@@ -20,10 +20,13 @@ import live_screener_ml_ranker as lsmr
 
 
 def _synthetic_training_frame(n_dates=20, symbols_per_day=15):
+    # 2026-08-07: _build_matrix() now groups by (run_id, symbol) instead of (appeared_at,
+    # symbol) -- see live_screener_ml_no_live_edge_2026_08_07 memory. One run_id per date is
+    # enough here since this generator never emits more than one row per (date, symbol) anyway.
     dates = pd.bdate_range("2026-06-01", periods=n_dates).strftime("%Y-%m-%d")
     rows = []
     rng = np.random.default_rng(42)
-    for d in dates:
+    for run_id, d in enumerate(dates, start=1):
         for i in range(symbols_per_day):
             symbol = f"SYM{i}"
             change_per = float(rng.normal(0, 2))
@@ -31,7 +34,7 @@ def _synthetic_training_frame(n_dates=20, symbols_per_day=15):
             filter_key = "RSI_OVERSOLD" if i % 3 == 0 else "VOLUME_SURGE"
             return_intraday = change_per / 100.0 + float(rng.normal(0, 0.01))
             rows.append({
-                "symbol": symbol, "filter_key": filter_key, "appeared_at": d,
+                "symbol": symbol, "filter_key": filter_key, "appeared_at": d, "run_id": run_id,
                 "return_intraday": return_intraday, "change_per": change_per, "volume": volume,
             })
     return pd.DataFrame(rows)

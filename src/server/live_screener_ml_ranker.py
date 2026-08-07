@@ -89,7 +89,7 @@ def _live_auc() -> tuple:
 
 def _load_training_frame() -> pd.DataFrame:
     return read_df("""
-        SELECT o.symbol, o.filter_key, o.appeared_at, o.return_intraday,
+        SELECT o.symbol, o.filter_key, o.appeared_at, a.run_id, o.return_intraday,
                a.change_per, a.volume
         FROM live_screener_outcomes o
         JOIN live_screener_appearances a ON a.id = o.appearance_id
@@ -98,22 +98,37 @@ def _load_training_frame() -> pd.DataFrame:
 
 
 def _build_matrix(df: pd.DataFrame):
-    """One row per (appeared_at, symbol): binary filter-match columns + mean change_per/
-    log-volume at match time + the mean same-day return across whichever filters it matched
-    that day. Mirrors live_screener_optimizer.py's pivot, plus the two appearance-level
-    features that pivot doesn't carry (change_per, volume)."""
-    agg = df.groupby(["appeared_at", "symbol"]).agg(
+    """One row per (run_id, symbol): binary filter-match columns (whichever filters matched
+    IN THAT SCAN CYCLE) + change_per/log-volume captured AT THAT SCAN + the resulting
+    same-day return.
+
+    Deliberately grouped at (run_id, symbol) -- NOT (appeared_at, symbol) as this used to be.
+    A filter match persists across many consecutive ~15-min scans in one trading day (median
+    15 runs/day per matching symbol, confirmed live), and the old day-level groupby averaged
+    change_per/volume across all of that day's runs (spread up to ~25pp within a single day)
+    and OR'd together every filter the symbol EVER matched that day into one row -- neither is
+    available at real scoring time, which only ever sees a single run's snapshot (see score()
+    below: `WHERE run_id = ?`). That mismatch between what the model was trained on (a
+    day-smoothed, day-unioned view) and what it actually receives live (one scan's raw,
+    possibly-partial view) is a train/serve skew, confirmed live 2026-08-07 as a likely
+    contributor to the deployed model's near-zero live AUC (see live_screener_ml_no_live_edge_
+    2026_08_07 memory). Grouping by (run_id, symbol) instead makes every training row exactly
+    the same shape as a scoring-time row: this scan's filter matches, this scan's change_per/
+    volume, nothing from later in the day folded in.
+    """
+    agg = df.groupby(["run_id", "symbol"]).agg(
+        appeared_at=("appeared_at", "first"),
         return_intraday=("return_intraday", "mean"),
         change_per=("change_per", "mean"),
         volume=("volume", "mean"),
     ).reset_index()
 
     pivot = df.pivot_table(
-        index=["appeared_at", "symbol"], columns="filter_key", aggfunc="size", fill_value=0
+        index=["run_id", "symbol"], columns="filter_key", aggfunc="size", fill_value=0
     ).clip(upper=1).reset_index()
-    filter_cols = [c for c in pivot.columns if c not in ("appeared_at", "symbol")]
+    filter_cols = [c for c in pivot.columns if c not in ("run_id", "symbol")]
 
-    matrix = pd.merge(pivot, agg, on=["appeared_at", "symbol"])
+    matrix = pd.merge(pivot, agg, on=["run_id", "symbol"])
     matrix["log_volume"] = np.log1p(matrix["volume"].clip(lower=0).fillna(0))
     matrix["change_per"] = matrix["change_per"].fillna(0.0)
     feature_cols = filter_cols + ["change_per", "log_volume"]
