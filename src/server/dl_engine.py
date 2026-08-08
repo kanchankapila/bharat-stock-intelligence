@@ -598,6 +598,20 @@ def run_inference(prediction_date: str = None) -> None:
                 continue
             conf   = float(np.mean([pu_1d, pu_5d, pu_15d])) * conf_modifier
             unc    = float(np.std([pu_1d, pu_5d, pu_15d]))
+            # KNOWN DEAD COLUMNS on deep_learning_predictions, investigated 2026-08-07
+            # (dead-column sweep), NOT fixed here -- both need model-architecture changes to a
+            # file with a documented NaN-weights/rollback incident history (see the 2026-08-02
+            # dl_trainer note), not a quick wiring fix:
+            #   exp_ret_1d: this model only has regression heads for 5d/15d (head_ret_5d,
+            #     head_ret_15d) -- 1d has a direction-classification head (head_dir_1d) but no
+            #     accompanying return-magnitude regression head. Populating this column for
+            #     real needs a new head trained from scratch, not a bug fix.
+            #   attention_json/top_features_json: SelfAttention (self.attn) IS computed inside
+            #     forward(), but its weights are consumed internally to build `feat` and never
+            #     returned/serialized -- attention_json is feasible (expose the existing
+            #     tensor) but still an inference-path change; top_features_json would need a
+            #     wholly new attribution mechanism (e.g. gradient-based), not a byproduct of
+            #     the existing forward pass at all. Deliberately not attempted in this pass.
             cur.execute(
                 """INSERT INTO deep_learning_predictions
                    (symbol, prediction_date, model_name, model_version,

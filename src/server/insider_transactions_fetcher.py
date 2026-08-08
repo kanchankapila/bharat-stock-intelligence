@@ -179,20 +179,23 @@ def _parse_record(symbol: str, row: dict) -> dict | None:
         except (TypeError, ValueError):
             value_cr = 0.0
 
-        # Before / after shareholding %
-        total_shares = row.get("totSharesNo") or row.get("totalShares") or 0
-        bef_shares = row.get("befAcqSharesNo") or row.get("beforeShares") or 0
-        aft_shares = row.get("afterAcqSharesNo") or row.get("afterShares") or 0
-
-        def _pct(n):
+        # Before / after shareholding % (2026-08-07 fix, dead-column sweep): the previous
+        # version derived these as befAcqSharesNo/totSharesNo -- but NSE's real corporates-pit
+        # response (live-verified, confirmed across RELIANCE/TCS/INFY/SUZLON/YESBANK) has NO
+        # totSharesNo/totalShares field at all, so total_shares was always 0 and _pct()'s
+        # `if t else None` guard made before_pct/after_pct 100% NULL forever (confirmed live,
+        # 23,596/23,596 rows). NSE already supplies the percentage directly --
+        # befAcqSharesPer/afterAcqSharesPer -- no ratio needs computing at all. Genuinely 0/
+        # unpopulated for some filings (e.g. YESBANK, live-checked: 0/20 records had any
+        # non-zero pct field) -- that's NSE's own filing data, not a parsing gap.
+        def _pctfield(v):
             try:
-                n, t = float(n), float(total_shares)
-                return round(n / t * 100, 4) if t else None
+                return round(float(v), 4)
             except (TypeError, ValueError):
                 return None
 
-        before_pct = _pct(bef_shares)
-        after_pct = _pct(aft_shares)
+        before_pct = _pctfield(row.get("befAcqSharesPer"))
+        after_pct = _pctfield(row.get("afterAcqSharesPer"))
 
         # Transaction date — NSE returns ISO or DD-MMM-YYYY formats, sometimes with time
         raw_date = row.get("date") or row.get("transactionDate") or ""

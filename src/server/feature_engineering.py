@@ -44,7 +44,7 @@ from sklearn.preprocessing import RobustScaler
 import ta
 
 from db_compat import connect, read_df, use_postgres, ConnWrapper
-from as_of import read_as_of_history
+from as_of import read_as_of_history, logical_write_floor
 
 SCALER_PATH = Path(__file__).parent / "ml_models" / "feature_scaler_v1.pkl"
 
@@ -605,7 +605,14 @@ class FeatureEngineer:
                 ).fetchall()
                 symbols = [r["symbol"] for r in rows]
 
-            only_date = datetime.today().strftime("%Y-%m-%d") if date_filter == "today" else None
+            # logical_write_floor(), not datetime.today() (2026-08-08) -- on any non-trading
+            # day (weekend/holiday) stock_ohlcv has no row for the raw calendar date, so every
+            # symbol's date-filtered write matched zero rows: 2426/2426 symbols "succeeded"
+            # (feat computed fine) but wrote 0 rows, tripping the written==0 guard below with
+            # no per-symbol cause (there wasn't one -- see run_full_pipeline's own comment on
+            # why individual worker errors can never surface). Use the last real trading
+            # session's date instead, same fix pattern as dl_engine.py/screener_performance.py.
+            only_date = logical_write_floor(con, fallback=datetime.today().strftime("%Y-%m-%d")) if date_filter == "today" else None
             total = len(symbols)
             if total == 0:
                 # Was silently a no-op: an empty symbol list (e.g. stock_ohlcv temporarily

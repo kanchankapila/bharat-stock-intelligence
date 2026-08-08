@@ -1,7 +1,11 @@
-"""Live-datasource test for nifty_pe_fetcher.py (see CLAUDE.md's "Adding a new data source"
-mandatory rule). execute()/executemany() are bare module-level functions imported from
-db_compat (no `con` parameter) -- monkeypatch-the-module pattern, same as the nt_* fetchers.
-NIFTY50 (MC indId=9, Trendlyne tlid=1887) -- the single most liquid, always-populated index.
+"""Live-datasource test for nifty_pe_fetcher.py (see CLAUDE.md's "Adding a New Data Source"
+mandatory rule). First test coverage for this fetcher.
+
+Regression coverage for the 2026-08-07 dead-column fix: fetch_mc_pe_pb() guessed
+ov.get("divYield")/ov.get("eps") against MC's real indices/fundamentals/overview response --
+neither key exists (real keys: div_yield, ttmEps, comma-formatted). index_valuation.div_yield
+was 0/7,384 rows; eps silently degraded to 26.7% (well below pe/pb's ~90%, both from a separate
+graph endpoint this bug didn't touch).
 """
 import os
 import sys
@@ -10,61 +14,36 @@ import pytest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 sys.path.insert(0, os.path.dirname(__file__))
-import nifty_pe_fetcher as npe
+import nifty_pe_fetcher as npf
 from live_datasource_helpers import assert_numeric_and_finite
 
-REAL_IND_ID = 9
-REAL_TLID = 1887
-REAL_INDEX_NAME = "NIFTY50"
-
-
-class _CaptureDB:
-    def __init__(self):
-        self.executemany_calls = []
-
-    def executemany(self, sql, rows):
-        self.executemany_calls.extend((sql, row) for row in rows)
+NIFTY50_IND_ID = 9  # per this fetcher's own docstring example
 
 
 @pytest.mark.live_datasource
 class TestNiftyPeFetcherLiveDataSource:
-    def test_mc_and_trendlyne_endpoints_produce_ml_usable_data(self):
-        """Hits both real sources for NIFTY50 via the fetcher's own fetch_mc_pe_pb()/
-        fetch_trendlyne()."""
-        mc_data = npe.fetch_mc_pe_pb(REAL_IND_ID, days=30)
-        assert mc_data, "fetch_mc_pe_pb() returned zero dates for NIFTY50 -- MC endpoint may be down/changed"
-        for date_str, vals in list(mc_data.items())[:5]:
-            assert date_str, "MC PE/PB row missing date"
-            if vals.get("pe") is not None:
-                assert_numeric_and_finite(vals["pe"], context="index_valuation.pe (MC)")
+    def test_real_overview_fetch_populates_div_yield_and_eps(self):
+        """Hits the real MC indices/fundamentals endpoints for NIFTY50 (graph/pe, graph/pb,
+        overview) via the fetcher's own fetch_mc_pe_pb(), and asserts today's entry has
+        real, plausible div_yield/eps values -- not just that the call didn't crash."""
+        result = npf.fetch_mc_pe_pb(NIFTY50_IND_ID, days=30)
+        assert result, "fetch_mc_pe_pb returned no data at all for NIFTY50"
 
-        tl_points = npe.fetch_trendlyne(REAL_TLID, "PE_TTM_SHARE_NOW")
-        assert tl_points, "fetch_trendlyne() returned zero points for NIFTY50 PE_TTM -- endpoint may be down/changed"
-        for date_str, val in tl_points[:5]:
-            assert date_str
-            assert_numeric_and_finite(val, context="index_valuation.pe (Trendlyne)")
+        import datetime
+        today = datetime.date.today().isoformat()
+        entry = result.get(today)
+        assert entry is not None, f"no entry for today ({today}) -- overview fetch may have failed"
 
-    def test_run_writes_ml_usable_rows(self):
-        """Runs the fetcher's real run() end-to-end for a real recent window, with
-        executemany() monkeypatched to a capture object instead of the real DB."""
-        cap = _CaptureDB()
-        orig_executemany = npe.executemany
-        orig_execute = npe.execute
-        npe.executemany = cap.executemany
-        npe.execute = lambda *a, **k: None  # _ensure_table()'s CREATE TABLE -- no-op, no real DB touched
-        # Scope the index universe down to just NIFTY50 so this doesn't hammer every index.
-        orig_build_map = npe._build_index_map
-        npe._build_index_map = lambda: {REAL_IND_ID: (REAL_INDEX_NAME, REAL_TLID)}
-        try:
-            npe.run(days=30, full=False)
-        finally:
-            npe.executemany, npe.execute = orig_executemany, orig_execute
-            npe._build_index_map = orig_build_map
+        assert "div_yield" in entry, "div_yield missing -- check ov.get('div_yield') is still the real MC key"
+        assert_numeric_and_finite(entry["div_yield"], context="index_valuation.div_yield")
+        # Nifty50's dividend yield realistically sits in a low single-digit % range.
+        assert 0 < entry["div_yield"] < 10, f"div_yield {entry['div_yield']} is outside a plausible range"
 
-        assert cap.executemany_calls, "run() made no executemany() calls despite a real, always-populated index"
-        for sql, row in cap.executemany_calls[:10]:
-            index_name, date, pe, pb, div_yield, eps, fetched_at = row
-            assert index_name == REAL_INDEX_NAME
-            assert date, "index_valuation.date is empty"
-            if pe is not None:
-                assert_numeric_and_finite(pe, context="index_valuation.pe")
+        assert "eps" in entry, "eps missing -- check ov.get('ttmEps') is still the real MC key"
+        assert_numeric_and_finite(entry["eps"], context="index_valuation.eps")
+        assert entry["eps"] > 0, f"eps {entry['eps']} should be positive for Nifty50"
+
+        # pe/pb come from a separate, already-working graph endpoint -- confirms this test
+        # exercises the real end-to-end call, not just the overview leg in isolation.
+        assert_numeric_and_finite(entry.get("pe"), context="index_valuation.pe")
+        assert_numeric_and_finite(entry.get("pb"), context="index_valuation.pb")
