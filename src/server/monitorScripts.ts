@@ -457,6 +457,20 @@ export const MONITOR_SCRIPTS = [
     staleLimitHours: 200,
   },
   {
+    id: 'corporate-actions-ingest',
+    label: 'Corporate Actions Ingest (splits/dividends)',
+    category: 'Data',
+    critical: false,
+    // 2026-08-07 dead-column-sweep fix: ingest_corporate_actions() was real and correct but
+    // never scheduled with ingest enabled (both existing ohlcv_quality.py calls pass
+    // --no-ingest for performance) -- corporate_actions.ratio was 0/389 rows before this.
+    description: 'Split ratios + dividend amounts from yfinance into corporate_actions (ratio column)',
+    schedule: 'Weekly Saturday',
+    pyScript: 'ohlcv_quality.py',
+    queueName: 'corporate-actions-ingest',
+    staleLimitHours: 200,
+  },
+  {
     id: 'intraday-breadth-capture',
     label: 'Intraday Breadth Capture',
     category: 'Data',

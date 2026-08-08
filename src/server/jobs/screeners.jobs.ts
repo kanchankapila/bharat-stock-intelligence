@@ -131,6 +131,20 @@ async function processQuantScoring(job: Job): Promise<{ success: boolean }> {
   // inverting the dependency its own docstring claims. Moved here 2026-08.
   await runPython('multi_factor_scorer.py', [], 180_000)
     .catch(e => console.warn('[QUEUE] multi_factor_scorer failed:', (e as Error).message));
+  // Beta/Sortino/VaR95 -> quant_scores.beta_1y/beta_6m/sortino_ratio/var_95 (2026-08-07,
+  // dead-column sweep). risk_metrics_engine.py was fully built (reads stock_ohlcv, computes
+  // rolling stats vs NIFTY50, writes via UPDATE quant_scores ... WHERE symbol=?) but was never
+  // scheduled anywhere -- confirmed 0 references in queues.ts/jobs/*.ts before this. Same
+  // ordering requirement as multi_factor_scorer.py above (must run AFTER runQuantScoring() so
+  // the row exists to UPDATE) and safe to run alongside it: runQuantScoring()'s own UPSERT_SQL
+  // explicitly lists its own columns and never mentions beta_1y/beta_6m/sortino_ratio/var_95,
+  // so it can't clobber what this step writes on any later run. Measured live 2026-08-07:
+  // full 2,449-symbol universe (2,423 processed, 26 skipped for insufficient history) in
+  // 37.6s -- the 10-symbol --test sample's 5.4s was almost entirely fixed overhead (module
+  // import, NIFTY50 benchmark load), not a per-symbol cost, so a naive linear extrapolation
+  // from it would have badly overestimated. 5min budget is ample margin over the real number.
+  await runPython('risk_metrics_engine.py', [], 5 * 60_000)
+    .catch(e => console.warn('[QUEUE] risk_metrics_engine failed:', (e as Error).message));
   return { success: true };
 }
 

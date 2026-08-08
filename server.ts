@@ -116,6 +116,11 @@ async function startServer() {
   const { bootstrapFundamentals } = await import('./src/server/fundamentalsSyncService');
   await bootstrapFundamentals(bullmqReady);
 
+  // NiftyTrader auto-login token refresh (2026-08-07) — deliberately a background timer, not
+  // on getNiftyTraderHeaders()'s request hot path (see that function's own comment for why).
+  const { startNiftyTraderTokenRefreshTimer } = await import('./src/server/niftytraderAuthService');
+  startNiftyTraderTokenRefreshTimer();
+
   // ── Technical signals: schedule daily + fallback ──────────────────────────
   const { getTechnicalSignalCount, runTechnicalSignalScan } = await import('./src/server/technicalSignalsService');
   const { technicalSignalsQueue } = await import('./src/server/queues');

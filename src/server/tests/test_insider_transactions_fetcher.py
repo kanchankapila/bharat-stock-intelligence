@@ -36,7 +36,12 @@ def _base_row(**overrides):
     row = {
         "personName": "", "acqName": "John Doe", "personCategory": "Promoter",
         "acqMode": "Market Purchase", "secAcq": "1000", "secVal": "500000",
-        "totSharesNo": "1000000", "befAcqSharesNo": "10000", "afterAcqSharesNo": "11000",
+        # befAcqSharesPer/afterAcqSharesPer: NSE's own real field names (live-verified
+        # 2026-08-07 against RELIANCE/TCS/INFY/SUZLON/YESBANK -- see the fix's comment in
+        # insider_transactions_fetcher.py). No totSharesNo field exists in NSE's real
+        # response at all -- deliberately absent from this fixture.
+        "befAcqSharesNo": "10000", "afterAcqSharesNo": "11000",
+        "befAcqSharesPer": "1.0", "afterAcqSharesPer": "1.1",
         "date": "13-Feb-2026",
     }
     row.update(overrides)
@@ -60,19 +65,31 @@ class TestParseRecordAcqNameFallback:
         rec = itf._parse_record("RELIANCE", _base_row(secVal="10000000"))
         assert rec["value_cr"] == 1.0
 
-    def test_before_after_pct_computed_from_total_shares(self):
+    def test_before_after_pct_read_directly_from_nse_pct_fields(self):
+        """Regression test for the 2026-08-07 fix: before_pct/after_pct used to be derived as
+        befAcqSharesNo/totSharesNo -- but NSE's real response has no totSharesNo field at all
+        (live-verified), so that division was always by zero -> always None (confirmed live,
+        23,596/23,596 rows). NSE already supplies the percentage directly."""
         rec = itf._parse_record("RELIANCE", _base_row())
         assert rec["before_pct"] == 1.0
         assert rec["after_pct"] == 1.1
+
+    def test_before_after_pct_none_when_nse_omits_the_pct_fields(self):
+        """Some real filings (live-verified: YESBANK, 0/20 records) have no pct data from NSE
+        at all -- must degrade to None, not raise or default to 0 as if it were a real value."""
+        rec = itf._parse_record("RELIANCE", _base_row(befAcqSharesPer=None, afterAcqSharesPer=None))
+        assert rec["before_pct"] is None
+        assert rec["after_pct"] is None
 
     def test_row_with_unparseable_date_is_dropped(self):
         rec = itf._parse_record("RELIANCE", _base_row(date="garbage"))
         assert rec is None
 
     def test_malformed_numeric_fields_degrade_to_none_not_raise(self):
-        rec = itf._parse_record("RELIANCE", _base_row(secVal="NA", totSharesNo="NA"))
+        rec = itf._parse_record("RELIANCE", _base_row(secVal="NA", befAcqSharesPer="NA"))
         assert rec is not None
         assert rec["value_cr"] is None
+        assert rec["before_pct"] is None
 
 
 # ── Regression: dead NSE session no longer silently truncates the run (2026-07-31) ──

@@ -181,6 +181,10 @@ describe('MONITOR_SCRIPTS.staleLimitHours consistency', () => {
     { id: 'working-capital', jobName: "jobName: 'trendlyne-ratios-monthly-check'", monthlyGated: true },
     { id: 'tickertape-scorecard', jobName: "jobName: 'tickertape-scorecard-weekly'" },
     { id: 'confluence-compute', marketHoursSkipGated: true },
+    // 2026-08-07 dead-column-sweep addition: corporate_actions.ratio had a real, correct
+    // writer (ohlcv_quality.py's ingest_corporate_actions()) that was never scheduled with
+    // ingest enabled -- see sync.jobs.ts's processCorporateActionsIngest for the full writeup.
+    { id: 'corporate-actions-ingest', jobName: "jobName: 'corporate-actions-ingest-weekly'" },
   ];
 
   it('driving-job list covers every no-cronPatterns MONITOR_SCRIPTS entry', () => {
