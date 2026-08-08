@@ -711,6 +711,20 @@ class MoneyControlFetcher:
                     """), r)
 
     def _parse_hits_misses(self, symbol: str, data: dict):
+        # KNOWN OPEN GAP (2026-08-07 dead-column sweep, NOT fixable by correcting this
+        # code): live-verified against MC's real `estimates/hits-misses` endpoint (curl
+        # against scId=RI/RELIANCE) that `item["estimates"]` and `item["surprise"]` are
+        # both the literal empty string "" for every quarter, for every stock checked --
+        # the keys exist and are read correctly, MoneyControl's own API has simply stopped
+        # supplying the underlying numbers upstream. `actual` and `type` (MC's own
+        # positive/negative/inline beat-miss classification) are still populated correctly
+        # and are NOT affected. clean_float("") correctly returns None here -- do not
+        # "fix" this by changing the key names, there's nothing wrong with them. mc_estimates_
+        # hits_misses.estimates/.surprise will stay 100% NULL until MoneyControl restores
+        # this field or a replacement consensus-estimate source is sourced and approved
+        # (see CLAUDE.md's dead-column-sweep session note / the dead_data_sweep_2026_08_07
+        # memory file -- do not silently build a guessed replacement, ask first per the
+        # standing feedback_failing_urls convention).
         l_list = data.get("list", [])
         rows = []
         for item in l_list:
@@ -818,6 +832,99 @@ class MoneyControlFetcher:
                     "fetched_at": r[6]
                 })
 
+    # ── Seasonality (mc_seasonality_best_stocks) ──────────────────────────
+    # Table schema existed since this file's original batch of table creates,
+    # but no fetch/write logic was ever built for it (found 2026-08-07 during
+    # a dead-column/dead-table sweep -- confirmed via a live COUNT(*), the
+    # table had 0 rows while all 7 sibling tables from the same batch had
+    # thousands to a million). getMcSeasonality (moneycontrol.router.ts) and
+    # SeasonalityCalendar.tsx (mounted on the Smart Money page) were reading
+    # an always-empty table with no error surfaced anywhere.
+    #
+    # Real endpoint confirmed live: api.moneycontrol.com/mcapi/v1/market/
+    # seasonality-analysis/get-best-month-stocks?ex=N&id=7&month=MM&year=YYYY
+    # &tab=hps&trend=bullish|bearish&limit=N -- "hps" (High Probability
+    # Stocks) + trend is the one variant that returns a self-consistent
+    # "these stocks have been positive/negative in this month in every
+    # tracked year" set (confirmed live: total_yr == tot_yr and
+    # perchg_years == "100.00" throughout a bullish-filtered sample --
+    # both fields are only equal because the filter already selects for
+    # 100% consistency). "bus"/"bes" tab codes exist too but their exact
+    # MC-internal meaning is undocumented and getMcSeasonality's own SQL
+    # doesn't filter on tab_type at all, so there's no reason to guess at
+    # them -- hps+trend is the one unambiguous, literally-named variant.
+    SEASONALITY_URL = (
+        "https://api.moneycontrol.com/mcapi/v1/market/seasonality-analysis/"
+        "get-best-month-stocks?ex=N&id=7&month={month:02d}&year={year}"
+        "&tab=hps&trend={trend}&limit=50"
+    )
+
+    def fetch_seasonality(self, month: int, trend: str) -> list[dict]:
+        year = datetime.datetime.now().year
+        url = self.SEASONALITY_URL.format(month=month, year=year, trend=trend)
+        resp = self._fetch_url(url)
+        if resp is None:
+            return []
+        try:
+            payload = resp.json()
+        except Exception:
+            return []
+        if payload.get("success") != 1:
+            return []
+        rows = []
+        for item in payload.get("data") or []:
+            sc_id = item.get("sc_id")
+            if not sc_id:
+                continue
+            rows.append({
+                "tab_type": trend,  # human-readable ('bullish'/'bearish'), not MC's opaque 'hps' code
+                "sc_id": sc_id,
+                "sc_fullname": item.get("sc_fullname"),
+                "year": year,
+                "month": month,
+                # DB columns are abbreviated (avg_pct/max_pct/min_pct); the API's real
+                # field names are avg_perchg/max_perchg/min_perchg -- this mapping is
+                # the piece that was never written.
+                "avg_pct": clean_float(item.get("avg_perchg")),
+                "max_pct": clean_float(item.get("max_perchg")),
+                "min_pct": clean_float(item.get("min_perchg")),
+                "total_yr": clean_float(item.get("total_yr")),
+                "tot_yr": clean_float(item.get("tot_yr")),
+            })
+        return rows
+
+    def _write_seasonality(self, rows: list[dict]) -> None:
+        if not rows:
+            return
+        with self.engine.begin() as conn:
+            for r in rows:
+                conn.execute(text("""
+                    INSERT INTO mc_seasonality_best_stocks
+                        (tab_type, sc_id, sc_fullname, year, month, avg_pct, max_pct, min_pct, total_yr, tot_yr)
+                    VALUES (:tab_type, :sc_id, :sc_fullname, :year, :month, :avg_pct, :max_pct, :min_pct, :total_yr, :tot_yr)
+                    ON CONFLICT(tab_type, sc_id, year, month) DO UPDATE SET
+                        sc_fullname = excluded.sc_fullname,
+                        avg_pct     = excluded.avg_pct,
+                        max_pct     = excluded.max_pct,
+                        min_pct     = excluded.min_pct,
+                        total_yr    = excluded.total_yr,
+                        tot_yr      = excluded.tot_yr
+                """), r)
+
+    def run_seasonality(self) -> int:
+        """Refreshes all 12 months x {bullish, bearish} -- 24 requests total.
+        Seasonality patterns move slowly (they're historical-year aggregates),
+        so this is intended to run weekly, not daily."""
+        total = 0
+        for month in range(1, 13):
+            for trend in ("bullish", "bearish"):
+                rows = self.fetch_seasonality(month, trend)
+                self._write_seasonality(rows)
+                total += len(rows)
+                print(f"[MC Fetcher] Seasonality month={month:02d} trend={trend}: {len(rows)} rows")
+        print(f"[MC Fetcher] Seasonality refresh complete: {total} rows upserted.")
+        return total
+
     def run(self):
         targets = self._resolve_target_batch()
         if not targets:
@@ -848,7 +955,11 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="MoneyControl Data Fetcher Pipeline")
     parser.add_argument("--symbols", nargs="*", help="List of specific stock symbols to fetch")
     parser.add_argument("--batch-size", type=int, default=150, help="Max stocks to crawl in this batch")
+    parser.add_argument("--seasonality", action="store_true", help="Refresh mc_seasonality_best_stocks only (market-wide, not per-stock)")
     args = parser.parse_args()
 
     fetcher = MoneyControlFetcher(target_symbols=args.symbols, batch_size=args.batch_size)
-    fetcher.run()
+    if args.seasonality:
+        fetcher.run_seasonality()
+    else:
+        fetcher.run()

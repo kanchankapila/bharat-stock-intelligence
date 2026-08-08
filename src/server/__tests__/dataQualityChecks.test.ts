@@ -269,12 +269,22 @@ describe('generated freshness checks (TABLE_FRESHNESS_CHECKS via makeFreshnessCh
     expect(r.status).toBe('pass');
   });
 
-  it('confluence-signals-freshness is NOT trading-day-aware (24/7 30-min cadence) and uses hour-scale thresholds', () => {
-    // 3 hours stale should already warn for a job that runs every 30 minutes, every day.
+  it('confluence-signals-freshness is NOT trading-day-aware, but tolerates the real ~9h daily skip window', () => {
+    // Fixed 2026-08-07: confluence-compute does NOT run every 30 minutes every day (that was
+    // the bug this threshold was originally, wrongly, sized around) -- processConfluenceCompute
+    // deliberately skips ALL real writes for ~9h/trading day (isMarketOpen() 9:15am-3:30pm PLUS
+    // isConfluenceComputeWindow()'s wider 8am-9:15am/3:30pm-5pm skip -- see confluence.jobs.ts).
+    // A naive hour-scale threshold false-alarmed WARN then CRITICAL FAIL every single trading
+    // day -- live-caught via `npm run dq:check` mid-warn at 10am IST. 3 hours stale (well inside
+    // the legitimate gap) must NOT warn; something genuinely beyond the ~9h/12h window must.
     const threeHoursAgo = new Date(now.getTime() - 3 * 3_600_000).toISOString();
-    const r = byId('confluence-signals-freshness').evaluate({ last_date: threeHoursAgo }, now);
-    expect(r.status).not.toBe('pass');
-    // And a weekend gap must NOT be absorbed here -- Saturday's data is genuinely stale by Monday.
+    expect(byId('confluence-signals-freshness').evaluate({ last_date: threeHoursAgo }, now).status).toBe('pass');
+    const tenHoursAgo = new Date(now.getTime() - 10 * 3_600_000).toISOString();
+    expect(byId('confluence-signals-freshness').evaluate({ last_date: tenHoursAgo }, now).status).toBe('warn');
+    const thirteenHoursAgo = new Date(now.getTime() - 13 * 3_600_000).toISOString();
+    expect(byId('confluence-signals-freshness').evaluate({ last_date: thirteenHoursAgo }, now).status).toBe('fail');
+    // A weekend gap must still NOT be absorbed here (not trading-day-aware) -- Saturday's data
+    // is genuinely stale by Monday, far beyond even the widened threshold.
     const satMorning = new Date(now.getTime() - 2.2 * 86_400_000).toISOString();
     expect(byId('confluence-signals-freshness').evaluate({ last_date: satMorning }, now).status).toBe('fail');
   });

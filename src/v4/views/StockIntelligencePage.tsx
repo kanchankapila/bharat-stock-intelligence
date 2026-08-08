@@ -14,6 +14,7 @@ import { McNewsCard, McNewsLinks, McNewsEmptyState } from '../../components/McNe
 import { StockTagRow, ConvictionPill } from '../../components/StockTagRow';
 import { relativeFromNow } from '../../lib/timeFormat';
 import { V4QuickNav } from '../components/V4QuickNav';
+import { AddToPortfolioButton } from '../../components/AddToPortfolioButton';
 
 type TabId = 'overview' | 'technicals' | 'fundamentals' | 'ownership' | 'fno' | 'earnings' | 'news';
 
@@ -334,6 +335,11 @@ const FundamentalsTab: React.FC<{ symbol: string }> = ({ symbol }) => {
 const OwnershipTab: React.FC<{ symbol: string }> = ({ symbol }) => {
   const { data: shareholding } = trpc.getShareholding.useQuery({ symbol });
   const { data: insiders } = trpc.getInsiderTransactions.useQuery({ symbol, limit: 25 });
+  // Superstar-investor tracking (InvestSights) -- the one feature v5's StockIntelligenceDeskPage.tsx
+  // had that this page didn't, per the Phase 3 stock-research-page merge ("V6 Canonical Workbench"
+  // proposal). Grafted here rather than v5's own layout/classes so it matches this tab's existing
+  // Card/glass conventions instead of mixing two different styling systems in one page.
+  const { data: superstarActivity } = trpc.getSuperstarInvestorActivity.useQuery({ symbol, limit: 20 });
 
   const sh = shareholding?.data ?? shareholding;
   // The live ET endpoint (fetchETShareholding) returns a nested { summary: { promoters: {
@@ -389,6 +395,42 @@ const OwnershipTab: React.FC<{ symbol: string }> = ({ symbol }) => {
                 </span>
               </div>
             ))}
+          </div>
+        )}
+      </Card>
+
+      <Card title="Superstar Investor Activity" icon={Star} className="lg:col-span-2">
+        {!superstarActivity || superstarActivity.length === 0 ? (
+          <div className="text-xs text-slate-500 py-4">No superstar investor activity recorded for {symbol}.</div>
+        ) : (
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 max-h-80 overflow-y-auto terminal-scrollbar pr-1">
+            {superstarActivity.map((row: any, i: number) => {
+              const activity = String(row.change_type ?? 'update').toUpperCase();
+              const pctChange = row.pct_holding_change != null ? Number(row.pct_holding_change) : null;
+              const isNegative = activity === 'EXIT' || (pctChange != null && pctChange < 0);
+              return (
+                <div key={`${row.investor_slug}-${row.period_end_date}-${i}`} className="glass rounded-xl p-2.5">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-xs font-bold text-slate-200 truncate">
+                      {String(row.investor_slug ?? 'investor').replace(/-/g, ' ')}
+                    </span>
+                    <span className={cn(
+                      'text-[9px] font-black uppercase tracking-wide shrink-0 px-1.5 py-0.5 rounded-full border',
+                      isNegative ? 'text-rose-400 border-rose-800/60 bg-rose-500/10' : 'text-emerald-400 border-emerald-800/60 bg-emerald-500/10'
+                    )}>
+                      {activity}
+                    </span>
+                  </div>
+                  <div className="flex flex-wrap gap-x-3 gap-y-0.5 mt-1.5 text-[10px] text-slate-500">
+                    <span>Holding: <span className="text-slate-300 font-mono">{row.curr_pct_holding != null ? `${fmt(row.curr_pct_holding)}%` : '—'}</span></span>
+                    <span>Change: <span className={cn('font-mono', isNegative ? 'text-rose-400' : 'text-emerald-400')}>
+                      {pctChange != null ? `${pctChange >= 0 ? '+' : ''}${fmt(pctChange)}%` : '—'}
+                    </span></span>
+                    <span>As of {row.period_end_date ?? '—'}</span>
+                  </div>
+                </div>
+              );
+            })}
           </div>
         )}
       </Card>
@@ -625,7 +667,8 @@ const StockHeaderCard: React.FC<{
   stockMeta?: { name?: string; sector?: string; industry?: string } | null;
   isWatched: boolean;
   onToggleWatchlist?: (symbol: string) => void;
-}> = ({ symbol, stockMeta, isWatched, onToggleWatchlist }) => {
+  userId?: string | null;
+}> = ({ symbol, stockMeta, isWatched, onToggleWatchlist, userId }) => {
   const { data: quote } = trpc.getLiveStockQuote.useQuery({ symbol }, { enabled: !!symbol, refetchInterval: 30_000, retry: false });
   const { data: predictions } = trpc.getTechnicalPredictions.useQuery({ symbol }, { enabled: !!symbol });
   const { data: unifiedScore, dataUpdatedAt } = trpc.getUnifiedScoreForSymbol.useQuery({ symbol }, { enabled: !!symbol });
@@ -674,6 +717,7 @@ const StockHeaderCard: React.FC<{
               {isWatched ? <Star className="w-4 h-4 text-amber-400 fill-amber-400" /> : <StarOff className="w-4 h-4 text-slate-500" />}
             </button>
           )}
+          <AddToPortfolioButton symbol={symbol} currentPrice={quote?.price} userId={userId} variant="pill" />
         </div>
       </div>
 
@@ -697,10 +741,11 @@ interface StockIntelligencePageProps {
   initialSymbol?: string | null;
   watchlist?: string[];
   onToggleWatchlist?: (symbol: string) => void;
+  userId?: string | null;
 }
 
 export const StockIntelligencePage: React.FC<StockIntelligencePageProps> = ({
-  initialSymbol, watchlist = [], onToggleWatchlist,
+  initialSymbol, watchlist = [], onToggleWatchlist, userId,
 }) => {
   const [symbol, setSymbol] = useState<string | null>(initialSymbol ?? null);
   const [tab, setTab] = useState<TabId>('overview');
@@ -720,7 +765,7 @@ export const StockIntelligencePage: React.FC<StockIntelligencePageProps> = ({
         <div className="text-center py-20 text-slate-500 text-sm">Search for a stock above to view its full intelligence profile.</div>
       ) : (
         <>
-          <StockHeaderCard symbol={symbol} stockMeta={stockMeta} isWatched={isWatched} onToggleWatchlist={onToggleWatchlist} />
+          <StockHeaderCard symbol={symbol} stockMeta={stockMeta} isWatched={isWatched} onToggleWatchlist={onToggleWatchlist} userId={userId} />
 
           <div className="flex gap-1 overflow-x-auto terminal-scrollbar border-b border-slate-800/60 pb-1">
             {TABS.map((t) => {

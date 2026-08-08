@@ -367,10 +367,14 @@ export default function SystemMonitorPage() {
         </h3>
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2">
           {[
-            { time: 'Every 30 min',      scripts: 'Technical Signal Scan' },
-            { time: 'Daily 9:30 AM IST', scripts: 'Outcome Resolver, Performance Tracker, ML Score, FII/DII' },
-            { time: 'Daily 5:00 PM IST', scripts: 'Full ML Daily Ops (FII → FinBERT → Outcomes → Perf → Score → RL)' },
-            { time: 'Sunday 6 PM IST',   scripts: 'ML Retrain, Strategy Optimizer, Performance Recompute' },
+            { time: 'Every 15-30 min, market hours', scripts: 'Technical Signal Scan, Intraday Fetch/Rank, Live Screener Collect' },
+            { time: 'Daily 7:30 AM IST',             scripts: 'Unified Ranker (canonical daily picks)' },
+            { time: 'Daily 9:30 AM IST',             scripts: 'Outcome Resolver' },
+            { time: 'Daily ~4:00-6:40 PM IST',        scripts: 'OHLCV Refresh, Screener Syncs (MC/ETNow/ET-Marketstats/Trendlyne)' },
+            { time: 'Daily 7:30 PM IST',              scripts: 'Full ML Daily Ops (FII → FinBERT → Outcomes → Perf → Score → Drift → RL)' },
+            { time: 'Chain-triggered, ~5-8 PM IST',   scripts: 'DL Inference (fires right after DL Feature Refresh; 5 AM fallback)' },
+            { time: 'Daily 10:00-11:30 PM IST',       scripts: 'Quant EOD Sync, Stock/Quant Scoring, Confluence Outcomes' },
+            { time: 'Sunday 8:30-11:30 AM IST',       scripts: 'Fundamentals Sync, ML/DL Weekly Retrain, Strategy Optimizer' },
           ].map(({ time, scripts }) => (
             <div key={time} className="space-y-1">
               <div className="text-[11px] font-semibold text-indigo-400">{time}</div>
@@ -378,6 +382,11 @@ export default function SystemMonitorPage() {
             </div>
           ))}
         </div>
+        <p className="mt-3 text-[10px] text-slate-600">
+          On a mid-week trading holiday, the daily pipeline (Outcome Resolver → ML Daily Ops → Unified Ranker)
+          runs early instead (~7:10 AM IST) and every other job above skips its normal run for the day — the
+          exchange never opened, so there is nothing new to fetch or re-score.
+        </p>
       </div>
     </div>
   );

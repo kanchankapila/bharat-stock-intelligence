@@ -142,3 +142,22 @@ export async function isTradingHolidayToday(): Promise<boolean> {
     return false;
   }
 }
+
+/**
+ * True when a routine evening/night job should skip its normal cron-triggered run because
+ * today is a trading holiday (2026-08-06). On a mid-week holiday the exchange never opens, so
+ * every "regular fetch" job downstream of it (screener syncs, OHLCV refresh, re-scoring) would
+ * just re-process yesterday's unchanged data -- pure wasted compute/network, not new signal.
+ * closed-day-early-batch (queues.ts's QUEUE_CLOSED_DAY) already runs the critical daily
+ * pipeline once, early, on such a day -- dispatched jobs carry job.name === 'closed-day-early'
+ * and must NEVER be skipped by this check, or the morning dispatch would itself be a no-op.
+ *
+ * Deliberately NOT applied to the 15-min intraday chain (already gated by the holiday-aware
+ * isMarketOpen() above) or to genuinely weekly/global-market jobs (weekly fetches are fine per
+ * the user's own framing; global macro data keeps moving on an NSE holiday even though NSE
+ * itself doesn't).
+ */
+export async function shouldSkipOnTradingHoliday(job?: { name?: string } | null): Promise<boolean> {
+  if (job?.name === 'closed-day-early') return false;
+  return isTradingHolidayToday();
+}

@@ -1,0 +1,147 @@
+/*
+ * V6 Workbench theme -- Phase 1 of the frontend consolidation, restyled 2026-08-07 to match
+ * v1 AppShell's actual look and feel (the codebase's real "Premium Dark Theme": deep near-black
+ * ground, indigo/violet ambient glow, frosted-glass surfaces, Inter + JetBrains Mono) instead of
+ * v5's teal-on-white palette. Values below are pulled directly from index.css's global
+ * .glass/.glass-strong/body rules (indigo #6366f1, near-black #050508) rather than approximated,
+ * so v6 is visually the same family as v1, not just similar.
+ *
+ * Dark-only, matching v1's own AppShell (which has no light mode at all) -- an earlier draft of
+ * this file added a light/dark toggle with its own light palette, but that's gone now: it let a
+ * stale `localStorage` value desync the shell chrome from the (theme-agnostic, always-dark) page
+ * content built from v1/v4 components, splitting the UI into a light header over a dark body.
+ * Removing the toggle removes the whole class of bug, not just this one instance of it.
+ *
+ * Neutrals (ink/muted/faint/border) are NOT flat Tailwind slate -- they're pulled from an
+ * indigo-tinted grey ramp (hue ~250deg, matching --v6-accent) so secondary text and borders read
+ * as a deliberate choice rather than an unconsidered default. v1's own index.css does use plain
+ * slate-400 in one spot (the `.label` utility) but that's not treated as precedent here.
+ *
+ * Scoped to `.v6-root` so it can't leak into AppShell/V2AppShell/v5-isolated, which define their
+ * own color systems.
+ */
+
+.v6-root {
+  --v6-bg: #050508;
+  --v6-bg-band: rgba(255, 255, 255, 0.03);
+  --v6-surface: rgba(10, 11, 16, 0.65);
+  --v6-surface-raised: rgba(8, 9, 12, 0.88);
+  --v6-surface-blur: blur(20px) saturate(160%);
+  --v6-surface-blur-strong: blur(32px) saturate(200%);
+  --v6-ink: #f3f1fb;
+  --v6-ink-soft: #c8c4e6;
+  --v6-muted: #948fbf;
+  --v6-faint: #6b6592;
+  --v6-border: rgba(255, 255, 255, 0.07);
+  --v6-border-strong: rgba(255, 255, 255, 0.11);
+  --v6-accent: #6366f1;
+  --v6-accent-ink: #a5b4fc;
+  --v6-accent-soft: rgba(99, 102, 241, 0.15);
+  --v6-positive: #10b981;
+  --v6-positive-soft: rgba(16, 185, 129, 0.12);
+  --v6-negative: #f43f5e;
+  --v6-negative-soft: rgba(244, 63, 94, 0.12);
+  --v6-warning: #f59e0b;
+  --v6-warning-soft: rgba(245, 158, 11, 0.12);
+  --v6-shadow: 0 10px 40px rgba(0, 0, 0, 0.3);
+  --v6-shadow-sm: 0 4px 30px rgba(0, 0, 0, 0.2);
+
+  /* Bridge: v5's desk pages (Options/Risk/Signal Review/etc, rendered here for dashboardVersion
+     ==='v6' -- see App.tsx) use v5.css's own --v5-* variables and .v5-* classes, which .v5-root
+     (the standalone /v5 route) defines with its own light-only values. Aliasing the same names
+     here means those exact same components/classes pick up V6Shell's theme automatically with
+     zero changes to v5.css or the desk-page components themselves whenever they're nested under
+     .v6-root instead of .v5-root. --v5-sky/--v5-indigo are categorical chart colors (mini-fill/
+     sparkline variants), not semantic theme colors, so they get their own dark-legible shades
+     here rather than reusing a --v6-* token that means something else. */
+  --v5-bg: var(--v6-bg);
+  --v5-surface: var(--v6-surface);
+  --v5-surface-2: var(--v6-bg-band);
+  --v5-surface-2-to: var(--v6-bg-band);
+  --v5-ink: var(--v6-ink);
+  --v5-ink-soft: var(--v6-ink-soft);
+  --v5-ink-muted: var(--v6-muted);
+  --v5-muted: var(--v6-muted);
+  --v5-border: var(--v6-border);
+  --v5-border-soft: var(--v6-border);
+  --v5-accent: var(--v6-accent);
+  --v5-accent-deep: var(--v6-accent-ink);
+  --v5-accent-hover: var(--v6-accent-ink);
+  --v5-accent-soft: var(--v6-accent-soft);
+  --v5-accent-focus-ring: var(--v6-accent-soft);
+  --v5-positive: var(--v6-positive);
+  --v5-positive-bright: var(--v6-positive);
+  --v5-negative: var(--v6-negative);
+  --v5-negative-bright: var(--v6-negative);
+  --v5-negative-soft: var(--v6-negative-soft);
+  --v5-warning: var(--v6-warning);
+  --v5-amber-bright: var(--v6-warning);
+  --v5-sky: #38bdf8;
+  --v5-indigo: #818cf8;
+  --v5-stripe-a: var(--v6-border-strong);
+  --v5-stripe-b: var(--v6-border);
+  --v5-scrollbar-thumb: var(--v6-border-strong);
+  --v5-controlbar-bg: var(--v6-surface-raised);
+  --v5-sparkline-bg-to: var(--v6-bg-band);
+
+  min-height: 100vh;
+  background:
+    radial-gradient(at 0% 0%, rgba(99, 102, 241, 0.15) 0px, transparent 50%),
+    radial-gradient(at 50% 0%, rgba(167, 139, 250, 0.1) 0px, transparent 50%),
+    radial-gradient(at 100% 0%, rgba(59, 130, 246, 0.15) 0px, transparent 50%),
+    #050508;
+  background-attachment: fixed;
+  color: var(--v6-ink);
+  font-family: 'Inter', ui-sans-serif, system-ui, sans-serif;
+  font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+}
+
+.v6-title {
+  font-family: 'Inter', ui-sans-serif, system-ui, sans-serif;
+  letter-spacing: -0.01em;
+}
+
+.v6-mono {
+  font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, monospace;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Frosted glass in dark mode (identical recipe to index.css's global .glass), flat elevated
+   card in light mode (blur reads muddy over a flat light ground -- see file header). */
+.v6-card {
+  background: var(--v6-surface);
+  -webkit-backdrop-filter: var(--v6-surface-blur);
+  backdrop-filter: var(--v6-surface-blur);
+  border: 1px solid var(--v6-border);
+  border-radius: 14px;
+  box-shadow: var(--v6-shadow-sm);
+}
+
+.v6-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 3px 9px;
+  border-radius: 20px;
+  background: var(--v6-bg-band);
+  color: var(--v6-muted);
+  white-space: nowrap;
+}
+.v6-chip-accent { background: var(--v6-accent-soft); color: var(--v6-accent-ink); }
+.v6-chip-positive { background: var(--v6-positive-soft); color: var(--v6-positive); }
+.v6-chip-negative { background: var(--v6-negative-soft); color: var(--v6-negative); }
+.v6-chip-warning { background: var(--v6-warning-soft); color: var(--v6-warning); }
+
+.v6-scrollbar { scrollbar-width: thin; scrollbar-color: var(--v6-border-strong) transparent; }
+.v6-scrollbar::-webkit-scrollbar { width: 5px; }
+.v6-scrollbar::-webkit-scrollbar-thumb { background: rgba(99, 102, 241, 0.2); border-radius: 4px; }
+.v6-scrollbar::-webkit-scrollbar-thumb:hover { background: rgba(99, 102, 241, 0.4); }
+
+.v6-root ::selection { background: rgba(99, 102, 241, 0.28); color: var(--v6-ink); }
+
+/* Respect reduced-motion for the theme-toggle knob and sidebar drawer transitions. */
+@media (prefers-reduced-motion: reduce) {
+  .v6-root, .v6-root * { transition-duration: 0.01ms !important; animation-duration: 0.01ms !important; }
+}

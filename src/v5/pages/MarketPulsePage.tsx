@@ -103,7 +103,7 @@ export function MarketPulsePage() {
         <div className="v5-section-head">
           <div>
             <div className="flex items-center gap-2">
-              <CandlestickChart className="h-4 w-4 text-teal-700" />
+              <CandlestickChart className="h-4 w-4 text-[var(--v5-positive)]" />
               <h2 className="v5-section-title">Index Pulse</h2>
             </div>
             <p className="v5-section-subtitle">Benchmark direction and intraday delta spread across core indices.</p>
@@ -111,11 +111,11 @@ export function MarketPulsePage() {
         </div>
         <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
           {indexCards.map((x) => (
-            <div key={x.label} className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
-              <div className="text-[11px] font-semibold tracking-wide text-slate-500">{x.label}</div>
-              <div className="mt-1 text-xl font-bold text-slate-900">{x.value == null ? '—' : fmtFixed(x.value, 2)}</div>
+            <div key={x.label} className="rounded-2xl border border-[var(--v5-border)] bg-[var(--v5-surface-2)] p-4">
+              <div className="text-[11px] font-semibold tracking-wide text-[var(--v5-muted)]">{x.label}</div>
+              <div className="mt-1 text-xl font-bold text-[var(--v5-ink)]">{x.value == null ? '—' : fmtFixed(x.value, 2)}</div>
               {x.change == null || x.changePct == null ? (
-                <div className="mt-1 text-sm font-semibold text-slate-500">—</div>
+                <div className="mt-1 text-sm font-semibold text-[var(--v5-muted)]">—</div>
               ) : (
                 <div className={`mt-1 flex items-center gap-1 text-sm font-semibold ${pctClass(x.changePct)}`}>
                   {x.change >= 0 ? <ArrowUpRight className="h-3.5 w-3.5" /> : <ArrowDownRight className="h-3.5 w-3.5" />}
@@ -140,23 +140,23 @@ export function MarketPulsePage() {
         </div>
         <div className="grid grid-cols-1 gap-3 md:grid-cols-2 lg:grid-cols-1">
           <div>
-            <div className="mb-2 flex items-center gap-2 text-sm font-semibold text-teal-700"><TrendingUp className="h-4 w-4" /> Gainers</div>
+            <div className="mb-2 flex items-center gap-2 text-sm font-semibold text-[var(--v5-positive)]"><TrendingUp className="h-4 w-4" /> Gainers</div>
             <div className="space-y-2">
               {gainers.map((m: any) => (
-                      <div key={s(m.symbol_name)} className="v5-table-row-intel flex items-center justify-between rounded-xl border border-slate-200 px-3 py-2">
-                  <span className="text-xs font-semibold text-slate-700">{s(m.symbol_name)}</span>
-                  <span className="text-xs font-bold text-teal-700">{numOrNull(m.change_percent) == null ? '—' : `+${fmtFixed(m.change_percent, 2)}%`}</span>
+                      <div key={s(m.symbol_name)} className="v5-table-row-intel flex items-center justify-between rounded-xl border border-[var(--v5-border)] px-3 py-2">
+                  <span className="text-xs font-semibold text-[var(--v5-ink-soft)]">{s(m.symbol_name)}</span>
+                  <span className="text-xs font-bold text-[var(--v5-positive)]">{numOrNull(m.change_percent) == null ? '—' : `+${fmtFixed(m.change_percent, 2)}%`}</span>
                 </div>
               ))}
             </div>
           </div>
           <div>
-            <div className="mb-2 mt-3 flex items-center gap-2 text-sm font-semibold text-rose-700"><TrendingDown className="h-4 w-4" /> Losers</div>
+            <div className="mb-2 mt-3 flex items-center gap-2 text-sm font-semibold text-[var(--v5-negative)]"><TrendingDown className="h-4 w-4" /> Losers</div>
             <div className="space-y-2">
               {losers.map((m: any) => (
-                      <div key={s(m.symbol_name)} className="v5-table-row-intel flex items-center justify-between rounded-xl border border-slate-200 px-3 py-2">
-                  <span className="text-xs font-semibold text-slate-700">{s(m.symbol_name)}</span>
-                  <span className="text-xs font-bold text-rose-700">{numOrNull(m.change_percent) == null ? '—' : `${fmtFixed(m.change_percent, 2)}%`}</span>
+                      <div key={s(m.symbol_name)} className="v5-table-row-intel flex items-center justify-between rounded-xl border border-[var(--v5-border)] px-3 py-2">
+                  <span className="text-xs font-semibold text-[var(--v5-ink-soft)]">{s(m.symbol_name)}</span>
+                  <span className="text-xs font-bold text-[var(--v5-negative)]">{numOrNull(m.change_percent) == null ? '—' : `${fmtFixed(m.change_percent, 2)}%`}</span>
                 </div>
               ))}
             </div>
@@ -179,7 +179,7 @@ export function MarketPulsePage() {
         <div className="v5-section-head">
           <div>
             <div className="flex items-center gap-2">
-              <Newspaper className="h-4 w-4 text-amber-700" />
+              <Newspaper className="h-4 w-4 text-[var(--v5-warning)]" />
               <h2 className="v5-section-title">Market Activity Feed</h2>
             </div>
             <p className="v5-section-subtitle">Chronological market events, signal triggers, and notable updates.</p>
@@ -187,15 +187,15 @@ export function MarketPulsePage() {
         </div>
         <div className="v5-compact-scroll space-y-2 pr-1">
           {feed.map((item: any, i: number) => (
-            <div key={`${s(item.symbol)}-${i}`} className="v5-table-row-intel rounded-xl border border-slate-200 p-3">
+            <div key={`${s(item.symbol)}-${i}`} className="v5-table-row-intel rounded-xl border border-[var(--v5-border)] p-3">
               <div className="flex flex-wrap items-center justify-between gap-2">
-                <div className="font-semibold text-slate-800">{s(item.symbol, s(item.title, 'Market Event'))}</div>
-                <span className="text-[11px] text-slate-500">{s(item.timeLabel, s(item.timestamp))}</span>
+                <div className="font-semibold text-[var(--v5-ink)]">{s(item.symbol, s(item.title, 'Market Event'))}</div>
+                <span className="text-[11px] text-[var(--v5-muted)]">{s(item.timeLabel, s(item.timestamp))}</span>
               </div>
-              <p className="mt-1 text-sm text-slate-600">{s(item.summary, s(item.reasoning, ''))}</p>
+              <p className="mt-1 text-sm text-[var(--v5-ink-muted)]">{s(item.summary, s(item.reasoning, ''))}</p>
             </div>
           ))}
-          {!feed.length && <p className="text-sm text-slate-500">No fresh events in the selected window.</p>}
+          {!feed.length && <p className="text-sm text-[var(--v5-muted)]">No fresh events in the selected window.</p>}
         </div>
         <div className="mt-3">
           <V5Sparkline

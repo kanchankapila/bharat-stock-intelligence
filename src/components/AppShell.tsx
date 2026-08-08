@@ -682,7 +682,7 @@ export const AppShell: React.FC<AppShellProps> = ({
             >
               V2
             </button>
-            <button 
+            <button
               onClick={() => {
                 localStorage.setItem('dashboardVersion', 'v3');
                 localStorage.setItem('v2Enabled', 'true');
@@ -691,6 +691,18 @@ export const AppShell: React.FC<AppShellProps> = ({
               className="bg-indigo-600 hover:bg-indigo-500 text-white font-black text-[9px] rounded-md px-2.5 py-1 uppercase tracking-wider cursor-pointer transition-colors"
             >
               V3 Pro
+            </button>
+            {/* v6 = the Phase 1 consolidation shell (src/v6/), reusing the same v2Enabled route
+                tree as v2/v3 -- see the "V6 Canonical Workbench" proposal. */}
+            <button
+              onClick={() => {
+                localStorage.setItem('dashboardVersion', 'v6');
+                localStorage.setItem('v2Enabled', 'true');
+                window.location.reload();
+              }}
+              className="bg-teal-600 hover:bg-teal-500 text-white font-black text-[9px] rounded-md px-2.5 py-1 uppercase tracking-wider cursor-pointer transition-colors"
+            >
+              Workbench
             </button>
             {/* V5 is a separate top-level route (main.tsx), not a dashboardVersion value --
                 a plain navigation, not a localStorage-driven reload like its siblings. */}

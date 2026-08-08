@@ -35,7 +35,7 @@ import { updateMonitorState } from './monitoringService';
 import { StepTracker } from './jobSteps';
 import { updateTrailingStops } from './trailingStopUpdater';
 import { getTrendlyneMetricSymbols, enqueueTrendlyneMetricsFetchJobs, runTrendlyneMetricsFetch } from './trendlyneDailyFetchService';
-import { isMarketOpen, isTradingHolidayToday } from './marketStatusService';
+import { isMarketOpen, isTradingHolidayToday, shouldSkipOnTradingHoliday } from './marketStatusService';
 import {
   isDormant, shouldStartNewCycle, pickRandomBatch, randomDelayMs, DORMANT_RECHECK_MS,
   getCycleState, startNewCycle, completeCycle, getPendingStocksForCycle, upsertChecklistResult,
@@ -216,7 +216,14 @@ let trendlyneChecklistCycleWorker: Worker | null = null;
 
 // ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ Stock-refresh worker processor (PHASE 1: Now persists OHLCV) ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬
 
-async function processStockRefresh(_job: Job): Promise<{ count: number; persisted: number }> {
+async function processStockRefresh(job: Job): Promise<{ count: number; persisted: number }> {
+  // 2026-08-06: the exchange never opened on a trading holiday, so there is no new EOD OHLCV
+  // bar to persist -- fetchAndPersistOHLCVData() would just re-fetch/re-write yesterday's
+  // close. Never dispatched by closed-day-early-batch, so a plain holiday check is enough.
+  if (await shouldSkipOnTradingHoliday(job)) {
+    console.log('[QUEUE] stock-refresh skipped — trading holiday, no new EOD bar to persist');
+    return { count: 0, persisted: 0 };
+  }
   const { fetchAndPersistOHLCVData } = await import('./liveStockData');
   const result = await fetchAndPersistOHLCVData();
   await checkPriceAlerts().catch(e => console.error('[QUEUE] checkPriceAlerts failed:', (e as Error).message));
@@ -429,7 +436,15 @@ function withJobTimeout<T>(name: string, budgetMs: number, fn: () => Promise<T>)
   return Promise.race([fn(), timeout]).finally(() => clearTimeout(timer)) as Promise<T>;
 }
 
-async function processMlDailyOps(_job: Job): Promise<{ success: boolean }> {
+async function processMlDailyOps(job: Job): Promise<{ success: boolean }> {
+  // 2026-08-06: skip the standalone 19:30 IST trigger on a trading holiday -- closed-day-early-
+  // batch (queues.ts's QUEUE_CLOSED_DAY) already dispatches a 'closed-day-early'-named run at
+  // ~07:10 IST that morning. Running the full ~120-script chain again that same evening off an
+  // exchange that never opened would just re-fetch/re-score identical data twice.
+  if (await shouldSkipOnTradingHoliday(job)) {
+    console.log('[QUEUE] ml-daily-ops skipped — trading holiday (closed-day-early-batch already ran this morning)');
+    return { success: true };
+  }
   // Dashboard-visible sub-tasks are wrapped in T.run(...) so their monitor state reflects the
   // ACTUAL step outcome (T.finish() at the end). Steps not tracked here stay best-effort with a
   // console.warn — they aren't individually dashboarded, so they can't create a false-healthy signal.
@@ -680,17 +695,17 @@ async function processMlDailyOps(_job: Job): Promise<{ success: boolean }> {
     // AI-generated earnings-call tone/takeaway (2026-08-06 urls.txt analysis) → concall_takeaways.
     runPython('investsights_concall_fetcher.py', [], 2 * 60_000)
       .catch(e => console.warn('[QUEUE] investsights_concall_fetcher failed:', (e as Error).message)),
-    // NDTV Profit futures basis/roll-spread/PCR, independent cross-check for fno_rollover_fetcher.py
-    // (2026-08-07 urls.txt follow-up) → ndtv_fno_basis. F&O-eligible universe only (209 symbols) --
-    // futures don't exist for the rest of nse_stocks. Live-measured ~7s for the full universe.
-    runPython('ndtv_fno_basis_fetcher.py', [], 2 * 60_000)
-      .catch(e => console.warn('[QUEUE] ndtv_fno_basis_fetcher failed:', (e as Error).message)),
     // Market-wide corporate-actions calendar sourced from real NSE filings (2026-08-07
     // urls.txt open-source sourcing pass) → nse_filed_corporate_actions. Daily and cheap (one
     // API call, ~40 rows): the completeness cross-check for mc_corporate_actions_fetcher.py's
     // weekly per-stock crawl, so it should stay fresher than the thing it's checking.
     runPython('investsights_corporate_actions_fetcher.py', [], 2 * 60_000)
       .catch(e => console.warn('[QUEUE] investsights_corporate_actions_fetcher failed:', (e as Error).message)),
+    // NDTV Profit futures basis/roll-spread/PCR, independent cross-check for fno_rollover_fetcher.py
+    // (2026-08-07 urls.txt follow-up) → ndtv_fno_basis. F&O-eligible universe only (209 symbols) --
+    // futures don't exist for the rest of nse_stocks. Live-measured ~7s for the full universe.
+    runPython('ndtv_fno_basis_fetcher.py', [], 2 * 60_000)
+      .catch(e => console.warn('[QUEUE] ndtv_fno_basis_fetcher failed:', (e as Error).message)),
   ]);
 
   // Earnings beat features (reads stock_earnings_beats, refreshed weekly by earnings_surprise_fetcher).
@@ -857,8 +872,14 @@ async function processMlDailyOps(_job: Job): Promise<{ success: boolean }> {
   await runPython('live_screener_resolver.py', [], 20 * 60_000)
     .catch(err => console.error('[QUEUE] live_screener_resolver.py failed:', err.message));
 
-  await T.run('performance-tracker', () => runPython('performance_tracker.py', ['--horizon', '5']));
-  await runPython('performance_tracker.py', ['--horizon', '15'])
+  // Measured 83.6s standalone (2026-08-08) -- well inside the implicit 5min default -- but it
+  // runs here alongside ~15 other ml-daily-ops steps hitting the same DB, and 11 of its last
+  // 116 scheduled runs (9.5%) timed out at that default under that contention (incl. the run
+  // right before this fix, which failed ml-daily-ops outright since this is a T.run() step).
+  // Same "give it real headroom for a once-daily batch step" pattern already applied to
+  // screener_performance.py/quant-eod-sync/alphaQuant.score elsewhere in this file.
+  await T.run('performance-tracker', () => runPython('performance_tracker.py', ['--horizon', '5'], 15 * 60_000));
+  await runPython('performance_tracker.py', ['--horizon', '15'], 15 * 60_000)
     .catch(e => console.warn('[QUEUE] performance_tracker(15) failed:', (e as Error).message));
 
   // ── feature-matrix hygiene (2026-07-31 bias audit) ──────────────────────────────
@@ -1169,20 +1190,42 @@ async function quantPhase(steps: Promise<unknown>[]): Promise<void> {
   if (failed) throw (failed as PromiseRejectedResult).reason;
 }
 
-async function processQuantEodSync(_job: Job): Promise<{ success: boolean }> {
+async function processQuantEodSync(job: Job): Promise<{ success: boolean }> {
+  // 2026-08-06: skip entirely on a trading holiday, no morning replacement -- every phase here
+  // (proprietary-score syncs, fundamentals resync, multi-factor scoring) re-derives from the
+  // same closed-exchange session's unchanged data. Not wired into closed-day-early-batch's
+  // dispatch, same reasoning as processStockScoring/processQuantScoring in screeners.jobs.ts.
+  if (await shouldSkipOnTradingHoliday(job)) {
+    console.log('[QUEUE] quant-eod-sync skipped — trading holiday, nothing new to sync');
+    return { success: true };
+  }
   console.log('[QUEUE] quant-eod-sync starting...');
   try {
-    // Phase 1 — different vendors (NiftyTrader vs Trendlyne). Both write proprietary_scores_history
-    // but under a different `source`, so ON CONFLICT(symbol,date,source,score_type) keeps the rows
-    // disjoint; concurrent upserts can't collide.
-    console.log('[QUANT EOD] 1. Syncing NiftyTrader & Trendlyne Scores');
+    // Phase 1 — different vendors (NiftyTrader vs Trendlyne) plus delivery-map, which is a pure
+    // in-memory cache warm off NSE's bhavcopy CSV (deliveryFetcher.ts's fetchDeliveryMap -- no DB
+    // write at all, confirmed 2026-08-06), so it has zero row/table overlap with either score sync
+    // and can run fully concurrently rather than after them. niftytrader-scores/trendlyne-scores
+    // both write proprietary_scores_history but under a different `source`, so
+    // ON CONFLICT(symbol,date,source,score_type) keeps the rows disjoint; concurrent upserts
+    // can't collide.
+    console.log('[QUANT EOD] 1. Syncing NiftyTrader & Trendlyne Scores + Delivery Data (concurrent)');
+    const today = new Date().toISOString().split('T')[0];
     await quantPhase([
-      quantStep('niftytrader-scores', 30, () => syncNiftyTraderScores()),
+      // 30min budget was hit by the real scheduled run on 2026-08-07 (14% historical fail
+      // rate, 8/56 runs). Bumped defensively -- could not independently re-time this one
+      // (getAllStocks() x per-symbol NiftyTrader fetch needs the live auth token, which a
+      // standalone script outside the running server doesn't pick up the same way), so this
+      // is headroom based on the observed failure rate, not a re-measured confirmation like
+      // the other timeout fixes made this session.
+      quantStep('niftytrader-scores', 45, () => syncNiftyTraderScores()),
       quantStep('trendlyne-scores', 30, () => syncTrendlyneScores()),
+      quantStep('delivery-map', 10, () => fetchDeliveryMap(today)),
     ]);
 
-    // Serial, and deliberately not folded into a phase with any other Trendlyne step: overlapping
+    // Serial, and deliberately not folded into a phase with any other TRENDLYNE step: overlapping
     // two Trendlyne calls risks the vendor rate-limit this repo has been bitten by before.
+    // (delivery-map above is NSE, not Trendlyne, so pairing it with the phase-1 Trendlyne call
+    // doesn't reintroduce that risk -- only two Trendlyne calls running concurrently would.)
     console.log('[QUANT EOD] 1.5. Syncing Trendlyne Technical Snapshots');
     await quantStep('trendlyne-technicals', 45, () => syncTrendlyneTechnicals());
 
@@ -1193,6 +1236,9 @@ async function processQuantEodSync(_job: Job): Promise<{ success: boolean }> {
     //     at 18:00/18:20/18:40 IST (et-marketstats-sync/mc-sync/etnow-sync in screeners.jobs.ts) --
     //     well before this job's 22:00 IST slot. Providers publish screener membership once/day
     //     post-close; re-fetching ~1,300-1,400 screeners again 2-4h later re-wrote identical rows.
+    //     This is also what a 2026-08-04 failure ("trendlyne-screeners exceeded its 60min execution
+    //     budget") was from -- that step no longer exists here; the one clean post-fix run measured
+    //     (2026-08-05) took 25.6min total, down from 73-82min pre-fix.
     //   - fundamentals-sync (runFullFundamentalsSync(), a full-universe Yahoo Finance deep pull with
     //     NO staleness filter) has its own dedicated WEEKLY job (sync-fundamentals-weekly, Sunday
     //     08:30 IST). Calling it here too meant "weekly" fundamentals actually ran 6 nights/week --
@@ -1202,9 +1248,6 @@ async function processQuantEodSync(_job: Job): Promise<{ success: boolean }> {
     //     at 22:00 IST added nothing since index EOD PCR doesn't move after close.
     // See docs session notes 2026-08-04 for the full evidence trail (each call traced to its
     // function body, not just its job name).
-    console.log('[QUANT EOD] 4. Syncing Delivery Data for Today');
-    const today = new Date().toISOString().split('T')[0];
-    await quantStep('delivery-map', 10, () => fetchDeliveryMap(today));
 
     updateMonitorState('quant-eod-sync', 'success');
     console.log('[QUEUE] quant-eod-sync completed successfully');
@@ -1752,7 +1795,7 @@ export async function initQueues(): Promise<boolean> {
       recordHeartbeat('ml-daily-ops', 'failed', err?.message);
     });
 
-    // ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ ML weekly retrain + optimize (Sunday 6 PM IST = 12:30 UTC) ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬
+    // -- ML weekly retrain + optimize (Sunday 10:30 IST = 05:00 UTC, see the repeat pattern below) --
     mlWeeklyRetrainQueue = new Queue(QUEUE_ML_WEEKLY_RETRAIN, { connection });
     // addJobWithCatchup does its own remove-then-add internally (and needs the pre-removal
     // repeatable's `next` to detect a slot missed by a restart) — removing it here first would
@@ -1951,7 +1994,16 @@ export async function initQueues(): Promise<boolean> {
     // On a TRADING HOLIDAY (weekday, exchange shut) there is no market close to wait for, so run
     // the daily learning/ranking pipeline in the morning instead of the usual evening slot.
     // Weekends are handled separately by the early-Sunday weekly jobs. No-ops on normal sessions.
-    // On a holiday the usual evening crons still fire (idempotent re-run) — this is purely additive.
+    // 2026-08-06: the usual evening/night crons for outcome-resolver/ml-daily-ops/unified-ranker
+    // (dispatched here) and for every routine screener-sync/OHLCV-refresh/re-scoring job (mc-sync,
+    // etnow-sync, et-marketstats-sync, trendlyne-screener-sync, stock-refresh, ohlcv-gap-fill-
+    // daily, dl-feature-refresh, quant-eod-sync, stock-scoring, quant-scoring, confluence-
+    // outcomes, dl-inference) now SKIP themselves on a trading holiday instead of duplicating —
+    // see marketStatusService.ts's shouldSkipOnTradingHoliday, wired into each of their
+    // processors. Only the three dispatched below still run (a closed-day-early-batch dispatch
+    // always passes job.name='closed-day-early', which shouldSkipOnTradingHoliday recognizes and
+    // never skips); the rest were skipped outright with no morning replacement, since re-syncing/
+    // re-scoring off a session that never opened would just reproduce yesterday's data.
     const QUEUE_CLOSED_DAY = 'closed-day-early-batch';
     const closedDayQueue = new Queue(QUEUE_CLOSED_DAY, { connection });
     const cdRep = await closedDayQueue.getRepeatableJobs();
@@ -2014,6 +2066,14 @@ export async function initQueues(): Promise<boolean> {
     ohlcvBackfillQueue = new Queue(QUEUE_OHLCV_BACKFILL, { connection });
     ohlcvBackfillWorker = new Worker(QUEUE_OHLCV_BACKFILL,
       async (job: Job) => {
+        // 2026-08-06: skip only the DAILY gap-fill (job.name === 'ohlcv-gap-fill-daily') on a
+        // trading holiday -- there's no new session to gap-fill. Weekly/full/indices/startup
+        // modes on this same queue are untouched (weekly fetches are fine; full/indices/startup
+        // are one-off catch-up runs, not routine daily waste).
+        if (job.name === 'ohlcv-gap-fill-daily' && await shouldSkipOnTradingHoliday(job)) {
+          console.log('[QUEUE] ohlcv-gap-fill-daily skipped — trading holiday, no new session to gap-fill');
+          return { success: true };
+        }
         const mode = (job.data?.mode as string) || 'gap-fill';
         const lookback = (job.data?.lookback as number) || 30;
         return processDLPython('backfill_ohlcv.py', ['--mode', mode, '--lookback', String(lookback)]);
@@ -2182,7 +2242,14 @@ export async function initQueues(): Promise<boolean> {
     unifiedRankerQueue = new Queue(QUEUE_UNIFIED_RANKER, { connection });
     const unifiedRankerWorkerInstance = new Worker(
       QUEUE_UNIFIED_RANKER,
-      async () => {
+      async (job) => {
+        // 2026-08-06: skip the standalone 07:30 IST trigger on a trading holiday --
+        // closed-day-early-batch already dispatches a 'closed-day-early'-named run (with a
+        // 20-min delay after ml-daily-ops) that same morning.
+        if (await shouldSkipOnTradingHoliday(job)) {
+          console.log('[QUEUE] unified-ranker skipped — trading holiday (closed-day-early-batch already ran this morning)');
+          return;
+        }
         console.log('[QUEUE] unified-ranker starting...');
         // 30 min: a full run now takes 15-20+ min (700k-row confluence window scans +
         // quality/win-prob loaders). The old 5-min budget timeout-killed 19 of its last

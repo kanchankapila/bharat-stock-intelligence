@@ -11,6 +11,7 @@ import {
 import { useIntersectionObserver } from '../hooks/useIntersectionObserver';
 import { MarketData } from '../services/marketService';
 import { relativeFromNow, formatISTWithLocal } from '../lib/timeFormat';
+import { AddToPortfolioButton } from './AddToPortfolioButton';
 
 interface WatchlistProps {
   watchlist: string[];
@@ -24,6 +25,7 @@ interface WatchlistProps {
   }>;
   onSelectStock: (symbol: string) => void;
   onRemove: (symbol: string) => void;
+  userId?: string | null;
 }
 
 const WatchlistSparkline: React.FC<{ symbol: string; isUp: boolean; enabled: boolean }> = ({ symbol, isUp, enabled }) => {
@@ -55,7 +57,8 @@ export const Watchlist: React.FC<WatchlistProps> = ({
   stocks,
   watchlistDetails,
   onSelectStock,
-  onRemove
+  onRemove,
+  userId
 }) => {
   const ref = React.useRef<HTMLDivElement>(null);
   const isVisible = useIntersectionObserver(ref, { threshold: 0.1 });
@@ -130,8 +133,9 @@ export const Watchlist: React.FC<WatchlistProps> = ({
                 onClick={() => onSelectStock(stock.symbol)}
               >
                 <div>
-                  <div className="absolute top-0 right-0 p-4 z-10">
-                    <button 
+                  <div className="absolute top-0 right-0 p-4 z-10 flex items-center gap-1.5">
+                    <AddToPortfolioButton symbol={stock.symbol} currentPrice={stock.price} userId={userId} className="bg-slate-900/60 text-slate-300 backdrop-blur-md" />
+                    <button
                       onClick={(e) => { e.stopPropagation(); onRemove(stock.symbol); }}
                       className="p-1.5 bg-rose-500/10 backdrop-blur-md rounded-lg text-rose-500 hover:bg-rose-500 hover:text-indigo-600 transition-all shadow-lg border border-rose-500/20"
                       title="Remove from Watchlist"

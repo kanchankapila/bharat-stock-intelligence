@@ -53,6 +53,47 @@ db.exec(`
     FOREIGN KEY (userId) REFERENCES users(id) ON DELETE CASCADE
   );
 
+  -- One row per lot, not a running-balance ledger -- a buy creates a row, a full/partial sell
+  -- fills sellPrice/sellDate on it (or splits the quantity into a new closed row when partial;
+  -- see portfolio.router.ts). Matches the "quantity/buy price/buy date/sell price/sell date"
+  -- fields a real portfolio tracker (Zerodha Console/Screener.in/Trendlyne) exposes per holding.
+  CREATE TABLE IF NOT EXISTS portfolio_holdings (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    userId TEXT NOT NULL,
+    symbol TEXT NOT NULL,
+    quantity REAL NOT NULL,
+    buyPrice REAL NOT NULL,
+    buyDate TEXT NOT NULL,
+    sellPrice REAL,
+    sellDate TEXT,
+    notes TEXT,
+    createdAt DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updatedAt DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (userId) REFERENCES users(id) ON DELETE CASCADE
+  );
+  CREATE INDEX IF NOT EXISTS idx_portfolio_holdings_user ON portfolio_holdings(userId);
+
+  -- Mirrors portfolio_holdings for mutual funds. currentNav is user-maintained (manually
+  -- updated) -- no live AMFI NAV feed exists in this codebase yet, see portfolio.router.ts.
+  CREATE TABLE IF NOT EXISTS mf_portfolio_holdings (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    userId TEXT NOT NULL,
+    schemeName TEXT NOT NULL,
+    folioNumber TEXT,
+    category TEXT,
+    units REAL NOT NULL,
+    buyNav REAL NOT NULL,
+    buyDate TEXT NOT NULL,
+    currentNav REAL,
+    sellNav REAL,
+    sellDate TEXT,
+    notes TEXT,
+    createdAt DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updatedAt DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (userId) REFERENCES users(id) ON DELETE CASCADE
+  );
+  CREATE INDEX IF NOT EXISTS idx_mf_portfolio_holdings_user ON mf_portfolio_holdings(userId);
+
   -- 2. Core Stock Data
   CREATE TABLE IF NOT EXISTS nse_stocks (
     id INTEGER PRIMARY KEY AUTOINCREMENT,

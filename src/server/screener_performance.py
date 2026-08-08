@@ -16,6 +16,7 @@ import datetime
 from collections import defaultdict
 
 from db_compat import connect, ConnWrapper
+from as_of import logical_trading_date
 
 NIFTY_SYMBOL = "NIFTY50"
 K_PRIOR_STARTUP = 8        # Bayesian prior when <90 days of screener history
@@ -143,20 +144,36 @@ def phase_a_bootstrap(conn: ConnWrapper) -> dict:
 # -- Phase B: Fill screener_appearances returns --------------------------------
 
 def phase_b_fill_returns(conn: ConnWrapper) -> int:
-    """Fill return columns for screener_appearances rows where any short-horizon return is NULL."""
+    """Fill return columns for screener_appearances rows where any horizon return is NULL.
+
+    BUG FOUND 2026-08-07 (dead-column sweep): the original WHERE clause gated purely on
+    `return_5d IS NULL`, so a row was selected AT MOST ONCE -- whenever it first became old
+    enough to fill return_5d (~7 calendar days after appearing). The comment directly above
+    this fix ("Longer horizons will be NULL for recent rows and filled on later runs") states
+    the intended design, but the actual predicate never re-selected a row after return_5d was
+    set, so return_60d/return_120d (which need 60/120 *trading* days of forward price history
+    -- far more than 7 calendar days) were always still None at that point and never revisited.
+    Confirmed live: 671,072/671,072 screener_appearances rows had return_60d/return_120d NULL,
+    100%, while return_5d/return_10d/return_20d were populated normally. Fixed by gating on
+    EACH horizon independently -- a row is now re-selected as long as ANY of its 5 target
+    columns is still NULL and enough calendar time has passed for THAT horizon specifically.
+    """
     print("[PhaseB] Filling screener_appearances returns from stock_ohlcv...")
 
     today = datetime.date.today()
-    # Use the shortest horizon (5 trading days ≈ 7 calendar days) as the gating cutoff.
-    # Longer horizons (10d, 20d) will be NULL for recent rows and filled on later runs.
+    # ~1.4 calendar days per trading day (5 trading days ≈ 7 calendar days, this file's own
+    # existing ratio) + a margin for holiday clusters, applied to each horizon independently.
     cutoff_5d = (today - datetime.timedelta(days=7)).isoformat()
+    cutoff_60d = (today - datetime.timedelta(days=95)).isoformat()
+    cutoff_120d = (today - datetime.timedelta(days=185)).isoformat()
 
     pending = conn.execute("""
         SELECT screener_id, symbol, appeared_date
         FROM screener_appearances
-        WHERE return_5d IS NULL
-          AND appeared_date <= ?
-    """, (cutoff_5d,)).fetchall()
+        WHERE (return_5d IS NULL AND appeared_date <= ?)
+           OR (return_60d IS NULL AND appeared_date <= ?)
+           OR (return_120d IS NULL AND appeared_date <= ?)
+    """, (cutoff_5d, cutoff_60d, cutoff_120d)).fetchall()
 
     if not pending:
         print("[PhaseB] Nothing to fill.")
@@ -662,7 +679,12 @@ def run():
         phase_c_bayesian(conn, proxy)
         phase_d_sync_back(conn)
         phase_e_update_confidence(conn)
-        phase_f_pit(conn, datetime.date.today().isoformat())
+        # logical_trading_date(), not date.today() (2026-08-06) -- this job is scheduled at
+        # 21:00 UTC = 02:30 IST, i.e. always AFTER midnight relative to the trading day it
+        # summarizes. A raw date.today() call here would permanently stamp every PIT snapshot
+        # one calendar day ahead of the data it actually reflects. See as_of.logical_trading_date's
+        # docstring for the wider incident (insider_features.py/bse_event_classifier.py, 2026-08-01).
+        phase_f_pit(conn, logical_trading_date())
         print("[ScreenerPerf] All phases complete.")
 
         # Print quick summary
@@ -680,7 +702,7 @@ if __name__ == '__main__':
     ap.add_argument('--backfill-pit', action='store_true',
                     help='backfill point-in-time screener scores over a date range')
     ap.add_argument('--start', default='2026-04-01')
-    ap.add_argument('--end', default=datetime.date.today().isoformat())
+    ap.add_argument('--end', default=logical_trading_date())
     ap.add_argument('--step-days', type=int, default=7)
     args = ap.parse_args()
     if args.backfill_pit:

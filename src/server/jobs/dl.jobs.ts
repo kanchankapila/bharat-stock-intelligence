@@ -28,6 +28,7 @@ import { Job } from 'bullmq';
 import { runPython } from '../pythonRunner';
 import { updateMonitorState } from '../monitoringService';
 import { registerRepeatableJob } from './registerJob';
+import { shouldSkipOnTradingHoliday } from '../marketStatusService';
 
 export const QUEUE_DL_MACRO_FETCH    = 'dl-macro-fetch';
 export const QUEUE_DL_FEATURE_REFRESH = 'dl-feature-refresh';
@@ -58,12 +59,52 @@ async function processDlMacroFetch(_job: Job): Promise<void> {
   // Bond yields (India G-Sec + US/UK/DE 10yr) are now fetched inside global_macro_fetcher.py.
 }
 
-async function processDlFeatureRefresh(_job: Job): Promise<{ success: boolean }> {
+async function processDlFeatureRefresh(job: Job): Promise<{ success: boolean; skipped?: boolean }> {
+  // 2026-08-06: feature_engineering.py reads stock_ohlcv, which stock-refresh never wrote a
+  // new bar into on a trading holiday -- there is no new session to featurize. Never
+  // dispatched by closed-day-early-batch, so a plain holiday check is enough.
+  if (await shouldSkipOnTradingHoliday(job)) {
+    console.log('[QUEUE] dl-feature-refresh skipped — trading holiday, no new session to featurize');
+    // `skipped: true` lets registerDlJobs' completion chain (below) tell a genuine holiday
+    // no-op apart from a real run -- without it, dl-inference would still get chain-dispatched
+    // off a "successful" completion that produced no new feature_store row.
+    return { success: true, skipped: true };
+  }
   return processDLPython('feature_engineering.py');
 }
 
-async function processDlInference(_job: Job): Promise<{ success: boolean }> {
-  return processDLPython('dl_engine.py', ['--mode', 'infer']);
+// 2026-08-06: tracks the IST calendar date dl-inference last actually ran on (either via the
+// chain trigger below or the fallback cron), so the fallback cron can skip a same-day re-run
+// instead of unconditionally duplicating whatever the chain already did. In-memory/per-process
+// is deliberate -- a server restart resetting this just means the fallback might run once extra
+// on that rare day, an acceptable, bounded cost against the complexity of persisting it.
+let _lastDlInferenceRunIstDate: string | null = null;
+
+function _currentIstDateString(): string {
+  return new Date(Date.now() + 5.5 * 60 * 60 * 1000).toISOString().slice(0, 10);
+}
+
+async function processDlInference(job: Job): Promise<{ success: boolean }> {
+  // 2026-08-06: skip entirely on a trading holiday, no morning replacement -- dl-feature-refresh
+  // is also skipped on the same day (see processDlFeatureRefresh above), so feature_store has no
+  // new row to infer against; re-running would just reproduce yesterday's prediction under
+  // logical_trading_date()'s resolved date.
+  if (await shouldSkipOnTradingHoliday(job)) {
+    console.log('[QUEUE] dl-inference skipped — trading holiday, no new feature row to infer against');
+    return { success: true };
+  }
+  // The scheduled fallback (job.name === 'dl-infer-daily', see registerDlJobs below) only
+  // exists to catch the rare case the chain trigger never fired -- on a normal night it would
+  // otherwise unconditionally re-run inference a second time, every single night, exactly the
+  // kind of daily duplicate this whole session is closing. The chain-triggered job itself
+  // carries a different job.name ('dl-infer-after-feature-refresh') and is never skipped here.
+  if (job.name === 'dl-infer-daily' && _lastDlInferenceRunIstDate === _currentIstDateString()) {
+    console.log('[QUEUE] dl-inference (fallback) skipped — already ran today via the dl-feature-refresh chain trigger');
+    return { success: true };
+  }
+  const result = await processDLPython('dl_engine.py', ['--mode', 'infer']);
+  _lastDlInferenceRunIstDate = _currentIstDateString();
+  return result;
 }
 
 async function processDlRegimeUpdate(_job: Job): Promise<{ success: boolean }> {
@@ -122,11 +163,20 @@ export async function registerDlJobs(connection: any) {
     connection,
     queueName: QUEUE_DL_INFERENCE,
     jobName: 'dl-infer-daily',
-    // 12:00 AM IST (18:30 UTC). Moved off 10:30 PM IST (2026-07-31): it collided exactly
-    // with stock-scoring, and the 10:00 PM–11:35 PM window held 8 heavy jobs in 95 minutes,
-    // which is where all 43 pg-pool "timeout exceeded when trying to connect" errors landed.
-    // Still strictly after dl-feature-refresh (5:00 PM) and before unified-ranker (7:30 AM).
-    repeat: { pattern: '30 18 * * 1-5' },
+    // 5:00 AM IST (23:30 UTC) -- FALLBACK ONLY. 2026-08-06: dl-inference's real dependency is
+    // just feature_store (dl-feature-refresh) + market_regimes, nothing from the 21:00-23:35
+    // IST cluster it used to be scheduled around -- so the primary trigger is now the
+    // featureRefresh.worker completion chain below, which fires it the moment fresh features
+    // actually exist (typically well before 11:30 PM) instead of waiting for a fixed midnight
+    // slot regardless of whether dl-feature-refresh happened to finish early or late that
+    // night (measured 2026-08-05: 17:00->18:58 IST, well over its nominal 60min budget --
+    // a fixed downstream time can't be both safe and prompt against that variance). This cron
+    // only matters if the chain never fired (dl-feature-refresh itself failed, or a mid-window
+    // restart) -- processDlInference's own same-day dedup skips it otherwise. Kept before
+    // closed-day-early-batch (7:10 AM) and unified-ranker (7:30 AM), not at the old midnight
+    // slot, since a fallback that only fires on a genuine miss doesn't need to run any earlier
+    // than "before the next thing that might want it."
+    repeat: { pattern: '30 23 * * 1-5' },
     jobId: 'dl-infer-daily',
     removeOnComplete: 3,
     removeOnFail: 3,
@@ -137,6 +187,18 @@ export async function registerDlJobs(connection: any) {
     lockRenewTime: 5 * 60 * 1000,
     // Real monitor id is 'dl-engine-infer', not 'dl-inference' -- see module docstring.
     monitorFn: (_name, status, detail) => updateMonitorState('dl-engine-infer', status, detail),
+  });
+
+  // Chain trigger: dispatch dl-inference the moment dl-feature-refresh actually finishes with
+  // fresh data, rather than relying solely on the fixed fallback above. `result.skipped` (see
+  // processDlFeatureRefresh) distinguishes a genuine run from a trading-holiday no-op -- a
+  // skipped refresh produced no new feature_store row, so chain-dispatching inference off it
+  // would just reproduce yesterday's prediction for no reason.
+  featureRefresh.worker.on('completed', (_job, result: any) => {
+    if (result?.skipped) return;
+    inference.queue.add('dl-infer-after-feature-refresh', {}, { removeOnComplete: 3, removeOnFail: 3 })
+      .then(() => console.log('[QUEUE] dl-inference dispatched right after dl-feature-refresh (chain trigger)'))
+      .catch(e => console.warn('[QUEUE] Failed to chain-dispatch dl-inference after dl-feature-refresh:', (e as Error).message));
   });
 
   const regimeUpdate = await registerRepeatableJob({

@@ -323,9 +323,16 @@ export const miscRouter = router({
       }, 300000);
     }),
 
+  // .optional() on the outer object, not just the date field -- v5's EarningsPulseDeskPage.tsx
+  // (rendered for dashboardVersion==='v6' at /earnings, see App.tsx's Phase 2 wiring) calls
+  // trpc.getEarnings.useQuery(undefined, ...), and Zod rejects a bare undefined against a
+  // required z.object() even when every field inside it is optional -- same class of bug as
+  // getAdvanceDecline's 2026-08-04 fix. v1/v2/v3's EarningsPage.tsx always sends a real
+  // { date } object so it never hit this; v4's EarningsPulseWidget.tsx passes {} so it didn't
+  // either -- confirmed live 2026-08-07 as a genuine 400 on every /earnings load under v6.
   getEarnings: publicProcedure
-    .input(z.object({ date: z.string().optional() }))
-    .query(async ({ input }) => fetchEarningsAll(input.date)),
+    .input(z.object({ date: z.string().optional() }).optional())
+    .query(async ({ input }) => fetchEarningsAll(input?.date)),
 
   getEarningsCalendar: publicProcedure
     .input(z.object({ date: z.string().optional() }))

@@ -89,15 +89,15 @@ export function SignalReviewPage({ onSelectSymbol }: { onSelectSymbol?: (symbol:
 
       <div className="v5-card col-span-12 p-4">
         <div className="mb-3 flex items-center gap-2">
-          <Radio className="h-4 w-4 text-teal-700" />
+          <Radio className="h-4 w-4 text-[var(--v5-positive)]" />
           <h2 className="v5-title text-lg font-semibold">Signal Review</h2>
         </div>
 
         <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-4">
           <Summary title="Total Signals" value={String(totalSignals)} icon={<Activity className="h-4 w-4 text-sky-700" />} />
-          <Summary title="Active Signals" value={String(activeSignals)} icon={<Target className="h-4 w-4 text-teal-700" />} />
+          <Summary title="Active Signals" value={String(activeSignals)} icon={<Target className="h-4 w-4 text-[var(--v5-positive)]" />} />
           <Summary title="Avg Confidence" value={`${avgConfidence.toFixed(1)}%`} icon={<Radio className="h-4 w-4 text-indigo-700" />} />
-          <Summary title="Queue Pending" value={queuePending == null ? '—' : String(queuePending)} icon={<Activity className="h-4 w-4 text-amber-700" />} />
+          <Summary title="Queue Pending" value={queuePending == null ? '—' : String(queuePending)} icon={<Activity className="h-4 w-4 text-[var(--v5-warning)]" />} />
         </div>
       </div>
 
@@ -106,7 +106,7 @@ export function SignalReviewPage({ onSelectSymbol }: { onSelectSymbol?: (symbol:
         <div className="overflow-x-auto">
           <table className="min-w-full text-sm">
             <thead>
-              <tr className="border-b border-slate-200 text-left text-xs uppercase tracking-wide text-slate-500">
+              <tr className="border-b border-[var(--v5-border)] text-left text-xs uppercase tracking-wide text-[var(--v5-muted)]">
                 <th className="px-3 py-2">Stock</th>
                 <th className="px-3 py-2">Source</th>
                 <th className="px-3 py-2">Type</th>
@@ -123,15 +123,15 @@ export function SignalReviewPage({ onSelectSymbol }: { onSelectSymbol?: (symbol:
                 const current = numOrNull(row.current_price);
                 const sym = s(row.symbol);
                 return (
-                  <tr key={String(row.id)} className="v5-table-row-intel border-b border-slate-100">
-                    <td className="px-3 py-2 font-semibold text-slate-800">
+                  <tr key={String(row.id)} className="v5-table-row-intel border-b border-[var(--v5-border)]">
+                    <td className="px-3 py-2 font-semibold text-[var(--v5-ink)]">
                       <button
                         onClick={() => sym && onSelectSymbol?.(sym)}
-                        className="text-left hover:text-teal-700"
+                        className="text-left hover:text-[var(--v5-positive)]"
                         title="Open stock intelligence"
                       >
                         <div>{stockDisplayName(sym, sym)}</div>
-                        <div className="text-[11px] font-medium text-slate-500">{sym}</div>
+                        <div className="text-[11px] font-medium text-[var(--v5-muted)]">{sym}</div>
                       </button>
                     </td>
                     <td className="px-3 py-2">{s(row.signal_source)}</td>
@@ -140,21 +140,21 @@ export function SignalReviewPage({ onSelectSymbol }: { onSelectSymbol?: (symbol:
                     <td className="px-3 py-2">{current == null ? '—' : `₹${fmtFixed(current, 2)}`}</td>
                     <td className="px-3 py-2">
                       {growth == null ? (
-                        <span className="text-slate-500">—</span>
+                        <span className="text-[var(--v5-muted)]">—</span>
                       ) : (
-                        <span className={growth >= 0 ? 'inline-flex items-center gap-1 text-teal-700' : 'inline-flex items-center gap-1 text-rose-700'}>
+                        <span className={growth >= 0 ? 'inline-flex items-center gap-1 text-[var(--v5-positive)]' : 'inline-flex items-center gap-1 text-[var(--v5-negative)]'}>
                           {growth >= 0 ? <ArrowUpRight className="h-3.5 w-3.5" /> : <ArrowDownRight className="h-3.5 w-3.5" />}
                           {growth >= 0 ? '+' : ''}{fmtFixed(growth, 2)}%
                         </span>
                       )}
                     </td>
-                    <td className="px-3 py-2 text-xs text-slate-500">{s(row.signal_generated_at).slice(0, 10)}</td>
+                    <td className="px-3 py-2 text-xs text-[var(--v5-muted)]">{s(row.signal_generated_at).slice(0, 10)}</td>
                   </tr>
                 );
               })}
             </tbody>
           </table>
-          {!recent.length && <p className="py-6 text-center text-sm text-slate-500">No signals available in the selected window.</p>}
+          {!recent.length && <p className="py-6 text-center text-sm text-[var(--v5-muted)]">No signals available in the selected window.</p>}
         </div>
       </div>
 
@@ -167,28 +167,28 @@ export function SignalReviewPage({ onSelectSymbol }: { onSelectSymbol?: (symbol:
         </div>
         <div className="space-y-2">
           {sourceSummary.map((src: any) => (
-            <div key={s(src.signal_source)} className="rounded-xl border border-slate-200 p-3">
+            <div key={s(src.signal_source)} className="rounded-xl border border-[var(--v5-border)] p-3">
               <div className="flex items-center justify-between">
-                <div className="font-semibold text-slate-800">{s(src.signal_source)}</div>
-                <div className="text-xs text-slate-500">{n(src.active_signals)} active</div>
+                <div className="font-semibold text-[var(--v5-ink)]">{s(src.signal_source)}</div>
+                <div className="text-xs text-[var(--v5-muted)]">{n(src.active_signals)} active</div>
               </div>
               <div className="mt-2 grid grid-cols-3 gap-2 text-[11px]">
                 <div>
-                  <div className="text-slate-500">Total</div>
-                  <div className="font-semibold text-slate-700">{n(src.total_signals)}</div>
+                  <div className="text-[var(--v5-muted)]">Total</div>
+                  <div className="font-semibold text-[var(--v5-ink-soft)]">{n(src.total_signals)}</div>
                 </div>
                 <div>
-                  <div className="text-slate-500">Avg Conf</div>
-                  <div className="font-semibold text-slate-700">{fmtFixed(src.avg_confidence_score, 1)}%</div>
+                  <div className="text-[var(--v5-muted)]">Avg Conf</div>
+                  <div className="font-semibold text-[var(--v5-ink-soft)]">{fmtFixed(src.avg_confidence_score, 1)}%</div>
                 </div>
                 <div>
-                  <div className="text-slate-500">Age</div>
-                  <div className="font-semibold text-slate-700">{fmtFixed(src.avg_age_days, 1)}d</div>
+                  <div className="text-[var(--v5-muted)]">Age</div>
+                  <div className="font-semibold text-[var(--v5-ink-soft)]">{fmtFixed(src.avg_age_days, 1)}d</div>
                 </div>
               </div>
             </div>
           ))}
-          {!sourceSummary.length && <p className="text-sm text-slate-500">Signal source summary unavailable.</p>}
+          {!sourceSummary.length && <p className="text-sm text-[var(--v5-muted)]">Signal source summary unavailable.</p>}
         </div>
       </div>
     </section>
@@ -197,9 +197,9 @@ export function SignalReviewPage({ onSelectSymbol }: { onSelectSymbol?: (symbol:
 
 function Summary({ title, value, icon }: { title: string; value: string; icon: React.ReactNode }) {
   return (
-    <div className="rounded-2xl border border-slate-200 bg-slate-50 p-3">
-      <div className="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-wide text-slate-500">{icon}{title}</div>
-      <div className="mt-1 text-xl font-bold text-slate-900">{value}</div>
+    <div className="rounded-2xl border border-[var(--v5-border)] bg-[var(--v5-surface-2)] p-3">
+      <div className="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-wide text-[var(--v5-muted)]">{icon}{title}</div>
+      <div className="mt-1 text-xl font-bold text-[var(--v5-ink)]">{value}</div>
     </div>
   );
 }

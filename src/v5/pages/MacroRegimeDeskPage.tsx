@@ -133,15 +133,15 @@ export function MacroRegimeDeskPage() {
 
       <div className="v5-card col-span-12 p-4 xl:col-span-5">
         <div className="mb-3 flex items-center gap-2">
-          <Compass className="h-4 w-4 text-teal-700" />
+          <Compass className="h-4 w-4 text-[var(--v5-positive)]" />
           <h2 className="v5-title text-lg font-semibold">Regime Console</h2>
         </div>
 
         <div className="grid grid-cols-2 gap-3 md:grid-cols-4 xl:grid-cols-2">
-          <MetricCard label="Regime" value={regime} toneClass={regimeTone(regime) === 'positive' ? 'text-teal-700' : regimeTone(regime) === 'negative' ? 'text-rose-700' : 'text-amber-700'} />
+          <MetricCard label="Regime" value={regime} toneClass={regimeTone(regime) === 'positive' ? 'text-[var(--v5-positive)]' : regimeTone(regime) === 'negative' ? 'text-[var(--v5-negative)]' : 'text-[var(--v5-warning)]'} />
           <MetricCard label="Confidence" value={regimeProb == null ? '—' : `${fmtFixed(regimeProb * 100, 1)}%`} />
-          <MetricCard label="FII Net" value={fiiNet == null ? '—' : `${fiiNet >= 0 ? '+' : ''}${fmtFixed(fiiNet, 0)} Cr`} toneClass={fiiNet != null && fiiNet < 0 ? 'text-rose-700' : 'text-teal-700'} />
-          <MetricCard label="DII Net" value={diiNet == null ? '—' : `${diiNet >= 0 ? '+' : ''}${fmtFixed(diiNet, 0)} Cr`} toneClass={diiNet != null && diiNet < 0 ? 'text-rose-700' : 'text-teal-700'} />
+          <MetricCard label="FII Net" value={fiiNet == null ? '—' : `${fiiNet >= 0 ? '+' : ''}${fmtFixed(fiiNet, 0)} Cr`} toneClass={fiiNet != null && fiiNet < 0 ? 'text-[var(--v5-negative)]' : 'text-[var(--v5-positive)]'} />
+          <MetricCard label="DII Net" value={diiNet == null ? '—' : `${diiNet >= 0 ? '+' : ''}${fmtFixed(diiNet, 0)} Cr`} toneClass={diiNet != null && diiNet < 0 ? 'text-[var(--v5-negative)]' : 'text-[var(--v5-positive)]'} />
         </div>
 
         <div className="mt-3">
@@ -164,7 +164,7 @@ export function MacroRegimeDeskPage() {
         <div className="mt-4 overflow-x-auto">
           <table className="min-w-full text-sm">
             <thead>
-              <tr className="border-b border-slate-200 text-left text-xs uppercase tracking-wide text-slate-500">
+              <tr className="border-b border-[var(--v5-border)] text-left text-xs uppercase tracking-wide text-[var(--v5-muted)]">
                 <th className="px-3 py-2">Date</th>
                 <th className="px-3 py-2">Regime</th>
                 <th className="px-3 py-2">Confidence</th>
@@ -178,12 +178,12 @@ export function MacroRegimeDeskPage() {
                 const up = dir === 'BULL';
                 const down = dir === 'BEAR' || dir === 'CRASH';
                 return (
-                  <tr key={`${s(row.date)}-${i}`} className="v5-table-row-intel border-b border-slate-100">
-                    <td className="px-3 py-2 text-slate-700">{s(row.date, '—')}</td>
-                    <td className="px-3 py-2 font-semibold text-slate-800">{s(row.regime, 'UNKNOWN')}</td>
-                    <td className="px-3 py-2 text-slate-700">{p == null ? '—' : `${fmtFixed(p * 100, 1)}%`}</td>
+                  <tr key={`${s(row.date)}-${i}`} className="v5-table-row-intel border-b border-[var(--v5-border)]">
+                    <td className="px-3 py-2 text-[var(--v5-ink-soft)]">{s(row.date, '—')}</td>
+                    <td className="px-3 py-2 font-semibold text-[var(--v5-ink)]">{s(row.regime, 'UNKNOWN')}</td>
+                    <td className="px-3 py-2 text-[var(--v5-ink-soft)]">{p == null ? '—' : `${fmtFixed(p * 100, 1)}%`}</td>
                     <td className="px-3 py-2">
-                      <span className={`inline-flex items-center gap-1 text-xs font-semibold ${up ? 'text-teal-700' : down ? 'text-rose-700' : 'text-amber-700'}`}>
+                      <span className={`inline-flex items-center gap-1 text-xs font-semibold ${up ? 'text-[var(--v5-positive)]' : down ? 'text-[var(--v5-negative)]' : 'text-[var(--v5-warning)]'}`}>
                         {up ? <TrendingUp className="h-3.5 w-3.5" /> : down ? <TrendingDown className="h-3.5 w-3.5" /> : <span>•</span>}
                         {up ? 'Risk-On' : down ? 'Risk-Off' : 'Neutral'}
                       </span>
@@ -193,17 +193,17 @@ export function MacroRegimeDeskPage() {
               })}
             </tbody>
           </table>
-          {!recent.length && <p className="py-4 text-sm text-slate-500">No recent regime rows available right now.</p>}
+          {!recent.length && <p className="py-4 text-sm text-[var(--v5-muted)]">No recent regime rows available right now.</p>}
         </div>
       </div>
     </section>
   );
 }
 
-function MetricCard({ label, value, toneClass = 'text-slate-900' }: { label: string; value: string; toneClass?: string }) {
+function MetricCard({ label, value, toneClass = 'text-[var(--v5-ink)]' }: { label: string; value: string; toneClass?: string }) {
   return (
-    <div className="rounded-2xl border border-slate-200 bg-slate-50 p-3">
-      <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">{label}</div>
+    <div className="rounded-2xl border border-[var(--v5-border)] bg-[var(--v5-surface-2)] p-3">
+      <div className="text-[11px] font-semibold uppercase tracking-wide text-[var(--v5-muted)]">{label}</div>
       <div className={`mt-1 text-lg font-bold ${toneClass}`}>{value}</div>
     </div>
   );

@@ -79,34 +79,34 @@ export function RiskDeskPage({ onSelectSymbol }: { onSelectSymbol?: (symbol: str
 
       <div className="v5-card col-span-12 p-4">
         <div className="mb-3 flex items-center gap-2">
-          <ShieldCheck className="h-4 w-4 text-teal-700" />
+          <ShieldCheck className="h-4 w-4 text-[var(--v5-positive)]" />
           <h2 className="v5-title text-lg font-semibold">Risk Desk</h2>
         </div>
 
         <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-6">
-          <div className="rounded-2xl border border-slate-200 bg-slate-50 p-3">
-            <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Regime</div>
-            <div className="mt-1 text-lg font-bold text-slate-900">{s((regimeQ.data?.current as any)?.regime, 'UNKNOWN')}</div>
+          <div className="rounded-2xl border border-[var(--v5-border)] bg-[var(--v5-surface-2)] p-3">
+            <div className="text-[11px] font-semibold uppercase tracking-wide text-[var(--v5-muted)]">Regime</div>
+            <div className="mt-1 text-lg font-bold text-[var(--v5-ink)]">{s((regimeQ.data?.current as any)?.regime, 'UNKNOWN')}</div>
           </div>
-          <div className="rounded-2xl border border-slate-200 bg-slate-50 p-3">
-            <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Regime Prob.</div>
-            <div className="mt-1 text-lg font-bold text-slate-900">{regimeProb == null ? '—' : `${(regimeProb * 100).toFixed(1)}%`}</div>
+          <div className="rounded-2xl border border-[var(--v5-border)] bg-[var(--v5-surface-2)] p-3">
+            <div className="text-[11px] font-semibold uppercase tracking-wide text-[var(--v5-muted)]">Regime Prob.</div>
+            <div className="mt-1 text-lg font-bold text-[var(--v5-ink)]">{regimeProb == null ? '—' : `${(regimeProb * 100).toFixed(1)}%`}</div>
           </div>
-          <div className="rounded-2xl border border-slate-200 bg-slate-50 p-3">
-            <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Universe</div>
-            <div className="mt-1 text-lg font-bold text-slate-900">{n(distributionQ.data?.total)}</div>
+          <div className="rounded-2xl border border-[var(--v5-border)] bg-[var(--v5-surface-2)] p-3">
+            <div className="text-[11px] font-semibold uppercase tracking-wide text-[var(--v5-muted)]">Universe</div>
+            <div className="mt-1 text-lg font-bold text-[var(--v5-ink)]">{n(distributionQ.data?.total)}</div>
           </div>
-          <div className="rounded-2xl border border-slate-200 bg-slate-50 p-3">
-            <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Avg Beta</div>
-            <div className="mt-1 text-lg font-bold text-slate-900">{fmtFixed(distributionQ.data?.avgBeta, 2)}</div>
+          <div className="rounded-2xl border border-[var(--v5-border)] bg-[var(--v5-surface-2)] p-3">
+            <div className="text-[11px] font-semibold uppercase tracking-wide text-[var(--v5-muted)]">Avg Beta</div>
+            <div className="mt-1 text-lg font-bold text-[var(--v5-ink)]">{fmtFixed(distributionQ.data?.avgBeta, 2)}</div>
           </div>
-          <div className="rounded-2xl border border-slate-200 bg-slate-50 p-3">
-            <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Avg Vol</div>
-            <div className="mt-1 text-lg font-bold text-slate-900">{fmtFixed(distributionQ.data?.avgVol, 2)}%</div>
+          <div className="rounded-2xl border border-[var(--v5-border)] bg-[var(--v5-surface-2)] p-3">
+            <div className="text-[11px] font-semibold uppercase tracking-wide text-[var(--v5-muted)]">Avg Vol</div>
+            <div className="mt-1 text-lg font-bold text-[var(--v5-ink)]">{fmtFixed(distributionQ.data?.avgVol, 2)}%</div>
           </div>
-          <div className="rounded-2xl border border-slate-200 bg-slate-50 p-3">
-            <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Tier Entries</div>
-            <div className="mt-1 text-lg font-bold text-slate-900">{totalTier}</div>
+          <div className="rounded-2xl border border-[var(--v5-border)] bg-[var(--v5-surface-2)] p-3">
+            <div className="text-[11px] font-semibold uppercase tracking-wide text-[var(--v5-muted)]">Tier Entries</div>
+            <div className="mt-1 text-lg font-bold text-[var(--v5-ink)]">{totalTier}</div>
           </div>
         </div>
 
@@ -146,7 +146,7 @@ export function RiskDeskPage({ onSelectSymbol }: { onSelectSymbol?: (symbol: str
       <div className="v5-card col-span-12 p-4 xl:col-span-8">
         <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
           <h3 className="v5-title text-base font-semibold">Multi-Factor Leadership</h3>
-          <label className="flex items-center gap-2 text-xs text-slate-600">
+          <label className="flex items-center gap-2 text-xs text-[var(--v5-ink-muted)]">
             Min Score
             <input type="number" min={0} max={95} value={minScore} onChange={(e) => setMinScore(Math.max(0, Math.min(95, Number(e.target.value) || 0)))} className="v5-input w-20" />
           </label>
@@ -155,7 +155,7 @@ export function RiskDeskPage({ onSelectSymbol }: { onSelectSymbol?: (symbol: str
         <div className="overflow-x-auto">
           <table className="min-w-full text-sm">
             <thead>
-              <tr className="border-b border-slate-200 text-left text-xs uppercase tracking-wide text-slate-500">
+              <tr className="border-b border-[var(--v5-border)] text-left text-xs uppercase tracking-wide text-[var(--v5-muted)]">
                 <th className="px-3 py-2">Stock</th>
                 <th className="px-3 py-2">Sector</th>
                 <th className="px-3 py-2">MF Composite</th>
@@ -168,15 +168,15 @@ export function RiskDeskPage({ onSelectSymbol }: { onSelectSymbol?: (symbol: str
               {(topQ.data ?? []).map((row: any) => {
                 const sym = s(row.symbol);
                 return (
-                <tr key={sym} className="v5-table-row-intel border-b border-slate-100">
-                  <td className="px-3 py-2 font-semibold text-slate-800">
+                <tr key={sym} className="v5-table-row-intel border-b border-[var(--v5-border)]">
+                  <td className="px-3 py-2 font-semibold text-[var(--v5-ink)]">
                     <button
                       onClick={() => sym && onSelectSymbol?.(sym)}
-                      className="text-left hover:text-teal-700"
+                      className="text-left hover:text-[var(--v5-positive)]"
                       title="Open stock intelligence"
                     >
                       <div>{stockDisplayName(sym, sym)}</div>
-                      <div className="text-[11px] font-medium text-slate-500">{sym}</div>
+                      <div className="text-[11px] font-medium text-[var(--v5-muted)]">{sym}</div>
                     </button>
                   </td>
                   <td className="px-3 py-2">{s(row.sector, 'Unclassified')}</td>
@@ -189,7 +189,7 @@ export function RiskDeskPage({ onSelectSymbol }: { onSelectSymbol?: (symbol: str
             </tbody>
           </table>
           {!topQ.data?.length && (
-            <div className="flex items-center gap-2 py-6 text-sm text-slate-500">
+            <div className="flex items-center gap-2 py-6 text-sm text-[var(--v5-muted)]">
               <AlertTriangle className="h-4 w-4" />
               No risk records available for this filter.
             </div>
@@ -202,9 +202,9 @@ export function RiskDeskPage({ onSelectSymbol }: { onSelectSymbol?: (symbol: str
 
 function RiskItem({ label, value }: { label: string; value: string }) {
   return (
-    <div className="flex items-center justify-between rounded-lg border border-slate-200 bg-slate-50 px-2 py-1.5">
-      <span className="text-xs text-slate-500">{label}</span>
-      <span className="font-semibold text-slate-800">{value}</span>
+    <div className="flex items-center justify-between rounded-lg border border-[var(--v5-border)] bg-[var(--v5-surface-2)] px-2 py-1.5">
+      <span className="text-xs text-[var(--v5-muted)]">{label}</span>
+      <span className="font-semibold text-[var(--v5-ink)]">{value}</span>
     </div>
   );
 }

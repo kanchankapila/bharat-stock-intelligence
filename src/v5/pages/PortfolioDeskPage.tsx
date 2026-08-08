@@ -85,24 +85,24 @@ export function PortfolioDeskPage() {
         <div className="v5-section-head">
           <div>
             <div className="flex items-center gap-2">
-              <PieChart className="h-4 w-4 text-teal-700" />
+              <PieChart className="h-4 w-4 text-[var(--v5-positive)]" />
               <h2 className="v5-section-title">Portfolio Sandbox</h2>
             </div>
             <p className="v5-section-subtitle">Rapid allocation stress-test before execution decisions.</p>
           </div>
         </div>
-        <p className="mb-3 text-sm text-slate-600">
+        <p className="mb-3 text-sm text-[var(--v5-ink-muted)]">
           Enter your basket, run quick portfolio diagnostics, then compare with live conviction picks.
         </p>
 
         <div className="space-y-3">
           <div>
-            <label className="mb-1 block text-xs font-semibold tracking-wide text-slate-500">SYMBOL BASKET</label>
+            <label className="mb-1 block text-xs font-semibold tracking-wide text-[var(--v5-muted)]">SYMBOL BASKET</label>
             <textarea
               value={symbolsInput}
               onChange={(e) => setSymbolsInput(e.target.value)}
               rows={4}
-              className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm outline-none ring-teal-200 focus:ring"
+              className="w-full rounded-xl border border-[var(--v5-border-soft)] bg-[var(--v5-surface)] px-3 py-2 text-sm outline-none ring-[var(--v5-accent-soft)] focus:ring"
               placeholder="RELIANCE, TCS, INFY"
             />
           </div>
@@ -111,17 +111,17 @@ export function PortfolioDeskPage() {
             <button
               onClick={runAnalysis}
               disabled={analyzeMutation.isPending || symbols.length === 0}
-              className="rounded-xl border border-teal-600 bg-teal-600 px-3 py-2 text-xs font-semibold text-white hover:bg-teal-700 disabled:cursor-not-allowed disabled:opacity-60"
+              className="rounded-xl border border-[var(--v5-accent)] bg-[var(--v5-accent)] px-3 py-2 text-xs font-semibold text-white hover:bg-[var(--v5-accent)] disabled:cursor-not-allowed disabled:opacity-60"
             >
               {analyzeMutation.isPending ? 'Running Analysis...' : 'Run Portfolio Analysis'}
             </button>
-            <span className="rounded-full bg-slate-100 px-2 py-1 text-[11px] font-semibold text-slate-600">
+            <span className="rounded-full bg-[var(--v5-surface-2)] px-2 py-1 text-[11px] font-semibold text-[var(--v5-ink-muted)]">
               {symbols.length} symbols
             </span>
           </div>
 
           {analyzeMutation.error && (
-            <div className="rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">
+            <div className="rounded-xl border border-[var(--v5-negative-bright)] bg-[var(--v5-negative-soft)] px-3 py-2 text-sm text-[var(--v5-negative)]">
               {analyzeMutation.error.message}
             </div>
           )}
@@ -155,39 +155,39 @@ export function PortfolioDeskPage() {
 
         <div className="v5-compact-scroll space-y-2 pr-1">
           {picks.map((p: any) => (
-            <div key={s(p.symbol)} className="v5-table-row-intel rounded-xl border border-slate-200 p-3">
+            <div key={s(p.symbol)} className="v5-table-row-intel rounded-xl border border-[var(--v5-border)] p-3">
               <div className="flex items-center justify-between">
                 <div>
-                  <div className="text-sm font-bold text-slate-800">{s(p.symbol)}</div>
-                  <div className="text-[11px] text-slate-500">{s(p.sector, 'Unclassified')}</div>
+                  <div className="text-sm font-bold text-[var(--v5-ink)]">{s(p.symbol)}</div>
+                  <div className="text-[11px] text-[var(--v5-muted)]">{s(p.sector, 'Unclassified')}</div>
                 </div>
-                <span className="rounded-full bg-teal-50 px-2 py-1 text-[11px] font-semibold text-teal-700">
+                <span className="rounded-full bg-[var(--v5-accent-soft)] px-2 py-1 text-[11px] font-semibold text-[var(--v5-positive)]">
                   {s(p.classification, '—')}
                 </span>
               </div>
               <div className="mt-2 grid grid-cols-3 gap-2 text-[11px]">
                 <div>
-                  <div className="text-slate-500">Score</div>
-                  <div className="font-semibold text-slate-700">{fmtFixed(p.unified_score, 1)}</div>
+                  <div className="text-[var(--v5-muted)]">Score</div>
+                  <div className="font-semibold text-[var(--v5-ink-soft)]">{fmtFixed(p.unified_score, 1)}</div>
                 </div>
                 <div>
-                  <div className="text-slate-500">Win Prob</div>
-                  <div className="font-semibold text-slate-700">{numOrNull(p.win_probability) == null ? '—' : `${(n(p.win_probability) * 100).toFixed(1)}%`}</div>
+                  <div className="text-[var(--v5-muted)]">Win Prob</div>
+                  <div className="font-semibold text-[var(--v5-ink-soft)]">{numOrNull(p.win_probability) == null ? '—' : `${(n(p.win_probability) * 100).toFixed(1)}%`}</div>
                 </div>
                 <div>
-                  <div className="text-slate-500">Size</div>
-                  <div className="font-semibold text-slate-700">{fmtFixed(p.position_size_pct, 1)}%</div>
+                  <div className="text-[var(--v5-muted)]">Size</div>
+                  <div className="font-semibold text-[var(--v5-ink-soft)]">{fmtFixed(p.position_size_pct, 1)}%</div>
                 </div>
               </div>
             </div>
           ))}
-          {!picks.length && <p className="text-sm text-slate-500">No active recommendations available.</p>}
+          {!picks.length && <p className="text-sm text-[var(--v5-muted)]">No active recommendations available.</p>}
         </div>
       </div>
 
-      <div className="v5-card col-span-12 flex flex-wrap items-center justify-between gap-3 p-4 text-xs text-slate-600">
-        <div className="inline-flex items-center gap-2"><ShieldCheck className="h-4 w-4 text-teal-700" /> Use this page for sandbox diagnostics, not final execution.</div>
-        <div className="inline-flex items-center gap-2"><BadgeIndianRupee className="h-4 w-4 text-amber-700" /> Allocation view is sourced from unified recommendations.</div>
+      <div className="v5-card col-span-12 flex flex-wrap items-center justify-between gap-3 p-4 text-xs text-[var(--v5-ink-muted)]">
+        <div className="inline-flex items-center gap-2"><ShieldCheck className="h-4 w-4 text-[var(--v5-positive)]" /> Use this page for sandbox diagnostics, not final execution.</div>
+        <div className="inline-flex items-center gap-2"><BadgeIndianRupee className="h-4 w-4 text-[var(--v5-warning)]" /> Allocation view is sourced from unified recommendations.</div>
       </div>
     </section>
   );
@@ -195,9 +195,9 @@ export function PortfolioDeskPage() {
 
 function MetricCard({ title, value }: { title: string; value: string }) {
   return (
-    <div className="rounded-2xl border border-slate-200 bg-slate-50 p-3">
-      <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">{title}</div>
-      <div className="mt-1 text-xl font-bold text-slate-900">{value}</div>
+    <div className="rounded-2xl border border-[var(--v5-border)] bg-[var(--v5-surface-2)] p-3">
+      <div className="text-[11px] font-semibold uppercase tracking-wide text-[var(--v5-muted)]">{title}</div>
+      <div className="mt-1 text-xl font-bold text-[var(--v5-ink)]">{value}</div>
     </div>
   );
 }

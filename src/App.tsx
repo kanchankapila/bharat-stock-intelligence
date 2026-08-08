@@ -29,6 +29,21 @@ import V1Routes from './v1/V1Routes';
 
 // ─── V2+ Components ─────────────────
 const V2AppShell         = React.lazy(() => import('./v2/components/layout/V2AppShell').then(m => ({ default: m.V2AppShell })));
+const V6Shell            = React.lazy(() => import('./v6/V6Shell').then(m => ({ default: m.V6Shell })));
+// Phase 2 of the frontend consolidation ("V6 Canonical Workbench" proposal): v5's desk-page
+// implementations, swapped in only for dashboardVersion==='v6' -- v1/v2/v3 keep their existing
+// pages exactly as-is, matching the "gradual, default now, delete later" rollout.
+const OptionsDeskPage         = React.lazy(() => import('./v5/pages/OptionsDeskPage').then(m => ({ default: m.OptionsDeskPage })));
+const InstitutionalFlowDeskPage = React.lazy(() => import('./v5/pages/InstitutionalFlowDeskPage').then(m => ({ default: m.InstitutionalFlowDeskPage })));
+const EarningsPulseDeskPage   = React.lazy(() => import('./v5/pages/EarningsPulseDeskPage').then(m => ({ default: m.EarningsPulseDeskPage })));
+const SignalReviewPage        = React.lazy(() => import('./v5/pages/SignalReviewPage').then(m => ({ default: m.SignalReviewPage })));
+const RiskDeskPage            = React.lazy(() => import('./v5/pages/RiskDeskPage').then(m => ({ default: m.RiskDeskPage })));
+// RiskMetricsDashboard.tsx was fully built and wired to real procedures (getMultiFactorScores,
+// getRiskMetrics, getRiskDistribution, getRegimeSummary) but had NO route pointing at it at all
+// -- found 2026-08-07 during the version-consolidation review. Ships at /risk now (v1/v2/v3's
+// non-v6 fallback; v6 gets v5's RiskDeskPage, the stronger of the two independent
+// implementations of the same four procedures).
+const RiskMetricsDashboard    = React.lazy(() => import('./components/RiskMetricsDashboard').then(m => ({ default: m.RiskMetricsDashboard })));
 const V2StockDetails     = React.lazy(() => import('./v2/views/stock-analysis/V2StockDetails').then(m => ({ default: m.V2StockDetails })));
 const V2Settings         = React.lazy(() => import('./v2/views/settings/V2Settings').then(m => ({ default: m.V2Settings })));
 const V2Dashboard        = React.lazy(() => import('./v2/views/dashboard/V2Dashboard').then(m => ({ default: m.V2Dashboard })));
@@ -36,7 +51,6 @@ const V3Dashboard        = React.lazy(() => import('./v3/views/dashboard/V3Dashb
 const MarketCommandCenter = React.lazy(() => import('./v4/views/MarketCommandCenter').then(m => ({ default: m.MarketCommandCenter })));
 const StockIntelligencePage = React.lazy(() => import('./v4/views/StockIntelligencePage').then(m => ({ default: m.StockIntelligencePage })));
 const V2SignalTracking   = React.lazy(() => import('./v2/views/signals/V2SignalTracking').then(m => ({ default: m.V2SignalTracking })));
-const MarketDashboard_v2 = React.lazy(() => import('./v2/views/dashboard/MarketDashboard').then(m => ({ default: m.MarketDashboard })));
 const ScreenerPage_v2    = React.lazy(() => import('./v2/views/screener/ScreenerPage').then(m => ({ default: m.ScreenerPage })));
 const TopRatedStocks          = React.lazy(() => import('./components/TopRatedStocks'));
 const IntradayPage       = React.lazy(() => import('./components/IntradayPage'));
@@ -72,6 +86,8 @@ const SystemMonitorPage       = React.lazy(() => import('./components/SystemMoni
 const JobsDashboardPage   = React.lazy(() => import('./components/JobsDashboardPage'));
 const ProfilePage             = React.lazy(() => import('./components/ProfilePage'));
 const PortfolioAnalytics      = React.lazy(() => import('./components/PortfolioAnalytics'));
+const PortfolioTrackerPage    = React.lazy(() => import('./v6/pages/PortfolioTrackerPage'));
+const ScreenerBrowserPage     = React.lazy(() => import('./v6/pages/ScreenerBrowserPage'));
 const StrategyBuilder         = React.lazy(() => import('./components/StrategyBuilder'));
 const StockChatbot       = React.lazy(() => import('./components/StockChatbot'));
 const CommandCenterDashboard   = React.lazy(() => import('./components/CommandCenterDashboard').then(m => ({ default: m.CommandCenterDashboard })));
@@ -190,18 +206,22 @@ export default function App() {
 
   const [selectedSymbol, setSelectedSymbol] = useState<string | null>(null);
   const [drawerSymbol, setDrawerSymbol] = useState<string | null>(null);
-  const [dashboardVersion, setDashboardVersion] = useState<'v1' | 'v2' | 'v3'>(() => {
+  // 'v6' = the Phase 1 consolidation shell (V6Shell, see src/v6/) -- not yet the default; reachable
+  // via the version switcher in every other shell until the phased rollout (see the "V6 Canonical
+  // Workbench" proposal) promotes it. Renders through the same v2Enabled route tree as v2/v3 so it
+  // inherits every existing page for free -- only the shell chrome differs.
+  const [dashboardVersion, setDashboardVersion] = useState<'v1' | 'v2' | 'v3' | 'v6'>(() => {
     const saved = localStorage.getItem('dashboardVersion');
-    if (saved === 'v1' || saved === 'v2' || saved === 'v3') return saved;
+    if (saved === 'v1' || saved === 'v2' || saved === 'v3' || saved === 'v6') return saved;
     const v2 = localStorage.getItem('v2Enabled') === 'true';
     return v2 ? 'v2' : 'v3'; // Default to v3
   });
-  const changeDashboardVersion = (version: 'v1' | 'v2' | 'v3') => {
+  const changeDashboardVersion = (version: 'v1' | 'v2' | 'v3' | 'v6') => {
     localStorage.setItem('dashboardVersion', version);
-    localStorage.setItem('v2Enabled', (version === 'v2' || version === 'v3') ? 'true' : 'false');
+    localStorage.setItem('v2Enabled', version !== 'v1' ? 'true' : 'false');
     setDashboardVersion(version);
   };
-  const v2Enabled = dashboardVersion === 'v2' || dashboardVersion === 'v3';
+  const v2Enabled = dashboardVersion === 'v2' || dashboardVersion === 'v3' || dashboardVersion === 'v6';
   const [researchSubTab, setResearchSubTab] = useState<'overview' | 'deep-learning'>('overview');
   const [selectedIndex, setSelectedIndex] = useState<{ id: string; name: string } | null>(null);
   const [user, setUser] = useState<FirebaseUser | null>(null);
@@ -210,7 +230,6 @@ export default function App() {
   const [toasts, setToasts] = useState<Toast[]>([]);
   const { stocks, dataUpdatedAt: stocksUpdatedAt } = useMarketData();
   const { data: realIndices } = trpc.getAllIndices.useQuery();
-  const syncNSEStocksMutation = trpc.syncNSEStocks.useMutation();
 
   const handleSelectIndexByName = useCallback((indexName: string) => {
     const u = indexName.toUpperCase();
@@ -238,11 +257,6 @@ export default function App() {
       navigate('/indices');
     }
   }, [navigate]);
-
-  useEffect(() => {
-    console.log('📊 Initializing NSE stocks database...');
-    syncNSEStocksMutation.mutate();
-  }, []);
 
   const displayIndices = useMemo(() => {
     const rawIndexData = realIndices?.data;
@@ -360,21 +374,12 @@ export default function App() {
   );
 
   if (v2Enabled) {
-    return (
-      <V2AppShell
-        activeTab={activeTab}
-        setActiveTab={setActiveTab}
-        v2Enabled={v2Enabled}
-        setV2Enabled={(enabled) => {
-          changeDashboardVersion(enabled ? 'v2' : 'v1');
-          window.location.reload();
-        }}
-        dashboardVersion={dashboardVersion}
-        onChangeVersion={(v) => {
-          changeDashboardVersion(v);
-          window.location.reload();
-        }}
-      >
+    // Shared by both the V2AppShell (v2/v3) and V6Shell (Phase 1 consolidation) branches below --
+    // one route tree, rendered inside whichever shell chrome dashboardVersion selects. This is
+    // exactly the reuse the "V6 Canonical Workbench" proposal's Phase 1 calls for: v6 inherits
+    // every existing page for free rather than needing its own duplicate route definitions.
+    const routedContent = (
+      <>
         <AnimatePresence mode="wait">
           <SafeRoutes>
           <Routes location={location} key={activeTab}>
@@ -386,6 +391,7 @@ export default function App() {
                   watchlistDetails={watchlistDetails || []}
                   onSelectStock={handleSelectStock}
                   onRemove={toggleWatchlist}
+                  userId={user?.uid}
                 />
                 <PriceAlertsPanel userId={user?.uid} />
               </div>
@@ -394,6 +400,7 @@ export default function App() {
               <MarketCommandCenter
                 onSelectStock={handleSelectStock}
                 onSelectIndex={(id, name) => { setSelectedIndex({ id, name }); navigate('/indices'); }}
+              userId={user?.uid}
               />
             } />
             <Route path="/stock-intelligence-hub" element={
@@ -401,10 +408,22 @@ export default function App() {
                 initialSymbol={selectedSymbol}
                 watchlist={watchlist}
                 onToggleWatchlist={toggleWatchlist}
+              userId={user?.uid}
               />
             } />
             <Route path="/details" element={selectedSymbol ? (
-              dashboardVersion === 'v3' ? (
+              // v6: Phase 3 of the consolidation replaced the v3-placeholder here with the real
+              // merged stock-research page (StockIntelligencePage, v4's base + v5's
+              // superstar-investor-activity addition) -- the same page /stock-intelligence-hub
+              // already uses for every version, so this now matches that page's content exactly.
+              dashboardVersion === 'v6' ? (
+                <StockIntelligencePage
+                  initialSymbol={selectedSymbol}
+                  watchlist={watchlist}
+                  onToggleWatchlist={toggleWatchlist}
+                userId={user?.uid}
+                />
+              ) : dashboardVersion === 'v3' ? (
                 <V3Dashboard
                   stocks={stocks}
                   watchlist={watchlist}
@@ -413,6 +432,7 @@ export default function App() {
                   onSelectIndex={(id, name) => { setSelectedIndex({ id, name }); navigate('/indices'); }}
                   initialSymbol={selectedSymbol}
                   initialTab="stock-intelligence"
+                  userId={user?.uid}
                 />
               ) : (
                 <V2StockDetails
@@ -424,26 +444,45 @@ export default function App() {
               )
             ) : <div className="p-6">Select a stock to view details</div>} />
             <Route path="/" element={
-              dashboardVersion === 'v3' ? (
+              // v6's real home: MarketCommandCenter is already exactly what Phase 3's composed-
+              // home-page spec described ("V6 Canonical Workbench" proposal) -- regime/breadth,
+              // canonical top picks, money flow, pre-market briefing, F&O read, sentiment, sector
+              // rotation, movers, breakouts, earnings -- all built from proven, reused widgets
+              // already. Only genuinely new addition was the Activity Feed card (see that file).
+              dashboardVersion === 'v6' ? (
+                <MarketCommandCenter
+                  onSelectStock={handleSelectStock}
+                  onSelectIndex={(id, name) => { setSelectedIndex({ id, name }); navigate('/indices'); }}
+                userId={user?.uid}
+                />
+              ) : dashboardVersion === 'v3' ? (
                 <V3Dashboard
                   stocks={stocks}
                   watchlist={watchlist}
                   onToggleWatchlist={toggleWatchlist}
                   onSelectStock={handleSelectStock}
                   onSelectIndex={(id, name) => { setSelectedIndex({ id, name }); navigate('/indices'); }}
+                userId={user?.uid}
                 />
               ) : (
                 <V2Dashboard />
               )
             } />
             <Route path="/dashboard" element={
-              dashboardVersion === 'v3' ? (
+              dashboardVersion === 'v6' ? (
+                <MarketCommandCenter
+                  onSelectStock={handleSelectStock}
+                  onSelectIndex={(id, name) => { setSelectedIndex({ id, name }); navigate('/indices'); }}
+                userId={user?.uid}
+                />
+              ) : dashboardVersion === 'v3' ? (
                 <V3Dashboard
                   stocks={stocks}
                   watchlist={watchlist}
                   onToggleWatchlist={toggleWatchlist}
                   onSelectStock={handleSelectStock}
                   onSelectIndex={(id, name) => { setSelectedIndex({ id, name }); navigate('/indices'); }}
+                userId={user?.uid}
                 />
               ) : (
                 <V2Dashboard />
@@ -462,17 +501,38 @@ export default function App() {
                 <SectorConstituents onSelectStock={handleSelectStock} />
               </div>
             } />
-            <Route path="/screener" element={<V1Screener stocks={stocks} onSelectStock={handleSelectStock} watchlist={watchlist} onToggleWatchlist={toggleWatchlist} />} />
+            <Route path="/screener" element={
+              dashboardVersion === 'v6'
+                ? <ScreenerBrowserPage onSelectStock={handleSelectStock} />
+                : <V1Screener stocks={stocks} onSelectStock={handleSelectStock} watchlist={watchlist} onToggleWatchlist={toggleWatchlist} />
+            } />
             <Route path="/screener-v2" element={<ScreenerPage_v2 />} />
             <Route path="/trendlyne" element={<TrendlyneScreenerPanel onSelectStock={handleSelectStock} watchlist={watchlist} onToggleWatchlist={toggleWatchlist} />} />
             <Route path="/premium-screeners" element={<PremiumScreenersPage onSelectStock={handleSelectStock} />} />
             <Route path="/live-screener" element={<LiveMarketScreener onSelectStock={handleSelectStock} />} />
             <Route path="/eod-screener" element={<EODMarketScreener onSelectStock={handleSelectStock} />} />
             <Route path="/discover" element={<div className="p-6"><NSEStockDiscovery onSelectStock={handleSelectStock} /></div>} />
-            <Route path="/smart-money" element={<SmartMoneyPage onSelectStock={handleSelectStock} />} />
-            <Route path="/earnings" element={<EarningsPage onSelectStock={handleSelectStock} />} />
+            <Route path="/smart-money" element={
+              dashboardVersion === 'v6'
+                ? <InstitutionalFlowDeskPage />
+                : <SmartMoneyPage onSelectStock={handleSelectStock} />
+            } />
+            <Route path="/earnings" element={
+              dashboardVersion === 'v6'
+                ? <EarningsPulseDeskPage onSelectSymbol={handleSelectStock} />
+                : <EarningsPage onSelectStock={handleSelectStock} />
+            } />
             <Route path="/fno-scanners" element={<FnOIntelligenceCenter onSelectStock={handleSelectStock} />} />
-            <Route path="/options" element={<div className="p-6"><OptionsIntelligence /></div>} />
+            <Route path="/options" element={
+              dashboardVersion === 'v6'
+                ? <OptionsDeskPage onSelectSymbol={handleSelectStock} />
+                : <div className="p-6"><OptionsIntelligence /></div>
+            } />
+            <Route path="/risk" element={
+              dashboardVersion === 'v6'
+                ? <RiskDeskPage onSelectSymbol={handleSelectStock} />
+                : <div className="p-6"><RiskMetricsDashboard /></div>
+            } />
             <Route path="/todays-picks" element={<TodaysPicks onSelectStock={handleSelectStock} />} />
             <Route path="/early-spotter" element={<EarlyHoursSpotter onSelectStock={handleSelectStock} />} />
             <Route path="/screener-intelligence" element={<ScreenerIntelligencePage />} />
@@ -482,10 +542,22 @@ export default function App() {
             <Route path="/agent-optimizer"      element={<AgentOptimizerPage />} />
             <Route path="/trade-cockpit" element={<TradeDecisionCockpit onSelectStock={handleSelectStock} />} />
             <Route path="/backtest" element={<V1Backtest stocks={stocks} />} />
-            <Route path="/signals" element={<DailySignals onSelectStock={handleSelectStock} watchlist={watchlist} onToggleWatchlist={toggleWatchlist} />} />
-            <Route path="/signal-tracking" element={<V2SignalTracking />} />
+            {/* v5's SignalReviewPage consolidates all 3 of these into one page (queue stats,
+                report card, and the tracking ledger together) -- the strongest single UX call
+                in v5, per the consolidation review. v1/v2/v3 keep the 3 separate pages; the
+                routes stay resolvable either way so no existing bookmark/link breaks. */}
+            <Route path="/signals" element={
+              dashboardVersion === 'v6'
+                ? <SignalReviewPage onSelectSymbol={handleSelectStock} />
+                : <DailySignals onSelectStock={handleSelectStock} watchlist={watchlist} onToggleWatchlist={toggleWatchlist} />
+            } />
+            <Route path="/signal-tracking" element={
+              dashboardVersion === 'v6' ? <SignalReviewPage onSelectSymbol={handleSelectStock} /> : <V2SignalTracking />
+            } />
             <Route path="/signal-intelligence" element={<SignalIntelligence />} />
-            <Route path="/signal-report-card" element={<SignalReportCard />} />
+            <Route path="/signal-report-card" element={
+              dashboardVersion === 'v6' ? <SignalReviewPage onSelectSymbol={handleSelectStock} /> : <SignalReportCard />
+            } />
             <Route path="/research" element={
               <div className="flex flex-col">
                 <div className="flex gap-2 px-4 py-2 border-b border-slate-800">
@@ -510,7 +582,11 @@ export default function App() {
             <Route path="/monitor" element={<SystemMonitorPage />} />
             <Route path="/jobs" element={<JobsDashboardPage />} />
             <Route path="/profile" element={<ProfilePage />} />
-            <Route path="/portfolio" element={<div className="p-6"><PortfolioAnalytics /></div>} />
+            <Route path="/portfolio" element={
+              dashboardVersion === 'v6'
+                ? <div className="p-6"><PortfolioTrackerPage userId={user?.uid} onSelectStock={handleSelectStock} /></div>
+                : <div className="p-6"><PortfolioAnalytics /></div>
+            } />
             <Route path="/builder" element={<div className="p-6"><StrategyBuilder /></div>} />
             <Route path="/export-picks" element={<div className="p-6"><ExportPortfolioView /></div>} />
             <Route path="/settings" element={<V2Settings />} />
@@ -519,7 +595,6 @@ export default function App() {
             <Route path="/alpha" element={<CommandCenterDashboard onSelectStock={(s) => { setDrawerSymbol(s); navigate('/trade-cockpit'); }} />} />
             <Route path="/buy-recs" element={<Navigate to="/alpha" replace />} />
             <Route path="/money-flow" element={<MoneyFlowPage />} />
-            <Route path="/market-dashboard" element={<MarketDashboard_v2 />} />
             <Route path="/economics" element={
               <div className="p-6 space-y-6">
                 <MacroDashboard />
@@ -551,6 +626,41 @@ export default function App() {
           onSelectStock={setDrawerSymbol}
         />
         <AlertsToast userId={user?.uid} />
+      </>
+    );
+
+    if (dashboardVersion === 'v6') {
+      return (
+        <V6Shell
+          activeTab={activeTab}
+          setActiveTab={setActiveTab}
+          dashboardVersion={dashboardVersion}
+          onChangeVersion={(v) => {
+            changeDashboardVersion(v);
+            window.location.reload();
+          }}
+        >
+          {routedContent}
+        </V6Shell>
+      );
+    }
+
+    return (
+      <V2AppShell
+        activeTab={activeTab}
+        setActiveTab={setActiveTab}
+        v2Enabled={v2Enabled}
+        setV2Enabled={(enabled) => {
+          changeDashboardVersion(enabled ? 'v2' : 'v1');
+          window.location.reload();
+        }}
+        dashboardVersion={dashboardVersion}
+        onChangeVersion={(v) => {
+          changeDashboardVersion(v);
+          window.location.reload();
+        }}
+      >
+        {routedContent}
       </V2AppShell>
     );
   }

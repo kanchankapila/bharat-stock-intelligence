@@ -1,16 +1,48 @@
 @import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=IBM+Plex+Sans:wght@400;500;600&display=swap');
 
+/*
+ * v5's component library, retrofitted to CSS custom properties 2026-08-07 so it can render
+ * correctly wherever it's nested -- both under .v5-root (the standalone /v5 workbench, unchanged
+ * visually from before this pass) and under .v6-root (V6Shell, which bridges these same variable
+ * names to its own theme -- see v6-theme.css). Before this pass, only .v5-root/.v5-card/.v5-chip/
+ * .v5-nav-btn referenced variables at all; every other class (kpi/mini-chart/insight/decision/
+ * sparkline -- the components actually used throughout every desk page) hardcoded colors tuned
+ * for v5's original light background. Rendered under V6Shell's dark theme, that meant transparent
+ * card fills/borders (var(--v5-surface) resolved to nothing outside .v5-root) and dark-on-dark
+ * text in the hardcoded classes -- found live 2026-08-07, not caught by earlier verification since
+ * it only checked page text content and console errors, not rendered contrast.
+ */
+
 .v5-root {
   --v5-bg: #f4f6f8;
   --v5-surface: #ffffff;
+  --v5-surface-2: #f8fafc;
+  --v5-surface-2-to: #f1f5f9;
   --v5-ink: #0f172a;
+  --v5-ink-soft: #334155;
+  --v5-ink-muted: #475569;
   --v5-muted: #64748b;
   --v5-border: #e2e8f0;
+  --v5-border-soft: #dbe3ee;
   --v5-accent: #0f766e;
+  --v5-accent-deep: #115e59;
+  --v5-accent-hover: #0b5d57;
   --v5-accent-soft: #ccfbf1;
+  --v5-accent-focus-ring: rgba(20, 184, 166, 0.12);
+  --v5-negative-soft: #ffe4e9;
   --v5-positive: #0f766e;
+  --v5-positive-bright: #14b8a6;
   --v5-negative: #be123c;
+  --v5-negative-bright: #f43f5e;
   --v5-warning: #b45309;
+  --v5-amber-bright: #f59e0b;
+  --v5-sky: #0ea5e9;
+  --v5-indigo: #6366f1;
+  --v5-stripe-a: #cbd5e1;
+  --v5-stripe-b: #e2e8f0;
+  --v5-scrollbar-thumb: #cbd5e1;
+  --v5-controlbar-bg: rgba(248, 250, 252, 0.92);
+  --v5-sparkline-bg-to: #eef2ff;
 
   min-height: 100vh;
   background:
@@ -63,14 +95,14 @@
   padding: 4px 10px;
   font-size: 11px;
   font-weight: 600;
-  color: #334155;
-  background: #fff;
+  color: var(--v5-ink-soft);
+  background: var(--v5-surface);
 }
 
 .v5-chip-active {
-  border-color: #0f766e;
+  border-color: var(--v5-accent);
   background: var(--v5-accent-soft);
-  color: #115e59;
+  color: var(--v5-accent-deep);
 }
 
 .v5-nav-btn {
@@ -78,40 +110,40 @@
   border: 1px solid var(--v5-border);
   border-radius: 12px;
   padding: 10px;
-  background: #fff;
+  background: var(--v5-surface);
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
   text-align: left;
-  color: #1f2937;
+  color: var(--v5-ink-soft);
   transition: all 0.14s ease;
 }
 
 .v5-nav-btn:hover {
-  border-color: #cbd5e1;
-  background: #f8fafc;
+  border-color: var(--v5-stripe-a);
+  background: var(--v5-surface-2);
 }
 
 .v5-nav-btn-active {
-  border-color: #0f766e;
-  background: #ccfbf1;
-  color: #115e59;
+  border-color: var(--v5-accent);
+  background: var(--v5-accent-soft);
+  color: var(--v5-accent-deep);
 }
 
 .v5-input {
   width: 100%;
-  border: 1px solid #cbd5e1;
+  border: 1px solid var(--v5-stripe-a);
   border-radius: 10px;
-  background: #fff;
-  color: #0f172a;
+  background: var(--v5-surface);
+  color: var(--v5-ink);
   font-size: 13px;
   padding: 6px 10px;
   outline: none;
 }
 
 .v5-input:focus {
-  border-color: #14b8a6;
-  box-shadow: 0 0 0 3px rgba(20, 184, 166, 0.12);
+  border-color: var(--v5-positive-bright);
+  box-shadow: 0 0 0 3px var(--v5-accent-focus-ring);
 }
 
 .v5-grid {
@@ -143,10 +175,10 @@
   flex-wrap: wrap;
   align-items: center;
   gap: 8px;
-  border: 1px solid #dbe3ee;
+  border: 1px solid var(--v5-border-soft);
   border-radius: 14px;
   padding: 8px;
-  background: rgba(248, 250, 252, 0.92);
+  background: var(--v5-controlbar-bg);
   backdrop-filter: blur(8px);
 }
 
@@ -154,7 +186,7 @@
   display: flex;
   align-items: center;
   gap: 8px;
-  border-right: 1px solid #e2e8f0;
+  border-right: 1px solid var(--v5-border);
   padding-right: 8px;
 }
 
@@ -169,7 +201,7 @@
   font-size: 11px;
   font-weight: 700;
   letter-spacing: 0.02em;
-  color: #475569;
+  color: var(--v5-ink-muted);
   text-transform: uppercase;
 }
 
@@ -180,10 +212,10 @@
 }
 
 .v5-control-pill {
-  border: 1px solid #d5dee8;
+  border: 1px solid var(--v5-border-soft);
   border-radius: 999px;
-  background: #fff;
-  color: #334155;
+  background: var(--v5-surface);
+  color: var(--v5-ink-soft);
   font-size: 11px;
   font-weight: 700;
   padding: 3px 8px;
@@ -191,21 +223,21 @@
 }
 
 .v5-control-pill:hover {
-  border-color: #b8c7d8;
-  background: #f8fafc;
+  border-color: var(--v5-stripe-a);
+  background: var(--v5-surface-2);
 }
 
 .v5-control-pill-active {
-  border-color: #0f766e;
-  background: #ccfbf1;
-  color: #115e59;
+  border-color: var(--v5-accent);
+  background: var(--v5-accent-soft);
+  color: var(--v5-accent-deep);
 }
 
 .v5-control-primary {
   margin-left: auto;
-  border: 1px solid #0f766e;
+  border: 1px solid var(--v5-accent);
   border-radius: 10px;
-  background: #0f766e;
+  background: var(--v5-accent);
   color: #fff;
   font-size: 12px;
   font-weight: 700;
@@ -214,8 +246,8 @@
 }
 
 .v5-control-primary:hover {
-  background: #0b5d57;
-  border-color: #0b5d57;
+  background: var(--v5-accent-hover);
+  border-color: var(--v5-accent-hover);
 }
 
 .v5-kpi-strip {
@@ -226,9 +258,9 @@
 }
 
 .v5-kpi-item {
-  border: 1px solid #e2e8f0;
+  border: 1px solid var(--v5-border);
   border-radius: 12px;
-  background: linear-gradient(180deg, #ffffff 0%, #f8fafc 100%);
+  background: linear-gradient(180deg, var(--v5-surface) 0%, var(--v5-surface-2) 100%);
   padding: 8px 10px;
 }
 
@@ -237,7 +269,7 @@
   font-weight: 700;
   letter-spacing: 0.06em;
   text-transform: uppercase;
-  color: #64748b;
+  color: var(--v5-muted);
 }
 
 .v5-kpi-value {
@@ -245,8 +277,16 @@
   font-size: 16px;
   line-height: 1.2;
   font-weight: 700;
-  color: #0f172a;
+  color: var(--v5-ink);
 }
+
+/* Tone classes for V5KpiStrip.tsx -- replaces the hardcoded text-slate-900/text-teal-700/
+   text-rose-700/text-amber-700 Tailwind classes it used to apply directly (those don't
+   respond to .v6-root's bridged variables at all, unlike everything else in this file). */
+.v5-kpi-value-neutral { color: var(--v5-ink); }
+.v5-kpi-value-positive { color: var(--v5-positive); }
+.v5-kpi-value-negative { color: var(--v5-negative); }
+.v5-kpi-value-warning { color: var(--v5-warning); }
 
 .v5-section-head {
   display: flex;
@@ -262,13 +302,13 @@
   line-height: 1.2;
   font-weight: 700;
   letter-spacing: -0.02em;
-  color: #0f172a;
+  color: var(--v5-ink);
 }
 
 .v5-section-subtitle {
   margin-top: 3px;
   font-size: 12px;
-  color: #64748b;
+  color: var(--v5-muted);
 }
 
 .v5-table-row-intel {
@@ -276,7 +316,7 @@
 }
 
 .v5-table-row-intel:hover {
-  background-color: #f8fafc;
+  background-color: var(--v5-surface-2);
 }
 
 .v5-compact-scroll {
@@ -289,14 +329,14 @@
 }
 
 .v5-compact-scroll::-webkit-scrollbar-thumb {
-  background: #cbd5e1;
+  background: var(--v5-scrollbar-thumb);
   border-radius: 999px;
 }
 
 .v5-mini-chart {
-  border: 1px solid #e2e8f0;
+  border: 1px solid var(--v5-border);
   border-radius: 12px;
-  background: #f8fafc;
+  background: var(--v5-surface-2);
   padding: 10px;
 }
 
@@ -305,7 +345,7 @@
   font-weight: 700;
   letter-spacing: 0.04em;
   text-transform: uppercase;
-  color: #64748b;
+  color: var(--v5-muted);
   margin-bottom: 8px;
 }
 
@@ -319,14 +359,14 @@
 
 .v5-mini-label {
   font-size: 11px;
-  color: #475569;
+  color: var(--v5-ink-muted);
   font-weight: 600;
 }
 
 .v5-mini-track {
   height: 8px;
   border-radius: 999px;
-  background: #e2e8f0;
+  background: var(--v5-border);
   overflow: hidden;
 }
 
@@ -335,21 +375,21 @@
   border-radius: 999px;
 }
 
-.v5-mini-fill-teal { background: #14b8a6; }
-.v5-mini-fill-rose { background: #f43f5e; }
-.v5-mini-fill-sky { background: #0ea5e9; }
-.v5-mini-fill-indigo { background: #6366f1; }
-.v5-mini-fill-amber { background: #f59e0b; }
+.v5-mini-fill-teal { background: var(--v5-positive-bright); }
+.v5-mini-fill-rose { background: var(--v5-negative-bright); }
+.v5-mini-fill-sky { background: var(--v5-sky); }
+.v5-mini-fill-indigo { background: var(--v5-indigo); }
+.v5-mini-fill-amber { background: var(--v5-amber-bright); }
 
 .v5-mini-empty {
   height: 100%;
   width: 100%;
   background: repeating-linear-gradient(
     135deg,
-    #cbd5e1,
-    #cbd5e1 4px,
-    #e2e8f0 4px,
-    #e2e8f0 8px
+    var(--v5-stripe-a),
+    var(--v5-stripe-a) 4px,
+    var(--v5-stripe-b) 4px,
+    var(--v5-stripe-b) 8px
   );
 }
 
@@ -357,19 +397,19 @@
   text-align: right;
   font-size: 11px;
   font-weight: 700;
-  color: #334155;
+  color: var(--v5-ink-soft);
 }
 
 .v5-mini-empty-note {
   margin-top: 6px;
   font-size: 12px;
-  color: #64748b;
+  color: var(--v5-muted);
 }
 
 .v5-insight-panel {
-  border: 1px solid #e2e8f0;
+  border: 1px solid var(--v5-border);
   border-radius: 12px;
-  background: #ffffff;
+  background: var(--v5-surface);
   padding: 10px;
 }
 
@@ -378,7 +418,7 @@
   font-weight: 700;
   letter-spacing: 0.04em;
   text-transform: uppercase;
-  color: #334155;
+  color: var(--v5-ink-soft);
   margin-bottom: 8px;
 }
 
@@ -389,17 +429,17 @@
 
 .v5-insight-item {
   font-size: 12px;
-  color: #475569;
-  background: #f8fafc;
-  border: 1px solid #e2e8f0;
+  color: var(--v5-ink-muted);
+  background: var(--v5-surface-2);
+  border: 1px solid var(--v5-border);
   border-radius: 8px;
   padding: 6px 8px;
 }
 
 .v5-decision-strip {
-  border: 1px solid #dbe3ee;
+  border: 1px solid var(--v5-border-soft);
   border-radius: 14px;
-  background: linear-gradient(180deg, #ffffff 0%, #f8fafc 100%);
+  background: linear-gradient(180deg, var(--v5-surface) 0%, var(--v5-surface-2) 100%);
   padding: 10px;
   margin-bottom: 10px;
 }
@@ -409,7 +449,7 @@
   font-weight: 700;
   letter-spacing: 0.04em;
   text-transform: uppercase;
-  color: #334155;
+  color: var(--v5-ink-soft);
   margin-bottom: 8px;
 }
 
@@ -420,12 +460,12 @@
 }
 
 .v5-decision-item {
-  border: 1px solid #e2e8f0;
+  border: 1px solid var(--v5-border);
   border-radius: 10px;
-  background: #f8fafc;
+  background: var(--v5-surface-2);
   padding: 8px;
   font-size: 12px;
-  color: #334155;
+  color: var(--v5-ink-soft);
   min-height: 52px;
 }
 
@@ -433,7 +473,7 @@
   width: 100%;
   height: 64px;
   border-radius: 8px;
-  background: linear-gradient(180deg, #f8fafc 0%, #eef2ff 100%);
+  background: linear-gradient(180deg, var(--v5-surface-2) 0%, var(--v5-sparkline-bg-to) 100%);
 }
 
 .v5-sparkline-stroke {
@@ -442,16 +482,16 @@
   stroke-linejoin: round;
 }
 
-.v5-sparkline-stroke-teal { stroke: #14b8a6; }
-.v5-sparkline-stroke-rose { stroke: #f43f5e; }
-.v5-sparkline-stroke-indigo { stroke: #6366f1; }
+.v5-sparkline-stroke-teal { stroke: var(--v5-positive-bright); }
+.v5-sparkline-stroke-rose { stroke: var(--v5-negative-bright); }
+.v5-sparkline-stroke-indigo { stroke: var(--v5-indigo); }
 
 .v5-sparkline-legend {
   margin-top: 6px;
   display: flex;
   justify-content: space-between;
   font-size: 11px;
-  color: #64748b;
+  color: var(--v5-muted);
   font-weight: 600;
 }
 

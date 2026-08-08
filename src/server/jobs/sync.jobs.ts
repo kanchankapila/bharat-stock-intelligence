@@ -18,13 +18,22 @@ import { Job } from 'bullmq';
 import { runPython } from '../pythonRunner';
 import { updateMonitorState } from '../monitoringService';
 import { registerRepeatableJob } from './registerJob';
+import { shouldSkipOnTradingHoliday } from '../marketStatusService';
 
 export const QUEUE_SCREENER_PERFORMANCE = 'screener-performance';
 export const QUEUE_COMPANY_PROFILES_SYNC = 'company-profiles-sync';
 export const QUEUE_TICKERTAPE_SCORECARD = 'tickertape-scorecard';
 export const QUEUE_NSE_SYNC = 'nse-sync';
 
-async function processScreenerPerf(_job: Job): Promise<void> {
+async function processScreenerPerf(job: Job): Promise<void> {
+  // 2026-08-07: skip entirely on a trading holiday -- every phase here (discovery/enrichment,
+  // Bayesian tier scoring, PIT snapshot, live-screener train/backtest) re-derives from
+  // screener_appearances/signal_outcomes/stock_ohlcv, none of which gained a new row on a day
+  // the exchange never opened. Same reasoning as processStockScoring/processQuantScoring.
+  if (await shouldSkipOnTradingHoliday(job)) {
+    console.log('[QUEUE] screener-performance skipped — trading holiday, nothing new to re-derive');
+    return;
+  }
   // 1. Sync newly discovered Trendlyne screener PKs. "known" mode only re-fetches PKs
   // missing from the DB, but with ~612 known PKs and a 0.4s rate limit that can still
   // run 20+ minutes in practice — the old 10-min timeout routinely SIGTERM'd it mid-run
@@ -144,6 +153,17 @@ async function processNSESync(_job: Job): Promise<{ success: boolean; stockCount
     // Index membership flags (Nifty50/100/200/Midcap150/Smallcap250) — passive ETF flow signal.
     await runPython('index_membership_fetcher.py', [], 60_000)
       .catch(err => console.warn('[QUEUE] index_membership_fetcher failed (non-blocking):', (err as Error).message));
+    // nse_stocks.market_cap/pe_ratio/dividend_yield fallback backfill (2026-08-07, dead-column
+    // sweep) — see backfillNseStocksFundamentalsFallback()'s own doc comment in nseService.ts.
+    // Pure DB-to-DB copy, no external call, so it costs nothing to run every week alongside the
+    // sector backfills above.
+    try {
+      const { backfillNseStocksFundamentalsFallback } = await import('../nseService');
+      const { updated } = await backfillNseStocksFundamentalsFallback();
+      console.log(`[QUEUE] nse_stocks fundamentals-fallback backfill: ${updated} rows updated`);
+    } catch (err: any) {
+      console.warn('[QUEUE] nse_stocks fundamentals-fallback backfill failed (non-blocking):', err.message);
+    }
     return { success: true, stockCount };
   } catch (err: any) {
     console.error('[QUEUE] NSE sync failed:', err.message);

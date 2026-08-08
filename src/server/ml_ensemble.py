@@ -815,7 +815,12 @@ def build_features(df: pd.DataFrame) -> pd.DataFrame:
 
     # ── Promoter insider transactions (insider_transactions_fetcher.py) ──────
     X['promoter_net']      = num('promoter_net_90d', 0.0).clip(-50, 50) / 50.0
-    # TODO: enable once insider_transactions_fetcher populates insider_buy_flag (currently 0 rows)
+    # insider_buy_flag was genuinely 0 rows for 90+ days (2026-08-07: insider_transactions_
+    # fetcher.py's own NSE per-symbol endpoint doesn't honor its from/to params -- fixed by
+    # repointing that fetcher's feature computation at insider_trades instead; see its docstring).
+    # NOT re-enabled here even though the data is now real: predict_proba_ensemble() passes X
+    # straight to each base model, and adding a column changes the feature matrix's shape/order
+    # against the CURRENTLY-ACTIVE trained model -- needs a coordinated retrain, not a live toggle.
     # X['insider_buy']       = num('insider_buy_flag', 0.0).clip(0, 1)
     X['insider_sell']      = num('insider_sell_flag', 0.0).clip(0, 1)
 

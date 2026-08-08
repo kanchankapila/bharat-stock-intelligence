@@ -22,8 +22,8 @@ function trendIcon(n: number | null | undefined) {
 }
 
 function trendClass(n: number | null | undefined) {
-  if (n == null) return 'text-slate-500';
-  return n > 0.05 ? 'text-teal-700' : n < -0.05 ? 'text-rose-700' : 'text-slate-500';
+  if (n == null) return 'text-[var(--v5-muted)]';
+  return n > 0.05 ? 'text-[var(--v5-positive)]' : n < -0.05 ? 'text-[var(--v5-negative)]' : 'text-[var(--v5-muted)]';
 }
 
 function fmtPct(v: number | null | undefined): string {
@@ -122,7 +122,7 @@ export function PreMarketBriefingDeskPage() {
 
       <div className="v5-card col-span-12 p-4 xl:col-span-5">
         <div className="mb-3 flex items-center gap-2">
-          <Globe2 className="h-4 w-4 text-teal-700" />
+          <Globe2 className="h-4 w-4 text-[var(--v5-positive)]" />
           <h2 className="v5-title text-lg font-semibold">Briefing Notes</h2>
         </div>
 
@@ -131,11 +131,11 @@ export function PreMarketBriefingDeskPage() {
           <V5InsightPanel title="Macro Insights" insights={tileInsights} />
         </div>
 
-        <div className="rounded-2xl border border-slate-200 bg-slate-50 p-3">
-          <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">Narrative</div>
+        <div className="rounded-2xl border border-[var(--v5-border)] bg-[var(--v5-surface-2)] p-3">
+          <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-[var(--v5-muted)]">Narrative</div>
           <div className="space-y-1.5">
             {briefing.map((line, i) => (
-              <div key={`${i}-${line}`} className="rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-xs text-slate-700">
+              <div key={`${i}-${line}`} className="rounded-lg border border-[var(--v5-border)] bg-[var(--v5-surface)] px-2 py-1.5 text-xs text-[var(--v5-ink-soft)]">
                 {line}
               </div>
             ))}
@@ -149,19 +149,19 @@ export function PreMarketBriefingDeskPage() {
           {marketTiles.map((t) => {
             const Icon = trendIcon(t.ret1d);
             return (
-              <div key={t.symbol} className="rounded-2xl border border-slate-200 bg-slate-50 p-3">
-                <div className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">{s(t.label, t.symbol)}</div>
-                <div className="mt-1 text-lg font-bold text-slate-900">
+              <div key={t.symbol} className="rounded-2xl border border-[var(--v5-border)] bg-[var(--v5-surface-2)] p-3">
+                <div className="text-[10px] font-semibold uppercase tracking-wide text-[var(--v5-muted)]">{s(t.label, t.symbol)}</div>
+                <div className="mt-1 text-lg font-bold text-[var(--v5-ink)]">
                   {t.close == null ? '—' : fmtFixed(t.close, 2)}{t.unit ? ` ${t.unit}` : ''}
                 </div>
                 <div className={`mt-1 inline-flex items-center gap-1 text-xs font-semibold ${trendClass(t.ret1d)}`}>
                   <Icon className="h-3.5 w-3.5" /> {fmtPct(t.ret1d)}
                 </div>
-                <div className="mt-0.5 text-[10px] text-slate-500">5D: {fmtPct(t.ret5d)}</div>
+                <div className="mt-0.5 text-[10px] text-[var(--v5-muted)]">5D: {fmtPct(t.ret5d)}</div>
               </div>
             );
           })}
-          {!marketTiles.length && <p className="text-sm text-slate-500">No macro tiles available in the current snapshot.</p>}
+          {!marketTiles.length && <p className="text-sm text-[var(--v5-muted)]">No macro tiles available in the current snapshot.</p>}
         </div>
       </div>
     </section>

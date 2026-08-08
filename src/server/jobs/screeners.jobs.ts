@@ -18,6 +18,7 @@ import { recalculateScores } from '../scoringService';
 import { syncAllScreenerStocksToDB } from '../trendlyneScreener';
 import { registerRepeatableJob } from './registerJob';
 import { runPython } from '../pythonRunner';
+import { shouldSkipOnTradingHoliday } from '../marketStatusService';
 
 export const QUEUE_STOCK_SCORING          = 'stock-scoring';
 export const QUEUE_MC_SCREENER_SYNC       = 'mc-screener-sync';
@@ -27,7 +28,17 @@ export const QUEUE_TRENDLYNE_SCREENER_SYNC = 'trendlyne-screener-sync';
 export const QUEUE_FUNDAMENTALS_SYNC      = 'fundamentals-sync';
 export const QUEUE_QUANT_SCORING          = 'quant-scoring';
 
-async function processStockScoring(_job: Job): Promise<{ success: boolean }> {
+async function processStockScoring(job: Job): Promise<{ success: boolean }> {
+  // 2026-08-06: skip entirely on a trading holiday, no morning replacement -- recalculateScores()
+  // would just re-derive the same composite scores from the same unchanged stock_scores/
+  // technical_signals inputs (the exchange never opened, nothing upstream refreshed). Not wired
+  // into closed-day-early-batch's dispatch: unlike outcome-resolver/ml-daily-ops/unified-ranker,
+  // re-scoring off literally identical inputs produces an identical result, so there's nothing
+  // to gain by running it earlier -- only by not running it a second time that evening.
+  if (await shouldSkipOnTradingHoliday(job)) {
+    console.log('[QUEUE] stock-scoring skipped — trading holiday, nothing new to score');
+    return { success: true };
+  }
   console.log('[QUEUE] Starting scheduled stock scoring...');
   // Calls recalculateScores() directly, NOT syncAndScore() -- 2026-08-04 job-timing audit.
   // syncAndScore() also re-syncs Trendlyne/MoneyControl/ETNow screener membership in-process,
@@ -42,28 +53,48 @@ async function processStockScoring(_job: Job): Promise<{ success: boolean }> {
   return { success: true };
 }
 
-async function processMcScreenerSync(_job: Job): Promise<{ success: boolean }> {
+async function processMcScreenerSync(job: Job): Promise<{ success: boolean }> {
+  // 2026-08-06: no new data to fetch on a trading holiday -- MoneyControl's screener universe
+  // reflects the same closed exchange session as yesterday. Never dispatched by closed-day-
+  // early-batch (no shortlist depends on same-day screener membership refreshing that fast),
+  // so a plain holiday check is enough here, unlike the scoring/ranking jobs elsewhere.
+  if (await shouldSkipOnTradingHoliday(job)) {
+    console.log('[QUEUE] mc-screener-sync skipped — trading holiday, nothing new to sync');
+    return { success: true };
+  }
   console.log('[QUEUE] Starting scheduled MoneyControl screener sync...');
   const { syncMoneyControlScreeners } = await import('../moneycontrolScreener');
   await syncMoneyControlScreeners();
   return { success: true };
 }
 
-async function processEtnowScreenerSync(_job: Job): Promise<{ success: boolean }> {
+async function processEtnowScreenerSync(job: Job): Promise<{ success: boolean }> {
+  if (await shouldSkipOnTradingHoliday(job)) {
+    console.log('[QUEUE] etnow-sync skipped — trading holiday, nothing new to sync');
+    return { success: true };
+  }
   console.log('[QUEUE] Starting scheduled ETNow screener sync...');
   const { syncETnowScreeners } = await import('../etnowScreenerSync');
   await syncETnowScreeners();
   return { success: true };
 }
 
-async function processEtMarketstatsSync(_job: Job): Promise<{ success: boolean }> {
+async function processEtMarketstatsSync(job: Job): Promise<{ success: boolean }> {
+  if (await shouldSkipOnTradingHoliday(job)) {
+    console.log('[QUEUE] et-marketstats-sync skipped — trading holiday, nothing new to sync');
+    return { success: true };
+  }
   console.log('[QUEUE] Starting scheduled ET Marketstats screener sync...');
   const { syncEtMarketstatsScreeners } = await import('../etMarketstatsSync');
   await syncEtMarketstatsScreeners();
   return { success: true };
 }
 
-async function processTrendlyneScreenerSync(_job: Job): Promise<{ success: boolean }> {
+async function processTrendlyneScreenerSync(job: Job): Promise<{ success: boolean }> {
+  if (await shouldSkipOnTradingHoliday(job)) {
+    console.log('[QUEUE] trendlyne-screener-sync skipped — trading holiday, nothing new to sync');
+    return { success: true };
+  }
   console.log('[QUEUE] Starting scheduled Trendlyne screener-stock sync...');
   // Given no dedicated schedule of its own before 2026-08-04: this membership sync only ever
   // ran as a side effect of quant-eod-sync (22:00 IST) and stock-scoring's syncAndScore()
@@ -84,7 +115,13 @@ async function processFundamentalsSync(job: Job): Promise<{ success: boolean }> 
   return { success: true };
 }
 
-async function processQuantScoring(_job: Job): Promise<{ success: boolean }> {
+async function processQuantScoring(job: Job): Promise<{ success: boolean }> {
+  // 2026-08-06: same reasoning as processStockScoring above -- skip entirely, no morning
+  // replacement, since quant_scores would just be re-derived from the same unchanged inputs.
+  if (await shouldSkipOnTradingHoliday(job)) {
+    console.log('[QUEUE] quant-scoring skipped — trading holiday, nothing new to score');
+    return { success: true };
+  }
   console.log('[QUEUE] Starting quant strategy scoring...');
   const { runQuantScoring } = await import('../quantScoringService');
   await runQuantScoring();
