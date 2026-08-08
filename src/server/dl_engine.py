@@ -16,6 +16,7 @@ from typing import Dict, List, Tuple
 
 from db_compat import connect, read_df
 from model_promotion import clears_promotion_bar
+from as_of import logical_trading_date
 
 # Must be set before torch/cuBLAS initialises
 os.environ.setdefault("CUBLAS_WORKSPACE_CONFIG", ":4096:8")
@@ -505,12 +506,27 @@ def train_lstm(version: int = 1) -> Dict:
 _DL_MODEL_CACHE: dict | None = None  # {'model': BiLSTMModel, 'path': str, 'mtime': float}
 
 
+def _resolve_prediction_date(prediction_date: str = None) -> str:
+    """Resolve run_inference()'s date argument, defaulting to logical_trading_date() rather
+    than a raw wall-clock date (2026-08-06). dl-infer-daily's cron fires at 18:30 UTC = 00:00
+    IST exactly (moved there 2026-07-31 specifically to dodge the 21:00-23:35 IST pg-pool
+    contention window), and no scheduled caller ever passes --date, so every run's "today" was
+    the calendar day AFTER the trading session whose feature_store row it actually reads --
+    deep_learning_predictions.prediction_date was permanently stamped one day ahead of the data
+    it reflects. Same bug class as insider_features.py/screener_performance.py; see
+    as_of.logical_trading_date's docstring. Extracted as its own function so this default is
+    directly unit-testable without invoking run_inference()'s model-loading/DB logic.
+    """
+    if prediction_date is None:
+        return logical_trading_date()
+    return prediction_date
+
+
 def run_inference(prediction_date: str = None) -> None:
     """Run BiLSTM inference on all symbols, write to deep_learning_predictions."""
     global _DL_MODEL_CACHE
 
-    if prediction_date is None:
-        prediction_date = datetime.today().strftime("%Y-%m-%d")
+    prediction_date = _resolve_prediction_date(prediction_date)
 
     cfg = _load_config()
     model_version = cfg.get("lstm_version", 1)

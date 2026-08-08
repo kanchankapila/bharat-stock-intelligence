@@ -129,3 +129,31 @@ class TestSoOptionChainFetcherLiveDataSource:
         if summary:
             summary_calls = [(sql, p) for sql, p in cap.execute_calls if "so_stock_oi_summary" in sql]
             assert summary_calls, "save_chain() had a summary but never wrote to so_stock_oi_summary"
+
+            # Regression guard added 2026-08-07: iv_call/iv_put/pcr were previously always
+            # None -- summary_calls only asserted "a write happened", not that its actual
+            # fields were populated, which is exactly the class of vacuous pass this test
+            # suite is supposed to prevent. Params order per save_chain(): (symbol, date,
+            # expiry, max_pain, atm, mwpl, iv_call, iv_put, pcr, fut_price, fut_oi, fut_oi_chg).
+            _, params = summary_calls[0]
+            iv_call, iv_put, pcr = params[6], params[7], params[8]
+            assert iv_call is not None, (
+                "iv_call is None -- check _parse_chain's ATM-nearest-strike IV derivation "
+                "(the summary-level body['IV'] field itself is confirmed always None live)"
+            )
+            assert iv_put is not None, "iv_put is None -- same as iv_call above"
+            assert_numeric_and_finite(iv_call, context="so_stock_oi_summary.iv_call")
+            assert_numeric_and_finite(iv_put, context="so_stock_oi_summary.iv_put")
+            assert pcr is not None, (
+                "pcr is None -- check expiryLevelPCRValues['pcr_oi'] is still the right key "
+                "(this dict is flat, NOT keyed by expiry date)"
+            )
+            assert_numeric_and_finite(pcr, context="so_stock_oi_summary.pcr")
+            assert pcr >= 0, f"pcr must be non-negative: {pcr}"
+            # fut_price/fut_oi/fut_oi_chg are EXPECTED None -- live-verified 2026-08-07 that
+            # body['futureData'] is genuinely {} for real stocks/expiries, not a parsing bug.
+            # Asserting this explicitly so a future session doesn't "fix" it into a guess.
+            assert params[9] is None and params[10] is None and params[11] is None, (
+                "fut_price/fut_oi/fut_oi_chg came back non-None -- Trendlyne may have started "
+                "populating futureData; if so, wire the real keys instead of leaving these NULL"
+            )

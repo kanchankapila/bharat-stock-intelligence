@@ -193,3 +193,124 @@ class TestComputeAndWriteFeaturesUsesLogicalTradingDate:
         updates = [c for c in conn.cur.executed if "UPDATE technical_signals" in c[0]]
         _, params = updates[0]
         assert params[-1] == "2026-08-01"  # would NOT match a grid row dated 2026-07-31
+
+
+# ── Regression: compute_and_write_features() now reads insider_trades, not
+# insider_transactions (2026-08-07) ──────────────────────────────────────────────────
+#
+# insider_transactions_fetcher.py's own NSE per-symbol endpoint (corporates-pit?symbol=X&
+# from=Y&to=Z) does not honor its own from/to params -- live-probed directly: RELIANCE's
+# response mixed dates from 2021 through 2026 regardless of the requested 90-day window --
+# so insider_transactions had zero rows newer than 2026-05-02 across all 1,823 symbols ever
+# fetched, for 90+ days, despite the fetcher running nightly and genuinely touching fetched_at
+# every time. Every existing health signal (job success, non-empty upsert, fresh fetched_at)
+# looked fine; only checking the actual transaction_date values exposed it. Switched the
+# feature computation onto insider_trades (fed by moneycontrol_fetcher.py +
+# tickertape_deals_fetcher.py --insider, genuinely fresh, already used by insider_features.py
+# for the sibling insider_buy_pct_90d ratio). These tests use a real SQLite DB (not the fake
+# cursor above) so the actual SQL -- category ILIKE/LOWE-LIKE filter, BUY_TYPES/SELL_TYPES
+# IN-list, valueInr -> Cr conversion -- is genuinely exercised, not just its call shape.
+
+import datetime
+import sqlite3
+
+
+def _make_insider_trades_db():
+    conn = sqlite3.connect(":memory:")
+    conn.row_factory = sqlite3.Row
+    conn.executescript("""
+        CREATE TABLE insider_trades (
+            symbol TEXT, "typeOfTransaction" TEXT, "valueInr" REAL,
+            category TEXT, date_iso TEXT
+        );
+        CREATE TABLE technical_signals (
+            symbol TEXT, date TEXT,
+            promoter_buy_90d_cr REAL, promoter_sell_90d_cr REAL, promoter_net_90d REAL,
+            insider_buy_flag INTEGER, insider_sell_flag INTEGER,
+            PRIMARY KEY (symbol, date)
+        );
+    """)
+    return conn
+
+
+def _seed_trade(conn, symbol, txn_type, value_inr, category, days_ago):
+    d = (datetime.date.today() - datetime.timedelta(days=days_ago)).isoformat()
+    conn.execute(
+        'INSERT INTO insider_trades (symbol, "typeOfTransaction", "valueInr", category, date_iso) '
+        "VALUES (?, ?, ?, ?, ?)",
+        (symbol, txn_type, value_inr, category, d),
+    )
+    conn.commit()
+
+
+class TestComputeAndWriteFeaturesReadsInsiderTrades:
+    def _run(self, monkeypatch, conn, symbol="TESTSYM", today="2026-08-06"):
+        monkeypatch.setattr(itf, "use_postgres", lambda: False)
+        monkeypatch.setattr(itf, "logical_trading_date", lambda: today)
+        conn.execute(
+            "INSERT INTO technical_signals (symbol, date) VALUES (?, ?)", (symbol, today)
+        )
+        conn.commit()
+        itf.compute_and_write_features(conn, symbol, days=90)
+        row = conn.execute(
+            "SELECT promoter_buy_90d_cr, promoter_sell_90d_cr, promoter_net_90d, "
+            "insider_buy_flag, insider_sell_flag FROM technical_signals "
+            "WHERE symbol = ? AND date = ?", (symbol, today),
+        ).fetchone()
+        return row
+
+    def test_promoter_buy_and_sell_aggregate_into_crores(self, monkeypatch):
+        conn = _make_insider_trades_db()
+        _seed_trade(conn, "TESTSYM", "BUY", 20_000_000, "Promoter", 5)   # 2 Cr
+        _seed_trade(conn, "TESTSYM", "SELL", 10_000_000, "Promoter", 10)  # 1 Cr
+        row = self._run(monkeypatch, conn)
+        assert row["promoter_buy_90d_cr"] == 2.0
+        assert row["promoter_sell_90d_cr"] == 1.0
+        assert row["promoter_net_90d"] == 1.0
+
+    def test_non_promoter_category_excluded(self, monkeypatch):
+        conn = _make_insider_trades_db()
+        _seed_trade(conn, "TESTSYM", "BUY", 50_000_000, "Insider - Connected Person", 5)
+        row = self._run(monkeypatch, conn)
+        assert row["promoter_buy_90d_cr"] == 0.0, (
+            "a non-promoter category must not count toward the promoter-only feature"
+        )
+
+    def test_promoter_group_variant_is_matched_case_insensitively(self, monkeypatch):
+        conn = _make_insider_trades_db()
+        _seed_trade(conn, "TESTSYM", "buy", 15_000_000, "Insider - Promoter Group", 5)
+        row = self._run(monkeypatch, conn)
+        assert row["promoter_buy_90d_cr"] == 1.5, (
+            "'Insider - Promoter Group' contains 'promoter' and must match; "
+            "lowercase 'buy' must still classify via UPPER(TRIM(...))"
+        )
+
+    def test_esop_and_pledge_types_are_not_buy_or_sell(self, monkeypatch):
+        """ESOP/Pledge/Bonus/Gift aren't open-market activity -- the file's own docstring is
+        specifically about open-market conviction, not every SEBI PIT disclosure type."""
+        conn = _make_insider_trades_db()
+        _seed_trade(conn, "TESTSYM", "ESOP", 30_000_000, "Promoter", 5)
+        _seed_trade(conn, "TESTSYM", "Pledge -  Pledge Creation", 30_000_000, "Promoter", 5)
+        row = self._run(monkeypatch, conn)
+        assert row["promoter_buy_90d_cr"] == 0.0
+        assert row["promoter_sell_90d_cr"] == 0.0
+
+    def test_trades_outside_the_90d_window_are_excluded(self, monkeypatch):
+        conn = _make_insider_trades_db()
+        _seed_trade(conn, "TESTSYM", "BUY", 20_000_000, "Promoter", 120)  # 120 days ago
+        row = self._run(monkeypatch, conn)
+        assert row["promoter_buy_90d_cr"] == 0.0
+
+    def test_flags_set_only_past_their_respective_thresholds(self, monkeypatch):
+        conn = _make_insider_trades_db()
+        _seed_trade(conn, "TESTSYM", "BUY", 5_000_000, "Promoter", 5)    # 0.5 Cr, below 1.0 threshold
+        _seed_trade(conn, "TESTSYM", "SELL", 60_000_000, "Promoter", 5)  # 6.0 Cr, above 5.0 threshold
+        row = self._run(monkeypatch, conn)
+        assert row["insider_buy_flag"] == 0
+        assert row["insider_sell_flag"] == 1
+
+    def test_a_different_symbols_activity_does_not_leak_in(self, monkeypatch):
+        conn = _make_insider_trades_db()
+        _seed_trade(conn, "OTHERSYM", "BUY", 100_000_000, "Promoter", 5)
+        row = self._run(monkeypatch, conn)
+        assert row["promoter_buy_90d_cr"] == 0.0

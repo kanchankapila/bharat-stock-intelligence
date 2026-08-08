@@ -1,4 +1,4 @@
-import { dbGet, dbAll, dbTransaction } from './dbAsync';
+import { dbGet, dbAll, dbRun, dbTransaction } from './dbAsync';
 import { getAllNSEStocks, getNSEStockBySymbol, searchNSEStocks, NSEStock } from '../data/nseStocks';
 
 export interface NSEStockRow {
@@ -15,6 +15,31 @@ export interface NSEStockRow {
   pe_ratio: number | null;
   dividend_yield: number | null;
   last_updated: string;
+}
+
+// Backfills nse_stocks.market_cap/pe_ratio/dividend_yield from stock_fundamentals (added
+// 2026-08-07, dead-column sweep). These 3 columns had NO writer anywhere in the codebase --
+// live-verified 0/2,366 ACTIVE rows populated -- but every reader (getStockList/getStocks/
+// searchNSEStocks/etc. in this file) already does COALESCE(stock_fundamentals.x, nse_stocks.x),
+// so this was a genuinely dead last-resort fallback rather than a live bug: stock_fundamentals
+// covers ~94% of the universe already. This backfill makes the fallback real for the remaining
+// ~6% stock_fundamentals doesn't cover, instead of leaving it structurally unreachable.
+// COALESCE-on-the-target-side (never downgrade): only fills a currently-NULL nse_stocks value,
+// never overwrites one that's already set (matches the sector-backfill convention directly
+// above in this file's syncNSEStocksToDatabase()).
+export async function backfillNseStocksFundamentalsFallback(): Promise<{ updated: number }> {
+  // Correlated subqueries rather than `UPDATE ... FROM` -- this codebase's SQLite dev-fallback
+  // path (sqlTranslate.ts) has no established precedent handling Postgres's FROM-joined UPDATE
+  // syntax, so this form (proven to work identically on both dialects) avoids that risk entirely.
+  const result = await dbRun(`
+    UPDATE nse_stocks
+    SET market_cap    = COALESCE(market_cap,    (SELECT sf.market_cap    FROM stock_fundamentals sf WHERE sf.symbol = nse_stocks.symbol)),
+        pe_ratio       = COALESCE(pe_ratio,      (SELECT sf.trailing_pe  FROM stock_fundamentals sf WHERE sf.symbol = nse_stocks.symbol)),
+        dividend_yield = COALESCE(dividend_yield,(SELECT sf.dividend_yield FROM stock_fundamentals sf WHERE sf.symbol = nse_stocks.symbol))
+    WHERE symbol IN (SELECT symbol FROM stock_fundamentals)
+      AND (market_cap IS NULL OR pe_ratio IS NULL OR dividend_yield IS NULL)
+  `);
+  return { updated: result?.changes ?? 0 };
 }
 
 let _nseSyncInProgress = false;

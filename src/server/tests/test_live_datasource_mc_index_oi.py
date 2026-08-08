@@ -86,6 +86,26 @@ class TestMcIndexOiLiveDataSource:
             strikes.append(strike)
         assert strikes, "no strikes captured in index_option_oi rows"
 
+        # Regression guard added 2026-08-07: a key-name mismatch in _parse_oi_row
+        # (guessed "callOI"/"callOpenInterest" against a real payload shaped
+        # "callOi"/"putOi") left ce_oi/pe_oi 100% NULL for weeks while this test kept
+        # passing, because the max-pain assertion below is only exercised `if max_pain
+        # is not None` -- and _compute_max_pain's degenerate all-zero-OI fallback still
+        # produces a real strike (the first candidate), which trivially satisfies
+        # "falls within the fetched strike range" even though the whole computation was
+        # meaningless. Assert directly that OI values were actually captured, not just
+        # that a downstream aggregate happens to look plausible.
+        ce_oi_values = [params[4] for _, params in oi_calls]
+        pe_oi_values = [params[5] for _, params in oi_calls]
+        assert any(v is not None for v in ce_oi_values), (
+            "every ce_oi came back None -- _parse_oi_row's key guesses no longer match "
+            "the live MC payload shape (check for callOi/putOi vs callOI/putOI casing)"
+        )
+        assert any(v is not None for v in pe_oi_values), (
+            "every pe_oi came back None -- _parse_oi_row's key guesses no longer match "
+            "the live MC payload shape (check for callOi/putOi vs callOI/putOI casing)"
+        )
+
         max_pain_calls = [(sql, params) for sql, params in cap.calls if "index_max_pain" in sql]
         assert max_pain_calls, "_fetch_and_store() never wrote to index_max_pain"
         # INSERT param order: (index_name, date, expiry, max_pain, pcr_oi, total_ce_oi, total_pe_oi, fetched_at)

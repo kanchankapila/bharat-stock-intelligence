@@ -84,12 +84,12 @@ A local-first quantitative intelligence platform for NSE/BSE equities. Synthesiz
 - **PCR scanner** (`pcr_fetcher.py`): daily Put/Call Ratio from NSE
 - **F&O heatmaps**: Trendlyne FnO heatmap + MC FnO overview
 - **Buildup analysis**: Long Buildup / Short Buildup / Long Unwinding / Short Covering
-- **Bulk & block deals**: tracked in `bulk_deals` table
+- **Bulk & block deals**: tracked in `block_deals` (NSE `block_deal_fetcher.py` + Tickertape `tickertape_deals_fetcher.py`, the latter carrying `pctTransacted` — % of float traded) — not the dead `bulk_deals` table, which has had no writer since 2026-05
 
 ### Sentiment & News
 - **News ingestion**: corporate actions, earnings, order wins, macro events
 - **FinBERT NLP** (`finbert_scorer.py`): sentiment polarity −1.0 to +1.0 with publisher quality-tier multiplier
-- **Institutional flows** (`institutional_quant_engine.py`): FII/DII net flows, block deals, insider trades
+- **Institutional flows** (`institutional_quant_engine.py`): FII/DII net flows, block deals, insider trades — on-demand only (not on any automatic schedule since 2026-08, see Python Scripts Reference below)
 - **FII/DII fetcher** (`fii_dii_fetcher.py`): daily institutional data from NSE API
 - **Claude AI re-scoring**: high-impact news re-evaluated by Claude (`ANTHROPIC_API_KEY`)
 
@@ -117,25 +117,36 @@ Visual dashboard for all Python pipeline scripts. Per-script status (Never / Run
 
 Scripts tracked:
 
+> Schedule column reflects the actual registered cron in `queues.ts`/`src/server/jobs/*.jobs.ts`
+> as of 2026-08-06 — several rows below moved (most notably ML Daily Ops, 5 PM → 7:30 PM) since
+> this table was first written, and the labels here previously lagged that by months.
+
 | Script | Schedule | Populates |
 |---|---|---|
-| Technical Signal Scan | Every 30 min | `technical_signals` |
-| Outcome Resolver (5D) | Daily 9:30 AM | `signal_outcomes` (5-day) |
-| Outcome Resolver (15D) | Daily 9:30 AM | `signal_outcomes` (15-day) |
-| Performance Tracker | Daily 9:30 AM | `strategy_performance` |
-| FII/DII Fetcher | Daily 5 PM | `fii_dii_flow` |
-| FinBERT Sentiment | Daily 5 PM | `technical_signals.news_sentiment_score` |
-| ML Ensemble Score | Daily 5 PM | `technical_signals.win_probability` |
-| ML Ensemble Train | Weekly Sunday | `model_registry` |
-| Strategy Optimizer | Weekly Sunday | `app_settings` weights |
-| OHLCV Gap Fill | Weekly Saturday | `stock_ohlcv` |
-| Market Regime Detector | Daily 5 PM | `market_regimes` |
-| Feature Engineering | Daily 5 PM | `feature_store` |
-| Reward Engine | Daily 5 PM | `signal_type_weights` |
-| RL Agent Update | Daily 5 PM | `rl_q_table` |
-| DL Engine Inference | Daily 5 PM | `deep_learning_predictions` |
-| DL Model Trainer | Weekly Sunday | `dl_model_performance` |
-| Signal Type Stats | Daily 5 PM | `signal_type_stats` |
+| Technical Signal Scan | Every 30 min, 8:30 AM–4:00 PM IST weekdays | `technical_signals` |
+| Unified Ranker | Daily 7:30 AM IST | `unified_recommendations` (canonical ranking) |
+| Outcome Resolver | Daily 9:30 AM IST | `signal_outcomes` (1/5/15-day horizons) |
+| Stock/OHLCV Refresh | Daily 4:00 PM IST | `stock_ohlcv` |
+| Market Regime Detector | Daily 4:45 PM IST | `market_regimes` |
+| Feature Engineering (DL) | Daily 5:00 PM IST | `feature_store` |
+| Screener Syncs (MoneyControl/ETNow/ET-Marketstats/Trendlyne) | Daily 6:00–6:40 PM IST | `*_screeners`, `*_screener_stocks` |
+| **ML Daily Ops** (FII/DII, FinBERT, Performance Tracker, ML Ensemble Score, Drift Detector, Reward Engine, RL Agent Update, Signal Type Stats, ~45 more steps) | Daily 7:30 PM IST | `fii_dii_flow`, `technical_signals.{news_sentiment_score,win_probability}`, `strategy_performance`, `dl_model_performance`, `signal_type_weights`, `rl_q_table`, `signal_type_stats` |
+| DL Engine Inference | Chain-triggered right after Feature Engineering finishes (typically 5–8 PM IST); 5:00 AM IST fallback if the chain never fires | `deep_learning_predictions` |
+| Quant EOD Sync, Stock Scoring, Quant Scoring, Confluence Outcomes | Daily 10:00–11:30 PM IST | `proprietary_scores_history`, `stock_scores`, `quant_scores`, confluence-sourced `signal_outcomes` |
+| Screener Performance | Daily 2:30 AM IST (i.e. after that evening's ML Daily Ops) | `screener_performance_history` |
+| ML Ensemble Train, Strategy Optimizer | Weekly Sunday 10:30 AM IST | `model_registry`, `app_settings` weights |
+| DL Model Trainer | Weekly Sunday 11:30 AM IST | `dl_model_performance` |
+| Fundamentals Sync | Weekly Sunday 8:30 AM IST | `stock_fundamentals` |
+| OHLCV Gap Fill | Weekly, Friday 8:30 PM UTC (Saturday 2:00 AM IST) | `stock_ohlcv` |
+
+**Holiday-aware scheduling.** On a mid-week NSE trading holiday (a weekday the exchange is shut —
+not caught by cron's own day-of-week check), a dedicated `closed-day-early-batch` job runs the
+critical daily pipeline early instead (~7:10 AM IST: Outcome Resolver → ML Daily Ops → Unified
+Ranker), and every other job in the table above skips its normal run for that day — there is no
+new market data to fetch or re-score, so running the full evening/night chain again would just
+duplicate the same output. See `src/server/marketStatusService.ts`'s `isTradingHolidayToday()` /
+`shouldSkipOnTradingHoliday()`. Weekends need no such handling — nearly every job above is already
+weekday-only by cron pattern.
 
 ### Telegram Alerts
 Set `TELEGRAM_BOT_TOKEN` + `TELEGRAM_CHAT_ID` in `.env` to receive signal alerts in a Telegram chat. Also configurable via the platform's settings page.
@@ -233,7 +244,12 @@ Starts both Express tRPC server (port 3000) and Vite dev server.
 
 ## Python Scripts Reference
 
-### Daily (run after market close — 5 PM IST)
+### Daily (illustrative manual invocations — see the schedule table above for real auto-run times)
+
+Every script below is auto-scheduled somewhere between 4:45 PM and 11:30 PM IST, not uniformly
+5 PM — check the table above for the specific time before assuming one from this list. Most of
+these (everything from `fii_dii_fetcher.py` through `ml_ensemble.py --score`) actually run as
+steps inside `ml-daily-ops` at 7:30 PM IST, not standalone.
 
 ```bash
 # Institutional flow data from NSE
@@ -245,16 +261,16 @@ python src/server/pcr_fetcher.py
 # FinBERT sentiment scoring on today's news
 python src/server/finbert_scorer.py --days 1
 
-# Institutional quant analysis (block deals, insider trades)
-python src/server/institutional_quant_engine.py
-
-# Market regime detection (updates market_regimes table)
+# Market regime detection (updates market_regimes table) — its own dedicated 4:45 PM IST job,
+# not part of ml-daily-ops
 python src/server/regime_detector.py --mode update
 
-# Feature engineering — today-only fast mode (writes 1 row per symbol)
+# Feature engineering — today-only fast mode (writes 1 row per symbol) — its own dedicated
+# 5:00 PM IST job, not part of ml-daily-ops
 python src/server/feature_engineering.py --date today
 
-# Resolve signal outcomes at 5-day and 15-day horizons
+# Resolve signal outcomes at 1/5/15-day horizons
+python src/server/outcome_resolver.py --horizon 1
 python src/server/outcome_resolver.py --horizon 5
 python src/server/outcome_resolver.py --horizon 15
 
@@ -270,12 +286,18 @@ python src/server/rl_agent.py --update
 # ML ensemble win probability scoring on today's signals
 python src/server/ml_ensemble.py --score
 
-# Deep learning inference → deep_learning_predictions
+# Deep learning inference → deep_learning_predictions — auto-scheduled by chaining off
+# feature_engineering.py's completion (see the schedule table above), not a fixed time
 python src/server/dl_engine.py --mode infer
 
 # Global macro data (US10Y, DXY, Crude, Gold, SP500)
 python src/server/global_macro_fetcher.py
 ```
+
+> `institutional_quant_engine.py` (block deals, insider trades) is **not** on any automatic
+> schedule — it was retired as a nightly writer in 2026-08 because its full DELETE+re-INSERT into
+> `quant_scores` was always clobbered a few hours later by `quantScoringService.ts`'s own upsert.
+> Still reachable on-demand via the AlphaQuant MCP server's `run_analytical_engine` tool.
 
 ### Weekly (Sunday after market close)
 
@@ -387,7 +409,7 @@ python src/server/feature_engineering.py --lookback 252
 | Macro | `macro_asset_prices`, `macro_indicators`, `fii_dii_flow` |
 | Options | `stock_options_oi`, `intraday_ohlcv` |
 | News | `news_articles`, `news_sentiment_items` |
-| Events | `bulk_deals`, `insider_trades`, `institutional_rankings` |
+| Events | `block_deals`, `bulk_block_deals`, `insider_trades` |
 | Config | `app_settings`, `_migrations` |
 
 ---

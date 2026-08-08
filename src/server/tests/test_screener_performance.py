@@ -1,9 +1,11 @@
 import sqlite3, sys, os, datetime
+from unittest.mock import patch
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
+import screener_performance as sp  # noqa: E402
 from screener_performance import (  # noqa: E402
     _sign_for_sentiment, get_price_on_or_after, get_trading_days_after,
-    phase_c_bayesian,
+    phase_c_bayesian, phase_b_fill_returns,
 )
 
 TODAY = datetime.date.today()
@@ -162,3 +164,125 @@ def test_phase_c_bearish_screener_that_predicted_wrong_scores_as_a_loss():
 # test_screener_pit_scores.py (that file already owns compute_pit_scores' test fixture/FakeConn
 # pattern -- see test_screener_pit_scores_sign_flips_bearish_screener there) rather than
 # duplicated here.
+
+
+# ─── run(): write-target date must be logical_trading_date(), not date.today() ────────────
+
+class _StubConn:
+    """Just enough of ConnWrapper for run()'s two post-pipeline summary queries."""
+
+    def execute(self, sql, params=()):
+        class _Result:
+            def fetchone(self):
+                return (0,)
+
+            def fetchall(self):
+                return []
+        return _Result()
+
+    def close(self):
+        pass
+
+
+def test_run_passes_logical_trading_date_to_phase_f_pit():
+    """2026-08-06: run() called phase_f_pit(conn, datetime.date.today().isoformat()) -- but
+    screener-performance's cron fires at 21:00 UTC = 02:30 IST, always AFTER midnight relative
+    to the trading day it summarizes. A raw date.today() call there permanently stamped every
+    PIT snapshot one calendar day ahead of the data it reflects (same bug class as
+    dl_engine.py/insider_features.py). run() must route through logical_trading_date() instead."""
+    seen = {}
+
+    def _fake_phase_f_pit(conn, as_of):
+        seen['as_of'] = as_of
+        return 0
+
+    with patch.object(sp, 'connect', return_value=_StubConn()), \
+         patch.object(sp, 'phase_a_bootstrap', return_value={}), \
+         patch.object(sp, 'phase_b_fill_returns'), \
+         patch.object(sp, 'phase_c_bayesian'), \
+         patch.object(sp, 'phase_d_sync_back'), \
+         patch.object(sp, 'phase_e_update_confidence'), \
+         patch.object(sp, 'phase_f_pit', side_effect=_fake_phase_f_pit), \
+         patch.object(sp, 'logical_trading_date', return_value='2026-07-31'):
+        sp.run()
+
+    assert seen['as_of'] == '2026-07-31', (
+        "run() must pass logical_trading_date()'s value to phase_f_pit(), not date.today()"
+    )
+
+
+# ─── phase_b_fill_returns: re-selection across horizons (2026-08-07 fix) ───────────
+
+def _seed_ohlcv_run(conn, symbol, start_date, num_days, base_price=100.0):
+    """Seeds num_days consecutive daily bars starting at start_date (treats every day as a
+    trading day -- fine for this fixture, get_trading_days_after just walks ordered rows)."""
+    d = datetime.date.fromisoformat(start_date)
+    for i in range(num_days):
+        conn.execute(
+            "INSERT INTO stock_ohlcv (symbol, date, close) VALUES (?, ?, ?)",
+            (symbol, (d + datetime.timedelta(days=i)).isoformat(), base_price + i),
+        )
+    conn.commit()
+
+
+def test_phase_b_reselects_a_row_whose_return_5d_is_already_filled_but_return_60d_is_not():
+    """The bug: the old WHERE clause only ever selected rows with return_5d IS NULL, so a row
+    processed once (return_5d filled, return_60d/120d still None because not enough forward
+    OHLCV existed yet at that time) was never revisited. Simulates that exact prior-run state
+    directly, then asserts a second phase_b_fill_returns() call fills return_60d."""
+    conn = make_db()
+    appeared = (TODAY - datetime.timedelta(days=200)).isoformat()
+    # Pre-seed as if a prior run already filled the short horizons (the buggy behavior's result).
+    conn.execute(
+        "INSERT INTO screener_appearances (screener_id, source, symbol, appeared_date, "
+        "return_5d, return_10d, return_20d, return_60d, return_120d) "
+        "VALUES ('scr1', 'trendlyne', 'DDD', ?, 2.0, 3.0, 4.0, NULL, NULL)",
+        (appeared,),
+    )
+    conn.commit()
+    # 130 consecutive daily bars from the appearance date covers a 120-"trading"-day forward
+    # lookup in this fixture (every day counts as a trading day here).
+    _seed_ohlcv_run(conn, 'DDD', appeared, 130)
+
+    filled = phase_b_fill_returns(CastStrippingConn(conn))
+    assert filled == 1, "the row must be re-selected even though return_5d is already non-NULL"
+
+    row = conn.execute(
+        "SELECT return_5d, return_60d, return_120d FROM screener_appearances WHERE symbol='DDD'"
+    ).fetchone()
+    assert row['return_60d'] is not None, "return_60d must now be filled"
+    assert row['return_120d'] is not None, "return_120d must now be filled"
+    # return_5d must still be correct (idempotent recompute), not clobbered with something else.
+    assert row['return_5d'] is not None
+
+
+def test_phase_b_does_not_reselect_a_fully_filled_row():
+    """Once all 5 horizons are filled, the row must drop out of `pending` -- otherwise every
+    run would rescan the entire historical table forever."""
+    conn = make_db()
+    appeared = (TODAY - datetime.timedelta(days=200)).isoformat()
+    conn.execute(
+        "INSERT INTO screener_appearances (screener_id, source, symbol, appeared_date, "
+        "return_5d, return_10d, return_20d, return_60d, return_120d) "
+        "VALUES ('scr1', 'trendlyne', 'EEE', ?, 2.0, 3.0, 4.0, 5.0, 6.0)",
+        (appeared,),
+    )
+    conn.commit()
+    filled = phase_b_fill_returns(CastStrippingConn(conn))
+    assert filled == 0, "a fully-filled row must not be re-processed"
+
+
+def test_phase_b_leaves_a_too_recent_row_alone():
+    """A row that appeared only 3 days ago isn't even eligible for return_5d yet -- must not be
+    selected at all (matches the pre-existing cutoff_5d behavior, unaffected by this fix)."""
+    conn = make_db()
+    appeared = (TODAY - datetime.timedelta(days=3)).isoformat()
+    conn.execute(
+        "INSERT INTO screener_appearances (screener_id, source, symbol, appeared_date) "
+        "VALUES ('scr1', 'trendlyne', 'FFF', ?)",
+        (appeared,),
+    )
+    conn.commit()
+    _seed_ohlcv_run(conn, 'FFF', appeared, 10)
+    filled = phase_b_fill_returns(CastStrippingConn(conn))
+    assert filled == 0, "a 3-day-old appearance is too recent for even return_5d"

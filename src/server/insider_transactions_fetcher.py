@@ -21,6 +21,7 @@ import requests
 from db_compat import connect, translate, use_postgres
 from fetch_utils import retry_get
 from as_of import logical_trading_date
+from insider_features import BUY_TYPES, SELL_TYPES
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -288,56 +289,67 @@ def upsert_transactions(con, rows: list[dict]) -> int:
 # ---------------------------------------------------------------------------
 
 def compute_and_write_features(con, symbol: str, days: int = 90) -> None:
-    """Aggregate insider_transactions for one symbol and write to technical_signals."""
+    """Aggregate insider_trades for one symbol and write to technical_signals.
+
+    2026-08-07: switched off insider_transactions (this file's own NSE per-symbol pull) onto
+    insider_trades. Live-probed NSE's corporates-pit?symbol=X&from=Y&to=Z endpoint directly:
+    it does NOT honor its own from/to params (RELIANCE's response mixed dates from 2021 through
+    2026 regardless of the requested 90-day window) -- so insider_transactions has had ZERO rows
+    dated after 2026-05-02 across all 1,823 symbols ever fetched, for 90+ days, despite the
+    fetcher running nightly inside ml-daily-ops and genuinely touching fetched_at every time.
+    Every existing health signal looked fine (job success, non-empty upsert, fresh fetched_at) --
+    only checking transaction_date (not fetched_at) against a live re-probe of the real endpoint
+    exposed it. insider_trades (fed by moneycontrol_fetcher.py + tickertape_deals_fetcher.py
+    --insider, already used by insider_features.py for the sibling insider_buy_pct_90d ratio
+    feature) is genuinely fresh (~2 days old) and is used here instead. BUY_TYPES/SELL_TYPES
+    imported from insider_features.py rather than redefined, so both features can never
+    classify the same typeOfTransaction value differently.
+    """
     cur = con.cursor()
-    # transaction_date is TEXT ('YYYY-MM-DD'); compare as an ISO string so Postgres doesn't
-    # choke on text >= date ("no operator matches"). ISO dates sort lexicographically.
+    # A sliding cutoff, not an exact-match write target -- self-heals regardless of which side
+    # of midnight this runs on, unlike the UPDATE below (which needs logical_trading_date()).
     cutoff = (date.today() - timedelta(days=days)).isoformat()
+    buy_ph = ','.join(['?'] * len(BUY_TYPES))
+    sell_ph = ','.join(['?'] * len(SELL_TYPES))
 
     if use_postgres():
         cur.execute(
-            """
+            f"""
             SELECT
-                COALESCE(SUM(CASE
-                    WHEN LOWER(transaction_mode) LIKE '%purchase%'
-                      OR LOWER(transaction_mode) LIKE '%buy%'
-                     THEN value_cr ELSE 0 END), 0)  AS buy_cr,
-                COALESCE(SUM(CASE
-                    WHEN LOWER(transaction_mode) LIKE '%sale%'
-                      OR LOWER(transaction_mode) LIKE '%sell%'
-                     THEN value_cr ELSE 0 END), 0)  AS sell_cr
-            FROM insider_transactions
+                COALESCE(SUM(CASE WHEN UPPER(TRIM("typeOfTransaction")) IN ({buy_ph})
+                    THEN "valueInr" ELSE 0 END), 0)  AS buy_inr,
+                COALESCE(SUM(CASE WHEN UPPER(TRIM("typeOfTransaction")) IN ({sell_ph})
+                    THEN "valueInr" ELSE 0 END), 0)  AS sell_inr
+            FROM insider_trades
             WHERE symbol = ?
-              AND person_category ILIKE '%promoter%'
-              AND transaction_date >= ?
+              AND category ILIKE '%promoter%'
+              AND date_iso >= ?
             """,
-            (symbol, cutoff),
+            (*BUY_TYPES, *SELL_TYPES, symbol, cutoff),
         )
     else:
         cur.execute(
-            """
+            f"""
             SELECT
-                COALESCE(SUM(CASE
-                    WHEN LOWER(transaction_mode) LIKE '%purchase%'
-                      OR LOWER(transaction_mode) LIKE '%buy%'
-                     THEN value_cr ELSE 0 END), 0)  AS buy_cr,
-                COALESCE(SUM(CASE
-                    WHEN LOWER(transaction_mode) LIKE '%sale%'
-                      OR LOWER(transaction_mode) LIKE '%sell%'
-                     THEN value_cr ELSE 0 END), 0)  AS sell_cr
-            FROM insider_transactions
+                COALESCE(SUM(CASE WHEN UPPER(TRIM("typeOfTransaction")) IN ({buy_ph})
+                    THEN "valueInr" ELSE 0 END), 0)  AS buy_inr,
+                COALESCE(SUM(CASE WHEN UPPER(TRIM("typeOfTransaction")) IN ({sell_ph})
+                    THEN "valueInr" ELSE 0 END), 0)  AS sell_inr
+            FROM insider_trades
             WHERE symbol = ?
-              AND LOWER(person_category) LIKE '%promoter%'
-              AND transaction_date >= ?
+              AND LOWER(category) LIKE '%promoter%'
+              AND date_iso >= ?
             """,
-            (symbol, cutoff),
+            (*BUY_TYPES, *SELL_TYPES, symbol, cutoff),
         )
 
     row = cur.fetchone()
     if not row:
         return
 
-    buy_cr, sell_cr = float(row[0]), float(row[1])
+    # valueInr is raw INR; the feature (and technical_signals' documented unit) is Cr.
+    buy_cr = round(float(row[0] or 0) / 1e7, 4)
+    sell_cr = round(float(row[1] or 0) / 1e7, 4)
     net = round(buy_cr - sell_cr, 4)
     insider_buy_flag = 1 if buy_cr > 1.0 else 0
     insider_sell_flag = 1 if sell_cr > 5.0 else 0

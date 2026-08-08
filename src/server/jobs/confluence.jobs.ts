@@ -26,7 +26,7 @@
  */
 import { Job } from 'bullmq';
 import { runPython } from '../pythonRunner';
-import { isMarketOpen } from '../marketStatusService';
+import { isMarketOpen, shouldSkipOnTradingHoliday } from '../marketStatusService';
 import { registerRepeatableJob } from './registerJob';
 import { makeConnection } from '../queues';
 
@@ -37,7 +37,8 @@ export const QUEUE_CONFLUENCE_OUTCOMES = 'confluence-outcomes';
  * True during the hours where re-running the whole-universe confluence compute can actually see
  * different input than its last run: the evening data-landing window (screener syncs 6:00-6:40 PM
  * -> ml-daily-ops 7:30 PM -> stock-scoring/quant-scoring/confluence-outcomes 10:30 PM-11:30 PM ->
- * dl-inference midnight -> screener-performance 2:30 AM) plus a short pre-open refresh window
+ * dl-inference chain-triggered right after dl-feature-refresh (typically well before 11:30 PM,
+ * see dl.jobs.ts) -> screener-performance 2:30 AM) plus a short pre-open refresh window
  * ahead of unified-ranker (7:30 AM). Outside these hours (~00:00-06:00, ~08:00-17:00 IST on a
  * trading day) every upstream table (technical_signals, screener tables, stock_scores,
  * quant_scores) is provably static until the next landing event, so recomputing this "whole-
@@ -73,7 +74,14 @@ async function processConfluenceCompute(_job: Job): Promise<{ computed: number; 
   return result;
 }
 
-async function processConfluenceOutcomes(_job: Job): Promise<void> {
+async function processConfluenceOutcomes(job: Job): Promise<void> {
+  // 2026-08-06: skip entirely on a trading holiday, no morning replacement -- confluence
+  // outcomes/reliability are graded against price action that didn't happen (exchange never
+  // opened), and confluence_ml_engine --train would just refit on an unchanged dataset.
+  if (await shouldSkipOnTradingHoliday(job)) {
+    console.log('[QUEUE] confluence-outcomes skipped — trading holiday, nothing new to grade');
+    return;
+  }
   // Sequential, not Promise.all: confluence_ml_engine --train is CPU-heavy (multiprocessing)
   // and the old concurrent 120s budget both starved the tracker AND timeout-killed the
   // trainer (its real runtime is several minutes) — 10 of its last 11 runs failed this way.

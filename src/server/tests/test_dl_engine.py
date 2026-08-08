@@ -8,7 +8,8 @@ import pytest
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..', '..'))
 
 import torch
-from src.server.dl_engine import BiLSTMModel, N_FEATURES, _predict_batch, _train_one_fold
+import src.server.dl_engine as dl_engine
+from src.server.dl_engine import BiLSTMModel, N_FEATURES, _predict_batch, _train_one_fold, _resolve_prediction_date
 
 
 class TestSoftmaxBug:
@@ -280,3 +281,34 @@ class TestWalkForwardValidation:
         assert result == sentinel, (
             f"train_lstm should return walk_forward_validate result, got {result}"
         )
+
+
+class TestResolvePredictionDateUsesLogicalTradingDate:
+    """2026-08-06: run_inference() defaulted prediction_date via datetime.today() -- but
+    dl-infer-daily's cron fires at 18:30 UTC = 00:00 IST exactly, so every scheduled run
+    (never passes --date) stamped deep_learning_predictions.prediction_date one calendar day
+    ahead of the feature_store row it actually read. Must default via logical_trading_date()."""
+
+    def test_no_arg_uses_logical_trading_date(self):
+        with patch.object(dl_engine, "logical_trading_date", return_value="2026-07-31"):
+            assert _resolve_prediction_date(None) == "2026-07-31", (
+                "run_inference()'s default must come from logical_trading_date(), "
+                "not a raw wall-clock date.today()/datetime.today() call"
+            )
+
+    def test_explicit_date_overrides_the_default(self):
+        with patch.object(dl_engine, "logical_trading_date", return_value="2099-01-01"):
+            assert _resolve_prediction_date("2026-06-25") == "2026-06-25", (
+                "an explicit --date argument must never be overridden by logical_trading_date()"
+            )
+
+    def test_run_inference_calls_the_resolver_when_no_date_given(self):
+        """Wiring check: run_inference() must actually route through _resolve_prediction_date
+        (not silently reintroduce its own datetime.today() call) before it can fail loudly on
+        a missing model file -- proves the fix is wired into the real entry point, not just
+        that the helper function itself is correct in isolation."""
+        with patch.object(dl_engine, "_resolve_prediction_date", return_value="2026-07-31") as mock_resolve, \
+             patch.object(dl_engine, "_load_config", return_value={"lstm_version": 999999}):
+            with pytest.raises(RuntimeError, match="No model at"):
+                dl_engine.run_inference()
+        mock_resolve.assert_called_once_with(None)

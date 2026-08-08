@@ -20,6 +20,7 @@ import { runPython } from '../pythonRunner';
 import { pythonApi } from '../pythonApi';
 import { updateMonitorState } from '../monitoringService';
 import { registerRepeatableJob } from './registerJob';
+import { shouldSkipOnTradingHoliday } from '../marketStatusService';
 
 export const QUEUE_RESEARCH_PREMARKET = 'research-premarket';
 export const QUEUE_RESEARCH_POSTCLOSE = 'research-postclose';
@@ -55,7 +56,13 @@ async function processResearchPostclose(_job: Job): Promise<{ success: boolean }
   return { success: true };
 }
 
-async function processOutcomeResolver(_job: Job): Promise<{ success: boolean }> {
+async function processOutcomeResolver(job: Job): Promise<{ success: boolean }> {
+  // 2026-08-06: skip the standalone 09:30 IST trigger on a trading holiday -- closed-day-early-
+  // batch already dispatches a 'closed-day-early'-named run at ~07:10 IST that morning.
+  if (await shouldSkipOnTradingHoliday(job)) {
+    console.log('[QUEUE] outcome-resolver skipped — trading holiday (closed-day-early-batch already ran this morning)');
+    return { success: true };
+  }
   // Flag bad-print OHLCV bars first so outcome labels skip them (ohlcv_quality.is_suspect).
   await runPython('ohlcv_quality.py', ['--no-ingest'], 180_000)
     .catch(e => console.warn('[QUEUE] ohlcv_quality flag failed:', (e as Error).message));

@@ -128,22 +128,37 @@ def _parse_oi_row(item: dict) -> dict | None:
     if strike is None:
         return None
 
+    # BUG FOUND 2026-08-07 (dead-column sweep): none of the pre-existing key guesses
+    # matched MC's real "oi-change-chart" payload, which live-verified returns
+    # {"strikePrice", "callOi", "callOiChange", "putOi", "putOiChange"} per row (note
+    # "callOi" -- lowercase i, NOT "callOI"/"callOpenInterest"). ce_oi_change/pe_oi_change
+    # happened to work already ("callOiChange" was the last item in that OR chain and
+    # matches exactly) -- only the OI-level fields ce_oi/pe_oi were silently always None.
+    # Confirmed live impact: index_option_oi's ce_oi/pe_oi were 100% NULL across all 2,206
+    # NIFTY50/NIFTYBANK rows, and _compute_max_pain() degenerated to picking the first
+    # candidate strike (min_loss stays 0 for every settlement when ce_oi/pe_oi are always
+    # `or 0`), which happened to still land inside the real strike range -- so the
+    # live_datasource test's `min(strikes) <= max_pain <= max(strikes)` check was a false
+    # pass throughout. "callOi"/"putOi" added as the first (correct) candidate below.
     ce_oi = _int(
-        item.get("callOpenInterest") or item.get("ceOpenInterest")
+        item.get("callOi") or item.get("callOpenInterest") or item.get("ceOpenInterest")
         or item.get("ce_oi") or item.get("callOI")
     )
     pe_oi = _int(
-        item.get("putOpenInterest") or item.get("peOpenInterest")
+        item.get("putOi") or item.get("putOpenInterest") or item.get("peOpenInterest")
         or item.get("pe_oi") or item.get("putOI")
     )
     ce_chg = _int(
-        item.get("callOIChange") or item.get("ceOIChange")
-        or item.get("ce_oi_change") or item.get("callOiChange")
+        item.get("callOiChange") or item.get("callOIChange") or item.get("ceOIChange")
+        or item.get("ce_oi_change")
     )
     pe_chg = _int(
-        item.get("putOIChange") or item.get("peOIChange")
-        or item.get("pe_oi_change") or item.get("putOiChange")
+        item.get("putOiChange") or item.get("putOIChange") or item.get("peOIChange")
+        or item.get("pe_oi_change")
     )
+    # ce_ltp/pe_ltp are expected to stay None for this endpoint: live-verified 2026-08-07
+    # that MC's oi-change-chart payload carries no per-strike LTP field at all (OI/OI-change
+    # only) -- this is not a parsing bug, per-strike LTP would need a different MC endpoint.
     ce_ltp = _float(
         item.get("callLTP") or item.get("ceLTP") or item.get("ce_ltp")
     )
