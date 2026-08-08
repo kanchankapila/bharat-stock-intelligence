@@ -872,8 +872,14 @@ async function processMlDailyOps(job: Job): Promise<{ success: boolean }> {
   await runPython('live_screener_resolver.py', [], 20 * 60_000)
     .catch(err => console.error('[QUEUE] live_screener_resolver.py failed:', err.message));
 
-  await T.run('performance-tracker', () => runPython('performance_tracker.py', ['--horizon', '5']));
-  await runPython('performance_tracker.py', ['--horizon', '15'])
+  // Measured 83.6s standalone (2026-08-08) -- well inside the implicit 5min default -- but it
+  // runs here alongside ~15 other ml-daily-ops steps hitting the same DB, and 11 of its last
+  // 116 scheduled runs (9.5%) timed out at that default under that contention (incl. the run
+  // right before this fix, which failed ml-daily-ops outright since this is a T.run() step).
+  // Same "give it real headroom for a once-daily batch step" pattern already applied to
+  // screener_performance.py/quant-eod-sync/alphaQuant.score elsewhere in this file.
+  await T.run('performance-tracker', () => runPython('performance_tracker.py', ['--horizon', '5'], 15 * 60_000));
+  await runPython('performance_tracker.py', ['--horizon', '15'], 15 * 60_000)
     .catch(e => console.warn('[QUEUE] performance_tracker(15) failed:', (e as Error).message));
 
   // ── feature-matrix hygiene (2026-07-31 bias audit) ──────────────────────────────
@@ -1205,7 +1211,13 @@ async function processQuantEodSync(job: Job): Promise<{ success: boolean }> {
     console.log('[QUANT EOD] 1. Syncing NiftyTrader & Trendlyne Scores + Delivery Data (concurrent)');
     const today = new Date().toISOString().split('T')[0];
     await quantPhase([
-      quantStep('niftytrader-scores', 30, () => syncNiftyTraderScores()),
+      // 30min budget was hit by the real scheduled run on 2026-08-07 (14% historical fail
+      // rate, 8/56 runs). Bumped defensively -- could not independently re-time this one
+      // (getAllStocks() x per-symbol NiftyTrader fetch needs the live auth token, which a
+      // standalone script outside the running server doesn't pick up the same way), so this
+      // is headroom based on the observed failure rate, not a re-measured confirmation like
+      // the other timeout fixes made this session.
+      quantStep('niftytrader-scores', 45, () => syncNiftyTraderScores()),
       quantStep('trendlyne-scores', 30, () => syncTrendlyneScores()),
       quantStep('delivery-map', 10, () => fetchDeliveryMap(today)),
     ]);
