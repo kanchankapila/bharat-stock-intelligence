@@ -213,6 +213,13 @@ const TABLE_FRESHNESS_CHECKS: TableFreshnessConfig[] = [
     category: 'fundamentals', critical: false, table: 'stock_earnings_beats', dateColumn: 'fetched_at', warnDays: 10 },
   { id: 'eps-surprise-history-recency', label: 'eps_surprise_history',
     category: 'fundamentals', critical: false, table: 'eps_surprise_history', dateColumn: 'fetched_at', warnDays: 10 },
+  // Written at request time (MCStockInfoPanel opens, see persistMcConsolidatedMetrics() in
+  // mcApiService.ts) alongside mc_general_metrics' source_api=mc_consolidated rows above --
+  // same "sparse by nature, no fixed schedule" reasoning, but this is its own dedicated table
+  // (not shared with another writer), so the generic factory's bare MAX(fetched_at) is safe
+  // here unlike mc_general_metrics, which needed the hand-rolled WHERE filter.
+  { id: 'mc-swot-history-freshness', label: 'mc_swot_history (per-stock strengths/weaknesses/opportunities/threats)',
+    category: 'fundamentals', critical: false, table: 'mc_swot_history', dateColumn: 'fetched_at', warnDays: 10 },
   // 2026-08-06 urls.txt data analysis (docs/url_explorer) -- see investsights_concall_fetcher.py.
   // Sparse by nature: the source's own "recent" window only has content when companies are
   // actively holding earnings calls, so a quiet week outside results season is not a failure.

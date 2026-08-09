@@ -710,6 +710,12 @@ export async function fetchMcChartPatterns(scId: string, symbol?: string): Promi
 // new scheduled fetcher; `fetched_at` is day-grain (not a full timestamp) so repeated panel opens
 // within the same day upsert the same row instead of accumulating duplicates, while a new day
 // still gets its own row -- giving a real daily time series for a future factor_edge.py pass.
+//
+// Deliberately does NOT persist chart patterns: mc_chart_patterns_fetcher.py already does,
+// on its own schedule, into mc_chart_patterns/mc_pattern_signals (with a proper (mcsymbol,
+// pattern_id) key and downstream technical_signals.mc_cp_* columns already feeding the ML
+// pipeline) -- a second writer here would just duplicate an existing, more complete pipeline.
+//
 // Best-effort: never throws (all errors are caught and logged), so the caller below
 // deliberately does NOT `await` this -- it stays fire-and-forget in production. Returns its
 // Promise anyway (rather than `void`) purely so a test can await it deterministically.
@@ -718,6 +724,12 @@ export async function persistMcConsolidatedMetrics(symbol: string, data: {
   analystRating?: { finalRating?: string; analystCount?: string } | null;
   priceForecast?: { high?: string; mean?: string; low?: string } | null;
   hitsMisses?: { beats?: { total?: string }; misses?: { total?: string }; inline?: { total?: string } } | null;
+  swot?: { strengths?: string[]; weaknesses?: string[]; opportunities?: string[]; threats?: string[] } | null;
+  // MC's `data` here is `any` at the type level (see McHistoricalRating) because the response
+  // shape is only ever consumed positionally (`data[0]`) by the panel itself -- MC's own trend
+  // history beyond today is Pro-locked (see MCStockInfoPanel's displayLock check), so `data[0]`
+  // really is the whole usable payload, not an arbitrary slice of a larger series.
+  historicalRating?: { data?: Array<{ currSentiment?: string; closePrice?: number | string; currdate?: string }> } | null;
 }): Promise<void> {
   try {
     const today = new Date().toISOString().slice(0, 10);
@@ -741,8 +753,44 @@ export async function persistMcConsolidatedMetrics(symbol: string, data: {
     const totalCalls = beats + misses + inline;
     if (totalCalls > 0) push('estimates', 'beat_ratio', beats / totalCalls);
 
-    if (rows.length === 0) return;
-    await Promise.all(rows.map(([metric_group, metric_name, metric_value_num, metric_value_text, fetched_at]) =>
+    // SWOT text is qualitative and free-form -- not itself a clean numeric factor -- but the
+    // counts are, and net_score gives factor_edge.py a single directional number to test
+    // ("does a rising strength/opportunity count vs. weakness/threat count predict forward
+    // returns") without needing to parse text. The full items themselves go to mc_swot_history
+    // below, not into this numeric-metrics table.
+    const swotRowsText: { category: string; item: string }[] = [];
+    if (data.swot) {
+      const s = data.swot.strengths?.length ?? 0;
+      const w = data.swot.weaknesses?.length ?? 0;
+      const o = data.swot.opportunities?.length ?? 0;
+      const t = data.swot.threats?.length ?? 0;
+      if (s + w + o + t > 0) {
+        push('swot', 'strengths_count', s);
+        push('swot', 'weaknesses_count', w);
+        push('swot', 'opportunities_count', o);
+        push('swot', 'threats_count', t);
+        push('swot', 'net_score', (s + o) - (w + t));
+      }
+      for (const item of data.swot.strengths ?? []) swotRowsText.push({ category: 'strength', item });
+      for (const item of data.swot.weaknesses ?? []) swotRowsText.push({ category: 'weakness', item });
+      for (const item of data.swot.opportunities ?? []) swotRowsText.push({ category: 'opportunity', item });
+      for (const item of data.swot.threats ?? []) swotRowsText.push({ category: 'threat', item });
+    }
+
+    // Only data[0] is ever public (see the type comment above) -- MCStockInfoPanel already
+    // reads it the same way. bull_flag turns the free-text sentiment into a signed number a
+    // future factor_edge.py pass can test directly, same rationale as swot's net_score.
+    const hrRow = data.historicalRating?.data?.[0];
+    if (hrRow?.currSentiment) {
+      push('historical_rating', 'sentiment_text', null, hrRow.currSentiment);
+      const isBull = /bullish/i.test(hrRow.currSentiment);
+      const isBear = /bearish/i.test(hrRow.currSentiment);
+      push('historical_rating', 'bull_flag', isBull ? 1 : isBear ? -1 : 0);
+      const closePrice = Number(hrRow.closePrice);
+      if (Number.isFinite(closePrice)) push('historical_rating', 'close_price_at_sentiment', closePrice);
+    }
+
+    const writes: Promise<unknown>[] = rows.map(([metric_group, metric_name, metric_value_num, metric_value_text, fetched_at]) =>
       dbRun(
         `INSERT INTO mc_general_metrics (symbol, source_api, metric_group, metric_name, metric_value_num, metric_value_text, fetched_at)
          VALUES (?, 'mc_consolidated', ?, ?, ?, ?, ?)
@@ -750,7 +798,18 @@ export async function persistMcConsolidatedMetrics(symbol: string, data: {
            metric_value_num = excluded.metric_value_num, metric_value_text = excluded.metric_value_text`,
         [symbol.toUpperCase(), metric_group, metric_name, metric_value_num, metric_value_text, fetched_at]
       )
-    ));
+    );
+    for (const { category, item } of swotRowsText) {
+      writes.push(dbRun(
+        `INSERT INTO mc_swot_history (symbol, category, item_text, fetched_at)
+         VALUES (?, ?, ?, ?)
+         ON CONFLICT(symbol, category, item_text, fetched_at) DO NOTHING`,
+        [symbol.toUpperCase(), category, item, today]
+      ));
+    }
+
+    if (writes.length === 0) return;
+    await Promise.all(writes);
   } catch (e) {
     console.warn('[mcApiService] persistMcConsolidatedMetrics failed (non-fatal):', (e as Error)?.message);
   }
@@ -830,7 +889,7 @@ export async function getMcConsolidatedData(scId: string, symbol: string, timefr
     fetchWithCache('chart_patterns', () => fetchMcChartPatterns(effectiveScId, symbol)),
   ]);
 
-  persistMcConsolidatedMetrics(symbol, { mcInsights, analystRating, priceForecast, hitsMisses });
+  persistMcConsolidatedMetrics(symbol, { mcInsights, analystRating, priceForecast, hitsMisses, swot, historicalRating });
 
   return {
     scId: effectiveScId,

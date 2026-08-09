@@ -339,6 +339,14 @@ describe('generated freshness checks (TABLE_FRESHNESS_CHECKS via makeFreshnessCh
     const r = byId('news-sentiment-freshness').evaluate(undefined, now);
     expect(r.status).toBe('warn');
   });
+
+  it('mc-swot-history-freshness (request-time writer, no fixed schedule) never fails, only warns/passes', () => {
+    const check = byId('mc-swot-history-freshness');
+    expect(check.critical).toBe(false);
+    const sixtyDaysAgo = new Date(now.getTime() - 60 * 86_400_000).toISOString();
+    expect(check.evaluate({ last_date: sixtyDaysAgo }, now).status).toBe('warn');
+    expect(check.evaluate({ last_date: now.toISOString() }, now).status).toBe('pass');
+  });
 });
 
 describe('runDataQualityChecks (orchestration)', () => {
