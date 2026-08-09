@@ -688,19 +688,20 @@ export const AppShell: React.FC<AppShellProps> = ({
                 localStorage.setItem('v2Enabled', 'true');
                 window.location.reload();
               }}
-              className="bg-indigo-600 hover:bg-indigo-500 text-white font-black text-[9px] rounded-md px-2.5 py-1 uppercase tracking-wider cursor-pointer transition-colors"
+              className="bg-slate-900 border border-slate-800 text-slate-400 hover:text-slate-200 font-black text-[9px] rounded-md px-2.5 py-1 uppercase tracking-wider cursor-pointer transition-colors"
             >
               V3 Pro
             </button>
-            {/* v6 = the Phase 1 consolidation shell (src/v6/), reusing the same v2Enabled route
-                tree as v2/v3 -- see the "V6 Canonical Workbench" proposal. */}
+            {/* v6 = the consolidation shell (src/v6/), reusing the same v2Enabled route tree as
+                v2/v3 -- promoted to the default 2026-08-09 (see App.tsx's dashboardVersion
+                initializer), so this button now carries the "recommended" accent V3 used to. */}
             <button
               onClick={() => {
                 localStorage.setItem('dashboardVersion', 'v6');
                 localStorage.setItem('v2Enabled', 'true');
                 window.location.reload();
               }}
-              className="bg-teal-600 hover:bg-teal-500 text-white font-black text-[9px] rounded-md px-2.5 py-1 uppercase tracking-wider cursor-pointer transition-colors"
+              className="bg-indigo-600 hover:bg-indigo-500 text-white font-black text-[9px] rounded-md px-2.5 py-1 uppercase tracking-wider cursor-pointer transition-colors"
             >
               Workbench
             </button>

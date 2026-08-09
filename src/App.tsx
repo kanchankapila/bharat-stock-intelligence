@@ -206,15 +206,18 @@ export default function App() {
 
   const [selectedSymbol, setSelectedSymbol] = useState<string | null>(null);
   const [drawerSymbol, setDrawerSymbol] = useState<string | null>(null);
-  // 'v6' = the Phase 1 consolidation shell (V6Shell, see src/v6/) -- not yet the default; reachable
-  // via the version switcher in every other shell until the phased rollout (see the "V6 Canonical
-  // Workbench" proposal) promotes it. Renders through the same v2Enabled route tree as v2/v3 so it
+  // 'v6' = the consolidation shell (V6Shell, see src/v6/) -- promoted to the default 2026-08-09
+  // now that its home page (MarketCommandCenter) and desk pages (retrofit from v5) cover
+  // everything v2/v3 offered plus a real portfolio/MF tracker and multi-provider screener
+  // browser neither had. v1/v2/v3/v5 stay reachable via the version switcher for anyone who
+  // explicitly picks them (an existing `dashboardVersion` value in localStorage is always
+  // honored below); only a visitor with NO saved preference at all -- fresh or pre-v6 -- now
+  // lands on v6 instead of v3. Renders through the same v2Enabled route tree as v2/v3 so it
   // inherits every existing page for free -- only the shell chrome differs.
   const [dashboardVersion, setDashboardVersion] = useState<'v1' | 'v2' | 'v3' | 'v6'>(() => {
     const saved = localStorage.getItem('dashboardVersion');
     if (saved === 'v1' || saved === 'v2' || saved === 'v3' || saved === 'v6') return saved;
-    const v2 = localStorage.getItem('v2Enabled') === 'true';
-    return v2 ? 'v2' : 'v3'; // Default to v3
+    return 'v6';
   });
   const changeDashboardVersion = (version: 'v1' | 'v2' | 'v3' | 'v6') => {
     localStorage.setItem('dashboardVersion', version);
