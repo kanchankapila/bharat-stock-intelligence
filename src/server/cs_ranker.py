@@ -23,6 +23,9 @@ import pandas as pd
 from scipy.stats import spearmanr
 
 from db_compat import connect, read_df, ConnWrapper
+from model_promotion import (clears_promotion_bar, rejections_since,
+                              staleness_override_applies,
+                              DEFAULT_STALENESS_MAX_DAYS, DEFAULT_STALENESS_MAX_REJECTIONS)
 from as_of import as_of_join_sql
 
 # Import feature engineering from the binary ensemble — same pipeline, different label.
@@ -35,6 +38,14 @@ CS_CANDIDATE_PATH = CS_MODEL_PATH + '.candidate'
 # New held-out Spearman rho must beat the active model's by at least this much to be
 # promoted. Same value as live_screener_ml_ranker.py's PROMOTION_MARGIN.
 CS_PROMOTION_MARGIN = 0.01
+# Staleness-override safety valve (2026-08-06) -- see model_promotion.staleness_override_applies'
+# own docstring. cs_ranker had NO such valve before this: its active baseline (id, trained
+# 2026-07-30) predates the 2026-07-30 CV-leakage fix (commit aa5862d2), and every honest
+# post-fix retrain since (4 attempts, 2026-08-02/08-03) was rejected against a rho that can
+# never be legitimately beaten again -- confirmed live, a real, currently-stuck deadlock, not
+# hypothetical. Same DEFAULT_* thresholds as ensemble (7 days unbeaten + 10 rejections).
+CS_STALENESS_MAX_DAYS = DEFAULT_STALENESS_MAX_DAYS
+CS_STALENESS_MAX_REJECTIONS = DEFAULT_STALENESS_MAX_REJECTIONS
 MIN_DATE_SIGNALS = 5   # minimum signals per date to include in training
 
 
@@ -124,6 +135,7 @@ def load_cs_training_data() -> pd.DataFrame:
         WHERE so.outcome IN ('WIN', 'LOSS', 'STOP_LOSS')
           AND so.return_pct IS NOT NULL
           AND so.horizon_days = 5
+          AND so.signal_source = 'technical'
     """
     df = read_df(q)
     if df.empty:
@@ -252,13 +264,21 @@ def load_cs_model() -> dict | None:
 
 def _active_cs_baseline(conn: ConnWrapper) -> float | None:
     """Held-out Spearman rho of the currently active cs_ranker model, or None."""
+    row = _active_cs_baseline_row(conn)
+    return row['rho'] if row else None
+
+
+def _active_cs_baseline_row(conn: ConnWrapper) -> dict | None:
+    """id/rho/trained_at of the currently active cs_ranker model, or None. Needed (2026-08-06)
+    for the staleness-override safety valve below -- _active_cs_baseline() alone only exposed
+    the rho, not enough to compute the baseline's age or count rejections against it."""
     try:
         row = conn.execute(
-            "SELECT cv_roc_auc FROM model_registry "
+            "SELECT id, cv_roc_auc, trained_at FROM model_registry "
             "WHERE model_name = 'cs_ranker' AND is_active = 1 ORDER BY id DESC LIMIT 1"
         ).fetchone()
-        if row and row[0] is not None:
-            return float(row[0])
+        if row and row[1] is not None:
+            return {'id': row[0], 'rho': float(row[1]), 'trained_at': row[2]}
     except Exception:
         pass
     return None
@@ -276,6 +296,18 @@ def _register_cs_model(conn: ConnWrapper, m: dict) -> int:
     downstream consumer with no safety net. Now matches the champion/challenger gate
     ml_ensemble.py/live_screener_ml_ranker.py already use: only activate if the new held-out
     rho beats the active model's by >= CS_PROMOTION_MARGIN, or there is no active model yet.
+
+    NOTE on `cv_roc_auc` (2026-08-05, found via a live production review that misread this
+    row as a broken/bypassed-gate AUC value): `model_registry.cv_roc_auc` is a column shared
+    across every model_type this platform registers -- for classifiers (Stacking Ensemble,
+    OnlineSGD, deep_learning) it genuinely holds an AUC. cs_ranker is a LightGBM *regressor*
+    (model_type='LightGBM Regressor') with no AUC concept at all -- this column instead holds
+    its held-out cross-sectional Spearman rho (same value `_active_cs_baseline` reads). A
+    "cv_roc_auc≈0.107" active row is NOT a broken/inverted classifier bar clearing an AUC
+    floor it shouldn't; it's a normal rho for this model (historical range across retrains has
+    been ~0.05-0.24) that correctly beat every later retrain attempt's rho (0.078-0.094, all
+    4 logged REJECTED in this same table) under the gate above. Don't re-flag this as a
+    promotion-gate bypass without checking model_type first.
     """
     import json
     version  = datetime.datetime.utcnow().strftime('%Y%m%d_%H%M%S')
@@ -286,10 +318,24 @@ def _register_cs_model(conn: ConnWrapper, m: dict) -> int:
         pairs = sorted(zip(feats, mdl.feature_importances_), key=lambda x: -x[1])[:15]
         top_feats = [{'feature': f, 'importance': round(float(i), 6)} for f, i in pairs]
 
-    baseline_rho = _active_cs_baseline(conn)
+    baseline_row = _active_cs_baseline_row(conn)
+    baseline_rho = baseline_row['rho'] if baseline_row else None
     new_rho = m['spearman_rho']
-    promote = baseline_rho is None or new_rho >= baseline_rho + CS_PROMOTION_MARGIN
+    clears_bar = clears_promotion_bar(new_rho, baseline_rho, CS_PROMOTION_MARGIN)
 
+    # Staleness override (2026-08-06): a baseline whose rho predates a leak/bug fix (e.g. the
+    # 2026-07-30 CV-leakage fix) can become permanently unbeatable -- every honest post-fix
+    # retrain is measuring something the pre-fix baseline never had to. Mirrors
+    # ml_ensemble.py's promote_or_register(); see model_promotion.staleness_override_applies.
+    staleness_override = False
+    age_days = 0.0
+    rejections = 0
+    if baseline_row is not None and not clears_bar:
+        rejections = rejections_since(conn, 'cs_ranker', baseline_row['id'])
+        staleness_override, age_days = staleness_override_applies(
+            baseline_row['trained_at'], rejections, CS_STALENESS_MAX_DAYS, CS_STALENESS_MAX_REJECTIONS)
+
+    promote = clears_bar or staleness_override
     cur = conn.cursor()
     if not promote:
         save_cs_model(m, path=CS_CANDIDATE_PATH)
@@ -307,7 +353,8 @@ def _register_cs_model(conn: ConnWrapper, m: dict) -> int:
             version, m['trained_at'], m['n_samples'],
             new_rho, None,
             len(feats), json.dumps(top_feats), CS_CANDIDATE_PATH,
-            f"REJECTED spearman_rho={new_rho:.4f} vs baseline={baseline_rho:.4f}",
+            f"REJECTED spearman_rho={new_rho:.4f} vs baseline={baseline_rho:.4f}"
+            + (f" (baseline stale {age_days:.1f}d, {rejections} rejections so far)" if baseline_row else ""),
         ))
         model_id = cur.fetchone()[0]
         conn.commit()
@@ -316,6 +363,17 @@ def _register_cs_model(conn: ConnWrapper, m: dict) -> int:
 
     save_cs_model(m, path=CS_MODEL_PATH)
     cur.execute("UPDATE model_registry SET is_active = 0 WHERE model_name = 'cs_ranker' AND is_active = 1")
+    if baseline_row is None:
+        promo_note = f"spearman_rho={new_rho:.4f} (no prior model)"
+        promo_reason = "bootstrap (no active baseline)"
+    elif staleness_override:
+        promo_note = (f"spearman_rho={new_rho:.4f}; STALENESS OVERRIDE -- baseline "
+                       f"id={baseline_row['id']} unbeaten {age_days:.1f}d across {rejections} "
+                       f"rejections; adopting best-available candidate (baseline rho={baseline_rho:.4f})")
+        promo_reason = promo_note
+    else:
+        promo_note = f"spearman_rho={new_rho:.4f} (beat baseline {baseline_rho:.4f})"
+        promo_reason = f"rho {new_rho:.4f} >= active {baseline_rho:.4f}+{CS_PROMOTION_MARGIN}"
     cur.execute("""
         INSERT INTO model_registry
             (model_name, model_version, model_type, trained_at,
@@ -327,10 +385,11 @@ def _register_cs_model(conn: ConnWrapper, m: dict) -> int:
         version, m['trained_at'], m['n_samples'],
         new_rho, None,
         len(feats), json.dumps(top_feats), CS_MODEL_PATH,
-        f"spearman_rho={new_rho:.4f}" + (f" (beat baseline {baseline_rho:.4f})" if baseline_rho is not None else " (no prior model)"),
+        promo_note,
     ))
     model_id = cur.fetchone()[0]
     conn.commit()
+    print(f"[CSRanker] Promoted: {promo_reason}")
     print(f"[CSRanker] Registered as model_id={model_id} version={version} (ACTIVE)")
     return model_id
 

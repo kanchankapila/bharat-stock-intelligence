@@ -194,7 +194,7 @@ def _quarterly_rows(session, mcsymbol: str) -> list[dict]:
 def upsert_rows(conn, symbol: str, rows: list[dict]) -> int:
     count = 0
     for r in rows:
-        if use_postgres:
+        if use_postgres():
             conn.execute(text("""
                 INSERT INTO stock_earnings_beats
                     (symbol, quarter_date, period_type, beat_type, beat_score,

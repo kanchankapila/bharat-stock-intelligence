@@ -2,6 +2,11 @@ import { getStockMapping } from './stockMapping';
 import { fetchTrendlyneFundamentals } from './trendlyneService';
 import { mcFetchJson } from './mcApiService';
 import { dbAll } from './dbAsync';
+import {
+  parseMcAdRatioCategoryResponse,
+  parseMcSectorPerformanceResponse,
+  parseMcSectorStocksResponse,
+} from './contracts/marketFeeds';
 
 export { fetchTrendlyneFundamentals };
 
@@ -38,6 +43,33 @@ export async function fetchAllIndianIndices() {
   // https://api.moneycontrol.com/mcapi/v1/indices/get-indian-indices
   const url = `https://api.moneycontrol.com/mcapi/v1/indices/get-indian-indices`;
   return mcFetchJson(url);
+}
+
+// NiftyTrader's per-symbol spot feed (webapi.niftytrader.in/webapi/symbol/today-spot-data) --
+// live-verified to carry NIFTY/BANKNIFTY/SENSEX individually (real captured URLs in urls.txt:
+// symbol=NIFTY+BANK, symbol=sensex&exchange=bse). Used to fetch the 3 headline indices via 3
+// distinct URLs instead of one shared MoneyControl "all indices" call, so a tight 5s poll
+// spreads load across endpoints rather than hammering a single one; fetchAllIndianIndices()
+// above remains the fallback source if this fails.
+export async function fetchIndexSpot(symbol: string, exchange?: string) {
+  let url = `https://webapi.niftytrader.in/webapi/symbol/today-spot-data?symbol=${encodeURIComponent(symbol)}`;
+  if (exchange) url += `&exchange=${exchange}`;
+  const response = await fetch(url, {
+    headers: {
+      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)',
+      'Accept': 'application/json',
+    },
+    signal: AbortSignal.timeout(8000),
+  });
+  if (!response.ok) throw new Error(`NiftyTrader spot-data error: ${response.status}`);
+  const json = await response.json();
+  const d = json?.resultData;
+  if (json?.result !== 1 || !d) throw new Error('NiftyTrader spot-data: no resultData');
+  return {
+    value: Number(d.last_trade_price ?? 0),
+    change: Number(d.change_value ?? 0),
+    changePct: Number(d.change_per ?? 0),
+  };
 }
 
 export async function fetchMCRatios(symbol: string) {
@@ -202,9 +234,30 @@ export async function fetchSectorPerformance(opts?: {
     };
   }
   const url = `https://api.moneycontrol.com/mcapi/v1/sector/performance?dur=${dur}&type=${type}&section=${section}&limit=${limit}`;
-  return mcFetchJson(url);
+  const raw = await mcFetchJson(url);
+  return parseMcSectorPerformanceResponse(raw);
 }
 
+// Sector-wise advance/decline breadth -- a different cut than fetchSectorPerformance's price
+// return ranking: how many constituents of each sectoral index are up vs down right now.
+// https://api.moneycontrol.com/mcapi/v1/indices/ad-ratio/category-wise-list?ex=N&type=sector&categoryId=2
+export async function fetchSectorAdvanceDecline() {
+  const url = `https://api.moneycontrol.com/mcapi/v1/indices/ad-ratio/category-wise-list?ex=N&type=sector&categoryId=2`;
+  const raw = await mcFetchJson(url);
+  return parseMcAdRatioCategoryResponse(raw);
+}
+
+// Sector -> constituent-stock mapping with per-stock financials (mkt cap, EPS, div yield,
+// D/E, MC's technical-trend read) -- the "which stocks belong to this sector, with data"
+// view market-map didn't have. `slug` is MC's own sector taxonomy id, live-verified for:
+// finance, fmcg, oil-gas, power, metals-mining, healthcare, capital-goods, telecom,
+// chemicals, textiles, infrastructure, banks (see SECTOR_SLUGS in SectorIntelligence.tsx).
+// https://api.moneycontrol.com/mcapi/v1/sector/get-all-stocks/financials?section=sector&slug=finance
+export async function fetchSectorStocks(slug: string) {
+  const url = `https://api.moneycontrol.com/mcapi/v1/sector/get-all-stocks/financials?section=sector&slug=${encodeURIComponent(slug)}`;
+  const raw = await mcFetchJson(url);
+  return parseMcSectorStocksResponse(raw);
+}
 
 export async function fetchGlobalIndices() {
   const url = `https://api.moneycontrol.com/mcapi/v1/indices/get-global-indices`;

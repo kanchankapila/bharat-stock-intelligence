@@ -185,8 +185,10 @@ export async function saveScreenerStocksToDB(
       }
     });
 
-    // Update screener_master to reflect fresh sync time
-    await dbRun(`UPDATE screener_master SET last_updated = ?, stocks_synced_at = ? WHERE scan_id = ?`, [now, now, screenerId]);
+    // Update screener_master to reflect fresh sync time. screener_master's PK is (source,
+    // scan_id) -- an unscoped WHERE would touch every provider's row sharing this scan_id
+    // number, not just Trendlyne's (see the 2026-08-04 screener_master memory).
+    await dbRun(`UPDATE screener_master SET last_updated = ?, stocks_synced_at = ? WHERE scan_id = ? AND source = 'Trendlyne'`, [now, now, screenerId]);
 
     // Diff patch: record entries/exits in screener_appearances
     const today = new Date().toISOString().slice(0, 10);
@@ -625,12 +627,31 @@ export async function fetchTrendlyneScreenerData(
           // 1. Fetch Quant Scores
           const placeholders = symbols.map(() => '?').join(',');
           const qScores = await dbAll(`
-            SELECT symbol, rank_composite, return_1w, return_1m, composite_class
+            SELECT symbol, rank_composite, return_1w, return_1m, composite_class, piotroski_f_score
             FROM quant_scores
             WHERE symbol IN (${placeholders})
           `, symbols) as any[];
 
           const scoreMap = new Map(qScores.map(q => [q.symbol, q]));
+
+          // 1b. Fetch latest technical_signals snapshot for Moneycontrol/MarketMojo derived scores.
+          const mcSignals = await dbAll(`
+            SELECT
+              ts.symbol,
+              ts.ext_mojo_quality_rank,
+              ts.ext_mojo_valuation_rank,
+              ts.ext_mojo_financial_pts,
+              ts.mc_cp_net_score
+            FROM technical_signals ts
+            WHERE ts.symbol IN (${placeholders})
+              AND ts.date = (
+                SELECT MAX(ts2.date)
+                FROM technical_signals ts2
+                WHERE ts2.symbol = ts.symbol
+              )
+          `, symbols) as any[];
+
+          const mcSignalMap = new Map(mcSignals.map(m => [m.symbol, m]));
 
           // 2. Fetch Other Screeners
           const otherScrs = await dbAll(`
@@ -657,7 +678,17 @@ export async function fetchTrendlyneScreenerData(
                 if (s.return_1w === undefined) s.return_1w = score.return_1w;
                 if (s.return_1m === undefined) s.return_1m = score.return_1m;
                 s.classification = score.composite_class;
+                s.piotroski_f_score = score.piotroski_f_score;
               }
+
+              const mc = mcSignalMap.get(s.symbol);
+              if (mc) {
+                s.mc_cp_net_score = mc.mc_cp_net_score;
+                s.ext_mojo_quality_rank = mc.ext_mojo_quality_rank;
+                s.ext_mojo_valuation_rank = mc.ext_mojo_valuation_rank;
+                s.ext_mojo_financial_pts = mc.ext_mojo_financial_pts;
+              }
+
               s.otherScreeners = scrMap.get(s.symbol) || [];
             }
           });
@@ -849,14 +880,18 @@ export async function getTrendlyneScreenerList() {
   }
 
   // 2. Load the "New Analysis" metadata from screener_master
+  // Keyed by (source, scan_id) -- scan_id alone collides across providers (MC and ETnow both
+  // hand out overlapping small integers, see the 2026-08-04 screener_master memory), and this
+  // function combines all 3 providers into one result list, so a bare-scan_id map would
+  // silently apply one provider's classification to an unrelated screener from another.
   const masterMeta = new Map<string, any>();
   try {
     const rows = await dbAll(`
-      SELECT scan_id, inferred_sentiment, inferred_category, inferred_timeframe, confidence
+      SELECT scan_id, source, inferred_sentiment, inferred_category, inferred_timeframe, confidence
       FROM screener_master
     `) as any[];
     for (const r of rows) {
-      masterMeta.set(r.scan_id, r);
+      masterMeta.set(`${r.source}::${r.scan_id}`, r);
     }
   } catch (err) {
     console.error('❌ Error loading screener_master metadata:', err);
@@ -885,10 +920,16 @@ export async function getTrendlyneScreenerList() {
   const result = [];
   
   // 3. Process Trendlyne screeners
+  // `id` is namespaced per source (tl-/mc-/et-) below -- these 3 sources each hand out their
+  // own raw numeric id sequence (screener_id/scan_id/screener_id), so an unprefixed id from one
+  // source can collide with an unrelated screener's id from another (confirmed live 2026-08-04:
+  // React "duplicate key" warnings on the Quick Directory grid traced to exactly this). `id` is
+  // only ever used for React keys/selection-equality in TrendlyneScreenerPanel.tsx -- the actual
+  // data fetch keys off `screenpk`, which is untouched here, so this is safe to change.
   for (const s of trendlyneScreeners) {
-    const meta = masterMeta.get(s.screener_id);
+    const meta = masterMeta.get(`Trendlyne::${s.screener_id}`);
     result.push({
-      id: s.screener_id,
+      id: `tl-${s.screener_id}`,
       name: s.screener_name,
       description: s.description,
       screenpk: s.screenpk,
@@ -903,9 +944,9 @@ export async function getTrendlyneScreenerList() {
   
   // 4. Process MoneyControl screeners
   for (const mc of mcScreeners) {
-    const meta = masterMeta.get(mc.scan_id);
+    const meta = masterMeta.get(`MoneyControl::${mc.scan_id}`);
     result.push({
-      id: mc.scan_id,
+      id: `mc-${mc.scan_id}`,
       name: mc.screener_name,
       description: 'Moneycontrol ' + (mc.type === 'pro' ? 'Fundamental' : 'Technical') + ' Screener',
       screenpk: 'MC_' + mc.scan_id,
@@ -926,9 +967,9 @@ export async function getTrendlyneScreenerList() {
     `) as any[];
 
     for (const et of etScreeners) {
-      const meta = masterMeta.get(et.screener_id);
+      const meta = masterMeta.get(`ETnow::${et.screener_id}`);
       result.push({
-        id: et.screener_id,
+        id: `et-${et.screener_id}`,
         name: et.screener_name,
         description: 'ETnow Market Screener',
         screenpk: 'ET_' + et.screener_id,
@@ -1005,7 +1046,7 @@ export async function findScreenersByStock(stockId: string): Promise<Array<{
       SELECT s.screener_id, s.screener_name, s.screenpk, s.description, m.inferred_sentiment, s.sentiment as fallback_sentiment
       FROM trendlyne_screeners s
       JOIN trendlyne_screener_stocks ss ON s.screener_id = ss.screener_id
-      LEFT JOIN screener_master m ON s.screener_id = m.scan_id
+      LEFT JOIN screener_master m ON s.screener_id = m.scan_id AND m.source = 'Trendlyne'
       WHERE ss.stock_id = ? OR ss.symbol = ?
     `, [stockId, symbol]) as Array<{
       screener_id: string; 
@@ -1307,7 +1348,7 @@ export async function runIntradayScreenerScan(): Promise<{
     const allScreeners = await dbAll(`
       SELECT DISTINCT s.screener_id, s.screener_name, s.screenpk, s.sentiment, m.inferred_sentiment
       FROM trendlyne_screeners s
-      LEFT JOIN screener_master m ON s.screener_id = m.scan_id
+      LEFT JOIN screener_master m ON s.screener_id = m.scan_id AND m.source = 'Trendlyne'
       WHERE s.timeframe = 'intraday' OR m.inferred_timeframe = 'intraday'
     `) as any[];
 

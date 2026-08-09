@@ -2,11 +2,16 @@ import React from 'react';
 import { Card } from './Card';
 import { trpc } from '../lib/trpc';
 import { cn } from '../lib/utils';
-import { 
-  Bookmark as WatchlistIcon, Minus 
+import {
+  Bookmark as WatchlistIcon, Minus
 } from 'lucide-react';
+import {
+  ResponsiveContainer, BarChart, Bar
+} from 'recharts';
 import { useIntersectionObserver } from '../hooks/useIntersectionObserver';
 import { MarketData } from '../services/marketService';
+import { relativeFromNow, formatISTWithLocal } from '../lib/timeFormat';
+import { AddToPortfolioButton } from './AddToPortfolioButton';
 
 interface WatchlistProps {
   watchlist: string[];
@@ -20,37 +25,80 @@ interface WatchlistProps {
   }>;
   onSelectStock: (symbol: string) => void;
   onRemove: (symbol: string) => void;
+  userId?: string | null;
 }
 
-export const Watchlist: React.FC<WatchlistProps> = ({ 
-  watchlist, 
-  stocks, 
+const WatchlistSparkline: React.FC<{ symbol: string; isUp: boolean; enabled: boolean }> = ({ symbol, isUp, enabled }) => {
+  const { data } = trpc.getOHLCData.useQuery(
+    { symbol, dur: '1m' },
+    { enabled, staleTime: 5 * 60 * 1000, refetchOnWindowFocus: false }
+  );
+
+  const bars = React.useMemo(() => {
+    const closes: number[] = (data?.data ?? []).map((d: any) => d.close).filter((c: number) => Number.isFinite(c));
+    return closes.slice(-8).map(v => ({ v }));
+  }, [data]);
+
+  if (bars.length < 2) return <div className="h-8 w-20" />;
+
+  return (
+    <div className="h-8 w-20">
+      <ResponsiveContainer width="100%" height="100%">
+        <BarChart data={bars}>
+          <Bar dataKey="v" fill={isUp ? "#10b981" : "#f43f5e"} opacity={0.3} radius={[2, 2, 0, 0]} />
+        </BarChart>
+      </ResponsiveContainer>
+    </div>
+  );
+};
+
+export const Watchlist: React.FC<WatchlistProps> = ({
+  watchlist,
+  stocks,
   watchlistDetails,
-  onSelectStock, 
-  onRemove 
+  onSelectStock,
+  onRemove,
+  userId
 }) => {
   const ref = React.useRef<HTMLDivElement>(null);
   const isVisible = useIntersectionObserver(ref, { threshold: 0.1 });
 
-  const { data: liveQuotes } = trpc.getLiveQuotesBatch.useQuery(watchlist, {
+  const { data: liveQuotes, dataUpdatedAt: quotesUpdatedAt } = trpc.getLiveQuotesBatch.useQuery(watchlist, {
     enabled: isVisible && watchlist.length > 0,
     refetchInterval: isVisible ? 10000 : false,
   });
 
-  const watchlistStocks = stocks.filter(s => watchlist.includes(s.symbol)).map(stock => {
-    const live = liveQuotes?.find((q: any) => q.symbol === stock.symbol);
-    const detail = watchlistDetails?.find(d => d.symbol === stock.symbol);
-    
-    return { 
-      ...stock, 
-      price: live ? live.price : stock.price, 
-      changePct: live ? (live.changePct ?? stock.changePct) : stock.changePct,
-      capturedPrice: detail?.price,
-      capturedName: detail?.name,
-      capturedDate: detail?.addedAt,
-      capturedSource: detail?.source
-    };
-  });
+  // > 3x the poll interval means the last poll likely failed silently rather than the tab
+  // just having been backgrounded (isVisible gates polling off entirely when backgrounded,
+  // so a live stale reading here only fires while the panel is actually on-screen).
+  const quotesAreStale = quotesUpdatedAt > 0 && Date.now() - quotesUpdatedAt > 30_000;
+
+  const { data: closeSeries } = trpc.getRecentCloseSeries.useQuery(
+    { symbols: watchlist, days: 15 },
+    { enabled: isVisible && watchlist.length > 0, staleTime: 15 * 60_000 }
+  );
+
+  // Was an un-memoized filter->map with a nested O(n·m) .find() per row against liveQuotes and
+  // watchlistDetails, recomputed on every render including the unrelated 10s liveQuotes poll
+  // tick. Build lookup Maps once per data change instead of re-scanning both arrays per row.
+  const watchlistStocks = React.useMemo(() => {
+    const watchSet = new Set(watchlist);
+    const liveBySymbol = new Map<string, any>((liveQuotes ?? []).map((q: any) => [q.symbol, q]));
+    const detailBySymbol = new Map((watchlistDetails ?? []).map(d => [d.symbol, d]));
+    return stocks.filter(s => watchSet.has(s.symbol)).map(stock => {
+      const live = liveBySymbol.get(stock.symbol);
+      const detail = detailBySymbol.get(stock.symbol);
+      return {
+        ...stock,
+        price: live ? live.price : stock.price,
+        changePct: live ? (live.changePct ?? stock.changePct) : stock.changePct,
+        capturedPrice: detail?.price,
+        capturedName: detail?.name,
+        capturedDate: detail?.addedAt,
+        capturedSource: detail?.source
+      };
+    });
+  }, [stocks, watchlist, liveQuotes, watchlistDetails]);
 
   return (
     <div ref={ref} className="p-4 space-y-4">
@@ -60,7 +108,17 @@ export const Watchlist: React.FC<WatchlistProps> = ({
             <WatchlistIcon className="w-5 h-5 text-indigo-400" />
             My Watchlist
           </h2>
-          <p className="text-slate-400 text-xs mt-1">Tracking your selected assets</p>
+          <p className="text-slate-400 text-xs mt-1">
+            Tracking your selected assets
+            {watchlistStocks.length > 0 && quotesUpdatedAt > 0 && (
+              <span
+                className={cn('ml-2', quotesAreStale ? 'text-amber-400 font-semibold' : 'text-slate-500')}
+                title={formatISTWithLocal(quotesUpdatedAt)}
+              >
+                · prices {relativeFromNow(quotesUpdatedAt)}{quotesAreStale ? ' — may be delayed' : ''}
+              </span>
+            )}
+          </p>
         </div>
       </div>
 
@@ -68,9 +126,6 @@ export const Watchlist: React.FC<WatchlistProps> = ({
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
           {watchlistStocks.map(stock => {
             const isUp = stock.changePct >= 0;
-            const dayRangePct = stock.high > stock.low
-              ? Math.min(100, Math.max(0, ((stock.price - stock.low) / (stock.high - stock.low)) * 100))
-              : 50;
             return (
               <Card 
                 key={stock.symbol} 
@@ -78,8 +133,9 @@ export const Watchlist: React.FC<WatchlistProps> = ({
                 onClick={() => onSelectStock(stock.symbol)}
               >
                 <div>
-                  <div className="absolute top-0 right-0 p-4 z-10">
-                    <button 
+                  <div className="absolute top-0 right-0 p-4 z-10 flex items-center gap-1.5">
+                    <AddToPortfolioButton symbol={stock.symbol} currentPrice={stock.price} userId={userId} className="bg-slate-900/60 text-slate-300 backdrop-blur-md" />
+                    <button
                       onClick={(e) => { e.stopPropagation(); onRemove(stock.symbol); }}
                       className="p-1.5 bg-rose-500/10 backdrop-blur-md rounded-lg text-rose-500 hover:bg-rose-500 hover:text-indigo-600 transition-all shadow-lg border border-rose-500/20"
                       title="Remove from Watchlist"
@@ -108,17 +164,21 @@ export const Watchlist: React.FC<WatchlistProps> = ({
                         <p className="text-[7px] font-black text-slate-400 uppercase tracking-widest mb-1">LTP</p>
                         <p className="text-xl font-black text-white tabular-nums tracking-tight italic">₹{stock.price.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</p>
                      </div>
-                     <div className="h-8 w-20 flex flex-col justify-center gap-1" title={`Day range: ${'₹'}${stock.low.toLocaleString('en-IN')} - ${'₹'}${stock.high.toLocaleString('en-IN')}`}>
-                        <div className="relative h-1.5 w-full bg-slate-800 rounded-full overflow-hidden">
-                           <div
-                              className="absolute top-0 bottom-0 w-[3px] rounded-full"
-                              style={{ left: `calc(${dayRangePct}% - 1.5px)`, background: isUp ? '#10b981' : '#f43f5e' }}
-                           />
-                        </div>
-                        <div className="flex justify-between text-[6px] text-slate-500 font-black tabular-nums leading-none">
-                           <span>{stock.low.toLocaleString('en-IN')}</span>
-                           <span>{stock.high.toLocaleString('en-IN')}</span>
-                        </div>
+                     <div className="h-8 w-20">
+                        {(() => {
+                          const closes = closeSeries?.[stock.symbol];
+                          if (!closes || closes.length < 2) {
+                            return <span className="text-[8px] text-slate-600 italic">No trend yet</span>;
+                          }
+                          const data = closes.map(v => ({ v }));
+                          return (
+                            <ResponsiveContainer width="100%" height="100%">
+                               <BarChart data={data}>
+                                  <Bar dataKey="v" fill={isUp ? "#10b981" : "#f43f5e"} opacity={0.5} radius={[2, 2, 0, 0]} />
+                               </BarChart>
+                            </ResponsiveContainer>
+                          );
+                        })()}
                      </div>
                   </div>
                 </div>

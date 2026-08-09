@@ -5,7 +5,7 @@ import stockData from '../data/stocklist';
 import {
   TrendingUp, TrendingDown, Activity, Zap, Info, AlertCircle,
   BarChart3, PieChart, Users, Filter, ArrowUpRight,
-  CheckCircle2, BrainCircuit, Search, Database, History, Newspaper
+  CheckCircle2, BrainCircuit, Search, Database, History, Newspaper, Gift
 } from 'lucide-react';
 import { motion } from 'motion/react';
 import {
@@ -16,6 +16,13 @@ import {
   AdvancedChartWidget 
 } from './TradingViewWidgets';
 import { McNewsCard, McNewsLinks, McNewsEmptyState } from './McNewsCard';
+
+const ACTION_TYPE_COLORS: Record<string, string> = {
+  dividend: 'text-emerald-400 bg-emerald-500/10',
+  bonus: 'text-indigo-400 bg-indigo-500/10',
+  split: 'text-sky-400 bg-sky-500/10',
+  rights: 'text-amber-400 bg-amber-500/10',
+};
 
 
 const Candlestick = (props: any) => {
@@ -185,14 +192,34 @@ const TrendlyneChecklistCard: React.FC<{ checklist: any }> = ({ checklist }) => 
 interface MCStockInfoPanelProps {
   symbol: string;
   scId: string;
-  section?: 'all' | 'technical' | 'fundamental' | 'insights' | 'overview' | 'shareholding' | 'peers' | 'trendlyne' | 'news';
+  section?: 'all' | 'technical' | 'fundamental' | 'earnings' | 'insights' | 'overview' | 'shareholding' | 'peers' | 'trendlyne' | 'news' | 'actions';
   onSelectStock?: (symbol: string) => void;
   watchlist?: string[];
   onToggleWatchlist?: (symbol: string, metadata?: { price?: number; name?: string; source?: string }) => void;
 }
 
 type Timeframe = 'D' | 'W' | 'M';
-type Tab = 'overview' | 'technical' | 'financials' | 'fno' | 'ai_report' | 'news';
+type Tab = 'overview' | 'technical' | 'financials' | 'earnings' | 'fno' | 'ai_report' | 'news' | 'actions';
+
+function PanelSectionHeader({
+  title,
+  subtitle,
+  right,
+}: {
+  title: string;
+  subtitle?: string;
+  right?: React.ReactNode;
+}) {
+  return (
+    <div className="mb-3 flex flex-wrap items-start justify-between gap-2 border-b border-slate-800/70 pb-2.5">
+      <div>
+        <h3 className="text-[11px] font-black uppercase tracking-[0.16em] text-slate-200">{title}</h3>
+        {subtitle ? <p className="mt-1 text-[10px] font-semibold text-slate-500">{subtitle}</p> : null}
+      </div>
+      {right ? <div className="shrink-0">{right}</div> : null}
+    </div>
+  );
+}
 
 export const MCStockInfoPanel: React.FC<MCStockInfoPanelProps> = ({ 
   symbol, 
@@ -205,11 +232,13 @@ export const MCStockInfoPanel: React.FC<MCStockInfoPanelProps> = ({
   const [activeTab, setActiveTab] = React.useState<Tab>(
     section === 'technical' ? 'technical' :
     section === 'fundamental' ? 'financials' :
+    section === 'earnings' ? 'earnings' :
     section === 'insights' ? 'ai_report' :
     section === 'overview' ? 'overview' :
     section === 'shareholding' ? 'financials' :
     section === 'trendlyne' ? 'ai_report' :
     section === 'news' ? 'news' :
+    section === 'actions' ? 'actions' :
     section === 'peers' ? 'financials' : 'overview'
   );
 
@@ -226,12 +255,14 @@ export const MCStockInfoPanel: React.FC<MCStockInfoPanelProps> = ({
   React.useEffect(() => {
     if (section === 'technical') setActiveTab('technical');
     else if (section === 'fundamental') setActiveTab('financials');
+    else if (section === 'earnings') setActiveTab('earnings');
     else if (section === 'insights') setActiveTab('ai_report');
     else if (section === 'overview') setActiveTab('overview');
     else if (section === 'shareholding') setActiveTab('financials');
     else if (section === 'peers') setActiveTab('financials');
     else if (section === 'trendlyne') setActiveTab('ai_report');
     else if (section === 'news') setActiveTab('news');
+    else if (section === 'actions') setActiveTab('actions');
   }, [section]);
   const containerRef = React.useRef<HTMLDivElement>(null);
   const [isVisible, setIsVisible] = React.useState(false);
@@ -310,7 +341,31 @@ export const MCStockInfoPanel: React.FC<MCStockInfoPanelProps> = ({
 
   const { data: peersData, isLoading: loadingPeers } = trpc.getNSEStocksBySector.useQuery(
     { sector: nseStockData?.sector ?? '' },
-    { enabled: isVisible && activeTab === 'financials' && !!nseStockData?.sector }
+    { enabled: isVisible && (activeTab === 'financials' || activeTab === 'earnings') && !!nseStockData?.sector }
+  );
+
+  // "Results & Earnings" tab content -- previously this tab fetched nothing of its own and
+  // silently rendered the Financials tab's content under a relabeled header (the "Forecasts,
+  // surprises, ratings and action calendar" subtitle described data that was never queried).
+  const { data: mcAnalystRating } = trpc.getMcAnalystRating.useQuery(
+    { symbol },
+    { enabled: isVisible && activeTab === 'earnings', staleTime: 3600000 }
+  );
+  const { data: mcEarningsForecast } = trpc.getMcEarningsForecast.useQuery(
+    { symbol },
+    { enabled: isVisible && activeTab === 'earnings', staleTime: 3600000 }
+  );
+  const { data: mcPriceForecast } = trpc.getMcPriceForecast.useQuery(
+    { symbol },
+    { enabled: isVisible && activeTab === 'earnings', staleTime: 3600000 }
+  );
+  const { data: mcConsensus } = trpc.getMcConsensus.useQuery(
+    { symbol },
+    { enabled: isVisible && activeTab === 'earnings', staleTime: 3600000 }
+  );
+  const { data: corporateActions } = trpc.getCorporateActions.useQuery(
+    { symbol },
+    { enabled: isVisible && activeTab === 'earnings', staleTime: 3600000 }
   );
 
 
@@ -349,6 +404,17 @@ export const MCStockInfoPanel: React.FC<MCStockInfoPanelProps> = ({
   const { data: mcNewsData, isLoading: loadingMcNews } = trpc.getMcStockNews.useQuery(
     { symbol },
     { enabled: isVisible && activeTab === 'news', staleTime: 60000 }
+  );
+
+  // Deep corporate-action history (dividends/bonus/splits/rights), 2026-08-07 urls.txt
+  // open-source sourcing pass — DB-backed, unlike the live-only getCorporateActions.
+  const { data: actionHistory, isLoading: loadingActionHistory } = trpc.getCorporateActionHistory.useQuery(
+    { symbol },
+    { enabled: isVisible && activeTab === 'actions', staleTime: 300000 }
+  );
+  const { data: filedActions, isLoading: loadingFiledActions } = trpc.getFiledCorporateActionsCalendar.useQuery(
+    { symbol, daysBack: 180, daysForward: 180 },
+    { enabled: isVisible && activeTab === 'actions', staleTime: 300000 }
   );
 
   if (!isVisible && !unifiedData) {
@@ -432,18 +498,66 @@ export const MCStockInfoPanel: React.FC<MCStockInfoPanelProps> = ({
   const currentPrice = eq?.pricecurrent || sp?.lastPrice || tech?.close?.toString() || '—';
   const changePct = eq?.pricepercentchange || sp?.perChange || '—';
 
+  const providerStatus = [
+    { name: 'MoneyControl', ok: !!eq || !!tech || !!classification },
+    { name: 'Trendlyne', ok: !!trendlyneOverview || !!trendlyneTa },
+    { name: 'TradeBrains', ok: !!tb },
+    { name: 'NSE/NiftyTrader', ok: !!niftyTraderData || !!nseStockData },
+  ];
+
   const TABS: { key: Tab; label: string }[] = [
     { key: 'overview',   label: 'Overview Cockpit' },
     { key: 'technical',  label: 'Technical Gauges' },
     { key: 'financials', label: 'Financials & Peers' },
+    { key: 'earnings',   label: 'Results & Earnings' },
     { key: 'fno',        label: 'Options & Flow (F&O)' },
     { key: 'ai_report',  label: 'AI Auditor Report' },
     { key: 'news',       label: 'Stock News' },
+    { key: 'actions',    label: 'Corporate Actions' },
   ];
 
 
   return (
-    <div ref={containerRef} className="space-y-4">
+    <div ref={containerRef} className="space-y-6">
+
+      <div className="rounded-2xl border border-slate-800 bg-slate-950/55 p-4">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <p className="text-[10px] font-black uppercase tracking-[0.18em] text-slate-500">Institutional Stock Intelligence</p>
+            <h2 className="mt-1 text-lg font-black tracking-tight text-white">{symbol}</h2>
+            <p className="mt-1 text-[10px] font-semibold text-slate-400">
+              Multi-provider research surface across valuation, ownership, earnings, options and technical context.
+            </p>
+          </div>
+          <div className="flex flex-col items-end gap-1">
+            <div className={cn(
+              "text-base font-black tabular-nums",
+              parseFloat(String(changePct || 0)) >= 0 ? "text-emerald-400" : "text-rose-400"
+            )}>
+              ₹{currentPrice}
+            </div>
+            <div className="text-[10px] font-black uppercase tracking-widest text-slate-500">
+              {changePct ? `${parseFloat(String(changePct)) >= 0 ? '+' : ''}${changePct}%` : 'day move unavailable'}
+            </div>
+          </div>
+        </div>
+
+        <div className="mt-3 flex flex-wrap items-center gap-1.5">
+          {providerStatus.map((src) => (
+            <span
+              key={src.name}
+              className={cn(
+                "rounded-full border px-2 py-0.5 text-[9px] font-black uppercase tracking-widest",
+                src.ok
+                  ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-400"
+                  : "border-slate-700 bg-slate-900 text-slate-500"
+              )}
+            >
+              {src.name}
+            </span>
+          ))}
+        </div>
+      </div>
 
       {/* ── HEADER: Scores (Only show in 'all' or 'overview') ── */}
       {(!section || section === 'all' || section === 'overview') && (
@@ -529,6 +643,10 @@ export const MCStockInfoPanel: React.FC<MCStockInfoPanelProps> = ({
       {/* ── Trendlyne Price Return Insights (Visible on top across all tabs) ── */}
       {trendlyneTa?.body?.parameters?.price_analysis && (
         <div className="bg-slate-950/40 border border-slate-800/80 rounded-2xl p-3 space-y-2">
+          <PanelSectionHeader
+            title="Price Regime"
+            subtitle="Trendlyne benchmark-relative return posture"
+          />
           <div className="flex items-center justify-between">
             <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest flex items-center gap-1.5">
               <TrendingUp className="w-3.5 h-3.5 text-indigo-500" />
@@ -589,21 +707,24 @@ export const MCStockInfoPanel: React.FC<MCStockInfoPanelProps> = ({
 
       {/* ── TAB BAR (Only show if section is 'all' or undefined) ── */}
       {(!section || section === 'all') && (
-        <div className="flex border-b border-white/[0.06] overflow-x-auto gap-1 scrollbar-none">
-          {TABS.map(tab => (
-            <button
-              key={tab.key}
-              onClick={() => setActiveTab(tab.key)}
-              className={cn(
-                "px-4 py-2 text-[10px] font-black uppercase tracking-widest transition-all whitespace-nowrap border-b-2 -mb-px",
-                activeTab === tab.key
-                  ? "border-blue-500 text-blue-400 font-extrabold"
-                  : "border-transparent text-slate-500 hover:text-slate-300"
-              )}
-            >
-              {tab.label}
-            </button>
-          ))}
+        <div className="rounded-2xl border border-slate-800 bg-slate-950/35 p-1.5">
+          <div className="mb-1.5 px-2 text-[9px] font-black uppercase tracking-[0.16em] text-slate-500">Research Lenses</div>
+          <div className="flex overflow-x-auto gap-1 scrollbar-none">
+            {TABS.map(tab => (
+              <button
+                key={tab.key}
+                onClick={() => setActiveTab(tab.key)}
+                className={cn(
+                  "rounded-xl border px-3 py-2 text-[10px] font-black uppercase tracking-widest transition-all whitespace-nowrap",
+                  activeTab === tab.key
+                    ? "border-blue-500 bg-blue-500/10 text-blue-300"
+                    : "border-transparent text-slate-500 hover:border-slate-700 hover:bg-slate-900/60 hover:text-slate-300"
+                )}
+              >
+                {tab.label}
+              </button>
+            ))}
+          </div>
         </div>
       )}
 
@@ -644,7 +765,11 @@ export const MCStockInfoPanel: React.FC<MCStockInfoPanelProps> = ({
       })()}
 
       {activeTab === 'overview' && (
-        <div className="space-y-4">
+        <div className="rounded-2xl border border-slate-800 bg-slate-950/30 p-4 space-y-4">
+          <PanelSectionHeader
+            title="Overview Synthesis"
+            subtitle="Unified multi-engine read with valuation and profile context"
+          />
           {/* High-Density Intelligence Grid */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
             {/* AlphaQuant Factor Breakdown */}
@@ -667,15 +792,22 @@ export const MCStockInfoPanel: React.FC<MCStockInfoPanelProps> = ({
                     </div>
                   ))}
                 </div>
-                <div className="mt-3">
-                  <div className="flex items-center justify-between text-[8px] font-black uppercase tracking-widest text-slate-405 mb-1">
-                    <span>Aggregate</span>
-                    <span className="text-blue-400">{(alphaData.factors.momentum * 10).toFixed(0)}%</span>
-                  </div>
-                  <div className="h-0.5 w-full bg-slate-900 rounded-full overflow-hidden">
-                    <div className="h-full bg-blue-500 rounded-full" style={{ width: `${alphaData.factors.momentum * 10}%` }} />
-                  </div>
-                </div>
+                {(() => {
+                  const f = alphaData.factors;
+                  const aggregateRaw = (f.technical + f.fundamental + f.momentum + f.valuation + f.delivery) / 5 * 10;
+                  const aggregatePct = Math.max(0, Math.min(100, aggregateRaw));
+                  return (
+                    <div className="mt-3">
+                      <div className="flex items-center justify-between text-[8px] font-black uppercase tracking-widest text-slate-405 mb-1">
+                        <span>Aggregate (derived)</span>
+                        <span className="text-blue-400">{aggregatePct.toFixed(0)}%</span>
+                      </div>
+                      <div className="h-0.5 w-full bg-slate-900 rounded-full overflow-hidden">
+                        <div className="h-full bg-blue-500 rounded-full" style={{ width: `${aggregatePct}%` }} />
+                      </div>
+                    </div>
+                  );
+                })()}
               </div>
             )}
 
@@ -962,8 +1094,121 @@ export const MCStockInfoPanel: React.FC<MCStockInfoPanelProps> = ({
       {/* ══════════════════════════════════════════════════════════════ */}
       {/* FINANCIALS TAB                                                 */}
       {/* ══════════════════════════════════════════════════════════════ */}
-      {activeTab === 'financials' && (
-        <div className="space-y-6">
+      {(activeTab === 'financials' || activeTab === 'earnings') && (
+        <div className="rounded-2xl border border-slate-800 bg-slate-950/30 p-4 space-y-6">
+          <PanelSectionHeader
+            title={activeTab === 'earnings' ? 'Results & Earnings' : 'Financials Core'}
+            subtitle={activeTab === 'earnings' ? 'Forecasts, surprises, ratings and action calendar' : 'Valuation matrix, profitability and events'}
+          />
+
+          {activeTab === 'earnings' && (() => {
+            const rating = mcAnalystRating as any;
+            const forecast = mcEarningsForecast as any;
+            const priceTarget = mcPriceForecast as any;
+            const consensus = mcConsensus as any;
+            const actions = corporateActions as any;
+            const hasRating = rating && rating.finalRating;
+            const hasPriceTarget = priceTarget && (priceTarget.high || priceTarget.mean || priceTarget.low);
+            const hasForecast = forecast && (forecast.eps?.length || forecast.revenue?.length || forecast.netProfit?.length);
+            const hasConsensus = consensus && Array.isArray(consensus.graphData) && consensus.graphData.length > 0;
+            const actionsList = Array.isArray(actions) ? actions : [];
+            const latestRow = (rows?: { date: string; high: string; low: string; avg: string; actual: string }[]) =>
+              rows && rows.length > 0 ? rows[rows.length - 1] : null;
+
+            return (
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-6">
+                <Card title="Analyst Rating & Price Target" icon={BarChart3}>
+                  {!hasRating && !hasPriceTarget ? (
+                    <div className="text-[10px] font-semibold text-slate-500 py-4">No analyst coverage data captured yet for {symbol}.</div>
+                  ) : (
+                    <div className="space-y-3 pt-2">
+                      {hasRating && (
+                        <div className="flex items-center justify-between flex-wrap gap-2">
+                          <div>
+                            <span className={cn(
+                              'text-sm font-black uppercase tracking-wide',
+                              /buy/i.test(rating.finalRating) ? 'text-emerald-400' : /sell/i.test(rating.finalRating) ? 'text-rose-400' : 'text-amber-400'
+                            )}>{rating.finalRating}</span>
+                            <div className="text-[10px] text-slate-500 mt-0.5">{rating.analystCount} analysts covering</div>
+                          </div>
+                          {Array.isArray(rating.ratings) && (
+                            <div className="flex gap-1.5 flex-wrap">
+                              {rating.ratings.map((r: any, i: number) => (
+                                <span key={i} className="text-[9px] px-1.5 py-0.5 rounded bg-slate-800 text-slate-300">{r.name}: {r.value}</span>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      )}
+                      {hasPriceTarget && (
+                        <div className="grid grid-cols-3 gap-2 pt-2 border-t border-slate-800/60">
+                          <CompactMetricCard label="Low Target" value={priceTarget.low != null ? `₹${priceTarget.low}` : '—'} color="text-rose-400" />
+                          <CompactMetricCard label="Mean Target" value={priceTarget.mean != null ? `₹${priceTarget.mean}` : '—'} />
+                          <CompactMetricCard label="High Target" value={priceTarget.high != null ? `₹${priceTarget.high}` : '—'} color="text-emerald-400" />
+                        </div>
+                      )}
+                      {hasConsensus && (
+                        <div className="pt-2 border-t border-slate-800/60">
+                          <div className="text-[9px] font-black text-slate-500 uppercase tracking-widest mb-1.5">Latest Consensus Mix</div>
+                          <div className="flex flex-wrap gap-1.5">
+                            {consensus.graphData.map((series: any, i: number) => (
+                              Array.isArray(series.data) && series.data.length > 0 && (
+                                <span key={i} className="text-[9px] px-1.5 py-0.5 rounded bg-indigo-500/10 text-indigo-300 border border-indigo-500/20">
+                                  {series.name}: {series.data[series.data.length - 1]}
+                                </span>
+                              )
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </Card>
+
+                <Card title="Earnings Estimates (latest period)" icon={History}>
+                  {!hasForecast ? (
+                    <div className="text-[10px] font-semibold text-slate-500 py-4">No earnings estimate data captured yet for {symbol}.</div>
+                  ) : (
+                    <div className="space-y-2.5 pt-2">
+                      {([
+                        ['EPS', latestRow(forecast.eps)],
+                        ['Net Profit', latestRow(forecast.netProfit)],
+                        ['Revenue', latestRow(forecast.revenue)],
+                      ] as [string, ReturnType<typeof latestRow>][]).map(([label, row]) => row && (
+                        <div key={label} className="p-2.5 bg-slate-950/60 rounded-xl border border-slate-800/50">
+                          <div className="flex items-center justify-between text-[9px] text-slate-500 uppercase tracking-widest mb-1">
+                            <span>{label}</span><span>{row.date}</span>
+                          </div>
+                          <div className="grid grid-cols-4 gap-2 text-center">
+                            <div><div className="text-xs font-mono font-bold text-slate-100">{row.avg}</div><div className="text-[8px] text-slate-600">Avg Est</div></div>
+                            <div><div className="text-xs font-mono font-bold text-rose-400">{row.low}</div><div className="text-[8px] text-slate-600">Low Est</div></div>
+                            <div><div className="text-xs font-mono font-bold text-emerald-400">{row.high}</div><div className="text-[8px] text-slate-600">High Est</div></div>
+                            <div><div className="text-xs font-mono font-bold text-indigo-300">{row.actual || '—'}</div><div className="text-[8px] text-slate-600">Actual</div></div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </Card>
+
+                <Card title="Corporate Actions" icon={History} className="lg:col-span-2">
+                  {actionsList.length === 0 ? (
+                    <div className="text-[10px] font-semibold text-slate-500 py-4">No recent corporate actions for {symbol}.</div>
+                  ) : (
+                    <div className="space-y-1.5 max-h-72 overflow-y-auto terminal-scrollbar pt-2">
+                      {actionsList.map((a: any, i: number) => (
+                        <div key={i} className="flex justify-between text-[11px] text-slate-400 border-b border-slate-800/40 pb-1">
+                          <span>{a.action_type ?? a.purpose}</span>
+                          <span className="font-mono text-slate-300">{a.ex_date}</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </Card>
+              </div>
+            );
+          })()}
+
           {/* High-Density Valuation & Key Metrics */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
             {/* Dividends (Trendlyne) */}
@@ -1112,7 +1357,7 @@ export const MCStockInfoPanel: React.FC<MCStockInfoPanelProps> = ({
                     <div key={period} className="p-2.5 bg-slate-950 rounded-xl border border-slate-800/50 text-center">
                       <p className="text-[7px] font-black text-slate-500 uppercase tracking-widest mb-0.5">{period}</p>
                       <p className={cn("text-[11px] font-black italic", Number(val) >= 0 ? "text-emerald-400" : "text-rose-400")}>
-                        {Number(val) >= 0 ? '+' : ''}{val}%
+                        {Number(val) >= 0 ? '+' : ''}{String(val)}%
                       </p>
                     </div>
                   ))}
@@ -1646,7 +1891,11 @@ export const MCStockInfoPanel: React.FC<MCStockInfoPanelProps> = ({
       {/* TECHNICAL TAB                                                  */}
       {/* ══════════════════════════════════════════════════════════════ */}
       {activeTab === 'technical' && (
-        <div className="space-y-6">
+        <div className="rounded-2xl border border-slate-800 bg-slate-950/30 p-4 space-y-6">
+          <PanelSectionHeader
+            title="Technical Gauges"
+            subtitle="Price structure, indicator stack and momentum diagnostics"
+          />
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
             <div className="lg:col-span-2 space-y-6">
               {/* Historical Max Data Chart */}
@@ -2311,8 +2560,12 @@ export const MCStockInfoPanel: React.FC<MCStockInfoPanelProps> = ({
       {/* ══════════════════════════════════════════════════════════════ */}
       {/* PEERS PANEL (Rendered under Financials & Peers)               */}
       {/* ══════════════════════════════════════════════════════════════ */}
-      {activeTab === 'financials' && (
-        <div className="space-y-6">
+      {(activeTab === 'financials' || activeTab === 'earnings') && (
+        <div className="rounded-2xl border border-slate-800 bg-slate-950/30 p-4 space-y-6">
+          <PanelSectionHeader
+            title="Peers & Relative Positioning"
+            subtitle="Sector-level comparables for context, not direct recommendations"
+          />
           {loadingPeers ? (
             <div className="flex items-center justify-center p-8 bg-slate-900/10 border border-slate-800 border-dashed rounded-2xl">
               <span className="text-[10px] font-black uppercase tracking-widest text-slate-500 animate-pulse">Loading Peer Data...</span>
@@ -2472,7 +2725,11 @@ export const MCStockInfoPanel: React.FC<MCStockInfoPanelProps> = ({
       {/* ANALYSIS SECTION (Rendered under AI Auditor Report)            */}
       {/* ══════════════════════════════════════════════════════════════ */}
       {activeTab === 'ai_report' && (
-        <div className="space-y-6">
+        <div className="rounded-2xl border border-slate-800 bg-slate-950/30 p-4 space-y-6">
+          <PanelSectionHeader
+            title="AI Auditor Report"
+            subtitle="Qualitative synthesis, technical overlays and ownership intelligence"
+          />
 
           {/* Intelligence Hub: Qualitative Factors */}
           {(swot || tb?.insights) && (
@@ -2688,7 +2945,11 @@ export const MCStockInfoPanel: React.FC<MCStockInfoPanelProps> = ({
       {/* ANALYST RECOMMENDATIONS (Rendered under AI Auditor Report)     */}
       {/* ══════════════════════════════════════════════════════════════ */}
       {activeTab === 'ai_report' && (
-        <div className="space-y-6">
+        <div className="rounded-2xl border border-slate-800 bg-slate-950/30 p-4 space-y-6">
+          <PanelSectionHeader
+            title="Analyst & Forecast Lens"
+            subtitle="Consensus trend, target dispersion and valuation expectations"
+          />
 
           {/* Analyst Intelligence Dashboard */}
           {(ar || pf) && (
@@ -2925,7 +3186,11 @@ export const MCStockInfoPanel: React.FC<MCStockInfoPanelProps> = ({
 
       {/* ── F&O Tab ── */}
       {activeTab === 'fno' && (
-        <div className="space-y-4">
+        <div className="rounded-2xl border border-slate-800 bg-slate-950/30 p-4 space-y-6">
+          <PanelSectionHeader
+            title="Options & Flow"
+            subtitle="OI structure, PCR, max pain and rollover posture"
+          />
           
           {/* Expiry Selector & Contract Headers */}
           <div className="flex flex-wrap items-center justify-between gap-3 bg-slate-950/40 border border-slate-800/80 rounded-2xl p-4">
@@ -3310,7 +3575,11 @@ export const MCStockInfoPanel: React.FC<MCStockInfoPanelProps> = ({
 
       {/* ── TAB: STOCK NEWS ── */}
       {activeTab === 'news' && (
-        <div className="space-y-4">
+        <div className="rounded-2xl border border-slate-800 bg-slate-950/30 p-4 space-y-4">
+          <PanelSectionHeader
+            title="News Flow"
+            subtitle="MoneyControl stock-specific stream with time-stamped items"
+          />
           <div className="flex items-center justify-between">
             <h3 className="text-xs font-black text-slate-300 uppercase tracking-widest flex items-center gap-2">
               <Newspaper className="w-4 h-4 text-blue-400" />
@@ -3342,6 +3611,97 @@ export const MCStockInfoPanel: React.FC<MCStockInfoPanelProps> = ({
             moreLink={mcNewsData?.more_link}
             accent="blue"
           />
+        </div>
+      )}
+
+      {/* ── TAB: CORPORATE ACTIONS ── */}
+      {activeTab === 'actions' && (
+        <div className="rounded-2xl border border-slate-800 bg-slate-950/30 p-4 space-y-6">
+          <PanelSectionHeader
+            title="Corporate Action History"
+            subtitle="Dividends, bonus issues, stock splits and rights issues — the record ohlcv_adjust.py cross-checks against for split/bonus price adjustment"
+          />
+          <div>
+            <h3 className="text-xs font-black text-slate-300 uppercase tracking-widest flex items-center gap-2 mb-3">
+              <Gift className="w-4 h-4 text-indigo-400" />
+              <span>MoneyControl — {symbol}</span>
+            </h3>
+            {loadingActionHistory ? (
+              <div className="text-center py-8 bg-slate-900/30 border border-slate-800 rounded-2xl animate-pulse">
+                <p className="text-xs text-slate-400 font-bold">Fetching corporate-action history…</p>
+              </div>
+            ) : !actionHistory || actionHistory.length === 0 ? (
+              <div className="text-center py-8 bg-slate-900/30 border border-slate-800 rounded-2xl">
+                <p className="text-xs text-slate-500 font-semibold">No dividend, bonus, split or rights history on record for {symbol}.</p>
+              </div>
+            ) : (
+              <div className="overflow-x-auto -mx-1">
+                <table className="w-full text-xs min-w-[480px]">
+                  <thead>
+                    <tr className="text-[10px] text-slate-500 uppercase tracking-wider border-b border-slate-800/60">
+                      <th className="text-left px-2 py-2 font-medium">Date</th>
+                      <th className="text-left px-2 py-2 font-medium">Type</th>
+                      <th className="text-right px-2 py-2 font-medium">Ratio / Amount</th>
+                      <th className="text-left px-2 py-2 font-medium">Announced</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-800/30">
+                    {actionHistory.map((a: any, i: number) => (
+                      <tr key={i} className="hover:bg-slate-800/40">
+                        <td className="px-2 py-1.5 font-mono text-slate-300">{a.record_date || '—'}</td>
+                        <td className="px-2 py-1.5">
+                          <span className={cn("text-[9px] px-2 py-0.5 rounded font-bold uppercase",
+                            ACTION_TYPE_COLORS[a.action_type] || "text-slate-400 bg-slate-500/10")}>
+                            {a.action_type}
+                          </span>
+                        </td>
+                        <td className="px-2 py-1.5 text-right font-mono text-slate-200">
+                          {a.ratio_text ? a.ratio_text
+                            : a.amount != null ? `₹${Number(a.amount).toFixed(2)}`
+                            : '—'}
+                        </td>
+                        <td className="px-2 py-1.5 font-mono text-slate-500">{a.announce_date || '—'}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+
+          <div>
+            <h3 className="text-xs font-black text-slate-300 uppercase tracking-widest flex items-center gap-2 mb-3">
+              <Database className="w-4 h-4 text-emerald-400" />
+              <span>Filed with NSE (last/next 6 months)</span>
+            </h3>
+            {loadingFiledActions ? (
+              <div className="text-center py-6 bg-slate-900/30 border border-slate-800 rounded-2xl animate-pulse">
+                <p className="text-xs text-slate-400 font-bold">Checking NSE filings…</p>
+              </div>
+            ) : !filedActions || filedActions.length === 0 ? (
+              <p className="text-xs text-slate-500 font-semibold">No NSE-filed corporate action in this window.</p>
+            ) : (
+              <div className="space-y-2">
+                {filedActions.map((f: any, i: number) => (
+                  <a
+                    key={i}
+                    href={f.source_url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="block p-2.5 bg-slate-950/50 border border-slate-800/60 rounded-lg hover:border-slate-700 transition-colors"
+                  >
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-[9px] px-2 py-0.5 rounded font-bold uppercase text-emerald-400 bg-emerald-500/10 shrink-0">
+                        {(f.category || '').split('|')[0] || 'filing'}
+                      </span>
+                      <span className="text-[10px] text-slate-500 font-mono shrink-0">{f.filing_date}</span>
+                    </div>
+                    <p className="text-xs text-slate-200 mt-1.5 leading-snug line-clamp-2">{f.headline}</p>
+                  </a>
+                ))}
+              </div>
+            )}
+          </div>
         </div>
       )}
 

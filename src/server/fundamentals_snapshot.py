@@ -23,7 +23,8 @@ Run:  python fundamentals_snapshot.py
 import argparse
 import datetime
 
-from db_compat import execute, query_all, query_scalar, use_postgres, connect
+from db_compat import execute, query_all, use_postgres, connect
+from as_of import logical_write_floor
 
 # ── Schema migrations (idempotent ADD COLUMN) ────────────────────────────────
 
@@ -136,8 +137,7 @@ def _last_trading_session_floor(as_of: str) -> str:
     historical pledge_chg_90d row for that symbol, silently, on every such run.
     """
     try:
-        d = query_scalar("SELECT MAX(date) AS d FROM stock_ohlcv")
-        return str(d)[:10] if d else as_of
+        return logical_write_floor(fallback=as_of)
     except Exception:
         return as_of
 

@@ -27,6 +27,7 @@ import numpy as np
 import pandas as pd
 
 from db_compat import execute, executemany, query_one, read_df
+from model_promotion import clears_promotion_bar
 
 MODEL_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "ml_models", "live_screener_intraday_clf.pkl")
 CANDIDATE_PATH = MODEL_PATH.replace(".pkl", "_candidate.pkl")
@@ -88,34 +89,182 @@ def _live_auc() -> tuple:
 
 def _load_training_frame() -> pd.DataFrame:
     return read_df("""
-        SELECT o.symbol, o.filter_key, o.appeared_at, o.return_intraday,
-               a.change_per, a.volume
+        SELECT o.symbol, o.filter_key, o.appeared_at, a.run_id, o.return_intraday,
+               a.change_per, a.volume, r.created_at AS run_ts
         FROM live_screener_outcomes o
         JOIN live_screener_appearances a ON a.id = o.appearance_id
+        JOIN live_screener_runs r ON r.id = a.run_id
         WHERE o.return_intraday IS NOT NULL
     """)
 
 
+# ── point-in-time intraday reversal features ───────────────────────────────────
+# vwap_deviation_pct / intraday_range_pos: the SAME two inputs intraday_ranker.py's
+# _reversal_scores() already computes and this platform has independently validated as its
+# best-ranked intraday signal (IC -0.090 t=-5.7 at 10:15, per the 2026-07-31 intraday audit)
+# -- but that function only ever answers "as of right now" (today, via date.today()), which is
+# fine for live scoring but useless for training on history. Reconstructed here point-in-time
+# per historical run instead: for a given (symbol, run timestamp), only bars strictly at or
+# before that timestamp, on that SAME trading day, ever contribute -- a run at 10:00 must never
+# see the stock's 14:00 high. Processed one trading day at a time (not one global merge_asof
+# across the whole date range) specifically so a day boundary can never accidentally let a run
+# match a bar from a different session -- the exact class of leak this whole file was fixed
+# for earlier today, in a new guise.
+REVERSAL_FEATURE_COLS = ['vwap_deviation_pct', 'intraday_range_pos']
+
+
+def _load_intraday_bars_for_date(session_date: str) -> pd.DataFrame:
+    """On-grid 15m bars for one IST trading date. Drops the zero-volume synthetic 'last
+    price' quotes intraday_fetcher.py appended before its 2026-07-31 fix (still present in
+    older history) -- matches _reversal_scores()'s own on-grid filter (minute % 15 == 0,
+    second == 0), just against a pandas Timestamp instead of string-slicing the raw text.
+    A plain UTC calendar-date bound is sufficient here (not an IST-aware range): NSE's whole
+    09:15-15:30 IST session falls inside 03:45-10:00 UTC of the SAME calendar date, since IST
+    is ahead of UTC.
+    """
+    next_date = (pd.Timestamp(session_date) + pd.Timedelta(days=1)).strftime('%Y-%m-%d')
+    df = read_df("""
+        SELECT symbol, datetime, high, low, close, volume
+        FROM intraday_ohlcv
+        WHERE interval = '15m' AND datetime >= ? AND datetime < ?
+    """, (session_date, next_date))
+    if df.empty:
+        return df
+    dt = pd.to_datetime(df['datetime'], utc=True)
+    on_grid = (dt.dt.minute % 15 == 0) & (dt.dt.second == 0)
+    df = df.loc[on_grid].copy()
+    df['datetime'] = dt.loc[on_grid]
+    for c in ('high', 'low', 'close', 'volume'):
+        df[c] = pd.to_numeric(df[c], errors='coerce')
+    return df.dropna(subset=['high', 'low', 'close'])
+
+
+def _empty_reversal_frame() -> pd.DataFrame:
+    """Explicit dtypes (not bare pd.DataFrame(columns=...), which defaults every column to
+    object) so a downstream .fillna()/arithmetic on an all-empty result doesn't hit pandas'
+    object-dtype-downcast-on-fillna FutureWarning."""
+    return pd.DataFrame({
+        'run_id': pd.Series(dtype='int64'), 'symbol': pd.Series(dtype='object'),
+        'vwap_deviation_pct': pd.Series(dtype='float64'),
+        'intraday_range_pos': pd.Series(dtype='float64'),
+    })
+
+
+def _asof_reversal_for_date(bars: pd.DataFrame, as_of: pd.DataFrame) -> pd.DataFrame:
+    """bars: one trading day's on-grid intraday_ohlcv rows (from _load_intraday_bars_for_date).
+    as_of: DataFrame with columns [run_id, symbol, ts] -- every row must fall on the SAME
+    trading day `bars` covers (caller's responsibility; _load_reversal_features enforces this
+    by looping per date). Returns [run_id, symbol, vwap_deviation_pct, intraday_range_pos]."""
+    if bars.empty or as_of.empty:
+        return _empty_reversal_frame()
+
+    # merge_asof (even with by=) requires the right frame globally sorted by the 'on' column,
+    # not by (symbol, datetime) -- sorting by datetime alone still leaves each symbol's own
+    # subsequence in chronological order (a subset of a sorted sequence stays sorted), which
+    # is what groupby(...).cumsum()/cummax()/cummin() below need to be correct.
+    b = bars.sort_values('datetime').copy()
+    b['typical_pv'] = (b['high'] + b['low'] + b['close']) / 3.0 * b['volume']
+    grp = b.groupby('symbol', sort=False)
+    b['cum_pv'] = grp['typical_pv'].cumsum()
+    b['cum_v'] = grp['volume'].cumsum()
+    b['cum_hi'] = grp['high'].cummax()
+    b['cum_lo'] = grp['low'].cummin()
+
+    a = as_of.copy()
+    # Cast to the SAME dtype as b['datetime'], not just utc=True -- pandas 2.x preserves
+    # sub-second resolution from the source rather than always coercing to [ns]. `ts` reaches
+    # this function from two different code paths with different native precisions
+    # (_build_matrix's `run_ts` comes from a bulk read_df() SQL read, typically [ns];
+    # score()'s comes from query_one()'s raw single-row cursor read, typically a plain Python
+    # datetime.datetime -> [us] once wrapped in a DataFrame column) -- merge_asof raises a
+    # hard MergeError on a [us] vs [ns] mismatch rather than silently coercing either side.
+    a['ts'] = pd.to_datetime(a['ts'], utc=True).astype(b['datetime'].dtype)
+    a = a.sort_values('ts')
+
+    merged = pd.merge_asof(
+        a, b, left_on='ts', right_on='datetime', by='symbol', direction='backward'
+    )
+
+    vwap = merged['cum_pv'] / merged['cum_v'].replace(0, np.nan)
+    merged['vwap_deviation_pct'] = (merged['close'] - vwap) / vwap * 100.0
+    span = merged['cum_hi'] - merged['cum_lo']
+    merged['intraday_range_pos'] = (merged['close'] - merged['cum_lo']) / span.replace(0, np.nan)
+
+    return merged[['run_id', 'symbol'] + REVERSAL_FEATURE_COLS]
+
+
+def _load_reversal_features(run_asof: pd.DataFrame) -> pd.DataFrame:
+    """run_asof: DataFrame with columns [run_id, symbol, ts, session_date] (session_date =
+    'YYYY-MM-DD' IST trading date the run belongs to; ts = the run's own UTC timestamp).
+    Returns [run_id, symbol, vwap_deviation_pct, intraday_range_pos] across all dates,
+    processed one trading day at a time so a run can never match a bar from a different day.
+    Missing for a (run_id, symbol) when that symbol had no intraday_ohlcv coverage that day
+    (a real, known gap -- intraday_fetcher.py doesn't reach 100% of the universe every cycle)
+    -- callers must fillna, not assume every row gets a value.
+    """
+    out = []
+    for session_date, day_asof in run_asof.groupby('session_date'):
+        try:
+            bars = _load_intraday_bars_for_date(session_date)
+        except Exception as e:
+            print(f"[LiveScreenerMLRanker] reversal features skipped for {session_date}: {str(e)[:100]}")
+            continue
+        out.append(_asof_reversal_for_date(bars, day_asof[['run_id', 'symbol', 'ts']]))
+    return pd.concat(out, ignore_index=True) if out else _empty_reversal_frame()
+
+
 def _build_matrix(df: pd.DataFrame):
-    """One row per (appeared_at, symbol): binary filter-match columns + mean change_per/
-    log-volume at match time + the mean same-day return across whichever filters it matched
-    that day. Mirrors live_screener_optimizer.py's pivot, plus the two appearance-level
-    features that pivot doesn't carry (change_per, volume)."""
-    agg = df.groupby(["appeared_at", "symbol"]).agg(
+    """One row per (run_id, symbol): binary filter-match columns (whichever filters matched
+    IN THAT SCAN CYCLE) + change_per/log-volume captured AT THAT SCAN + the resulting
+    same-day return.
+
+    Deliberately grouped at (run_id, symbol) -- NOT (appeared_at, symbol) as this used to be.
+    A filter match persists across many consecutive ~15-min scans in one trading day (median
+    15 runs/day per matching symbol, confirmed live), and the old day-level groupby averaged
+    change_per/volume across all of that day's runs (spread up to ~25pp within a single day)
+    and OR'd together every filter the symbol EVER matched that day into one row -- neither is
+    available at real scoring time, which only ever sees a single run's snapshot (see score()
+    below: `WHERE run_id = ?`). That mismatch between what the model was trained on (a
+    day-smoothed, day-unioned view) and what it actually receives live (one scan's raw,
+    possibly-partial view) is a train/serve skew, confirmed live 2026-08-07 as a likely
+    contributor to the deployed model's near-zero live AUC (see live_screener_ml_no_live_edge_
+    2026_08_07 memory). Grouping by (run_id, symbol) instead makes every training row exactly
+    the same shape as a scoring-time row: this scan's filter matches, this scan's change_per/
+    volume, nothing from later in the day folded in.
+
+    Also joins in vwap_deviation_pct/intraday_range_pos (see _load_reversal_features) --
+    this platform's own best-validated intraday signal family, computed point-in-time as of
+    each row's own run timestamp, never peeking at later bars from the same day.
+    """
+    agg = df.groupby(["run_id", "symbol"]).agg(
+        appeared_at=("appeared_at", "first"),
+        run_ts=("run_ts", "first"),
         return_intraday=("return_intraday", "mean"),
         change_per=("change_per", "mean"),
         volume=("volume", "mean"),
     ).reset_index()
 
     pivot = df.pivot_table(
-        index=["appeared_at", "symbol"], columns="filter_key", aggfunc="size", fill_value=0
+        index=["run_id", "symbol"], columns="filter_key", aggfunc="size", fill_value=0
     ).clip(upper=1).reset_index()
-    filter_cols = [c for c in pivot.columns if c not in ("appeared_at", "symbol")]
+    filter_cols = [c for c in pivot.columns if c not in ("run_id", "symbol")]
 
-    matrix = pd.merge(pivot, agg, on=["appeared_at", "symbol"])
+    matrix = pd.merge(pivot, agg, on=["run_id", "symbol"])
     matrix["log_volume"] = np.log1p(matrix["volume"].clip(lower=0).fillna(0))
     matrix["change_per"] = matrix["change_per"].fillna(0.0)
-    feature_cols = filter_cols + ["change_per", "log_volume"]
+
+    run_asof = matrix[["run_id", "symbol", "appeared_at", "run_ts"]].rename(
+        columns={"appeared_at": "session_date", "run_ts": "ts"}
+    )
+    reversal = _load_reversal_features(run_asof)
+    matrix = matrix.merge(reversal, on=["run_id", "symbol"], how="left")
+    # Explicit, semantically-neutral fills (not the blanket 0.0 train() applies to every
+    # feature downstream) -- 0.0 = "at VWAP", 0.5 = "mid-range", for symbols with no
+    # intraday_ohlcv coverage that day (a real, known coverage gap, not an error).
+    matrix["vwap_deviation_pct"] = matrix["vwap_deviation_pct"].fillna(0.0)
+    matrix["intraday_range_pos"] = matrix["intraday_range_pos"].fillna(0.5)
+
+    feature_cols = filter_cols + ["change_per", "log_volume"] + REVERSAL_FEATURE_COLS
     return matrix.sort_values("appeared_at").reset_index(drop=True), feature_cols
 
 
@@ -136,9 +285,51 @@ def _load_active_metrics() -> dict | None:
     try:
         with open(MODEL_PATH, "rb") as f:
             art = pickle.load(f)
-        return {"test_auc": art.get("test_auc"), "trained_at": art.get("trained_at")}
+        # Full field set (2026-08-07), not just test_auc/trained_at -- needed so a REJECTED
+        # candidate's run can still refresh app_settings' live-edge status without overwriting
+        # the still-active model's own cv_auc/test_acc/base_rate/n_samples/n_features with a
+        # rejected candidate's numbers. See _persist_live_edge_status.
+        return {k: art.get(k) for k in
+                ("test_auc", "trained_at", "cv_auc", "test_acc", "base_rate",
+                 "n_samples", "feature_names")}
     except Exception:
         return None
+
+
+def _persist_live_edge_status(active: dict, live_auc: float | None, live_n: int,
+                               live_edge_proven: bool) -> None:
+    """Refresh app_settings.live_screener_ml_model_status' live_auc/live_edge_proven fields
+    for the model CURRENTLY DEPLOYED (MODEL_PATH) -- unconditionally, on every --train run,
+    not just when a new candidate happens to get promoted.
+
+    2026-08-07 fix: this used to be written only inside train()'s `if promote:` branch. Since
+    scoring always uses whatever's in MODEL_PATH regardless of whether that day's retrain
+    promotes, live_auc/live_edge_proven describe the DEPLOYED model, not the candidate -- but
+    as long as promotion kept failing (confirmed live: the deployed model's live AUC is 0.4615
+    over 671,257 resolved rows, essentially no real edge, and every subsequent candidate has
+    also failed to clear the resulting elevated STRICT_PROMOTION_MARGIN), this health signal
+    never reached app_settings at all. monitor.router.ts's "Intraday Edge" tab reads
+    live_screener_ml_scores.win_probability directly with no gate on this signal whatsoever --
+    a model with demonstrably no live edge was being rendered to users as a confidently
+    color-coded "ML XX%" badge indistinguishable from a model that actually works.
+    """
+    if not active:
+        return
+    execute("""
+        INSERT INTO app_settings (key, value, "updatedAt")
+        VALUES ('live_screener_ml_model_status', ?, ?)
+        ON CONFLICT(key) DO UPDATE SET value = excluded.value, "updatedAt" = excluded."updatedAt"
+    """, (
+        json.dumps({
+            "trained_at": active.get("trained_at"), "cv_auc": active.get("cv_auc"),
+            "test_auc": active.get("test_auc"), "test_acc": active.get("test_acc"),
+            "base_rate": active.get("base_rate"), "n_samples": active.get("n_samples"),
+            "n_features": len(active["feature_names"]) if active.get("feature_names") else None,
+            "live_auc": live_auc, "live_auc_rows": live_n,
+            "live_edge_proven": live_edge_proven,
+        }),
+        datetime.datetime.now().isoformat(),
+    ))
 
 
 def train():
@@ -231,10 +422,8 @@ def train():
         print(f"[LiveScreenerMLRanker] LIVE AUC unavailable ({live_n} gradeable rows, "
               f"need {LIVE_AUC_MIN_ROWS}) -- using standard promotion margin.")
 
-    promote = (
-        baseline is None or baseline.get("test_auc") is None
-        or test_auc >= baseline["test_auc"] + margin
-    )
+    baseline_test_auc = baseline.get("test_auc") if baseline else None
+    promote = clears_promotion_bar(test_auc, baseline_test_auc, margin)
 
     # Refit on ALL data (train + test windows) for the artifact that actually goes live --
     # matches the OOF/held-out probe above, same as breakout_classifier.py's convention.
@@ -258,22 +447,14 @@ def train():
     if promote:
         with open(MODEL_PATH, "wb") as f:
             pickle.dump(artifact, f)
-        execute("""
-            INSERT INTO app_settings (key, value, "updatedAt")
-            VALUES ('live_screener_ml_model_status', ?, ?)
-            ON CONFLICT(key) DO UPDATE SET value = excluded.value, "updatedAt" = excluded."updatedAt"
-        """, (
-            json.dumps({
-                "trained_at": artifact["trained_at"], "cv_auc": cv_auc, "test_auc": test_auc,
-                "test_acc": test_acc, "base_rate": base_rate, "n_samples": len(matrix),
-                "n_features": len(feature_cols),
-                # Surfaced so consumers (the Live Screener page's "Intraday Edge" tab) can tell
-                # a model with demonstrated live discrimination from one without.
-                "live_auc": live_auc, "live_auc_rows": live_n,
-                "live_edge_proven": live_edge_proven,
-            }),
-            datetime.datetime.now().isoformat(),
-        ))
+        # Surfaced so consumers (the Live Screener page's "Intraday Edge" tab) can tell a
+        # model with demonstrated live discrimination from one without.
+        _persist_live_edge_status(
+            {"trained_at": artifact["trained_at"], "cv_auc": cv_auc, "test_auc": test_auc,
+             "test_acc": test_acc, "base_rate": base_rate, "n_samples": len(matrix),
+             "feature_names": feature_cols},
+            live_auc, live_n, live_edge_proven,
+        )
         print(f"[LiveScreenerMLRanker] Model ACTIVATED (test_auc={test_auc:.4f}"
               + (f", beat baseline {baseline['test_auc']:.4f})" if baseline and baseline.get('test_auc') is not None else ", no prior model)"))
         if not live_edge_proven and live_auc is not None:
@@ -283,6 +464,12 @@ def train():
     else:
         with open(CANDIDATE_PATH, "wb") as f:
             pickle.dump(artifact, f)
+        # 2026-08-07 fix: refresh the DEPLOYED model's live-edge status even though this
+        # candidate was rejected -- live_auc/live_edge_proven describe whatever's still in
+        # MODEL_PATH (unchanged by a rejection), and that signal must keep reaching
+        # app_settings on every run, not just the rare one that happens to promote. Uses
+        # `baseline` (the still-active model's own metrics), not this rejected candidate's.
+        _persist_live_edge_status(baseline, live_auc, live_n, live_edge_proven)
         print(f"[LiveScreenerMLRanker] Candidate REJECTED: test_auc={test_auc:.4f} did not "
               f"beat active model's {baseline['test_auc']:.4f} + {margin} margin. "
               f"Saved to {CANDIDATE_PATH} for inspection; active model unchanged.")
@@ -298,8 +485,11 @@ def score():
         art = pickle.load(f)
     model, feature_names = art["model"], art["feature_names"]
 
-    run_row = query_one("SELECT MAX(id) FROM live_screener_runs WHERE status IN ('SUCCESS','PARTIAL')")
-    run_id = run_row[0] if run_row else None
+    run_row = query_one(
+        "SELECT id, created_at FROM live_screener_runs WHERE status IN ('SUCCESS','PARTIAL') "
+        "ORDER BY id DESC LIMIT 1"
+    )
+    run_id, run_ts = (run_row[0], run_row[1]) if run_row else (None, None)
     if not run_id:
         print("[LiveScreenerMLRanker] No live screener run to score yet.")
         return
@@ -318,6 +508,21 @@ def score():
     flags = pd.crosstab(appearances["symbol"], appearances["filter_key"]).clip(upper=1)
     matrix = agg.join(flags, how="left").fillna(0.0)
     matrix["log_volume"] = np.log1p(matrix["volume"].clip(lower=0))
+
+    # Point-in-time vwap_deviation_pct/intraday_range_pos for this run's own timestamp, via
+    # the exact same function _build_matrix() uses for training -- only present in the
+    # active model's feature_names once a model has been trained after this feature was
+    # added (2026-08-07); a currently-deployed older model simply never selects these
+    # columns below, so this is safe against an old model too.
+    if run_ts is not None and any(f in REVERSAL_FEATURE_COLS for f in feature_names):
+        session_date = str(run_ts)[:10]
+        run_asof = pd.DataFrame({
+            "run_id": run_id, "symbol": matrix.index, "ts": run_ts, "session_date": session_date,
+        })
+        reversal = _load_reversal_features(run_asof).set_index("symbol")
+        matrix = matrix.join(reversal[REVERSAL_FEATURE_COLS], how="left")
+        matrix["vwap_deviation_pct"] = matrix["vwap_deviation_pct"].fillna(0.0)
+        matrix["intraday_range_pos"] = matrix["intraday_range_pos"].fillna(0.5)
 
     for f in feature_names:
         if f not in matrix.columns:

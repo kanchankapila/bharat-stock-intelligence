@@ -6,8 +6,16 @@
  * and category (EARNINGS/ORDER_WIN/BUYBACK/POLICY/IPO/GLOBAL/SECTOR/GENERAL).
  * Aggregates into a market sentiment snapshot and Nifty range prediction.
  *
- * Sources (Indian): Economic Times, Business Standard, LiveMint, MoneyControl, The Hindu BusinessLine
- * Sources (Global): Reuters, Yahoo Finance (via globalMarketService)
+ * Sources (Indian): Economic Times, LiveMint, CNBC TV18, Zee Business, The Hindu BusinessLine, Tradebrains
+ * Sources (Global): Financial Times, CNBC TV18 World, MarketWatch, Yahoo Finance (via globalMarketService)
+ *
+ * MoneyControl's own rss.moneycontrol.com/* feeds (latestnews/buzzingstocks/brokeragerecos/
+ * economy/marketreports/internationalmarkets) are NOT used here as of 2026-08-05 -- all 6 were
+ * live-verified to return HTTP 200 with content frozen since Feb-Aug 2024 (confirmed via
+ * Last-Modified headers, cross-checked against a genuinely live feed on the same code path
+ * to rule out a caching artifact). Akamai's edge serves the stale snapshot indefinitely with
+ * a misleading `Cache-Control: max-age=30`. See the "Dead as of Aug 2026" note below before
+ * re-adding any moneycontrol.com/rss/* URL -- verify Last-Modified first, don't trust 200 OK.
  */
 
 import { dbGet, dbAll, dbRun, dbTransaction } from './dbAsync';
@@ -17,6 +25,8 @@ import { fetchGlobalMarketData } from './globalMarketService';
 import {
   buildAliasIndex, extractSymbolsByName, companyAliases, NEWS_ALIAS_OVERRIDES, type AliasEntry,
 } from './newsEntityTagger';
+import { resolveMoneycontrolSymbol } from './stockMapping';
+import { fetchMcStockNews } from './mcApiService';
 
 function toSqliteDateTime(date: Date): string {
   return date.toISOString().replace('T', ' ').substring(0, 19);
@@ -77,22 +87,25 @@ interface NewsSource {
 
 const NEWS_SOURCES: NewsSource[] = [
   // Indian sources — verified working June 2026
-  { name: 'ET Viewandrecofeed', url: 'https://economictimes.indiatimes.com/viewandrecofeed.cms', type: 'INDIAN' },
   { name: 'LiveMint Markets', url: 'https://www.livemint.com/rss/markets', type: 'INDIAN' },
   { name: 'LiveMint Companies', url: 'https://www.livemint.com/rss/companies', type: 'INDIAN' },
-  { name: 'MoneyControl Latest', url: 'https://www.moneycontrol.com/rss/latestnews.xml', type: 'INDIAN' },
-  { name: 'MoneyControl Markets', url: 'https://www.moneycontrol.com/rss/marketreports.xml', type: 'INDIAN' },
-  { name: 'MoneyControl Business', url: 'https://www.moneycontrol.com/rss/business.xml', type: 'INDIAN' },
-  { name: 'MoneyControl Economy', url: 'https://www.moneycontrol.com/rss/economy.xml', type: 'INDIAN' },
-  { name: 'MoneyControl Mutual Funds', url: 'https://www.moneycontrol.com/rss/mfnews.xml', type: 'INDIAN' },
   { name: 'Hindu BusinessLine', url: 'https://www.thehindubusinessline.com/markets/?service=rss', type: 'INDIAN' },
   { name: 'Zee Business Markets', url: 'https://www.zeebiz.com/market-news/rss.xml', type: 'INDIAN' },
   { name: 'CNBC TV18 Markets', url: 'https://www.cnbctv18.com/commonfeeds/v1/cne/rss/market.xml', type: 'INDIAN' },
   { name: 'Tradebrains', url: 'https://tradebrains.in/feed/', type: 'INDIAN' },
   { name: 'Google News India Markets', url: 'https://news.google.com/rss/search?q=Indian+stock+market+NSE+BSE&hl=en-IN&gl=IN&ceid=IN:en', type: 'INDIAN' },
   { name: 'Google News NIFTY', url: 'https://news.google.com/rss/search?q=NIFTY+SENSEX+trading&hl=en-IN&gl=IN&ceid=IN:en', type: 'INDIAN' },
+  // Added 2026-08-05 — live-verified fresh (real same-day pubDate) as replacements for the dead
+  // MoneyControl family below. High-frequency (items land within minutes of fetch), so these
+  // fit the flat 15-min NEWS_SOURCES cadence same as the sources they replace.
+  { name: 'ET Top Stories', url: 'https://economictimes.indiatimes.com/rssfeedstopstories.cms', type: 'INDIAN' }, // MoneyControl Latest replacement
+  { name: 'ET Stocks in News', url: 'https://economictimes.indiatimes.com/markets/stocks/rssfeeds/2146843.cms', type: 'INDIAN' }, // MoneyControl Buzzing Stocks replacement
+  { name: 'CNBC TV18 Business', url: 'https://www.cnbctv18.com/commonfeeds/v1/cne/rss/business.xml', type: 'INDIAN' }, // MoneyControl Markets/Business replacement
   // Global sources — verified working June 2026
   { name: 'Financial Times', url: 'https://www.ft.com/rss/home/uk', type: 'GLOBAL', timeout: 8000 },
+  // Added 2026-08-05 — live-verified fresh, MoneyControl Global Markets replacement.
+  { name: 'CNBC TV18 World', url: 'https://www.cnbctv18.com/commonfeeds/v1/cne/rss/world.xml', type: 'GLOBAL' },
+  { name: 'MarketWatch Top Stories', url: 'https://feeds.content.dowjones.io/public/rss/mw_topstories', type: 'GLOBAL', timeout: 8000 },
   // Dead as of June 2026 — removed:
   // Economic Times markets/economy RSS (return HTML not XML)
   // Business Standard RSS (403 Forbidden)
@@ -101,6 +114,25 @@ const NEWS_SOURCES: NewsSource[] = [
   // Yahoo Finance India RSS (500 Internal Server Error)
   // Reuters RSS feeds.reuters.com (domain connection error)
   // MoneyControl Broker Research (503)
+  // Dead as of Aug 2026 — removed (live-verified 2026-08-05, not just "used to fail" —
+  // all 6 return HTTP 200 with Last-Modified frozen between Feb and Aug 2024, over a year
+  // stale, cross-checked against a genuinely live feed on the identical fetch path to rule
+  // out a sandbox/proxy caching artifact):
+  //   MoneyControl Latest       (rss/latestnews.xml)         Last-Modified 2024-08-26
+  //   MoneyControl Markets      (rss/marketreports.xml)      Last-Modified 2024-06-03
+  //   MoneyControl Business     (rss/business.xml)           Last-Modified 2024-06-03
+  //   MoneyControl Economy      (rss/economy.xml)            Last-Modified 2024-06-03
+  //   MoneyControl Mutual Funds (rss/mfnews.xml)              Last-Modified 2024-02-19
+  //   MoneyControl Buzzing Stocks / Brokerage Recos / Global Markets — never added; the same
+  //   dead RSS family (buzzingstocks.xml/brokeragerecos.xml/internationalmarkets.xml all
+  //   Last-Modified 2024-06-03), confirmed at request time before wiring anything in.
+  //   ET Viewandrecofeed (viewandrecofeed.cms) — removed 2026-08-05. Not RSS at all: it's
+  //   ET's NewsML export (`<NewsML><articlelistroot><sec><stry><stname>...`), structurally
+  //   incompatible with parseRSS()'s `<item>...</item>` matcher (0 matches, always) — a
+  //   different failure mode from the CDATA-whitespace bug fixed the same day (see
+  //   extractCdata's comment above), but the same net effect: zero rows, forever, silently
+  //   (no error — parseRSS just returns []). Superseded by 'ET Top Stories'/'ET Stocks in
+  //   News' above, which are real RSS and live-verified working.
 ];
 
 // ─── Keyword Classifiers ──────────────────────────────────────────────────────
@@ -171,7 +203,16 @@ function stripHtml(html: string): string {
 }
 
 function extractCdata(block: string, tag: string): string {
-  const cdataRe = new RegExp(`<${tag}><!\\[CDATA\\[([\\s\\S]*?)\\]\\]><\\/${tag}>`, 'i');
+  // \s* around the CDATA markers -- some feeds (ET's RSS family confirmed 2026-08-05) emit
+  // `]]> </tag>` with a stray space/newline before the closing tag. A strict `]]></tag>`
+  // match then misses, falls through to plainRe, and plainRe's raw (unstripped) capture --
+  // literal `<![CDATA[...]]>` markers still in the string -- gets destroyed by stripHtml's
+  // `<[^>]*>` below: it spans from the leading `<` of `<![CDATA[` all the way to the `>` in
+  // `]]>`, silently wiping the entire title/description to '' with no error anywhere. An
+  // empty title then fails parseRSS's `if (title) items.push(...)` check, so the article is
+  // just dropped -- this is why `ET Viewandrecofeed` had zero rows in production despite
+  // being fetched successfully on every single 15-min cycle since it was added.
+  const cdataRe = new RegExp(`<${tag}>\\s*<!\\[CDATA\\[([\\s\\S]*?)\\]\\]>\\s*<\\/${tag}>`, 'i');
   const plainRe  = new RegExp(`<${tag}>([\\s\\S]*?)<\\/${tag}>`, 'i');
   const m = cdataRe.exec(block) || plainRe.exec(block);
   return m ? stripHtml(m[1].trim()) : '';
@@ -387,6 +428,56 @@ export async function runCompanyNewsCycle(limit = 150): Promise<{ companies: num
   return { companies: universe.length, inserted: sentRows.size };
 }
 
+// ─── MoneyControl per-stock news (genuinely live — no publish-delay caveat) ───
+// Reuses the same fetchMcStockNews()/resolveMoneycontrolSymbol() this codebase already proved
+// working for the per-stock news tab (McNewsCard.tsx, 2026-07-31) — MC's own news feed, not the
+// market-wide MoneyControl RSS feeds already in NEWS_SOURCES above (those cover MC's homepage/
+// section feeds; this is the per-scId `techmvc/mc_apis/mc_pricechart_homepage/news` endpoint,
+// force-tagged to its query symbol the same way BSE/Google News already are). Unlike GNews,
+// there is no metered daily quota here -- `mcFetchJson`'s own Semaphore already throttles
+// concurrency platform-wide, so this can run denser/more often without a separate rate budget.
+const MC_NEWS_STOCKS_TRACKED = 100;
+const MC_NEWS_BATCH = 8; // matches mcFetchJson's own concurrency ceiling elsewhere in the app
+
+export async function runMcStockNewsCycle(limit = MC_NEWS_STOCKS_TRACKED): Promise<{ companies: number; inserted: number }> {
+  const universe = await dbAll(
+    `SELECT ns.symbol FROM nse_stocks ns
+     JOIN stock_fundamentals sf ON sf.symbol = ns.symbol
+     WHERE ns.status = 'ACTIVE' AND sf.market_cap IS NOT NULL
+     ORDER BY sf.market_cap DESC LIMIT ?`, [limit],
+  ) as { symbol: string }[];
+  if (universe.length === 0) return { companies: 0, inserted: 0 };
+
+  await ensureNSESymbols();
+  const sentRows = new Map<string, unknown[]>();
+  const legacyRows = new Map<string, unknown[]>();
+
+  for (let i = 0; i < universe.length; i += MC_NEWS_BATCH) {
+    const batch = universe.slice(i, i + MC_NEWS_BATCH);
+    await Promise.all(batch.map(async ({ symbol }) => {
+      try {
+        const scId = await resolveMoneycontrolSymbol(symbol);
+        if (!scId) return;
+        const res = await fetchMcStockNews(scId, symbol);
+        if (res.status !== 'ok') return; // 'no_news'/'fetch_failed' both legitimately skip
+        for (const item of res.news.slice(0, 8)) {
+          if (!item.posturl) continue; // no link -> no stable dedup id
+          const epoch = Number(item.creation_date_epoch || item.update_date_epoch);
+          const pubDate = epoch ? new Date(epoch * 1000).toISOString() : '';
+          processNewsItem(
+            { title: item.heading, description: item.summary, link: item.posturl, pubDate },
+            'MoneyControl Stock News', 'INDIAN', sentRows, legacyRows, symbol,
+          );
+        }
+      } catch { /* one bad stock must not abort the batch */ }
+    }));
+  }
+
+  if (sentRows.size > 0) await persistNewsRows(sentRows, legacyRows);
+  console.log(`[SENTIMENT] MC stock-news cycle: ${universe.length} companies → ${sentRows.size} articles`);
+  return { companies: universe.length, inserted: sentRows.size };
+}
+
 // ─── BSE Corporate Announcements (free, per-stock, structured, historical) ────
 
 interface BseAnnouncement {
@@ -484,6 +575,272 @@ export async function runBseAnnouncementsCycle(): Promise<{ fetched: number; ins
   if (sentRows.size > 0) await persistNewsRows(sentRows, legacyRows);
   console.log(`[SENTIMENT] BSE announcements: ${anns.length} fetched → ${sentRows.size} mapped to NSE symbols`);
   return { fetched: anns.length, inserted: sentRows.size };
+}
+
+// ─── GNews (gnews.io — structured JSON, needs GNEWS_API_KEY) ──────────────────
+// A 4th source tier, split into 3 independently-scheduled cycles rather than one flat job,
+// because "market", "stock", and "global" news genuinely warrant different cadences -- market-
+// moving and per-stock news are what actually feeds trading decisions and go stale fast, while
+// world business headlines are slower-moving macro context. Each is entity-tagged by the same
+// name-based tagger the RSS sources use (GNews doesn't identify the stock any more than an RSS
+// feed does). Gated on GNEWS_API_KEY -- no key means a silent no-op on all 3, the same pattern
+// this file already uses for ANTHROPIC_API_KEY-gated enrichWithAI below.
+//
+// Also gated on app_settings.gnews_enabled, DEFAULT OFF -- live-verified 2026-08-04 that GNews's
+// own free-tier response carries `information.realTimeArticles: "Real-time news data is only
+// available on paid plans. Free plan has a 12-hour delay."`. That is a materially different
+// freshness guarantee than every other source in this file (RSS lags ~15-30min, MC stock news
+// and BSE announcements are live) and would be misleading to present as "live" market/stock
+// news without an explicit opt-in. Flip on with:
+//   UPDATE app_settings SET value='true' WHERE key='gnews_enabled' (insert if missing)
+// -- same escape-hatch pattern as edge_adjustment_enabled elsewhere in this codebase.
+//
+// Free tier is also only 100 req/day and (unlike free/uncapped RSS) every call spends metered
+// quota, so the 3 cycles' cadences were chosen to add up to a fraction of that budget, not to
+// each be "as fresh as possible" independently:
+//   market  (business headlines + NSE/BSE/Nifty/Sensex search, 2 calls) every 2h  -> 24 req/day
+//   stocks  (1 OR-joined search over a rotating batch of top-cap names) every 1h  -> 24 req/day
+//   global  (world business headlines, 1 call)                          every 6h  ->  4 req/day
+// Total 52 req/day, leaving ~48/day headroom for manual testing/retries (see queues.ts).
+
+interface GNewsArticle {
+  title: string;
+  description?: string;
+  url: string;
+  publishedAt: string;
+  source?: { name: string; url?: string };
+}
+
+const GNEWS_BASE = 'https://gnews.io/api/v4';
+const GNEWS_ENABLED_SETTING = 'gnews_enabled';
+
+async function isGNewsEnabled(): Promise<boolean> {
+  try {
+    const row = await dbGet<{ value: string }>(
+      "SELECT value FROM app_settings WHERE key = ?", [GNEWS_ENABLED_SETTING],
+    );
+    return !!row && ['1', 'true', 'yes'].includes(String(row.value).toLowerCase());
+  } catch {
+    return false; // DB error -> fail closed, same posture as every other kill-switch here
+  }
+}
+
+/** Shared guard for all 3 GNews cycles: needs both a real API key AND the explicit
+ *  app_settings opt-in (default off — see the 12-hour-delay note above). Returns the
+ *  skip reason so callers can log which gate actually blocked the run. */
+async function gnewsGateReason(): Promise<string | null> {
+  if (!process.env.GNEWS_API_KEY) return 'GNEWS_API_KEY not set';
+  if (!(await isGNewsEnabled())) return "disabled (app_settings.gnews_enabled != 'true' — free tier is 12h-delayed, opt in explicitly)";
+  return null;
+}
+
+async function fetchGNews(path: 'top-headlines' | 'search', params: Record<string, string>): Promise<GNewsArticle[]> {
+  const apiKey = process.env.GNEWS_API_KEY;
+  if (!apiKey) return [];
+  const qs = new URLSearchParams({ lang: 'en', max: '10', ...params, apikey: apiKey });
+  try {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 10000);
+    const res = await fetch(`${GNEWS_BASE}/${path}?${qs.toString()}`, { signal: controller.signal });
+    clearTimeout(timer);
+    if (!res.ok) {
+      // Never log the querystring -- it carries the API key.
+      console.warn(`[SENTIMENT] GNews ${path} (${params.category ?? params.q}) failed: HTTP ${res.status}`);
+      return [];
+    }
+    const j = await res.json() as { articles?: GNewsArticle[] };
+    return j.articles ?? [];
+  } catch (e) {
+    console.warn(`[SENTIMENT] GNews ${path} fetch error:`, (e as Error).message);
+    return [];
+  }
+}
+
+function gnewsToRaw(a: GNewsArticle): RawNewsItem {
+  return { title: a.title ?? '', link: a.url, pubDate: a.publishedAt, description: a.description ?? '' };
+}
+
+function gnewsTag(
+  arts: GNewsArticle[], srcName: string, srcType: 'INDIAN' | 'GLOBAL',
+  sentRows: Map<string, unknown[]>, legacyRows: Map<string, unknown[]>,
+  forceSymbol?: (a: GNewsArticle) => string | undefined,
+): number {
+  let n = 0;
+  for (const a of arts) {
+    if (!a.url) continue; // no link -> no stable dedup id, skip
+    n++;
+    processNewsItem(gnewsToRaw(a), srcName, srcType, sentRows, legacyRows, forceSymbol?.(a));
+  }
+  return n;
+}
+
+/** India business headlines + an NSE/BSE/Nifty/Sensex search -- market-moving news, the most
+ *  time-sensitive of the 3 cycles. 2 calls, paced (not Promise.all) -- live-verified 2026-08-04:
+ *  3 concurrent GNews calls got 2x HTTP 429 on the free tier (a burst/concurrency limit, not
+ *  the 100/day quota -- a lone call immediately afterward succeeded fine), so these must be
+ *  paced like this codebase's other rate-limited sources (BSE/Google News above use 200-250ms). */
+export async function runGNewsMarketCycle(): Promise<{ fetched: number; inserted: number; skipped?: boolean }> {
+  const skipReason = await gnewsGateReason();
+  if (skipReason) {
+    console.log(`[SENTIMENT] GNews market cycle skipped — ${skipReason}`);
+    return { fetched: 0, inserted: 0, skipped: true };
+  }
+  await ensureNSESymbols();
+
+  const indiaBiz = await fetchGNews('top-headlines', { category: 'business', country: 'in' });
+  await new Promise(r => setTimeout(r, 1200));
+  const indiaMarket = await fetchGNews('search', { q: 'NSE OR BSE OR Nifty OR Sensex OR "Indian stock market"', country: 'in' });
+
+  const sentRows = new Map<string, unknown[]>();
+  const legacyRows = new Map<string, unknown[]>();
+  const fetched = gnewsTag(indiaBiz, 'GNews India', 'INDIAN', sentRows, legacyRows)
+                + gnewsTag(indiaMarket, 'GNews Market', 'INDIAN', sentRows, legacyRows);
+
+  const inserted = sentRows.size;
+  if (inserted > 0) await persistNewsRows(sentRows, legacyRows);
+  console.log(`[SENTIMENT] GNews market cycle: fetched=${fetched}, processed=${inserted}`);
+  return { fetched, inserted };
+}
+
+/** World business headlines -- slower-moving macro context, not stock/market-specific. 1 call. */
+export async function runGNewsGlobalCycle(): Promise<{ fetched: number; inserted: number; skipped?: boolean }> {
+  const skipReason = await gnewsGateReason();
+  if (skipReason) {
+    console.log(`[SENTIMENT] GNews global cycle skipped — ${skipReason}`);
+    return { fetched: 0, inserted: 0, skipped: true };
+  }
+  await ensureNSESymbols();
+
+  const worldBiz = await fetchGNews('top-headlines', { category: 'business', country: 'us' });
+  const sentRows = new Map<string, unknown[]>();
+  const legacyRows = new Map<string, unknown[]>();
+  const fetched = gnewsTag(worldBiz, 'GNews Global', 'GLOBAL', sentRows, legacyRows);
+
+  const inserted = sentRows.size;
+  if (inserted > 0) await persistNewsRows(sentRows, legacyRows);
+  console.log(`[SENTIMENT] GNews global cycle: fetched=${fetched}, processed=${inserted}`);
+  return { fetched, inserted };
+}
+
+// ─── GNews per-stock coverage (rotating batch — GNews search is metered, unlike Google
+// News RSS above, so this cannot cover the same 150-company universe runCompanyNewsCycle does)
+
+const GNEWS_STOCKS_TRACKED = 60;  // top-N by market cap eligible for GNews stock coverage
+const GNEWS_STOCKS_BATCH = 5;     // company names OR-joined into one search call per cycle
+const GNEWS_STOCKS_OFFSET_KEY = 'gnews_stocks_rotation_offset';
+
+/** Advances a persisted round-robin cursor over the top-N liquid universe (by market cap) and
+ *  returns the next batch. At GNEWS_STOCKS_BATCH=5 and an hourly cycle, the full 60-name
+ *  universe rotates through every 12 hours. */
+async function nextGNewsStockBatch(): Promise<{ symbol: string; name: string }[]> {
+  const universe = await dbAll(
+    `SELECT ns.symbol, ns.name FROM nse_stocks ns
+     JOIN stock_fundamentals sf ON sf.symbol = ns.symbol
+     WHERE ns.status = 'ACTIVE' AND ns.name IS NOT NULL AND sf.market_cap IS NOT NULL
+     ORDER BY sf.market_cap DESC LIMIT ?`, [GNEWS_STOCKS_TRACKED],
+  ) as { symbol: string; name: string }[];
+  if (universe.length === 0) return [];
+
+  const row = await dbGet<{ value: string }>(
+    'SELECT value FROM app_settings WHERE key = ?', [GNEWS_STOCKS_OFFSET_KEY],
+  );
+  const offset = row?.value ? (parseInt(row.value, 10) || 0) % universe.length : 0;
+  const batch: { symbol: string; name: string }[] = [];
+  for (let i = 0; i < GNEWS_STOCKS_BATCH && i < universe.length; i++) {
+    batch.push(universe[(offset + i) % universe.length]);
+  }
+  const nextOffset = (offset + GNEWS_STOCKS_BATCH) % universe.length;
+  await dbRun(
+    `INSERT INTO app_settings (key, value) VALUES (?, ?)
+     ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
+    [GNEWS_STOCKS_OFFSET_KEY, String(nextOffset)],
+  );
+  return batch;
+}
+
+/** Per-stock news via one OR-joined GNews search over a rotating batch of top-cap names --
+ *  force-tagged to whichever batch symbol's name literally appears in each article (falling
+ *  back to the ordinary name-tagger for co-mentions outside the batch), same force-tag +
+ *  union-with-co-mentions contract processNewsItem already gives runCompanyNewsCycle/BSE. */
+export async function runGNewsStocksCycle(): Promise<{ fetched: number; inserted: number; skipped?: boolean; batch?: string[] }> {
+  const skipReason = await gnewsGateReason();
+  if (skipReason) {
+    console.log(`[SENTIMENT] GNews stocks cycle skipped — ${skipReason}`);
+    return { fetched: 0, inserted: 0, skipped: true };
+  }
+  await ensureNSESymbols();
+
+  const batch = await nextGNewsStockBatch();
+  if (batch.length === 0) return { fetched: 0, inserted: 0 };
+
+  const cleanedNames = batch.map(b => companyAliases(b.name)[0] ?? b.name);
+  const q = cleanedNames.map(n => `"${n}"`).join(' OR ');
+  const articles = await fetchGNews('search', { q, country: 'in' });
+
+  const sentRows = new Map<string, unknown[]>();
+  const legacyRows = new Map<string, unknown[]>();
+  const forceSymbol = (a: GNewsArticle): string | undefined => {
+    const text = `${a.title} ${a.description ?? ''}`.toLowerCase();
+    return batch.find(b => text.includes((companyAliases(b.name)[0] ?? b.name).toLowerCase()))?.symbol;
+  };
+  const fetched = gnewsTag(articles, 'GNews Stocks', 'INDIAN', sentRows, legacyRows, forceSymbol);
+
+  const inserted = sentRows.size;
+  if (inserted > 0) await persistNewsRows(sentRows, legacyRows);
+  const batchSymbols = batch.map(b => b.symbol);
+  console.log(`[SENTIMENT] GNews stocks cycle: batch=[${batchSymbols.join(',')}] fetched=${fetched} processed=${inserted}`);
+  return { fetched, inserted, batch: batchSymbols };
+}
+
+// ─── Investing.com (slow-refresh RSS — separate cadence from NEWS_SOURCES) ────
+//
+// investing.com's India edition carries two feeds that don't fit NEWS_SOURCES' flat 15-min
+// cadence, added 2026-08-05 while replacing MoneyControl's dead RSS family:
+//   "Stock Market Investment Ideas" (news_1065) — analyst/target-price-flavored, the closest
+//     live match found for MoneyControl's dead brokeragerecos.xml (no clean 1:1 replacement
+//     exists — this is topically adjacent, not identical). Refreshes roughly once/day.
+//   "Economy News" (news_14) — genuinely global/US macro despite the in.investing.com host;
+//     live-verified 2026-08-05 (Bessent/Iran/Palantir headlines) — do NOT treat this as an
+//     India-economy source. Refreshes a few times/day.
+// Polling either on the flat 15-min cadence would just re-fetch the same items for hours
+// before anything new appears — the same wasted-request rationale this file already
+// documents for GNews/BSE above. 3h is a middle ground: tight enough to catch the economy
+// feed's multi-times-a-day cadence without hammering the once-a-day ideas feed for nothing.
+//
+// Caveat: investing.com's pubDate is a bare `YYYY-MM-DD HH:mm:ss` (no weekday, no offset),
+// unlike every RFC-822 date elsewhere in NEWS_SOURCES. `new Date(...)` parses it as the
+// server's LOCAL time zone (verified — no crash, ISO round-trip succeeds), which is only
+// correct if investing.com's raw timestamp is already IST for this India-edition subdomain.
+// Not confirmed against the source; `published_at` may be off by a few hours if that
+// assumption is wrong. Non-critical — dedup keys off (source name, link), not this field.
+const INVESTING_SOURCES: NewsSource[] = [
+  { name: 'Investing.com Stock Ideas', url: 'https://in.investing.com/rss/news_1065.rss', type: 'INDIAN' },
+  { name: 'Investing.com Global Economy', url: 'https://in.investing.com/rss/news_14.rss', type: 'GLOBAL' },
+];
+
+/** Dedicated slow-cadence cycle for INVESTING_SOURCES — see the comment above for why these
+ *  two feeds don't live in the flat-15-min NEWS_SOURCES array. */
+export async function runInvestingIdeasCycle(): Promise<{ fetched: number; inserted: number }> {
+  await ensureNSESymbols();
+
+  const sentRows = new Map<string, unknown[]>();
+  const legacyRows = new Map<string, unknown[]>();
+  let fetched = 0;
+
+  const results = await Promise.all(INVESTING_SOURCES.map(src =>
+    fetchSource(src).then(items => ({ src, items }))
+  ));
+  for (const { src, items } of results) {
+    fetched += items.length;
+    for (const raw of items.slice(0, 30)) {
+      processNewsItem(raw, src.name, src.type, sentRows, legacyRows);
+    }
+  }
+
+  const inserted = sentRows.size;
+  if (inserted > 0) await persistNewsRows(sentRows, legacyRows);
+  console.log(`[SENTIMENT] Investing.com cycle: fetched=${fetched}, processed=${inserted}`);
+  return { fetched, inserted };
 }
 
 // ─── Main Fetch + Score Cycle ─────────────────────────────────────────────────
@@ -633,13 +990,22 @@ async function buildMarketSentimentSnapshot(): Promise<void> {
   let globalScore = 0;
 
   try {
-    const globalData = await fetchGlobalMarketData();
-    const nifty = globalData.find(d =>
-      d.symbol?.toLowerCase().includes('nifty') || d.country?.toLowerCase().includes('india')
-    );
-    if (nifty) {
-      niftyClose = parseFloat(nifty.current_price?.replace(/,/g, '') ?? '0') || null;
+    // BUG FOUND 2026-08-07 (dead-column sweep): this used to search fetchGlobalMarketData()'s
+    // result for a 'nifty'/'india' entry -- but that endpoint (NiftyTrader's usstock/global-
+    // market) is a global-EX-INDIA indices feed by design (live-verified: SHANGHAI/HANG SENG/
+    // NIKKEI/CAC 40/DAX/FTSE 100/DOW JONES/NASDAQ FUTURES/S&P 500 FUTURES -- zero India/Nifty
+    // entries, ever), so the .find() could never match and market_sentiment_snapshots.
+    // nifty_last_close/nifty_support/nifty_resistance were 100% NULL (confirmed live,
+    // 669/669 rows) despite this whole block looking fully wired. Reads NIFTY50's own real
+    // close from stock_ohlcv (this platform's canonical, already-collected source) instead.
+    const niftyRow = await dbGet<{ close: number }>(
+      "SELECT close FROM stock_ohlcv WHERE symbol = 'NIFTY50' ORDER BY date DESC LIMIT 1"
+    ).catch(() => null);
+    if (niftyRow?.close) {
+      niftyClose = niftyRow.close;
     }
+
+    const globalData = await fetchGlobalMarketData();
 
     // Global cue: average change% of US, Japan, HK, Europe indices
     const globalIndices = globalData.filter(d =>

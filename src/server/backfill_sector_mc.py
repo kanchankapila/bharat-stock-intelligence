@@ -73,6 +73,25 @@ _GICS = {
     "Services": "Industrials",
     "Trading": "Industrials",
     "Realty": "Real Estate",
+    # Found unmapped on the first live --enumerate run against production (2026-08-05) --
+    # MC's main_sector labels aren't just the ones probed when this dict was first built.
+    "Real Estate": "Real Estate",                 # MC uses this exact label too, not just "Realty"
+    "Plastic Products": "Materials",
+    "Electricals": "Industrials",                 # electrical equipment, not power generation/utility
+    "Paper": "Materials",
+    "Diamond & Jewellery": "Consumer Discretionary",
+    "Diamond  &  Jewellery": "Consumer Discretionary",  # MC's own feed has a double-space variant
+    "Containers & Packaging": "Materials",
+    "Aviation": "Industrials",
+    "Alcohol": "Consumer Staples",
+    "Industrial Gases & Fuels": "Materials",
+    "Footwear": "Consumer Discretionary",
+    "Manufacturing": "Industrials",
+    "Ship Building": "Industrials",
+    "Photographic Products": "Consumer Discretionary",
+    # "Miscellaneous" deliberately left unmapped -- genuinely not a single GICS sector, and
+    # forcing one would be a guess this project's own conventions rule out (industry still
+    # gets written for it via `sub`, per write_db()'s COALESCE logic).
 }
 
 

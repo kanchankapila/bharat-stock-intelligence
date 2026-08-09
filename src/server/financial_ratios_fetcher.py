@@ -56,6 +56,7 @@ from datetime import date
 import requests
 
 from db_compat import connect
+from as_of import logical_write_floor
 from et_stats_client import HEADERS, fetch_et_stats, load_companyid_map, as_of_floor
 
 DEBT_COVERAGE_RISK_THRESHOLD = 1.5
@@ -85,6 +86,18 @@ def ensure_schema(con) -> None:
         ON tl_financial_quality(symbol, as_of_date DESC)
     """)
     con.commit()
+
+    # KNOWN DEAD-BY-DESIGN COLUMNS (investigated 2026-08-07, dead-column sweep -- not a bug,
+    # documented so a future session doesn't re-flag or try to "fix" them): live Postgres also
+    # carries capex_ttm/ebit_ttm/fcf_ttm/fcf_yield/interest_expense_ttm on this table (added by
+    # an earlier migration, outside this file's own ensure_schema()/ALTER block above, which is
+    # why they're absent from it). fcf_ttm/fcf_yield are the pre-"_approx" originals --
+    # superseded by fcf_ttm_approx/fcf_yield_approx (the same "Task 11" supersession already
+    # documented in pgClient.ts for technical_signals.fcf_yield). capex_ttm/ebit_ttm/
+    # interest_expense_ttm were raw per-line-item inputs to a more granular FCF formula that
+    # was abandoned in favor of the simpler fcf_ttm_approx = cfo_ttm + cfi_ttm this file
+    # actually computes. None of the 5 have ever been written by this fetcher; do not build new
+    # logic to populate them -- that would resurrect a design this file has already moved past.
 
     for ddl in [
         "ALTER TABLE tl_financial_quality ADD COLUMN fetched_at TEXT DEFAULT CURRENT_TIMESTAMP",
@@ -458,8 +471,7 @@ def main() -> None:
     # Align to the last completed trading session, NOT date.today() -- this job runs in the
     # trendlyne-ratios-monthly batch (first Sunday of the month), a non-trading day with no
     # technical_signals row yet. Same fix as trendlyne_fundamentals_fetcher.py / mf_holdings_fetcher.py.
-    latest_row = con.execute("SELECT MAX(date) AS d FROM stock_ohlcv").fetchone()
-    today = str(latest_row["d"])[:10] if latest_row and latest_row["d"] else date.today().isoformat()
+    today = logical_write_floor(con, fallback=date.today().isoformat())
 
     ok = 0
     fcf_positive_count = 0

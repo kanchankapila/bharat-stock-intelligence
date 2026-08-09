@@ -4,6 +4,8 @@ import {
   fetchAllIndianIndices,
   fetchGlobalIndices,
   fetchSectorPerformance,
+  fetchSectorAdvanceDecline,
+  fetchSectorStocks,
   fetchHistoricalOHLC,
   fetchMarketMap,
 } from "../marketData";
@@ -16,10 +18,48 @@ import { fetchGlobalMarketData } from "../globalMarketService";
 import { generateStockAnalysis } from "../../services/aiService";
 import { router, publicProcedure, adminProcedure } from "../trpc";
 import { runPython } from "../pythonRunner";
+import { fetchWithCache } from "../cacheService";
 
 export const marketRouter = router({
-  getGlobalMarketData: publicProcedure
-    .query(async () => fetchGlobalMarketData()),
+  getMarketBreadth: publicProcedure
+    .query(async () => {
+      const breadth = await dbGet<any>(`
+        SELECT * FROM market_breadth
+        ORDER BY date DESC
+        LIMIT 1
+      `);
+      return breadth;
+    }),
+
+  // getFiiDiiFlow lives in ml.router.ts (accepts {days}, returns the recent-history array
+  // every real caller shares one cache entry over) -- this router must not redeclare it,
+  // mergeRouters() throws "Duplicate key" if two routers export the same procedure name.
+  //
+  // getMarketRegime lives in dl.router.ts (accepts an optional {date} for point-in-time
+  // lookback and parses the JSON feature columns) -- same reasoning, don't redeclare it here.
+
+    getEconomicCalendar: publicProcedure
+    .query(async () => {
+      const events = await dbAll<any>(`
+        SELECT * FROM eco_calendar
+        WHERE event_date >= date('now')
+        ORDER BY event_date, event_time
+        LIMIT 10
+      `);
+      return events;
+    }),
+
+    // These upstream-fetching procedures (getGlobalMarketData/getMarketOverview/getTopMovers/
+    // getBreakouts/getSectorPerformance below) previously called their live MoneyControl/
+    // NiftyTrader/ET fetch functions directly with no caching -- every dashboard load AND every
+    // poll tick from every concurrent browser tab was a synchronous round-trip to a third-party
+    // API. At any real concurrency this both inflates request latency to the upstream's latency
+    // and risks the upstream rate-limiting/banning this app. fetchWithCache already implements
+    // Redis/in-memory fallback + in-flight de-dup (cache-stampede protection) -- these just
+    // weren't calling it. TTLs are short enough that a fresh page load is never more than one
+    // interval stale, matching how often the frontend already polls these.
+    getGlobalMarketData: publicProcedure
+    .query(async () => fetchWithCache('market:global-data', () => fetchGlobalMarketData(), 30)),
 
   getLiveStocks: publicProcedure
     .query(async () => getOrRefreshAllStocks()),
@@ -126,6 +166,30 @@ export const marketRouter = router({
       return results.filter(Boolean);
     }),
 
+  // Recent daily closes per symbol, for lightweight sparklines (watchlist cards, etc).
+  // DB-only (stock_ohlcv), no external fetch -- cheap enough to call for a whole watchlist grid.
+  getRecentCloseSeries: publicProcedure
+    .input(z.object({ symbols: z.array(z.string()).max(60), days: z.number().min(2).max(60).default(15) }))
+    .query(async ({ input }) => {
+      const { symbols, days } = input;
+      if (symbols.length === 0) return {};
+      const placeholders = symbols.map(() => '?').join(',');
+      const rows = await dbAll<{ symbol: string; date: string; close: number }>(`
+        SELECT symbol, date, close FROM (
+          SELECT symbol, date, close,
+                 ROW_NUMBER() OVER (PARTITION BY symbol ORDER BY date DESC) AS rn
+          FROM stock_ohlcv
+          WHERE symbol IN (${placeholders}) AND (is_suspect IS NULL OR is_suspect = 0) AND close IS NOT NULL
+        ) t WHERE rn <= ?
+        ORDER BY symbol ASC, date ASC
+      `, [...symbols, days]);
+      const bySymbol: Record<string, number[]> = {};
+      for (const r of rows) {
+        (bySymbol[r.symbol] ??= []).push(r.close);
+      }
+      return bySymbol;
+    }),
+
   getStocks: publicProcedure
     .input(z.object({ limit: z.number().optional().default(10), sector: z.string().optional() }))
     .query(async ({ input }) => {
@@ -135,13 +199,32 @@ export const marketRouter = router({
     }),
 
   getMarketOverview: publicProcedure
-    .query(async () => {
-      const parse = (s: unknown) => parseFloat(String(s ?? '0').replace(/,/g, '')) || 0;
+    .query(async () => fetchWithCache('market:overview', async () => {
       const { getIndexByName } = await import('../indexMapping');
+      const { fetchIndexSpot } = await import('../marketData');
+      const id = (name: string) => getIndexByName(name)?.id || null;
+
+      // Primary: 3 distinct NiftyTrader per-index URLs, fetched in parallel -- so a 5s poll
+      // distributes load across 3 endpoints instead of one shared MoneyControl "all indices"
+      // call. Falls back to the single combined MC call below only if any of the 3 fail.
+      try {
+        const [n50, bnk, sx] = await Promise.all([
+          fetchIndexSpot('NIFTY'),
+          fetchIndexSpot('NIFTY BANK'),
+          fetchIndexSpot('sensex', 'bse'),
+        ]);
+        return {
+          nifty50:   { indId: id('NIFTY 50'),   ...n50 },
+          sensex:    { indId: id('SENSEX'),     ...sx  },
+          bankNifty: { indId: id('NIFTY BANK'), ...bnk },
+        };
+      } catch (e) { console.error('[MARKET OVERVIEW] NiftyTrader per-index fetch failed, falling back to MC:', e); }
+
+      const parse = (s: unknown) => parseFloat(String(s ?? '0').replace(/,/g, '')) || 0;
       const extractId = (name: string, url: string) => {
         const m = url?.match(/-(\d+)\.html$/);
         if (m) return m[1];
-        return getIndexByName(name)?.id || null;
+        return id(name);
       };
       try {
         const data = await fetchAllIndianIndices();
@@ -165,13 +248,13 @@ export const marketRouter = router({
         sensex:    { indId: '4',  value: null, change: null, changePct: null, stale: true },
         bankNifty: { indId: '23', value: null, change: null, changePct: null, stale: true },
       };
-    }),
+    }, 5)),
 
   getTopMovers: publicProcedure
-    .query(async () => fetchTopMovers()),
+    .query(async () => fetchWithCache('market:top-movers', () => fetchTopMovers(), 60)),
 
   getBreakouts: publicProcedure
-    .query(async () => fetchNiftyTraderBreakouts()),
+    .query(async () => fetchWithCache('market:breakouts', () => fetchNiftyTraderBreakouts(), 60)),
 
   getEarlyHoursPredictions: publicProcedure
     .input(z.object({ date: z.string().optional() }).optional())
@@ -253,30 +336,33 @@ export const marketRouter = router({
       limit:   z.number().optional(),
     }).optional())
     .query(async ({ input }) => {
-      const data = await fetchSectorPerformance(input);
-      if (data && data.success === 1 && data.data) {
-        return data.data.map((s: any) => {
-          const name = s.sectorName || s.sector || 'Unknown';
-          const rawChange = s.percentChange ?? s.mcapPerChange ?? 0;
-          const change = typeof rawChange === 'number' ? rawChange : parseFloat(String(rawChange).replace(/,/g, ''));
-          return { name, change: isNaN(change) ? 0 : change, stocks: s.stocksCount || 0 };
-        });
-      }
-      const allStocks = await getOrRefreshAllStocks();
-      const sectorMap = new Map<string, number[]>();
-      for (const stock of allStocks) {
-        const sector = (stock as any).sector || (stock as any).industry;
-        if (sector && sector !== 'Unknown') {
-          if (!sectorMap.has(sector)) sectorMap.set(sector, []);
-          sectorMap.get(sector)!.push(stock.changePct);
+      const cacheKey = `market:sector-perf:${JSON.stringify(input ?? {})}`;
+      return fetchWithCache(cacheKey, async () => {
+        const data = await fetchSectorPerformance(input);
+        if (data && data.success === 1 && data.data) {
+          return data.data.map((s: any) => {
+            const name = s.sectorName || s.sector || 'Unknown';
+            const rawChange = s.percentChange ?? s.mcapPerChange ?? 0;
+            const change = typeof rawChange === 'number' ? rawChange : parseFloat(String(rawChange).replace(/,/g, ''));
+            return { name, change: isNaN(change) ? 0 : change, stocks: s.stocksCount || 0 };
+          });
         }
-      }
-      return Array.from(sectorMap.entries())
-        .map(([name, changes]) => {
-          const avgChange = changes.reduce((a, b) => a + b, 0) / changes.length;
-          return { name, change: isNaN(avgChange) ? 0 : Number(avgChange.toFixed(2)), stocks: changes.length };
-        })
-        .sort((a, b) => b.change - a.change);
+        const allStocks = await getOrRefreshAllStocks();
+        const sectorMap = new Map<string, number[]>();
+        for (const stock of allStocks) {
+          const sector = (stock as any).sector || (stock as any).industry;
+          if (sector && sector !== 'Unknown') {
+            if (!sectorMap.has(sector)) sectorMap.set(sector, []);
+            sectorMap.get(sector)!.push(stock.changePct);
+          }
+        }
+        return Array.from(sectorMap.entries())
+          .map(([name, changes]) => {
+            const avgChange = changes.reduce((a, b) => a + b, 0) / changes.length;
+            return { name, change: isNaN(avgChange) ? 0 : Number(avgChange.toFixed(2)), stocks: changes.length };
+          })
+          .sort((a, b) => b.change - a.change);
+      }, 60);
     }),
 
   getSectorTechnicalTrends: publicProcedure
@@ -292,6 +378,13 @@ export const marketRouter = router({
   getMarketMapData: publicProcedure
     .input(z.object({ indId: z.string().optional() }))
     .query(async ({ input }) => fetchMarketMap(input.indId)),
+
+  getSectorAdvanceDecline: publicProcedure
+    .query(async () => fetchWithCache('market:sector-ad', () => fetchSectorAdvanceDecline(), 30)),
+
+  getSectorStocks: publicProcedure
+    .input(z.object({ slug: z.string() }))
+    .query(async ({ input }) => fetchWithCache(`market:sector-stocks:${input.slug}`, () => fetchSectorStocks(input.slug), 300)),
 
   getScreenerResults: publicProcedure
     .input(z.object({

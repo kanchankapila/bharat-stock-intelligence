@@ -1,7 +1,12 @@
 import { describe, it, expect, beforeEach } from 'vitest';
-import { dbRun } from '../dbAsync';
-import { createCallerFactory } from '../trpc';
-import { appRouter } from '../router';
+
+// Isolates this test from the host environment's USE_POSTGRES -- see createSignal.test.ts
+// for the full explanation of why a dynamic import is required here, not a plain top-level
+// statement before a static `import { dbRun } from '../dbAsync'`.
+process.env.USE_POSTGRES = 'false';
+const { dbRun } = await import('../dbAsync');
+const { createCallerFactory } = await import('../trpc');
+const { appRouter } = await import('../router');
 
 const caller = createCallerFactory(appRouter)({} as any);
 

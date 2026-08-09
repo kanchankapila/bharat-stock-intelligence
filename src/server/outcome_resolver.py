@@ -99,9 +99,13 @@ def simulate_exit(bars, entry, initial_stop, target, atr,
     """Bar-by-bar long-trade exit simulation over the holding window.
 
     `bars`: list of (date, high, low, close) ascending, position already open at `entry`.
-    Returns (exit_date, exit_price, exit_reason, gross_return_pct) where the return blends
-    a `scale_frac` partial booked at `target` with the remainder's exit. Net-of-cost is the
-    caller's job. Policy:
+    Returns (exit_date, exit_price, exit_reason, gross_return_pct, mfe_pct, mae_pct) where the
+    return blends a `scale_frac` partial booked at `target` with the remainder's exit, and
+    mfe_pct/mae_pct are the max favorable/adverse excursion seen over the whole holding window
+    (independent of how/where the trade actually exited -- added 2026-08-07, dead-column sweep,
+    for unified_signal_outcomes.intraday_max_return_pct/intraday_min_return_pct, which had zero
+    writers despite `highest` already being tracked here for the trailing-stop logic; `lowest`
+    is new). Net-of-cost is the caller's job. Policy:
       - Hard `initial_stop` always applies. Once price advances, a chandelier trailing stop
         (highest_high − mult×ATR) ratchets the stop up — never below the initial stop, and
         computed from bars *before* the current one (no intra-bar look-ahead).
@@ -111,9 +115,16 @@ def simulate_exit(bars, entry, initial_stop, target, atr,
       - If nothing exits the remainder by the last bar, it exits at the last close (time).
     """
     if not bars:
-        return None, None, 'PENDING', None
+        return None, None, 'PENDING', None, None, None
 
-    highest = entry
+    highest = lowest = entry
+    # mfe_high tracks the true max favorable excursion, INCLUDING the exiting bar's own high --
+    # deliberately separate from `highest` (which the chandelier stop calc reads and must stay
+    # updated only after the check, to avoid folding this bar's own high into this bar's own
+    # stop level -- a real anti-look-ahead property of the exit LOGIC). MFE/MAE are a pure
+    # descriptive statistic computed after the fact and feed no decision, so no such constraint
+    # applies to them; mirrors `lowest`, which was already being updated before the check.
+    mfe_high = entry
     partial_taken = False
     partial_return = 0.0
     has_target = target is not None and target > entry
@@ -126,11 +137,16 @@ def simulate_exit(bars, entry, initial_stop, target, atr,
         elif atr and atr > 0:
             eff_stop = highest - chandelier_mult * atr
 
+        lowest = min(lowest, low)
+        mfe_high = max(mfe_high, high)
+
         if eff_stop is not None and low <= eff_stop:
             reason = 'STOP_LOSS' if (initial_stop is not None and eff_stop == initial_stop) else 'TRAILING_STOP'
             leg = (eff_stop - entry) / entry * 100
             gross = scale_frac * partial_return + (1 - scale_frac) * leg if partial_taken else leg
-            return d, eff_stop, reason, gross
+            mfe_pct = (mfe_high - entry) / entry * 100
+            mae_pct = (lowest - entry) / entry * 100
+            return d, eff_stop, reason, gross, mfe_pct, mae_pct
 
         if has_target and not partial_taken and high >= target:
             partial_taken = True
@@ -140,9 +156,12 @@ def simulate_exit(bars, entry, initial_stop, target, atr,
 
     last_d, _, _, last_close = bars[-1]
     leg = (last_close - entry) / entry * 100
+    mfe_pct = (mfe_high - entry) / entry * 100
+    mae_pct = (lowest - entry) / entry * 100
     if partial_taken:
-        return last_d, last_close, 'TIME_EXIT_PARTIAL', scale_frac * partial_return + (1 - scale_frac) * leg
-    return last_d, last_close, 'TIME_EXIT', leg
+        gross = scale_frac * partial_return + (1 - scale_frac) * leg
+        return last_d, last_close, 'TIME_EXIT_PARTIAL', gross, mfe_pct, mae_pct
+    return last_d, last_close, 'TIME_EXIT', leg, mfe_pct, mae_pct
 
 
 def get_atr(conn: ConnWrapper, symbol: str, signal_date: str, window: int = 14) -> float:
@@ -233,6 +252,10 @@ def resolve_outcomes(
     # Signals old enough that horizon has passed, not yet resolved at THIS horizon.
     # Scoped to horizon_days so each horizon is selected independently — without this
     # the h1 pass would exclude signals from h5/h15 passes (starvation bug).
+    # signal_source='technical' scoped explicitly (2026-08): the dedup guard used to match on
+    # ANY row for (symbol, signal_date, horizon_days) regardless of who wrote it, so this
+    # resolver would silently skip a horizon confluence_outcome_tracker.py had already claimed
+    # (and vice versa) — see the signal_outcomes.signal_source migration for the full mechanism.
     pending = conn.execute("""
         SELECT ts.symbol, ts.date AS signal_date, ts.cmp AS entry_price,
                ts.signal_score, ts.signals_json,
@@ -245,6 +268,7 @@ def resolve_outcomes(
                WHERE so2.symbol = ts.symbol
                  AND so2.signal_date = ts.date
                  AND so2.horizon_days = ?
+                 AND so2.signal_source = 'technical'
                  AND so2.outcome IN ('WIN','LOSS','NEUTRAL','STOP_LOSS')
            )
          ORDER BY ts.date DESC
@@ -265,12 +289,13 @@ def resolve_outcomes(
         INSERT INTO signal_outcomes
             (symbol, signal_date, horizon_days, entry_price,
              check_date, exit_price, return_pct, outcome,
-             signal_score, signals_json, computed_at)
-        VALUES (?,?,?,?,?,?,?,?,?,?,CURRENT_TIMESTAMP)
-        ON CONFLICT(symbol, signal_date, horizon_days) DO UPDATE SET
+             signal_score, signals_json, computed_at,
+             signal_source, label_definition)
+        VALUES (?,?,?,?,?,?,?,?,?,?,CURRENT_TIMESTAMP,'technical','path_barrier')
+        ON CONFLICT(symbol, signal_date, horizon_days, signal_source) DO UPDATE SET
             check_date=excluded.check_date, exit_price=excluded.exit_price,
             return_pct=excluded.return_pct, outcome=excluded.outcome,
-            computed_at=excluded.computed_at
+            computed_at=excluded.computed_at, label_definition=excluded.label_definition
     """
 
     for row in rows:
@@ -280,9 +305,11 @@ def resolve_outcomes(
         stop_loss    = row['stop_loss']
         sig_horizon  = parse_horizon(row.get('time_horizon'), horizon_days)
 
-        # Skip if already resolved at this specific horizon
+        # Skip if already resolved at this specific horizon (technical source only — see the
+        # outer query's NOT EXISTS comment above for why signal_source is part of this check)
         if conn.execute(
-            "SELECT 1 FROM signal_outcomes WHERE symbol=? AND signal_date=? AND horizon_days=? AND outcome != 'PENDING' LIMIT 1",
+            "SELECT 1 FROM signal_outcomes WHERE symbol=? AND signal_date=? AND horizon_days=? "
+            "AND signal_source='technical' AND outcome != 'PENDING' LIMIT 1",
             (sym, signal_date, sig_horizon)
         ).fetchone():
             continue
@@ -427,17 +454,29 @@ def resolve_unified_outcomes(
     print(f"[OutcomeResolver] {len(rows)} unified signals pending resolution.")
     resolved = 0
 
+    # signal_score/intraday_max_return_pct/intraday_min_return_pct/exit_time fix (2026-08-07,
+    # dead-column sweep): all 4 had zero writers (confirmed live, 89,713/89,713 rows null).
+    # signal_score is round(confidence_score) -- unified_signals has no separate bare
+    # "signal_score" column, and confidence_score is the closest real match (already SELECTed
+    # into `cols` above but never used). intraday_max/min_return_pct come from simulate_exit's
+    # now-returned mfe_pct/mae_pct. exit_time is only set on the intraday-bar path (see above).
     upsert = """
         INSERT INTO unified_signal_outcomes
             (unified_signal_id, signal_source, symbol, signal_date, horizon_days,
              entry_price, entry_time, check_date, exit_price, outcome, return_pct,
-             exit_reason, computed_at)
-        VALUES (?,?,?,?,?,?,CURRENT_TIMESTAMP,?,?,?,?,?,CURRENT_TIMESTAMP)
+             exit_reason, signal_score, intraday_max_return_pct, intraday_min_return_pct,
+             exit_time, computed_at)
+        VALUES (?,?,?,?,?,?,CURRENT_TIMESTAMP,?,?,?,?,?,?,?,?,?,CURRENT_TIMESTAMP)
         ON CONFLICT(unified_signal_id, horizon_days) DO UPDATE SET
             entry_price=excluded.entry_price,
             check_date=excluded.check_date, exit_price=excluded.exit_price,
             outcome=excluded.outcome, return_pct=excluded.return_pct,
-            exit_reason=excluded.exit_reason, computed_at=excluded.computed_at
+            exit_reason=excluded.exit_reason,
+            signal_score=excluded.signal_score,
+            intraday_max_return_pct=excluded.intraday_max_return_pct,
+            intraday_min_return_pct=excluded.intraday_min_return_pct,
+            exit_time=excluded.exit_time,
+            computed_at=excluded.computed_at
     """
 
     for row in rows:
@@ -521,25 +560,34 @@ def resolve_unified_outcomes(
                 pass
 
         outcome, exit_price, check_date, return_pct, exit_reason = None, None, None, None, None
+        mfe_pct = mae_pct = exit_time = None
 
         if not bars:
             outcome = 'PENDING'
         else:
             initial_stop = stop_loss if (stop_loss and stop_loss > 0) else None
-            check_date, exit_price, exit_reason, gross = simulate_exit(
+            check_date, exit_price, exit_reason, gross, mfe_pct, mae_pct = simulate_exit(
                 bars, entry=entry, initial_stop=initial_stop, target=target, atr=atr)
-            
+            # exit_time (timestamptz) only gets real precision when the intraday 15m path was
+            # used above -- `check_date` is then already a full datetime string; on the daily-
+            # bar fallback it's a bare date, so exit_time stays NULL rather than fabricating a
+            # midnight timestamp that implies precision we don't actually have.
+            if use_intra:
+                exit_time = check_date
+
             # Incorporate dividend returns if any paid during the trade
             if dividend_sum > 0:
                 dividend_pct = (dividend_sum / entry) * 100
                 gross += dividend_pct
-                
+
             return_pct = net_return_pct(gross)
             if not is_plausible_return(return_pct):
                 # Phantom move from a bad/unadjusted bar — neither a win nor a loss, and
                 # the return itself is untrustworthy, so null it so it can't skew the
-                # per-source averages reward_engine/strategy_optimizer learn from.
+                # per-source averages reward_engine/strategy_optimizer learn from. mfe/mae are
+                # derived from the same suspect bars, so null them too for the same reason.
                 outcome, exit_reason, return_pct = 'NEUTRAL', 'SUSPECT_DATA', None
+                mfe_pct = mae_pct = None
             elif exit_reason == 'STOP_LOSS':
                 outcome = 'STOP_LOSS'
             else:
@@ -554,11 +602,18 @@ def resolve_unified_outcomes(
             print(msg)
             continue
 
+        conf = row.get('confidence_score')
+        signal_score = round(conf) if conf is not None else None
+
         conn.execute(upsert, (
             uid, source, sym, signal_date, horizon_days, entry,
             check_date, exit_price, outcome,
             round(return_pct, 4) if return_pct is not None else None,
             exit_reason,
+            signal_score,
+            round(mfe_pct, 4) if mfe_pct is not None else None,
+            round(mae_pct, 4) if mae_pct is not None else None,
+            exit_time,
         ))
         
         if outcome != 'PENDING':
@@ -821,7 +876,9 @@ def resolve_recommendation_log(
             outcome = 'PENDING'
         else:
             initial_stop = stop_loss if (stop_loss and stop_loss > 0) else None
-            _, exit_price, exit_reason, gross = simulate_exit(
+            # recommendation_log has no mfe/mae-equivalent columns to write, unlike
+            # unified_signal_outcomes above -- discarded here, not a bug.
+            _, exit_price, exit_reason, gross, _, _ = simulate_exit(
                 bars, entry=entry, initial_stop=initial_stop, target=target, atr=atr)
             
             # Incorporate dividend returns if any paid during the trade

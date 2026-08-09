@@ -5,8 +5,8 @@ Trains an ensemble of classifiers on historical signal_outcomes and uses the
 combined probability estimate as win_probability for new signals.
 
 Models:
-  - LGBMClassifier              (GPU-accelerated, replaces GradientBoostingClassifier)
-  - XGBClassifier               (GPU-accelerated, 5th base model)
+  - LGBMClassifier              (CPU by default; optional CUDA build support)
+  - XGBClassifier               (GPU-accelerated when CUDA is available)
   - RandomForestClassifier
   - ExtraTreesClassifier
   - LogisticRegression          (linear baseline)
@@ -40,6 +40,9 @@ import pandas as pd
 
 from db_compat import connect, read_df, use_postgres, ConnWrapper
 from as_of import as_of_join_sql
+from model_promotion import (clears_promotion_bar, rejections_since,
+                              staleness_override_applies,
+                              DEFAULT_STALENESS_MAX_DAYS, DEFAULT_STALENESS_MAX_REJECTIONS)
 
 MODELS_DIR  = os.path.join(os.getcwd(), 'src', 'server', 'ml_models')
 ENSEMBLE_PATH = os.path.join(MODELS_DIR, 'ensemble.pkl')
@@ -271,6 +274,18 @@ def build_features(df: pd.DataFrame) -> pd.DataFrame:
     # Ohlson O-Score: log-odds of failure; negative = lower failure probability.
     # Neutral default -2.0 (moderate safety, representative of a typical listed company).
     X['ohlson_o']        = num('ohlson_o', -2.0).clip(-10, 5)
+    # Graham Number: Graham's intrinsic-value estimate is an absolute price, not directly
+    # usable by the model at the stock's own price scale -- expressed as % discount/premium
+    # vs current price, same pattern as target_upside_pct above. Positive = undervalued
+    # (price below Graham fair value); negative = overvalued. Neutral default 0.0 (fairly
+    # valued) rather than dropping the row when either side of the ratio is missing/zero.
+    X['graham_discount_pct'] = ((num('graham_number', np.nan) - cmp_) / cmp_.replace(0, np.nan) * 100) \
+        .fillna(0).clip(-100, 200)
+    # DuPont ROE: MC's 3-way decomposed ROE (margin x turnover x leverage), distinct from
+    # stock_fundamentals.return_on_equity (a different vendor/methodology) -- kept as its own
+    # feature rather than merged, so the model can weigh them independently. Neutral default
+    # 12.0 (a representative mid-range ROE for a typical listed company).
+    X['dupont_roe'] = num('dupont_score', 12.0).clip(-50, 100)
 
     # ── Insider activity (from insider_features.py → technical_signals) ──
     # > 0.5 = promoters/directors accumulating (strong India signal: insider buying rarely occurs
@@ -800,7 +815,12 @@ def build_features(df: pd.DataFrame) -> pd.DataFrame:
 
     # ── Promoter insider transactions (insider_transactions_fetcher.py) ──────
     X['promoter_net']      = num('promoter_net_90d', 0.0).clip(-50, 50) / 50.0
-    # TODO: enable once insider_transactions_fetcher populates insider_buy_flag (currently 0 rows)
+    # insider_buy_flag was genuinely 0 rows for 90+ days (2026-08-07: insider_transactions_
+    # fetcher.py's own NSE per-symbol endpoint doesn't honor its from/to params -- fixed by
+    # repointing that fetcher's feature computation at insider_trades instead; see its docstring).
+    # NOT re-enabled here even though the data is now real: predict_proba_ensemble() passes X
+    # straight to each base model, and adding a column changes the feature matrix's shape/order
+    # against the CURRENTLY-ACTIVE trained model -- needs a coordinated retrain, not a live toggle.
     # X['insider_buy']       = num('insider_buy_flag', 0.0).clip(0, 1)
     X['insider_sell']      = num('insider_sell_flag', 0.0).clip(0, 1)
 
@@ -1009,6 +1029,10 @@ def load_training_data(label: str = 'horizon') -> pd.DataFrame:
       - 'horizon'        → so.outcome ∈ {WIN,LOSS} thresholded at the horizon (default).
       - 'triple_barrier' → se.tb_label (vol-scaled first-touch label from signal_excursions).
     """
+    # signal_source='technical' (2026-08): this whole query's feature set is a technical_signals
+    # LEFT JOIN (rsi/adx/nifty_regime/etc.) -- without this filter, a confluence-sourced outcome
+    # row sharing (symbol, signal_date) with an unrelated technical_signals row would be trained
+    # on as if it graded that signal, exactly the mispairing bug documented for ml_calibration.py.
     if label == 'triple_barrier':
         label_select = "se.tb_label AS outcome"
         label_join = (
@@ -1016,11 +1040,12 @@ def load_training_data(label: str = 'horizon') -> pd.DataFrame:
             "ON se.symbol = so.symbol AND se.signal_date = so.signal_date "
             "AND se.horizon_days = so.horizon_days"
         )
-        label_where = "se.tb_label IS NOT NULL"
+        label_where = "se.tb_label IS NOT NULL AND so.signal_source = 'technical'"
     else:
         label_select = "so.outcome"
         label_join = ""
-        label_where = "so.outcome IN ('WIN','LOSS','STOP_LOSS')\n          AND so.return_pct IS NOT NULL"
+        label_where = ("so.outcome IN ('WIN','LOSS','STOP_LOSS')\n          AND so.return_pct IS NOT NULL"
+                       "\n          AND so.signal_source = 'technical'")
 
     if use_postgres():
         q = f"""
@@ -1143,6 +1168,8 @@ def load_training_data(label: str = 'horizon') -> pd.DataFrame:
                    aeh.n_analysts, aeh.buy_count, aeh.target_mean,
                    psh_az.score_value AS altman_z,
                    psh_oo.score_value AS ohlson_o,
+                   psh_gn.score_value AS graham_number,
+                   psh_ds.score_value AS dupont_score,
                    (SELECT COUNT(*) FROM credit_rating_events cre
                      WHERE cre.symbol = so.symbol
                        AND UPPER(cre.action) LIKE '%UPGRADE%'
@@ -1200,6 +1227,26 @@ def load_training_data(label: str = 'horizon') -> pd.DataFrame:
                       SELECT MAX(p2.date) FROM proprietary_scores_history p2
                       WHERE p2.symbol = so.symbol AND p2.source = 'moneycontrol'
                         AND p2.score_type = 'ohlson_o_score'
+                        AND p2.date <= so.signal_date
+                  )
+            LEFT JOIN proprietary_scores_history psh_gn
+                   ON psh_gn.symbol = so.symbol
+                  AND psh_gn.source = 'moneycontrol'
+                  AND psh_gn.score_type = 'graham_number'
+                  AND psh_gn.date = (
+                      SELECT MAX(p2.date) FROM proprietary_scores_history p2
+                      WHERE p2.symbol = so.symbol AND p2.source = 'moneycontrol'
+                        AND p2.score_type = 'graham_number'
+                        AND p2.date <= so.signal_date
+                  )
+            LEFT JOIN proprietary_scores_history psh_ds
+                   ON psh_ds.symbol = so.symbol
+                  AND psh_ds.source = 'moneycontrol'
+                  AND psh_ds.score_type = 'dupont_score'
+                  AND psh_ds.date = (
+                      SELECT MAX(p2.date) FROM proprietary_scores_history p2
+                      WHERE p2.symbol = so.symbol AND p2.source = 'moneycontrol'
+                        AND p2.score_type = 'dupont_score'
                         AND p2.date <= so.signal_date
                   )
             LEFT JOIN feature_store fs
@@ -1412,6 +1459,8 @@ def load_training_data(label: str = 'horizon') -> pd.DataFrame:
                    aeh.n_analysts, aeh.buy_count, aeh.target_mean,
                    psh_az.score_value AS altman_z,
                    psh_oo.score_value AS ohlson_o,
+                   psh_gn.score_value AS graham_number,
+                   psh_ds.score_value AS dupont_score,
                    (SELECT COUNT(*) FROM credit_rating_events cre
                      WHERE cre.symbol = so.symbol
                        AND UPPER(cre.action) LIKE '%UPGRADE%'
@@ -1453,6 +1502,26 @@ def load_training_data(label: str = 'horizon') -> pd.DataFrame:
                       SELECT MAX(p2.date) FROM proprietary_scores_history p2
                       WHERE p2.symbol = so.symbol AND p2.source = 'moneycontrol'
                         AND p2.score_type = 'ohlson_o_score'
+                        AND p2.date <= so.signal_date
+                  )
+            LEFT JOIN proprietary_scores_history psh_gn
+                   ON psh_gn.symbol = so.symbol
+                  AND psh_gn.source = 'moneycontrol'
+                  AND psh_gn.score_type = 'graham_number'
+                  AND psh_gn.date = (
+                      SELECT MAX(p2.date) FROM proprietary_scores_history p2
+                      WHERE p2.symbol = so.symbol AND p2.source = 'moneycontrol'
+                        AND p2.score_type = 'graham_number'
+                        AND p2.date <= so.signal_date
+                  )
+            LEFT JOIN proprietary_scores_history psh_ds
+                   ON psh_ds.symbol = so.symbol
+                  AND psh_ds.source = 'moneycontrol'
+                  AND psh_ds.score_type = 'dupont_score'
+                  AND psh_ds.date = (
+                      SELECT MAX(p2.date) FROM proprietary_scores_history p2
+                      WHERE p2.symbol = so.symbol AND p2.source = 'moneycontrol'
+                        AND p2.score_type = 'dupont_score'
                         AND p2.date <= so.signal_date
                   )
             LEFT JOIN feature_store fs
@@ -1633,6 +1702,8 @@ def load_pending_signals() -> pd.DataFrame:
                    aeh.n_analysts, aeh.buy_count, aeh.target_mean,
                    psh_az.score_value AS altman_z,
                    psh_oo.score_value AS ohlson_o,
+                   psh_gn.score_value AS graham_number,
+                   psh_ds.score_value AS dupont_score,
                    sfs.sector_pcr, sfs.total_call_oi AS sector_call_oi, sfs.total_put_oi AS sector_put_oi
             FROM technical_signals ts
             LEFT JOIN stock_fundamentals sf ON sf.symbol = ts.symbol
@@ -1661,6 +1732,26 @@ def load_pending_signals() -> pd.DataFrame:
                       SELECT MAX(p2.date) FROM proprietary_scores_history p2
                       WHERE p2.symbol = ts.symbol AND p2.source = 'moneycontrol'
                         AND p2.score_type = 'ohlson_o_score'
+                        AND p2.date <= ts.date
+                  )
+            LEFT JOIN proprietary_scores_history psh_gn
+                   ON psh_gn.symbol = ts.symbol
+                  AND psh_gn.source = 'moneycontrol'
+                  AND psh_gn.score_type = 'graham_number'
+                  AND psh_gn.date = (
+                      SELECT MAX(p2.date) FROM proprietary_scores_history p2
+                      WHERE p2.symbol = ts.symbol AND p2.source = 'moneycontrol'
+                        AND p2.score_type = 'graham_number'
+                        AND p2.date <= ts.date
+                  )
+            LEFT JOIN proprietary_scores_history psh_ds
+                   ON psh_ds.symbol = ts.symbol
+                  AND psh_ds.source = 'moneycontrol'
+                  AND psh_ds.score_type = 'dupont_score'
+                  AND psh_ds.date = (
+                      SELECT MAX(p2.date) FROM proprietary_scores_history p2
+                      WHERE p2.symbol = ts.symbol AND p2.source = 'moneycontrol'
+                        AND p2.score_type = 'dupont_score'
                         AND p2.date <= ts.date
                   )
             LEFT JOIN (
@@ -1752,6 +1843,14 @@ def load_pending_signals() -> pd.DataFrame:
         def psh_oo_c(col, alias=None):
             out_alias = alias if alias else col
             return f"psh_oo.{col}" if col.lower() in psh_cols else f"NULL AS {out_alias}"
+
+        def psh_gn_c(col, alias=None):
+            out_alias = alias if alias else col
+            return f"psh_gn.{col}" if col.lower() in psh_cols else f"NULL AS {out_alias}"
+
+        def psh_ds_c(col, alias=None):
+            out_alias = alias if alias else col
+            return f"psh_ds.{col}" if col.lower() in psh_cols else f"NULL AS {out_alias}"
 
         def fs_c(col, alias=None):
             out_alias = alias if alias else col
@@ -1908,6 +2007,8 @@ def load_pending_signals() -> pd.DataFrame:
                    {aeh_c('n_analysts')}, {aeh_c('buy_count')}, {aeh_c('target_mean')},
                    {psh_az_c('score_value', 'altman_z')},
                    {psh_oo_c('score_value', 'ohlson_o')},
+                   {psh_gn_c('score_value', 'graham_number')},
+                   {psh_ds_c('score_value', 'dupont_score')},
                    {sfs_pcr_sel}, {sfs_call_sel}, {sfs_put_sel}
             FROM technical_signals ts
             LEFT JOIN stock_fundamentals sf ON sf.symbol = ts.symbol
@@ -1935,6 +2036,26 @@ def load_pending_signals() -> pd.DataFrame:
                       SELECT MAX(p2.date) FROM proprietary_scores_history p2
                       WHERE p2.symbol = ts.symbol AND p2.source = 'moneycontrol'
                         AND p2.score_type = 'ohlson_o_score'
+                        AND p2.date <= ts.date
+                  )
+            LEFT JOIN proprietary_scores_history psh_gn
+                   ON psh_gn.symbol = ts.symbol
+                  AND psh_gn.source = 'moneycontrol'
+                  AND psh_gn.score_type = 'graham_number'
+                  AND psh_gn.date = (
+                      SELECT MAX(p2.date) FROM proprietary_scores_history p2
+                      WHERE p2.symbol = ts.symbol AND p2.source = 'moneycontrol'
+                        AND p2.score_type = 'graham_number'
+                        AND p2.date <= ts.date
+                  )
+            LEFT JOIN proprietary_scores_history psh_ds
+                   ON psh_ds.symbol = ts.symbol
+                  AND psh_ds.source = 'moneycontrol'
+                  AND psh_ds.score_type = 'dupont_score'
+                  AND psh_ds.date = (
+                      SELECT MAX(p2.date) FROM proprietary_scores_history p2
+                      WHERE p2.symbol = ts.symbol AND p2.source = 'moneycontrol'
+                        AND p2.score_type = 'dupont_score'
                         AND p2.date <= ts.date
                   )
             LEFT JOIN (
@@ -1977,23 +2098,66 @@ def load_pending_signals() -> pd.DataFrame:
 
 # ── Model Building ────────────────────────────────────────────────────────────
 
-def _gpu_device() -> str:
-    """Return 'cuda' if GPU is available AND LightGBM was built with CUDA, else 'cpu'."""
+_LIGHTGBM_DEVICE_CACHE: dict[str, str] = {}
+
+
+def _truthy_env(name: str) -> bool:
+    return os.getenv(name, '').strip().lower() in {'1', 'true', 'yes', 'y', 'on'}
+
+
+def _torch_cuda_available() -> bool:
     try:
         import torch
-        if not torch.cuda.is_available():
-            return 'cpu'
+        return bool(torch.cuda.is_available())
     except ImportError:
-        return 'cpu'
-    # Verify LightGBM CUDA support with a minimal probe
+        return False
+
+
+def _probe_lightgbm_device(device: str) -> bool:
+    """Fit a tiny LightGBM model while suppressing native stderr from failed CUDA builds."""
+    if device in _LIGHTGBM_DEVICE_CACHE:
+        return _LIGHTGBM_DEVICE_CACHE[device] == device
+
     try:
         from lightgbm import LGBMClassifier
         import numpy as np
-        _probe = LGBMClassifier(n_estimators=1, device='cuda', verbose=-1)
-        _probe.fit(np.array([[0], [1]]), np.array([0, 1]))
-        return 'cuda'
+        with open(os.devnull, 'w') as devnull:
+            old_stderr = os.dup(2)
+            try:
+                os.dup2(devnull.fileno(), 2)
+                probe = LGBMClassifier(n_estimators=1, device=device, verbose=-1)
+                probe.fit(np.array([[0], [1]]), np.array([0, 1]))
+            finally:
+                os.dup2(old_stderr, 2)
+                os.close(old_stderr)
+        _LIGHTGBM_DEVICE_CACHE[device] = device
+        return True
     except Exception:
+        _LIGHTGBM_DEVICE_CACHE[device] = 'cpu'
+        return False
+
+
+def _lightgbm_device(requested: str | None = None) -> str:
+    """Return a LightGBM device that is safe for the installed wheel."""
+    requested = (requested or os.getenv('ML_ENSEMBLE_LIGHTGBM_DEVICE') or 'cpu').strip().lower()
+    if requested in {'', 'auto'}:
+        requested = 'cuda' if _truthy_env('ML_ENSEMBLE_ENABLE_LGBM_CUDA') else 'cpu'
+    if requested == 'cpu':
         return 'cpu'
+    if requested == 'cuda' and not _torch_cuda_available():
+        print("[Ensemble] LightGBM CUDA requested but torch sees no CUDA GPU; using CPU.")
+        return 'cpu'
+    if requested in {'cuda', 'gpu'} and _probe_lightgbm_device(requested):
+        return requested
+    print(f"[Ensemble] LightGBM {requested!r} device unavailable in this build; using CPU.")
+    return 'cpu'
+
+
+def _xgboost_device() -> str:
+    """Return the preferred XGBoost device."""
+    if _truthy_env('ML_ENSEMBLE_FORCE_CPU'):
+        return 'cpu'
+    return 'cuda' if _torch_cuda_available() else 'cpu'
 
 
 def _base_models(scale_pos_weight: float = 1.0, tuned_params: dict | None = None):
@@ -2004,14 +2168,16 @@ def _base_models(scale_pos_weight: float = 1.0, tuned_params: dict | None = None
     from xgboost import XGBClassifier
 
     tp = tuned_params or {}
-    _dev = _gpu_device()
+    lgbm_device = _lightgbm_device()
+    xgb_device = _xgboost_device()
 
     lgbm_params = {
         'n_estimators': 300, 'max_depth': 4, 'learning_rate': 0.04,
         'subsample': 0.8, 'min_child_samples': 5, 'random_state': 42,
-        'device': _dev, 'verbose': -1, 'class_weight': 'balanced',
+        'device': lgbm_device, 'verbose': -1, 'class_weight': 'balanced',
     }
     lgbm_params.update(tp.get('lgbm', {}))
+    lgbm_params['device'] = _lightgbm_device(str(lgbm_params.get('device', 'cpu')))
     lgbm = CalibratedClassifierCV(
         LGBMClassifier(**lgbm_params),
         method='isotonic', cv=3,
@@ -2020,9 +2186,13 @@ def _base_models(scale_pos_weight: float = 1.0, tuned_params: dict | None = None
     xgb_params = {
         'n_estimators': 300, 'max_depth': 4, 'learning_rate': 0.04,
         'subsample': 0.8, 'random_state': 42, 'scale_pos_weight': scale_pos_weight,
-        'device': _dev, 'eval_metric': 'logloss', 'verbosity': 0,
+        'device': xgb_device, 'eval_metric': 'logloss', 'verbosity': 0,
     }
     xgb_params.update(tp.get('xgb', {}))
+    if _truthy_env('ML_ENSEMBLE_FORCE_CPU') or (
+        str(xgb_params.get('device', 'cpu')).startswith('cuda') and not _torch_cuda_available()
+    ):
+        xgb_params['device'] = 'cpu'
     xgb_model = CalibratedClassifierCV(
         XGBClassifier(**xgb_params),
         method='isotonic', cv=3,
@@ -2473,9 +2643,13 @@ def save_ensemble(ensemble: dict):
 # A candidate stuck behind a stale baseline forever (e.g. the baseline's CV AUC was inflated by
 # a leak that's since been fixed, so nothing can ever clear PROMOTION_MARGIN over it again) gets
 # auto-adopted once the baseline has gone unbeaten this long. This is a safety valve, not a
-# relaxation of the bar itself — it only fires after sustained, repeated rejection.
-STALENESS_MAX_DAYS = 7
-STALENESS_MAX_REJECTIONS = 10
+# relaxation of the bar itself — it only fires after sustained, repeated rejection. Thresholds
+# and the age/rejection-count math now live in model_promotion.py (2026-08-06) -- cs_ranker.py
+# and confluence_ml_engine.py had no equivalent safety valve at all, which is exactly how the
+# same "baseline predates a leak fix, nothing can ever beat it again" deadlock recurred for them
+# with no way to self-heal; see that module's staleness_override_applies() docstring.
+STALENESS_MAX_DAYS = DEFAULT_STALENESS_MAX_DAYS
+STALENESS_MAX_REJECTIONS = DEFAULT_STALENESS_MAX_REJECTIONS
 # A candidate's true held-out AUC is allowed to sit below baseline's by at most this much even
 # if its CV AUC clears the promotion bar — protects against promoting a model whose CV score
 # looks fine but that doesn't actually generalize (the cv/test gap seen 2026-07-14 onward).
@@ -2502,32 +2676,6 @@ def _active_baseline(conn: ConnWrapper) -> dict | None:
         return None
 
 
-def _rejections_since(conn: ConnWrapper, baseline_id: int) -> int:
-    """How many candidates have been registered (and rejected) against the current baseline."""
-    try:
-        row = conn.execute(
-            "SELECT COUNT(*) FROM model_registry WHERE model_name = 'ensemble' "
-            "AND is_active = 0 AND id > ?", (baseline_id,)
-        ).fetchone()
-        return int(row[0]) if row and row[0] is not None else 0
-    except Exception:
-        conn.rollback()
-        return 0
-
-
-def _days_since(trained_at) -> float:
-    try:
-        if isinstance(trained_at, str):
-            trained_at = datetime.datetime.fromisoformat(trained_at)
-        # Postgres returns tz-aware datetimes (UTC); datetime.now() is naive. Match awareness
-        # on both sides so the subtraction doesn't raise (which silently produced 0.0 here).
-        now = datetime.datetime.now(trained_at.tzinfo) if trained_at.tzinfo else datetime.datetime.now()
-        return (now - trained_at).total_seconds() / 86400.0
-    except Exception as e:
-        print(f"[Ensemble] _days_since failed for trained_at={trained_at!r}: {e}")
-        return 0.0
-
-
 def promote_or_register(conn: ConnWrapper, ensemble: dict) -> int:
     """Gate activation behind a promotion bar so a retrain can't silently replace a good live
     model with a worse one (the ensemble.pkl auto-activate incident). The new model must beat the
@@ -2549,7 +2697,7 @@ def promote_or_register(conn: ConnWrapper, ensemble: dict) -> int:
     new_test_auc = ensemble.get('test_auc')
     baseline = _active_baseline(conn)
 
-    clears_cv_bar = baseline is None or new_cv_auc >= baseline['cv_auc'] + PROMOTION_MARGIN
+    clears_cv_bar = clears_promotion_bar(new_cv_auc, baseline['cv_auc'] if baseline else None, PROMOTION_MARGIN)
     # Only enforce the test-AUC gate when both sides have a real reading to compare.
     clears_test_gate = (
         baseline is None or baseline['test_auc'] is None or new_test_auc is None
@@ -2561,9 +2709,9 @@ def promote_or_register(conn: ConnWrapper, ensemble: dict) -> int:
     age_days = 0.0
     rejections = 0
     if baseline is not None and not clears_bar:
-        age_days = _days_since(baseline['trained_at'])
-        rejections = _rejections_since(conn, baseline['id'])
-        staleness_override = age_days >= STALENESS_MAX_DAYS and rejections >= STALENESS_MAX_REJECTIONS
+        rejections = rejections_since(conn, 'ensemble', baseline['id'])
+        staleness_override, age_days = staleness_override_applies(
+            baseline['trained_at'], rejections, STALENESS_MAX_DAYS, STALENESS_MAX_REJECTIONS)
 
     if baseline is not None and not clears_bar and not staleness_override:
         try:
@@ -2900,6 +3048,9 @@ def check_drift(conn: ConnWrapper, auc_drop_threshold: float = 0.04,
         return False
     trained_auc = float(row[0])
 
+    # signal_source='technical' (2026-08): the ensemble is trained only on technical-sourced
+    # rows (see load_training_data's label_where) -- comparing against a pooled win-rate across
+    # both sources would produce a spurious drift signal, not a real one.
     live = conn.execute(f"""
         SELECT
             COUNT(*) as total,
@@ -2907,6 +3058,7 @@ def check_drift(conn: ConnWrapper, auc_drop_threshold: float = 0.04,
         FROM signal_outcomes
         WHERE computed_at >= date('now', '-{window_days} days')
           AND outcome IN ('WIN', 'LOSS', 'STOP_LOSS')
+          AND signal_source = 'technical'
     """).fetchone()
 
     if not live or not live[0] or live[0] < 20:
@@ -3095,6 +3247,7 @@ def incremental_update(n_days: int = 3, n_rounds: int = 20, dry_run: bool = Fals
               )
         WHERE so.outcome IN ('WIN','LOSS')
           AND so.signal_date >= ?
+          AND so.signal_source = 'technical'
         ORDER BY so.signal_date ASC
     """
     df = read_df(q, (cutoff,))
@@ -3133,8 +3286,10 @@ def incremental_update(n_days: int = 3, n_rounds: int = 20, dry_run: bool = Fals
     X_aligned = X[feature_names].astype(np.float32)
 
     ds = lgb.Dataset(X_aligned, label=y, free_raw_data=False)
+    lgbm_train_params = dict(lgbm_model.get_params())
+    lgbm_train_params['device'] = _lightgbm_device(str(lgbm_train_params.get('device', 'cpu')))
     lgbm_model.booster_ = lgb.train(
-        lgbm_model.get_params(),
+        lgbm_train_params,
         ds,
         num_boost_round=n_rounds,
         init_model=lgbm_model.booster_,

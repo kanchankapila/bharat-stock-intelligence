@@ -22,7 +22,7 @@ function conviction(level: string | null | undefined) {
 export function TodaysPicks({ onSelectStock }: TodaysPicksProps) {
   const today = new Date().toISOString().slice(0, 10);
 
-  const { data, isLoading, error, refetch } = trpc.getUnifiedSignals.useQuery(
+  const { data, isLoading, error, refetch } = trpc.getTechnicalConfluenceSignals.useQuery(
     { date: today, minUnified: 0.55, minConfluence: 40, limit: 20 },
     { refetchInterval: 5 * 60 * 1000 }
   );

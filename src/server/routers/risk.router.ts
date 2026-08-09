@@ -31,6 +31,21 @@ interface RiskRow {
 
 // ── Risk tier classification ─────────────────────────────────────────────────
 
+// multi_factor_scorer.py can compute a genuine IEEE754 NaN for mf_composite_score/
+// mf_risk_adj_score (e.g. a z-score normalised against a zero-stdev factor) and Postgres
+// happily stores/returns it -- unlike JS, Postgres treats NaN as a valid, non-null float that
+// sorts GREATER than every real number, so `IS NOT NULL` does not filter it and
+// `ORDER BY ... DESC` puts the broken rows at rank #1 of "top stocks by multi-factor score".
+// Wrapping every mf_* column in NULLIF(x, 'NaN'::float8) converts NaN to a real SQL
+// NULL (Postgres considers NaN = NaN true), which the existing `!= null` guards in
+// RiskMetricsDashboard.tsx already handle correctly -- same defensive pattern as
+// unified_ranker.py's _finite_engine_map(). `::float8` (not the two-word `::double precision`,
+// which sqlTranslate.ts's stripPgCasts regex can't match) is stripped for the SQLite
+// dev-fallback path (harmless no-op there; SQLite REAL columns don't produce JS NaN).
+const MF_COLUMNS_RAW = ['mf_composite_score', 'mf_quality_score', 'mf_momentum_score', 'mf_value_score', 'mf_risk_adj_score', 'mf_macro_score'] as const;
+const mfSelectSql = (alias: string) => MF_COLUMNS_RAW.map(c => `NULLIF(${alias}.${c}, 'NaN'::float8) AS ${c}`).join(', ');
+const mfCompositeNotNaN = (alias: string) => `NULLIF(${alias}.mf_composite_score, 'NaN'::float8) IS NOT NULL`;
+
 function riskTier(beta: number | null, vol: number | null, maxDD: number | null): string {
   // Composite risk: equally weighted z-score of beta, vol, drawdown
   const factors: number[] = [];
@@ -75,8 +90,7 @@ export const riskRouter = router({
           qs.beta_1y, qs.beta_6m,
           qs.sortino_ratio, qs.var_95,
           qs.sharpe_ratio, qs.annualized_vol, qs.max_drawdown_1y,
-          qs.mf_composite_score, qs.mf_quality_score, qs.mf_momentum_score,
-          qs.mf_value_score, qs.mf_risk_adj_score, qs.mf_macro_score,
+          ${mfSelectSql('qs')},
           qs.rank_composite, qs.composite_class
         FROM quant_scores qs
         LEFT JOIN nse_stocks ns ON ns.symbol = qs.symbol
@@ -100,7 +114,7 @@ export const riskRouter = router({
       sector:   z.string().optional(),
     }))
     .query(async ({ input }) => {
-      const conditions: string[] = ['qs.mf_composite_score IS NOT NULL'];
+      const conditions: string[] = [mfCompositeNotNaN('qs')];
       const params: (number | string)[] = [];
 
       if (input.minScore > 0) {
@@ -127,13 +141,12 @@ export const riskRouter = router({
           qs.beta_1y, qs.beta_6m,
           qs.sortino_ratio, qs.var_95,
           qs.sharpe_ratio, qs.annualized_vol, qs.max_drawdown_1y,
-          qs.mf_composite_score, qs.mf_quality_score, qs.mf_momentum_score,
-          qs.mf_value_score, qs.mf_risk_adj_score, qs.mf_macro_score,
+          ${mfSelectSql('qs')},
           qs.rank_composite, qs.composite_class
         FROM quant_scores qs
         LEFT JOIN nse_stocks ns ON ns.symbol = qs.symbol
         WHERE ${where}
-        ORDER BY qs.mf_composite_score DESC
+        ORDER BY NULLIF(qs.mf_composite_score, 'NaN'::float8) DESC
         LIMIT ?
       `, params);
 

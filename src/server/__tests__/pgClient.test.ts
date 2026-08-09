@@ -8,7 +8,7 @@ vi.mock('pg', () => ({
   Pool: vi.fn().mockImplementation(() => ({ connect: mockConnect, on: vi.fn() })),
   types: {
     setTypeParser: vi.fn((oid: number, fn: (val: string) => unknown) => { parsers[oid] = fn; }),
-    builtins: { INT8: 20, TIMESTAMP: 1114 },
+    builtins: { INT8: 20, TIMESTAMP: 1114, NUMERIC: 1700 },
   },
 }));
 
@@ -43,6 +43,16 @@ describe('pgClient', () => {
     expect(parse).toBeTypeOf('function');
     const d = parse('2026-07-17 10:00:00.000') as Date;
     expect(d.toISOString()).toBe('2026-07-17T10:00:00.000Z');
+    expect(parse(null as unknown as string)).toBeNull();
+  });
+
+  it('parses NUMERIC columns as JS numbers, not strings (e.g. ROUND()-produced growth_pct)', () => {
+    const parse = parsers[1700];
+    expect(parse).toBeTypeOf('function');
+    const parsed = parse('12.34');
+    expect(parsed).toBe(12.34);
+    expect(typeof parsed).toBe('number');
+    expect((parsed as number).toFixed(2)).toBe('12.34');
     expect(parse(null as unknown as string)).toBeNull();
   });
 

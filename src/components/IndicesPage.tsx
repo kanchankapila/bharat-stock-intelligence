@@ -2,14 +2,12 @@ import React from 'react';
 import { motion } from 'motion/react';
 import { ArrowUpRight, ArrowDownRight, Activity } from 'lucide-react';
 import { trpc } from '../lib/trpc';
-import { cn } from '../lib/utils';
+import { cn, extractIndexId } from '../lib/utils';
+import { marketHoursRefetchInterval } from '../lib/timeFormat';
 import { IndexDetailPage } from './IndexDetailPage';
 import { AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from 'recharts';
 
-export function extractIndexId(url: string): string | null {
-  const m = url.match(/-(\d+)\.html$/);
-  return m ? m[1] : null;
-}
+export { extractIndexId };
 
 export const IndicesPage: React.FC<{ 
   onSelectStock: (symbol: string) => void;
@@ -17,7 +15,7 @@ export const IndicesPage: React.FC<{
   setSelectedIndex: (idx: { id: string; name: string } | null) => void;
 }> = ({ onSelectStock, selectedIndex, setSelectedIndex }) => {
   const { data: indicesData, isLoading } = trpc.getAllIndices.useQuery(undefined, { refetchInterval: 30000 });
-  const { data: advDecData } = trpc.getIndexAdvanceDecline.useQuery(undefined, { refetchInterval: 60000 });
+  const { data: advDecData } = trpc.getIndexAdvanceDecline.useQuery(undefined, { refetchInterval: marketHoursRefetchInterval(10000) });
 
   if (selectedIndex) {
     return (

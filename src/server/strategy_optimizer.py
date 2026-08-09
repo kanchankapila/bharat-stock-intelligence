@@ -111,6 +111,7 @@ class StrategyOptimizer:
             WHERE so.outcome IN ('WIN','LOSS','NEUTRAL')
               AND so.return_pct IS NOT NULL
               AND so.horizon_days = ?
+              AND so.signal_source = 'technical'
         """
         df = self._read_df(q, (horizon_days,))
         for col in CATEGORIES:
@@ -277,13 +278,18 @@ class StrategyOptimizer:
         win rates with zero split before writing straight into screener_master
         .weight_override -- an in-sample fit with no signal of whether it generalises.
         """
+        # sm.source = 'Trendlyne' is required: this query only ever joins against
+        # trendlyne_screener_stocks, but without scoping the join, a scan_id that happens to
+        # numerically collide with an MC/ETnow screener_master row (2026-08-04 memory) could
+        # pull in that unrelated provider's name/category instead of Trendlyne's own.
         q = """
             SELECT sm.scan_id, sm.name, sm.source, sm.inferred_category,
                    so.signal_date, so.symbol, so.outcome
             FROM screener_master sm
             JOIN trendlyne_screener_stocks tss ON tss.screener_id = sm.scan_id
             JOIN signal_outcomes so ON so.symbol = tss.symbol
-            WHERE so.outcome IN ('WIN','LOSS','NEUTRAL')
+            WHERE so.outcome IN ('WIN','LOSS','NEUTRAL') AND so.signal_source = 'technical'
+              AND sm.source = 'Trendlyne'
         """
         raw = self._read_df(q)
         if raw.empty:
@@ -373,21 +379,29 @@ class StrategyOptimizer:
         cur = self.conn.cursor()
         n = 0
         for scan_id, weight in overrides.items():
+            # source='Trendlyne' -- overrides is built exclusively from Trendlyne-scoped scan_ids
+            # (see the source-scoped JOIN above); an unscoped UPDATE could otherwise clobber a
+            # colliding MC/ETnow screener's weight_override for the same numeric scan_id.
             cur.execute(
-                "UPDATE screener_master SET weight_override = ? WHERE scan_id = ?",
+                "UPDATE screener_master SET weight_override = ? WHERE scan_id = ? AND source = 'Trendlyne'",
                 (weight, scan_id),
             )
             if cur.rowcount > 0:
                 n += 1
         self.conn.commit()
         
+        import os
         import requests
         try:
+            headers = {}
+            secret = os.environ.get("INTERNAL_API_SECRET")
+            if secret:
+                headers["x-internal-secret"] = secret
             requests.post("http://127.0.0.1:3000/api/internal/notify", json={
                 "type": "SUCCESS",
                 "title": "Optimization Complete",
                 "message": "Strategy Optimizer finished. Weight overrides applied."
-            }, timeout=2)
+            }, headers=headers, timeout=2)
         except requests.RequestException:
             pass
             

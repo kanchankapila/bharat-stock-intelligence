@@ -41,6 +41,7 @@ import requests
 from requests.adapters import HTTPAdapter
 
 from db_compat import connect
+from as_of import logical_write_floor
 
 BASE_URL = "https://trendlyne.com/mapp/v1/stock/chart-data/{tlid}/{param}/"
 
@@ -393,8 +394,7 @@ def main() -> None:
     # branch nulled every existing historical row -- silently wiping eps_ttm/dvm_*/pe_* to NULL
     # every week with no error, since the UPDATE always "succeeds" (0 rows affected on either
     # branch is not an exception). Same fix pattern as mc_techscanner_fetcher.py.
-    latest_row = con.execute("SELECT MAX(date) AS d FROM stock_ohlcv").fetchone()
-    today = str(latest_row["d"])[:10] if latest_row and latest_row["d"] else date.today().isoformat()
+    today = logical_write_floor(con, fallback=date.today().isoformat())
     con.close()
 
     stocks = _load_stocks(args.symbol)

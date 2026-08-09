@@ -17,25 +17,60 @@ from db_compat import connect, read_df, execute
 RETURN_COLS = ['return_1d', 'return_3d', 'return_5d', 'return_intraday']
 
 
-def _optimize_for_horizon(df: pd.DataFrame, target_col: str, settings_key: str, fixed_horizon: bool = False):
-    """Trains the decision tree / single-filter rankings for one target horizon and saves
-    the result to the given app_settings key. `fixed_horizon=True` skips the 3d->1d
-    fallback (used for the intraday horizon, which has no fallback column)."""
-    # Group target returns by date and symbol (in case a stock appeared in multiple filters on the same day)
-    target_df = df.groupby(['appeared_at', 'symbol'])[RETURN_COLS].mean().reset_index()
+def _build_run_matrix(df: pd.DataFrame):
+    """One row per (run_id, symbol): binary filter-match columns (whichever filters matched
+    IN THAT SCAN CYCLE) + the mean return across whichever filters it matched that run.
 
-    # Pivot the filter occurrences (binary matrix: 1 if symbol matched filter_key on appeared_at, 0 otherwise)
+    Grouped by (run_id, symbol) -- NOT (appeared_at, symbol) as this used to be. A filter
+    match persists across many consecutive ~15-min scans in one trading day (live-confirmed
+    median 15 distinct runs per matching (date, symbol) pair), so the old day-level grouping
+    let a "combination" (e.g. RSI_OVERSOLD + VOLUME_SURGE) count as a match whenever a stock
+    matched EACH filter at ANY point that day, even hours apart. But the frontend's "Apply
+    Combo" button (LiveMarketScreener.tsx's applyCombo -> getLiveMarketScreener ->
+    fetchLiveMarketScreener) sends every selected filter as one simultaneous AND query to
+    NiftyTrader -- it only ever returns stocks matching ALL of them AT THE SAME MOMENT, in
+    the current scan. The reported win_rate/avg_return badge shown next to the "AI
+    Recommendation" button was therefore measuring a materially different, easier-to-satisfy
+    condition than what clicking it actually retrieves live -- the same train/serve skew
+    fixed in live_screener_ml_ranker.py's _build_matrix() the same day (see
+    live_screener_ml_no_live_edge_2026_08_07 memory), just surfacing here as a misleading
+    user-facing number instead of a silently-bad model. Grouping by (run_id, symbol) makes a
+    "combination" mean "matched within the SAME scan cycle", exactly the population
+    fetchLiveMarketScreener's simultaneous-AND query draws from.
+
+    Extracted as its own function (mirroring live_screener_ml_ranker.py's _build_matrix) so
+    the grouping logic is directly unit-testable without going through the full decision-tree/
+    app_settings machinery in _optimize_for_horizon.
+    """
+    target_df = df.groupby(['run_id', 'symbol']).agg(
+        appeared_at=('appeared_at', 'first'),
+        **{c: (c, 'mean') for c in RETURN_COLS},
+    ).reset_index()
+
+    # Pivot the filter occurrences (binary matrix: 1 if symbol matched filter_key IN THIS RUN, 0 otherwise)
     pivot_df = df.pivot_table(
-        index=['appeared_at', 'symbol'],
+        index=['run_id', 'symbol'],
         columns='filter_key',
         aggfunc='size',
         fill_value=0
     )
-    # Clip to binary 1 or 0 (if a stock appeared multiple times in 15m intervals for same filter on same day)
+    # Clip to binary 1 or 0 (a stock can match the same filter more than once within one run
+    # if the collector records it per-source; collapse to a plain matched/not-matched flag)
     pivot_df = pivot_df.clip(upper=1).reset_index()
 
+    filter_cols = [c for c in pivot_df.columns if c not in ('run_id', 'symbol')]
+
     # Merge filters and target returns
-    matrix = pd.merge(pivot_df, target_df, on=['appeared_at', 'symbol'])
+    matrix = pd.merge(pivot_df, target_df, on=['run_id', 'symbol'])
+    return matrix, filter_cols
+
+
+def _optimize_for_horizon(df: pd.DataFrame, target_col: str, settings_key: str, fixed_horizon: bool = False):
+    """Trains the decision tree / single-filter rankings for one target horizon and saves
+    the result to the given app_settings key. `fixed_horizon=True` skips the 3d->1d
+    fallback (used for the intraday horizon, which has no fallback column). See
+    _build_run_matrix's docstring for why matches are grouped by (run_id, symbol)."""
+    matrix, filter_cols = _build_run_matrix(df)
 
     # Determine the best target horizon to optimize for (defaulting to 3d, fallback to 1d)
     if not fixed_horizon and matrix[target_col].isnull().sum() > len(matrix) * 0.7:
@@ -64,7 +99,6 @@ def _optimize_for_horizon(df: pd.DataFrame, target_col: str, settings_key: str, 
               f"(train={len(train_data)}, holdout={len(holdout_data)}) — skipping {target_col}.")
         return
 
-    filter_cols = [c for c in pivot_df.columns if c not in ['appeared_at', 'symbol']]
     X = train_data[filter_cols]
     y = train_data[target_col]
 
@@ -170,11 +204,13 @@ def optimize_combinations():
     print(f"[LiveScreenerOptimizer] Starting optimization run at {datetime.datetime.now()}")
 
     q = """
-        SELECT appearance_id, symbol, filter_key, appeared_at, entry_price,
-               return_1d, return_3d, return_5d, return_intraday
-        FROM live_screener_outcomes
-        WHERE return_1d IS NOT NULL OR return_3d IS NOT NULL OR return_5d IS NOT NULL
-           OR return_intraday IS NOT NULL
+        SELECT o.appearance_id, o.symbol, o.filter_key, o.appeared_at, o.entry_price,
+               a.run_id,
+               o.return_1d, o.return_3d, o.return_5d, o.return_intraday
+        FROM live_screener_outcomes o
+        JOIN live_screener_appearances a ON a.id = o.appearance_id
+        WHERE o.return_1d IS NOT NULL OR o.return_3d IS NOT NULL OR o.return_5d IS NOT NULL
+           OR o.return_intraday IS NOT NULL
     """
     df = read_df(q)
 

@@ -3,6 +3,7 @@ import { cn } from '../lib/utils';
 import { trpc } from '../lib/trpc';
 import { Activity, BarChart3, Clock, ShieldCheck, AlertTriangle, Zap } from 'lucide-react';
 import { Card } from './MCCommon';
+import { marketHoursRefetchInterval } from '../lib/timeFormat';
 
 interface IndexFnoOverviewProps {
   symbol: string;
@@ -213,9 +214,9 @@ const StrikeRow: React.FC<{
 const IndexFnoOverview: React.FC<IndexFnoOverviewProps> = ({ symbol }) => {
   const fnoSymbol = toFnoSymbol(symbol);
 
-  const { data: futData,  isLoading: lFut }  = trpc.getTrendlyneFnoScanners.useQuery({ mtype: 'futures', screenType: 'most-active-contract', instType: 'index' });
-  const { data: callData, isLoading: lCall } = trpc.getTrendlyneFnoScanners.useQuery({ mtype: 'options', screenType: 'oi-gainers-call',     instType: 'index' });
-  const { data: putData,  isLoading: lPut }  = trpc.getTrendlyneFnoScanners.useQuery({ mtype: 'options', screenType: 'oi-gainers-put',      instType: 'index' });
+  const { data: futData,  isLoading: lFut }  = trpc.getTrendlyneFnoScanners.useQuery({ mtype: 'futures', screenType: 'most-active-contract', instType: 'index' }, { refetchInterval: marketHoursRefetchInterval(10000) });
+  const { data: callData, isLoading: lCall } = trpc.getTrendlyneFnoScanners.useQuery({ mtype: 'options', screenType: 'oi-gainers-call',     instType: 'index' }, { refetchInterval: marketHoursRefetchInterval(10000) });
+  const { data: putData,  isLoading: lPut }  = trpc.getTrendlyneFnoScanners.useQuery({ mtype: 'options', screenType: 'oi-gainers-put',      instType: 'index' }, { refetchInterval: marketHoursRefetchInterval(10000) });
 
   const futRows  = useMemo(() => (futData?.tableData  || []).filter((r: any[]) => r[0]?.name === fnoSymbol), [futData, fnoSymbol]);
   const callRows = useMemo(() => (callData?.tableData || []).filter((r: any[]) => r[0]?.name === fnoSymbol), [callData, fnoSymbol]);

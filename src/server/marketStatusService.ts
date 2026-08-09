@@ -123,10 +123,9 @@ export async function isMarketOpen(): Promise<boolean> {
  * schedule is never wrongly suppressed — the worst case is a holiday runs on its usual schedule.
  */
 export async function isTradingHolidayToday(): Promise<boolean> {
-  const istNow = new Date(Date.now() + 5.5 * 60 * 60 * 1000);
-  const day = istNow.getUTCDay(); // 0=Sun, 6=Sat
-  if (day === 0 || day === 6) return false; // weekend, not a trading holiday
-
+  // No separate weekend short-circuit: the BSE feed already reports Sat/Sun with
+  // purpose "Weekly Off", which the purpose.includes('weekly') check below correctly
+  // treats as not-a-holiday. Every real caller's own cron is weekday-only anyway.
   try {
     const res = await fetch(BSE_STATUS_URL, { headers: { 'User-Agent': HEADERS['User-Agent'] }, signal: AbortSignal.timeout(10_000) });
     if (!res.ok) return false;
@@ -141,4 +140,23 @@ export async function isTradingHolidayToday(): Promise<boolean> {
   } catch {
     return false;
   }
+}
+
+/**
+ * True when a routine evening/night job should skip its normal cron-triggered run because
+ * today is a trading holiday (2026-08-06). On a mid-week holiday the exchange never opens, so
+ * every "regular fetch" job downstream of it (screener syncs, OHLCV refresh, re-scoring) would
+ * just re-process yesterday's unchanged data -- pure wasted compute/network, not new signal.
+ * closed-day-early-batch (queues.ts's QUEUE_CLOSED_DAY) already runs the critical daily
+ * pipeline once, early, on such a day -- dispatched jobs carry job.name === 'closed-day-early'
+ * and must NEVER be skipped by this check, or the morning dispatch would itself be a no-op.
+ *
+ * Deliberately NOT applied to the 15-min intraday chain (already gated by the holiday-aware
+ * isMarketOpen() above) or to genuinely weekly/global-market jobs (weekly fetches are fine per
+ * the user's own framing; global macro data keeps moving on an NSE holiday even though NSE
+ * itself doesn't).
+ */
+export async function shouldSkipOnTradingHoliday(job?: { name?: string } | null): Promise<boolean> {
+  if (job?.name === 'closed-day-early') return false;
+  return isTradingHolidayToday();
 }

@@ -7,6 +7,16 @@ import { getSymbolFromMcsymbol } from "../stockMapping";
 import { alphaQuant } from "../alphaQuantClient";
 import { router, publicProcedure, adminProcedure } from "../trpc";
 import { TRPCError } from "@trpc/server";
+import { fetchWithCache } from "../cacheService";
+
+// Next calendar day (UTC) as a 'YYYY-MM-DD' string, used to build a half-open [d, d+1) range
+// for getTechnicalConfluenceSignals below -- extracted so month/year-boundary correctness is
+// independently testable.
+export function nextCalendarDayUTC(dateStr: string): string {
+  const dNext = new Date(`${dateStr}T00:00:00Z`);
+  dNext.setUTCDate(dNext.getUTCDate() + 1);
+  return dNext.toISOString().slice(0, 10);
+}
 
 export const technicalsRouter = router({
   getTechnicalDetails: publicProcedure
@@ -79,7 +89,10 @@ export const technicalsRouter = router({
       }));
     }),
 
-  getUnifiedSignals: publicProcedure
+  // Renamed from getUnifiedSignals (2026-08) -- despite the old name, this has never read the
+  // unified_signals table. It reads technical_signals LEFT JOIN confluence_signals and computes
+  // its own ad-hoc unified_score, unrelated to unified_signals or unified_recommendations.
+  getTechnicalConfluenceSignals: publicProcedure
     .input(z.object({
       date:          z.string().optional(),
       minUnified:    z.number().min(0).max(1).default(0.55),
@@ -92,6 +105,9 @@ export const technicalsRouter = router({
         const maxRow = await dbGet<{ d: string }>('SELECT MAX(date) as d FROM technical_signals');
         d = maxRow?.d ?? new Date().toISOString().slice(0, 10);
       }
+      // Exclusive upper bound, computed in JS so the query below needs no in-SQL date
+      // arithmetic and stays identical across both dialects.
+      const dExclusive = nextCalendarDayUTC(d);
       return dbAll<any>(`
         WITH scored AS (
           SELECT
@@ -109,8 +125,13 @@ export const technicalsRouter = router({
             ) AS unified_score
           FROM technical_signals ts
           LEFT JOIN nse_stocks ns ON ns.symbol = ts.symbol
+          -- Was date(cs.computed_at) = ? -- wrapping confluence_signals' TimescaleDB
+          -- partitioning column in date() defeats both the existing idx_csi_computed index and
+          -- Timescale's own chunk-exclusion pruning (same bug class already fixed for
+          -- ml.router.ts's getSignalReportCard). A half-open range on the bare column is
+          -- sargable and lets Timescale skip every chunk outside [d, d+1).
           LEFT JOIN confluence_signals cs
-                 ON cs.symbol = ts.symbol AND date(cs.computed_at) = ?
+                 ON cs.symbol = ts.symbol AND cs.computed_at >= ?::timestamptz AND cs.computed_at < ?::timestamptz
           WHERE ts.date = ?
             AND COALESCE(cs.confluence_score, 0) >= ?
         )
@@ -118,7 +139,7 @@ export const technicalsRouter = router({
         WHERE unified_score >= ?
         ORDER BY unified_score DESC
         LIMIT ?
-      `, [d, d, input.minConfluence, input.minUnified, input.limit]);
+      `, [d, dExclusive, d, input.minConfluence, input.minUnified, input.limit]);
     }),
 
   getSignalDates: publicProcedure
@@ -160,12 +181,15 @@ export const technicalsRouter = router({
       return await computeSignalTypeStats();
     }),
 
+  // Was uncached -- a cold DB cache (getLatestRSIForSymbols) makes this fall back to fetching
+  // RSI from MoneyControl live, in batches of 5, INLINE in the request handler; every concurrent
+  // request paid that cost independently instead of one request per TTL window absorbing it.
   getTechnicalTrends: publicProcedure
     .input(z.object({
       type:  z.enum(['bullish', 'bearish', 'turning-bullish', 'turning-bearish']),
       index: z.string().optional(),
     }))
-    .query(async ({ input }) => {
+    .query(async ({ input }) => fetchWithCache(`tech:trends:${input.type}:${input.index ?? ''}`, async () => {
       const result = await fetchTechnicalTrends(input.type, input.index);
       if (result?.success === 1) {
         const list = result.data?.list || result.data?.tableDataList || [];
@@ -208,7 +232,7 @@ export const technicalsRouter = router({
         if (result.data?.tableDataList) result.data.tableDataList = finalData;
       }
       return result;
-    }),
+    }, 300)),
 
   getTechTrendsBySegment: publicProcedure
     .input(z.object({ type: z.enum(['bullish', 'bearish', 'turning-bullish', 'turning-bearish']) }))

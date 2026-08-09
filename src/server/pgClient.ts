@@ -21,6 +21,33 @@ types.setTypeParser(types.builtins.INT8, (val) => parseInt(val, 10));
 // Date without a per-callsite `::text` + manual 'Z'-append workaround.
 types.setTypeParser(types.builtins.TIMESTAMP, (val) => (val === null ? null : new Date(val.replace(' ', 'T') + 'Z')));
 
+// node-postgres leaves NUMERIC/DECIMAL (OID 1700) as a string by default, to avoid silent
+// precision loss on bignum values. Every NUMERIC column this app actually produces is a
+// financial ratio/percentage/score, not a value needing exact decimal precision, and callers
+// throughout the codebase treat query results as plain numbers (`.toFixed()`, `>`/`<`
+// comparisons) -- e.g. `growth_pct` in signals.router.ts/ml.router.ts is built via
+// `ROUND(<double precision expr>, 2)`, and Postgres only has a 2-arg round() overload for
+// `numeric`, so it silently upcasts the double-precision expression and returns `numeric`
+// even though every input column is DOUBLE PRECISION. Confirmed live 2026-08-04: growth_pct
+// arrived as a string, and SignalTracking.tsx/V2SignalTracking.tsx's unguarded
+// `sig.growth_pct.toFixed(2)` threw during render -- caught by TabErrorBoundary and shown as
+// "Service temporarily unavailable", not an actual backend outage.
+types.setTypeParser(types.builtins.NUMERIC, (val) => (val === null ? null : parseFloat(val)));
+
+// node-postgres's default parser for DATE (OID 1082) — used by every TimescaleDB hypertable's
+// partition column (macro_asset_prices, stock_ohlcv, confluence_signals, ...) since
+// create_hypertable requires a real date/timestamp type — builds a JS Date object. Every other
+// "date" column in this schema is TEXT and every consumer throughout the app (frontend included)
+// treats a query result's date field as a plain string; superjson (this app's tRPC transformer)
+// faithfully round-trips a real Date object to the client rather than stringifying it, so a raw
+// `{date}` in JSX throws "Objects are not valid as a React child (found: [object Date])" the
+// instant that query actually resolves with data — confirmed live 2026-08-07 via
+// MarketMoodGauge.tsx reading macro_asset_prices.date, caught by TabErrorBoundary and shown as
+// "Service temporarily unavailable" (not an actual outage). Keep DATE as the raw 'YYYY-MM-DD'
+// wire string, matching every TEXT-date column's existing behavior, instead of adding a
+// timezone-shift risk on top by parsing to a Date and reformatting per-callsite.
+types.setTypeParser(types.builtins.DATE, (val) => val);
+
 let pool: Pool | null = null;
 
 export function getPool(): Pool {

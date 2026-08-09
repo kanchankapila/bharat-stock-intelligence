@@ -1,5 +1,6 @@
-import React, { useState, useEffect } from 'react';
-import { Search, Filter, TrendingUp, Briefcase, Grid3x3, List, Loader } from 'lucide-react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import { Search, Filter, TrendingUp, Briefcase, Grid3x3, List as ListIcon, Loader } from 'lucide-react';
+import { List, Grid, type RowComponentProps, type CellComponentProps } from 'react-window';
 import { cn } from '../lib/utils';
 import { trpc } from '../lib/trpc';
 import stockData from '../data/stocklist';
@@ -22,6 +23,116 @@ interface NSEStock {
 
 type ViewMode = 'grid' | 'list';
 
+interface StockListRowProps {
+  stocks: NSEStock[];
+  onSelectStock?: (symbol: string) => void;
+}
+
+/** One virtualized row for the List view. Fixed height (see LIST_ROW_HEIGHT below) so
+ * react-window can compute scroll geometry without measuring every row up front -- the whole
+ * point of virtualizing a list that can be thousands of rows long. */
+function StockListRow({ index, style, stocks, onSelectStock }: RowComponentProps<StockListRowProps>): React.ReactElement | null {
+  const stock = stocks[index];
+  if (!stock) return null;
+  return (
+    <div
+      style={style}
+      onClick={() => onSelectStock && stock.symbol && onSelectStock(stock.symbol)}
+      className="grid grid-cols-12 gap-4 p-4 border-b border-slate-800/30 hover:bg-slate-800/50 transition-colors cursor-pointer group items-center"
+    >
+      <div className="col-span-2">
+        <span className="font-bold text-slate-100 group-hover:text-blue-400 transition-colors">
+          {stock.symbol}
+        </span>
+      </div>
+      <div className="col-span-4">
+        <p className="text-sm text-slate-300 line-clamp-1">{stock.name}</p>
+      </div>
+      <div className="col-span-3">
+        <span className="text-xs bg-slate-700/30 px-2 py-1 rounded text-slate-300">
+          {stock.sector}
+        </span>
+      </div>
+      <div className="col-span-3">
+        <span className="text-xs bg-slate-700/30 px-2 py-1 rounded text-slate-300">
+          {stock.industry}
+        </span>
+      </div>
+    </div>
+  );
+}
+
+const LIST_ROW_HEIGHT = 68;
+const LIST_VIEWPORT_HEIGHT = 640;
+
+interface StockGridCellProps {
+  stocks: NSEStock[];
+  columnCount: number;
+  onSelectStock?: (symbol: string) => void;
+}
+
+/** One virtualized cell for the Grid view. Fixed row height (see GRID_ROW_HEIGHT below), sized
+ * generously enough that a 2-line company name plus the ISIN row never clips -- shorter cards
+ * just leave a little blank space, which is the standard tradeoff for a fixed-height virtualized
+ * grid and not a layout regression. Column count is measured from the Grid's own rendered width
+ * (see columnCountForWidth) rather than a fixed number, so it still adapts responsively. */
+function StockGridCell({ columnIndex, rowIndex, style, stocks, columnCount, onSelectStock, ariaAttributes }: CellComponentProps<StockGridCellProps>): React.ReactElement | null {
+  const stock = stocks[rowIndex * columnCount + columnIndex];
+  if (!stock) return <div style={style} {...ariaAttributes} />;
+  return (
+    <div style={style} {...ariaAttributes} className="p-2">
+      <div
+        onClick={() => onSelectStock && stock.symbol && onSelectStock(stock.symbol)}
+        className="h-full bg-slate-800/50 border border-slate-800/30 rounded-lg p-4 hover:border-slate-600 transition-all hover:shadow-lg hover:shadow-blue-500/10 group cursor-pointer overflow-hidden"
+      >
+        <div className="flex items-start justify-between mb-3">
+          <div className="flex-1">
+            <h3 className="font-bold text-slate-100 text-base group-hover:text-blue-400 transition-colors">
+              {stock.symbol}
+            </h3>
+            <p className="text-xs text-slate-400 mt-1 line-clamp-2">
+              {stock.name}
+            </p>
+          </div>
+        </div>
+
+        <div className="space-y-2 mb-3 text-xs">
+          <div className="flex justify-between">
+            <span className="text-slate-400">Sector:</span>
+            <span className="text-slate-300 font-medium truncate ml-2">{stock.sector}</span>
+          </div>
+          <div className="flex justify-between">
+            <span className="text-slate-400">Industry:</span>
+            <span className="text-slate-300 font-medium truncate ml-2">{stock.industry}</span>
+          </div>
+          {stock.isin && (
+            <div className="flex justify-between">
+              <span className="text-slate-400">ISIN:</span>
+              <span className="text-slate-300 font-mono truncate ml-2">{stock.isin}</span>
+            </div>
+          )}
+        </div>
+
+        <div className="pt-3 border-t border-slate-800/30 flex items-center gap-2 text-slate-400 text-xs group-hover:text-blue-400/70 transition-colors">
+          <TrendingUp className="w-3 h-3" />
+          <span>View Details</span>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+const GRID_ROW_HEIGHT = 240;
+const GRID_VIEWPORT_HEIGHT = 720;
+// Mirrors the Tailwind breakpoints the old CSS grid used (grid-cols-1 md:grid-cols-2 lg:grid-cols-3),
+// but measured off the Grid's own rendered width rather than the viewport -- correct even when a
+// sidebar or narrower parent container means the two diverge.
+function columnCountForWidth(width: number): number {
+  if (width >= 1024) return 3;
+  if (width >= 768) return 2;
+  return 1;
+}
+
 const NSEStockDiscovery: React.FC<{
   onSelectStock?: (symbol: string) => void;
 }> = ({ onSelectStock }) => {
@@ -30,6 +141,23 @@ const NSEStockDiscovery: React.FC<{
   const [selectedIndustry, setSelectedIndustry] = useState<string | null>(null);
   const [viewMode, setViewMode] = useState<ViewMode>('grid');
   const [displayedStocks, setDisplayedStocks] = useState<NSEStock[]>([]);
+  // Percentage-string columnWidth (e.g. "33.33%") silently resolves to 0px in this react-window
+  // version -- verified live, every cell collapsed into column 0. Track the Grid's actual pixel
+  // width instead and compute a numeric columnWidth from it, the codepath that's proven to work
+  // (rowHeight, a plain number, always rendered correctly).
+  const [gridWidth, setGridWidth] = useState(() => (typeof window !== 'undefined' ? window.innerWidth : 1024));
+  const gridColumnCount = columnCountForWidth(gridWidth);
+  const handleGridResize = useCallback((size: { width: number; height: number }) => {
+    if (size.width > 0) setGridWidth(size.width);
+  }, []);
+
+  // Debounced so typing a symbol/name doesn't re-filter the full (up to thousands-of-rows)
+  // stock list on every keystroke -- was firing the useEffect below on each character.
+  const [debouncedSearchQuery, setDebouncedSearchQuery] = useState('');
+  useEffect(() => {
+    const t = setTimeout(() => setDebouncedSearchQuery(searchQuery), 300);
+    return () => clearTimeout(t);
+  }, [searchQuery]);
 
   // TRPC Hooks
   const allStocksQuery = trpc.getAllNSEStocks.useQuery();
@@ -37,11 +165,11 @@ const NSEStockDiscovery: React.FC<{
   const industriesQuery = trpc.getAllIndustries.useQuery();
   const sectorStocksQuery = trpc.getNSEStocksBySector.useQuery(
     { sector: selectedSector || '' },
-    { enabled: !!selectedSector && !searchQuery }
+    { enabled: !!selectedSector && !debouncedSearchQuery }
   );
   const industryStocksQuery = trpc.getNSEStocksByIndustry.useQuery(
     { industry: selectedIndustry || '' },
-    { enabled: !!selectedIndustry && !searchQuery && !selectedSector }
+    { enabled: !!selectedIndustry && !debouncedSearchQuery && !selectedSector }
   );
   const stockCountQuery = trpc.getNSEStockCount.useQuery();
 
@@ -49,9 +177,9 @@ const NSEStockDiscovery: React.FC<{
   useEffect(() => {
     let stocks: NSEStock[] = [];
 
-    if (searchQuery.length > 0) {
-      const lowerQuery = searchQuery.toLowerCase();
-      
+    if (debouncedSearchQuery.length > 0) {
+      const lowerQuery = debouncedSearchQuery.toLowerCase();
+
       if (allStocksQuery.data?.stocks) {
         stocks = allStocksQuery.data.stocks.filter((s) =>
           (s.name && s.name.toLowerCase().includes(lowerQuery)) ||
@@ -68,7 +196,7 @@ const NSEStockDiscovery: React.FC<{
 
     setDisplayedStocks(stocks);
   }, [
-    searchQuery,
+    debouncedSearchQuery,
     selectedSector,
     sectorStocksQuery.data,
     selectedIndustry,
@@ -84,6 +212,22 @@ const NSEStockDiscovery: React.FC<{
   const sectors = sectorsQuery.data || [];
   const industries = industriesQuery.data || [];
   const totalStocks = stockCountQuery.data || 0;
+
+  // Both views now render the FULL filtered set virtualized (no page cap, no "Load more" click).
+  // Grid's fixed GRID_ROW_HEIGHT (see StockGridCell above) is what makes this safe despite the
+  // underlying cards having slightly variable content -- react-window only needs a column count
+  // and a row height, not truly uniform content, and gridColumnCount is measured off the Grid's
+  // own rendered width via handleGridResize rather than assumed.
+  const gridRowCount = Math.max(1, Math.ceil(displayedStocks.length / gridColumnCount));
+  const gridCellProps = useMemo<StockGridCellProps>(
+    () => ({ stocks: displayedStocks, columnCount: gridColumnCount, onSelectStock }),
+    [displayedStocks, gridColumnCount, onSelectStock],
+  );
+
+  const listRowProps = useMemo<StockListRowProps>(
+    () => ({ stocks: displayedStocks, onSelectStock }),
+    [displayedStocks, onSelectStock],
+  );
 
   const clearFilters = () => {
     setSearchQuery('');
@@ -238,7 +382,7 @@ const NSEStockDiscovery: React.FC<{
           )}
           title="List View"
         >
-          <List className="w-4 h-4" />
+          <ListIcon className="w-4 h-4" />
         </button>
       </div>
 
@@ -260,7 +404,7 @@ const NSEStockDiscovery: React.FC<{
         </div>
       )}
 
-      {/* Stocks Grid View */}
+      {/* Stocks Grid View -- virtualized, renders the full filtered set regardless of count */}
       {!isLoading && displayedStocks.length > 0 && viewMode === 'grid' && (
         <div className="space-y-3">
           <div className="text-sm font-medium text-slate-400 px-2">
@@ -268,52 +412,21 @@ const NSEStockDiscovery: React.FC<{
             {selectedSector && ` in ${selectedSector}`}
             {selectedIndustry && ` • ${selectedIndustry}`}
           </div>
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-            {displayedStocks.map((stock) => (
-              <div
-                key={stock.symbol}
-                onClick={() => onSelectStock && stock.symbol && onSelectStock(stock.symbol)}
-                className="bg-slate-800/50 border border-slate-800/30 rounded-lg p-4 hover:border-slate-600 transition-all hover:shadow-lg hover:shadow-blue-500/10 group cursor-pointer"
-              >
-                <div className="flex items-start justify-between mb-3">
-                  <div className="flex-1">
-                    <h3 className="font-bold text-slate-100 text-base group-hover:text-blue-400 transition-colors">
-                      {stock.symbol}
-                    </h3>
-                    <p className="text-xs text-slate-400 mt-1 line-clamp-2">
-                      {stock.name}
-                    </p>
-                  </div>
-                </div>
-
-                <div className="space-y-2 mb-3 text-xs">
-                  <div className="flex justify-between">
-                    <span className="text-slate-400">Sector:</span>
-                    <span className="text-slate-300 font-medium">{stock.sector}</span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className="text-slate-400">Industry:</span>
-                    <span className="text-slate-300 font-medium">{stock.industry}</span>
-                  </div>
-                  {stock.isin && (
-                    <div className="flex justify-between">
-                      <span className="text-slate-400">ISIN:</span>
-                      <span className="text-slate-300 font-mono">{stock.isin}</span>
-                    </div>
-                  )}
-                </div>
-
-                <div className="pt-3 border-t border-slate-800/30 flex items-center gap-2 text-slate-400 text-xs group-hover:text-blue-400/70 transition-colors">
-                  <TrendingUp className="w-3 h-3" />
-                  <span>View Details</span>
-                </div>
-              </div>
-            ))}
-          </div>
+          <Grid
+            cellComponent={StockGridCell}
+            cellProps={gridCellProps}
+            columnCount={gridColumnCount}
+            columnWidth={Math.max(1, Math.floor(gridWidth / gridColumnCount))}
+            defaultWidth={gridWidth}
+            rowCount={gridRowCount}
+            rowHeight={GRID_ROW_HEIGHT}
+            onResize={handleGridResize}
+            style={{ height: Math.min(GRID_VIEWPORT_HEIGHT, gridRowCount * GRID_ROW_HEIGHT), width: '100%' }}
+          />
         </div>
       )}
 
-      {/* Stocks List View */}
+      {/* Stocks List View -- virtualized, renders the full filtered set regardless of count */}
       {!isLoading && displayedStocks.length > 0 && viewMode === 'list' && (
         <div className="space-y-3">
           <div className="text-sm font-medium text-slate-400 px-2">
@@ -326,32 +439,14 @@ const NSEStockDiscovery: React.FC<{
               <div className="col-span-3">Sector</div>
               <div className="col-span-3">Industry</div>
             </div>
-            {displayedStocks.map((stock) => (
-              <div
-                key={stock.symbol}
-                onClick={() => onSelectStock && stock.symbol && onSelectStock(stock.symbol)}
-                className="grid grid-cols-12 gap-4 p-4 border-b border-slate-800/30 hover:bg-slate-800/50 transition-colors cursor-pointer group"
-              >
-                <div className="col-span-2">
-                  <span className="font-bold text-slate-100 group-hover:text-blue-400 transition-colors">
-                    {stock.symbol}
-                  </span>
-                </div>
-                <div className="col-span-4">
-                  <p className="text-sm text-slate-300 line-clamp-1">{stock.name}</p>
-                </div>
-                <div className="col-span-3">
-                  <span className="text-xs bg-slate-700/30 px-2 py-1 rounded text-slate-300">
-                    {stock.sector}
-                  </span>
-                </div>
-                <div className="col-span-3">
-                  <span className="text-xs bg-slate-700/30 px-2 py-1 rounded text-slate-300">
-                    {stock.industry}
-                  </span>
-                </div>
-              </div>
-            ))}
+            <List
+              rowComponent={StockListRow}
+              rowCount={displayedStocks.length}
+              rowHeight={LIST_ROW_HEIGHT}
+              rowProps={listRowProps}
+              defaultHeight={LIST_VIEWPORT_HEIGHT}
+              style={{ height: Math.min(LIST_VIEWPORT_HEIGHT, displayedStocks.length * LIST_ROW_HEIGHT) }}
+            />
           </div>
         </div>
       )}

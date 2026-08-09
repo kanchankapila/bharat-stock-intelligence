@@ -59,6 +59,10 @@ def recalibrate_win_probabilities(conn: ConnWrapper, min_samples: int = 200,
     # never exactly 0.5, and 0.5 carries no ranking/calibration information. Excluding it here is
     # load-bearing: training the isotonic map on that blob de-calibrates the entire 0.5 region and
     # feeds bad calibrated_win_probability into position sizing.
+    # signal_source='technical' (2026-08): without this, a confluence-sourced outcome row that
+    # happens to share (symbol, date) with an unrelated technical_signals row gets joined in
+    # and treated as if it graded that signal's win_probability -- see the signal_outcomes
+    # signal_source migration for the full mechanism.
     rows = conn.execute("""
         SELECT ts.nifty_regime AS regime, ts.date AS d,
                ts.win_probability AS p,
@@ -66,7 +70,7 @@ def recalibrate_win_probabilities(conn: ConnWrapper, min_samples: int = 200,
         FROM signal_outcomes so
         JOIN technical_signals ts ON ts.symbol = so.symbol AND ts.date = so.signal_date
         WHERE so.outcome IN ('WIN', 'LOSS') AND ts.win_probability IS NOT NULL
-          AND ts.win_probability <> 0.5
+          AND ts.win_probability <> 0.5 AND so.signal_source = 'technical'
     """).fetchall()
     # Postgres allows storing float('nan') in a NOT NULL-satisfying column — filter those
     # out explicitly since IS NOT NULL doesn't catch NaN and isotonic regression rejects it.
@@ -134,6 +138,7 @@ def per_regime_auc(conn: ConnWrapper, min_n: int = 50) -> dict:
           ON ts.symbol = so.symbol AND ts.date = so.signal_date
         WHERE so.outcome IN ('WIN', 'LOSS') AND ts.win_probability IS NOT NULL
           AND ts.win_probability <> 0.5          -- exclude unscored 0.5 defaults (see recalibrate)
+          AND so.signal_source = 'technical'
     """).fetchall()
     g: dict = {}
     for r in rows:
@@ -159,6 +164,7 @@ def regime_readiness(conn: ConnWrapper, min_regime_days: int = 20, min_regime_ep
           ON ts.symbol = so.symbol AND ts.date = so.signal_date
         WHERE so.outcome IN ('WIN', 'LOSS') AND ts.win_probability IS NOT NULL
           AND ts.win_probability <> 0.5          -- exclude unscored 0.5 defaults (see recalibrate)
+          AND so.signal_source = 'technical'
     """).fetchall()
     g: dict = {}
     for r in rows:
@@ -211,7 +217,7 @@ def _pooled_auc(conn: ConnWrapper, min_n: int = 50):
         FROM signal_outcomes so JOIN technical_signals ts
           ON ts.symbol = so.symbol AND ts.date = so.signal_date
         WHERE so.outcome IN ('WIN', 'LOSS') AND ts.win_probability IS NOT NULL
-          AND ts.win_probability <> 0.5
+          AND ts.win_probability <> 0.5 AND so.signal_source = 'technical'
     """).fetchall()
     pairs = [(float(r['p']), int(r['y'])) for r in rows if math.isfinite(float(r['p']))]
     if len(pairs) < min_n or len({y for _, y in pairs}) < 2:

@@ -10,6 +10,14 @@ export function invalidateNiftyTraderToken(): void {
 }
 
 export async function getNiftyTraderHeaders(): Promise<Record<string, string>> {
+  // Auto-refresh (2026-08-07) deliberately does NOT live on this hot path -- an earlier
+  // version called ensureNiftyTraderToken() here on every single invocation, which broke the
+  // whole point of _cachedToken (settingsCache.test.ts caught this: 3 calls -> 4 DB reads
+  // instead of 1) by adding its own independent dbGet() call regardless of cache state.
+  // The refresh check instead runs on a periodic background timer -- see
+  // niftytraderAuthService.ts's startNiftyTraderTokenRefreshTimer(), started once at server
+  // boot -- which calls invalidateNiftyTraderToken() only when it actually writes a fresh
+  // token, so this function's cache-hit path is completely unaffected the rest of the time.
   if (_cachedToken === null) {
     try {
       const row = await dbGet<{ value: string }>("SELECT value FROM app_settings WHERE key = 'niftytrader_auth_token'");

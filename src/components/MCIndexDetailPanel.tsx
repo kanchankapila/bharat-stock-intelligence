@@ -2,49 +2,28 @@ import React from 'react';
 import { cn } from '../lib/utils';
 import { trpc } from '../lib/trpc';
 import {
-  TrendingUp, TrendingDown, Activity, Info, BarChart3,
-  PieChart, ArrowUpRight, ArrowDownRight, Layers, Target, Zap
+  TrendingUp, TrendingDown, Info, BarChart3,
+  PieChart, ArrowUpRight, ArrowDownRight, Target, Zap
 } from 'lucide-react';
 import { motion } from 'motion/react';
 import {
   LineChart, Line, AreaChart, Area, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend, ComposedChart
 } from 'recharts';
 import { Card, SentimentBadge, ValueDisplay, IndicatorRow } from './MCCommon';
-import stockData from '../data/stocklist';
+import { MarketBreadthIntraday } from './MarketBreadthIntraday';
+import { resolveConstituentSymbol } from '../lib/resolveConstituentSymbol';
+
+export { resolveConstituentSymbol };
 
 interface MCIndexDetailPanelProps {
   indId: string;
   name: string;
   bridgeSymbol?: string;
-  onSelectStock?: (symbol: string) => void;
 }
 
 type Timeframe = 'D' | 'W' | 'M';
 
-export function resolveConstituentSymbol(s: any): string | null {
-  // s.id from MC marketmap is the NSE/BSE ticker (e.g. "RELIANCE")
-  if (s.id) {
-    const bySymbol = stockData.find(st => st.symbol.toUpperCase() === String(s.id).toUpperCase());
-    if (bySymbol) return bySymbol.symbol;
-    // also try matching against mcsymbol
-    const byMc = stockData.find(st => st.mcsymbol?.toUpperCase() === String(s.id).toUpperCase());
-    if (byMc) return byMc.symbol;
-  }
-  // fallback: match company name
-  if (s.shortname) {
-    const nameLower = String(s.shortname).toLowerCase();
-    const byName = stockData.find(st => st.name.toLowerCase() === nameLower);
-    if (byName) return byName.symbol;
-    const firstWord = nameLower.split(' ')[0];
-    if (firstWord.length >= 4) {
-      const partial = stockData.find(st => st.name.toLowerCase().startsWith(firstWord));
-      if (partial) return partial.symbol;
-    }
-  }
-  return null;
-}
-
-export const MCIndexDetailPanel: React.FC<MCIndexDetailPanelProps> = ({ indId, name, bridgeSymbol, onSelectStock }) => {
+export const MCIndexDetailPanel: React.FC<MCIndexDetailPanelProps> = ({ indId, name, bridgeSymbol }) => {
   const [timeframe, setTimeframe] = React.useState<Timeframe>('D');
   const [graphRange, setGraphRange] = React.useState<string>('1d');
   const [graphType, setGraphType] = React.useState<string>('line');
@@ -55,15 +34,7 @@ export const MCIndexDetailPanel: React.FC<MCIndexDetailPanelProps> = ({ indId, n
     { enabled: !!indId }
   );
   
-  const { data: constituents, isLoading: loadingStocks } = trpc.getIndexConstituents.useQuery(
-    { indId, type: '0' },
-    { enabled: !!indId }
-  );
-
-  const { data: advDec } = trpc.getAdvanceDecline.useQuery(
-    { ex: bridgeSymbol?.includes('NSX') || name.toUpperCase().includes('NIFTY') ? 'N' : 'B' },
-    { enabled: !!indId }
-  );
+  const breadthEx: 'N' | 'B' = bridgeSymbol?.includes('NSX') || name.toUpperCase().includes('NIFTY') ? 'N' : 'B';
 
   const { data: peChart } = trpc.getIndexPeChart.useQuery(
     { indId },
@@ -91,7 +62,6 @@ export const MCIndexDetailPanel: React.FC<MCIndexDetailPanelProps> = ({ indId, n
   const details = indexData?.details?.indices;
   const fundamentals = indexData?.fundamentals;
   const technicals = indexData?.technicals;
-  const ad = advDec?.data;
 
   return (
     <div className="space-y-6">
@@ -261,68 +231,8 @@ export const MCIndexDetailPanel: React.FC<MCIndexDetailPanelProps> = ({ indId, n
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* Market Breadth & Fundamentals */}
         <div className="lg:col-span-1 space-y-6">
-          {/* Advance Decline — intraday breadth chart */}
-          {ad && (() => {
-            const latest = (ad as any)['0'] || {};
-            const advances = latest.advances ?? 0;
-            const declines = latest.declines ?? 0;
-            const unchanged = latest.unchanged ?? 0;
-            const total = advances + declines + unchanged || 1;
-
-            const allPoints = Object.values(ad as Record<string, any>)
-              .filter((p: any) => p && typeof p.advances === 'number')
-              .reverse();
-            const step = Math.max(1, Math.floor(allPoints.length / 40));
-            const chartSeries = allPoints
-              .filter((_: any, i: number) => i % step === 0)
-              .map((p: any, i: number) => ({ t: i, adv: p.advances, dec: p.declines }));
-
-            return (
-              <Card title="Market Breadth (Intraday)" icon={Activity}>
-                <div className="space-y-3">
-                  <div className="flex justify-between items-end">
-                    <div className="text-center">
-                      <span className="text-[10px] font-black text-emerald-500 uppercase">Advances</span>
-                      <p className="text-lg font-black text-emerald-400">{advances}</p>
-                    </div>
-                    <div className="text-center">
-                      <span className="text-[10px] font-black text-slate-400 uppercase">Unchanged</span>
-                      <p className="text-lg font-black text-slate-400">{unchanged}</p>
-                    </div>
-                    <div className="text-center">
-                      <span className="text-[10px] font-black text-rose-500 uppercase">Declines</span>
-                      <p className="text-lg font-black text-rose-400">{declines}</p>
-                    </div>
-                  </div>
-                  <div className="h-2 w-full glass rounded-full overflow-hidden flex">
-                    <div className="h-full bg-emerald-500" style={{ width: `${(advances / total) * 100}%` }} />
-                    <div className="h-full bg-slate-700" style={{ width: `${(unchanged / total) * 100}%` }} />
-                    <div className="h-full bg-rose-500" style={{ width: `${(declines / total) * 100}%` }} />
-                  </div>
-                  {chartSeries.length > 3 && (
-                    <div className="h-28">
-                      <ResponsiveContainer width="100%" height="100%">
-                        <LineChart data={chartSeries} margin={{ top: 2, right: 2, bottom: 0, left: -28 }}>
-                          <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" vertical={false} />
-                          <XAxis dataKey="t" hide />
-                          <YAxis tick={{ fontSize: 8, fill: '#64748b' }} />
-                          <Tooltip
-                            contentStyle={{ backgroundColor: '#0f172a', border: '1px solid #1e293b', borderRadius: '8px', fontSize: '9px' }}
-                            formatter={(v: any, n: string) => [v, n === 'adv' ? 'Advances' : 'Declines']}
-                          />
-                          <Line type="monotone" dataKey="adv" stroke="#10b981" strokeWidth={1.5} dot={false} />
-                          <Line type="monotone" dataKey="dec" stroke="#f43f5e" strokeWidth={1.5} dot={false} />
-                        </LineChart>
-                      </ResponsiveContainer>
-                    </div>
-                  )}
-                  <p className="text-[9.5px] text-center text-slate-300 font-bold uppercase tracking-widest">
-                    {total} stocks • A/D Ratio: {declines > 0 ? (advances / declines).toFixed(2) : '—'}
-                  </p>
-                </div>
-              </Card>
-            );
-          })()}
+          {/* Advance Decline — intraday breadth chart (shared widget, 10s refresh) */}
+          <MarketBreadthIntraday ex={breadthEx} refetchInterval={10000} />
 
           {/* Fundamentals */}
           {fundamentals && (
@@ -507,54 +417,6 @@ export const MCIndexDetailPanel: React.FC<MCIndexDetailPanelProps> = ({ indId, n
                 </Card>
               )}
             </div>
-          )}
-
-          {/* Constituents */}
-          {constituents && constituents.item && (
-            <Card title="Top Constituents" icon={Layers}>
-              <div className="overflow-x-auto">
-                <table className="w-full text-left">
-                  <thead>
-                    <tr className="border-b border-slate-800/50">
-                      <th className="py-3 text-[10px] font-black text-slate-400 uppercase tracking-widest">Symbol</th>
-                      <th className="py-3 text-[10px] font-black text-slate-400 uppercase tracking-widest text-right">LTP</th>
-                      <th className="py-3 text-[10px] font-black text-slate-400 uppercase tracking-widest text-right">Change</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {constituents.item.slice(0, 10).map((s: any, i: number) => {
-                      const sym = resolveConstituentSymbol(s);
-                      return (
-                      <tr
-                        key={i}
-                        onClick={() => sym && onSelectStock && onSelectStock(sym)}
-                        className={cn(
-                          "border-b border-slate-800/20 hover:bg-slate-800/20 transition-colors group",
-                          sym && onSelectStock ? "cursor-pointer" : ""
-                        )}
-                      >
-                        <td className="py-3">
-                          <p className="text-xs font-black text-white group-hover:text-blue-400 transition-colors uppercase italic">{s.shortname}</p>
-                          {sym && <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest">{sym}</p>}
-                        </td>
-                        <td className="py-3 text-right">
-                          <p className="text-xs font-black text-white tabular-nums">{s.lastprice}</p>
-                        </td>
-                        <td className="py-3 text-right">
-                          <span className={cn(
-                            "text-[10px] font-black tabular-nums",
-                            parseFloat(s.percentchange) >= 0 ? "text-emerald-400" : "text-rose-400"
-                          )}>
-                            {parseFloat(s.percentchange) >= 0 ? '+' : ''}{s.percentchange}%
-                          </span>
-                        </td>
-                      </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </div>
-            </Card>
           )}
         </div>
       </div>

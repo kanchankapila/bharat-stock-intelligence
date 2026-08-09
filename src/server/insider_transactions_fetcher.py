@@ -20,6 +20,8 @@ import requests
 
 from db_compat import connect, translate, use_postgres
 from fetch_utils import retry_get
+from as_of import logical_trading_date
+from insider_features import BUY_TYPES, SELL_TYPES
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -177,20 +179,23 @@ def _parse_record(symbol: str, row: dict) -> dict | None:
         except (TypeError, ValueError):
             value_cr = 0.0
 
-        # Before / after shareholding %
-        total_shares = row.get("totSharesNo") or row.get("totalShares") or 0
-        bef_shares = row.get("befAcqSharesNo") or row.get("beforeShares") or 0
-        aft_shares = row.get("afterAcqSharesNo") or row.get("afterShares") or 0
-
-        def _pct(n):
+        # Before / after shareholding % (2026-08-07 fix, dead-column sweep): the previous
+        # version derived these as befAcqSharesNo/totSharesNo -- but NSE's real corporates-pit
+        # response (live-verified, confirmed across RELIANCE/TCS/INFY/SUZLON/YESBANK) has NO
+        # totSharesNo/totalShares field at all, so total_shares was always 0 and _pct()'s
+        # `if t else None` guard made before_pct/after_pct 100% NULL forever (confirmed live,
+        # 23,596/23,596 rows). NSE already supplies the percentage directly --
+        # befAcqSharesPer/afterAcqSharesPer -- no ratio needs computing at all. Genuinely 0/
+        # unpopulated for some filings (e.g. YESBANK, live-checked: 0/20 records had any
+        # non-zero pct field) -- that's NSE's own filing data, not a parsing gap.
+        def _pctfield(v):
             try:
-                n, t = float(n), float(total_shares)
-                return round(n / t * 100, 4) if t else None
+                return round(float(v), 4)
             except (TypeError, ValueError):
                 return None
 
-        before_pct = _pct(bef_shares)
-        after_pct = _pct(aft_shares)
+        before_pct = _pctfield(row.get("befAcqSharesPer"))
+        after_pct = _pctfield(row.get("afterAcqSharesPer"))
 
         # Transaction date — NSE returns ISO or DD-MMM-YYYY formats, sometimes with time
         raw_date = row.get("date") or row.get("transactionDate") or ""
@@ -287,56 +292,67 @@ def upsert_transactions(con, rows: list[dict]) -> int:
 # ---------------------------------------------------------------------------
 
 def compute_and_write_features(con, symbol: str, days: int = 90) -> None:
-    """Aggregate insider_transactions for one symbol and write to technical_signals."""
+    """Aggregate insider_trades for one symbol and write to technical_signals.
+
+    2026-08-07: switched off insider_transactions (this file's own NSE per-symbol pull) onto
+    insider_trades. Live-probed NSE's corporates-pit?symbol=X&from=Y&to=Z endpoint directly:
+    it does NOT honor its own from/to params (RELIANCE's response mixed dates from 2021 through
+    2026 regardless of the requested 90-day window) -- so insider_transactions has had ZERO rows
+    dated after 2026-05-02 across all 1,823 symbols ever fetched, for 90+ days, despite the
+    fetcher running nightly inside ml-daily-ops and genuinely touching fetched_at every time.
+    Every existing health signal looked fine (job success, non-empty upsert, fresh fetched_at) --
+    only checking transaction_date (not fetched_at) against a live re-probe of the real endpoint
+    exposed it. insider_trades (fed by moneycontrol_fetcher.py + tickertape_deals_fetcher.py
+    --insider, already used by insider_features.py for the sibling insider_buy_pct_90d ratio
+    feature) is genuinely fresh (~2 days old) and is used here instead. BUY_TYPES/SELL_TYPES
+    imported from insider_features.py rather than redefined, so both features can never
+    classify the same typeOfTransaction value differently.
+    """
     cur = con.cursor()
-    # transaction_date is TEXT ('YYYY-MM-DD'); compare as an ISO string so Postgres doesn't
-    # choke on text >= date ("no operator matches"). ISO dates sort lexicographically.
+    # A sliding cutoff, not an exact-match write target -- self-heals regardless of which side
+    # of midnight this runs on, unlike the UPDATE below (which needs logical_trading_date()).
     cutoff = (date.today() - timedelta(days=days)).isoformat()
+    buy_ph = ','.join(['?'] * len(BUY_TYPES))
+    sell_ph = ','.join(['?'] * len(SELL_TYPES))
 
     if use_postgres():
         cur.execute(
-            """
+            f"""
             SELECT
-                COALESCE(SUM(CASE
-                    WHEN LOWER(transaction_mode) LIKE '%purchase%'
-                      OR LOWER(transaction_mode) LIKE '%buy%'
-                     THEN value_cr ELSE 0 END), 0)  AS buy_cr,
-                COALESCE(SUM(CASE
-                    WHEN LOWER(transaction_mode) LIKE '%sale%'
-                      OR LOWER(transaction_mode) LIKE '%sell%'
-                     THEN value_cr ELSE 0 END), 0)  AS sell_cr
-            FROM insider_transactions
+                COALESCE(SUM(CASE WHEN UPPER(TRIM("typeOfTransaction")) IN ({buy_ph})
+                    THEN "valueInr" ELSE 0 END), 0)  AS buy_inr,
+                COALESCE(SUM(CASE WHEN UPPER(TRIM("typeOfTransaction")) IN ({sell_ph})
+                    THEN "valueInr" ELSE 0 END), 0)  AS sell_inr
+            FROM insider_trades
             WHERE symbol = ?
-              AND person_category ILIKE '%promoter%'
-              AND transaction_date >= ?
+              AND category ILIKE '%promoter%'
+              AND date_iso >= ?
             """,
-            (symbol, cutoff),
+            (*BUY_TYPES, *SELL_TYPES, symbol, cutoff),
         )
     else:
         cur.execute(
-            """
+            f"""
             SELECT
-                COALESCE(SUM(CASE
-                    WHEN LOWER(transaction_mode) LIKE '%purchase%'
-                      OR LOWER(transaction_mode) LIKE '%buy%'
-                     THEN value_cr ELSE 0 END), 0)  AS buy_cr,
-                COALESCE(SUM(CASE
-                    WHEN LOWER(transaction_mode) LIKE '%sale%'
-                      OR LOWER(transaction_mode) LIKE '%sell%'
-                     THEN value_cr ELSE 0 END), 0)  AS sell_cr
-            FROM insider_transactions
+                COALESCE(SUM(CASE WHEN UPPER(TRIM("typeOfTransaction")) IN ({buy_ph})
+                    THEN "valueInr" ELSE 0 END), 0)  AS buy_inr,
+                COALESCE(SUM(CASE WHEN UPPER(TRIM("typeOfTransaction")) IN ({sell_ph})
+                    THEN "valueInr" ELSE 0 END), 0)  AS sell_inr
+            FROM insider_trades
             WHERE symbol = ?
-              AND LOWER(person_category) LIKE '%promoter%'
-              AND transaction_date >= ?
+              AND LOWER(category) LIKE '%promoter%'
+              AND date_iso >= ?
             """,
-            (symbol, cutoff),
+            (*BUY_TYPES, *SELL_TYPES, symbol, cutoff),
         )
 
     row = cur.fetchone()
     if not row:
         return
 
-    buy_cr, sell_cr = float(row[0]), float(row[1])
+    # valueInr is raw INR; the feature (and technical_signals' documented unit) is Cr.
+    buy_cr = round(float(row[0] or 0) / 1e7, 4)
+    sell_cr = round(float(row[1] or 0) / 1e7, 4)
     net = round(buy_cr - sell_cr, 4)
     insider_buy_flag = 1 if buy_cr > 1.0 else 0
     insider_sell_flag = 1 if sell_cr > 5.0 else 0
@@ -345,7 +361,11 @@ def compute_and_write_features(con, symbol: str, days: int = 90) -> None:
     # technical_signals.created_at is NULL for 100% of rows in production (nothing else in
     # this codebase sets it) -- MAX(created_at) is therefore always NULL, and `created_at =
     # NULL` never matches in SQL, so this UPDATE has never actually written a row, ever.
-    today = date.today().isoformat()
+    # logical_trading_date(), not date.today() (2026-08-01) -- this fetcher runs inside
+    # ml-daily-ops, whose step chain regularly finishes after midnight IST; a raw wall-clock
+    # date silently targets a day with no grid row yet. See as_of.logical_trading_date's
+    # docstring for the incident.
+    today = logical_trading_date()
     cur.execute(
         """
         UPDATE technical_signals

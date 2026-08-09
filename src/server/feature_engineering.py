@@ -44,7 +44,7 @@ from sklearn.preprocessing import RobustScaler
 import ta
 
 from db_compat import connect, read_df, use_postgres, ConnWrapper
-from as_of import read_as_of_history
+from as_of import read_as_of_history, logical_write_floor
 
 SCALER_PATH = Path(__file__).parent / "ml_models" / "feature_scaler_v1.pkl"
 
@@ -605,8 +605,26 @@ class FeatureEngineer:
                 ).fetchall()
                 symbols = [r["symbol"] for r in rows]
 
-            only_date = datetime.today().strftime("%Y-%m-%d") if date_filter == "today" else None
+            # logical_write_floor(), not datetime.today() (2026-08-08) -- on any non-trading
+            # day (weekend/holiday) stock_ohlcv has no row for the raw calendar date, so every
+            # symbol's date-filtered write matched zero rows: 2426/2426 symbols "succeeded"
+            # (feat computed fine) but wrote 0 rows, tripping the written==0 guard below with
+            # no per-symbol cause (there wasn't one -- see run_full_pipeline's own comment on
+            # why individual worker errors can never surface). Use the last real trading
+            # session's date instead, same fix pattern as dl_engine.py/screener_performance.py.
+            only_date = logical_write_floor(con, fallback=datetime.today().strftime("%Y-%m-%d")) if date_filter == "today" else None
             total = len(symbols)
+            if total == 0:
+                # Was silently a no-op: an empty symbol list (e.g. stock_ohlcv temporarily
+                # empty/unreachable) fell straight through the loop below to "Pipeline
+                # complete — 0 total rows written" and exit 0, indistinguishable from a
+                # healthy day in job_heartbeat/BullMQ. See the 2026-08 job-health
+                # investigation: feature_store's MAX(computed_at) was found frozen for
+                # weeks with no error anywhere.
+                raise RuntimeError(
+                    "[FE] No symbols found in stock_ohlcv with >=60 rows — refusing to "
+                    "report a silent-empty success."
+                )
             print(f"[FE] Processing {total} symbols in parallel{' (today-only mode)' if only_date else ''}...")
 
             args_list = [(sym, lookback_days, only_date) for sym in symbols]
@@ -651,6 +669,18 @@ class FeatureEngineer:
 
             con.commit()
             print(f"[FE] Pipeline complete — {written} total rows written")
+            if written == 0:
+                # Every symbol either had <60 rows post-fetch, threw inside
+                # _compute_symbol_unscaled/_write_symbol_features (each caught and logged
+                # individually above, never surfaced), or was silently skipped -- any of
+                # which used to exit 0 with feature_store untouched. Fail loudly instead so
+                # this shows up as a real BullMQ/job_heartbeat failure, not a clean "success"
+                # that quietly wrote nothing (same class of bug as the total==0 guard above).
+                raise RuntimeError(
+                    f"[FE] Processed {total} symbols but wrote 0 feature rows — every "
+                    "worker failed or returned no data. Refusing to report a silent-empty "
+                    "success; see the per-symbol [FE] ERROR lines above for the real cause."
+                )
         finally:
             con.close()
 

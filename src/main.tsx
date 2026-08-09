@@ -1,13 +1,14 @@
 import { StrictMode, useState } from 'react';
 import { createRoot } from 'react-dom/client';
-import { BrowserRouter } from 'react-router-dom';
+import { BrowserRouter, Route, Routes } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { httpBatchLink } from "@trpc/client";
 import superjson from "superjson";
 import { trpc } from "./lib/trpc";
 import { initSentry } from "./lib/sentry";
 import { auth } from "./lib/firebase";
-import App from './App.tsx';
+import V5App from './v5/V5App.tsx';
+import App from './App';
 import './index.css';
 
 // No-op without VITE_SENTRY_DSN. Init before render so it can capture render-time errors too.
@@ -48,7 +49,10 @@ const Main = () => {
     <trpc.Provider client={trpcClient} queryClient={queryClient}>
       <QueryClientProvider client={queryClient}>
         <BrowserRouter>
-          <App />
+          <Routes>
+            <Route path="/v5" element={<V5App />} />
+            <Route path="/*" element={<App />} />
+          </Routes>
         </BrowserRouter>
       </QueryClientProvider>
     </trpc.Provider>

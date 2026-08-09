@@ -1,4 +1,4 @@
-import { dbGet, dbAll, dbTransaction } from './dbAsync';
+import { dbGet, dbAll, dbRun, dbTransaction } from './dbAsync';
 import { getAllNSEStocks, getNSEStockBySymbol, searchNSEStocks, NSEStock } from '../data/nseStocks';
 
 export interface NSEStockRow {
@@ -15,6 +15,31 @@ export interface NSEStockRow {
   pe_ratio: number | null;
   dividend_yield: number | null;
   last_updated: string;
+}
+
+// Backfills nse_stocks.market_cap/pe_ratio/dividend_yield from stock_fundamentals (added
+// 2026-08-07, dead-column sweep). These 3 columns had NO writer anywhere in the codebase --
+// live-verified 0/2,366 ACTIVE rows populated -- but every reader (getStockList/getStocks/
+// searchNSEStocks/etc. in this file) already does COALESCE(stock_fundamentals.x, nse_stocks.x),
+// so this was a genuinely dead last-resort fallback rather than a live bug: stock_fundamentals
+// covers ~94% of the universe already. This backfill makes the fallback real for the remaining
+// ~6% stock_fundamentals doesn't cover, instead of leaving it structurally unreachable.
+// COALESCE-on-the-target-side (never downgrade): only fills a currently-NULL nse_stocks value,
+// never overwrites one that's already set (matches the sector-backfill convention directly
+// above in this file's syncNSEStocksToDatabase()).
+export async function backfillNseStocksFundamentalsFallback(): Promise<{ updated: number }> {
+  // Correlated subqueries rather than `UPDATE ... FROM` -- this codebase's SQLite dev-fallback
+  // path (sqlTranslate.ts) has no established precedent handling Postgres's FROM-joined UPDATE
+  // syntax, so this form (proven to work identically on both dialects) avoids that risk entirely.
+  const result = await dbRun(`
+    UPDATE nse_stocks
+    SET market_cap    = COALESCE(market_cap,    (SELECT sf.market_cap    FROM stock_fundamentals sf WHERE sf.symbol = nse_stocks.symbol)),
+        pe_ratio       = COALESCE(pe_ratio,      (SELECT sf.trailing_pe  FROM stock_fundamentals sf WHERE sf.symbol = nse_stocks.symbol)),
+        dividend_yield = COALESCE(dividend_yield,(SELECT sf.dividend_yield FROM stock_fundamentals sf WHERE sf.symbol = nse_stocks.symbol))
+    WHERE symbol IN (SELECT symbol FROM stock_fundamentals)
+      AND (market_cap IS NULL OR pe_ratio IS NULL OR dividend_yield IS NULL)
+  `);
+  return { updated: result?.changes ?? 0 };
 }
 
 let _nseSyncInProgress = false;
@@ -46,7 +71,20 @@ export function syncNSEStocksToDatabase(): { success: boolean; message: string; 
         const BATCH_SIZE = 100;
         const ROW_PH = `(?,?,?,?,?,?,?,?,CURRENT_TIMESTAMP)`;
         const COLS = `symbol,name,sector,industry,isin,listing_date,exchange,status,last_updated`;
-        const CONFLICT = `name=excluded.name,sector=excluded.sector,industry=excluded.industry,`
+        // sector/industry: the static src/data/nseStocks.ts seed file hardcodes 'Unknown' for
+        // ~95% of symbols (real classification is backfilled separately by
+        // backfill_sector_mc.py/backfill_sector_industry.py, chained right after this sync --
+        // see processNSESync in jobs/sync.jobs.ts). This job runs weekly; a blind
+        // `sector=excluded.sector` would silently wipe every backfilled real value back to
+        // 'Unknown' on the very next run. Only take the incoming value when it's a genuine
+        // classification, or when the existing row has nothing at all (first-ever sync) --
+        // never let a placeholder downgrade a real one, matching the "gap-fill only, never
+        // clobber" convention the backfill scripts themselves already follow.
+        const CONFLICT = `name=excluded.name,`
+          + `sector=CASE WHEN excluded.sector IS NOT NULL AND excluded.sector NOT IN ('','Unknown') THEN excluded.sector `
+          +   `WHEN nse_stocks.sector IS NULL THEN excluded.sector ELSE nse_stocks.sector END,`
+          + `industry=CASE WHEN excluded.industry IS NOT NULL AND excluded.industry NOT IN ('','Unknown') THEN excluded.industry `
+          +   `WHEN nse_stocks.industry IS NULL THEN excluded.industry ELSE nse_stocks.industry END,`
           + `isin=excluded.isin,listing_date=excluded.listing_date,last_updated=CURRENT_TIMESTAMP`;
 
         let inserted = 0;
@@ -144,33 +182,39 @@ export async function getNSEStockFromDB(symbol: string): Promise<NSEStockRow | u
 // Search NSE stocks from database
 export async function searchNSEStocksFromDB(query: string): Promise<NSEStockRow[]> {
   try {
-    const q = `%${query}%`;
+    // LIKE is case-sensitive on Postgres (unlike SQLite's implicit ASCII-only
+    // case-insensitivity) -- wrap both sides in LOWER() so "bel" matches the
+    // uppercase-stored "BEL" on both dialects, matching the LOWER()-bridging
+    // convention already used elsewhere in this codebase for cross-dialect matches.
+    const q = `%${query.toLowerCase()}%`;
     const rows = await dbAll<NSEStockRow>(`
-      SELECT 
-        n.id, 
-        n.symbol, 
-        n.name, 
-        n.sector, 
-        n.industry, 
-        n.isin, 
-        n.listing_date, 
-        n.exchange, 
-        n.status, 
-        COALESCE(f.market_cap, n.market_cap) as market_cap, 
-        COALESCE(f.trailing_pe, n.pe_ratio) as pe_ratio, 
-        COALESCE(f.dividend_yield, n.dividend_yield) as dividend_yield, 
+      SELECT
+        n.id,
+        n.symbol,
+        n.name,
+        n.sector,
+        n.industry,
+        n.isin,
+        n.listing_date,
+        n.exchange,
+        n.status,
+        COALESCE(f.market_cap, n.market_cap) as market_cap,
+        COALESCE(f.trailing_pe, n.pe_ratio) as pe_ratio,
+        COALESCE(f.dividend_yield, n.dividend_yield) as dividend_yield,
         n.last_updated
       FROM nse_stocks n
       LEFT JOIN stock_fundamentals f ON n.symbol = f.symbol
       WHERE n.status = 'ACTIVE' AND (
-        n.symbol LIKE ? OR
-        n.name LIKE ? OR
-        n.sector LIKE ? OR
-        n.industry LIKE ?
+        LOWER(n.symbol) LIKE ? OR
+        LOWER(n.name) LIKE ? OR
+        LOWER(n.sector) LIKE ? OR
+        LOWER(n.industry) LIKE ?
       )
-      ORDER BY n.symbol ASC
+      ORDER BY
+        CASE WHEN LOWER(n.symbol) = LOWER(?) THEN 0 ELSE 1 END,
+        n.symbol ASC
       LIMIT 100
-    `, [q, q, q, q]);
+    `, [q, q, q, q, query]);
     return rows;
   } catch (error) {
     console.error(`❌ Error searching NSE stocks:`, error);

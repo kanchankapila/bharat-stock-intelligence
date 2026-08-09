@@ -68,7 +68,11 @@ def make_db():
         );
         CREATE TABLE signal_outcomes (
             symbol TEXT, signal_date TEXT, horizon_days INTEGER, outcome TEXT,
-            PRIMARY KEY (symbol, signal_date, horizon_days)
+            -- ml_calibration.py only trains on signal_source='technical' rows (2026-08 fix);
+            -- every INSERT in this file grades a technical_signals-shaped scenario, so default
+            -- to 'technical' rather than touching every INSERT statement individually.
+            signal_source TEXT NOT NULL DEFAULT 'technical',
+            PRIMARY KEY (symbol, signal_date, horizon_days, signal_source)
         );
         CREATE TABLE app_settings (key TEXT PRIMARY KEY, value TEXT);
     """)
@@ -202,6 +206,34 @@ def test_per_regime_auc_distinguishes_rankable_vs_random():
     auc = per_regime_auc(conn, min_n=50)
     assert auc['BULL']['auc'] > 0.9
     assert 0.4 <= auc['BEAR']['auc'] <= 0.6
+
+
+def test_per_regime_auc_ignores_confluence_sourced_outcome_rows():
+    """The actual 2026-08 bug: signal_outcomes has no source discriminator, so a
+    confluence-sourced outcome row sharing (symbol, date) with an unrelated technical_signals
+    row used to get joined in and treated as if it graded that signal's win_probability. A
+    confluence-sourced row with the OPPOSITE outcome of the real technical-sourced row must not
+    change the computed AUC."""
+    conn = make_db()
+    for i in range(60):
+        p = 0.2 if i < 30 else 0.8
+        y = 'LOSS' if i < 30 else 'WIN'  # low p -> LOSS, high p -> WIN: cleanly rankable
+        day = f"2026-04-{i % 28 + 1:02d}"
+        conn.execute("INSERT INTO technical_signals (symbol,date,win_probability,nifty_regime) VALUES (?,?,?,?)",
+                     (f"S{i}", day, p, 'SIDEWAYS'))
+        conn.execute(
+            "INSERT INTO signal_outcomes (symbol,signal_date,horizon_days,outcome,signal_source) "
+            "VALUES (?,?,5,?,'technical')", (f"S{i}", day, y))
+        # A confluence-sourced row for the SAME (symbol, date) with the opposite outcome --
+        # must be excluded, not blended into the technical-sourced AUC computation.
+        conn.execute(
+            "INSERT INTO signal_outcomes (symbol,signal_date,horizon_days,outcome,signal_source) "
+            "VALUES (?,?,5,?,'confluence')", (f"S{i}", day, 'LOSS' if y == 'WIN' else 'WIN'))
+    conn.commit()
+    auc = per_regime_auc(conn, min_n=50)
+    # If the confluence rows leaked in, the join would return 2 rows per signal with
+    # contradictory outcomes and AUC would collapse toward 0.5, not the clean signal here.
+    assert auc['SIDEWAYS']['auc'] > 0.9
 
 
 def test_regime_readiness_flags():

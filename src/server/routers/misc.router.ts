@@ -221,6 +221,98 @@ export const miscRouter = router({
       }
     }),
 
+  // ── 2026-08-06 urls.txt data analysis: structured tables replacing raw-archived endpoints ──
+  // (docs/url_explorer/DATA_CATEGORIZATION_AND_USAGE.md). These read persisted history from
+  // sector_intel/institutional_deals/concall fetchers, complementing (not replacing) getDeals
+  // above — getDeals is a live on-demand snapshot across all 3 dealsTypes with no history;
+  // getInstitutionalDealHistory below is a persisted, queryable, freshness-monitored
+  // topInvestor-only trend.
+
+  getSectorRotationIntel: publicProcedure
+    .query(async () => fetchWithCache('sector_rotation_intel', async () => {
+      const [rrg, pairs, stats, summary] = await Promise.all([
+        dbAll<any>(`
+          SELECT sector, week_date, rs_ratio, rs_momentum, sector_return, stocks_count, quadrant
+          FROM sector_rrg_history
+          WHERE week_date = (SELECT MAX(week_date) FROM sector_rrg_history)
+          ORDER BY rs_ratio DESC
+        `),
+        dbAll<any>(`
+          SELECT sector_a, sector_b, correlation, pair_type
+          FROM sector_correlation_pairs
+          WHERE data_date = (SELECT MAX(data_date) FROM sector_correlation_pairs)
+            AND pair_type IS NOT NULL
+          ORDER BY pair_type, correlation DESC
+        `),
+        dbAll<any>(`
+          SELECT sector, avg_daily_return, volatility, total_return, data_points
+          FROM sector_correlation_stats
+          WHERE data_date = (SELECT MAX(data_date) FROM sector_correlation_stats)
+          ORDER BY total_return DESC
+        `),
+        dbGet<any>(`
+          SELECT data_date, avg_pairwise_correlation, pct_pairs_above_0_7, total_pairs, takeaway
+          FROM sector_correlation_summary
+          ORDER BY data_date DESC LIMIT 1
+        `),
+      ]);
+      return { rrg, correlationPairs: pairs, sectorStats: stats, summary: summary ?? null };
+    }, 900)),
+
+  getInstitutionalDealHistory: publicProcedure
+    .input(z.object({ symbol: z.string().optional(), days: z.number().min(1).max(90).optional().default(14) }))
+    .query(async ({ input }) => {
+      const key = `inst_deals_${input.symbol ?? 'all'}_${input.days}`;
+      return fetchWithCache(key, async () => {
+        const params: any[] = [];
+        let where = `deal_date >= date('now', '-${input.days} days')`;
+        if (input.symbol) { where += ` AND symbol = ?`; params.push(input.symbol.toUpperCase()); }
+        return dbAll<any>(`
+          SELECT symbol, exchange, sector, action, deal_type, deal_date, counterparty,
+                 quantity, deal_price, deal_value_cr_1w, deals_count_1w
+          FROM institutional_deal_signals
+          WHERE ${where}
+          ORDER BY deal_date DESC, deal_value_cr_1w DESC
+          LIMIT 200
+        `, params);
+      }, 900);
+    }),
+
+  getConcallTakeaways: publicProcedure
+    .input(z.object({ symbol: z.string().optional(), limit: z.number().min(1).max(50).optional().default(20) }))
+    .query(async ({ input }) => {
+      const key = `concall_takeaways_${input.symbol ?? 'all'}_${input.limit}`;
+      return fetchWithCache(key, async () => {
+        const params: any[] = [];
+        let where = '1=1';
+        if (input.symbol) { where += ` AND symbol = ?`; params.push(input.symbol.toUpperCase()); }
+        params.push(input.limit);
+        return dbAll<any>(`
+          SELECT symbol, company_name, quarter, fiscal_year, key_takeaway, tone_assessment,
+                 transcript_source, announcement_date, generated_at
+          FROM concall_takeaways
+          WHERE ${where}
+          ORDER BY announcement_date DESC
+          LIMIT ?
+        `, params);
+      }, 900);
+    }),
+
+  getMarketMoodIndex: publicProcedure
+    .query(async () => fetchWithCache('market_mood_index', async () => {
+      const rows = await dbAll<any>(`
+        SELECT date, close AS indicator
+        FROM macro_asset_prices
+        WHERE symbol = 'INDIA_MMI'
+        ORDER BY date DESC LIMIT 30
+      `);
+      if (!rows.length) return null;
+      const latest = rows[0];
+      const value = Number(latest.indicator);
+      const zone = value > 70 ? 'Extreme Greed' : value > 50 ? 'Greed' : value > 30 ? 'Fear' : 'Extreme Fear';
+      return { date: latest.date, indicator: value, zone, trail: rows.slice(1, 8) };
+    }, 900)),
+
   // Raw NSE PIT (insider) filings: promoter/designated-person transactions with before/after
   // %holding — richer than getDeals, previously only consumed as a binary flag by the scoring
   // engine (technical_signals.insider_buy_flag/sell_flag).
@@ -252,9 +344,16 @@ export const miscRouter = router({
       }, 300000);
     }),
 
+  // .optional() on the outer object, not just the date field -- v5's EarningsPulseDeskPage.tsx
+  // (rendered for dashboardVersion==='v6' at /earnings, see App.tsx's Phase 2 wiring) calls
+  // trpc.getEarnings.useQuery(undefined, ...), and Zod rejects a bare undefined against a
+  // required z.object() even when every field inside it is optional -- same class of bug as
+  // getAdvanceDecline's 2026-08-04 fix. v1/v2/v3's EarningsPage.tsx always sends a real
+  // { date } object so it never hit this; v4's EarningsPulseWidget.tsx passes {} so it didn't
+  // either -- confirmed live 2026-08-07 as a genuine 400 on every /earnings load under v6.
   getEarnings: publicProcedure
-    .input(z.object({ date: z.string().optional() }))
-    .query(async ({ input }) => fetchEarningsAll(input.date)),
+    .input(z.object({ date: z.string().optional() }).optional())
+    .query(async ({ input }) => fetchEarningsAll(input?.date)),
 
   getEarningsCalendar: publicProcedure
     .input(z.object({ date: z.string().optional() }))
@@ -275,8 +374,13 @@ export const miscRouter = router({
     .input(z.object({ type: z.enum(['LR', 'BP']).optional().default('BP') }))
     .query(async ({ input }) => fetchEarningsRapidResults(input.type)),
 
+  // Was uncached despite being polled every 60s by TradeDecisionCockpit.tsx from every open
+  // tab -- the full query set + composite-scoring computation below reran from scratch on every
+  // single request even though technical_signals/unified_signals/stock_scores/
+  // news_sentiment_items only change on batch-job cadence. TTL matched to the frontend's own
+  // poll interval so a cache hit never serves data older than one poll cycle would anyway.
   getTradeDecisionCockpitData: publicProcedure
-    .query(async () => {
+    .query(async () => fetchWithCache('misc:trade-decision-cockpit', async () => {
       try {
         // Pull latest technical snapshot per symbol (most recent date per symbol)
         // Fixed 2026-07-30 (Finding #33, full-stack audit): the correlated subquery
@@ -464,15 +568,98 @@ export const miscRouter = router({
           ? `${top20.length} setups · avg win rate ${avgWinProbability}% · ${bullish}/${total} stocks bullish`
           : top20.length < 3 ? 'Insufficient setups — run Technical Signal Scan first' : 'Win probability below threshold';
 
+        // `signals` is ORDER BY date DESC first, so signals[0].date is the most recent
+        // technical_signals scan date any candidate here is grounded in -- surfaced to the
+        // frontend so a trader can tell whether this verdict reflects today's scan or a stale
+        // one, rather than trusting the table's mere presence.
+        const asOfDate = (signals[0]?.date as string) ?? null;
+
         return {
           success: true,
           data: {
-            marketOverview: { verdict, verdictReason, advDecRatio, avgWinProbability, activeSignalsCount: candidates.length },
+            marketOverview: { verdict, verdictReason, advDecRatio, avgWinProbability, activeSignalsCount: candidates.length, asOfDate },
             candidates: top20,
           },
         };
       } catch (err) {
         return { success: false, data: { marketOverview: { verdict: 'NO TRADE', verdictReason: 'Data unavailable', advDecRatio: 1, avgWinProbability: 0, activeSignalsCount: 0 }, candidates: [] } };
       }
+    }, 45)),
+
+  // One reverse-chronological feed merging the two event sources that actually change during a
+  // trading day (new BUY/SELL signals + market-moving news) into a single timeline a trader can
+  // scan top-to-bottom, instead of cross-referencing the Signal Ledger and News tabs separately.
+  // Deliberately excludes NEUTRAL/HOLD signals (pure noise at platform scale -- thousands/day
+  // across ~2450 stocks) and does NOT threshold on confidence/win_probability: this codebase's
+  // own calibrated win-probability values run low (documented baseline ~35-41%), so a naive
+  // score cutoff would silently empty the feed rather than surface real activity.
+  getActivityFeed: publicProcedure
+    .input(z.object({ hours: z.number().min(1).max(72).default(24), limit: z.number().min(10).max(150).default(60) }).optional())
+    .query(async ({ input }) => {
+      const hours = input?.hours ?? 24;
+      const limit = input?.limit ?? 60;
+      return fetchWithCache(`misc:activity-feed:${hours}:${limit}`, async () => {
+        const cutoffIso = new Date(Date.now() - hours * 60 * 60 * 1000).toISOString();
+
+        const [signalRows, newsRows] = await Promise.all([
+          dbAll<Record<string, unknown>>(`
+            SELECT symbol, signal_source, signal_type, entry_price, target_price, stop_loss,
+                   confidence_score, signal_generated_at, reasoning
+            FROM unified_signals
+            WHERE signal_type IN ('BUY', 'SELL') AND signal_generated_at >= ?
+            ORDER BY signal_generated_at DESC
+            LIMIT ?
+          `, [cutoffIso, limit]).catch(() => []),
+          (async () => {
+            try {
+              const { getNewsItems } = await import('../newsSentimentService');
+              return await getNewsItems({ hours, limit });
+            } catch { return []; }
+          })(),
+        ]);
+
+        type ActivityItem = {
+          id: string; type: 'SIGNAL' | 'NEWS'; timestamp: string;
+          symbol: string | null; headline: string; detail: string | null;
+          tag: string; tagSentiment: 'BULLISH' | 'BEARISH' | 'NEUTRAL'; source: string; url: string | null;
+        };
+
+        const signalItems: ActivityItem[] = signalRows.map((s, i): ActivityItem => ({
+          id: `sig-${s.symbol}-${s.signal_generated_at}-${i}`,
+          type: 'SIGNAL',
+          timestamp: s.signal_generated_at as string,
+          symbol: s.symbol as string,
+          headline: `${s.signal_type} signal · ${s.symbol}`,
+          detail: (s.reasoning as string) || (s.entry_price ? `Entry ₹${s.entry_price}${s.target_price ? ` · Target ₹${s.target_price}` : ''}${s.stop_loss ? ` · SL ₹${s.stop_loss}` : ''}` : null),
+          tag: `${s.signal_source ?? 'SIGNAL'}`,
+          tagSentiment: s.signal_type === 'BUY' ? 'BULLISH' : 'BEARISH',
+          source: (s.signal_source as string) || 'Signal Engine',
+          url: null,
+        }));
+
+        const newsItems: ActivityItem[] = (newsRows as unknown as Array<Record<string, unknown>>).map((n, i): ActivityItem => {
+          let symbols: string[] = [];
+          try { symbols = JSON.parse((n.symbols_json as string) || '[]'); } catch { /* ignore malformed */ }
+          const sentiment = n.sentiment as string | undefined;
+          return {
+            id: `news-${n.id ?? i}`,
+            type: 'NEWS',
+            timestamp: (n.published_at as string) || (n.fetched_at as string),
+            symbol: symbols[0] || null,
+            headline: n.title as string,
+            detail: (n.summary as string) || null,
+            tag: (n.category as string) || 'NEWS',
+            tagSentiment: sentiment === 'BULLISH' || sentiment === 'BEARISH' ? sentiment : 'NEUTRAL',
+            source: (n.source as string) || 'News',
+            url: (n.url as string) || null,
+          };
+        });
+
+        const items = [...signalItems, ...newsItems]
+          .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime())
+          .slice(0, limit);
+
+        return { success: true, items, generatedAt: new Date().toISOString() };
+      }, 60);
     }),
 });

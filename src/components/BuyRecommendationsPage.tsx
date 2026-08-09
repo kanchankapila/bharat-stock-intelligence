@@ -2,14 +2,23 @@ import { useState, useMemo } from 'react';
 import { trpc } from '../lib/trpc';
 import { cn } from '../lib/utils';
 import {
+  ResponsiveContainer, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Cell,
+} from 'recharts';
+import {
   TrendingUp, RefreshCw, Shield, Zap, Star, Activity,
   ChevronUp, ChevronDown, AlertTriangle, Users, BarChart2,
-  Building2, Percent, Clock,
+  Building2, Percent, Clock, Lock, Newspaper,
 } from 'lucide-react';
+import { formatISTWithLocal, relativeFromNow } from '../lib/timeFormat';
+import { CanonicalBadge } from './CanonicalSourceNote';
+import { StockTagRow } from './StockTagRow';
+import { V4QuickNav } from '../v4/components/V4QuickNav';
+import stockData from '../data/stocklist';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
-type ConvFilter = 'ALL' | 'S_ELITE' | 'A_HIGH' | 'B_MEDIUM';
+// 'TOP' = S_ELITE + A_HIGH combined -- the "most accurate only" default tier.
+type ConvFilter = 'TOP' | 'ALL' | 'S_ELITE' | 'A_HIGH' | 'B_MEDIUM';
 type HorizonFilter = 'ALL' | 'intraday' | 'swing' | 'long_term';
 
 // ─── Style maps ───────────────────────────────────────────────────────────────
@@ -34,48 +43,14 @@ const pctFmt = (v: number | null | undefined, decimals = 1) =>
 const pctColor = (v: number | null | undefined) =>
   v == null ? 'text-slate-400' : v >= 0 ? 'text-emerald-400' : 'text-rose-400';
 const numFmt = (v: number | null | undefined) => v == null ? '—' : v.toFixed(1);
-
-// ─── Signal badges ────────────────────────────────────────────────────────────
-
-function Badge({ label, color = 'bg-slate-700 text-slate-300' }: { label: string; color?: string }) {
-  return <span className={cn('px-1.5 py-0.5 rounded text-[9px] font-semibold uppercase tracking-wide', color)}>{label}</span>;
-}
-
-function StockBadges({ p }: { p: any }) {
-  const badges: Array<{ label: string; color: string }> = [];
-
-  if (p.eps_beat_streak >= 3) badges.push({ label: `EPS ×${p.eps_beat_streak}`, color: 'bg-emerald-500/20 text-emerald-300' });
-  else if (p.eps_surprise_q1 > 5) badges.push({ label: 'EPS beat', color: 'bg-emerald-500/15 text-emerald-400' });
-  if (p.eps_miss_after_streak) badges.push({ label: 'PEAD', color: 'bg-rose-500/20 text-rose-300' });
-
-  if (p.insider_buy_flag) badges.push({ label: 'Insider buy', color: 'bg-violet-500/20 text-violet-300' });
-  if (p.insider_sell_flag) badges.push({ label: 'Insider sell', color: 'bg-rose-500/15 text-rose-400' });
-  if (p.promoter_net_90d > 0.5) badges.push({ label: 'Promoter ↑', color: 'bg-violet-500/15 text-violet-400' });
-
-  if (p.rating_upgrade_180d) badges.push({ label: 'Rating ↑', color: 'bg-sky-500/20 text-sky-300' });
-  if (p.rating_downgrade_180d) badges.push({ label: 'Rating ↓', color: 'bg-rose-500/15 text-rose-400' });
-
-  if (p.fcf_positive && p.fcf_yield > 3) badges.push({ label: `FCF ${numFmt(p.fcf_yield)}%`, color: 'bg-teal-500/20 text-teal-300' });
-  if (p.debt_coverage_risk) badges.push({ label: 'Debt risk', color: 'bg-orange-500/20 text-orange-300' });
-
-  if (p.block_deal_flag && p.block_deal_direction > 0) badges.push({ label: 'Block buy', color: 'bg-sky-500/15 text-sky-400' });
-  if (p.block_deal_flag && p.block_deal_direction < 0) badges.push({ label: 'Block sell', color: 'bg-rose-500/15 text-rose-400' });
-
-  if (p.mf_sector_flow_pct > 1) badges.push({ label: 'MF inflow', color: 'bg-indigo-500/20 text-indigo-300' });
-
-  if (p.wc_improving) badges.push({ label: 'WC ↑', color: 'bg-teal-500/15 text-teal-400' });
-  if (p.wc_deteriorating) badges.push({ label: 'WC ↓', color: 'bg-orange-500/15 text-orange-400' });
-
-  if (p.asm_flag) badges.push({ label: 'ASM', color: 'bg-red-500/25 text-red-300' });
-
-  if (p.is_nifty50) badges.push({ label: 'N50', color: 'bg-slate-600/60 text-slate-300' });
-
-  return (
-    <div className="flex flex-wrap gap-1 mt-2">
-      {badges.map((b, i) => <Badge key={i} label={b.label} color={b.color} />)}
-    </div>
-  );
-}
+const STOCK_NAME_BY_SYMBOL = new Map(
+  stockData.map((row) => [String(row.symbol || '').toUpperCase(), String(row.name || '').trim()])
+);
+const displayStockName = (symbol?: string | null) => {
+  const sym = String(symbol || '').trim().toUpperCase();
+  if (!sym) return '—';
+  return STOCK_NAME_BY_SYMBOL.get(sym) || sym;
+};
 
 // ─── Mini score bar ───────────────────────────────────────────────────────────
 
@@ -95,6 +70,7 @@ function StockCard({ p, onSelect }: { p: any; onSelect: (sym: string) => void })
   const style = CONV[p.conviction_level as keyof typeof CONV] ?? CONV.B_MEDIUM;
   const winPct = p.win_probability != null ? Math.round(p.win_probability * 100) : null;
   const rr = n2(p.risk_reward);
+  const sym = String(p.symbol || '').toUpperCase();
 
   return (
     <div
@@ -107,10 +83,11 @@ function StockCard({ p, onSelect }: { p: any; onSelect: (sym: string) => void })
       <div className="flex items-start justify-between gap-2">
         <div className="flex-1 min-w-0">
           <button
-            onClick={() => onSelect(p.symbol)}
+            onClick={() => onSelect(sym)}
             className="font-bold text-white text-base leading-tight hover:text-sky-300 transition-colors text-left"
           >
-            {p.symbol}
+            <div>{displayStockName(sym)}</div>
+            <div className="text-[11px] font-medium text-slate-400 mt-0.5">{sym || '—'}</div>
           </button>
           {p.sector && <div className="text-[10px] text-slate-400 truncate mt-0.5">{p.sector}</div>}
         </div>
@@ -204,7 +181,7 @@ function StockCard({ p, onSelect }: { p: any; onSelect: (sym: string) => void })
       )}
 
       {/* Badges */}
-      <StockBadges p={p} />
+      <StockTagRow p={p} className="mt-2" />
 
       {/* Expand toggle */}
       <button
@@ -284,6 +261,51 @@ function StockCard({ p, onSelect }: { p: any; onSelect: (sym: string) => void })
   );
 }
 
+// ─── Intraday pick card (compact -- distinct data source from the swing/positional cards above) ──
+
+function IntradayPickCard({ p, onSelect }: { p: any; onSelect: (sym: string) => void }) {
+  const style = CONV[p.conviction_level as keyof typeof CONV] ?? CONV.B_MEDIUM;
+  const rr = n2(p.risk_reward);
+  const sym = String(p.symbol || '').toUpperCase();
+  return (
+    <div className={cn('rounded-xl border p-3 flex flex-col gap-1.5', style.bg, style.border)}>
+      <div className="flex items-start justify-between gap-2">
+        <button
+          onClick={() => onSelect(sym)}
+          className="font-bold text-white text-sm hover:text-sky-300 transition-colors text-left"
+        >
+          <div>{displayStockName(sym)}</div>
+          <div className="text-[11px] font-medium text-slate-400 mt-0.5">{sym || '—'}</div>
+        </button>
+        <span className={cn('text-[10px] font-bold px-1.5 py-0.5 rounded-full border', style.text, style.border)}>
+          {style.label} · {n2(p.intraday_score)}
+        </span>
+      </div>
+      <div className="grid grid-cols-3 gap-1 text-[10px]">
+        <div>
+          <div className="text-slate-500">Entry</div>
+          <div className="text-white font-medium">{p.entry_price ? `₹${p.entry_price.toFixed(0)}` : '—'}</div>
+        </div>
+        <div>
+          <div className="text-slate-500">SL</div>
+          <div className="text-rose-400 font-medium">{p.stop_loss ? `₹${p.stop_loss.toFixed(0)}` : '—'}</div>
+        </div>
+        <div>
+          <div className="text-slate-500">T1 {rr ? `(${rr}R)` : ''}</div>
+          <div className="text-emerald-400 font-medium">{p.target_1 ? `₹${p.target_1.toFixed(0)}` : '—'}</div>
+        </div>
+      </div>
+      {p.news_sentiment != null && (
+        <div className="flex items-center gap-1 text-[10px]">
+          <Newspaper size={9} className={pctColor(p.news_sentiment)} />
+          <span className={pctColor(p.news_sentiment)}>news {p.news_sentiment >= 0 ? '+' : ''}{p.news_sentiment.toFixed(2)}</span>
+        </div>
+      )}
+      <p className="text-[10px] text-slate-400 leading-relaxed">{p.reasoning}</p>
+    </div>
+  );
+}
+
 // ─── Stat pill ────────────────────────────────────────────────────────────────
 
 function StatPill({ label, value, color = 'text-white' }: { label: string; value: string | number; color?: string }) {
@@ -298,17 +320,21 @@ function StatPill({ label, value, color = 'text-white' }: { label: string; value
 // ─── Main page ────────────────────────────────────────────────────────────────
 
 export function BuyRecommendationsPage({ onSelectStock }: { onSelectStock: (sym: string) => void }) {
-  const [conviction, setConviction] = useState<ConvFilter>('ALL');
+  const [conviction, setConviction] = useState<ConvFilter>('TOP');
   const [horizon, setHorizon] = useState<HorizonFilter>('ALL');
   const [sector, setSector] = useState<string>('');
   const [search, setSearch] = useState('');
 
-  const { data, isLoading, refetch, isFetching } = trpc.getBuyRecommendations.useQuery({
+  const { data, isLoading, refetch, isFetching, dataUpdatedAt } = trpc.getBuyRecommendations.useQuery({
     conviction,
     horizon,
     sector: sector || undefined,
     limit: 120,
-  }, { staleTime: 2 * 60_000 });
+  }, { staleTime: 2 * 60_000, refetchInterval: 3 * 60_000, refetchOnWindowFocus: true });
+
+  const { data: intraday, isLoading: intradayLoading } = trpc.getIntradayTopPicks.useQuery(undefined, {
+    staleTime: 60_000, refetchInterval: 2 * 60_000, refetchOnWindowFocus: true,
+  });
 
   const filtered = useMemo(() => {
     if (!data?.picks) return [];
@@ -329,23 +355,50 @@ export function BuyRecommendationsPage({ onSelectStock }: { onSelectStock: (sym:
     return vals.length ? Math.round(vals.reduce((a, b) => a + b, 0) / vals.length * 100) : null;
   }, [filtered]);
 
+  // Sector distribution of the currently-filtered picks -- top 8 sectors by count.
+  const sectorChartData = useMemo(() => {
+    const counts: Record<string, number> = {};
+    filtered.forEach((p: any) => { const s = p.sector || 'Unclassified'; counts[s] = (counts[s] ?? 0) + 1; });
+    return Object.entries(counts)
+      .map(([sector, count]) => ({ sector, count }))
+      .sort((a, b) => b.count - a.count)
+      .slice(0, 8);
+  }, [filtered]);
+
+  // Win-probability histogram in 10pt buckets, over the currently-filtered picks.
+  const winProbHistogram = useMemo(() => {
+    const buckets = ['<40%', '40-50%', '50-60%', '60-70%', '70-80%', '80%+'];
+    const counts = new Array(buckets.length).fill(0);
+    filtered.forEach((p: any) => {
+      if (p.win_probability == null) return;
+      const pct = p.win_probability * 100;
+      const idx = pct < 40 ? 0 : pct < 50 ? 1 : pct < 60 ? 2 : pct < 70 ? 3 : pct < 80 ? 4 : 5;
+      counts[idx]++;
+    });
+    return buckets.map((bucket, i) => ({ bucket, count: counts[i] }));
+  }, [filtered]);
+
   const regimeColor = REGIME_COLOR[data?.regime ?? ''] ?? 'text-slate-400';
 
   return (
     <div className="min-h-screen bg-slate-900 text-white p-4 space-y-4">
+      <V4QuickNav />
 
       {/* Page header */}
       <div className="flex items-center justify-between flex-wrap gap-3">
         <div>
           <h1 className="text-xl font-bold flex items-center gap-2">
             <TrendingUp size={20} className="text-emerald-400" />
-            Buy Recommendations
+            Top Picks
+            <CanonicalBadge />
           </h1>
           <p className="text-xs text-slate-400 mt-0.5">
-            ML-ranked picks · {data?.picks?.length ?? 0} stocks ·{' '}
-            {data?.lastComputedAt ? new Date(data.lastComputedAt).toLocaleString('en-IN', { dateStyle: 'medium', timeStyle: 'short' }) : '—'}
+            Highest-conviction Buy calls only · {data?.picks?.length ?? 0} stocks · Model run {data?.lastComputedAt ? formatISTWithLocal(data.lastComputedAt) : '—'}
             {data?.regime && (
               <span className={cn('ml-2 font-semibold', regimeColor)}>· {data.regime}</span>
+            )}
+            {dataUpdatedAt > 0 && (
+              <span className="ml-2 text-slate-600">· page data fetched {relativeFromNow(dataUpdatedAt)}</span>
             )}
           </p>
         </div>
@@ -359,6 +412,45 @@ export function BuyRecommendationsPage({ onSelectStock }: { onSelectStock: (sym:
         </button>
       </div>
 
+      {/* Intraday section -- a distinct engine/table (intraday_ranker.py -> intraday_recommendations),
+          isolated from the swing/positional picks above. Its Buy/Strong Buy emission is gated on the
+          engine's own trailing realised P&L, so an empty/closed state here is a correct, honest
+          reflection of "no validated same-day edge right now", not a loading or data problem. */}
+      <div className="bg-slate-800/30 border border-slate-700/40 rounded-xl p-3">
+        <div className="flex items-center gap-2 mb-2">
+          <Zap size={14} className="text-amber-400" />
+          <span className="text-sm font-semibold text-white">Intraday</span>
+          {intraday && (
+            <span className={cn(
+              'text-[10px] font-semibold px-2 py-0.5 rounded-full border flex items-center gap-1',
+              intraday.gateOpen ? 'text-emerald-300 border-emerald-500/40 bg-emerald-500/10'
+                                 : 'text-slate-400 border-slate-600/40 bg-slate-700/30',
+            )}>
+              {intraday.gateOpen ? <Zap size={9} /> : <Lock size={9} />}
+              {intraday.gateOpen ? 'Live edge confirmed' : 'Gated — no confirmed edge today'}
+            </span>
+          )}
+        </div>
+        {intradayLoading ? (
+          <div className="h-16 animate-pulse bg-slate-800/40 rounded-lg" />
+        ) : !intraday?.gateOpen ? (
+          <p className="text-xs text-slate-500">
+            {intraday?.gateReason ?? 'No intraday picks scored yet today.'}
+            {(intraday?.totalScored ?? 0) > 0 && (
+              <span className="text-slate-600"> ({intraday!.totalScored} stocks scored this cycle, none cleared for same-day entry.)</span>
+            )}
+          </p>
+        ) : (intraday?.picks?.length ?? 0) === 0 ? (
+          <p className="text-xs text-slate-500">Gate is open, but nothing clears the score threshold this cycle.</p>
+        ) : (
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2">
+            {intraday!.picks.map((p: any) => (
+              <IntradayPickCard key={p.symbol} p={p} onSelect={onSelectStock} />
+            ))}
+          </div>
+        )}
+      </div>
+
       {/* Stats row */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
         <StatPill label="S — Elite" value={breakdown.S_ELITE} color="text-emerald-400" />
@@ -366,6 +458,40 @@ export function BuyRecommendationsPage({ onSelectStock }: { onSelectStock: (sym:
         <StatPill label="B — Medium" value={breakdown.B_MEDIUM} color="text-amber-400" />
         <StatPill label="Avg win prob" value={avgWin != null ? `${avgWin}%` : '—'} color="text-violet-400" />
       </div>
+
+      {/* At-a-glance charts */}
+      {filtered.length > 0 && (
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <div className="bg-slate-800/40 border border-slate-700/50 rounded-lg p-3">
+            <div className="text-[10px] font-semibold text-slate-400 uppercase tracking-wide mb-1">Win-probability distribution</div>
+            <ResponsiveContainer width="100%" height={110}>
+              <BarChart data={winProbHistogram} margin={{ top: 4, right: 4, left: -20, bottom: 0 }}>
+                <CartesianGrid strokeDasharray="3 3" stroke="#334155" vertical={false} />
+                <XAxis dataKey="bucket" tick={{ fontSize: 9, fill: '#94a3b8' }} axisLine={false} tickLine={false} />
+                <YAxis tick={{ fontSize: 9, fill: '#94a3b8' }} axisLine={false} tickLine={false} allowDecimals={false} />
+                <Tooltip contentStyle={{ background: '#1e293b', border: '1px solid #334155', fontSize: 11 }} />
+                <Bar dataKey="count" radius={[3, 3, 0, 0]}>
+                  {winProbHistogram.map((entry, i) => (
+                    <Cell key={i} fill={i >= 4 ? '#10b981' : i >= 2 ? '#0ea5e9' : '#f59e0b'} />
+                  ))}
+                </Bar>
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+          <div className="bg-slate-800/40 border border-slate-700/50 rounded-lg p-3">
+            <div className="text-[10px] font-semibold text-slate-400 uppercase tracking-wide mb-1">Sector concentration (top 8)</div>
+            <ResponsiveContainer width="100%" height={110}>
+              <BarChart data={sectorChartData} layout="vertical" margin={{ top: 4, right: 12, left: 4, bottom: 0 }}>
+                <CartesianGrid strokeDasharray="3 3" stroke="#334155" horizontal={false} />
+                <XAxis type="number" tick={{ fontSize: 9, fill: '#94a3b8' }} axisLine={false} tickLine={false} allowDecimals={false} />
+                <YAxis dataKey="sector" type="category" width={90} tick={{ fontSize: 9, fill: '#cbd5e1' }} axisLine={false} tickLine={false} />
+                <Tooltip contentStyle={{ background: '#1e293b', border: '1px solid #334155', fontSize: 11 }} />
+                <Bar dataKey="count" fill="#8b5cf6" radius={[0, 3, 3, 0]} />
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+        </div>
+      )}
 
       {/* Filters */}
       <div className="flex flex-wrap gap-2">
@@ -379,13 +505,14 @@ export function BuyRecommendationsPage({ onSelectStock }: { onSelectStock: (sym:
 
         {/* Conviction */}
         <div className="flex bg-slate-800 border border-slate-700 rounded-lg overflow-hidden text-xs">
-          {(['ALL', 'S_ELITE', 'A_HIGH', 'B_MEDIUM'] as ConvFilter[]).map(c => (
+          {(['TOP', 'ALL', 'S_ELITE', 'A_HIGH', 'B_MEDIUM'] as ConvFilter[]).map(c => (
             <button
               key={c}
               onClick={() => setConviction(c)}
+              title={c === 'TOP' ? 'S_ELITE + A_HIGH only — the most accurate tier' : undefined}
               className={cn('px-3 py-1.5 transition-colors', conviction === c ? 'bg-sky-600 text-white' : 'text-slate-400 hover:text-white')}
             >
-              {c === 'ALL' ? 'All' : c === 'S_ELITE' ? 'S' : c === 'A_HIGH' ? 'A' : 'B'}
+              {c === 'TOP' ? 'Top ★' : c === 'ALL' ? 'All' : c === 'S_ELITE' ? 'S' : c === 'A_HIGH' ? 'A' : 'B'}
             </button>
           ))}
         </div>

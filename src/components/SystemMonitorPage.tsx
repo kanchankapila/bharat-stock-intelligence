@@ -15,6 +15,11 @@ interface ScriptStatus {
   description: string;
   schedule: string;
   lastRunAt: string | null;
+  lastSuccessAt?: string | null;
+  lastFailureAt?: string | null;
+  nextScheduledAt?: string | null;
+  runCount?: number;
+  failCount?: number;
   runState: RunState;
   stats: Record<string, string | number | null>;
   error: string | null;
@@ -36,9 +41,28 @@ function fmtDateTime(iso: string | null): string {
   if (!iso) return '—';
   try {
     return new Date(iso).toLocaleString('en-IN', {
+      timeZone: 'Asia/Kolkata',
       day: '2-digit', month: 'short', year: 'numeric',
       hour: '2-digit', minute: '2-digit', hour12: true,
+      timeZoneName: 'short',
     });
+  } catch {
+    return iso;
+  }
+}
+
+function fmtIstSchedule(iso: string | null | undefined): string {
+  if (!iso) return 'Not scheduled';
+  try {
+    return new Date(iso).toLocaleString('en-IN', {
+      timeZone: 'Asia/Kolkata',
+      weekday: 'short',
+      day: '2-digit',
+      month: 'short',
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: true,
+    }) + ' IST';
   } catch {
     return iso;
   }
@@ -77,7 +101,7 @@ function ScriptCard({ script, onTrigger, triggering }: {
       <div className="flex items-start justify-between gap-2">
         <div className="flex items-center gap-2 min-w-0">
           <CatIcon className="w-4 h-4 text-slate-500 shrink-0" />
-          <span className="text-sm font-semibold text-white truncate">{script.label}</span>
+          <span className="text-sm font-semibold text-white whitespace-normal break-words leading-tight">{script.label}</span>
           {script.critical && (
             <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-indigo-900/60 text-indigo-300 uppercase tracking-wider shrink-0">
               Critical
@@ -107,21 +131,32 @@ function ScriptCard({ script, onTrigger, triggering }: {
 
       {/* Error */}
       {script.error && (
-        <div className="text-[11px] text-red-400 bg-red-900/20 rounded px-2 py-1 font-mono truncate">
+        <div className="text-[11px] text-red-400 bg-red-900/20 rounded px-2 py-1 font-mono whitespace-pre-wrap break-words leading-snug">
           {script.error}
         </div>
       )}
 
       {/* Footer */}
       <div className="flex items-end justify-between mt-auto pt-1 border-t border-slate-800">
-        <div className="flex flex-col gap-0.5">
+        <div className="flex flex-col gap-0.5 text-[10px]">
           <div className="flex items-center gap-1 text-[11px] text-slate-400">
             <Clock className="w-3 h-3" />
             <span className="font-semibold text-slate-200">{relTime(script.lastRunAt)}</span>
             <span className="text-slate-600">·</span>
             <span>{fmtDateTime(script.lastRunAt)}</span>
           </div>
-          <div className="text-[10px] text-slate-600">{script.schedule}</div>
+          <div className="text-slate-500">
+            Last success (IST): <span className="text-slate-300">{relTime(script.lastSuccessAt ?? null)}</span>
+            {' '}· Next run (IST): <span className="text-indigo-300">{relTime(script.nextScheduledAt ?? null)}</span>
+          </div>
+          <div className="text-slate-600 whitespace-normal break-words">
+            Next schedule: <span className="text-slate-400">{fmtIstSchedule(script.nextScheduledAt ?? null)}</span>
+          </div>
+          <div className="text-slate-600">
+            Runs: <span className="text-slate-400 font-mono">{script.runCount ?? 0}</span>
+            {' '}· Fails: <span className="text-slate-400 font-mono">{script.failCount ?? 0}</span>
+          </div>
+          <div className="text-[10px] text-slate-600 whitespace-normal break-words">{script.schedule}</div>
         </div>
 
         <button
@@ -251,6 +286,48 @@ export default function SystemMonitorPage() {
         ))}
       </div>
 
+      {/* Schedule + status matrix (IST) */}
+      {(scripts || []).length > 0 && (
+        <div className="rounded-xl border border-slate-800 bg-slate-900/50 p-4">
+          <h3 className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-3 flex items-center gap-2">
+            <Clock className="w-3.5 h-3.5" /> Job Schedule Matrix (IST)
+          </h3>
+          <div className="overflow-x-auto">
+            <table className="w-full text-left border-collapse">
+              <thead>
+                <tr className="border-b border-slate-800 text-[10px] text-slate-500 uppercase tracking-wider">
+                  <th className="py-2 pr-3">Job</th>
+                  <th className="py-2 pr-3">Category</th>
+                  <th className="py-2 pr-3">Configured Schedule</th>
+                  <th className="py-2 pr-3">Next Run (IST)</th>
+                  <th className="py-2 pr-3">Current Status</th>
+                </tr>
+              </thead>
+              <tbody>
+                {(scripts || []).map((s) => {
+                  const state = STATE_CONFIG[s.runState];
+                  const MatrixStateIcon = state.icon;
+                  return (
+                    <tr key={`matrix-${s.id}`} className="border-b border-slate-900/60 text-[11px] text-slate-300">
+                      <td className="py-2 pr-3 font-semibold text-white whitespace-normal break-words">{s.label}</td>
+                      <td className="py-2 pr-3 text-slate-400">{s.category}</td>
+                      <td className="py-2 pr-3 text-slate-400 whitespace-normal break-words">{s.schedule}</td>
+                      <td className="py-2 pr-3 text-indigo-300 whitespace-normal break-words">{fmtIstSchedule(s.nextScheduledAt ?? null)}</td>
+                      <td className="py-2 pr-3">
+                        <span className={`inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full ${state.bg} ${state.color}`}>
+                          <MatrixStateIcon className={`w-3 h-3 ${s.runState === 'running' ? 'animate-spin' : ''}`} />
+                          {state.label}
+                        </span>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
       {isLoading && (
         <div className="flex justify-center py-12">
           <RefreshCw className="w-6 h-6 text-slate-500 animate-spin" />
@@ -290,10 +367,14 @@ export default function SystemMonitorPage() {
         </h3>
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2">
           {[
-            { time: 'Every 30 min',      scripts: 'Technical Signal Scan' },
-            { time: 'Daily 9:30 AM IST', scripts: 'Outcome Resolver, Performance Tracker, ML Score, FII/DII' },
-            { time: 'Daily 5:00 PM IST', scripts: 'Full ML Daily Ops (FII → FinBERT → Outcomes → Perf → Score → RL)' },
-            { time: 'Sunday 6 PM IST',   scripts: 'ML Retrain, Strategy Optimizer, Performance Recompute' },
+            { time: 'Every 15-30 min, market hours', scripts: 'Technical Signal Scan, Intraday Fetch/Rank, Live Screener Collect' },
+            { time: 'Daily 7:30 AM IST',             scripts: 'Unified Ranker (canonical daily picks)' },
+            { time: 'Daily 9:30 AM IST',             scripts: 'Outcome Resolver' },
+            { time: 'Daily ~4:00-6:40 PM IST',        scripts: 'OHLCV Refresh, Screener Syncs (MC/ETNow/ET-Marketstats/Trendlyne)' },
+            { time: 'Daily 7:30 PM IST',              scripts: 'Full ML Daily Ops (FII → FinBERT → Outcomes → Perf → Score → Drift → RL)' },
+            { time: 'Chain-triggered, ~5-8 PM IST',   scripts: 'DL Inference (fires right after DL Feature Refresh; 5 AM fallback)' },
+            { time: 'Daily 10:00-11:30 PM IST',       scripts: 'Quant EOD Sync, Stock/Quant Scoring, Confluence Outcomes' },
+            { time: 'Sunday 8:30-11:30 AM IST',       scripts: 'Fundamentals Sync, ML/DL Weekly Retrain, Strategy Optimizer' },
           ].map(({ time, scripts }) => (
             <div key={time} className="space-y-1">
               <div className="text-[11px] font-semibold text-indigo-400">{time}</div>
@@ -301,6 +382,11 @@ export default function SystemMonitorPage() {
             </div>
           ))}
         </div>
+        <p className="mt-3 text-[10px] text-slate-600">
+          On a mid-week trading holiday, the daily pipeline (Outcome Resolver → ML Daily Ops → Unified Ranker)
+          runs early instead (~7:10 AM IST) and every other job above skips its normal run for the day — the
+          exchange never opened, so there is nothing new to fetch or re-score.
+        </p>
       </div>
     </div>
   );

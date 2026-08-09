@@ -112,22 +112,34 @@ class _FakeRegistryConn:
     """Fake DB connection for train()'s promotion-gate integration test: answers the
     baseline SELECT, and records UPDATE/INSERT statements without touching a real DB."""
 
-    def __init__(self, baseline_auc):
+    def __init__(self, baseline_auc, baseline_id=1, baseline_trained_at="2026-01-01T00:00:00",
+                 rejections=0):
         self._baseline_auc = baseline_auc
+        self._baseline_id = baseline_id
+        self._baseline_trained_at = baseline_trained_at
+        # 0 by default (below CONFLUENCE_STALENESS_MAX_REJECTIONS=10) so the staleness-override
+        # safety valve (2026-08-06) can never spuriously fire in the basic promotion-gate tests
+        # below regardless of how old/new _baseline_trained_at computes against real wall-clock
+        # time -- staleness_override_applies requires BOTH age AND rejection-count thresholds.
+        self._rejections = rejections
         self.executed = []
         self.committed = 0
         self.rolled_back = 0
+        self._last_sql = None
 
     def execute(self, sql, params=None):
         self.executed.append((sql, params))
-        if "SELECT cv_roc_auc" in sql:
-            return self
+        self._last_sql = sql
         return self
 
     def fetchone(self):
-        if self._baseline_auc is None:
-            return None
-        return (self._baseline_auc,)
+        sql = self._last_sql or ""
+        if "SELECT id, cv_roc_auc, trained_at" in sql:
+            return None if self._baseline_auc is None else (
+                self._baseline_id, self._baseline_auc, self._baseline_trained_at)
+        if "SELECT COUNT(*) FROM model_registry" in sql:
+            return (self._rejections,)
+        return None
 
     def commit(self):
         self.committed += 1
@@ -191,3 +203,64 @@ class TestPromotionGate:
         assert "VALUES (?, ?, ?, ?, ?, 0," in insert_calls[0][0], "is_active must be 0 for a rejected candidate"
         update_calls = [c for c in conn.executed if "UPDATE model_registry SET is_active = 0" in c[0]]
         assert update_calls == [], "a rejected candidate must not deactivate the current live model"
+
+
+class TestConfluenceMlStalenessOverride:
+    """2026-08-06: confluence_ml had no staleness-override safety valve at all -- confirmed
+    live, its real active baseline (trained 2026-07-30T10:11:57Z) predates the 2026-07-30
+    CV-leakage fix (commit aa5862d2, ~46min later) and carries a leak-inflated AUC (0.777) that
+    every honest post-fix retrain since has been rejected against. Wired to
+    model_promotion.staleness_override_applies, mirroring ml_ensemble.py/cs_ranker.py."""
+
+    def test_stale_unbeaten_baseline_with_enough_rejections_is_overridden(self, monkeypatch, tmp_path):
+        monkeypatch.setattr(cme, "build_training_data", lambda conn: _synthetic_training_set())
+        monkeypatch.setattr(cme, "MODEL_DIR", str(tmp_path))
+        monkeypatch.setattr(cme, "MODEL_PATH", str(tmp_path / "confluence_ml.pkl"))
+        monkeypatch.setattr(cme, "CANDIDATE_PATH", str(tmp_path / "confluence_ml.pkl.candidate"))
+        monkeypatch.setattr(
+            cme, "staleness_override_applies",
+            lambda trained_at, rejections, max_days, max_rejections: (True, 42.0))
+
+        conn = _FakeRegistryConn(baseline_auc=0.999, rejections=cme.CONFLUENCE_STALENESS_MAX_REJECTIONS)
+        ok = cme.train(conn)
+
+        assert ok is True
+        assert os.path.exists(cme.MODEL_PATH), (
+            "a candidate stuck behind a stale, permanently-unbeatable baseline must still be "
+            "auto-adopted once the staleness override fires"
+        )
+        insert_calls = [c for c in conn.executed if "INSERT INTO model_registry" in c[0]]
+        assert "STALENESS OVERRIDE" in insert_calls[0][1][-1], (
+            "the promoted row's notes must record that this was a staleness override, not a "
+            "genuine margin-clearing promotion, for future audit"
+        )
+
+    def test_young_baseline_with_many_rejections_is_not_overridden(self, monkeypatch, tmp_path):
+        monkeypatch.setattr(cme, "build_training_data", lambda conn: _synthetic_training_set())
+        monkeypatch.setattr(cme, "MODEL_DIR", str(tmp_path))
+        monkeypatch.setattr(cme, "MODEL_PATH", str(tmp_path / "confluence_ml.pkl"))
+        monkeypatch.setattr(cme, "CANDIDATE_PATH", str(tmp_path / "confluence_ml.pkl.candidate"))
+        monkeypatch.setattr(
+            cme, "staleness_override_applies",
+            lambda trained_at, rejections, max_days, max_rejections: (False, 0.5))
+
+        conn = _FakeRegistryConn(baseline_auc=0.999, rejections=cme.CONFLUENCE_STALENESS_MAX_REJECTIONS)
+        cme.train(conn)
+
+        assert not os.path.exists(cme.MODEL_PATH)
+        assert os.path.exists(cme.CANDIDATE_PATH)
+
+    def test_stale_baseline_with_few_rejections_is_not_overridden(self, monkeypatch, tmp_path):
+        monkeypatch.setattr(cme, "build_training_data", lambda conn: _synthetic_training_set())
+        monkeypatch.setattr(cme, "MODEL_DIR", str(tmp_path))
+        monkeypatch.setattr(cme, "MODEL_PATH", str(tmp_path / "confluence_ml.pkl"))
+        monkeypatch.setattr(cme, "CANDIDATE_PATH", str(tmp_path / "confluence_ml.pkl.candidate"))
+        monkeypatch.setattr(
+            cme, "staleness_override_applies",
+            lambda trained_at, rejections, max_days, max_rejections: (False, 90.0))
+
+        conn = _FakeRegistryConn(baseline_auc=0.999, rejections=1)
+        cme.train(conn)
+
+        assert not os.path.exists(cme.MODEL_PATH)
+        assert os.path.exists(cme.CANDIDATE_PATH)

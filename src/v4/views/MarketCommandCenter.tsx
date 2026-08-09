@@ -1,9 +1,9 @@
-import React from 'react';
-import { Activity, Gauge, TrendingUp, TrendingDown, Flame, BarChart3 } from 'lucide-react';
+import React, { useEffect, useState } from 'react';
+import { Gauge, TrendingUp, TrendingDown, Flame, BarChart3, LayoutDashboard } from 'lucide-react';
 import { trpc } from '../../lib/trpc';
 import { Card } from '../../components/Card';
 import { cn } from '../../lib/utils';
-import { IndexOverview, InstitutionalInsights } from '../../components/MarketInsights';
+import { IndexOverview } from '../../components/MarketInsights';
 import { SectorHeatmap } from '../../components/SectorIntelligence';
 import { TopMoversIntelligence } from '../../components/TopMoversIntelligence';
 import { IntradayBreakouts } from '../../components/IntradayBreakouts';
@@ -13,6 +13,18 @@ import { FnOIndexInsight } from '../components/FnOIndexInsight';
 import { SentimentPulseWidget } from '../components/SentimentPulseWidget';
 import { EarningsPulseWidget } from '../components/EarningsPulseWidget';
 import { HighFlyerWidget } from '../components/HighFlyerWidget';
+import { V4QuickNav } from '../components/V4QuickNav';
+import { TopPicksWidget } from '../components/TopPicksWidget';
+import { MoneyFlowPulseWidget } from '../components/MoneyFlowPulseWidget';
+import { MarketBreadthIntraday } from '../../components/MarketBreadthIntraday';
+import { ActivityFeed } from '../../components/ActivityFeed';
+import { MarketMoodGauge } from '../../components/MarketMoodGauge';
+import { currentTimeInZone } from '../../lib/timeFormat';
+import { SectorRotationGraph } from '../components/SectorRotationGraph';
+import { SectorCorrelationWidget } from '../components/SectorCorrelationWidget';
+import { InstitutionalDealFeed } from '../components/InstitutionalDealFeed';
+import { ConcallTakeawaysWidget } from '../components/ConcallTakeawaysWidget';
+import { SuperstarActivityFeed } from '../components/SuperstarActivityFeed';
 
 const REGIME_STYLE: Record<string, { color: string; bg: string; label: string }> = {
   BULL:     { color: 'text-emerald-400', bg: 'bg-emerald-500/10 border-emerald-500/25', label: 'BULL' },
@@ -46,31 +58,24 @@ const RegimeBadge: React.FC = () => {
   );
 };
 
-const BreadthStrip: React.FC = () => {
-  const { data } = trpc.getIntradayBreadth.useQuery(undefined, { refetchInterval: 60000 });
-  const b = data?.breadth as { adv?: number; dec?: number; advDeclineRatio?: number } | null | undefined;
-  if (!b) return null;
-  const adv = b.adv ?? null;
-  const dec = b.dec ?? null;
-  const ratio = b.advDeclineRatio ?? 0.5;
-  const color = ratio > 0.6 ? 'text-emerald-400' : ratio < 0.4 ? 'text-rose-400' : 'text-amber-400';
-
+const LiveClock: React.FC = () => {
+  const [, tick] = useState(0);
+  useEffect(() => {
+    const t = setInterval(() => tick((n) => n + 1), 30_000);
+    return () => clearInterval(t);
+  }, []);
   return (
-    <div className="flex items-center gap-3 px-3 py-2 rounded-xl border border-slate-800 bg-slate-950/30">
-      <Activity className={cn('w-4 h-4', color)} />
-      <div>
-        <div className={cn('text-xs font-black font-mono', color)}>
-          {adv ?? '—'}<span className="text-slate-600 mx-1">/</span>{dec ?? '—'}
-        </div>
-        <div className="text-[9px] text-slate-500 uppercase tracking-widest">Advance / Decline</div>
-      </div>
-    </div>
+    <span className="flex items-center gap-1.5 text-[10px] text-slate-500 font-mono">
+      <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+      {currentTimeInZone('Asia/Kolkata')} IST
+    </span>
   );
 };
 
 interface MarketCommandCenterProps {
   onSelectStock?: (symbol: string) => void;
   onSelectIndex?: (id: string, name: string) => void;
+  userId?: string | null;
 }
 
 // Page 1 — "the pre-trading-day briefing" — a fresh page that combines what an expert analyst
@@ -80,23 +85,68 @@ interface MarketCommandCenterProps {
 // here computes its own numbers where a proven engine already exists (F&O read reuses
 // IndexFnoOverview's analyseOI(), sentiment/earnings pulses reuse the same tRPC queries as their
 // full pages) — this page's job is composition and prioritization, not new math.
-export const MarketCommandCenter: React.FC<MarketCommandCenterProps> = ({ onSelectStock, onSelectIndex }) => {
+export const MarketCommandCenter: React.FC<MarketCommandCenterProps> = ({ onSelectStock, onSelectIndex, userId }) => {
   return (
     <div className="space-y-6 pb-10">
-      {/* Header strip: indices + regime + breadth */}
-      <div className="flex flex-col lg:flex-row gap-4 lg:items-start">
-        <div className="flex-1">
+      <V4QuickNav />
+
+      {/* Hero: title + live clock, then indices/regime/breadth in a unified gradient shell */}
+      <div className="rounded-2xl border border-slate-800 bg-gradient-to-br from-indigo-950/30 via-slate-900/60 to-slate-950/80 p-4 space-y-4">
+        <div className="flex items-center justify-between flex-wrap gap-2">
+          <div className="flex items-center gap-2">
+            <LayoutDashboard className="w-4 h-4 text-indigo-400" />
+            <h1 className="text-sm font-black text-slate-100 uppercase tracking-widest">Market Command Center</h1>
+          </div>
+          <LiveClock />
+        </div>
+
+        <div className="flex flex-col gap-4">
+          <div className="flex items-center gap-4 flex-wrap">
+            <RegimeBadge />
+            <div className="flex-1 min-w-[220px] px-3 py-2 rounded-xl border border-slate-800 bg-slate-950/40">
+              <MarketMoodGauge />
+            </div>
+          </div>
           <IndexOverview onSelectIndex={onSelectIndex} />
         </div>
-        <div className="flex flex-row lg:flex-col gap-3 shrink-0">
-          <RegimeBadge />
-          <BreadthStrip />
-        </div>
       </div>
+
+      {/* Market Breadth (Intraday) — replaces the old compact Advance/Decline strip with the
+          fuller live chart, same shared widget used on Dashboard and the Index Detail page */}
+      <div>
+        <div className="flex items-center gap-2 mb-3">
+          <BarChart3 className="w-4 h-4 text-indigo-400" />
+          <h2 className="text-xs font-black text-slate-200 uppercase tracking-widest">Market Breadth</h2>
+        </div>
+        <MarketBreadthIntraday ex="N" refetchInterval={10000} />
+      </div>
+
+      {/* Canonical picks + institutional flow -- the decisive numbers, front and center */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        <TopPicksWidget onSelectStock={onSelectStock} userId={userId} />
+        <MoneyFlowPulseWidget />
+      </div>
+
+      {/* Chronological signal/news/alert stream -- the one piece this page was missing
+          relative to v5's MarketPulsePage, per the Phase 3 home-page composition
+          ("V6 Canonical Workbench" proposal). Reuses the same shared component
+          DashboardPage.tsx already embeds, not a new implementation. */}
+      <Card title="Activity Feed" icon={Flame}>
+        <ActivityFeed onSelectStock={onSelectStock} />
+      </Card>
 
       <PreMarketBriefing />
 
       <FnOIndexInsight />
+
+      {/* Sentiment + Global Markets — surfaced right after the F&O read, ahead of the
+          supporting sector/movers/earnings sections below */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        <SentimentPulseWidget />
+        <Card title="Global Markets" icon={TrendingDown}>
+          <GlobalMarkets />
+        </Card>
+      </div>
 
       <div>
         <div className="flex items-center gap-2 mb-3">
@@ -106,13 +156,20 @@ export const MarketCommandCenter: React.FC<MarketCommandCenterProps> = ({ onSele
         <SectorHeatmap />
       </div>
 
+      {/* Rotation trend + diversification -- complements the heatmap above (today's move) with
+          the multi-week trend regime and whether these sector bets actually move independently. */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        <SectorRotationGraph />
+        <SectorCorrelationWidget />
+      </div>
+
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         <div>
           <div className="flex items-center gap-2 mb-3">
             <TrendingUp className="w-4 h-4 text-indigo-400" />
             <h2 className="text-xs font-black text-slate-200 uppercase tracking-widest">Top Movers</h2>
           </div>
-          <TopMoversIntelligence onSelectStock={onSelectStock ?? (() => {})} />
+          <TopMoversIntelligence onSelectStock={onSelectStock ?? (() => {})} userId={userId} />
         </div>
         <div>
           <div className="flex items-center gap-2 mb-3">
@@ -123,18 +180,17 @@ export const MarketCommandCenter: React.FC<MarketCommandCenterProps> = ({ onSele
         </div>
       </div>
 
+      {/* Ownership/institutional conviction -- who's buying, ranked, not just what moved. */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-        <SentimentPulseWidget />
-        <EarningsPulseWidget onSelectStock={onSelectStock} />
+        <InstitutionalDealFeed onSelectStock={onSelectStock} />
+        <SuperstarActivityFeed onSelectStock={onSelectStock} />
       </div>
 
       <HighFlyerWidget onSelectStock={onSelectStock} />
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-        <InstitutionalInsights />
-        <Card title="Global Markets" icon={TrendingDown}>
-          <GlobalMarkets />
-        </Card>
+        <EarningsPulseWidget onSelectStock={onSelectStock} />
+        <ConcallTakeawaysWidget onSelectStock={onSelectStock} />
       </div>
     </div>
   );

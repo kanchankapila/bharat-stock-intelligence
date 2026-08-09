@@ -36,6 +36,60 @@ export interface SignalAlert {
 
 const PING_INTERVAL_MS = 25_000; // below typical NAT/firewall 30s idle timeout
 
+// Defense-in-depth cap on AI-sourced Telegram alerts (added 2026-08-06 after a 60+-alert-in-
+// minutes incident). The guard that used to live at this call site was a stale confidence>=85
+// check -- dead since 2026-07-18 (see git history), meaning it had accidentally suppressed
+// EVERY AI-signal Telegram send for months regardless of how selective the real upstream gate
+// was. Removing it (2026-08-05, commit fcd8557) was correct -- re-checking an absolute
+// confidence number on a scale this function doesn't own is exactly what broke last time -- but
+// it left this path trusting getAISignalMinWinProb() (signals.ts) alone to bound volume, and
+// that gate has already been observed to collapse to a near-no-op once (2026-08-02, and again
+// 2026-08-06 on a deployment that never received the one-off DB fix for it -- see
+// migrations/1786300000000_ai-signal-min-win-prob-seed.sql). This cap does not replace fixing
+// the upstream gate; it bounds the blast radius if it ever degrades again, here or elsewhere,
+// without needing a human to notice and flip telegram_enabled=false first. WebSocket delivery
+// to the frontend (this.broadcast(), a few lines up in broadcastNewSignal) is unaffected --
+// only the Telegram side effect is capped.
+export const AI_SIGNAL_TELEGRAM_DAILY_CAP = 40;
+let _aiTelegramDay: string | null = null;
+let _aiTelegramSentToday = 0;
+let _aiTelegramCapWarned = false;
+
+/** Test-only: reset the daily Telegram-cap counter between test cases. */
+export function resetAITelegramCapForTests(): void {
+  _aiTelegramDay = null;
+  _aiTelegramSentToday = 0;
+  _aiTelegramCapWarned = false;
+}
+
+/**
+ * Returns true (and consumes one unit of budget) if another AI-signal Telegram alert may be
+ * sent today; false once the daily cap is reached. Pure counter logic, no I/O, so it is
+ * unit-testable without a DB or a real clock dependency beyond `Date`.
+ */
+function consumeAITelegramBudget(now: Date = new Date()): boolean {
+  const today = now.toISOString().slice(0, 10);
+  if (today !== _aiTelegramDay) {
+    _aiTelegramDay = today;
+    _aiTelegramSentToday = 0;
+    _aiTelegramCapWarned = false;
+  }
+  if (_aiTelegramSentToday >= AI_SIGNAL_TELEGRAM_DAILY_CAP) {
+    if (!_aiTelegramCapWarned) {
+      _aiTelegramCapWarned = true;
+      console.warn(
+        `[WebSocketService] AI-signal Telegram daily cap (${AI_SIGNAL_TELEGRAM_DAILY_CAP}) reached -- ` +
+        'suppressing further AI-signal Telegram alerts today. This usually means the upstream ' +
+        'win_probability gate (signals.getAISignalMinWinProb) has degraded to a near-no-op again -- ' +
+        'check app_settings.ai_signal_min_win_prob and the live calibrated_win_probability distribution.'
+      );
+    }
+    return false;
+  }
+  _aiTelegramSentToday++;
+  return true;
+}
+
 export class WebSocketSignalService {
   private wss: WebSocketServer | null = null;
   private clients: Set<WebSocket> = new Set();
@@ -120,13 +174,33 @@ export class WebSocketSignalService {
       timestamp: new Date().toISOString(),
     });
 
-    // NOTE: this threshold is effectively unreachable and has not fired since 2026-07-18.
-    // `confidence` here is the quant win_probability x100 (commit 0609a49 replaced the LLM's
-    // self-reported 85-98 confidence with it); win_probability peaks around 0.41 across the
-    // universe, so `>= 85` never passes. Stock recommendations are delivered by the daily
-    // digest in telegramRecommendations.ts instead. Left in place rather than re-tuned:
-    // lowering it would restore a ~1000-alerts/day firehose that was deliberately removed.
-    if (alert.signal && alert.signal.signalType === 'BUY' && (alert.signal.confidence ?? 0) >= 85) {
+    // FIXED 2026-08-05: this threshold was effectively unreachable and had not fired since
+    // 2026-07-18. `confidence` here is the quant win_probability x100 (commit 0609a49 replaced
+    // the LLM's self-reported 85-98 confidence with it); win_probability peaks around 0.41
+    // across the universe, so `>= 85` never passed. Note this only ever gated a *legacy
+    // per-signal* Telegram ping nested inside this function -- `this.broadcast()` two lines up
+    // (the actual WebSocket push to connected frontend clients) was NEVER gated by this check
+    // and has always fired for every AI/technical signal reaching this function; the dead
+    // threshold only silenced this secondary Telegram notification, not real-time delivery.
+    //
+    // Dropped the redundant absolute-confidence floor rather than re-tuning it to a new magic
+    // number: `processAISignal` (queues.ts) already gates on getAISignalMinConfidence() (win
+    // probability >= ~0.40-0.42, ~14/2264 stocks/day) BEFORE this function is ever called with
+    // source: 'AI' -- re-checking an absolute value here a second time, on a scale this
+    // function doesn't own, is exactly what broke last time the scale changed underneath it.
+    // Scoped to source === 'AI' specifically so the canonical unified_ranker broadcast wired
+    // in via broadcastCanonicalPicks() (unifiedSignalBroadcast.ts, source: 'UNIFIED') does NOT
+    // also trigger this -- telegramRecommendations.ts's once-daily digest is already the
+    // canonical Telegram delivery path for those picks; firing both would double-notify.
+    //
+    // consumeAITelegramBudget() (top of file) is the daily-cap defense-in-depth added 2026-08-06
+    // -- see its comment for why an upstream-gate-only design proved insufficient in practice.
+    if (
+      alert.source === 'AI' &&
+      alert.signal &&
+      alert.signal.signalType === 'BUY' &&
+      consumeAITelegramBudget()
+    ) {
       telegramService.sendSignalNotification(
         alert.symbol,
         'BUY',

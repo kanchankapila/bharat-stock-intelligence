@@ -1,7 +1,8 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import {
   Search, LayoutGrid, LineChart, BadgeDollarSign, Users, Landmark,
-  CalendarClock, Newspaper, ShieldAlert, Star, StarOff,
+  CalendarClock, Newspaper, ShieldAlert, Star, StarOff, ArrowUpRight, ArrowDownRight,
+  Building2, Tags,
 } from 'lucide-react';
 import { trpc } from '../../lib/trpc';
 import { Card } from '../../components/Card';
@@ -10,6 +11,10 @@ import { V2LightweightChart } from '../../v2/components/widgets/V2LightweightCha
 import { OptionChainView } from '../../components/OptionChainView';
 import { WhyThisPick } from '../../components/WhyThisPick';
 import { McNewsCard, McNewsLinks, McNewsEmptyState } from '../../components/McNewsCard';
+import { StockTagRow, ConvictionPill } from '../../components/StockTagRow';
+import { relativeFromNow } from '../../lib/timeFormat';
+import { V4QuickNav } from '../components/V4QuickNav';
+import { AddToPortfolioButton } from '../../components/AddToPortfolioButton';
 
 type TabId = 'overview' | 'technicals' | 'fundamentals' | 'ownership' | 'fno' | 'earnings' | 'news';
 
@@ -46,8 +51,8 @@ const SymbolSearch: React.FC<{ onSelect: (symbol: string) => void }> = ({ onSele
         />
       </div>
       {q.length >= 1 && results.length > 0 && (
-        <div className="absolute z-20 mt-1 w-full max-h-72 overflow-y-auto glass-strong rounded-xl border border-slate-800 terminal-scrollbar">
-          {results.slice(0, 15).map((s: any) => (
+        <div className="absolute z-20 mt-1 w-full max-h-96 overflow-y-auto glass-strong rounded-xl border border-slate-800 terminal-scrollbar">
+          {results.map((s: any) => (
             <button
               key={s.symbol}
               onClick={() => { onSelect(s.symbol); setQ(''); }}
@@ -66,8 +71,18 @@ const SymbolSearch: React.FC<{ onSelect: (symbol: string) => void }> = ({ onSele
 // ─── Overview tab: unified score + reasoning (the "why", not shown anywhere else today) ──
 const OverviewTab: React.FC<{ symbol: string }> = ({ symbol }) => {
   const { data: scoreDetail } = trpc.getStockScoreDetail.useQuery({ symbol, timeframe: 'long_term' });
+  const { data: quote } = trpc.getLiveStockQuote.useQuery({ symbol }, { enabled: !!symbol, retry: false });
   const score = scoreDetail?.score;
   const factors = scoreDetail?.factors;
+
+  // Day range / 52-week range / volume -- already fetched by StockHeaderCard's own
+  // getLiveStockQuote call for the price ticker, just never surfaced in the tab body itself.
+  const keyStats: [string, any][] = [
+    ['Open', quote?.open], ['Prev Close', quote?.prevClose],
+    ['Day High', quote?.high], ['Day Low', quote?.low],
+    ['52W High', quote?.high52w], ['52W Low', quote?.low52w],
+    ['Volume', quote?.volume],
+  ];
 
   return (
     <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
@@ -131,7 +146,19 @@ const OverviewTab: React.FC<{ symbol: string }> = ({ symbol }) => {
         )}
       </Card>
 
-      <div className="lg:col-span-2">
+      <div className="lg:col-span-2 space-y-4">
+        <Card title="Key Stats" icon={LayoutGrid}>
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+            {keyStats.map(([label, value]) => (
+              <div key={label} className="glass rounded-xl p-2.5 text-center">
+                <div className="text-sm font-mono font-bold text-slate-100">
+                  {label === 'Volume' ? (value ?? '—') : `₹${fmt(value)}`}
+                </div>
+                <div className="text-[9px] text-slate-500 uppercase tracking-widest mt-1">{label}</div>
+              </div>
+            ))}
+          </div>
+        </Card>
         <WhyThisPick symbol={symbol} timeframe="long_term" />
       </div>
     </div>
@@ -185,8 +212,46 @@ const TechnicalsTab: React.FC<{ symbol: string }> = ({ symbol }) => {
               )
             ))}
           </div>
+          {/* predictions.patterns dead-array rendering dropped -- technical_signals has no
+              patterns column (nothing writes it), see technicals.router.ts. */}
+          <TechnicalReadTags predictions={predictions} />
         </Card>
       )}
+    </div>
+  );
+};
+
+// Plain-language read on the raw indicator values -- the numbers above tell an analyst
+// something, but "RSI 78" means nothing to someone scanning quickly; the tag does.
+const TechnicalReadTags: React.FC<{ predictions: any }> = ({ predictions }) => {
+  const tags: { label: string; color: string }[] = [];
+  if (predictions.rsi != null) {
+    if (predictions.rsi >= 70) tags.push({ label: 'RSI Overbought', color: 'bg-rose-500/15 text-rose-300 border-rose-500/30' });
+    else if (predictions.rsi <= 30) tags.push({ label: 'RSI Oversold', color: 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30' });
+  }
+  if (predictions.macd != null) {
+    tags.push(predictions.macd > 0
+      ? { label: 'MACD Bullish', color: 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30' }
+      : { label: 'MACD Bearish', color: 'bg-rose-500/15 text-rose-300 border-rose-500/30' });
+  }
+  if (predictions.adx != null && predictions.adx >= 25) {
+    tags.push({ label: 'Strong Trend (ADX)', color: 'bg-indigo-500/15 text-indigo-300 border-indigo-500/30' });
+  }
+  if (predictions.win_probability != null) {
+    const wp = predictions.win_probability * 100;
+    tags.push({
+      label: `Win Prob ${wp.toFixed(0)}%`,
+      color: wp >= 55 ? 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30'
+        : wp >= 45 ? 'bg-amber-500/15 text-amber-300 border-amber-500/30'
+        : 'bg-rose-500/15 text-rose-300 border-rose-500/30',
+    });
+  }
+  if (tags.length === 0) return null;
+  return (
+    <div className="flex flex-wrap gap-1.5 mt-3 pt-3 border-t border-slate-800/60">
+      {tags.map((t, i) => (
+        <span key={i} className={cn('text-[9px] font-semibold px-2 py-0.5 rounded-full border', t.color)}>{t.label}</span>
+      ))}
     </div>
   );
 };
@@ -198,24 +263,44 @@ const DVM_COLOR: Record<string, string> = {
   red: 'text-rose-400 bg-rose-500/10 border-rose-500/20',
 };
 
+// Small labeled metric grid used to group fundamentals into named categories
+// (Moneycontrol/Trendlyne convention: Valuation / Profitability / Growth / Quality),
+// rather than one flat undifferentiated grid of 10 numbers.
+const MetricCategoryCard: React.FC<{
+  title: string;
+  rows: [string, any][];
+  flagBad?: (label: string, value: any) => boolean;
+}> = ({ title, rows, flagBad }) => {
+  const present = rows.filter(([, v]) => v != null);
+  if (present.length === 0) return null;
+  return (
+    <div className="glass rounded-xl p-3">
+      <div className="text-[10px] font-black text-indigo-300 uppercase tracking-widest mb-2">{title}</div>
+      <div className="grid grid-cols-2 gap-2.5">
+        {present.map(([label, value]) => (
+          <div key={label}>
+            <div className={cn('text-sm font-mono font-bold', flagBad?.(label, value) ? 'text-rose-400' : 'text-slate-100')}>{fmt(value)}</div>
+            <div className="text-[9px] text-slate-500 uppercase tracking-widest mt-0.5">{label}</div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+};
+
 const FundamentalsTab: React.FC<{ symbol: string }> = ({ symbol }) => {
   const { data: fundamentals } = trpc.getStockFundamentals.useQuery({ symbol });
   const { data: ratios } = trpc.getRatios.useQuery({ symbol });
   const { data: dvm } = trpc.getTrendlyneDVM.useQuery({ symbol });
   const { data: checklist } = trpc.getTrendlyneChecklist.useQuery({ symbol });
 
-  const rows: [string, any, string?][] = [
-    ['Market Cap (Cr)', fundamentals?.market_cap],
-    ['P/E', fundamentals?.trailing_pe ?? ratios?.pe],
-    ['P/B', fundamentals?.price_to_book ?? ratios?.pb],
-    ['ROE %', fundamentals?.return_on_equity],
-    ['Debt/Equity', fundamentals?.debt_to_equity],
-    ['Operating Margin %', fundamentals?.operating_margins],
-    ['Revenue Growth %', fundamentals?.revenue_growth],
-    ['Earnings Growth %', fundamentals?.earnings_growth],
-    ['Piotroski F-Score', fundamentals?.piotroski_f_score],
-    ['Earnings Yield %', fundamentals?.earnings_yield],
-  ];
+  if (!fundamentals) {
+    return (
+      <Card title="Fundamentals" icon={BadgeDollarSign}>
+        <div className="text-xs text-slate-500 py-4">No fundamentals data captured yet for {symbol}.</div>
+      </Card>
+    );
+  }
 
   const dvmRows: [string, any][] = [
     ['Durability', dvm?.durability],
@@ -242,18 +327,39 @@ const FundamentalsTab: React.FC<{ symbol: string }> = ({ symbol }) => {
         </Card>
       )}
       <Card title="Fundamentals" icon={BadgeDollarSign}>
-        {!fundamentals ? (
-          <div className="text-xs text-slate-500 py-4">No fundamentals data captured yet for {symbol}.</div>
-        ) : (
-          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-3">
-            {rows.map(([label, value]) => (
-              <div key={label} className="glass rounded-xl p-2.5">
-                <div className="text-sm font-mono font-bold text-slate-100">{fmt(value)}</div>
-                <div className="text-[9px] text-slate-500 uppercase tracking-widest mt-1">{label}</div>
-              </div>
-            ))}
-          </div>
-        )}
+        <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3">
+          <MetricCategoryCard
+            title="Valuation"
+            rows={[
+              ['Market Cap (Cr)', fundamentals?.market_cap],
+              ['P/E', fundamentals?.trailing_pe ?? ratios?.pe],
+              ['P/B', fundamentals?.price_to_book ?? ratios?.pb],
+              ['Earnings Yield %', fundamentals?.earnings_yield],
+            ]}
+          />
+          <MetricCategoryCard
+            title="Profitability"
+            rows={[
+              ['ROE %', fundamentals?.return_on_equity],
+              ['Operating Margin %', fundamentals?.operating_margins],
+              ['Piotroski F-Score', fundamentals?.piotroski_f_score],
+            ]}
+            flagBad={(label, v) => label === 'Piotroski F-Score' && Number(v) < 4}
+          />
+          <MetricCategoryCard
+            title="Growth"
+            rows={[
+              ['Revenue Growth %', fundamentals?.revenue_growth],
+              ['Earnings Growth %', fundamentals?.earnings_growth],
+            ]}
+            flagBad={(_, v) => Number(v) < 0}
+          />
+          <MetricCategoryCard
+            title="Leverage & Quality"
+            rows={[['Debt/Equity', fundamentals?.debt_to_equity]]}
+            flagBad={(_, v) => Number(v) > 1.5}
+          />
+        </div>
       </Card>
     </div>
   );
@@ -263,16 +369,22 @@ const FundamentalsTab: React.FC<{ symbol: string }> = ({ symbol }) => {
 const OwnershipTab: React.FC<{ symbol: string }> = ({ symbol }) => {
   const { data: shareholding } = trpc.getShareholding.useQuery({ symbol });
   const { data: insiders } = trpc.getInsiderTransactions.useQuery({ symbol, limit: 25 });
+  // Superstar-investor tracking (InvestSights) -- the one feature v5's StockIntelligenceDeskPage.tsx
+  // had that this page didn't, per the Phase 3 stock-research-page merge ("V6 Canonical Workbench"
+  // proposal). Grafted here rather than v5's own layout/classes so it matches this tab's existing
+  // Card/glass conventions instead of mixing two different styling systems in one page.
+  const { data: superstarActivity } = trpc.getSuperstarInvestorActivity.useQuery({ symbol, limit: 20 });
 
-  const sh: any = shareholding;
-  // getShareholding has two possible shapes: the live ET path returns
-  // { summary: { promoters: { percentage }, fii: { percentage }, mf: { percentage } } },
-  // the DB fallback returns flat { promoter_pct, fii_pct, mf_pct, pledge_pct } (see App.tsx's
-  // working consumer of the same procedure for the live shape).
+  const sh = shareholding?.data ?? shareholding;
+  // The live ET endpoint (fetchETShareholding) returns a nested { summary: { promoters: {
+  // percentage, changeQoQ }, fii: {...}, dii: {...}, mf: {...}, pledge: {...} } } shape --
+  // the flat promoter_pct/fii_pct/... fields only exist on the DB fallback path (no live
+  // data). Read both, same dual-shape pattern already proven live in V1MFAnalysis.tsx.
   const holdingRows: [string, any][] = [
     ['Promoter %', sh?.summary?.promoters?.percentage ?? sh?.promoter_pct],
     ['FII %', sh?.summary?.fii?.percentage ?? sh?.fii_pct],
-    ['DII / MF %', sh?.summary?.mf?.percentage ?? sh?.mf_pct],
+    ['DII %', sh?.summary?.dii?.percentage ?? sh?.dii_pct],
+    ['MF %', sh?.summary?.mf?.percentage ?? sh?.mf_pct],
     ['Pledge %', sh?.summary?.pledge?.percentage ?? sh?.pledge_pct],
   ];
 
@@ -320,6 +432,42 @@ const OwnershipTab: React.FC<{ symbol: string }> = ({ symbol }) => {
           </div>
         )}
       </Card>
+
+      <Card title="Superstar Investor Activity" icon={Star} className="lg:col-span-2">
+        {!superstarActivity || superstarActivity.length === 0 ? (
+          <div className="text-xs text-slate-500 py-4">No superstar investor activity recorded for {symbol}.</div>
+        ) : (
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 max-h-80 overflow-y-auto terminal-scrollbar pr-1">
+            {superstarActivity.map((row: any, i: number) => {
+              const activity = String(row.change_type ?? 'update').toUpperCase();
+              const pctChange = row.pct_holding_change != null ? Number(row.pct_holding_change) : null;
+              const isNegative = activity === 'EXIT' || (pctChange != null && pctChange < 0);
+              return (
+                <div key={`${row.investor_slug}-${row.period_end_date}-${i}`} className="glass rounded-xl p-2.5">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-xs font-bold text-slate-200 truncate">
+                      {String(row.investor_slug ?? 'investor').replace(/-/g, ' ')}
+                    </span>
+                    <span className={cn(
+                      'text-[9px] font-black uppercase tracking-wide shrink-0 px-1.5 py-0.5 rounded-full border',
+                      isNegative ? 'text-rose-400 border-rose-800/60 bg-rose-500/10' : 'text-emerald-400 border-emerald-800/60 bg-emerald-500/10'
+                    )}>
+                      {activity}
+                    </span>
+                  </div>
+                  <div className="flex flex-wrap gap-x-3 gap-y-0.5 mt-1.5 text-[10px] text-slate-500">
+                    <span>Holding: <span className="text-slate-300 font-mono">{row.curr_pct_holding != null ? `${fmt(row.curr_pct_holding)}%` : '—'}</span></span>
+                    <span>Change: <span className={cn('font-mono', isNegative ? 'text-rose-400' : 'text-emerald-400')}>
+                      {pctChange != null ? `${pctChange >= 0 ? '+' : ''}${fmt(pctChange)}%` : '—'}
+                    </span></span>
+                    <span>As of {row.period_end_date ?? '—'}</span>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </Card>
     </div>
   );
 };
@@ -363,25 +511,100 @@ const EarningsTab: React.FC<{ symbol: string }> = ({ symbol }) => {
   const { data: priceTarget } = trpc.getMcPriceForecast.useQuery({ symbol });
   const { data: actions } = trpc.getCorporateActions.useQuery({ symbol });
 
-  const nonEmpty = (v: any) => v && typeof v === 'object' && Object.keys(v).length > 0;
-  const hasAnyData = nonEmpty(forecast) || nonEmpty(rating) || nonEmpty(consensus) || nonEmpty(priceTarget);
+  const hasRating = rating && rating.finalRating;
+  const hasPriceTarget = priceTarget && (priceTarget.high || priceTarget.mean || priceTarget.low);
+  const hasForecast = forecast && (forecast.eps?.length || forecast.revenue?.length || forecast.netProfit?.length);
+  const hasConsensus = consensus && Array.isArray(consensus.graphData) && consensus.graphData.length > 0;
+
+  const latestRow = (rows?: { date: string; high: string; low: string; avg: string; actual: string }[]) =>
+    rows && rows.length > 0 ? rows[rows.length - 1] : null;
 
   return (
     <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-      <Card title="Analyst Consensus & Estimates" icon={CalendarClock}>
-        {!hasAnyData ? (
+      <Card title="Analyst Rating & Price Target" icon={CalendarClock}>
+        {!hasRating && !hasPriceTarget ? (
           <div className="text-xs text-slate-500 py-4">No analyst coverage data captured yet for {symbol}.</div>
         ) : (
-          // ponytail: these 4 MC endpoints pass through raw third-party JSON with no fixed
-          // schema, so a scrollable dump beats hand-building a renderer for shapes that can
-          // change upstream. Was hard-truncated at 1500 chars before, which could cut mid-token
-          // into invalid JSON — scroll instead of truncate.
-          <pre className="text-[11px] text-slate-300 whitespace-pre-wrap font-mono leading-relaxed max-h-72 overflow-y-auto terminal-scrollbar">
-            {JSON.stringify({ rating, consensus, priceTarget, forecast }, null, 2)}
-          </pre>
+          <div className="space-y-3">
+            {hasRating && (
+              <div className="flex items-center justify-between">
+                <div>
+                  <span className={cn(
+                    'text-sm font-black uppercase tracking-wide',
+                    /buy/i.test(rating.finalRating) ? 'text-emerald-400' : /sell/i.test(rating.finalRating) ? 'text-rose-400' : 'text-amber-400'
+                  )}>{rating.finalRating}</span>
+                  <div className="text-[10px] text-slate-500 mt-0.5">{rating.analystCount} analysts covering</div>
+                </div>
+                {Array.isArray(rating.ratings) && (
+                  <div className="flex gap-1.5">
+                    {rating.ratings.map((r, i) => (
+                      <span key={i} className="text-[9px] px-1.5 py-0.5 rounded bg-slate-800 text-slate-300">{r.name}: {r.value}</span>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+            {hasPriceTarget && (
+              <div className="grid grid-cols-3 gap-2 pt-2 border-t border-slate-800/60">
+                <div className="glass rounded-xl p-2.5 text-center">
+                  <div className="text-sm font-mono font-bold text-rose-400">₹{fmt(priceTarget.low)}</div>
+                  <div className="text-[9px] text-slate-500 uppercase tracking-widest mt-1">Low Target</div>
+                </div>
+                <div className="glass rounded-xl p-2.5 text-center">
+                  <div className="text-sm font-mono font-bold text-slate-100">₹{fmt(priceTarget.mean)}</div>
+                  <div className="text-[9px] text-slate-500 uppercase tracking-widest mt-1">Mean Target</div>
+                </div>
+                <div className="glass rounded-xl p-2.5 text-center">
+                  <div className="text-sm font-mono font-bold text-emerald-400">₹{fmt(priceTarget.high)}</div>
+                  <div className="text-[9px] text-slate-500 uppercase tracking-widest mt-1">High Target</div>
+                </div>
+              </div>
+            )}
+            {hasConsensus && (
+              <div className="pt-2 border-t border-slate-800/60">
+                <div className="text-[10px] text-slate-500 uppercase tracking-widest mb-1.5">Latest Consensus Mix</div>
+                <div className="flex flex-wrap gap-1.5">
+                  {consensus.graphData.map((series, i) => (
+                    Array.isArray(series.data) && series.data.length > 0 && (
+                      <span key={i} className="text-[9px] px-1.5 py-0.5 rounded bg-indigo-500/10 text-indigo-300 border border-indigo-500/20">
+                        {series.name}: {series.data[series.data.length - 1]}
+                      </span>
+                    )
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
         )}
       </Card>
-      <Card title="Corporate Actions" icon={CalendarClock}>
+
+      <Card title="Earnings Estimates (latest period)" icon={CalendarClock}>
+        {!hasForecast ? (
+          <div className="text-xs text-slate-500 py-4">No earnings estimate data captured yet for {symbol}.</div>
+        ) : (
+          <div className="space-y-2.5">
+            {([
+              ['EPS', latestRow(forecast.eps)],
+              ['Net Profit', latestRow(forecast.netProfit)],
+              ['Revenue', latestRow(forecast.revenue)],
+            ] as [string, ReturnType<typeof latestRow>][]).map(([label, row]) => row && (
+              <div key={label} className="glass rounded-xl p-2.5">
+                <div className="flex items-center justify-between text-[10px] text-slate-500 uppercase tracking-widest mb-1">
+                  <span>{label}</span><span>{row.date}</span>
+                </div>
+                <div className="grid grid-cols-4 gap-2 text-center">
+                  <div><div className="text-xs font-mono font-bold text-slate-100">{row.avg}</div><div className="text-[8px] text-slate-600">Avg Est</div></div>
+                  <div><div className="text-xs font-mono font-bold text-rose-400">{row.low}</div><div className="text-[8px] text-slate-600">Low Est</div></div>
+                  <div><div className="text-xs font-mono font-bold text-emerald-400">{row.high}</div><div className="text-[8px] text-slate-600">High Est</div></div>
+                  <div><div className="text-xs font-mono font-bold text-indigo-300">{row.actual || '—'}</div><div className="text-[8px] text-slate-600">Actual</div></div>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </Card>
+
+      <Card title="Corporate Actions" icon={CalendarClock} className="lg:col-span-2">
         {(() => {
           // getCorporateActions returns the raw ET response object { corporate_actions: [...] },
           // not an array directly — see App.tsx's working consumer of the same procedure.
@@ -437,15 +660,131 @@ const NewsTab: React.FC<{ symbol: string }> = ({ symbol }) => {
   );
 };
 
+// ─── Screener membership chips (Moneycontrol/Trendlyne "appears in" convention) ───
+const SCREENER_SENTIMENT_STYLE: Record<string, string> = {
+  bullish: 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30',
+  bearish: 'bg-rose-500/15 text-rose-300 border-rose-500/30',
+  neutral: 'bg-slate-700/40 text-slate-300 border-slate-600/40',
+};
+
+const ScreenerChips: React.FC<{ symbol: string }> = ({ symbol }) => {
+  const { data } = trpc.getStockScreeners.useQuery({ stockId: symbol }, { enabled: !!symbol, staleTime: 15 * 60_000 });
+  const screeners = data ?? [];
+  const [showAll, setShowAll] = useState(false);
+  if (screeners.length === 0) return null;
+  const visible = showAll ? screeners : screeners.slice(0, 8);
+
+  return (
+    <div className="flex flex-wrap items-center gap-1.5">
+      <Tags className="w-3 h-3 text-slate-500 shrink-0" />
+      {visible.map((s, i) => {
+        // et_marketstats' finder doesn't carry a sentiment field (source data has no bull/bear
+        // signal, just membership) -- default those to neutral styling rather than erroring.
+        const sentiment = (s as { sentiment?: string }).sentiment ?? 'neutral';
+        return (
+          <span
+            key={`${s.id}-${i}`}
+            title={s.description || s.name}
+            className={cn('px-1.5 py-0.5 rounded text-[9px] font-semibold border', SCREENER_SENTIMENT_STYLE[sentiment] ?? SCREENER_SENTIMENT_STYLE.neutral)}
+          >
+            {s.name}
+          </span>
+        );
+      })}
+      {!showAll && screeners.length > 8 && (
+        <button onClick={() => setShowAll(true)} className="text-[9px] text-indigo-400 hover:text-indigo-300 font-semibold">
+          +{screeners.length - 8} more
+        </button>
+      )}
+    </div>
+  );
+};
+
+// ─── Header: Moneycontrol/Trendlyne-style ticker card — price, tags, screeners ───
+const StockHeaderCard: React.FC<{
+  symbol: string;
+  stockMeta?: { name?: string; sector?: string; industry?: string } | null;
+  isWatched: boolean;
+  onToggleWatchlist?: (symbol: string) => void;
+  userId?: string | null;
+}> = ({ symbol, stockMeta, isWatched, onToggleWatchlist, userId }) => {
+  const { data: quote } = trpc.getLiveStockQuote.useQuery({ symbol }, { enabled: !!symbol, refetchInterval: 30_000, retry: false });
+  const { data: predictions } = trpc.getTechnicalPredictions.useQuery({ symbol }, { enabled: !!symbol });
+  const { data: unifiedScore, dataUpdatedAt } = trpc.getUnifiedScoreForSymbol.useQuery({ symbol }, { enabled: !!symbol });
+  const { data: fundamentals } = trpc.getStockFundamentals.useQuery({ symbol }, { enabled: !!symbol });
+
+  const tagData = predictions ? { ...predictions, fcf_yield: (predictions as any).fcf_yield_approx } : {};
+  const isUp = (quote?.changePct ?? 0) >= 0;
+
+  return (
+    <div className="rounded-2xl border border-slate-800 bg-gradient-to-br from-slate-900/80 to-slate-950/60 p-4 space-y-3">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div className="min-w-0">
+          <div className="flex items-center gap-2 flex-wrap">
+            <h2 className="text-xl font-black text-slate-100 tracking-tight">{symbol}</h2>
+            <ConvictionPill level={unifiedScore?.conviction_level} />
+            {unifiedScore?.timeframe && (
+              <span className="text-[9px] text-slate-500 uppercase tracking-widest">{unifiedScore.timeframe.replace('_', ' ')}</span>
+            )}
+          </div>
+          <div className="flex items-center gap-1.5 text-xs text-slate-400 mt-0.5">
+            <Building2 className="w-3 h-3 text-slate-600" />
+            <span>{stockMeta?.name ?? '—'}</span>
+            {stockMeta?.sector && <span className="text-slate-600">· {stockMeta.sector}</span>}
+            {fundamentals?.market_cap != null && (
+              <span className="text-slate-600">· Mkt Cap ₹{fmt(fundamentals.market_cap, 0)} Cr</span>
+            )}
+          </div>
+        </div>
+
+        <div className="flex items-center gap-3">
+          {quote?.price != null && (
+            <div className="text-right">
+              <div className="text-xl font-black font-mono text-slate-100">₹{fmt(quote.price, 2)}</div>
+              <div className={cn('flex items-center justify-end gap-1 text-xs font-bold', isUp ? 'text-emerald-400' : 'text-rose-400')}>
+                {isUp ? <ArrowUpRight className="w-3 h-3" /> : <ArrowDownRight className="w-3 h-3" />}
+                {fmt(quote.change, 2)} ({fmt(quote.changePct, 2)}%)
+              </div>
+            </div>
+          )}
+          {onToggleWatchlist && (
+            <button
+              onClick={() => onToggleWatchlist(symbol)}
+              className="p-2 rounded-lg glass hover:bg-indigo-500/10"
+              title={isWatched ? 'Remove from watchlist' : 'Add to watchlist'}
+            >
+              {isWatched ? <Star className="w-4 h-4 text-amber-400 fill-amber-400" /> : <StarOff className="w-4 h-4 text-slate-500" />}
+            </button>
+          )}
+          <AddToPortfolioButton symbol={symbol} currentPrice={quote?.price} userId={userId} variant="pill" />
+        </div>
+      </div>
+
+      {unifiedScore?.trade_reasoning && (
+        <p className="text-[11px] text-slate-400 leading-relaxed border-t border-slate-800/60 pt-2">
+          <span className="text-indigo-400 font-semibold">Why: </span>{unifiedScore.trade_reasoning}
+          {unifiedScore.engine_coverage_count != null && (
+            <span className="text-slate-600 ml-1.5">({unifiedScore.engine_coverage_count}/7 engines · {relativeFromNow(dataUpdatedAt)})</span>
+          )}
+        </p>
+      )}
+
+      <StockTagRow p={tagData} className="border-t border-slate-800/60 pt-2" />
+      <ScreenerChips symbol={symbol} />
+    </div>
+  );
+};
+
 // ─── Main page ──────────────────────────────────────────────────────────────
 interface StockIntelligencePageProps {
   initialSymbol?: string | null;
   watchlist?: string[];
   onToggleWatchlist?: (symbol: string) => void;
+  userId?: string | null;
 }
 
 export const StockIntelligencePage: React.FC<StockIntelligencePageProps> = ({
-  initialSymbol, watchlist = [], onToggleWatchlist,
+  initialSymbol, watchlist = [], onToggleWatchlist, userId,
 }) => {
   const [symbol, setSymbol] = useState<string | null>(initialSymbol ?? null);
   const [tab, setTab] = useState<TabId>('overview');
@@ -453,36 +792,20 @@ export const StockIntelligencePage: React.FC<StockIntelligencePageProps> = ({
   useEffect(() => { if (initialSymbol) setSymbol(initialSymbol); }, [initialSymbol]);
 
   const { data: stockMetaRaw } = trpc.getNSEStockBySymbol.useQuery({ symbol: symbol ?? '' }, { enabled: !!symbol });
-  const stockMeta = stockMetaRaw as { name?: string; sector?: string } | null | undefined;
+  const stockMeta = stockMetaRaw as { name?: string; sector?: string; industry?: string } | null | undefined;
   const isWatched = symbol ? watchlist.includes(symbol) : false;
 
   return (
     <div className="space-y-4 pb-10">
-      <div className="flex items-center justify-between flex-wrap gap-3">
-        <SymbolSearch onSelect={setSymbol} />
-        {symbol && (
-          <div className="flex items-center gap-3">
-            <div>
-              <div className="text-sm font-black text-slate-100">{symbol}</div>
-              <div className="text-[10px] text-slate-500">{stockMeta?.name ?? stockMeta?.sector ?? ''}</div>
-            </div>
-            {onToggleWatchlist && (
-              <button
-                onClick={() => onToggleWatchlist(symbol)}
-                className="p-2 rounded-lg glass hover:bg-indigo-500/10"
-                title={isWatched ? 'Remove from watchlist' : 'Add to watchlist'}
-              >
-                {isWatched ? <Star className="w-4 h-4 text-amber-400 fill-amber-400" /> : <StarOff className="w-4 h-4 text-slate-500" />}
-              </button>
-            )}
-          </div>
-        )}
-      </div>
+      <V4QuickNav />
+      <SymbolSearch onSelect={setSymbol} />
 
       {!symbol ? (
         <div className="text-center py-20 text-slate-500 text-sm">Search for a stock above to view its full intelligence profile.</div>
       ) : (
         <>
+          <StockHeaderCard symbol={symbol} stockMeta={stockMeta} isWatched={isWatched} onToggleWatchlist={onToggleWatchlist} userId={userId} />
+
           <div className="flex gap-1 overflow-x-auto terminal-scrollbar border-b border-slate-800/60 pb-1">
             {TABS.map((t) => {
               const Icon = t.icon;

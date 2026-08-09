@@ -3,10 +3,12 @@ import { trpc } from '../lib/trpc';
 import {
   Activity, TrendingUp, TrendingDown, ChevronRight, RefreshCw,
   BarChart2, BrainCircuit, Sparkles, AlertTriangle, ShieldCheck,
-  ArrowRight, ArrowUpRight, ArrowDownRight
+  ArrowRight, ArrowUpRight, ArrowDownRight, Radio
 } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { RiskMetricsDashboard } from './RiskMetricsDashboard';
+import { ActivityFeed } from './ActivityFeed';
+import { formatISTWithLocal, relativeFromNow } from '../lib/timeFormat';
 
 const fmt = (n: number | null | undefined, dec = 2) =>
   n == null ? '—' : n.toLocaleString('en-IN', { minimumFractionDigits: dec, maximumFractionDigits: dec });
@@ -18,10 +20,10 @@ const sign = (v: number | null | undefined) =>
   v == null ? '' : v >= 0 ? '+' : '';
 
 export const TradeDecisionCockpit: React.FC<{ onSelectStock: (symbol: string) => void }> = ({ onSelectStock }) => {
-  const [rightPanel, setRightPanel] = useState<'context' | 'detail'>('context');
+  const [rightPanel, setRightPanel] = useState<'context' | 'detail' | 'activity'>('context');
   const [selectedCand, setSelectedCand] = useState<any>(null);
 
-  const { data: cockpitRes, isLoading: cockpitLoading, refetch } =
+  const { data: cockpitRes, isLoading: cockpitLoading, isRefetching: cockpitRefetching, refetch, dataUpdatedAt } =
     trpc.getTradeDecisionCockpitData.useQuery(undefined, { refetchInterval: 60000, refetchOnWindowFocus: false });
 
   const { data: overviewRes } =
@@ -36,8 +38,11 @@ export const TradeDecisionCockpit: React.FC<{ onSelectStock: (symbol: string) =>
   const { data: moversRes } =
     trpc.getTopMovers.useQuery(undefined, { refetchInterval: 60000, refetchOnWindowFocus: false });
 
+  // Was `undefined` (server default days:30) -- only the top 5 rows are ever read below
+  // (fiiRows.slice(0, 5)). Standardized on days:10 (2026-08-02 perf pass) to match every other
+  // current-flow caller of getFiiDiiFlow, so React Query shares one cache entry across them.
   const { data: fiiRes } =
-    trpc.getFiiDiiFlow.useQuery(undefined, { refetchInterval: 300000, refetchOnWindowFocus: false });
+    trpc.getFiiDiiFlow.useQuery({ days: 10 }, { refetchInterval: 300000, refetchOnWindowFocus: false });
 
   const { data: sentimentRes } =
     trpc.getMarketSentiment.useQuery(undefined, { refetchInterval: 120000, refetchOnWindowFocus: false });
@@ -47,6 +52,12 @@ export const TradeDecisionCockpit: React.FC<{ onSelectStock: (symbol: string) =>
   const candidates: any[] = cockpitData?.candidates || [];
 
   const isTradeActive = overview.verdict === 'TRADE';
+
+  // Browser-fetch recency only (not a trading-day staleness check -- this codebase has been
+  // burned repeatedly by weekend/holiday-blind staleness thresholds, see CLAUDE.md's
+  // look-ahead-bias-audit notes). > 2x the poll interval means the last poll likely failed
+  // silently (network blip, server restart) rather than "market is closed".
+  const fetchIsStale = dataUpdatedAt > 0 && Date.now() - dataUpdatedAt > 120_000;
 
   // Market pulse data
   const indices: any[] = (overviewRes as any)?.data?.indiceList?.flatMap((g: any) => g.list) ?? (overviewRes as any)?.indices ?? (overviewRes as any)?.data ?? [];
@@ -135,15 +146,26 @@ export const TradeDecisionCockpit: React.FC<{ onSelectStock: (symbol: string) =>
             <p className="text-[10px] text-slate-400 font-medium mt-0.5">
               {overview.verdictReason || 'Run technical scans from the Signals tab to populate candidates.'}
             </p>
+            <p className={cn('text-[9px] font-bold mt-1 flex items-center gap-1.5', fetchIsStale ? 'text-amber-400' : 'text-slate-500')}>
+              {overview.asOfDate && <span>Scan as of {overview.asOfDate}</span>}
+              {dataUpdatedAt > 0 && (
+                <span className="flex items-center gap-1">
+                  {overview.asOfDate && <span className="text-slate-600">·</span>}
+                  {fetchIsStale && <AlertTriangle className="w-2.5 h-2.5" />}
+                  fetched {relativeFromNow(dataUpdatedAt)}
+                  {fetchIsStale && ' (retry?)'}
+                </span>
+              )}
+            </p>
           </div>
         </div>
         <div className="flex items-center gap-3 shrink-0">
           <span className="text-[10px] font-bold text-slate-400 hidden sm:block">
             {overview.activeSignalsCount ?? candidates.length} signals · A/D {overview.advDecRatio ?? '—'}x · Win {overview.avgWinProbability ?? '—'}%
           </span>
-          <button onClick={() => refetch()}
+          <button onClick={() => refetch()} title={dataUpdatedAt > 0 ? `Last fetched ${formatISTWithLocal(dataUpdatedAt)}` : 'Refresh'}
             className="p-2 bg-slate-800/60 hover:bg-slate-800 border border-slate-700/50 rounded-lg text-slate-400 transition-all">
-            <RefreshCw className="w-3.5 h-3.5" />
+            <RefreshCw className={cn('w-3.5 h-3.5', cockpitRefetching && 'animate-spin')} />
           </button>
         </div>
       </div>
@@ -304,8 +326,9 @@ export const TradeDecisionCockpit: React.FC<{ onSelectStock: (symbol: string) =>
           {/* Toggle tabs */}
           <div className="flex gap-1 bg-slate-900/60 border border-slate-800/50 rounded-xl p-1">
             {[
-              { id: 'context', label: 'Market Context', icon: BarChart2 },
-              { id: 'detail',  label: 'Candidate Detail', icon: BrainCircuit },
+              { id: 'context',  label: 'Market Context',   icon: BarChart2 },
+              { id: 'detail',   label: 'Candidate Detail',  icon: BrainCircuit },
+              { id: 'activity', label: 'Activity',          icon: Radio },
             ].map(tab => (
               <button key={tab.id}
                 onClick={() => setRightPanel(tab.id as any)}
@@ -574,13 +597,13 @@ export const TradeDecisionCockpit: React.FC<{ onSelectStock: (symbol: string) =>
                         val: selectedCand.macd != null ? fmt(selectedCand.macd, 2) : '—',
                         sub: selectedCand.macd != null && selectedCand.macdSignal != null
                           ? (selectedCand.macd > selectedCand.macdSignal ? 'Bullish Cross' : 'Bearish Cross') : '',
-                        color: selectedCand.macd > selectedCand.macdSignal ? 'text-emerald-400' : 'text-rose-400'
+                        color: selectedCand.macd == null || selectedCand.macdSignal == null ? 'text-slate-400' : (selectedCand.macd > selectedCand.macdSignal ? 'text-emerald-400' : 'text-rose-400')
                       },
                       {
                         label: 'SMA 50/200',
-                        val: selectedCand.sma50 ? `${fmt(selectedCand.sma50, 0)}/${fmt(selectedCand.sma200, 0)}` : '—',
-                        sub: selectedCand.sma50 > selectedCand.sma200 ? 'Golden Cross' : 'Death Cross',
-                        color: selectedCand.sma50 > selectedCand.sma200 ? 'text-emerald-400' : 'text-rose-400'
+                        val: selectedCand.sma50 != null && selectedCand.sma200 != null ? `${fmt(selectedCand.sma50, 0)}/${fmt(selectedCand.sma200, 0)}` : '—',
+                        sub: selectedCand.sma50 == null || selectedCand.sma200 == null ? '' : (selectedCand.sma50 > selectedCand.sma200 ? 'Golden Cross' : 'Death Cross'),
+                        color: selectedCand.sma50 == null || selectedCand.sma200 == null ? 'text-slate-400' : (selectedCand.sma50 > selectedCand.sma200 ? 'text-emerald-400' : 'text-rose-400')
                       },
                       {
                         label: 'Vol Ratio',
@@ -638,6 +661,10 @@ export const TradeDecisionCockpit: React.FC<{ onSelectStock: (symbol: string) =>
               )}
             </div>
           )}
+
+          {/* Activity Feed panel — reverse-chronological signals + news, so a trader can see
+              what actually happened today without leaving the decision screen. */}
+          {rightPanel === 'activity' && <ActivityFeed onSelectStock={onSelectStock} />}
         </div>
       </div>
 

@@ -22,6 +22,7 @@ import datetime
 import pandas as pd
 
 from db_compat import read_df, executemany, connect, translate
+from as_of import logical_trading_date
 
 LOOKBACK_DAYS = 420   # enough to cover a 63-day return plus buffer
 RET_WINDOWS = (21, 63)
@@ -192,7 +193,11 @@ def run(only_date: str | None = None) -> int:
     )
     feats = build_rs_features(ohlcv)
     if only_date:
-        target = datetime.date.today().isoformat() if only_date == "today" else only_date
+        # logical_trading_date(), not date.today() (2026-08-01) -- not currently reachable in
+        # production (queues.ts calls this with no --date arg), but `--date today` is this
+        # script's own documented usage pattern, and ml-daily-ops's step chain regularly
+        # finishes after midnight IST -- see as_of.logical_trading_date's docstring.
+        target = logical_trading_date() if only_date == "today" else only_date
         feats = feats[feats["date"] == target]
     if feats.empty:
         print("[RS] No relative-strength features to write.")

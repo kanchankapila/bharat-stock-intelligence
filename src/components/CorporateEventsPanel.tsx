@@ -1,7 +1,7 @@
 import React from 'react';
 import { trpc } from '../lib/trpc';
 import { cn } from '../lib/utils';
-import { ShieldCheck, CalendarDays } from 'lucide-react';
+import { ShieldCheck, CalendarDays, FileCheck2 } from 'lucide-react';
 
 const ACTION_COLORS: Record<string, string> = {
   DIVIDEND: 'text-emerald-400 bg-emerald-500/10',
@@ -25,9 +25,16 @@ export const CorporateEventsPanel: React.FC<{ onSelectStock?: (symbol: string) =
     { limit: 40 },
     { staleTime: 30 * 60 * 1000 }
   );
+  // Market-wide, NSE-filing-sourced corporate actions (2026-08-07 urls.txt open-source
+  // sourcing pass) — the completeness cross-check for the ratio calendar to the left, not a
+  // duplicate: every row here links back to a real exchange filing PDF.
+  const { data: filedActions = [], isLoading: filedLoading } = trpc.getFiledCorporateActionsCalendar.useQuery(
+    { daysBack: 14, daysForward: 60 },
+    { staleTime: 30 * 60 * 1000 }
+  );
 
   return (
-    <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+    <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
       {/* Corporate actions calendar */}
       <div className="bg-slate-900/40 border border-slate-800/50 rounded-xl p-5 backdrop-blur-sm">
         <div className="flex items-center gap-2 mb-4">
@@ -96,6 +103,39 @@ export const CorporateEventsPanel: React.FC<{ onSelectStock?: (symbol: string) =
                 </div>
                 <p className="text-xs text-slate-200 mt-1.5 leading-snug">{r.headline}</p>
                 <p className="text-[10px] text-slate-500 mt-1">{r.rating_agency}</p>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* NSE-filed corporate actions — real exchange filings, not a derived ratio */}
+      <div className="bg-slate-900/40 border border-slate-800/50 rounded-xl p-5 backdrop-blur-sm">
+        <div className="flex items-center gap-2 mb-4">
+          <FileCheck2 className="w-5 h-5 text-emerald-400" />
+          <h3 className="text-sm font-bold text-slate-100 uppercase tracking-widest">Filed with NSE</h3>
+        </div>
+        {filedLoading ? (
+          <p className="text-xs text-slate-500 font-mono">Loading&hellip;</p>
+        ) : filedActions.length === 0 ? (
+          <p className="text-xs text-slate-500 font-mono">No filed corporate actions in this window.</p>
+        ) : (
+          <div className="overflow-y-auto max-h-96 space-y-2 -mx-1 px-1">
+            {filedActions.map((f: any, i: number) => (
+              <div key={f.source_url || i} className="p-2.5 bg-slate-950/50 border border-slate-800/60 rounded-lg hover:border-slate-700">
+                <div className="flex items-center justify-between gap-2">
+                  <button
+                    onClick={() => onSelectStock?.(f.symbol)}
+                    className="text-[9px] px-2 py-0.5 rounded font-bold uppercase text-emerald-400 bg-emerald-500/10 shrink-0 hover:bg-emerald-500/20"
+                  >
+                    {f.symbol}
+                  </button>
+                  <span className="text-[10px] text-slate-500 font-mono shrink-0">{f.filing_date}</span>
+                </div>
+                <p className="text-xs text-slate-200 mt-1.5 leading-snug line-clamp-2">{f.headline}</p>
+                <a href={f.source_url} target="_blank" rel="noopener noreferrer" className="text-[10px] text-emerald-400 hover:underline mt-1 inline-block">
+                  View filing →
+                </a>
               </div>
             ))}
           </div>

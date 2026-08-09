@@ -6,6 +6,7 @@ import { getStockInsights } from "../insightService";
 import { getFinologyData } from "../finologyService";
 import { dbAll } from "../dbAsync";
 import { router, publicProcedure, adminProcedure } from "../trpc";
+import { fetchWithCache } from "../cacheService";
 
 export const fundamentalsRouter = router({
   triggerFundamentalsSync: adminProcedure
@@ -48,13 +49,18 @@ export const fundamentalsRouter = router({
       return row ?? null;
     }),
 
+  // Ratios/shareholding/corporate-actions/MF-investment data changes at most quarterly, but
+  // previously called the live MoneyControl/ET upstream on every single stock-page view with
+  // no caching. fetchWithCache (Redis/in-memory fallback + in-flight de-dup) already existed
+  // in this codebase (used correctly by getSuperstarList/getEarningsSummary) -- these simply
+  // weren't calling it.
   getRatios: publicProcedure
     .input(z.object({ symbol: z.string() }))
-    .query(async ({ input }) => fetchMCRatios(input.symbol)),
+    .query(async ({ input }) => fetchWithCache(`fund:ratios:${input.symbol}`, () => fetchMCRatios(input.symbol), 3600)),
 
   getShareholding: publicProcedure
     .input(z.object({ symbol: z.string() }))
-    .query(async ({ input }) => {
+    .query(async ({ input }) => fetchWithCache(`fund:shareholding:${input.symbol}`, async () => {
       const live = await fetchETShareholding(input.symbol);
       if (live) return live;
       // ET Markets unreachable/no data — technical_signals already carries a promoter/FII/MF/
@@ -71,7 +77,7 @@ export const fundamentalsRouter = router({
         console.error("[Fundamentals Router] getShareholding DB fallback failed:", e);
         return null;
       }
-    }),
+    }, 3600)),
 
   // Added 2026-07-30 (Finding #94, full-stack audit): SmartMoneyMonitor.tsx previously had
   // no backend call at all -- a hardcoded array of 9 stocks with invented promoter/FII/DII
@@ -87,13 +93,23 @@ export const fundamentalsRouter = router({
       direction: z.enum(['accumulation', 'distribution']).default('accumulation'),
       limit: z.number().min(1).max(50).optional().default(20),
     }))
-    .query(async ({ input }) => {
+    .query(async ({ input }) => fetchWithCache(`fund:smart-money:${input.direction}:${input.limit}`, async () => {
       try {
+        // The windowed subquery used to be `SELECT *` -- materializing every one of
+        // technical_signals' ~300 columns for every historical row matching the (unindexed) OR
+        // filter, before the outer query narrows to rn=1. Deliberately NOT adding a date bound
+        // here (unlike the sibling fixes in this file/session): fii_chg_qoq/mf_chg_qoq are
+        // quarterly figures that may persist unchanged on a symbol's row for weeks, so a narrow
+        // date window could silently drop symbols whose latest value sits on an older row --
+        // that's a real behavior/correctness risk this sandbox has no live DB to verify against.
+        // Projecting only the columns actually read below is output-identical and still cuts
+        // the I/O materially.
         const rows = await dbAll<any>(`
           SELECT t.symbol, ns.name, t.date, t.promoter_chg_qoq, t.fii_chg_qoq, t.mf_chg_qoq,
                  (COALESCE(t.fii_chg_qoq, 0) + COALESCE(t.mf_chg_qoq, 0)) AS net_flow
           FROM (
-            SELECT *, ROW_NUMBER() OVER (PARTITION BY symbol ORDER BY date DESC) AS rn
+            SELECT symbol, date, promoter_chg_qoq, fii_chg_qoq, mf_chg_qoq,
+                   ROW_NUMBER() OVER (PARTITION BY symbol ORDER BY date DESC) AS rn
             FROM technical_signals
             WHERE fii_chg_qoq IS NOT NULL OR mf_chg_qoq IS NOT NULL
           ) t
@@ -117,11 +133,11 @@ export const fundamentalsRouter = router({
         console.error("[Fundamentals Router] getSmartMoneyFlow failed:", e);
         return [];
       }
-    }),
+    }, 300)),
 
   getCorporateActions: publicProcedure
     .input(z.object({ symbol: z.string() }))
-    .query(async ({ input }) => fetchETCorporateActions(input.symbol)),
+    .query(async ({ input }) => fetchWithCache(`fund:corp-actions:${input.symbol}`, () => fetchETCorporateActions(input.symbol), 3600)),
 
   // Market-wide corporate actions calendar — corporate_actions is populated daily but had no
   // consumer beyond a per-stock "has an action" boolean flag in EarlyHoursSpotter.tsx.
@@ -152,6 +168,63 @@ export const fundamentalsRouter = router({
       }
     }),
 
+  // Deep per-stock corporate-action history (dividends/bonus/splits/rights), 2026-08-07
+  // urls.txt open-source sourcing pass. Distinct from getCorporateActions above (that one
+  // proxies ET Markets live with no persistence) — this reads the DB-backed ledger
+  // mc_corporate_actions_fetcher.py builds, the same one ohlcv_adjust.py's
+  // cross_validate_with_mc_actions() cross-checks against.
+  getCorporateActionHistory: publicProcedure
+    .input(z.object({ symbol: z.string() }))
+    .query(async ({ input }) => fetchWithCache(`fund:corp-action-history:${input.symbol}`, async () => {
+      try {
+        const rows = await dbAll<any>(
+          `SELECT action_type, announce_date, record_date, ratio_text, ratio_factor, amount, source
+           FROM stock_corporate_action_history
+           WHERE symbol = ?
+           ORDER BY COALESCE(record_date, announce_date) DESC`,
+          [input.symbol.toUpperCase()]
+        );
+        return rows || [];
+      } catch (e: any) {
+        console.error("[Fundamentals Router] Error fetching corporate action history:", e);
+        return [];
+      }
+    }, 3600)),
+
+  // Market-wide corporate actions sourced from real NSE regulatory filings (InvestSights),
+  // 2026-08-07 urls.txt open-source sourcing pass — the completeness cross-check for
+  // getCorporateActionHistory's per-stock MoneyControl ledger, not a replacement for it.
+  getFiledCorporateActionsCalendar: publicProcedure
+    .input(z.object({
+      daysBack: z.number().min(0).max(180).optional().default(14),
+      daysForward: z.number().min(0).max(365).optional().default(60),
+      symbol: z.string().optional(),
+    }))
+    .query(async ({ input }) => fetchWithCache(
+      `fund:filed-corp-actions:${input.daysBack}:${input.daysForward}:${input.symbol ?? ''}`,
+      async () => {
+        try {
+          const rows = await dbAll<any>(
+            `SELECT symbol, company_name, category, headline, dividend_per_share,
+                    record_date, ex_date, filing_date, source_url, upcoming
+             FROM nse_filed_corporate_actions
+             WHERE filing_date >= (CURRENT_DATE - (? || ' days')::interval)::text
+               AND filing_date <= (CURRENT_DATE + (? || ' days')::interval)::text
+               ${input.symbol ? "AND symbol = ?" : ""}
+             ORDER BY filing_date DESC`,
+            input.symbol
+              ? [input.daysBack, input.daysForward, input.symbol.toUpperCase()]
+              : [input.daysBack, input.daysForward]
+          );
+          return rows || [];
+        } catch (e: any) {
+          console.error("[Fundamentals Router] Error fetching filed corporate actions calendar:", e);
+          return [];
+        }
+      },
+      1800
+    )),
+
   // credit_rating_events is populated by credit_rating_fetcher.py but had no tRPC procedure at
   // all — only fed internal technical_signals scoring flags.
   getCreditRatingEvents: publicProcedure
@@ -175,7 +248,58 @@ export const fundamentalsRouter = router({
 
   getMFInvestments: publicProcedure
     .input(z.object({ symbol: z.string() }))
-    .query(async ({ input }) => fetchMFInvestments(input.symbol)),
+    .query(async ({ input }) => fetchWithCache(`fund:mf-investments:${input.symbol}`, () => fetchMFInvestments(input.symbol), 3600)),
+
+  // InvestSights superstar investor activity (urls.txt expansion): per-stock entry/increase/
+  // decrease/exit activity keyed by NSE symbol, populated by
+  // investsights_investor_activity_fetcher.py.
+  getSuperstarInvestorActivity: publicProcedure
+    .input(z.object({ symbol: z.string(), limit: z.number().min(1).max(100).optional().default(30) }))
+    .query(async ({ input }) => fetchWithCache(`fund:superstar-activity:${input.symbol}:${input.limit}`, async () => {
+      try {
+        const rows = await dbAll<any>(
+          `SELECT symbol, investor_slug, change_type, curr_pct_holding, pct_holding_change, period_end_date, fetched_at
+           FROM superstar_investor_activity
+           WHERE symbol = ?
+           ORDER BY period_end_date DESC, fetched_at DESC
+           LIMIT ?`,
+          [input.symbol.toUpperCase(), input.limit]
+        );
+        return rows || [];
+      } catch (e) {
+        console.error('[Fundamentals Router] getSuperstarInvestorActivity failed:', e);
+        return [];
+      }
+    }, 3600)),
+
+  // Market-wide feed of the same table (no symbol filter) -- the per-stock procedure above has
+  // no discovery surface: you need to already know a symbol to see any superstar activity at
+  // all. This backs a leaderboard/feed widget instead.
+  getSuperstarActivityFeed: publicProcedure
+    .input(z.object({
+      changeType: z.enum(['entry', 'exit', 'increase', 'decrease']).optional(),
+      limit: z.number().min(1).max(100).optional().default(30),
+    }))
+    .query(async ({ input }) => fetchWithCache(`fund:superstar-feed:${input.changeType ?? 'all'}:${input.limit}`, async () => {
+      try {
+        const params: any[] = [];
+        let where = '1=1';
+        if (input.changeType) { where += ' AND change_type = ?'; params.push(input.changeType); }
+        params.push(input.limit);
+        const rows = await dbAll<any>(
+          `SELECT symbol, investor_slug, investor_name, change_type, curr_pct_holding, pct_holding_change, period_end_date, fetched_at
+           FROM superstar_investor_activity
+           WHERE ${where}
+           ORDER BY fetched_at DESC, period_end_date DESC
+           LIMIT ?`,
+          params
+        );
+        return rows || [];
+      } catch (e) {
+        console.error('[Fundamentals Router] getSuperstarActivityFeed failed:', e);
+        return [];
+      }
+    }, 3600)),
 
   getInsights: publicProcedure
     .input(z.object({ symbol: z.string() }))

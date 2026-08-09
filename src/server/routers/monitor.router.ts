@@ -8,10 +8,115 @@ import { fetchIndexAdvanceDecline, fetchIndiaVix, fetchLiveMarketScreener, fetch
 import * as queueModule from '../queues';
 import { MONITOR_SCRIPTS } from '../monitorScripts';
 import { computeCronLateness } from '../jobHeartbeat';
+import { CronExpressionParser } from 'cron-parser';
+import { fetchWithCache } from '../cacheService';
 
 export { MONITOR_SCRIPTS };
 
 type ScriptId = typeof MONITOR_SCRIPTS[number]['id'];
+
+/**
+ * Extracts `live_edge_proven` from a raw app_settings.live_screener_ml_model_status JSON
+ * string (2026-08-07). Exported/pure so it's independently testable without mocking the DB --
+ * the router procedure itself just calls this on the row it already fetched.
+ *
+ * Returns `null` (not `false`) for "no evidence either way" -- missing row, malformed JSON, or
+ * a JSON value that isn't a real boolean -- deliberately distinct from an explicit `false`
+ * ("live-graded against real outcomes and shown NO edge"), so a model that simply hasn't
+ * accumulated enough resolved rows yet keeps behaving as it always has instead of being
+ * pre-emptively suppressed.
+ */
+export function parseLiveEdgeProven(rawValue: string | null | undefined): boolean | null {
+  if (!rawValue) return null;
+  try {
+    const parsed = JSON.parse(rawValue);
+    return typeof parsed.live_edge_proven === 'boolean' ? parsed.live_edge_proven : null;
+  } catch {
+    return null;
+  }
+}
+
+function asIso(value: unknown): string | null {
+  if (value == null) return null;
+  const n = Number(value);
+  if (Number.isFinite(n) && n > 0) {
+    return new Date(n).toISOString();
+  }
+  const d = new Date(String(value));
+  return Number.isNaN(d.getTime()) ? null : d.toISOString();
+}
+
+// A getLastRunAt() value that's a bare 'YYYY-MM-DD' (no time component -- e.g. trendlyne-midweek's
+// MIN(MAX(date)) over two DATE columns) parses via `new Date(...)` as UTC midnight. Compared
+// against a cron's specific fire time-of-day (e.g. '30 14 * * 2' = 14:30 UTC), midnight is
+// always earlier -- so a genuinely fresh, same-day success reads as "late" forever, every week,
+// regardless of actual freshness. Found 2026-08-09: trendlyne-midweek stayed permanently flagged
+// 'stale' in the daily digest even right after a real Tuesday success. Treat a date-only value as
+// having happened by the END of that UTC day instead, since that's the most that can honestly be
+// said about a timestamp we only know to day granularity.
+function toComparableMs(lastRunAt: string): number {
+  if (/^\d{4}-\d{2}-\d{2}$/.test(lastRunAt)) {
+    return new Date(lastRunAt + 'T23:59:59.999Z').getTime();
+  }
+  return new Date(lastRunAt).getTime();
+}
+
+function percentileFromSorted(values: number[], p: number): number | null {
+  if (!values.length) return null;
+  if (values.length === 1) return values[0];
+  const idx = (values.length - 1) * p;
+  const lo = Math.floor(idx);
+  const hi = Math.ceil(idx);
+  if (lo === hi) return values[lo];
+  const weight = idx - lo;
+  return values[lo] * (1 - weight) + values[hi] * weight;
+}
+
+function summarizeDurationsMs(jobs: Array<{ processedOn?: number | null; finishedOn?: number | null }>) {
+  const durations = jobs
+    .map((j) => {
+      const start = Number(j.processedOn ?? 0);
+      const end = Number(j.finishedOn ?? 0);
+      if (!Number.isFinite(start) || !Number.isFinite(end) || start <= 0 || end <= start) return null;
+      return end - start;
+    })
+    .filter((v): v is number => v !== null)
+    .sort((a, b) => a - b);
+
+  if (!durations.length) {
+    return {
+      sampleSize: 0,
+      avgMs: null as number | null,
+      p50Ms: null as number | null,
+      p95Ms: null as number | null,
+      lastRunMs: null as number | null,
+    };
+  }
+
+  const sum = durations.reduce((acc, v) => acc + v, 0);
+  const lastDur = durations[durations.length - 1];
+  return {
+    sampleSize: durations.length,
+    avgMs: Math.round(sum / durations.length),
+    p50Ms: Math.round(percentileFromSorted(durations, 0.5) ?? lastDur),
+    p95Ms: Math.round(percentileFromSorted(durations, 0.95) ?? lastDur),
+    lastRunMs: Math.round(lastDur),
+  };
+}
+
+function nextCronTimeIso(cronPatterns: readonly string[] | undefined, now: Date): string | null {
+  if (!cronPatterns?.length) return null;
+  let minNext: Date | null = null;
+  for (const pattern of cronPatterns) {
+    try {
+      const next = CronExpressionParser.parse(pattern, { currentDate: now, tz: 'Etc/UTC' }).next().toDate();
+      if (!minNext || next < minNext) minNext = next;
+    } catch {
+      // Ignore malformed cron patterns and keep evaluating others.
+    }
+  }
+  return minNext ? minNext.toISOString() : null;
+}
 
 async function getLastRunAt(scriptId: ScriptId): Promise<string | null> {
   try {
@@ -20,6 +125,12 @@ async function getLastRunAt(scriptId: ScriptId): Promise<string | null> {
       case 'technical-scan':
         row = await dbGet("SELECT MAX(computed_at) as t FROM technical_signals");
         break;
+      case 'confluence-compute':
+        row = await dbGet("SELECT MAX(computed_at) as t FROM confluence_signals");
+        break;
+      case 'news-sentiment':
+        row = await dbGet("SELECT MAX(fetched_at) as t FROM news_sentiment_items");
+        break;
       case 'outcome-resolver-5d':
         // computed_at is stamped on every upsert regardless of outcome (see outcome_resolver.py's
         // ON CONFLICT ... computed_at=excluded.computed_at), so filtering out PENDING rows here
@@ -27,10 +138,10 @@ async function getLastRunAt(scriptId: ScriptId): Promise<string | null> {
         // within its holding period, the resolver runs fine but touches only PENDING rows, and
         // this query kept reporting the last *resolved* outcome (which can be days older) as "last
         // run" — false-flagging the job stale even though it executed on schedule.
-        row = await dbGet("SELECT MAX(computed_at) as t FROM signal_outcomes WHERE horizon_days=5");
+        row = await dbGet("SELECT MAX(computed_at) as t FROM signal_outcomes WHERE horizon_days=5 AND signal_source='technical'");
         break;
       case 'outcome-resolver-15d':
-        row = await dbGet("SELECT MAX(computed_at) as t FROM signal_outcomes WHERE horizon_days=15");
+        row = await dbGet("SELECT MAX(computed_at) as t FROM signal_outcomes WHERE horizon_days=15 AND signal_source='technical'");
         break;
       case 'performance-tracker':
         row = await dbGet("SELECT MAX(last_computed) as t FROM strategy_performance");
@@ -119,10 +230,23 @@ async function getScriptStats(scriptId: ScriptId): Promise<Record<string, number
     switch (scriptId) {
       case 'technical-scan':
         return { total: ((await dbGet("SELECT COUNT(*) as n FROM technical_signals")) as any)?.n ?? 0 };
+      case 'confluence-compute':
+        return {
+          elite: ((await dbGet("SELECT COUNT(*) as n FROM confluence_signals WHERE conviction_level='ELITE' AND computed_at = (SELECT MAX(computed_at) FROM confluence_signals)")) as any)?.n ?? 0,
+          latest: ((await dbGet("SELECT COUNT(*) as n FROM confluence_signals WHERE computed_at = (SELECT MAX(computed_at) FROM confluence_signals)")) as any)?.n ?? 0,
+        };
+      case 'news-sentiment': {
+        // Cutoff computed in JS and bound as a parameter, not `NOW() - INTERVAL ...` --
+        // this codebase has repeatedly been bitten by Postgres-only date arithmetic that
+        // doesn't survive sqlTranslate.ts's translation to the SQLite dev fallback (see
+        // ml-ensemble-score's case above for the same pattern already proven safe here).
+        const cutoff = new Date(Date.now() - 24 * 3600_000).toISOString();
+        return { rows24h: ((await dbGet("SELECT COUNT(*) as n FROM news_sentiment_items WHERE fetched_at >= ?", [cutoff])) as any)?.n ?? 0 };
+      }
       case 'outcome-resolver-5d':
-        return { resolved: ((await dbGet("SELECT COUNT(*) as n FROM signal_outcomes WHERE horizon_days=5 AND outcome!='PENDING'")) as any)?.n ?? 0 };
+        return { resolved: ((await dbGet("SELECT COUNT(*) as n FROM signal_outcomes WHERE horizon_days=5 AND outcome!='PENDING' AND signal_source='technical'")) as any)?.n ?? 0 };
       case 'outcome-resolver-15d':
-        return { resolved: ((await dbGet("SELECT COUNT(*) as n FROM signal_outcomes WHERE horizon_days=15 AND outcome!='PENDING'")) as any)?.n ?? 0 };
+        return { resolved: ((await dbGet("SELECT COUNT(*) as n FROM signal_outcomes WHERE horizon_days=15 AND outcome!='PENDING' AND signal_source='technical'")) as any)?.n ?? 0 };
       case 'performance-tracker':
         return {
           strategies: ((await dbGet("SELECT COUNT(*) as n FROM strategy_performance")) as any)?.n ?? 0,
@@ -234,15 +358,43 @@ async function getScriptStats(scriptId: ScriptId): Promise<Record<string, number
 
 export async function getSystemStatus(now: Date = new Date()) {
   const runStates: Record<string, string> = {};
+  const heartbeatByName = new Map<string, {
+    lastRunAt: string | null;
+    lastSuccessAt: string | null;
+    lastError: string | null;
+    runCount: number;
+    failCount: number;
+  }>();
   try {
     const rows = await dbAll<any>("SELECT key, value FROM app_settings WHERE key LIKE 'monitor_%'");
     for (const r of rows) runStates[r.key] = r.value;
+
+    const hbRows = await dbAll<any>(
+      'SELECT job_name, last_run_at, last_success_at, last_error, run_count, fail_count FROM job_heartbeat'
+    );
+    for (const row of hbRows) {
+      heartbeatByName.set(String(row.job_name), {
+        lastRunAt: asIso(row.last_run_at),
+        lastSuccessAt: asIso(row.last_success_at),
+        lastError: row.last_error ?? null,
+        runCount: Number(row.run_count ?? 0),
+        failCount: Number(row.fail_count ?? 0),
+      });
+    }
   } catch (err: unknown) {
     console.warn('[MONITOR] getSystemStatus failed:', (err as Error).message);
   }
 
   return Promise.all(MONITOR_SCRIPTS.map(async s => {
-    const dbLastRunAt = await getLastRunAt(s.id as ScriptId);
+    // getScriptStats(s.id) depends on nothing getLastRunAt(s.id) computes -- these were awaited
+    // sequentially per script (2 round trips deep) despite being fully independent. Across the
+    // ~30 scripts in MONITOR_SCRIPTS this whole map is already running concurrently (Promise.all
+    // over the map, not a true N+1 loop), so this halves the critical-path depth per script
+    // rather than the total round-trip count.
+    const [dbLastRunAt, stats] = await Promise.all([
+      getLastRunAt(s.id as ScriptId),
+      getScriptStats(s.id as ScriptId),
+    ]);
     // Fall back to stored timestamp for scripts that ran but produced no DB rows
     const storedRanAt = runStates[`monitor_${s.id}_ran_at`] ?? null;
     const lastRunAt = dbLastRunAt ?? storedRanAt;
@@ -266,11 +418,11 @@ export async function getSystemStatus(now: Date = new Date()) {
         isLate = computeCronLateness(
           cronPatterns,
           (s as any).graceMinutes ?? 60,
-          new Date(lastRunAt).getTime(),
+          toComparableMs(lastRunAt),
           now,
         ).late;
       } else {
-        const ageHours = (now.getTime() - new Date(lastRunAt).getTime()) / 3600000;
+        const ageHours = (now.getTime() - toComparableMs(lastRunAt)) / 3600000;
         isLate = ageHours > s.staleLimitHours;
       }
       runState = !isLate ? 'success' : (rawState === 'running' ? 'running' : (rawState === 'failed' ? 'failed' : 'stale'));
@@ -278,18 +430,30 @@ export async function getSystemStatus(now: Date = new Date()) {
       runState = rawState === 'running' ? 'running' : (rawState === 'failed' ? 'failed' : 'never');
     }
 
+    const hb = heartbeatByName.get(s.id);
+    const nextScheduledAt = nextCronTimeIso((s as any).cronPatterns, now);
     return {
       ...s,
       lastRunAt,
+      lastSuccessAt: hb?.lastSuccessAt ?? (runState === 'success' ? lastRunAt : null),
+      lastFailureAt: runState === 'failed' ? lastRunAt : null,
+      nextScheduledAt,
+      runCount: hb?.runCount ?? 0,
+      failCount: hb?.failCount ?? 0,
       runState,
-      stats: await getScriptStats(s.id as ScriptId),
-      error: runStates[`monitor_${s.id}_error`] ?? null,
+      stats,
+      error: runStates[`monitor_${s.id}_error`] ?? hb?.lastError ?? null,
     };
   }));
 }
 
 export const monitorRouter = router({
-  getSystemStatus: publicProcedure.query(() => getSystemStatus()),
+  // ~30 monitored scripts x 2 independent lookups each (now parallelized above) = ~60 DB round
+  // trips recomputed from scratch on every single call. This is an ops dashboard, not a
+  // real-time trading surface -- a 30s cache is well below every staleLimitHours/graceMinutes
+  // threshold this function itself checks against, so cached staleness never meaningfully lags
+  // what a live call would show.
+  getSystemStatus: publicProcedure.query(() => fetchWithCache('monitor:system-status', () => getSystemStatus(), 30)),
 
   getIndexAdvanceDecline: publicProcedure
     .query(async () => {
@@ -389,9 +553,9 @@ export const monitorRouter = router({
           console.error(`[MONITOR] ${script.id} failed:`, msg);
           if (script.critical) {
             try {
-              const { TelegramNotificationService } = await import('../telegramService');
+              const { TelegramNotificationService, sanitizeMarkdown } = await import('../telegramService');
               await new TelegramNotificationService().sendMarkdownMessage(
-                `🚨 *Critical script failed*: \`${script.label}\`\nError: ${msg.slice(0, 300)}`
+                `🚨 *Critical script failed*: \`${script.label}\`\nError: ${sanitizeMarkdown(msg.slice(0, 300))}`
               );
             } catch { /* telegram optional */ }
           }
@@ -446,6 +610,7 @@ export const monitorRouter = router({
       { id: 'mc-screener-sync', q: queueModule.mcScreenerSyncQueue, label: 'MoneyControl Sync', desc: 'Pulls positive and negative stock scans from MoneyControl', category: 'data-sync' },
       { id: 'etnow-screener-sync', q: queueModule.etnowScreenerSyncQueue, label: 'ETNow Sync', desc: 'Synchronizes ETNow screener lists and breakouts', category: 'data-sync' },
       { id: 'et-marketstats-sync', q: queueModule.etMarketstatsSyncQueue, label: 'ET Marketstats Sync', desc: 'Synchronizes ET marketstats/technicals screeners (financials, RSI/MACD, moving averages, relative returns, etc.)', category: 'data-sync' },
+      { id: 'trendlyne-screener-sync', q: queueModule.trendlyneScreenerSyncQueue, label: 'Trendlyne Screener Sync', desc: 'Synchronizes Trendlyne screener-stock membership (moved to its own 6:10 PM IST slot 2026-08-04, was a side effect of quant-eod-sync/stock-scoring)', category: 'data-sync' },
       { id: 'nse-sync', q: queueModule.nseScreenerSyncQueue, label: 'NSE Master Sync', desc: 'Weekly synchronization of the NSE master stock list', category: 'data-sync' },
       { id: 'fundamentals-sync', q: queueModule.fundamentalsSyncQueue, label: 'Fundamentals Sync', desc: 'Fetches company financials and ratios', category: 'data-sync' },
       { id: 'quant-scoring', q: queueModule.quantScoringQueue, label: 'Quant Score Engine', desc: 'Calculates momentum and volatility ranks', category: 'machine-learning' },
@@ -491,6 +656,19 @@ export const monitorRouter = router({
             completedCount: 0,
             failedCount: 0,
             delayedCount: 0,
+            currentStatus: 'offline' as const,
+            lastStartedAt: null,
+            lastCompletedAt: null,
+            lastSuccessAt: null,
+            lastFailureAt: null,
+            nextScheduledAt: null,
+            duration: {
+              sampleSize: 0,
+              avgMs: null,
+              p50Ms: null,
+              p95Ms: null,
+              lastRunMs: null,
+            },
             repeatable: [] as any[],
             recentJobs: [] as any[],
           };
@@ -508,10 +686,10 @@ export const monitorRouter = router({
 
           // Fetch recent completed/failed/active/waiting jobs
           const [completedJobs, failedJobs, activeJobs, waitingJobs] = await Promise.all([
-            q.getJobs(['completed'], 0, 5, true),
-            q.getJobs(['failed'], 0, 5, true),
-            q.getJobs(['active'], 0, 5, true),
-            q.getJobs(['waiting'], 0, 5, true),
+            q.getJobs(['completed'], 0, 25, true),
+            q.getJobs(['failed'], 0, 25, true),
+            q.getJobs(['active'], 0, 10, true),
+            q.getJobs(['waiting'], 0, 10, true),
           ]);
 
           const formatJob = (job: any, state: string) => ({
@@ -532,6 +710,29 @@ export const monitorRouter = router({
             ...completedJobs.map(j => formatJob(j, 'completed')),
           ].slice(0, 10); // Limit to top 10 overall recent jobs
 
+          const succeededFinished = completedJobs
+            .map((j: any) => Number(j.finishedOn ?? 0))
+            .filter((v: number) => Number.isFinite(v) && v > 0);
+          const failedFinished = failedJobs
+            .map((j: any) => Number(j.finishedOn ?? 0))
+            .filter((v: number) => Number.isFinite(v) && v > 0);
+          const startedTimes = [...activeJobs, ...completedJobs, ...failedJobs]
+            .map((j: any) => Number(j.processedOn ?? 0))
+            .filter((v: number) => Number.isFinite(v) && v > 0);
+          const completedTimes = [...completedJobs, ...failedJobs]
+            .map((j: any) => Number(j.finishedOn ?? 0))
+            .filter((v: number) => Number.isFinite(v) && v > 0);
+          const duration = summarizeDurationsMs([...completedJobs, ...failedJobs]);
+          const latestRepeatableNext = repeatableJobs
+            .map((r: any) => Number(r.next ?? 0))
+            .filter((v: number) => Number.isFinite(v) && v > 0)
+            .sort((a: number, b: number) => a - b)[0] ?? null;
+
+          const currentStatus: 'offline' | 'running' | 'queued' | 'idle' =
+            active > 0 ? 'running' :
+            (waiting + delayed) > 0 ? 'queued' :
+            'idle';
+
           return {
             id: item.id,
             label: item.label,
@@ -543,6 +744,13 @@ export const monitorRouter = router({
             completedCount: completed,
             failedCount: failed,
             delayedCount: delayed,
+            currentStatus,
+            lastStartedAt: startedTimes.length ? new Date(Math.max(...startedTimes)).toISOString() : null,
+            lastCompletedAt: completedTimes.length ? new Date(Math.max(...completedTimes)).toISOString() : null,
+            lastSuccessAt: succeededFinished.length ? new Date(Math.max(...succeededFinished)).toISOString() : null,
+            lastFailureAt: failedFinished.length ? new Date(Math.max(...failedFinished)).toISOString() : null,
+            nextScheduledAt: latestRepeatableNext ? new Date(latestRepeatableNext).toISOString() : null,
+            duration,
             repeatable: repeatableJobs.map((r: any) => ({
               key: r.key,
               name: r.name,
@@ -563,6 +771,19 @@ export const monitorRouter = router({
             completedCount: 0,
             failedCount: 0,
             delayedCount: 0,
+            currentStatus: 'offline' as const,
+            lastStartedAt: null,
+            lastCompletedAt: null,
+            lastSuccessAt: null,
+            lastFailureAt: null,
+            nextScheduledAt: null,
+            duration: {
+              sampleSize: 0,
+              avgMs: null,
+              p50Ms: null,
+              p95Ms: null,
+              lastRunMs: null,
+            },
             repeatable: [] as any[],
             recentJobs: [] as any[],
             error: err.message,
@@ -584,6 +805,7 @@ export const monitorRouter = router({
         { id: 'mc-screener-sync', q: queueModule.mcScreenerSyncQueue },
         { id: 'etnow-screener-sync', q: queueModule.etnowScreenerSyncQueue },
         { id: 'et-marketstats-sync', q: queueModule.etMarketstatsSyncQueue },
+        { id: 'trendlyne-screener-sync', q: queueModule.trendlyneScreenerSyncQueue },
         { id: 'nse-sync', q: queueModule.nseScreenerSyncQueue },
         { id: 'fundamentals-sync', q: queueModule.fundamentalsSyncQueue },
         { id: 'quant-scoring', q: queueModule.quantScoringQueue },
@@ -677,7 +899,7 @@ export const monitorRouter = router({
       );
       if (!latestRun?.id) return { asOf: null, stocks: [] };
 
-      const [appearances, filterStats, mlScores, runRow] = await Promise.all([
+      const [appearances, filterStats, mlScores, runRow, mlStatusRow] = await Promise.all([
         dbAll<{ symbol: string; filter_key: string; price: number; change_per: number; volume: number }>(
           "SELECT symbol, filter_key, price, change_per, volume FROM live_screener_appearances WHERE run_id = ?",
           [latestRun.id]
@@ -699,10 +921,25 @@ export const monitorRouter = router({
           [latestRun.id]
         ),
         dbGet<{ created_at: string }>("SELECT created_at FROM live_screener_runs WHERE id = ?", [latestRun.id]),
+        dbGet<{ value: string }>("SELECT value FROM app_settings WHERE key = 'live_screener_ml_model_status'"),
       ]);
 
+      // 2026-08-07 fix: live_edge_proven is refreshed on every --train run now (previously
+      // only when a candidate happened to promote -- see live_screener_ml_ranker.py's
+      // _persist_live_edge_status). Live-confirmed the deployed model's real AUC is 0.4615
+      // over 671,257 resolved rows (essentially no edge) while its held-out test_auc reads
+      // 0.641 -- exactly the CV/test-doesn't-survive-deployment gap this platform has hit
+      // repeatedly elsewhere.
+      const mlEdgeProven = parseLiveEdgeProven(mlStatusRow?.value);
+
       const statsByFilter = new Map(filterStats.map(f => [f.filter_key, f]));
-      const mlBySymbol = new Map(mlScores.map(m => [m.symbol, Number(m.win_probability)]));
+      // A model with a live-confirmed lack of edge must not be presented as a working signal --
+      // dropping it here (rather than filtering client-side) makes every consumer of this
+      // procedure fall back to the rule-based edge_score automatically, the same fallback path
+      // already used before any model has trained at all.
+      const mlBySymbol = mlEdgeProven === false
+        ? new Map<string, number>()
+        : new Map(mlScores.map(m => [m.symbol, Number(m.win_probability)]));
 
       type StockAgg = {
         symbol: string; price: number; change_per: number; volume: number;
@@ -752,13 +989,14 @@ export const monitorRouter = router({
         return b.edge_score - a.edge_score;
       });
 
-      return { asOf: runRow?.created_at ?? null, stocks };
+      return { asOf: runRow?.created_at ?? null, stocks, mlEdgeProven };
     }),
 
-  // Status of the currently-ACTIVE live_screener_intraday_clf model (written by
-  // live_screener_ml_ranker.py --train only when a retrain clears its promotion-margin
-  // check against the prior model -- a rejected candidate never touches this key, so it
-  // always reflects whichever model is actually scoring stocks right now).
+  // Status of the currently-ACTIVE live_screener_intraday_clf model. The trained_at/cv_auc/
+  // test_auc/etc. fields only change when a retrain clears its promotion-margin check against
+  // the prior model -- but live_auc/live_edge_proven (2026-08-07) refresh on EVERY --train
+  // run, including a rejected one, since they describe whatever's still deployed and scoring,
+  // not the rejected candidate. See live_screener_ml_ranker.py's _persist_live_edge_status.
   getLiveScreenerMlModelStatus: publicProcedure
     .query(async () => {
       const row = await dbGet<{ value: string }>(

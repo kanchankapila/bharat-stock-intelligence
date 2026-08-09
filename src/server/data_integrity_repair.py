@@ -21,6 +21,7 @@ import json
 import re
 
 from db_compat import connect, ConnWrapper
+from hypertable_safe_write import safe_keyed_update
 
 # A bar is physically impossible if OHLC is internally inconsistent, or if it implies a
 # 1-day move beyond what NSE circuit limits allow, with no corporate action to explain it.
@@ -85,21 +86,11 @@ def repair_bad_bars(conn: ConnWrapper, dry: bool) -> None:
     if not found or dry:
         return
 
-    # stock_ohlcv is a compressed TimescaleDB hypertable. A predicate-wide UPDATE makes
-    # Timescale decompress every chunk it might touch (2.2M tuples -> hits
-    # max_tuples_decompressed_per_dml_transaction). Updating by explicit (symbol, date) key
-    # in small batches keeps decompression to the handful of chunks actually affected.
-    conn.execute("SET timescaledb.max_tuples_decompressed_per_dml_transaction = 0")
-    items = list(found.items())
-    done = 0
-    for i in range(0, len(items), 50):
-        batch = items[i:i + 50]
-        for (sym, dt), reason in batch:
-            conn.execute(
-                "UPDATE stock_ohlcv SET is_suspect=1, suspect_reason=? "
-                "WHERE symbol=? AND date::text=?", (reason, sym, dt))
-        conn.commit()
-        done += len(batch)
+    done = safe_keyed_update(
+        conn,
+        "UPDATE stock_ohlcv SET is_suspect=1, suspect_reason=? WHERE symbol=? AND date::text=?",
+        [(reason, sym, dt) for (sym, dt), reason in found.items()],
+        batch_size=50)
     _log(f"  flagged {done} bars")
 
     total = conn.execute("SELECT count(*) FROM stock_ohlcv WHERE is_suspect=1").fetchone()[0]
@@ -335,11 +326,27 @@ def repair_labels(conn: ConnWrapper, dry: bool) -> None:
         conn.execute(
             "UPDATE signal_outcomes SET is_suspect=1 WHERE abs(return_pct) > ?",
             (MAX_PLAUSIBLE_RETURN_PCT,))
+        # signal_source backfill (2026-08): inferred from label_definition, not a guess -- the
+        # mechanism traced live (both writers' dedup guards used to match on ANY row for a key
+        # regardless of source, so each horizon bucket was claimed by exactly one writer for its
+        # entire history: label_definition='path_barrier' rows were always written by
+        # outcome_resolver.py grading technical_signals; 'terminal_pct2' rows were always
+        # written by confluence_outcome_tracker.py grading confluence_signals. Only rows already
+        # written by the fixed writers (signal_source already set) are left untouched.
+        conn.execute(
+            "UPDATE signal_outcomes SET signal_source='technical' "
+            "WHERE label_definition='path_barrier' AND signal_source='unknown'")
+        conn.execute(
+            "UPDATE signal_outcomes SET signal_source='confluence' "
+            "WHERE label_definition='terminal_pct2' AND signal_source='unknown'")
         conn.commit()
     dist = conn.execute(
         "SELECT label_definition, count(*) FROM signal_outcomes GROUP BY 1 ORDER BY 2 DESC").fetchall()
     n_sus = conn.execute("SELECT count(*) FROM signal_outcomes WHERE is_suspect=1").fetchone()[0]
+    src_dist = conn.execute(
+        "SELECT signal_source, count(*) FROM signal_outcomes GROUP BY 1 ORDER BY 2 DESC").fetchall()
     _log(f"  label_definition: {dict(dist)}")
+    _log(f"  signal_source: {dict(src_dist)}")
     _log(f"  implausible-return rows flagged: {n_sus}")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_so_label ON signal_outcomes (label_definition)")
     conn.commit()

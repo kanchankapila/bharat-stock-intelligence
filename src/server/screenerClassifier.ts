@@ -118,8 +118,12 @@ export async function classifyAllScreeners(): Promise<{
   classified: number;
   remaining_other: number;
 }> {
-  const rows = await dbAll<{ scan_id: string; name: string }>(`
-    SELECT scan_id, name FROM screener_master
+  // scan_id is only unique WITHIN a provider (screener_master's PK is (source, scan_id) --
+  // MoneyControl and ETnow independently hand out overlapping small integers, see the
+  // 2026-08-04 screener_master memory) -- both source and scan_id are required in the WHERE
+  // clause below, or classifying one provider's screener would silently overwrite the other's.
+  const rows = await dbAll<{ scan_id: string; source: string; name: string }>(`
+    SELECT scan_id, source, name FROM screener_master
     WHERE subcategory IS NULL OR classified_by IS NULL
     ORDER BY name
   `);
@@ -135,7 +139,7 @@ export async function classifyAllScreeners(): Promise<{
     UPDATE screener_master
     SET subcategory = ?, inferred_category = ?, inferred_sentiment = ?,
         inferred_timeframe = ?, category_confidence = ?, classified_by = ?
-    WHERE scan_id = ?
+    WHERE scan_id = ? AND source = ?
   `;
 
   let classified = 0;
@@ -147,7 +151,7 @@ export async function classifyAllScreeners(): Promise<{
     for (const row of rows) {
       const r = classifyByKeyword(row.name);
       const timeframe = r.investment_horizon === 'intraday' ? 'intraday' : 'long_term';
-      await tx.run(updateSql, [r.subcategory, r.category, r.signal_bias, timeframe, r.confidence, 'keyword', row.scan_id]);
+      await tx.run(updateSql, [r.subcategory, r.category, r.signal_bias, timeframe, r.confidence, 'keyword', row.scan_id, row.source]);
       if (r.category === 'other') remaining_other++;
       else classified++;
     }

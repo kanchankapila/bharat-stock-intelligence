@@ -17,6 +17,9 @@ import numpy as np
 from datetime import datetime, timedelta
 
 from db_compat import connect, use_postgres, ConnWrapper
+from model_promotion import (clears_promotion_bar, rejections_since,
+                              staleness_override_applies,
+                              DEFAULT_STALENESS_MAX_DAYS, DEFAULT_STALENESS_MAX_REJECTIONS)
 from as_of import as_of_join_sql
 
 # ── Optional imports (graceful fallback) ──────────────────────────────────────
@@ -46,6 +49,14 @@ CANDIDATE_PATH = MODEL_PATH + '.candidate'
 # New held-out AUC must beat the active model's by at least this much to be promoted.
 # Same value as ml_ensemble.py's PROMOTION_MARGIN, for consistency across engines.
 PROMOTION_MARGIN = 0.005
+# Staleness-override safety valve (2026-08-06) -- see model_promotion.staleness_override_applies'
+# own docstring. confluence_ml had NO such valve before this: its active baseline (trained
+# 2026-07-30T10:11:57Z, ~46min BEFORE the 2026-07-30 CV-leakage fix commit aa5862d2 landed)
+# carries a leak-inflated AUC (0.777) that every honest post-fix retrain since has been
+# measured against and rejected -- confirmed live, a real, currently-stuck deadlock, not
+# hypothetical. Same DEFAULT_* thresholds as ensemble/cs_ranker (7 days unbeaten + 10 rejections).
+CONFLUENCE_STALENESS_MAX_DAYS = DEFAULT_STALENESS_MAX_DAYS
+CONFLUENCE_STALENESS_MAX_REJECTIONS = DEFAULT_STALENESS_MAX_REJECTIONS
 
 FEATURE_COLS = [
     'bullish_screener_count',
@@ -130,6 +141,7 @@ def build_training_data(conn):
         LEFT JOIN quant_scores qs       ON qs.symbol = cs.symbol
         {_FUND_JOIN}
         WHERE so.horizon_days = 7 AND so.outcome IN ('WIN', 'LOSS')
+          AND so.signal_source = 'confluence'
         """
     else:
         # SQLite (dev): tiny dataset, keep the portable window-function form (no LATERAL).
@@ -154,6 +166,7 @@ def build_training_data(conn):
           AND {_CS_DAY} = so.signal_date
           AND so.horizon_days = 7
           AND so.outcome IN ('WIN', 'LOSS')
+          AND so.signal_source = 'confluence'
         LEFT JOIN technical_signals ts
           ON ts.symbol = cs.symbol
           AND ts.date = {_CS_DAY}
@@ -290,19 +303,35 @@ def train(conn):
     # champion/challenger gate ml_ensemble.py/live_screener_ml_ranker.py already use: only
     # activate if the new model beats the currently-active one's cv_roc_auc by >=
     # PROMOTION_MARGIN, or there is no active model yet.
+    baseline_id = None
     baseline_auc = None
+    baseline_trained_at = None
     try:
         row = conn.execute("""
-            SELECT cv_roc_auc FROM model_registry
+            SELECT id, cv_roc_auc, trained_at FROM model_registry
             WHERE model_name = 'confluence_ml' AND is_active = 1
             ORDER BY id DESC LIMIT 1
         """).fetchone()
-        if row and row[0] is not None:
-            baseline_auc = float(row[0])
+        if row and row[1] is not None:
+            baseline_id, baseline_auc, baseline_trained_at = row[0], float(row[1]), row[2]
     except Exception:
-        pass
+        conn.rollback()
 
-    promote = baseline_auc is None or new_auc >= baseline_auc + PROMOTION_MARGIN
+    clears_bar = clears_promotion_bar(new_auc, baseline_auc, PROMOTION_MARGIN)
+
+    # Staleness override (2026-08-06): a baseline whose AUC predates a leak/bug fix can become
+    # permanently unbeatable -- every honest post-fix retrain is measuring something the
+    # pre-fix baseline never had to. Mirrors ml_ensemble.py/cs_ranker.py.
+    staleness_override = False
+    age_days = 0.0
+    rejections = 0
+    if baseline_id is not None and not clears_bar:
+        rejections = rejections_since(conn, 'confluence_ml', baseline_id)
+        staleness_override, age_days = staleness_override_applies(
+            baseline_trained_at, rejections,
+            CONFLUENCE_STALENESS_MAX_DAYS, CONFLUENCE_STALENESS_MAX_REJECTIONS)
+
+    promote = clears_bar or staleness_override
 
     os.makedirs(MODEL_DIR, exist_ok=True)
     version = datetime.now().strftime('%Y%m%d_%H%M%S')
@@ -316,9 +345,12 @@ def train(conn):
         try:
             conn.execute("""
                 INSERT INTO model_registry (model_name, model_version, model_type, cv_roc_auc,
-                  feature_count, is_active, trained_at)
-                VALUES (?, ?, ?, ?, ?, 0, CURRENT_TIMESTAMP)
-            """, ('confluence_ml', version, 'breakout_probability', new_auc, len(FEATURE_COLS)))
+                  feature_count, is_active, trained_at, notes)
+                VALUES (?, ?, ?, ?, ?, 0, CURRENT_TIMESTAMP, ?)
+            """, ('confluence_ml', version, 'breakout_probability', new_auc, len(FEATURE_COLS),
+                  f'REJECTED cv_roc_auc={new_auc:.4f} vs baseline={baseline_auc:.4f}'
+                  + (f' (baseline stale {age_days:.1f}d, {rejections} rejections so far)'
+                     if baseline_id is not None else '')))
             conn.commit()
         except Exception:
             conn.rollback()
@@ -326,6 +358,15 @@ def train(conn):
 
     with open(MODEL_PATH, 'wb') as f:
         pickle.dump(model, f)
+
+    if baseline_id is None:
+        promo_note = f'cv_roc_auc={new_auc:.4f} (no prior model)'
+    elif staleness_override:
+        promo_note = (f'cv_roc_auc={new_auc:.4f}; STALENESS OVERRIDE -- baseline id={baseline_id} '
+                       f'unbeaten {age_days:.1f}d across {rejections} rejections; adopting '
+                       f'best-available candidate (baseline cv_roc_auc={baseline_auc:.4f})')
+    else:
+        promo_note = f'cv_roc_auc={new_auc:.4f} (beat baseline {baseline_auc:.4f})'
 
     # Register in model_registry (best-effort). NOTE: the prior code wrote a non-existent
     # `auc_score` column (correct column is cv_roc_auc) and omitted the NOT NULL model_version,
@@ -338,13 +379,16 @@ def train(conn):
         """)
         conn.execute("""
             INSERT INTO model_registry (model_name, model_version, model_type, cv_roc_auc,
-              feature_count, is_active, trained_at)
-            VALUES (?, ?, ?, ?, ?, 1, CURRENT_TIMESTAMP)
-        """, ('confluence_ml', version, 'breakout_probability', new_auc, len(FEATURE_COLS)))
+              feature_count, is_active, trained_at, notes)
+            VALUES (?, ?, ?, ?, ?, 1, CURRENT_TIMESTAMP, ?)
+        """, ('confluence_ml', version, 'breakout_probability', new_auc, len(FEATURE_COLS), promo_note))
         conn.commit()
     except Exception:
         conn.rollback()
 
+    if staleness_override:
+        print(f'[ML] Promoted via STALENESS OVERRIDE: baseline id={baseline_id} unbeaten '
+              f'{age_days:.1f}d across {rejections} rejections')
     print(f'[ML] Model ACTIVATED (CV AUC={new_auc:.4f}'
           + (f', beat baseline {baseline_auc:.4f})' if baseline_auc is not None else ', no prior model)'))
     print(f'[ML] Model saved to {MODEL_PATH}')

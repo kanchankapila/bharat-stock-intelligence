@@ -359,13 +359,15 @@ def upsert_screener(con, info: dict):
         len(info["stocks"]),
     ))
 
-    # screener_master (sync)
+    # screener_master (sync). ON CONFLICT target is (source, scan_id) -- screener_master's real
+    # PK, not scan_id alone; scan_id collides across providers (2026-08-04 memory) and, after
+    # that PK migration, ON CONFLICT(scan_id) no longer matches any unique constraint.
     con.execute("""
         INSERT INTO screener_master
             (scan_id, name, source, inferred_sentiment, inferred_category,
              inferred_timeframe, confidence)
         VALUES (?,?,'Trendlyne',?,?,?,0.75)
-        ON CONFLICT(scan_id) DO UPDATE SET
+        ON CONFLICT(source, scan_id) DO UPDATE SET
             name               = excluded.name,
             inferred_sentiment = excluded.inferred_sentiment,
             inferred_category  = excluded.inferred_category,

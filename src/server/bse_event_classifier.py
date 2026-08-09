@@ -21,6 +21,7 @@ from collections import defaultdict
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from db_compat import connect
+from as_of import logical_trading_date
 
 # Event patterns: (regex, score, event_type)
 EVENT_PATTERNS = [
@@ -107,9 +108,14 @@ def run_daily(con):
     created a row, or after a gap in the scan schedule. Same underlying assumption-bug class as
     the no-date-filter smear already fixed elsewhere, just milder (touches one wrong row, not
     every historical row) -- see mc_pricefeed_fetcher.py's backfill_technical_signals docstring.
+
+    logical_trading_date(), not a raw datetime.now(), as of 2026-08-01 -- the date=? guard
+    above traded the old bug for a new one: ml-daily-ops's step chain now regularly finishes
+    after midnight IST, so datetime.now() silently targets a day with no grid row yet (0 rows
+    matched, no error). See as_of.logical_trading_date's docstring for the full incident.
     """
     ensure_schema(con)
-    today = datetime.now().strftime('%Y-%m-%d')
+    today = logical_trading_date()
     since = (datetime.now() - timedelta(days=30)).strftime('%Y-%m-%d')
     idx = _build_event_index(con, since)
     print(f"[EventClassifier] {len(idx)} symbols with events in last 30 days")

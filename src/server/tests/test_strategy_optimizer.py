@@ -66,7 +66,11 @@ class TestTemporalSplit:
         conn.execute("""
             CREATE TABLE signal_outcomes (
                 symbol TEXT, signal_date TEXT, horizon_days INTEGER,
-                outcome TEXT, return_pct REAL, signal_score INTEGER
+                outcome TEXT, return_pct REAL, signal_score INTEGER,
+                -- load_signal_outcomes_with_factors/compute_screener_overrides both filter to
+                -- signal_source='technical' (2026-08 fix); default so the existing positional
+                -- 6-col INSERT below doesn't need touching.
+                signal_source TEXT NOT NULL DEFAULT 'technical'
             )
         """)
         conn.execute("""
@@ -81,9 +85,12 @@ class TestTemporalSplit:
 
         # Insert signal outcomes
         for _, row in df.iterrows():
-            conn.execute("INSERT INTO signal_outcomes VALUES (?,?,?,?,?,?)",
-                         (row['symbol'], row['signal_date'], 15,
-                          row['outcome'], row['return_pct'], int(row['signal_score'])))
+            conn.execute(
+                "INSERT INTO signal_outcomes "
+                "(symbol, signal_date, horizon_days, outcome, return_pct, signal_score) "
+                "VALUES (?,?,?,?,?,?)",
+                (row['symbol'], row['signal_date'], 15,
+                 row['outcome'], row['return_pct'], int(row['signal_score'])))
             # Insert factor breakdown with all required columns
             conn.execute("""
                 INSERT INTO stock_factor_breakdown

@@ -1,19 +1,28 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useState } from 'react';
 import { trpc } from '../lib/trpc';
 import { cn } from '../lib/utils';
 import { ArrowUpRight, ArrowDownRight, Minus } from 'lucide-react';
 import { motion } from 'motion/react';
+import { lookupExchangeTimeZone, currentTimeInZone, relativeFromNow } from '../lib/timeFormat';
 
 export const GlobalMarketCards: React.FC = () => {
-  const { data: globalMarketData, isLoading, error, refetch } = trpc.getGlobalMarketData.useQuery(undefined, {
+  const { data: globalMarketData, isLoading, error, refetch, dataUpdatedAt } = trpc.getGlobalMarketData.useQuery(undefined, {
     refetchOnWindowFocus: true,
     refetchOnMount: true,
+    refetchInterval: 5 * 60_000,
   });
 
   // Ensure it refreshes every time the component mounts
   useEffect(() => {
     refetch();
   }, [refetch]);
+
+  // Ticks once a minute so each market's local clock stays live without re-fetching data.
+  const [, setClockTick] = useState(0);
+  useEffect(() => {
+    const t = setInterval(() => setClockTick(n => n + 1), 60_000);
+    return () => clearInterval(t);
+  }, []);
 
   if (isLoading) {
     return (
@@ -72,12 +81,33 @@ export const GlobalMarketCards: React.FC = () => {
                   {market.country}
                 </span>
               </div>
-              
+
               <div className="flex items-end justify-between mt-1">
                 <span className="text-base font-black text-white tabular-nums tracking-tighter">
                   {market.current_price}
                 </span>
               </div>
+
+              {/* Local exchange clock + live open/closed status, from the vendor's own market_status flag */}
+              {(() => {
+                const tz = lookupExchangeTimeZone(market.country);
+                return (
+                  <div className="flex items-center gap-1.5 mt-1.5 text-[8px] font-bold uppercase tracking-wide">
+                    {tz && (
+                      <span className="text-slate-500 tabular-nums">{currentTimeInZone(tz)} local</span>
+                    )}
+                    {typeof market.market_status === 'boolean' && (
+                      <span className={cn(
+                        'flex items-center gap-1',
+                        market.market_status ? 'text-emerald-400' : 'text-slate-600'
+                      )}>
+                        <span className={cn('w-1.5 h-1.5 rounded-full', market.market_status ? 'bg-emerald-400 animate-pulse' : 'bg-slate-600')} />
+                        {market.market_status ? 'Open' : 'Closed'}
+                      </span>
+                    )}
+                  </div>
+                );
+              })()}
 
               <div className={cn("flex items-center text-[10px] font-black mt-1", textColor)}>
                 <Icon className="w-3.5 h-3.5 mr-1" />
@@ -87,6 +117,11 @@ export const GlobalMarketCards: React.FC = () => {
           );
         })}
       </div>
+      {dataUpdatedAt > 0 && (
+        <div className="text-[8px] text-slate-600 font-semibold uppercase tracking-wide mt-2 text-right">
+          Data fetched {relativeFromNow(dataUpdatedAt)} · local clocks live
+        </div>
+      )}
     </div>
   );
 };

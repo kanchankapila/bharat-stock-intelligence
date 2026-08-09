@@ -11,6 +11,7 @@ profitable -- which is why the load-bearing fix is a gate on realised edge rathe
 flip.
 """
 
+import math
 import os
 import sys
 import types
@@ -130,6 +131,40 @@ class TestEmissionGate:
         assert allowed is False, "a failed edge lookup must fail CLOSED, not open"
 
 
+class TestEmissionGateConstantsArePinned:
+    """The emission gate's whole job is to keep the engine's negative-edge Buy signals from
+    publishing. Loosening EMISSION_GATE_MIN_TRADES/MIN_AVG_PNL/LOOKBACK_DAYS would make the
+    gate easier to satisfy without the underlying edge actually improving -- i.e. exactly the
+    kind of silent weakening that would let a load-bearing constraint quietly stop doing its
+    job. Pinned here so any such change requires a conscious edit to this test, with a reason,
+    rather than slipping through as an incidental tweak. Run
+    `python scripts/check_load_bearing_constraints.py` before changing any of these -- it
+    reports the CURRENT live trailing edge, which is what should justify a change, not the
+    other way around."""
+
+    def test_min_trades_not_silently_lowered(self):
+        assert ir.EMISSION_GATE_MIN_TRADES == 100, (
+            f"EMISSION_GATE_MIN_TRADES changed to {ir.EMISSION_GATE_MIN_TRADES} -- a lower "
+            "sample-size floor makes the gate easier to open on noise, not on real edge."
+        )
+
+    def test_min_avg_pnl_not_silently_lowered_below_breakeven(self):
+        assert ir.EMISSION_GATE_MIN_AVG_PNL == 0.0, (
+            f"EMISSION_GATE_MIN_AVG_PNL changed to {ir.EMISSION_GATE_MIN_AVG_PNL} -- this gate "
+            "exists specifically to require a POSITIVE trailing edge before publishing; "
+            "anything below 0.0%/trade would let the engine publish while still losing money "
+            "net of the realised outcomes it's grading itself against."
+        )
+
+    def test_lookback_window_not_silently_shortened(self):
+        # A shorter window makes the trailing-edge estimate noisier and easier to flip open on
+        # a lucky few days -- 10d was chosen deliberately, not a placeholder.
+        assert ir.EMISSION_GATE_LOOKBACK_DAYS == 10, (
+            f"EMISSION_GATE_LOOKBACK_DAYS changed to {ir.EMISSION_GATE_LOOKBACK_DAYS} -- "
+            "shortening this window makes the realised-edge estimate noisier, not more current."
+        )
+
+
 # ── Reversal component ────────────────────────────────────────────────────────
 
 def _bar(sym, hhmm, hi, lo, close, vol=1000, ss="00"):
@@ -199,3 +234,28 @@ class TestIndexSeriesExcluded:
         scored = _ranker(bars=bars)._reversal_scores()
         assert "NIFTY50" in scored
         assert set(scored) - set(ir._INDEX_SYMBOLS) == {"RELIANCE"}
+
+
+class TestComponentBlendNaNGuard:
+    """2026-08-01 audit sweep: the component blend filtered `v is not None`, not
+    `math.isfinite(v)`, on screener/breakout/reversal scores -- the same anti-pattern class as
+    unified_ranker's dl_score incident. Currently benign here (max(0.0, nan) happens to keep
+    0.0 under Python's first-argument-wins NaN comparison, so it silently zeroes the score
+    rather than faking a Buy), but that's an accident of argument order, not a guarantee --
+    matched to the explicit isfinite guard unified_ranker.py already uses for the same shape
+    of bug."""
+
+    def test_present_filter_excludes_nan(self):
+        parts = [(0.45, 80.0), (0.20, float('nan')), (0.35, 60.0)]
+        present = [(w, v) for w, v in parts if v is not None and math.isfinite(v)]
+        assert present == [(0.45, 80.0), (0.35, 60.0)]
+
+    def test_naive_none_filter_would_let_nan_through(self):
+        """Negative control: `is not None` alone keeps the NaN entry, which then poisons the
+        weighted sum via w*nan -> nan -> sum(...) -> nan."""
+        parts = [(0.45, 80.0), (0.20, float('nan')), (0.35, 60.0)]
+        present = [(w, v) for w, v in parts if v is not None]
+        assert len(present) == 3
+        wsum = sum(w for w, _ in present)
+        base = sum(w * v for w, v in present) / wsum
+        assert base != base  # NaN != NaN

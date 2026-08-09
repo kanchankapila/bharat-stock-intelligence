@@ -147,9 +147,21 @@ def run():
     print(f"[CatalogEnricher] trendlyne_screeners: {ts_updated} screener_url backfilled from screenpk")
 
     # ── Step 4: Fill screener_master.signal_type_tag ─────────────────────────
+    # source is required both to fetch (so trendlyne_screeners is only consulted for a
+    # Trendlyne row) and to scope the UPDATE below -- scan_id collides across providers
+    # (2026-08-04 memory), and an unscoped UPDATE would tag both colliding rows identically.
+    # BUG FOUND 2026-08-07 (dead-column sweep): the original WHERE clause gated re-selection
+    # purely on signal_type_tag, so once that column reached 100% coverage (confirmed live:
+    # 1,669/1,669), this loop selected ZERO rows on every subsequent run -- permanently, even
+    # though the loop body ALSO derives screener_url, which was 0/1,669 the whole time as a
+    # result (same bug class fixed earlier this session in screener_appearances.phase_b_fill_returns:
+    # a fill-missing-columns loop gated on only one of the columns it fills). Now re-selects a
+    # row if EITHER target column is still missing -- extract_signal_keywords() is a cheap pure
+    # function, so recomputing it for already-tagged rows is harmless and idempotent.
     sm_rows = con.execute("""
-        SELECT scan_id, name FROM screener_master
+        SELECT scan_id, name, source FROM screener_master
         WHERE signal_type_tag IS NULL OR signal_type_tag = ''
+           OR screener_url IS NULL OR screener_url = ''
     """).fetchall()
 
     sm_updated = 0
@@ -157,19 +169,20 @@ def run():
         kw = extract_signal_keywords(row[1] or row[0])
         if kw:
             # also derive a screener_url if the scan_id matches a trendlyne_screeners pk
-            ts_row = con.execute(
-                "SELECT screenpk, screener_url FROM trendlyne_screeners WHERE screener_id = ? LIMIT 1",
-                (row[0],)
-            ).fetchone()
             url = None
-            if ts_row:
-                url = ts_row[1] or tl_screener_url(ts_row[0])
+            if row[2] == 'Trendlyne':
+                ts_row = con.execute(
+                    "SELECT screenpk, screener_url FROM trendlyne_screeners WHERE screener_id = ? LIMIT 1",
+                    (row[0],)
+                ).fetchone()
+                if ts_row:
+                    url = ts_row[1] or tl_screener_url(ts_row[0])
             con.execute("""
                 UPDATE screener_master
                 SET signal_type_tag = ?,
                     screener_url = COALESCE(screener_url, ?)
-                WHERE scan_id = ?
-            """, (kw, url, row[0]))
+                WHERE scan_id = ? AND source = ?
+            """, (kw, url, row[0], row[2]))
             sm_updated += 1
 
     con.commit()
@@ -177,13 +190,20 @@ def run():
 
     # ── Step 5: INSERT missing screener_catalog entries from screener_master ────
     # 858 screener_master rows have no catalog entry. Insert them with NLP-derived bias.
+    # sc.source vs sm.source case mismatch: screener_catalog historically got both 'trendlyne'
+    # and 'Trendlyne' rows (2026-08 screener_signal_generator.py comment documents the same
+    # split) -- match case-insensitively so a lowercase-cataloged screener isn't re-inserted,
+    # and source-scope the NOT EXISTS so a genuinely-missing MoneyControl/ETnow scan_id isn't
+    # silently skipped just because an unrelated provider's screener happens to share the same
+    # numeric scan_id (2026-08-04 screener_master collision class) and already has a row.
     missing = con.execute("""
         SELECT sm.scan_id, sm.name, sm.source, sm.inferred_sentiment, sm.inferred_category,
                ts.screenpk, ts.screener_url AS ts_url
         FROM screener_master sm
         LEFT JOIN trendlyne_screeners ts ON ts.screener_id = sm.scan_id
         WHERE NOT EXISTS (
-            SELECT 1 FROM screener_catalog sc WHERE sc.screener_id = sm.scan_id
+            SELECT 1 FROM screener_catalog sc
+            WHERE sc.screener_id = sm.scan_id AND LOWER(sc.source) = LOWER(sm.source)
         )
     """).fetchall()
 
@@ -213,7 +233,13 @@ def run():
     for row in missing:
         scan_id  = row[0]
         name     = row[1] or scan_id
-        source   = row[2] or 'unknown'
+        # Lowercased: unified_ranker.py's _get_screener_membership() joins screener_catalog on
+        # a hardcoded lowercase literal ('trendlyne'/'moneycontrol'/'etnow'), case-sensitively,
+        # not LOWER(sc.source) -- inserting screener_master's raw capitalized source
+        # ('MoneyControl') here would silently reproduce the exact orphaned-row bug this run is
+        # meant to close (874 pre-existing screener_catalog rows already sit under a capitalized
+        # source and are never read by that join; verified live 2026-08-04).
+        source   = (row[2] or 'unknown').lower()
         sentiment = row[3]
         category  = row[4] or 'other'
         screenpk  = row[5]
@@ -242,8 +268,10 @@ def run():
                   (screener_id, screener_name, source, signal_bias, category,
                    investment_horizon, confidence, signal_keywords, screener_url)
                 SELECT ?,?,?,?,?, ?,?,?,?
-                WHERE NOT EXISTS (SELECT 1 FROM screener_catalog WHERE screener_id = ?)
-            """, (scan_id, name, source, bias, cat_norm, horizon, confidence, kw, url, scan_id))
+                WHERE NOT EXISTS (
+                    SELECT 1 FROM screener_catalog WHERE screener_id = ? AND LOWER(source) = LOWER(?)
+                )
+            """, (scan_id, name, source, bias, cat_norm, horizon, confidence, kw, url, scan_id, source))
             inserted += 1
         except Exception as e:
             print(f"  [WARN] Cannot insert {scan_id}: {e}")

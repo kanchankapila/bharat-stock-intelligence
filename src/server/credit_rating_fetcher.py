@@ -19,6 +19,7 @@ import pandas as pd
 
 from db_compat import connect, read_df, executemany, safe_alter, execute
 from fetch_utils import retry_get
+from as_of import logical_trading_date
 
 # ---------------------------------------------------------------------------
 # NSE API
@@ -253,7 +254,11 @@ def update_technical_signals(conn, lookback_days: int = 180) -> int:
         return 0
 
     df["announcement_date"] = pd.to_datetime(df["announcement_date"], errors="coerce")
-    today = pd.Timestamp.today().normalize()
+    # logical_trading_date(), not pd.Timestamp.today() (2026-08-01) -- this fetcher runs inside
+    # ml-daily-ops, whose step chain regularly finishes after midnight IST; a raw wall-clock
+    # date silently targets a day with no grid row yet. See as_of.logical_trading_date's
+    # docstring for the incident.
+    today = pd.Timestamp(logical_trading_date())
 
     updates = []
     for symbol, grp in df.groupby("symbol"):

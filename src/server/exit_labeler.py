@@ -156,10 +156,15 @@ def compute_excursions(entry: float, bars: list, atr: float,
 
 
 def _entries(horizon: int | None, limit: int | None) -> list:
+    # signal_source='technical' (2026-08): signal_excursions' key (symbol, signal_date,
+    # horizon_days) has no source discriminator of its own -- now that signal_outcomes can
+    # carry a technical- AND a confluence-sourced row for the same key, scoping here to
+    # 'technical' keeps this at most one entry per key (matching every other ML consumer's
+    # scope) rather than letting two entries with different entry_price collide on write.
     sql = (
         "SELECT o.symbol, o.signal_date, o.horizon_days, o.entry_price "
         "FROM signal_outcomes o "
-        "WHERE o.entry_price IS NOT NULL "
+        "WHERE o.entry_price IS NOT NULL AND o.signal_source = 'technical' "
         "AND NOT EXISTS ( "
         "  SELECT 1 FROM signal_excursions e "
         "  WHERE e.symbol = o.symbol "

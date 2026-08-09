@@ -19,7 +19,7 @@ import pytest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
-from unified_ranker import _blend, _classify, _conviction, _finite_engine_map
+from unified_ranker import _blend, _classify, _conviction, _finite_engine_map, bet_size_from_probability
 
 
 class TestFiniteEngineMap:
@@ -99,3 +99,52 @@ class TestNaNFallsThroughDownstreamGuards:
     def test_isfinite_check_does_stop_it(self):
         unified = float('nan')
         assert not math.isfinite(unified) or unified < 1
+
+
+class TestBetSizeFromProbabilityNaNGuard:
+    """A NaN win_probability found 2026-08-01 in the position-sizing leg: unlike dl_score,
+    it doesn't get silently zeroed -- it gets sized at 1.0, the MAXIMUM bet, because
+    `p <= neutral` is False for NaN (falls through the early return) and then
+    `min(1.0, nan)` keeps 1.0 under Python's first-argument-wins NaN comparison."""
+
+    def test_normal_probabilities_unaffected(self):
+        assert bet_size_from_probability(0.5) == 0.0  # at neutral
+        assert 0.0 < bet_size_from_probability(0.65) <= 1.0
+        assert bet_size_from_probability(0.3) == 0.0  # below neutral, long-only
+
+    def test_none_is_zero(self):
+        assert bet_size_from_probability(None) == 0.0
+
+    def test_nan_would_be_maximum_bet_without_the_guard(self):
+        """Negative control: proves the failure mode the guard prevents."""
+        p = float('nan')
+        denom = math.sqrt(p * (1.0 - p))
+        z = (p - 0.5) / denom
+        cdf = 0.5 * (1.0 + math.erf(z / math.sqrt(2.0)))
+        naive = max(0.0, min(1.0, 2.0 * cdf - 1.0))
+        assert naive == 1.0, "documents why the isfinite guard is load-bearing"
+
+    def test_nan_is_zero_with_guard(self):
+        assert bet_size_from_probability(float('nan')) == 0.0
+
+    def test_inf_is_zero_with_guard(self):
+        assert bet_size_from_probability(float('inf')) == 0.0
+
+
+class TestGetWinProbabilitiesNaNGuard:
+    """_get_win_probabilities' SQL filters `win_probability IS NOT NULL`, which does NOT
+    exclude NaN (a real float value, not NULL) -- a NaN row would poison the whole symbol's
+    sum()/len() average, then flow into bet_size_from_probability above."""
+
+    def test_nan_poisons_a_plain_average(self):
+        """Negative control: documents the failure mode `if p is None: continue` alone misses."""
+        values = [0.6, float('nan'), 0.55]
+        avg = sum(values) / len(values)
+        assert math.isnan(avg)
+
+    def test_isfinite_filter_excludes_nan_from_average(self):
+        raw = [0.6, float('nan'), 0.55, None]
+        clean = [float(v) for v in raw if v is not None and math.isfinite(v)]
+        avg = sum(clean) / len(clean)
+        assert math.isfinite(avg)
+        assert avg == pytest.approx((0.6 + 0.55) / 2)

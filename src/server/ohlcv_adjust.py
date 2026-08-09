@@ -66,6 +66,7 @@ Run:
 """
 import argparse
 import sys
+from datetime import date
 from fractions import Fraction
 
 from db_compat import connect, ConnWrapper
@@ -247,6 +248,93 @@ def adjust_symbol(rows) -> dict:
 # on 2021-10-28 was detected correctly at exactly 0.2 and then thrown away because four other
 # companies happened to have actions the same day.
 
+# ── authoritative cross-validation (2026-08-07) ─────────────────────────────
+#
+# mc_corporate_actions_fetcher.py closed the gap this module's own docstring named as the
+# reason it had to reverse-derive ratios in the first place ("the corporate_actions table was
+# checked and is unusable for it ... no splits or bonuses" -- true of that table, but that
+# table was never meant to carry deep history; see the new fetcher's docstring). This section
+# is deliberately ADDITIVE, not a replacement for detect_adjustment_events(): the guards above
+# are the load-bearing, already-proven-correct part of this module, and an authoritative feed
+# can itself be wrong (a bad scId resolution, a malformed row) -- so an authoritative event is
+# only ever used to FILL a genuine gap the heuristic left, never to silently override an
+# existing heuristic-detected factor. A disagreement between the two is reported, exactly like
+# a rejected heuristic event, not auto-resolved either way.
+
+DATE_WINDOW_DAYS = 5  # ex-date vs record-date / weekend slack between the two sources
+
+
+def cross_validate_with_mc_actions(conn: ConnWrapper, persist: bool = False) -> dict:
+    """Compare `stock_corporate_action_history`'s authoritative bonus/split ratios against
+    `ohlcv_adjustment_factors`, the heuristic detector's output.
+
+    Three outcomes per authoritative (symbol, ex-date, ratio) event:
+      - confirmed: an existing heuristic factor within RATIO_TOL sits within DATE_WINDOW_DAYS
+        of the authoritative date. No write.
+      - filled: NO heuristic factor exists for that symbol anywhere in the window -- a genuine
+        gap (the price-ratio detector's guards rejected it, or bhavcopy was missing the
+        session). Inserted with source='mc_corporate_action' when persist=True, so
+        backtester.load_bhavcopy_adjusted() picks it up.
+      - disagreement: a heuristic factor DOES exist in the window but its value doesn't match
+        the authoritative one -- NEVER auto-resolved (either side could be the one that's
+        wrong; overwriting risks double-adjusting a bar that the heuristic's own factor was
+        already correctly applied to). Reported only, matching this module's stated philosophy
+        of reporting an uncertain case rather than guessing.
+    """
+    mc_events = conn.execute(
+        "SELECT symbol, record_date, ratio_factor, ratio_text, action_type "
+        "FROM stock_corporate_action_history "
+        "WHERE action_type IN ('bonus','split') AND ratio_factor IS NOT NULL "
+        "AND record_date IS NOT NULL"
+    ).fetchall()
+    existing = conn.execute("SELECT symbol, ex_date, factor FROM ohlcv_adjustment_factors").fetchall()
+
+    by_symbol: dict[str, list[tuple[str, float]]] = {}
+    for r in existing:
+        by_symbol.setdefault(r[0], []).append((r[1], r[2]))
+
+    confirmed, filled, disagreement = [], [], []
+    for row in mc_events:
+        sym, rdate_s, factor, ratio_text, atype = row[0], row[1], row[2], row[3], row[4]
+        try:
+            rdate = date.fromisoformat(str(rdate_s)[:10])
+            factor = float(factor)
+        except (TypeError, ValueError):
+            continue
+
+        nearby = []
+        for ex_date_s, ex_factor in by_symbol.get(sym, []):
+            try:
+                ex_date = date.fromisoformat(str(ex_date_s)[:10])
+            except (TypeError, ValueError):
+                continue
+            if abs((ex_date - rdate).days) <= DATE_WINDOW_DAYS:
+                nearby.append((ex_date_s, ex_factor))
+
+        close = [ (d, f) for d, f in nearby
+                  if f is not None and f > 0 and abs(float(f) - factor) / factor <= RATIO_TOL ]
+        if close:
+            confirmed.append((sym, rdate_s, atype, factor, ratio_text))
+        elif nearby:
+            disagreement.append((sym, rdate_s, atype, factor, ratio_text, nearby))
+        else:
+            filled.append((sym, rdate_s, atype, factor, ratio_text))
+
+    if persist and filled:
+        ensure_schema(conn)
+        for sym, d, atype, factor, ratio_text in filled:
+            conn.execute(
+                "INSERT INTO ohlcv_adjustment_factors (symbol, ex_date, factor, source) "
+                "VALUES (?,?,?,'mc_corporate_action') "
+                "ON CONFLICT (symbol, ex_date) DO UPDATE SET "
+                "factor=excluded.factor, source=excluded.source",
+                (sym, d, factor),
+            )
+        conn.commit()
+
+    return {'confirmed': confirmed, 'filled': filled, 'disagreement': disagreement}
+
+
 # ── persistence ──────────────────────────────────────────────────────────────
 
 def ensure_schema(conn: ConnWrapper) -> None:
@@ -302,9 +390,26 @@ def main():
     ap = argparse.ArgumentParser(description="Detect split/bonus factors from bhavcopy prev_close")
     ap.add_argument('--persist', action='store_true', help='write ohlcv_adjustment_factors')
     ap.add_argument('--report', action='store_true', help='print detail, write nothing')
+    ap.add_argument('--cross-validate', action='store_true',
+                     help='compare against stock_corporate_action_history (mc_corporate_actions_fetcher.py)')
     args = ap.parse_args()
 
     conn = connect()
+    if args.cross_validate:
+        res = cross_validate_with_mc_actions(conn, persist=args.persist)
+        print(f"[OhlcvAdjust] cross-validate: {len(res['confirmed'])} confirmed, "
+              f"{len(res['filled'])} filled, {len(res['disagreement'])} disagreement")
+        if args.report:
+            print("\n-- filled (heuristic had nothing here) --")
+            for sym, d, atype, f, txt in sorted(res['filled'], key=lambda x: x[1]):
+                print(f"   {sym:14s} {d}  {atype:6s} {txt or '':8s} x{f:g}")
+            print("\n-- disagreement (needs manual review, neither side auto-changed) --")
+            for sym, d, atype, f, txt, nearby in sorted(res['disagreement'], key=lambda x: x[1]):
+                print(f"   {sym:14s} {d}  {atype:6s} {txt or '':8s} authoritative=x{f:g}  heuristic={nearby}")
+        if args.persist:
+            print(f"[OhlcvAdjust] persisted {len(res['filled'])} authoritative-sourced factors")
+        return 0
+
     res = scan(conn, persist=args.persist)
     print(f"[OhlcvAdjust] scanned {res['symbols_scanned']} symbols")
     print(f"[OhlcvAdjust] accepted {len(res['accepted'])} adjustment events, "

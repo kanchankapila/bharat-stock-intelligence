@@ -110,7 +110,10 @@ def _make_db():
         CREATE TABLE signal_outcomes (
             symbol TEXT, signal_date TEXT, horizon_days INT, outcome TEXT,
             signal_score INT, signals_json TEXT, return_pct REAL,
-            PRIMARY KEY (symbol, signal_date, horizon_days)
+            -- ml_ensemble.py's load_training_data() filters to signal_source='technical'
+            -- (2026-08 fix); default so the existing INSERT below doesn't need touching.
+            signal_source TEXT NOT NULL DEFAULT 'technical',
+            PRIMARY KEY (symbol, signal_date, horizon_days, signal_source)
         );
         CREATE TABLE technical_signals (
             symbol TEXT, date TEXT, rsi REAL, adx REAL, nifty_regime TEXT, cmp REAL,

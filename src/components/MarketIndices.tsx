@@ -4,14 +4,17 @@ import { cn } from '../lib/utils';
 import { motion } from 'motion/react';
 import { ArrowUpRight, ArrowDownRight } from 'lucide-react';
 import { useIntersectionObserver } from '../hooks/useIntersectionObserver';
+import { marketHoursRefetchInterval } from '../lib/timeFormat';
+import { PriceFreshnessBadge } from './PriceFreshnessBadge';
 
 export const MarketIndices: React.FC<{ onSelect?: (id: string, name: string) => void }> = ({ onSelect }) => {
   const ref = React.useRef<HTMLDivElement>(null);
   const isVisible = useIntersectionObserver(ref, { threshold: 0.1 });
+  const activeRefetch = marketHoursRefetchInterval(5000);
 
-  const { data: indices, isLoading } = trpc.getMarketOverview.useQuery(undefined, {
+  const { data: indices, isLoading, dataUpdatedAt } = trpc.getMarketOverview.useQuery(undefined, {
     enabled: isVisible,
-    refetchInterval: isVisible ? 10000 : false,
+    refetchInterval: isVisible ? activeRefetch : false,
   });
 
   if (isLoading || !indices) return (
@@ -37,7 +40,13 @@ export const MarketIndices: React.FC<{ onSelect?: (id: string, name: string) => 
   };
 
   return (
-    <div ref={ref} className="col-span-12 grid grid-cols-1 md:grid-cols-3 gap-4 mb-2">
+    <div ref={ref} className="col-span-12">
+      {dataUpdatedAt > 0 && (
+        <div className="flex justify-end mb-1.5">
+          <PriceFreshnessBadge updatedAt={dataUpdatedAt} thresholdMs={15_000} />
+        </div>
+      )}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-2">
       {displayItems.map((item, idx) => {
         const isUp = item.change >= 0;
 
@@ -135,6 +144,7 @@ export const MarketIndices: React.FC<{ onSelect?: (id: string, name: string) => 
           </motion.div>
         );
       })}
+      </div>
     </div>
   );
 };

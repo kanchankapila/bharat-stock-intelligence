@@ -11,6 +11,7 @@ import io
 import requests
 import pandas as pd
 from db_compat import connect, use_postgres
+from as_of import logical_write_floor
 
 HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
@@ -155,8 +156,7 @@ def backfill_technical_signals(con) -> int:
     # every historical is_nifty50/.../nifty_tier column gets NULLed out on every single run -- same
     # bug class already fixed in asm_gsm_fetcher.py, financial_ratios_fetcher.py, and 7 other
     # fetchers (see CLAUDE.md "date('now') anchor" recurring-bug notes).
-    latest_row = cur.execute("SELECT MAX(date) AS d FROM stock_ohlcv").fetchone()
-    today = str(latest_row["d"])[:10] if latest_row and latest_row["d"] else datetime.now().strftime("%Y-%m-%d")
+    today = logical_write_floor(cur, fallback=datetime.now().strftime("%Y-%m-%d"))
     if use_postgres():
         cur.execute(
             """

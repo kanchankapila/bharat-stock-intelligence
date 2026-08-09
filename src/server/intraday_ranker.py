@@ -14,6 +14,7 @@ no table or query with the positional pipeline, so unified_ranker output is neve
 Run (market hours, every 15 min):  python intraday_ranker.py
 """
 import json
+import math
 from datetime import date, datetime, timedelta
 
 from db_compat import connect
@@ -547,7 +548,11 @@ class IntradayRanker:
             # Renormalize the blend over whichever components are present for this symbol, so a
             # missing component never silently dilutes the others toward zero.
             parts = [(w_screener, s_sc), (w_breakout, b_sc), (W_REVERSAL, r_sc)]
-            present = [(w, v) for w, v in parts if v is not None]
+            # isfinite, not just `is not None` -- a NaN component currently degrades to a
+            # silently-zeroed score (max(0.0, nan) keeps 0.0 under Python's first-arg-wins
+            # NaN comparison), not a fake Buy, but that's incidental to argument order, not a
+            # guarantee -- match unified_ranker.py's explicit guard for the same anti-pattern.
+            present = [(w, v) for w, v in parts if v is not None and math.isfinite(v)]
             if not present:
                 continue
             wsum = sum(w for w, _ in present)

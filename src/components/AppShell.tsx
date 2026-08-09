@@ -6,24 +6,44 @@ import {
   Search, History, PieChart, Bookmark, Users, Globe, CheckCircle2,
   Star, LogIn, TrendingUp, ArrowUpRight, ArrowDownRight, Menu,
   ChevronLeft, ChevronRight, Radio, Settings2, Briefcase, Calendar, Sparkles,
-  FlaskConical, Layers, MonitorDot, ChartLine, X, MessageSquare, Gauge,
+  FlaskConical, Layers, MonitorDot, ChartLine, X, MessageSquare, Gauge, FileDown,
 } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { nseStocksData } from '../data/nseStocks';
 import type { MarketData } from '../services/marketService';
 import type { User as FirebaseUser } from 'firebase/auth';
 import { useWebSocket } from '../v2/hooks/useWebSocket';
+import { notifyAlert } from '../lib/browserNotify';
+import { CommandPalette } from './CommandPalette';
 
 // ─── Nav Config ───────────────────────────────────────────────────────────────
 
 interface NavItem { icon: React.ElementType; label: string; id: string; }
 interface NavGroup { label: string; items: NavItem[]; }
 
-// Items that appear only when "Advanced" is expanded
-const ADVANCED_INTELLIGENCE_IDS = new Set([
-  'top-rated', 'signals', 'todays-picks', 'research',
-]);
-
+// Nav restructuring (2026-08-04 UX audit follow-up): the old flat 18-item "Intelligence" group
+// mixed the canonical cross-engine ranking (unified_recommendations, via unified_ranker.py --
+// see CLAUDE.md's "Scoring Authority" section) with several independent/alternative scoring
+// models and pure diagnostics tools, with no visual signal for which to trust first. Split into
+// three groups by what each tab actually is, verified against each page's own backend query
+// and on-page copy (several -- Best Picks, Strategy -- already self-label "independent scoring
+// model, not the unified cross-engine model" in their own UI; that framing is now reflected in
+// the nav itself instead of only showing up once you've already opened the page):
+//   - "Top Picks": canonical, unified_recommendations-backed. Placed right after Markets.
+//   - "Alternative Screens": independent scoring models -- a different lens, not a duplicate.
+//   - "Signal Tools": logs/diagnostics/research, not ranked "buy this" lists at all.
+// The old "Advanced" hide-behind-a-toggle mechanism (top-rated/signals/todays-picks/research)
+// is dropped in favor of this grouping -- each new group is small enough (4-7 items) to show
+// everything without an extra click, matching the density of the un-collapsed "Analysis" group.
+//
+// 2026-08-04 follow-up: "Top Picks" is capped at exactly the 2 pages worth trusting for a real
+// decision. Alpha (CommandCenterDashboard) and Buy Recs/Alpha Cockpit all ran the literal same
+// query (getBuyRecommendations -> unified_recommendations) under three different names -- Buy
+// Recs and Alpha Cockpit now redirect to /alpha (App.tsx) rather than exist as separate pages,
+// so there's no longer a real choice to make between them. Top Rated moved out -- it renders
+// stock_scores only (one INPUT to the canonical blend, not the merge itself) and already carries
+// its own LegacyScoreBanner -- it belongs beside Strategy/Strategy Builder in Alternative Screens,
+// not implying equal standing with the canonical page.
 const NAV_GROUPS: NavGroup[] = [
   {
     label: 'Markets',
@@ -36,39 +56,49 @@ const NAV_GROUPS: NavGroup[] = [
     ],
   },
   {
+    label: 'Top Picks',
+    items: [
+      { icon: Zap,        label: 'Alpha ⚡',      id: 'alpha'         },
+      { icon: Sparkles,   label: 'Trade Cockpit', id: 'trade-cockpit' },
+    ],
+  },
+  {
     label: 'Analysis',
     items: [
       { icon: Filter,  label: 'Screener',   id: 'screener'    },
       { icon: Target,  label: 'F&O Intel',  id: 'fno-scanners'},
       { icon: TrendingUp, label: 'Options Intel', id: 'options' },
       { icon: Zap,     label: 'Trendlyne',  id: 'trendlyne'   },
+      { icon: Star,    label: 'Premium Screeners', id: 'premium-screeners' },
       { icon: Search,     label: 'Discover',    id: 'discover'    },
       { icon: Briefcase,  label: 'Smart Money', id: 'smart-money' },
+      { icon: Users,      label: 'Money Flow',  id: 'money-flow'  },
       { icon: Calendar,   label: 'Earnings',    id: 'earnings'    },
     ],
   },
   {
-    label: 'Intelligence',
+    label: 'Alternative Screens',
     items: [
-      { icon: TrendingUp, label: 'Buy Recs 🟢',          id: 'buy-recs'             },
-      { icon: Zap,      label: 'Alpha ⚡',             id: 'alpha'                },
-      { icon: BarChart2, label: 'Screener Intel',      id: 'screener-intelligence' },
-      { icon: Sparkles, label: 'Trade Cockpit',        id: 'trade-cockpit'        },
-      { icon: Zap,      label: 'Early Spotter ⚡', id: 'early-spotter'        },
-      { icon: Crosshair, label: 'Best Picks',          id: 'best-picks'           },
-      { icon: Layers,  label: 'Signal Intel', id: 'signal-intelligence' },
-      { icon: ChartLine, label: 'Signal Report Card', id: 'signal-report-card' },
-      { icon: Star,    label: 'Strategy',   id: 'strategy'    },
-      { icon: Target,  label: 'Builder',    id: 'strategy-builder' },
-      { icon: Activity,label: 'Sentiment',  id: 'sentiment'   },
-      { icon: History, label: 'Backtest',   id: 'backtest'    },
-      { icon: Settings2, label: 'ML Builder', id: 'builder'   },
-      // Advanced (hidden by default):
-      { icon: Trophy,   label: 'Top Rated',     id: 'top-rated'    },
-      { icon: Radio,    label: 'Signal Ledger',  id: 'signal-tracking' },
-      { icon: Radio,    label: 'Signals',        id: 'signals'      },
-      { icon: Zap,      label: "Today's Picks",  id: 'todays-picks' },
-      { icon: FlaskConical, label: 'Research',   id: 'research'     },
+      { icon: Crosshair, label: 'Best Picks',           id: 'best-picks'            },
+      { icon: Trophy,    label: 'Top Rated',            id: 'top-rated'             },
+      { icon: Star,      label: 'Strategy',             id: 'strategy'              },
+      { icon: Target,    label: 'Strategy Builder',     id: 'strategy-builder'      },
+      { icon: Layers,    label: 'Signal Intel',         id: 'signal-intelligence'   },
+      { icon: BarChart2, label: 'Screener Intel',       id: 'screener-intelligence' },
+      { icon: Zap,       label: 'Early Spotter ⚡',     id: 'early-spotter'         },
+      { icon: Zap,       label: "Today's Picks",        id: 'todays-picks'          },
+    ],
+  },
+  {
+    label: 'Signal Tools',
+    items: [
+      { icon: Radio,        label: 'Signal Ledger',      id: 'signal-tracking'    },
+      { icon: Radio,        label: 'Signals',            id: 'signals'            },
+      { icon: ChartLine,    label: 'Signal Report Card', id: 'signal-report-card' },
+      { icon: Activity,     label: 'Sentiment',          id: 'sentiment'          },
+      { icon: History,      label: 'Backtest',           id: 'backtest'           },
+      { icon: Settings2,    label: 'ML Builder',         id: 'builder'            },
+      { icon: FlaskConical, label: 'Research',           id: 'research'           },
     ],
   },
   {
@@ -93,10 +123,12 @@ const NAV_GROUPS: NavGroup[] = [
     label: 'Tools',
     items: [
       { icon: MessageSquare, label: 'AI Chat',    id: 'chat'      },
+      { icon: Sparkles,      label: 'Switch to V5', id: 'v5'      },
       { icon: Globe,         label: 'Economics',  id: 'economics' },
       { icon: CheckCircle2,  label: 'ToDo',       id: 'todo'      },
-      { icon: MonitorDot,    label: 'Monitor',    id: 'monitor'   },
-      { icon: Calendar,      label: 'Jobs',       id: 'jobs'      },
+      { icon: MonitorDot,    label: 'System Monitor', id: 'monitor'   },
+      { icon: Calendar,      label: 'Job Console',    id: 'jobs'      },
+      { icon: FileDown,      label: 'Export Portfolio', id: 'export-picks' },
     ],
   },
 ];
@@ -163,7 +195,6 @@ const SidebarInner = React.memo(function SidebarInner({ collapsed, setCollapsed,
   const [marketStatus, setMarketStatus] = useState(getMarketStatus());
   const [searchQuery, setSearchQuery]   = useState('');
   const [showSearch, setShowSearch]     = useState(false);
-  const [showAdvancedTabs, setShowAdvancedTabs] = useState(false);
   const searchRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -369,7 +400,6 @@ const SidebarInner = React.memo(function SidebarInner({ collapsed, setCollapsed,
             {collapsed && <div className="my-1 mx-1 border-t border-slate-800/50" />}
 
             {group.items
-              .filter(item => !ADVANCED_INTELLIGENCE_IDS.has(item.id) || showAdvancedTabs)
               .map(item => {
                 const active = activeTab === item.id;
                 return (
@@ -412,15 +442,6 @@ const SidebarInner = React.memo(function SidebarInner({ collapsed, setCollapsed,
                   </button>
                 );
               })}
-            {/* Advanced toggle — shown only in Intelligence group when not collapsed */}
-            {group.label === 'Intelligence' && !collapsed && (
-              <button
-                onClick={() => setShowAdvancedTabs(!showAdvancedTabs)}
-                className="flex items-center gap-1 px-2 py-1 text-[11px] text-slate-500 hover:text-slate-300 transition-colors w-full"
-              >
-                Advanced {showAdvancedTabs ? '‹' : '›'}
-              </button>
-            )}
           </div>
         ))}
       </nav>
@@ -528,6 +549,10 @@ export const AppShell: React.FC<AppShellProps> = ({
   useEffect(() => {
     if (lastMessage) {
       setToastMessage(lastMessage);
+      const body = lastMessage.type === 'new_signal'
+        ? `New ${lastMessage.signal?.signalType || 'Signal'} generated (${lastMessage.source || 'AI'})`
+        : lastMessage.level || 'Status update';
+      notifyAlert(`Live Alert: ${lastMessage.symbol}`, body);
       const timer = setTimeout(() => {
         setToastMessage(null);
       }, 5000);
@@ -657,15 +682,36 @@ export const AppShell: React.FC<AppShellProps> = ({
             >
               V2
             </button>
-            <button 
+            <button
               onClick={() => {
                 localStorage.setItem('dashboardVersion', 'v3');
                 localStorage.setItem('v2Enabled', 'true');
                 window.location.reload();
               }}
-              className="bg-indigo-600 hover:bg-indigo-500 text-white font-black text-[9px] rounded-md px-2.5 py-1 uppercase tracking-wider cursor-pointer transition-colors"
+              className="bg-slate-900 border border-slate-800 text-slate-400 hover:text-slate-200 font-black text-[9px] rounded-md px-2.5 py-1 uppercase tracking-wider cursor-pointer transition-colors"
             >
               V3 Pro
+            </button>
+            {/* v6 = the consolidation shell (src/v6/), reusing the same v2Enabled route tree as
+                v2/v3 -- promoted to the default 2026-08-09 (see App.tsx's dashboardVersion
+                initializer), so this button now carries the "recommended" accent V3 used to. */}
+            <button
+              onClick={() => {
+                localStorage.setItem('dashboardVersion', 'v6');
+                localStorage.setItem('v2Enabled', 'true');
+                window.location.reload();
+              }}
+              className="bg-indigo-600 hover:bg-indigo-500 text-white font-black text-[9px] rounded-md px-2.5 py-1 uppercase tracking-wider cursor-pointer transition-colors"
+            >
+              Workbench
+            </button>
+            {/* V5 is a separate top-level route (main.tsx), not a dashboardVersion value --
+                a plain navigation, not a localStorage-driven reload like its siblings. */}
+            <button
+              onClick={() => { window.location.href = '/v5'; }}
+              className="bg-violet-600 hover:bg-violet-500 text-white font-black text-[9px] rounded-md px-2.5 py-1 uppercase tracking-wider cursor-pointer transition-colors"
+            >
+              V5
             </button>
           </div>
         </header>
@@ -695,7 +741,7 @@ export const AppShell: React.FC<AppShellProps> = ({
                 </p>
               </div>
             </div>
-            <button 
+            <button
               onClick={() => setToastMessage(null)}
               className="p-1 hover:bg-white/10 rounded-full transition-colors self-start -mt-1 -mr-1"
             >
@@ -704,6 +750,8 @@ export const AppShell: React.FC<AppShellProps> = ({
           </div>
         </div>
       )}
+
+      <CommandPalette navGroups={NAV_GROUPS} onNavigate={setActiveTab} onSelectStock={onSelectStock} stocks={stocks} />
     </div>
   );
 };

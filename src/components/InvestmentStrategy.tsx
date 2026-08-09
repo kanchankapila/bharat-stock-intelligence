@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { trpc } from '../lib/trpc';
 import { Loader2, TrendingUp, Shield, Zap, Target, Activity, CheckCircle2, Layers } from 'lucide-react';
 import { cn } from '../lib/utils';
+import { LegacyScoreBanner } from './CanonicalSourceNote';
 
 // ponytail: 3 pre-built scanners with no UI (getConvergenceSignals/getRegimeSectorSignals/
 // getQualityOversoldSignals) — all return the same flat {symbol, score, classification, ...}
@@ -113,6 +114,8 @@ export function InvestmentStrategy({ onSelectStock }: { onSelectStock: (symbol: 
           </button>
         </div>
       </div>
+
+      <LegacyScoreBanner note="Ranked by an independent screener-confluence formula (ET/MoneyControl/Trendlyne membership counts), not the unified cross-engine model -- check Alpha / Buy Recs for the canonical, regime-aware view of the same stocks." />
 
       {activeTab === 'SCANNERS' && (
         <div className="space-y-4">

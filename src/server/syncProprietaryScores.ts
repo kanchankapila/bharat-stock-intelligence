@@ -55,10 +55,15 @@ export async function syncNiftyTraderScores() {
         count++;
       }
 
-      const finScore = data.financialData?.fin_score;
-      if (finScore !== undefined && finScore !== null) {
-        stockUpserts.push([stock.symbol, date, 'financial_score', finScore, '']);
-      }
+      // NOTE: NiftyTrader's stock-financial-data response no longer carries a `fin_score`
+      // field (confirmed live 2026-08-06 — it now returns market_cap/book_value/stock_pe/
+      // dividend_yield/roce/roe/sales_growth/face_value/current_price instead). This read
+      // was always undefined against the current API shape, so 'financial_score' has zero
+      // rows in proprietary_scores_history — a silent no-op, not a real data source. Every
+      // field the endpoint DOES return is already covered elsewhere at equal-or-better
+      // coverage (stock_fundamentals: market_cap 93.8%, book_value 97.1%, trailing_pe 79.1%,
+      // revenue_growth 93.0%; tl_financial_quality.roce 97.7%; historical_fundamentals.roe
+      // 77.7%) — not worth reviving as a 4th duplicate source. Removed rather than fixed.
 
       if (stockUpserts.length > 0) {
         await dbTransaction(async (tx) => {

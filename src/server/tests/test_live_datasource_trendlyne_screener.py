@@ -37,9 +37,10 @@ def _make_test_db():
             last_updated TEXT, screener_url TEXT, query_text TEXT, stock_count INTEGER
         );
         CREATE TABLE screener_master (
-            scan_id TEXT PRIMARY KEY, name TEXT, source TEXT,
+            scan_id TEXT, name TEXT, source TEXT,
             inferred_sentiment TEXT, inferred_category TEXT,
-            inferred_timeframe TEXT, confidence REAL
+            inferred_timeframe TEXT, confidence REAL,
+            UNIQUE (source, scan_id)
         );
         CREATE TABLE screener_catalog (
             screener_id TEXT PRIMARY KEY, source TEXT, screener_name TEXT,

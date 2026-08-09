@@ -171,7 +171,7 @@ def test_fetchable_registry_keeps_current_parser_ready_pipeline(tmp_path):
     rendered = {endpoint.name: render_endpoint_url(endpoint, stock) for endpoint in stock_endpoints}
 
     assert len(stock_endpoints) == 20
-    assert len(market_endpoints) == 8
+    assert len(market_endpoints) == 14
     assert rendered["marketservices_shareholding"].endswith("companyid=123")
     assert "sid=456" in rendered["trading80_header_info"]
     assert "sid=456" in rendered["marketsmojo_header_info"]

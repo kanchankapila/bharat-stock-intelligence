@@ -53,6 +53,47 @@ db.exec(`
     FOREIGN KEY (userId) REFERENCES users(id) ON DELETE CASCADE
   );
 
+  -- One row per lot, not a running-balance ledger -- a buy creates a row, a full/partial sell
+  -- fills sellPrice/sellDate on it (or splits the quantity into a new closed row when partial;
+  -- see portfolio.router.ts). Matches the "quantity/buy price/buy date/sell price/sell date"
+  -- fields a real portfolio tracker (Zerodha Console/Screener.in/Trendlyne) exposes per holding.
+  CREATE TABLE IF NOT EXISTS portfolio_holdings (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    userId TEXT NOT NULL,
+    symbol TEXT NOT NULL,
+    quantity REAL NOT NULL,
+    buyPrice REAL NOT NULL,
+    buyDate TEXT NOT NULL,
+    sellPrice REAL,
+    sellDate TEXT,
+    notes TEXT,
+    createdAt DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updatedAt DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (userId) REFERENCES users(id) ON DELETE CASCADE
+  );
+  CREATE INDEX IF NOT EXISTS idx_portfolio_holdings_user ON portfolio_holdings(userId);
+
+  -- Mirrors portfolio_holdings for mutual funds. currentNav is user-maintained (manually
+  -- updated) -- no live AMFI NAV feed exists in this codebase yet, see portfolio.router.ts.
+  CREATE TABLE IF NOT EXISTS mf_portfolio_holdings (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    userId TEXT NOT NULL,
+    schemeName TEXT NOT NULL,
+    folioNumber TEXT,
+    category TEXT,
+    units REAL NOT NULL,
+    buyNav REAL NOT NULL,
+    buyDate TEXT NOT NULL,
+    currentNav REAL,
+    sellNav REAL,
+    sellDate TEXT,
+    notes TEXT,
+    createdAt DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updatedAt DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (userId) REFERENCES users(id) ON DELETE CASCADE
+  );
+  CREATE INDEX IF NOT EXISTS idx_mf_portfolio_holdings_user ON mf_portfolio_holdings(userId);
+
   -- 2. Core Stock Data
   CREATE TABLE IF NOT EXISTS nse_stocks (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -253,7 +294,7 @@ db.exec(`
 
   -- 5b. Unified Screener Metadata (NLP Inferred)
   CREATE TABLE IF NOT EXISTS screener_master (
-    scan_id TEXT PRIMARY KEY,
+    scan_id TEXT,
     name TEXT NOT NULL,
     source TEXT NOT NULL,
     inferred_sentiment TEXT, -- 'bullish', 'bearish', 'neutral'
@@ -261,7 +302,11 @@ db.exec(`
     inferred_timeframe TEXT DEFAULT 'long_term', -- 'long_term', 'intraday'
     confidence REAL,
     weight_override REAL,
-    last_updated DATETIME DEFAULT CURRENT_TIMESTAMP
+    last_updated DATETIME DEFAULT CURRENT_TIMESTAMP,
+    -- PK is (source, scan_id), not scan_id alone -- scan_id collides across providers (MC and
+    -- ETnow independently hand out overlapping small integers). See migration
+    -- 1785900000001_screener-master-source-scan-id-pk.sql / the 2026-08-04 screener_master memory.
+    PRIMARY KEY (source, scan_id)
   );
 
   -- 6. ETnow Intelligence (Placeholder for future sync)
@@ -388,18 +433,8 @@ db.exec(`
   );
 
   -- 9. Technical Analysis Signals & Predictions
-  CREATE TABLE IF NOT EXISTS technical_analysis_signals (
-    symbol TEXT PRIMARY KEY,
-    trend TEXT, -- 'Bullish' | 'Bearish' | 'Neutral'
-    rsi REAL,
-    macd TEXT,
-    bollinger TEXT,
-    patterns TEXT, -- JSON array of detected candlestick patterns
-    entry_price REAL,
-    target_price REAL,
-    stop_loss REAL,
-    last_updated DATETIME DEFAULT CURRENT_TIMESTAMP
-  );
+  -- technical_analysis_signals folded into unified_signals (signal_source='technical'),
+  -- Cluster B-lite, 2026-08 -- see migration 074_drop_technical_analysis_signals below.
 
   -- 8. Strategies & Settings
   CREATE TABLE IF NOT EXISTS backtest_strategies (
@@ -610,6 +645,11 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_tsig_sym   ON technical_signals(symbol);
 
   -- 15. Signal Outcomes — win rate tracking (entry vs exit N days later)
+  -- signal_source: which upstream signal this row grades ('technical' = technical_signals via
+  -- outcome_resolver.py, 'confluence' = confluence_signals via confluence_outcome_tracker.py,
+  -- 'unknown' = pre-2026-08 rows that can't be attributed). Without this, both writers collide
+  -- on (symbol, signal_date, horizon_days) and silently pick whichever wrote first -- see
+  -- migration 075 below for the fresh-DB-vs-existing-DB split of this fix.
   CREATE TABLE IF NOT EXISTS signal_outcomes (
     symbol        TEXT NOT NULL,
     signal_date   TEXT NOT NULL,
@@ -622,7 +662,13 @@ db.exec(`
     signal_score  INTEGER,
     signals_json  TEXT,
     computed_at   DATETIME DEFAULT CURRENT_TIMESTAMP,
-    PRIMARY KEY (symbol, signal_date, horizon_days)
+    max_return_pct REAL,
+    -- label_definition ('terminal_pct2' | 'path_barrier' | 'unknown') / is_suspect: see the
+    -- migrateColumn() catch-up below for why these are on the CREATE TABLE too.
+    label_definition TEXT,
+    is_suspect    INTEGER DEFAULT 0,
+    signal_source TEXT NOT NULL DEFAULT 'unknown',
+    PRIMARY KEY (symbol, signal_date, horizon_days, signal_source)
   );
 
   CREATE INDEX IF NOT EXISTS idx_sout_date    ON signal_outcomes(signal_date DESC);
@@ -1552,6 +1598,13 @@ migrateColumn('screener_master', 'signal_type_tag', "TEXT DEFAULT 'OTHER'");
 
 // signal_outcomes — max intraday high return over horizon for accurate WIN detection
 migrateColumn('signal_outcomes', 'max_return_pct', 'REAL');
+
+// signal_outcomes — label_definition/is_suspect were previously added only via
+// data_integrity_repair.py's runtime ALTER TABLE ... ADD COLUMN IF NOT EXISTS; not in the
+// tracked schema, so a fresh bootstrap or DR restore would silently lose them. Schema
+// catch-up, 2026-08 -- no behavior change, the live DB already has these columns.
+migrateColumn('signal_outcomes', 'label_definition', 'TEXT');
+migrateColumn('signal_outcomes', 'is_suspect', 'INTEGER DEFAULT 0');
 
 // signal_excursions — triple-barrier label (vol-scaled, asymmetric) + the ATR%% scale
 // it was computed against, written by exit_labeler.py. Consumed by ml_ensemble --label.
@@ -2968,6 +3021,63 @@ runMigration('072_nse_stocks_provider_ids', `
 // unified_ranker.py's _blend() renormalized weights (see unified_ranker.py's `present` set).
 runMigration('073_unified_recommendations_engine_coverage', `
   ALTER TABLE unified_recommendations ADD COLUMN engine_coverage_count INTEGER;
+`);
+
+// technical_analysis_signals folded into unified_signals (signal_source='technical'),
+// Cluster B-lite, 2026-08 -- writer (technical_analysis_engine.py) and all 3 non-UI readers
+// (mcpServer.ts, strategySignalsService.ts, chatbot price_tool.py) already repointed.
+runMigration('074_drop_technical_analysis_signals', `
+  DROP TABLE IF EXISTS technical_analysis_signals;
+`);
+
+// signal_outcomes gained a signal_source discriminator (2026-08): outcome_resolver.py
+// (technical_signals, horizons 1/5/15) and confluence_outcome_tracker.py (confluence_signals,
+// horizons 3/7/14/30) were both writing the same (symbol, signal_date, horizon_days) key with no
+// way to tell which upstream signal a row grades -- silently colliding, and letting ML consumers
+// that JOIN back to technical_signals mispair a confluence-sourced outcome with an unrelated
+// technical signal's features. Widened key mirrors unified_signals' own 4-col key (migrations
+// 043/044) -- same rename->recreate->copy->drop dance, since SQLite can't alter an inline PK.
+runMigration('075_signal_outcomes_signal_source', `
+  PRAGMA foreign_keys=OFF;
+
+  ALTER TABLE signal_outcomes RENAME TO signal_outcomes_old;
+
+  CREATE TABLE signal_outcomes (
+    symbol        TEXT NOT NULL,
+    signal_date   TEXT NOT NULL,
+    horizon_days  INTEGER NOT NULL,
+    entry_price   REAL NOT NULL,
+    check_date    TEXT,
+    exit_price    REAL,
+    return_pct    REAL,
+    outcome       TEXT,
+    signal_score  INTEGER,
+    signals_json  TEXT,
+    computed_at   DATETIME DEFAULT CURRENT_TIMESTAMP,
+    max_return_pct REAL,
+    label_definition TEXT,
+    is_suspect    INTEGER DEFAULT 0,
+    signal_source TEXT NOT NULL DEFAULT 'unknown',
+    PRIMARY KEY (symbol, signal_date, horizon_days, signal_source)
+  );
+
+  INSERT INTO signal_outcomes
+    (symbol, signal_date, horizon_days, entry_price, check_date, exit_price, return_pct,
+     outcome, signal_score, signals_json, computed_at, max_return_pct, label_definition,
+     is_suspect, signal_source)
+  SELECT
+    symbol, signal_date, horizon_days, entry_price, check_date, exit_price, return_pct,
+    outcome, signal_score, signals_json, computed_at, max_return_pct, label_definition,
+    is_suspect, 'unknown'
+  FROM signal_outcomes_old;
+
+  DROP TABLE signal_outcomes_old;
+
+  CREATE INDEX IF NOT EXISTS idx_sout_date    ON signal_outcomes(signal_date DESC);
+  CREATE INDEX IF NOT EXISTS idx_sout_outcome ON signal_outcomes(outcome);
+  CREATE INDEX IF NOT EXISTS idx_sout_sym     ON signal_outcomes(symbol);
+  CREATE INDEX IF NOT EXISTS idx_so_label     ON signal_outcomes(label_definition);
+  CREATE INDEX IF NOT EXISTS idx_sout_source  ON signal_outcomes(signal_source);
 `);
 
 // Keep startup diagnostics off stdout so stdio-based clients can parse JSON-RPC.

@@ -184,6 +184,41 @@ class TestMCVitalsFeatures:
         assert X['ohlson_o'].iloc[0] >= -10.0
         assert X['ohlson_o'].iloc[1] <= 5.0
 
+    def test_graham_dupont_features_present(self):
+        X = build_features(_make_feature_df())
+        for col in ['graham_discount_pct', 'dupont_roe']:
+            assert col in X.columns, f"Expected {col} in build_features output"
+
+    def test_missing_graham_dupont_no_nan(self):
+        X = build_features(_make_feature_df())
+        assert not X['graham_discount_pct'].isna().any()
+        assert not X['dupont_roe'].isna().any()
+
+    def test_graham_discount_pct_direction_and_magnitude(self):
+        """graham_number above cmp = undervalued = positive discount; below = overvalued."""
+        df = _make_feature_df(n=3)
+        df['cmp'] = [100.0, 100.0, 100.0]
+        df['graham_number'] = [120.0, 80.0, 100.0]  # undervalued / overvalued / fair
+        X = build_features(df)
+        assert X['graham_discount_pct'].iloc[0] == pytest.approx(20.0)
+        assert X['graham_discount_pct'].iloc[1] == pytest.approx(-20.0)
+        assert X['graham_discount_pct'].iloc[2] == pytest.approx(0.0)
+
+    def test_graham_discount_pct_clipped(self):
+        df = _make_feature_df(n=2)
+        df['cmp'] = [100.0, 100.0]
+        df['graham_number'] = [1000.0, 1.0]  # +900% discount / -99% discount, both extreme
+        X = build_features(df)
+        assert X['graham_discount_pct'].iloc[0] <= 200.0
+        assert X['graham_discount_pct'].iloc[1] >= -100.0
+
+    def test_dupont_roe_clipped(self):
+        df = _make_feature_df(n=2)
+        df['dupont_score'] = [-999.0, 999.0]
+        X = build_features(df)
+        assert X['dupont_roe'].iloc[0] >= -50.0
+        assert X['dupont_roe'].iloc[1] <= 100.0
+
 
 class TestExtraEndpointFeatures:
     """ext_* columns from extra_endpoints_fetcher.py (Trading80/MarketsMojo/Indiatimes).
@@ -370,6 +405,8 @@ class TestLoadTrainingDataNoLeakColumns:
         assert 'p2.date <= so.signal_date' in src, "Altman Z join must be AS-OF (no look-ahead)"
         assert 'altman_z_score' in src, "Must query for altman_z_score"
         assert 'ohlson_o_score' in src, "Must query for ohlson_o_score"
+        assert 'graham_number' in src, "Must query for graham_number"
+        assert 'dupont_score' in src, "Must query for dupont_score"
 
 
 class TestInsiderActivityFeatures:

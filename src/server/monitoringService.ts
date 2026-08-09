@@ -31,9 +31,13 @@ export async function updateScreenerReliability(screenerId: string, horizonDays 
     // Pre-load matching outcomes for the whole batch once (was one dbGet per appearance).
     const symbols = [...new Set(appearances.map(a => a.symbol))];
     const placeholders = symbols.map(() => '?').join(',');
+    // signal_source='confluence' (2026-08): the default horizonDays=7 is exclusively written
+    // by confluence_outcome_tracker.py (outcome_resolver.py never resolves h7) -- this function
+    // matches screener_appearances (any screener source) against signal_outcomes by symbol+date
+    // as a loose proxy, same pattern as screener_performance.py's phase_a_bootstrap.
     const outcomeRows = await dbAll<{ symbol: string; signal_date: string; outcome: string }>(`
       SELECT symbol, signal_date, outcome FROM signal_outcomes
-      WHERE symbol IN (${placeholders}) AND horizon_days = ?
+      WHERE symbol IN (${placeholders}) AND horizon_days = ? AND signal_source = 'confluence'
     `, [...symbols, horizonDays]);
     const outcomeMap = new Map(outcomeRows.map(r => [`${r.symbol}|${r.signal_date}`, r.outcome]));
 
@@ -47,9 +51,12 @@ export async function updateScreenerReliability(screenerId: string, horizonDays 
 
     const winRate = total === 0 ? 0 : (wins / total);
 
+    // ON CONFLICT(source, scan_id) matches screener_reliability's composite PK (2026-08-04
+    // migration) -- source='platform' here is this function's own synthetic bucket, distinct
+    // from the 4 real provider values, so it can never collide with a real screener's row.
     await dbRun(`INSERT INTO screener_reliability (scan_id, screener_name, source, total_signals, wins_7d, win_rate_7d, last_updated)
       VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
-      ON CONFLICT(scan_id) DO UPDATE SET total_signals=excluded.total_signals, wins_7d=excluded.wins_7d, win_rate_7d=excluded.win_rate_7d, last_updated=CURRENT_TIMESTAMP
+      ON CONFLICT(source, scan_id) DO UPDATE SET total_signals=excluded.total_signals, wins_7d=excluded.wins_7d, win_rate_7d=excluded.win_rate_7d, last_updated=CURRENT_TIMESTAMP
     `, [screenerId, screenerId, 'platform', total, wins, winRate]);
 
     return { updated: true, total, wins, winRate };

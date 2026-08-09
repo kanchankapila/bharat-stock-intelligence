@@ -23,6 +23,7 @@ import time
 import datetime
 from collections import defaultdict
 from db_compat import connect
+from as_of import logical_trading_date
 
 # ── NLP keyword mappings for screener names ──────────────────────────────────
 
@@ -98,22 +99,38 @@ def load_screener_meta(con, as_of: str | None = None) -> dict:
     screener_performance_history snapshot <= as_of, and only falls back to the current
     full-sample score when no PIT snapshot exists yet (bootstrap).
     """
+    # Source-scoped (2026-08-06 fix, closes the gap this comment used to flag): screener_
+    # performance_history's PK was migrated to (source, screener_id, as_of_date) on 2026-08-05
+    # (same cross-provider scan_id collision class as the 2026-08-04 screener_master fix -- MC
+    # and ETnow independently issue overlapping small-integer scan_ids, confirmed live), and its
+    # writer (screener_performance.py's phase_f_pit) now populates that column. pit[] is keyed
+    # by (source, screener_id) to match -- source here is screener_performance_history's own
+    # stored value, which mirrors screener_appearances' lowercase convention
+    # ('moneycontrol'/'etnow'/'trendlyne'/'et_marketstats'), so it's looked up below via
+    # src.lower() against screener_master's mixed-case source, same bridge `meta`'s own key
+    # already uses.
     pit = {}
     if as_of:
         try:
-            for sid, score, tier, alpha in con.execute("""
-                SELECT DISTINCT ON (screener_id) screener_id, bayesian_score, tier, alpha_20d
+            for source, sid, score, tier, alpha in con.execute("""
+                SELECT DISTINCT ON (source, screener_id) source, screener_id, bayesian_score, tier, alpha_20d
                 FROM screener_performance_history
                 WHERE as_of_date <= ?
-                ORDER BY screener_id, as_of_date DESC
+                ORDER BY source, screener_id, as_of_date DESC
             """, (as_of,)).fetchall():
-                pit[sid] = (score, tier, alpha)
+                pit[(source, sid)] = (score, tier, alpha)
         except Exception as e:
             print(f"[ScreenerFeatures] PIT scores unavailable ({e}); "
                   f"falling back to full-sample bayesian_score")
 
+    # sm.source is required on both joins: MC and ETnow independently hand out overlapping
+    # small-integer scan_ids (see the 2026-08-04 screener_master memory) -- an unscoped join
+    # against screener_performance_v2 could pick up a different provider's win-rate stats for
+    # the same numeric scan_id, and an unscoped join against trendlyne_screeners could label an
+    # MC/ETnow screener with an unrelated Trendlyne screener's name.
     rows = con.execute("""
         SELECT sm.scan_id,
+               sm.source,
                sm.inferred_sentiment,
                sm.inferred_category,
                COALESCE(spv.bayesian_score, 0.40) AS bayesian_score,
@@ -121,22 +138,27 @@ def load_screener_meta(con, as_of: str | None = None) -> dict:
                COALESCE(spv.tier, 'Unranked')    AS tier,
                COALESCE(ts.screener_name, sm.name, sm.scan_id) AS screener_name
         FROM screener_master sm
-        LEFT JOIN screener_performance_v2 spv ON spv.screener_id = sm.scan_id
-        LEFT JOIN trendlyne_screeners ts       ON ts.screener_id = sm.scan_id
+        LEFT JOIN screener_performance_v2 spv ON spv.screener_id = sm.scan_id AND spv.source = sm.source
+        LEFT JOIN trendlyne_screeners ts       ON ts.screener_id = sm.scan_id AND sm.source = 'Trendlyne'
     """).fetchall()
 
+    # meta is keyed by (source.lower(), scan_id) -- lowercased because screener_appearances.source
+    # (the table compute_features' caller ultimately reads scan_ids from) uses lowercase
+    # ('moneycontrol') while screener_master.source does not ('MoneyControl'/'ETnow'/'Trendlyne')
+    # -- a pre-existing casing mismatch between the two tables, bridged here rather than by
+    # normalizing either table's actual stored values.
     meta = {}
     for row in rows:
-        sid = row[0]
-        p = pit.get(sid)
-        meta[sid] = {
-            "sentiment":  row[1] or "neutral",
-            "category":   row[2] or "other",
-            "bayesian":   float(p[0]) if p and p[0] is not None else float(row[3] or 0.40),
+        sid, src = row[0], row[1]
+        p = pit.get((src.lower(), sid))
+        meta[(src.lower(), sid)] = {
+            "sentiment":  row[2] or "neutral",
+            "category":   row[3] or "other",
+            "bayesian":   float(p[0]) if p and p[0] is not None else float(row[4] or 0.40),
             "alpha_20d":  (float(p[2]) if p[2] is not None else None) if p
-                          else (float(row[4]) if row[4] is not None else None),
-            "tier":       (p[1] if p else None) or row[5],
-            "name":       row[6] or row[0],
+                          else (float(row[5]) if row[5] is not None else None),
+            "tier":       (p[1] if p else None) or row[6],
+            "name":       row[7] or row[0],
             "pit":        bool(p),
         }
     if as_of:
@@ -178,7 +200,11 @@ def snapshot_membership(con, as_of: str, appearances: dict) -> int:
     ensure_snapshot_schema(con)
     n = 0
     for symbol, ids in appearances.items():
-        for sid in set(ids):
+        # ids is now [(source, screener_id), ...] -- this table has no source column (a
+        # separate, undone follow-up, see load_screener_meta's pit[] comment above), so only
+        # screener_id is recorded here; set() dedupes on the full tuple, which is correct since
+        # the same scan_id from two different sources is two distinct memberships.
+        for src, sid in set(ids):
             con.execute(
                 "INSERT INTO screener_membership_snapshot (as_of_date, symbol, screener_id) "
                 "VALUES (?,?,?) ON CONFLICT (as_of_date, symbol, screener_id) DO NOTHING",
@@ -190,20 +216,24 @@ def snapshot_membership(con, as_of: str, appearances: dict) -> int:
 
 def load_today_appearances(con, as_of: str) -> dict:
     """
-    Returns dict: symbol -> [screener_id, ...] that are active (appeared_date <= as_of, exited_date IS NULL or future).
-    Uses the most-recent 3-day window so same-day re-syncs are captured.
+    Returns dict: symbol -> [(source, screener_id), ...] that are active (appeared_date <= as_of,
+    exited_date IS NULL or future). Uses the most-recent 3-day window so same-day re-syncs are
+    captured. source is required alongside screener_id (not screener_id alone) so compute_features
+    can look up the right provider's screener_master row when scan_ids collide across providers
+    (see the 2026-08-04 screener_master memory) -- screener_appearances.source is already
+    lowercase, matching load_screener_meta's meta dict keys.
     """
     cutoff = (datetime.date.fromisoformat(as_of) - datetime.timedelta(days=3)).isoformat()
     rows = con.execute("""
-        SELECT symbol, screener_id
+        SELECT symbol, screener_id, source
         FROM screener_appearances
         WHERE appeared_date >= ?
           AND (exited_date IS NULL OR exited_date >= ?)
     """, (cutoff, as_of)).fetchall()
 
     result = defaultdict(list)
-    for sym, sid in rows:
-        result[sym].append(sid)
+    for sym, sid, src in rows:
+        result[sym].append((src, sid))
     return result
 
 
@@ -236,8 +266,10 @@ def compute_features(symbol: str, screener_ids: list, meta: dict) -> dict:
     alpha_vals = []
     name_signals = []
 
-    for sid in screener_ids:
-        m = meta.get(sid)
+    # screener_ids is [(source, screener_id), ...] -- source is required to disambiguate
+    # scan_ids that collide across providers (see load_today_appearances/load_screener_meta).
+    for src, sid in screener_ids:
+        m = meta.get((src, sid))
         if not m:
             continue
         sentiment = m["sentiment"]
@@ -278,7 +310,10 @@ def compute_features(symbol: str, screener_ids: list, meta: dict) -> dict:
 def stamp_features(con, features_by_symbol: dict, streaks: dict):
     # date = ? guard (2026-07-19) instead of MAX(date) -- see bse_event_classifier.py's
     # run_daily docstring for why matching the latest row isn't the same as matching today.
-    today = datetime.date.today().isoformat()
+    # logical_trading_date(), not date.today() (2026-08-01) -- this is the largest single
+    # engine weight in unified_ranker; ml-daily-ops's step chain regularly finishes after
+    # midnight IST, so a raw wall-clock date silently targeted a day with no grid row yet.
+    today = logical_trading_date()
     updated = 0
     for symbol, feats in features_by_symbol.items():
         streak = streaks.get(symbol, 0)
@@ -317,7 +352,9 @@ def run():
     con = connect()
     try:
         ensure_schema(con)
-        as_of = datetime.date.today().isoformat()
+        # logical_trading_date(), not date.today() -- keeps the membership snapshot/appearances
+        # window consistent with stamp_features()'s own write target above.
+        as_of = logical_trading_date()
 
         print(f"[ScreenerFeatures] Loading screener metadata...")
         meta = load_screener_meta(con, as_of)

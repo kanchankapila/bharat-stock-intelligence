@@ -147,10 +147,17 @@ def fetch_mc_pe_pb(ind_id: int, days: int = 365) -> dict[str, dict]:
         ov = r.json().get("data") or {}
         today = datetime.date.today().isoformat()
         entry = combined.setdefault(today, {})
-        if ov.get("divYield"):
-            entry["div_yield"] = float(ov["divYield"])
-        if ov.get("eps"):
-            entry["eps"] = float(ov["eps"])
+        # BUG FOUND 2026-08-07 (dead-column sweep): both keys were guessed wrong against MC's
+        # real overview response (live-verified for indId=9/NIFTY50: {"div_yield":"1.27",
+        # "ttmEps":"1,177.32", ...} -- no "divYield" or "eps" key exists at all). div_yield was
+        # 100% NULL (0/7,384 rows); eps silently degraded to whatever a different code path
+        # happened to populate it with (26.7% coverage, well below pe/pb's ~90% from the
+        # separate graph endpoints this overview call doesn't feed). ttmEps values are
+        # comma-formatted ("1,177.32") -- strip commas before float().
+        if ov.get("div_yield"):
+            entry["div_yield"] = float(ov["div_yield"])
+        if ov.get("ttmEps"):
+            entry["eps"] = float(str(ov["ttmEps"]).replace(",", ""))
     except Exception:
         pass
 

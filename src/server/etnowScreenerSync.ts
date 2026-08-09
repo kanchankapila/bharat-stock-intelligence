@@ -128,8 +128,9 @@ export async function syncETnowScreeners(timeframeFilter?: 'intraday' | 'long_te
         }
       });
 
-      // Update screener_master sync time
-      await dbRun(`UPDATE screener_master SET last_updated = ?, stocks_synced_at = ? WHERE scan_id = ?`,
+      // Update screener_master sync time. PK is (source, scan_id) -- scope to ETnow or this
+      // would also touch MoneyControl's row for a colliding scan_id (2026-08-04 memory).
+      await dbRun(`UPDATE screener_master SET last_updated = ?, stocks_synced_at = ? WHERE scan_id = ? AND source = 'ETnow'`,
         [today, today, screener.screener_id]);
 
       // Diff patch: record new appearances / exits

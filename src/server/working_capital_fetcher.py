@@ -45,6 +45,7 @@ from datetime import date, timedelta
 import requests
 
 from db_compat import connect
+from as_of import logical_write_floor
 from et_stats_client import HEADERS, fetch_et_stats, load_companyid_map, as_of_floor
 
 DETERIORATING_THRESHOLD_DAYS = 5
@@ -293,8 +294,7 @@ def main() -> None:
     # Align to the last completed trading session, NOT date.today() -- this job runs in the
     # trendlyne-ratios-monthly batch (first Sunday of the month), a non-trading day with no
     # technical_signals row yet. Same fix as financial_ratios_fetcher.py.
-    latest_row = con.execute("SELECT MAX(date) AS d FROM stock_ohlcv").fetchone()
-    today = str(latest_row["d"])[:10] if latest_row and latest_row["d"] else date.today().isoformat()
+    today = logical_write_floor(con, fallback=date.today().isoformat())
 
     ok = 0
     ccc_sum = 0.0

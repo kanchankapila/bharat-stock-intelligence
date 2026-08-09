@@ -11,6 +11,7 @@ import sys
 from datetime import datetime, date
 import requests
 from db_compat import connect, use_postgres
+from as_of import logical_write_floor
 
 HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
@@ -182,8 +183,7 @@ def backfill_technical_signals(con) -> int:
     # current session's row set -- never any prior date, regardless of what "floor" resolves
     # to. This also makes the CASE/ELSE NULL construct unnecessary: the WHERE clause alone
     # keeps historical rows untouched instead of relying on a NULL-if-mismatched branch.
-    floor_row = cur.execute("SELECT MAX(date) AS d FROM stock_ohlcv").fetchone()
-    floor = str(floor_row["d"])[:10] if floor_row and floor_row["d"] else date.today().isoformat()
+    floor = logical_write_floor(cur, fallback=date.today().isoformat())
 
     if use_postgres():
         cur.execute(

@@ -236,13 +236,16 @@ export const signalsRouter = router({
     .input(z.object({ days: z.number().default(30) }).optional())
     .query(async ({ input }) => {
       const days = input?.days ?? 30;
+      // Was `WHERE (symbol, date) IN (SELECT symbol, MAX(date) FROM stock_ohlcv GROUP BY
+      // symbol)` -- full GROUP BY aggregation + re-scan. Same ROW_NUMBER() rewrite used at
+      // scoring.router.ts's getStrategyPicks / ml.router.ts's getSignalReportCard.
       return dbAll(`
         WITH latest_price AS (
-          SELECT symbol, close
-          FROM stock_ohlcv
-          WHERE (symbol, date) IN (
-            SELECT symbol, MAX(date) FROM stock_ohlcv GROUP BY symbol
-          )
+          SELECT symbol, close FROM (
+            SELECT symbol, close,
+                   ROW_NUMBER() OVER (PARTITION BY symbol ORDER BY date DESC) AS rn
+            FROM stock_ohlcv
+          ) t WHERE rn = 1
         )
         SELECT
           us.id,

@@ -1,11 +1,12 @@
 import React, { useState, useEffect, useMemo } from 'react';
+import { useNavigate } from 'react-router-dom';
 import {
   AreaChart, Area, XAxis, YAxis, ResponsiveContainer, Tooltip, CartesianGrid,
 } from 'recharts';
 import { motion, AnimatePresence } from 'motion/react';
 import {
   Activity, Zap, TrendingUp, ArrowUpRight, ArrowDownRight,
-  History, Plus, RefreshCw, Cpu, Radio, BarChart2,
+  History, Plus, RefreshCw, Cpu, Radio, BarChart2, Gauge,
 } from 'lucide-react';
 import { format } from 'date-fns';
 import { cn } from '../lib/utils';
@@ -22,6 +23,9 @@ import { GlobalMarkets } from './GlobalMarkets';
 import { PremarketPanel } from './PremarketPanel';
 import { LiveMarketScreener } from './LiveMarketScreener';
 import { EODMarketScreener } from './EODMarketScreener';
+import { ActivityFeed } from './ActivityFeed';
+import { MarketBreadthIntraday } from './MarketBreadthIntraday';
+import { MarketMoodGauge } from './MarketMoodGauge';
 
 // ─── Fonts injected once ──────────────────────────────────────────────────────
 const FONT_FAMILY_DISPLAY = "'Rajdhani', sans-serif";
@@ -359,11 +363,13 @@ interface DashboardPageProps {
   watchlist: string[];
   onToggleWatchlist: (symbol: string, metadata?: { price?: number; name?: string; source?: string }) => void;
   onSelectIndex?: (id: string, name: string) => void;
+  userId?: string | null;
 }
 
 const DashboardPage: React.FC<DashboardPageProps> = ({
-  stocks, onNewSignal, onSelectStock, watchlist, onToggleWatchlist, onSelectIndex,
+  stocks, onNewSignal, onSelectStock, watchlist, onToggleWatchlist, onSelectIndex, userId,
 }) => {
+  const navigate = useNavigate();
   const news = useNewsFeed();
   const [aiSignals, setAiSignals] = useState<any[]>([]);
   const [isGenerating, setIsGenerating] = useState(false);
@@ -372,7 +378,6 @@ const DashboardPage: React.FC<DashboardPageProps> = ({
 
   const { data: niftyOhlc } = trpc.getOHLCData.useQuery({ symbol: 'in;NSX', dur: '1M' });
   const { data: vixData } = trpc.getIndiaVix.useQuery(undefined, { refetchInterval: 30000 });
-  const { data: accuracyMetrics } = trpc.getAccuracyMetrics.useQuery();
   const graphData = useMemo(() => {
     const candles: any[] = niftyOhlc?.data ?? [];
     return candles.slice(-30).map((d: any, i: number) => ({
@@ -384,6 +389,9 @@ const DashboardPage: React.FC<DashboardPageProps> = ({
   const enqueueSignalsMutation = trpc.enqueueSignals.useMutation();
   const { data: queueStats, refetch: refetchStats } = trpc.getQueueStats.useQuery(undefined, {
     refetchInterval: isGenerating ? 2000 : false,
+  });
+  const { data: accuracyMetrics } = trpc.getAccuracyMetrics.useQuery(undefined, {
+    staleTime: 15 * 60 * 1000,
   });
   const { data: savedSignals, refetch: refetchSignals } = trpc.getSignals.useQuery(
     { limit: 50 },
@@ -432,18 +440,17 @@ const DashboardPage: React.FC<DashboardPageProps> = ({
     }
   };
 
-  useEffect(() => {
-    if (aiSignals.length === 0 && stocks.length > 0 && !isGenerating) {
-      handleGenerateSignals();
-    }
-  }, [stocks.length]);
-
-  // Derived market stats
-  const advancers = stocks.filter(s => s.changePct > 0).length;
-  const decliners = stocks.filter(s => s.changePct < 0).length;
-  const topGainers = [...stocks].sort((a, b) => b.changePct - a.changePct).slice(0, 5);
-  const topLosers  = [...stocks].sort((a, b) => a.changePct - b.changePct).slice(0, 5);
-  const niftyStock = stocks.find(s => s.symbol === 'NIFTY' || s.symbol === 'NIFTY50') ?? stocks[0];
+  // Derived market stats — this component polls getQueueStats every 2s and getSignals every
+  // 3s while signal generation is running (potentially minutes on a cold cache), and every
+  // tick re-rendered this component. These sorts/filters over the full live `stocks` list only
+  // need to recompute when the market data itself changes, not on every queue-status tick.
+  const { advancers, decliners, topGainers, topLosers, niftyStock } = useMemo(() => ({
+    advancers: stocks.filter(s => s.changePct > 0).length,
+    decliners: stocks.filter(s => s.changePct < 0).length,
+    topGainers: [...stocks].sort((a, b) => b.changePct - a.changePct).slice(0, 5),
+    topLosers: [...stocks].sort((a, b) => a.changePct - b.changePct).slice(0, 5),
+    niftyStock: stocks.find(s => s.symbol === 'NIFTY' || s.symbol === 'NIFTY50') ?? stocks[0],
+  }), [stocks]);
 
   const signalCount = aiSignals.filter(s => s.signal === 'BUY' || s.signal === 'SELL').length;
   const buySignals  = aiSignals.filter(s => s.signal === 'BUY').length;
@@ -478,6 +485,65 @@ const DashboardPage: React.FC<DashboardPageProps> = ({
   return (
     <div style={{ padding: '12px 16px', background: 'transparent', minHeight: '100vh' }}>
 
+      {/* ── V4 entry point ───────────────────────────────────────────────
+          This dashboard (v1) is still the default landing experience, but v4's
+          MarketCommandCenter/StockIntelligencePage are already reachable via the sidebar
+          ("Market Command"/"Stock Intelligence" in both AppShell.tsx and V2AppShell.tsx) --
+          just not prominently, buried among 30+ other nav items. This is a second, more
+          discoverable entry point from the page every session actually lands on first. */}
+      <button
+        onClick={() => navigate('/market-command')}
+        style={{
+          display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+          width: '100%', marginBottom: 12, padding: '10px 16px',
+          background: 'linear-gradient(90deg, rgba(79,70,229,0.15), rgba(59,130,246,0.08))',
+          border: '1px solid rgba(99,102,241,0.3)', borderRadius: 10,
+          cursor: 'pointer', textAlign: 'left',
+        }}
+      >
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+          <Gauge size={16} color="#818cf8" />
+          <div>
+            <div style={{ fontSize: 12, fontWeight: 700, color: '#e2e8f0' }}>
+              Try the new Market Command Center
+            </div>
+            <div style={{ fontSize: 10, color: '#94a3b8', marginTop: 1 }}>
+              Regime/breadth header, pre-market briefing, F&amp;O read, sector rotation — the next-gen dashboard
+            </div>
+          </div>
+        </div>
+        <ArrowUpRight size={14} color="#818cf8" style={{ flexShrink: 0 }} />
+      </button>
+
+      {/* ── Top Picks entry point ────────────────────────────────────────
+          One canonical "most accurate signals only" page (S_ELITE/A_HIGH conviction,
+          Buy-classified only) instead of navigating through the many screener/scanner
+          pages to find what's actually worth acting on. Also surfaces same-day intraday
+          picks with an honest gate-open/closed status, previously not shown anywhere. */}
+      <button
+        onClick={() => navigate('/alpha')}
+        style={{
+          display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+          width: '100%', marginBottom: 12, padding: '10px 16px',
+          background: 'linear-gradient(90deg, rgba(16,185,129,0.15), rgba(5,150,105,0.08))',
+          border: '1px solid rgba(16,185,129,0.3)', borderRadius: 10,
+          cursor: 'pointer', textAlign: 'left',
+        }}
+      >
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+          <TrendingUp size={16} color="#34d399" />
+          <div>
+            <div style={{ fontSize: 12, fontWeight: 700, color: '#e2e8f0' }}>
+              View Top Picks — highest-conviction signals only
+            </div>
+            <div style={{ fontSize: 10, color: '#94a3b8', marginTop: 1 }}>
+              S/A-tier Buy calls plus gated intraday picks, instead of scanning every screener page
+            </div>
+          </div>
+        </div>
+        <ArrowUpRight size={14} color="#34d399" style={{ flexShrink: 0 }} />
+      </button>
+
       {/* ── Row 0: Market Indices Strip ─────────────────────────────────── */}
       <div style={{ marginBottom: 12 }}>
         <MarketIndices onSelect={(id, name) => onSelectIndex?.(id, name)} />
@@ -510,11 +576,11 @@ const DashboardPage: React.FC<DashboardPageProps> = ({
           icon={<Radio size={9} />}
         />
         <KpiChip
-          label="Win Rate (All-Time)"
-          value={accuracyMetrics ? `${accuracyMetrics.profitHitRate.toFixed(0)}%` : '—'}
-          sub={accuracyMetrics ? `${accuracyMetrics.totalSignals} signals resolved` : 'Loading…'}
+          label="Win Rate"
+          value={accuracyMetrics && accuracyMetrics.totalSignals > 0 ? `${accuracyMetrics.profitHitRate.toFixed(0)}%` : '—'}
+          sub={accuracyMetrics && accuracyMetrics.totalSignals > 0 ? `${accuracyMetrics.totalSignals} signals resolved` : 'No resolved signals yet'}
           up={(accuracyMetrics?.profitHitRate ?? 0) >= 50}
-          accent={(accuracyMetrics?.profitHitRate ?? 0) >= 50 ? emerald : rose}
+          accent={emerald}
           icon={<TrendingUp size={9} />}
         />
       </div>
@@ -829,6 +895,12 @@ const DashboardPage: React.FC<DashboardPageProps> = ({
         </div>
       </div>
 
+      {/* ── Row 2.5: Market Mood Index — single-glance sentiment gauge (2026-08-06 urls.txt
+          data analysis; data already fed macro features, previously had no frontend surface). */}
+      <div className="glass border border-slate-800/50 shadow-[0_4px_20px_rgba(0,0,0,0.02)]" style={{ borderRadius: 10, padding: '10px 16px', marginBottom: 12 }}>
+        <MarketMoodGauge />
+      </div>
+
       {/* ── Row 3: Index Overview + Global Markets ────────────────────────── */}
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 12 }}>
         <div className="glass border border-slate-800/50 shadow-[0_4px_20px_rgba(0,0,0,0.02)]" style={{ borderRadius: 10, padding: '14px 16px' }}>
@@ -841,9 +913,22 @@ const DashboardPage: React.FC<DashboardPageProps> = ({
         </div>
       </div>
 
+      {/* ── Row 3.4: Market Breadth (Intraday) — same shared, 10s-polled widget used on
+          Market Command Center and the Index Detail page. ─────────────────────────────── */}
+      <div style={{ marginBottom: 12 }}>
+        <MarketBreadthIntraday ex="N" refetchInterval={10000} />
+      </div>
+
+      {/* ── Row 3.5: Activity Feed — reverse-chronological signals + news, so a trader can
+          scan "what happened, in order" right from the landing page. ────────────────────── */}
+      <div className="glass border border-slate-800/50 shadow-[0_4px_20px_rgba(0,0,0,0.02)]" style={{ borderRadius: 10, padding: '14px 16px', marginBottom: 12 }}>
+        <SectionLabel>Activity Feed</SectionLabel>
+        <ActivityFeed onSelectStock={onSelectStock} />
+      </div>
+
       {/* ── Row 4: Top Movers ─────────────────────────────────────────────── */}
       <div style={{ marginBottom: 12 }}>
-        <TopMoversIntelligence onSelectStock={onSelectStock} />
+        <TopMoversIntelligence onSelectStock={onSelectStock} userId={userId} />
       </div>
 
       {/* ── Row 5: Intraday Breakouts ────────────────────────────────────── */}

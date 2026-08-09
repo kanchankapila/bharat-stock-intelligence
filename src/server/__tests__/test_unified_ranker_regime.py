@@ -57,7 +57,60 @@ class TestRegimeCatWeights:
 class TestRegimeWeightsHasSideways:
     def test_sideways_present(self):
         assert "SIDEWAYS" in REGIME_WEIGHTS
-        assert set(REGIME_WEIGHTS["SIDEWAYS"]) == {"screener", "ml", "cs", "confluence", "technical", "dl", "breakout"}
+        assert set(REGIME_WEIGHTS["SIDEWAYS"]) == {"screener", "ml", "cs", "confluence", "technical", "dl", "breakout", "smart_money"}
+
+
+class TestEngineCountIsPinned:
+    """Pinned so that adding a 9th engine to the blend requires a conscious edit here, not a
+    silent drift. If you're editing this test because you're wiring in a new engine: STOP and
+    run `python feature_coverage_gate.py --columns <your engine's source technical_signals
+    columns>` first (see that file's module docstring). A column can look empty before
+    densify_feature_matrix.py's forward-fill and be ~75% covered after it, or vice versa (a
+    column with zero non-null values anywhere, which densify correctly cannot fill) -- the
+    only way to know which is true for your new engine's inputs is to measure it, on a
+    full-row-count date, post-densification. Two prior sessions independently found the
+    platform's highest-weighted (screener) and one of its newest (smart_money) engine inputs
+    had real, non-obvious coverage/reproducibility problems that were only caught by actually
+    measuring live data, not by inspecting the code."""
+
+    EXPECTED_ENGINES = {"screener", "ml", "cs", "confluence", "technical", "dl", "breakout", "smart_money"}
+
+    @pytest.mark.parametrize("regime", ["BULL", "BEAR", "HIGH_VOL", "CRASH", "SIDEWAYS"])
+    def test_every_regime_has_exactly_the_expected_engine_set(self, regime):
+        assert set(REGIME_WEIGHTS[regime]) == self.EXPECTED_ENGINES, (
+            f"REGIME_WEIGHTS['{regime}'] engine keys changed from the pinned set "
+            f"{self.EXPECTED_ENGINES} -- see this test's class docstring before merging a "
+            "new engine."
+        )
+
+    def test_regime_weights_has_exactly_five_regimes(self):
+        # A silently-added or silently-dropped regime is just as much a drift risk as an
+        # engine key -- BULL/BEAR/HIGH_VOL/CRASH/SIDEWAYS is the full, documented set.
+        assert set(REGIME_WEIGHTS) == {"BULL", "BEAR", "HIGH_VOL", "CRASH", "SIDEWAYS"}
+
+
+class TestBreakoutWeightCeilingIsPinned:
+    """The `breakout` engine's weight was capped low specifically because the 2026-07-30 bias
+    audit measured short-horizon cross-sectional momentum net-negative on this universe (mom21:
+    -0.53% net alpha/5d, t=-3.21, negative in 5/6 years), and the 2026-07-31 intraday audit
+    found the same sign intraday. BULL/SIDEWAYS carry a higher weight than BEAR/CRASH/HIGH_VOL
+    only because those were the regimes where the finding was least negative -- not because
+    momentum was found profitable anywhere. A silent increase here would re-introduce exposure
+    to a factor this codebase measured losing money after costs. Mirrors the ceiling in
+    scripts/check_load_bearing_constraints.py -- keep both in sync if this is ever revised."""
+
+    CEILING = {"BULL": 0.15, "SIDEWAYS": 0.13, "HIGH_VOL": 0.10, "BEAR": 0.05, "CRASH": 0.05}
+
+    @pytest.mark.parametrize("regime", ["BULL", "BEAR", "HIGH_VOL", "CRASH", "SIDEWAYS"])
+    def test_breakout_weight_at_or_below_audit_derived_ceiling(self, regime):
+        actual = REGIME_WEIGHTS[regime]["breakout"]
+        ceiling = self.CEILING[regime]
+        assert actual <= ceiling + 1e-9, (
+            f"REGIME_WEIGHTS['{regime}']['breakout'] = {actual} exceeds the audit-derived "
+            f"ceiling of {ceiling}. If this is a deliberate change backed by a re-measurement "
+            "of momentum's live edge, update this test AND scripts/check_load_bearing_"
+            "constraints.py's BREAKOUT_WEIGHT_CEILING together, with a citation."
+        )
 
 
 class TestComputeScoresWithRegimeWeights:

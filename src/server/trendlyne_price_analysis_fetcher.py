@@ -34,6 +34,8 @@ from datetime import date
 import requests
 
 from db_compat import connect
+from as_of import logical_write_floor
+from fetch_utils import retry_get, FetchTracker
 
 ANALYSIS_URL = "https://trendlyne.com/share-price/price-performance-analysis/{tlid}/"
 
@@ -47,8 +49,17 @@ HEADERS = {
 }
 
 RATE_LIMIT_SEC = 0.5
-BATCH_SIZE     = 15
-BATCH_GAP_SEC  = 0.5
+# Reduced from 15/0.5s 2026-08-09: the last two scheduled runs (07-28, 08-04) both hit 100%
+# failure -- live-reproduced by hand the same day, a burst of concurrent requests to THIS
+# specific endpoint (trendlyne_adv_tech_fetcher.py's sibling job, identical batch settings,
+# succeeded both times) reliably trips Trendlyne's WAF into serving a "Human Verification"
+# page (405) for every request, including previously-working ones, for the rest of the run.
+# Lower concurrency + wider gap to stay under whatever burst threshold this endpoint enforces.
+# ponytail: no adaptive backoff/proxy rotation -- if this still trips the WAF, the run now
+# fails loud (FetchTracker/job_heartbeat) instead of silently, so the next tightening is a
+# data-driven follow-up, not a guess made now.
+BATCH_SIZE     = 5
+BATCH_GAP_SEC  = 2.0
 
 # Map period name from returnsComparison to column key
 PERIOD_MAP = {
@@ -133,9 +144,7 @@ def ensure_schema(con) -> None:
 def _fetch(tlid: str, session: requests.Session) -> dict | None:
     url = ANALYSIS_URL.format(tlid=tlid)
     try:
-        r = session.get(url, params={"format": "json"}, timeout=15)
-        if r.status_code != 200:
-            return None
+        r = retry_get(session, url, params={"format": "json"}, timeout=15)
         data = r.json()
         if data.get("head", {}).get("status") != "0":
             return None
@@ -176,10 +185,15 @@ def extract_features(body: dict, today: date) -> dict:
             feat[f"alpha_ind_{key}"] = round(stock_ret - ind_ret, 2)
 
     # â”€â”€ Returns deep dive â€” distance from period high/low â”€â”€
+    # Live response rows (2026-08-06): Day, Week, Month, Qtr, Half Year, 1 Yr, 3 Yr, 5 Yr, 10 Yr.
+    # The old bare `"3" in label` fallback also matched "3 Yr" (which sorts AFTER "Qtr" in the
+    # table), silently overwriting the correct 3-month distance with the 3-YEAR distance on every
+    # successful run since this column was built -- excluding any "Yr" label keeps the fallback
+    # for a differently-labeled "3 Mth"/"3M" response without matching "3 Yr"/"3 Years".
     dd = body.get("returnsDeepDive", {})
     for row in dd.get("tableData", []):
         label = str(row[IDX_DD_PERIOD]) if len(row) > IDX_DD_PERIOD else ""
-        if "Qtr" in label or "3" in label:
+        if label == "Qtr" or ("3" in label and "Yr" not in label):
             if len(row) > IDX_DD_HIGH_DIST:
                 feat["dist_3m_high_pct"] = _sf(row[IDX_DD_HIGH_DIST])
             if len(row) > IDX_DD_LOW_DIST:
@@ -324,11 +338,15 @@ def main() -> None:
     # this script is re-run ad-hoc) leaves "date >= today_str" matching zero rows while the ELSE
     # branch nulls every existing row -- same bug found in trendlyne_fundamentals_fetcher.py /
     # mf_holdings_fetcher.py / financial_ratios_fetcher.py.
-    latest_row = con.execute("SELECT MAX(date) AS d FROM stock_ohlcv").fetchone()
-    anchor_str = str(latest_row["d"])[:10] if latest_row and latest_row["d"] else today.isoformat()
+    anchor_str = logical_write_floor(con, fallback=today.isoformat())
     today_str = today.isoformat()
     ok = 0
     done = 0
+    # Every stock returning "no data" (found live 2026-07-28: all 1822/1822 stocks silently
+    # empty, script still exited 0 and logged "execution completed") must not look identical to
+    # a healthy run -- FetchTracker exits non-zero once the failure rate crosses its threshold,
+    # so pythonRunner/T.run() surfaces it as a real job failure instead of a silent no-op.
+    tracker = FetchTracker("trendlyne_price_analysis_fetcher")
 
     def _fetch_one(args):
         symbol, tlid = args
@@ -343,6 +361,7 @@ def main() -> None:
                 done += 1
                 if body is None:
                     print(f"  [{done}/{len(stocks)}] {symbol}: no data")
+                    tracker.record(symbol, ok=False)
                     continue
                 f = extract_features(body, today)
                 upsert_row(symbol, today_str, f, con)
@@ -352,10 +371,12 @@ def main() -> None:
                 seasonal_str = f"season={f.get('tl_seasonal_month_5y','?')}%"
                 print(f"  [{done}/{len(stocks)}] {symbol}: {alpha_str} | {ind_str} | {seasonal_str}")
                 ok += 1
+                tracker.record(symbol, ok=True)
         time.sleep(BATCH_GAP_SEC)
 
     print(f"[TLPriceAnalysis] Done. {ok}/{len(stocks)} stocks.")
     con.close()
+    tracker.finish()
 
 
 if __name__ == "__main__":

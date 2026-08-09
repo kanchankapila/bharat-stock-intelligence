@@ -86,6 +86,7 @@ export const scoringRouter = router({
         maxDebtToEquity: z.number().optional(),
         minPiotroski:    z.number().optional(),
         minMarketCapCr:  z.number().optional(),
+        requireUnifiedCoverage: z.boolean().optional(),
       }).optional(),
     }))
     .query(async ({ input }) => {
@@ -131,12 +132,19 @@ export const scoringRouter = router({
         return { price: eodClose, priceSource: 'eod' };
       };
 
+      // Was `JOIN (SELECT symbol, MAX(date) AS max_date ... GROUP BY symbol) latest ON ...` --
+      // a full GROUP BY aggregation over the entire stock_ohlcv hypertable, then a second pass
+      // re-joining back to the same table to fetch the close. ROW_NUMBER() is this codebase's
+      // established cross-dialect equivalent of DISTINCT ON (Postgres-only, doesn't translate
+      // to SQLite -- see confluenceEngine.ts's techMap comment); a single pass over the
+      // (symbol, date DESC)-indexed rows, same result.
       const latestPriceCte = `
         WITH latest_prices AS (
-          SELECT o.symbol, o.close
-          FROM stock_ohlcv o
-          JOIN (SELECT symbol, MAX(date) AS max_date FROM stock_ohlcv GROUP BY symbol) latest
-            ON latest.symbol = o.symbol AND latest.max_date = o.date
+          SELECT symbol, close FROM (
+            SELECT symbol, close,
+                   ROW_NUMBER() OVER (PARTITION BY symbol ORDER BY date DESC) AS rn
+            FROM stock_ohlcv
+          ) t WHERE rn = 1
         )
       `;
       const invRows = await dbAll<any>(`${latestPriceCte}
@@ -182,7 +190,7 @@ export const scoringRouter = router({
         FROM nse_stocks n
         JOIN trendlyne_screener_stocks ts ON n.symbol = ts.symbol
         JOIN trendlyne_screeners tls ON tls.screener_id = ts.screener_id
-        LEFT JOIN screener_master sm ON sm.scan_id = ts.screener_id
+        LEFT JOIN screener_master sm ON sm.scan_id = ts.screener_id AND sm.source = 'Trendlyne'
         LEFT JOIN moneycontrol_screener_stocks ms ON n.symbol = ms.symbol
         LEFT JOIN latest_prices lp ON lp.symbol = n.symbol
         WHERE tls.timeframe = 'intraday' OR sm.inferred_timeframe = 'intraday'
@@ -240,6 +248,7 @@ export const scoringRouter = router({
           WHERE outcome IN ('WIN','PENDING')
             AND signal_score >= 5
             AND (signals_json LIKE '%RSI_DIVERGENCE%' OR signals_json LIKE '%EMA_BULL_STACK%')
+            AND signal_source = 'technical'
         )
         SELECT
           r.symbol, ns.name, ns.sector,

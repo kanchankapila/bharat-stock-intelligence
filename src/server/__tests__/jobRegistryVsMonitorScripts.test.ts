@@ -19,6 +19,17 @@ const KNOWN_SAFE_OVERLAPS = new Set([
   'fii-dii-fetcher', 'finbert-scorer', 'outcome-resolver-5d', 'outcome-resolver-15d',
   'performance-tracker', 'ml-ensemble-score', 'reward-engine', 'rl-agent-update',
   'signal-type-stats', 'ml-ensemble-train', 'strategy-optimizer',
+  // Added 2026-08-03: JOB_REGISTRY tracks these two everyMs jobs via job_heartbeat (did the
+  // BullMQ processor return without throwing), which is structurally blind to a deliberate
+  // internal skip reporting success (confirmed live for confluence-compute: its processor
+  // returns `{ computed: 0, ... }` -- not a throw -- on every market-hours tick, so
+  // job_heartbeat shows "success" every 30 min regardless of whether confluence_signals ever
+  // gets a real write). The new MONITOR_SCRIPTS entries of the same id independently watch
+  // MAX(computed_at)/MAX(fetched_at) on the actual output table, closing that blind spot --
+  // see monitorScripts.ts's confluence-compute/news-sentiment entries for the full reasoning,
+  // including why the third everyMs job (trendlyne-intraday) deliberately does NOT get one
+  // (its output table is shared with unrelated writers and its writes are legitimately sparse).
+  'confluence-compute', 'news-sentiment',
 ]);
 
 describe('JOB_REGISTRY vs MONITOR_SCRIPTS', () => {

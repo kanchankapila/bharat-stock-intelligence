@@ -75,25 +75,25 @@ class TestMainFunctionsComputeFloorFromStockOhlcv:
     query_scalar, not reuse date.today() -- this is the actual fix; the functions
     above only prove the plumbing carries whatever floor they're given."""
 
-    def test_mc_pricefeed_imports_query_scalar(self):
-        assert hasattr(mcp, "query_scalar")
+    def test_mc_pricefeed_imports_logical_write_floor(self):
+        assert hasattr(mcp, "logical_write_floor")
 
-    def test_mc_pricefeed_main_source_uses_query_scalar_for_ts_floor(self):
+    def test_mc_pricefeed_main_source_uses_logical_write_floor_for_ts_floor(self):
         import inspect
         src = inspect.getsource(mcp.main)
         assert "ts_floor" in src
-        assert "query_scalar" in src
+        assert "logical_write_floor" in src
 
-    def test_mc_chart_patterns_main_source_uses_query_scalar_for_ts_floor(self):
+    def test_mc_chart_patterns_main_source_uses_logical_write_floor_for_ts_floor(self):
         import inspect
-        assert hasattr(mcc, "query_scalar")
+        assert hasattr(mcc, "logical_write_floor")
         src = inspect.getsource(mcc.main)
         assert "ts_floor" in src
-        assert "query_scalar" in src
+        assert "logical_write_floor" in src
 
-    def test_nt_dashboard_main_source_uses_query_scalar_for_ts_floor(self):
+    def test_nt_dashboard_main_source_uses_logical_write_floor_for_ts_floor(self):
         import inspect
-        assert hasattr(ntd, "query_scalar")
+        assert hasattr(ntd, "logical_write_floor")
         src = inspect.getsource(ntd.main)
         assert "ts_floor" in src
-        assert "query_scalar" in src
+        assert "logical_write_floor" in src

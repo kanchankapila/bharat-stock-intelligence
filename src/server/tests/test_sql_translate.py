@@ -3,10 +3,13 @@ import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
+import pytest
+
 from sql_translate import (  # noqa: E402
     convert_placeholders,
     translate,
     build_params,
+    date_now_text,
 )
 
 
@@ -25,6 +28,32 @@ def test_ignores_question_mark_in_string_literal():
 def test_ignores_question_mark_in_double_quoted_identifier():
     assert convert_placeholders('SELECT "we?rd" FROM t WHERE a=?') == \
         'SELECT "we?rd" FROM t WHERE a=:p0'
+
+
+def test_apostrophe_inside_line_comment_does_not_break_later_placeholders():
+    """Regression: an apostrophe inside a `-- ...` comment (e.g. "table's") is not a
+    string-literal delimiter, but the old scanner had no comment awareness and toggled
+    in_single on it anyway -- corrupting every `?` after that line. Hit live in
+    screener_signal_generator.py's load_high_performing_screeners() query."""
+    sql = (
+        "SELECT a\n"
+        "-- bridges it without touching the table's stored values.\n"
+        "FROM t WHERE a >= ? OR b IN (?, ?)"
+    )
+    out = convert_placeholders(sql)
+    assert "?" not in out
+    assert out.count(":p") == 3
+    assert "a >= :p0 OR b IN (:p1, :p2)" in out
+
+
+def test_apostrophe_inside_block_comment_does_not_break_later_placeholders():
+    sql = "SELECT a /* the table's rows */ FROM t WHERE a = ?"
+    assert convert_placeholders(sql) == "SELECT a /* the table's rows */ FROM t WHERE a = :p0"
+
+
+def test_double_dash_inside_string_literal_is_not_treated_as_a_comment():
+    assert convert_placeholders("SELECT '--' AS q, a=? FROM t") == \
+        "SELECT '--' AS q, a=:p0 FROM t"
 
 
 # ─── function mapping (Postgres path) ──────────────────────────────────────────
@@ -82,6 +111,60 @@ def test_maps_cast_real_and_group_concat():
         "SELECT CAST(x AS double precision) FROM t"
     assert _pg("SELECT GROUP_CONCAT(sym) FROM t") == \
         "SELECT string_agg(sym::text, ',') FROM t"
+
+
+# ─── INSERT OR REPLACE: rejected loudly, not silently passed through ───────────
+
+def test_insert_or_replace_raises_instead_of_reaching_postgres():
+    with pytest.raises(ValueError, match="INSERT OR REPLACE"):
+        _pg("INSERT OR REPLACE INTO t (a) VALUES (?)")
+
+
+def test_insert_or_replace_is_untouched_on_the_sqlite_path():
+    # Several fetchers (earnings_surprise_fetcher.py, insider_transactions_fetcher.py,
+    # mc_global_macro_fetcher.py, moneycontrol_fetcher.py, stock_option_chain_fetcher.py)
+    # correctly dialect-branch and only ever reach INSERT OR REPLACE with use_pg=False,
+    # where it is valid SQLite and must keep working exactly as before this change.
+    assert translate("INSERT OR REPLACE INTO t (a) VALUES (?)", use_pg=False) == \
+        "INSERT OR REPLACE INTO t (a) VALUES (:p0)"
+
+
+def test_insert_or_ignore_is_unaffected_by_the_guard():
+    # only OR REPLACE is rejected; OR IGNORE has a real translation and must still work
+    assert _pg("INSERT OR IGNORE INTO t (a) VALUES (?)") == \
+        "INSERT INTO t (a) VALUES (:p0) ON CONFLICT DO NOTHING"
+
+
+# ─── memoization: pure cache, no behavior change ────────────────────────────────
+
+def test_translate_is_memoized_and_still_correct():
+    sql = "SELECT * FROM t WHERE d = date('now') AND a = ?"
+    first = _pg(sql)
+    second = _pg(sql)
+    assert second == first == "SELECT * FROM t WHERE d = current_date AND a = :p0"
+
+
+def test_translate_cache_does_not_cross_contaminate():
+    assert _pg("SELECT a FROM t WHERE x = ?") == "SELECT a FROM t WHERE x = :p0"
+    assert _pg("SELECT b FROM t WHERE y = ?") == "SELECT b FROM t WHERE y = :p0"
+    assert _pg("SELECT a FROM t WHERE x = ?") == "SELECT a FROM t WHERE x = :p0"
+
+
+def test_translate_cache_is_keyed_on_use_pg_too():
+    # same SQL string, different dialect flag, must not share a cache entry
+    sql = "SELECT IFNULL(a, 0) FROM t"
+    assert translate(sql, use_pg=True) == "SELECT COALESCE(a, 0) FROM t"
+    assert translate(sql, use_pg=False) == "SELECT IFNULL(a, 0) FROM t"
+
+
+# ─── date_now_text(): the explicit opt-in for TEXT date columns ────────────────
+
+def test_date_now_text_no_modifier():
+    assert date_now_text() == "current_date::text"
+
+
+def test_date_now_text_with_modifier():
+    assert date_now_text("-3 days") == "((current_date + interval '-3 days')::date)::text"
 
 
 # ─── SQLite path is a function-mapping no-op (placeholders still convert) ───────

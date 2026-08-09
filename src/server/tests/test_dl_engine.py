@@ -8,7 +8,8 @@ import pytest
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..', '..'))
 
 import torch
-from src.server.dl_engine import BiLSTMModel, N_FEATURES, _predict_batch, _train_one_fold
+import src.server.dl_engine as dl_engine
+from src.server.dl_engine import BiLSTMModel, N_FEATURES, _predict_batch, _train_one_fold, _resolve_prediction_date
 
 
 class TestSoftmaxBug:
@@ -174,6 +175,80 @@ class TestLoadSymbolSequencesLabelRange:
         assert list(y5) == [1 if r > 0 else 0 for r in yr5]
 
 
+class TestFeatureClipping:
+    """2026-08-06: nan_to_num only maps true NaN/+-inf to 0 -- an extreme-but-finite outlier
+    (confirmed live: dist_sma200_pct in [-3644, +2771], ret_1d/ret_5d reaching +-1.5M/+-3.2M)
+    passes through untouched and can still blow up the first matmul. Both load_symbol_sequences
+    (training) and load_inference_sequence (inference) must clip to +-FEATURE_CLIP_BOUND so
+    training and serving see an identically-bounded feature distribution."""
+
+    def _fake_df(self, n, overrides=None):
+        import pandas as pd
+        import src.server.dl_engine as mod
+
+        feat_cols = mod.FEATURE_COLS[:mod.N_FEATURES]
+        numeric_cols = [c for c in feat_cols if c not in mod._VOL_ONEHOT]
+        data = {c: np.random.randn(n) * 0.5 for c in numeric_cols}
+        data["date"] = pd.date_range("2024-01-01", periods=n).strftime("%Y-%m-%d")
+        data["vol_regime"] = ["MED"] * n
+        data["target_ret_5d"] = np.random.choice([-1.0, 1.0], n)
+        data["target_ret_15d"] = np.random.choice([-1.0, 1.0], n)
+        if overrides:
+            for col, vals in overrides.items():
+                data[col] = vals
+        return pd.DataFrame(data)
+
+    def test_load_symbol_sequences_clips_extreme_finite_outlier(self):
+        import src.server.dl_engine as mod
+
+        n = mod.SEQUENCE_LEN + 5
+        # a single corrupted row mirroring the live-confirmed dist_sma200_pct outlier scale
+        overrides = {"dist_sma200_pct": [0.0] * (n - 1) + [3_644_000.0]}
+        fake_df = self._fake_df(n, overrides)
+
+        with patch.object(mod, "read_df", return_value=fake_df):
+            X, y5, y15, yr5, dates = mod.load_symbol_sequences("FAKESYM")
+
+        assert np.isfinite(X).all(), "clipped output must remain finite"
+        assert np.abs(X).max() <= mod.FEATURE_CLIP_BOUND, (
+            f"a feature value of {np.abs(X).max()} exceeded FEATURE_CLIP_BOUND="
+            f"{mod.FEATURE_CLIP_BOUND} -- the extreme outlier was not clipped"
+        )
+
+    def test_load_symbol_sequences_leaves_ordinary_values_untouched(self):
+        """Negative control: clipping must not distort values already well within bound."""
+        import src.server.dl_engine as mod
+
+        n = mod.SEQUENCE_LEN + 5
+        overrides = {"rsi_14": [42.5] * n}
+        fake_df = self._fake_df(n, overrides)
+
+        with patch.object(mod, "read_df", return_value=fake_df):
+            X, *_ = mod.load_symbol_sequences("FAKESYM")
+
+        feat_cols = mod.FEATURE_COLS[:mod.N_FEATURES]
+        rsi_idx = feat_cols.index("rsi_14")
+        assert np.allclose(X[:, :, rsi_idx], 42.5), (
+            "an ordinary in-range value must pass through clipping unchanged"
+        )
+
+    def test_load_inference_sequence_uses_the_same_bound_as_training(self):
+        """Train/serve skew guard: inference must clip identically to training, or the model
+        sees a differently-shaped feature distribution live than it was trained on."""
+        import src.server.dl_engine as mod
+
+        n = mod.SEQUENCE_LEN
+        overrides = {"op_margins": [0.0] * (n - 1) + [-19_479_000.0]}
+        fake_df = self._fake_df(n, overrides)
+
+        with patch.object(mod, "read_df", return_value=fake_df):
+            X, latest_date = mod.load_inference_sequence("FAKESYM")
+
+        assert X is not None
+        assert np.isfinite(X).all()
+        assert np.abs(X).max() <= mod.FEATURE_CLIP_BOUND
+
+
 class TestWalkForwardValidation:
     def test_train_lstm_calls_walk_forward_validate(self):
         """train_lstm must call walk_forward_validate (not return a hardcoded NaN stub)."""
@@ -206,3 +281,34 @@ class TestWalkForwardValidation:
         assert result == sentinel, (
             f"train_lstm should return walk_forward_validate result, got {result}"
         )
+
+
+class TestResolvePredictionDateUsesLogicalTradingDate:
+    """2026-08-06: run_inference() defaulted prediction_date via datetime.today() -- but
+    dl-infer-daily's cron fires at 18:30 UTC = 00:00 IST exactly, so every scheduled run
+    (never passes --date) stamped deep_learning_predictions.prediction_date one calendar day
+    ahead of the feature_store row it actually read. Must default via logical_trading_date()."""
+
+    def test_no_arg_uses_logical_trading_date(self):
+        with patch.object(dl_engine, "logical_trading_date", return_value="2026-07-31"):
+            assert _resolve_prediction_date(None) == "2026-07-31", (
+                "run_inference()'s default must come from logical_trading_date(), "
+                "not a raw wall-clock date.today()/datetime.today() call"
+            )
+
+    def test_explicit_date_overrides_the_default(self):
+        with patch.object(dl_engine, "logical_trading_date", return_value="2099-01-01"):
+            assert _resolve_prediction_date("2026-06-25") == "2026-06-25", (
+                "an explicit --date argument must never be overridden by logical_trading_date()"
+            )
+
+    def test_run_inference_calls_the_resolver_when_no_date_given(self):
+        """Wiring check: run_inference() must actually route through _resolve_prediction_date
+        (not silently reintroduce its own datetime.today() call) before it can fail loudly on
+        a missing model file -- proves the fix is wired into the real entry point, not just
+        that the helper function itself is correct in isolation."""
+        with patch.object(dl_engine, "_resolve_prediction_date", return_value="2026-07-31") as mock_resolve, \
+             patch.object(dl_engine, "_load_config", return_value={"lstm_version": 999999}):
+            with pytest.raises(RuntimeError, match="No model at"):
+                dl_engine.run_inference()
+        mock_resolve.assert_called_once_with(None)

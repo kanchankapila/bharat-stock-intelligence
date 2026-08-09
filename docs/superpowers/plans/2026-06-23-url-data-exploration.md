@@ -33,7 +33,7 @@
   - `classify_value(value:str, universe:set[str]) -> str` — returns an `inferred_type` (never `"const"`; const is decided by variability, not value).
   - `normalize(urls:list[str], universe:set[str]) -> list[EndpointTemplate]`.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 ```python
 # src/server/tests/test_url_explorer_normalizer.py
@@ -95,12 +95,12 @@ class TestNormalize:
         assert len(normalize(urls, UNIVERSE)) == 2
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `backend-python/venv/Scripts/python.exe -m pytest src/server/tests/test_url_explorer_normalizer.py -v`
 Expected: FAIL with `ModuleNotFoundError: No module named 'url_explorer'`.
 
-- [ ] **Step 3: Write minimal implementation**
+- [x] **Step 3: Write minimal implementation**
 
 ```python
 # src/server/url_explorer/__init__.py
@@ -230,12 +230,12 @@ def normalize(urls: list[str], universe: set[str]) -> list[EndpointTemplate]:
     return endpoints
 ```
 
-- [ ] **Step 4: Run test to verify it passes**
+- [x] **Step 4: Run test to verify it passes**
 
 Run: `backend-python/venv/Scripts/python.exe -m pytest src/server/tests/test_url_explorer_normalizer.py -v`
 Expected: PASS (8 tests).
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/server/url_explorer/__init__.py src/server/url_explorer/normalizer.py src/server/tests/test_url_explorer_normalizer.py
@@ -261,7 +261,7 @@ git commit -m "feat(url-explorer): URL normalizer with hybrid param typing"
   - `insert_correlation(endpoint_id:int, run_at:str, c:"Correlation") -> None` (Correlation from Task 5; attrs `field_path,target,n,pearson,spearman,ic`)
   - `last_run_field_paths(endpoint_id:int) -> set[str]` (for Task 4 change detection)
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 ```python
 # src/server/tests/test_url_explorer_store.py
@@ -316,12 +316,12 @@ def test_insert_fetch_appends_history(_db):
     assert con.execute("SELECT COUNT(*) FROM url_fetches").fetchone()[0] == 2
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `backend-python/venv/Scripts/python.exe -m pytest src/server/tests/test_url_explorer_store.py -v`
 Expected: FAIL with `ModuleNotFoundError: No module named 'url_explorer.store'`.
 
-- [ ] **Step 3: Write minimal implementation**
+- [x] **Step 3: Write minimal implementation**
 
 ```python
 # src/server/url_explorer/store.py
@@ -441,12 +441,12 @@ def last_run_field_paths(endpoint_id: int) -> set[str]:
     return {r["field_path"] for r in rows}
 ```
 
-- [ ] **Step 4: Run test to verify it passes**
+- [x] **Step 4: Run test to verify it passes**
 
 Run: `backend-python/venv/Scripts/python.exe -m pytest src/server/tests/test_url_explorer_store.py -v`
 Expected: PASS (3 tests).
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/server/url_explorer/store.py src/server/tests/test_url_explorer_store.py
@@ -468,7 +468,7 @@ git commit -m "feat(url-explorer): Postgres/SQLite storage schema + writers"
   - `fetch_all(endpoints:list[EndpointTemplate], fetch_fn=None, max_per_endpoint:int|None=None, delay:float=0.3, max_consec_fail:int=5) -> list[FetchResult]`
   - `fetch_fn` signature: `fetch_fn(url:str) -> tuple[int, str|None, str]` returning `(status, body, content_type)`; raising is treated as a failure.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 ```python
 # src/server/tests/test_url_explorer_fetcher.py
@@ -518,12 +518,12 @@ def test_circuit_breaker_stops_endpoint_after_consecutive_failures():
     assert all(not r.ok for r in results)
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `backend-python/venv/Scripts/python.exe -m pytest src/server/tests/test_url_explorer_fetcher.py -v`
 Expected: FAIL with `ModuleNotFoundError`.
 
-- [ ] **Step 3: Write minimal implementation**
+- [x] **Step 3: Write minimal implementation**
 
 ```python
 # src/server/url_explorer/fetcher.py
@@ -580,12 +580,12 @@ def fetch_all(endpoints, fetch_fn=None, max_per_endpoint=None,
     return results
 ```
 
-- [ ] **Step 4: Run test to verify it passes**
+- [x] **Step 4: Run test to verify it passes**
 
 Run: `backend-python/venv/Scripts/python.exe -m pytest src/server/tests/test_url_explorer_fetcher.py -v`
 Expected: PASS (4 tests).
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/server/url_explorer/fetcher.py src/server/tests/test_url_explorer_fetcher.py
@@ -607,7 +607,7 @@ git commit -m "feat(url-explorer): injectable throttled fetcher with circuit bre
   - `flatten(obj, prefix="") -> list[tuple[str, object]]` — leaf `(path, value)` pairs; list items collapse to the same path (fan-out).
   - `profile_endpoint(results:list[FetchResult], universe:set[str], prev_paths:set[str]) -> list[FieldProfile]`
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 ```python
 # src/server/tests/test_url_explorer_profiler.py
@@ -649,12 +649,12 @@ def test_changed_vs_last_flag():
     assert profs["newcol"].changed_vs_last is True
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `backend-python/venv/Scripts/python.exe -m pytest src/server/tests/test_url_explorer_profiler.py -v`
 Expected: FAIL with `ModuleNotFoundError`.
 
-- [ ] **Step 3: Write minimal implementation**
+- [x] **Step 3: Write minimal implementation**
 
 ```python
 # src/server/url_explorer/profiler.py
@@ -738,12 +738,12 @@ def profile_endpoint(results, universe, prev_paths):
     return profiles
 ```
 
-- [ ] **Step 4: Run test to verify it passes**
+- [x] **Step 4: Run test to verify it passes**
 
 Run: `backend-python/venv/Scripts/python.exe -m pytest src/server/tests/test_url_explorer_profiler.py -v`
 Expected: PASS (4 tests).
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/server/url_explorer/profiler.py src/server/tests/test_url_explorer_profiler.py
@@ -766,7 +766,7 @@ git commit -m "feat(url-explorer): JSON field profiler with universe overlap"
   - `correlate(cross_section:dict[str,float], returns:dict[str,float], field_path:str, target:str, min_n:int=20) -> Correlation|None`
   - `correlate_endpoint(results, profiles, returns_by_target:dict[str,dict[str,float]], universe:set[str], overlap_threshold:float=0.5, min_n:int=20) -> list[Correlation]`
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 ```python
 # src/server/tests/test_url_explorer_correlator.py
@@ -812,12 +812,12 @@ def test_correlate_endpoint_only_ticker_keyed_numeric():
     assert round(cors[0].pearson, 3) == 1.0
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `backend-python/venv/Scripts/python.exe -m pytest src/server/tests/test_url_explorer_correlator.py -v`
 Expected: FAIL with `ModuleNotFoundError`.
 
-- [ ] **Step 3: Write minimal implementation**
+- [x] **Step 3: Write minimal implementation**
 
 ```python
 # src/server/url_explorer/correlator.py
@@ -906,12 +906,12 @@ def correlate_endpoint(results, profiles, returns_by_target, universe,
     return out
 ```
 
-- [ ] **Step 4: Run test to verify it passes**
+- [x] **Step 4: Run test to verify it passes**
 
 Run: `backend-python/venv/Scripts/python.exe -m pytest src/server/tests/test_url_explorer_correlator.py -v`
 Expected: PASS (4 tests).
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/server/url_explorer/correlator.py src/server/tests/test_url_explorer_correlator.py
@@ -933,7 +933,7 @@ git commit -m "feat(url-explorer): cross-sectional correlation vs returns"
   - `returns.load_return_targets(windows=(5,20)) -> dict[str, dict[str,float]]` — keys like `trailing_ret_5d`, `fwd_ret_5d`; each maps `ticker -> return`. Reads `stock_ohlcv` via `db_compat`; empty dict if table absent.
   - `report.render_report(items:list[dict]) -> str` where each item = `{"endpoint":EndpointTemplate, "n_ok":int, "n_total":int, "profiles":list[FieldProfile], "correlations":list[Correlation]}`.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 ```python
 # src/server/tests/test_url_explorer_report.py
@@ -962,12 +962,12 @@ def test_report_handles_empty():
     assert "No endpoints" in render_report([])
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `backend-python/venv/Scripts/python.exe -m pytest src/server/tests/test_url_explorer_report.py -v`
 Expected: FAIL with `ModuleNotFoundError`.
 
-- [ ] **Step 3: Write minimal implementation**
+- [x] **Step 3: Write minimal implementation**
 
 ```python
 # src/server/url_explorer/returns.py
@@ -1045,12 +1045,12 @@ def render_report(items) -> str:
     return "\n".join(lines) + "\n"
 ```
 
-- [ ] **Step 4: Run test to verify it passes**
+- [x] **Step 4: Run test to verify it passes**
 
 Run: `backend-python/venv/Scripts/python.exe -m pytest src/server/tests/test_url_explorer_report.py -v`
 Expected: PASS (2 tests).
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/server/url_explorer/returns.py src/server/url_explorer/report.py src/server/tests/test_url_explorer_report.py
@@ -1072,7 +1072,7 @@ git commit -m "feat(url-explorer): return targets + markdown usefulness report"
   - `run(urls:list[str], universe:set[str], fetch_fn=None, returns_by_target=None, max_per_endpoint=None, write=True) -> dict` — runs the full pipeline, returns `{"report": str, "endpoints": int, "fetches": int}`. `write=False` skips DB writes (for tests).
   - `main(argv=None) -> int` — argparse CLI (`--urls`, `--normalize-only`, `--no-correlate`, `--max-per-endpoint`, `--out`).
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 ```python
 # src/server/tests/test_url_explorer_explore.py
@@ -1098,12 +1098,12 @@ def test_run_end_to_end_without_db_or_network():
     assert "fwd_ret_5d" in out["report"]
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `backend-python/venv/Scripts/python.exe -m pytest src/server/tests/test_url_explorer_explore.py -v`
 Expected: FAIL with `ModuleNotFoundError`.
 
-- [ ] **Step 3: Write minimal implementation**
+- [x] **Step 3: Write minimal implementation**
 
 ```python
 # src/server/url_explorer/explore.py
@@ -1212,12 +1212,12 @@ if __name__ == "__main__":
     sys.exit(main())
 ```
 
-- [ ] **Step 4: Run test to verify it passes**
+- [x] **Step 4: Run test to verify it passes**
 
 Run: `backend-python/venv/Scripts/python.exe -m pytest src/server/tests/test_url_explorer_explore.py -v`
 Expected: PASS (1 test).
 
-- [ ] **Step 5: Run the whole suite + a tiny live smoke test**
+- [x] **Step 5: Run the whole suite + a tiny live smoke test**
 
 Run: `backend-python/venv/Scripts/python.exe -m pytest src/server/tests/test_url_explorer_*.py -v`
 Expected: all PASS (26 tests).
@@ -1232,7 +1232,7 @@ cd src/server && printf '%s\n' \
 ```
 Expected: prints `1 endpoints, 3 fetches` and writes a report under `docs/url_explorer/`.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add src/server/url_explorer/explore.py src/server/tests/test_url_explorer_explore.py

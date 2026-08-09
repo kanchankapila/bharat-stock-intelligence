@@ -6,15 +6,24 @@ import { Activity, ArrowUpRight, ArrowDownRight } from 'lucide-react';
 import { motion } from 'motion/react';
 import { GlobalMarketCards } from './GlobalMarketCards';
 import { useIntersectionObserver } from '../hooks/useIntersectionObserver';
+import { lookupExchangeTimeZone, currentTimeInZone } from '../lib/timeFormat';
+import { PriceFreshnessBadge } from './PriceFreshnessBadge';
 
 export const GlobalMarkets: React.FC<{ className?: string }> = ({ className }) => {
   const ref = React.useRef<HTMLDivElement>(null);
   const isVisible = useIntersectionObserver(ref, { threshold: 0.1 });
 
-  const { data: globalData, isLoading } = trpc.getGlobalIndices.useQuery(undefined, {
+  const { data: globalData, isLoading, dataUpdatedAt } = trpc.getGlobalIndices.useQuery(undefined, {
     enabled: isVisible,
     refetchInterval: isVisible ? 30000 : false,
   });
+
+  // Ticks once a minute so per-market local clocks stay live without re-fetching.
+  const [, setClockTick] = React.useState(0);
+  React.useEffect(() => {
+    const t = setInterval(() => setClockTick(n => n + 1), 60_000);
+    return () => clearInterval(t);
+  }, []);
 
   if (isLoading || !globalData) return (
     <Card ref={ref} title="Global Intelligence" icon={Activity} className={cn("h-full", className)}>
@@ -47,7 +56,13 @@ export const GlobalMarkets: React.FC<{ className?: string }> = ({ className }) =
   );
 
   return (
-    <Card ref={ref} title="Global Intelligence" icon={Activity} className={cn("h-full", className)}>
+    <Card
+      ref={ref}
+      title="Global Intelligence"
+      icon={Activity}
+      className={cn("h-full", className)}
+      action={<PriceFreshnessBadge updatedAt={dataUpdatedAt} thresholdMs={60_000} />}
+    >
       <div className="grid grid-cols-2 gap-3 pt-2">
         {displayIndices.map((idx: any) => {
           const isUp = Number(idx.direction) === 1 || parseFloat(idx.percentChange) >= 0;
@@ -76,6 +91,15 @@ export const GlobalMarkets: React.FC<{ className?: string }> = ({ className }) =
                   {idx.price}
                 </span>
               </div>
+
+              {(() => {
+                const tz = lookupExchangeTimeZone(idx.name) ?? lookupExchangeTimeZone(idx.region);
+                return tz ? (
+                  <div className="text-[7px] font-bold text-slate-600 uppercase tracking-wide mb-1 tabular-nums">
+                    {currentTimeInZone(tz)} local
+                  </div>
+                ) : null;
+              })()}
 
               <div className={cn(
                 "flex items-center gap-1 text-[10px] font-black",

@@ -18,44 +18,35 @@ from db_compat import connect, read_df, execute
 
 NIFTY_BENCHMARK = "NIFTY50"
 
-def run_backtest(filters: list[str], horizon: str = '3d', initial_capital: float = 1000000.0, max_positions: int = 10, start_date: str = None, end_date: str = None, save_db: bool = True):
-    print(f"[LiveScreenerBacktester] Starting backtest for filters: {filters}")
-    print(f"  Horizon: {horizon} | Initial Capital: Rs. {initial_capital:,.2f} | Max Positions: {max_positions}")
-    
-    if not filters:
-        print("[Error] No filters provided for backtest.")
-        return
-        
-    # 'intraday' exits same-day, but the equity loop below steps day-by-day, so it still
-    # needs a 1-day holding slot to clear the position on the next date it processes.
-    horizon_days_map = {'1d': 1, '3d': 3, '5d': 5, 'intraday': 1}
-    horizon_days = horizon_days_map.get(horizon, 3)
-    return_col = 'return_intraday' if horizon == 'intraday' else f"return_{horizon}"
 
-    # 1. Fetch live screener outcomes for the specified filters
-    placeholders = ",".join(["?"] * len(filters))
-    q = f"""
-        SELECT symbol, appeared_at, entry_price, return_1d, return_3d, return_5d, return_intraday, filter_key
-        FROM live_screener_outcomes
-        WHERE filter_key IN ({placeholders})
+def _generate_combo_signals(df: pd.DataFrame, filters: list[str], return_col: str,
+                             start_date: str = None, end_date: str = None) -> pd.DataFrame:
+    """One entry signal per (run_id, symbol) where ALL of `filters` matched simultaneously.
+
+    Grouped by (run_id, symbol), NOT (appeared_at, symbol) as this used to be -- a filter
+    match persists across many consecutive ~15-min scans in one trading day (live-confirmed
+    median 15 distinct runs per matching (date, symbol) pair), so grouping by calendar day
+    let "ALL of the specified filters active" mean "matched each filter at SOME point that
+    day, even hours apart". That is a different, easier-to-satisfy condition than what a live
+    trader would ever actually see: LiveMarketScreener.tsx's "Apply Combo" button sends every
+    filter as ONE simultaneous-AND query to NiftyTrader, which only returns stocks matching
+    ALL of them AT THE SAME MOMENT. Backtesting the day-level union instead of the same-scan
+    intersection reports a different, generally more favorable trade frequency/quality than
+    the combo the frontend and live_screener_optimizer.py's honest (post-2026-08-07-fix)
+    win-rate figures actually describe -- same train/serve skew, this time in the backtest
+    engine itself (see live_screener_ml_no_live_edge_2026_08_07 memory). Extracted as its own
+    function so the grouping logic is directly unit-testable without a DB.
     """
-    df = read_df(q, tuple(filters))
-    
-    if df.empty:
-        print("[LiveScreenerBacktester] No historical outcome records found for these filters.")
-        return
-        
-    # Group by (appeared_at, symbol) to ensure we require ALL of the specified filters to be active
-    grouped = df.groupby(['appeared_at', 'symbol'])
+    grouped = df.groupby(['run_id', 'symbol'])
     signals = []
-    
-    for (appeared_at, symbol), g in grouped:
-        # Check start/end bounds if specified
+
+    for (run_id, symbol), g in grouped:
+        appeared_at = g['appeared_at'].iloc[0]
         if start_date and appeared_at < start_date:
             continue
         if end_date and appeared_at > end_date:
             continue
-            
+
         unique_filters = g['filter_key'].unique()
         if len(unique_filters) == len(filters):
             # Take the first entry
@@ -66,13 +57,46 @@ def run_backtest(filters: list[str], horizon: str = '3d', initial_capital: float
                 'entry_price': first_row['entry_price'],
                 'return_val': first_row[return_col]
             })
-            
+
     if not signals:
+        return pd.DataFrame(columns=['symbol', 'appeared_at', 'entry_price', 'return_val'])
+    return pd.DataFrame(signals).sort_values('appeared_at').reset_index(drop=True)
+
+
+def run_backtest(filters: list[str], horizon: str = '3d', initial_capital: float = 1000000.0, max_positions: int = 10, start_date: str = None, end_date: str = None, save_db: bool = True):
+    print(f"[LiveScreenerBacktester] Starting backtest for filters: {filters}")
+    print(f"  Horizon: {horizon} | Initial Capital: Rs. {initial_capital:,.2f} | Max Positions: {max_positions}")
+
+    if not filters:
+        print("[Error] No filters provided for backtest.")
+        return
+
+    # 'intraday' exits same-day, but the equity loop below steps day-by-day, so it still
+    # needs a 1-day holding slot to clear the position on the next date it processes.
+    horizon_days_map = {'1d': 1, '3d': 3, '5d': 5, 'intraday': 1}
+    horizon_days = horizon_days_map.get(horizon, 3)
+    return_col = 'return_intraday' if horizon == 'intraday' else f"return_{horizon}"
+
+    # 1. Fetch live screener outcomes for the specified filters
+    placeholders = ",".join(["?"] * len(filters))
+    q = f"""
+        SELECT o.symbol, o.appeared_at, o.entry_price, o.return_1d, o.return_3d, o.return_5d,
+               o.return_intraday, o.filter_key, a.run_id
+        FROM live_screener_outcomes o
+        JOIN live_screener_appearances a ON a.id = o.appearance_id
+        WHERE o.filter_key IN ({placeholders})
+    """
+    df = read_df(q, tuple(filters))
+
+    if df.empty:
+        print("[LiveScreenerBacktester] No historical outcome records found for these filters.")
+        return
+
+    signals_df = _generate_combo_signals(df, filters, return_col, start_date, end_date)
+    if signals_df.empty:
         print("[LiveScreenerBacktester] No dates found where ALL of the selected filters matched simultaneously.")
         return
-        
-    signals_df = pd.DataFrame(signals)
-    signals_df = signals_df.sort_values('appeared_at')
+
     print(f"[LiveScreenerBacktester] Generated {len(signals_df)} entry signals.")
     
     # 2. Replay chronological timeline

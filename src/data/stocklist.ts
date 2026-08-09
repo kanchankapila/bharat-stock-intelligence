@@ -25584,16 +25584,6 @@ const stockData: StockMapping[] = [
     "scripcode": 543417
   },
   {
-    "name": "13510368",
-    "mcsymbol": "",
-    "tlid": "1493810",
-    "tlname": "cosmic-crf-ltd",
-    "isin": "",
-    "symbol": "13510368",
-    "stockid": "",
-    "companyid": ""
-  },
-  {
     "name": "STRATMONT",
     "mcsymbol": "",
     "tlid": "82968",

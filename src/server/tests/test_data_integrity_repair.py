@@ -67,6 +67,111 @@ class TestLabelDefinitions:
         assert abs(45.0) <= dir_mod.MAX_PLAUSIBLE_RETURN_PCT
 
 
+# ── signal_outcomes signal_source backfill (2026-08) ─────────────────────────
+# The real root cause behind the label split above: outcome_resolver.py and
+# confluence_outcome_tracker.py were colliding on the same (symbol, signal_date,
+# horizon_days) key with no way to tell which wrote a given row. Inferred from
+# label_definition, since the mechanism traced live showed each horizon bucket was
+# claimed by exactly one writer for its entire history.
+
+class _SkipAddColumnIfExists:
+    """repair_labels() issues `ALTER TABLE ... ADD COLUMN IF NOT EXISTS`, which is valid
+    Postgres syntax (its real, production target) but not real SQLite -- sql_translate.py
+    doesn't translate this pattern, so it's never been runnable against a plain sqlite3
+    connection. This fixture already creates those columns via CREATE TABLE, so the two
+    ALTER statements are no-ops here; skip exactly those two rather than mocking the whole
+    connection, so every other statement still hits the real in-memory DB."""
+
+    def __init__(self, conn):
+        self._conn = conn
+
+    def execute(self, sql, params=()):
+        if 'ADD COLUMN IF NOT EXISTS' in sql:
+            return self._conn  # inert stand-in; return value is unused by repair_labels
+        return self._conn.execute(sql, params)
+
+    def __getattr__(self, name):
+        return getattr(self._conn, name)
+
+
+class TestSignalSourceBackfill:
+    def _make_db(self):
+        import sqlite3
+        conn = sqlite3.connect(':memory:')
+        conn.row_factory = sqlite3.Row
+        conn.executescript("""
+            CREATE TABLE signal_outcomes (
+                symbol TEXT, signal_date TEXT, horizon_days INTEGER,
+                entry_price REAL, return_pct REAL, outcome TEXT,
+                label_definition TEXT, is_suspect INTEGER DEFAULT 0,
+                signal_source TEXT NOT NULL DEFAULT 'unknown',
+                PRIMARY KEY (symbol, signal_date, horizon_days, signal_source)
+            );
+        """)
+        return _SkipAddColumnIfExists(conn)
+
+    def test_path_barrier_rows_backfilled_to_technical(self):
+        conn = self._make_db()
+        conn.execute(
+            "INSERT INTO signal_outcomes (symbol, signal_date, horizon_days, entry_price, "
+            "return_pct, outcome, label_definition) VALUES ('AAA','2026-01-01',1,100,5,'WIN','path_barrier')"
+        )
+        conn.commit()
+        dir_mod.repair_labels(conn, dry=False)
+        row = conn.execute("SELECT signal_source FROM signal_outcomes WHERE symbol='AAA'").fetchone()
+        assert row['signal_source'] == 'technical'
+
+    def test_terminal_pct2_rows_backfilled_to_confluence(self):
+        conn = self._make_db()
+        conn.execute(
+            "INSERT INTO signal_outcomes (symbol, signal_date, horizon_days, entry_price, "
+            "return_pct, outcome, label_definition) VALUES ('BBB','2026-01-01',7,100,3,'WIN','terminal_pct2')"
+        )
+        conn.commit()
+        dir_mod.repair_labels(conn, dry=False)
+        row = conn.execute("SELECT signal_source FROM signal_outcomes WHERE symbol='BBB'").fetchone()
+        assert row['signal_source'] == 'confluence'
+
+    def test_already_attributed_rows_are_left_untouched(self):
+        """A row the fixed writers already stamped correctly must not be reclassified by the
+        backfill's label_definition heuristic -- only pre-fix 'unknown' rows are inferred."""
+        conn = self._make_db()
+        conn.execute(
+            "INSERT INTO signal_outcomes (symbol, signal_date, horizon_days, entry_price, "
+            "return_pct, outcome, label_definition, signal_source) "
+            "VALUES ('CCC','2026-01-01',7,100,3,'WIN','path_barrier','confluence')"
+        )
+        conn.commit()
+        dir_mod.repair_labels(conn, dry=False)
+        row = conn.execute("SELECT signal_source FROM signal_outcomes WHERE symbol='CCC'").fetchone()
+        assert row['signal_source'] == 'confluence', "must not overwrite an already-attributed row"
+
+    def test_unclassifiable_horizon_stays_unknown(self):
+        """horizon=99 is in neither TERMINAL_HORIZONS nor PATH_HORIZONS -- label_definition
+        backfills to 'unknown', and signal_source correctly has no inference to make."""
+        conn = self._make_db()
+        conn.execute(
+            "INSERT INTO signal_outcomes (symbol, signal_date, horizon_days, entry_price, "
+            "return_pct, outcome) VALUES ('DDD','2026-01-01',99,100,5,'WIN')"
+        )
+        conn.commit()
+        dir_mod.repair_labels(conn, dry=False)
+        row = conn.execute("SELECT signal_source, label_definition FROM signal_outcomes WHERE symbol='DDD'").fetchone()
+        assert row['label_definition'] == 'unknown'
+        assert row['signal_source'] == 'unknown'
+
+    def test_dry_run_writes_nothing(self):
+        conn = self._make_db()
+        conn.execute(
+            "INSERT INTO signal_outcomes (symbol, signal_date, horizon_days, entry_price, "
+            "return_pct, outcome, label_definition) VALUES ('EEE','2026-01-01',1,100,5,'WIN','path_barrier')"
+        )
+        conn.commit()
+        dir_mod.repair_labels(conn, dry=True)
+        row = conn.execute("SELECT signal_source FROM signal_outcomes WHERE symbol='EEE'").fetchone()
+        assert row['signal_source'] == 'unknown', "dry run must not backfill anything"
+
+
 class TestBadBarThreshold:
     def test_reliance_2022_06_16_would_be_flagged(self):
         """close=1280 against a prior bar near 1.0 -> +127,900%."""

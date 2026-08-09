@@ -1,6 +1,11 @@
 import { describe, it, expect, beforeEach } from 'vitest';
-import { dbRun, dbGet } from '../dbAsync';
-import { upsertUnifiedSignal } from '../signals';
+
+// Isolates this test from the host environment's USE_POSTGRES -- see createSignal.test.ts
+// for the full explanation of why a dynamic import is required here, not a plain top-level
+// statement before a static `import { dbRun, dbGet } from '../dbAsync'`.
+process.env.USE_POSTGRES = 'false';
+const { dbRun, dbGet } = await import('../dbAsync');
+const { upsertUnifiedSignal } = await import('../signals');
 
 describe('upsertUnifiedSignal', () => {
   beforeEach(async () => { await dbRun('DELETE FROM unified_signals WHERE symbol = ?', ['TESTUP']); });

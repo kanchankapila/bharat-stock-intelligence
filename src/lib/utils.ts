@@ -4,6 +4,15 @@ import { twMerge } from "tailwind-merge"
 export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs))
 }
+
+/**
+ * MoneyControl index URLs end in "-<indexId>.html" -- pull that id out for click-through
+ * navigation to the Index Detail page. Shared by IndicesPage.tsx and MarketInsights.tsx.
+ */
+export function extractIndexId(url: string): string | null {
+  const m = url?.match(/-(\d+)\.html$/);
+  return m ? m[1] : null;
+}
 /**
  * Generate a random jitter value to avoid thundering herd problem
  * @param baseMs - Base milliseconds to add jitter to

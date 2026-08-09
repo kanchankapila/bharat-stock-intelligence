@@ -15,6 +15,8 @@ from pathlib import Path
 from typing import Dict, List, Tuple
 
 from db_compat import connect, read_df
+from model_promotion import clears_promotion_bar
+from as_of import logical_trading_date
 
 # Must be set before torch/cuBLAS initialises
 os.environ.setdefault("CUBLAS_WORKSPACE_CONFIG", ":4096:8")
@@ -43,6 +45,24 @@ CONFIG_PATH = MODEL_DIR / "dl_model_config.json"
 
 SEQUENCE_LEN = 60
 N_FEATURES   = 78
+
+# Defensive winsorization bound for raw engineered features fed to the LSTM (2026-08-06).
+# nan_to_num below only catches true NaN/+-inf; it does nothing for an extreme-but-finite
+# outlier -- and those are real and pervasive in feature_store, not hypothetical: live query
+# confirmed dist_sma200_pct in [-3644, +2771] (avg |value| ~2.15), ret_1d/ret_5d (fractional
+# return columns, legitimate range roughly +-1) reaching +-1.5M/+-3.2M, op_margins to -19479,
+# and 88k+ debt_to_equity rows with |value|>50 -- almost certainly the documented bad-OHLCV-bar
+# class (ohlcv_quality.py) and/or unit-scale mismatches in upstream ratio computations, not
+# clipped anywhere before reaching this model. A single such row in a 60-step sequence is
+# enough to blow up the first matmul (worse under this model's AMP/fp16 forward pass, whose
+# max representable magnitude is ~65504) and is a highly plausible contributor to the
+# recurring NaN-weight divergence documented in dl_model_config.json's stale v3 pin (see
+# CLAUDE.md's dl_trainer.py session notes) -- gradient clipping alone (added 2026-08-02) bounds
+# the backward pass, not this. 1e4 is deliberately wide: it is far above every plausible real
+# value for every FEATURE_COLS entry (bounded indicators like RSI/MACD/ratios are two to three
+# orders of magnitude smaller) while unambiguously catching the confirmed corruption-scale
+# outliers above -- this is a numerical-stability guard, not a per-column scale/unit fix.
+FEATURE_CLIP_BOUND = 1e4
 FEATURE_COLS = [
     "ret_1d","ret_5d","ret_15d","ret_21d","ret_63d","ret_126d","ret_252d",
     "sma20","sma50","sma200","ema8","ema21","dist_sma20_pct","dist_sma200_pct","above_sma200",
@@ -168,10 +188,19 @@ def load_symbol_sequences(
     df = df.dropna(subset=["target_ret_5d", "target_ret_15d"])
     df = df.fillna(0)
 
-    X_all = df[feat_cols].values.astype(np.float32)
+    # A ratio-style feature (e.g. dist_sma200_pct, pe, vwap_dist_pct) computed off a near-zero
+    # denominator or an implausible bad bar (this codebase has documented cases of >100,000%
+    # single-day "returns" from bad OHLCV rows -- see ohlcv_quality.py) can be +/-inf. Feeding
+    # that straight into the LSTM blows up the first matmul instantly and diverges the whole
+    # model; np.nan_to_num maps it to 0 (treated the same as the missing-data fillna(0) above)
+    # rather than letting a single row poison every future gradient step. np.clip afterward
+    # catches the same failure mode's finite sibling -- an extreme-but-not-inf outlier
+    # (confirmed live, see FEATURE_CLIP_BOUND's own comment) that nan_to_num does not touch.
+    X_all = np.nan_to_num(df[feat_cols].values.astype(np.float32), nan=0.0, posinf=0.0, neginf=0.0)
+    X_all = np.clip(X_all, -FEATURE_CLIP_BOUND, FEATURE_CLIP_BOUND)
     y5    = (df["target_ret_5d"]  > 0).astype(np.int64).values
     y15   = (df["target_ret_15d"] > 0).astype(np.int64).values
-    yr5   = df["target_ret_5d"].values.astype(np.float32)
+    yr5   = np.nan_to_num(df["target_ret_5d"].values.astype(np.float32), nan=0.0, posinf=0.0, neginf=0.0)
     dates = df["date"].dt.strftime("%Y-%m-%d").tolist()
 
     # Build sliding windows
@@ -213,7 +242,13 @@ def load_inference_sequence(
         return None, None
     df = df.sort_values("date")
     df = _onehot_vol_regime(df).fillna(0)
-    X = df[feat_cols].values.astype(np.float32)
+    # Same non-finite + extreme-outlier guard as load_symbol_sequences (training) -- must match
+    # exactly, or inference sees a different feature distribution than training did (train/serve
+    # skew). A live inf/extreme feature here would otherwise produce an inf/NaN prediction,
+    # which the caller's finite-check then correctly drops, but there's no reason to let it
+    # reach the model at all.
+    X = np.nan_to_num(df[feat_cols].values.astype(np.float32), nan=0.0, posinf=0.0, neginf=0.0)
+    X = np.clip(X, -FEATURE_CLIP_BOUND, FEATURE_CLIP_BOUND)
     return X[np.newaxis], df["date"].iloc[-1]
 
 
@@ -308,15 +343,31 @@ def _train_one_fold(model: BiLSTMModel, X: np.ndarray, y5: np.ndarray,
                 loss = ce(out["dir_5d"], yb) * 0.5 + hub(out["ret_5d"], rb) * 0.5
                 if yb15 is not None:
                     loss = loss + ce(out["dir_15d"], yb15) * 0.5
+            if not torch.isfinite(loss):
+                # A single non-finite batch (e.g. one remaining bad-data row that np.nan_to_num
+                # in load_symbol_sequences didn't already zero, or an unlucky fp16 overflow under
+                # autocast) must not be allowed to backward() at all -- every lstm_v3..v18
+                # checkpoint diverged to ~100% NaN weights this way, and once the LSTM's hidden
+                # state carries a NaN it poisons every subsequent batch and epoch permanently.
+                continue
             if scaler is not None:
                 prev_scale = scaler.get_scale()
                 scaler.scale(loss).backward()
+                # unscale BEFORE clipping -- clip_grad_norm_ on still-fp16-scaled gradients
+                # clips against the wrong (scaled) magnitude and doesn't actually bound the
+                # true gradient norm.
+                scaler.unscale_(opt)
+                torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
                 scaler.step(opt)
                 scaler.update()
                 if scaler.get_scale() >= prev_scale:  # step was not skipped
                     stepped = True
             else:
                 loss.backward()
+                # Gradient clipping is the standard fix for LSTM exploding-gradient divergence;
+                # this loop previously had none, and an unbounded update from one bad batch or
+                # a stretch of high-lr instability could push weights to NaN in a single step.
+                torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
                 opt.step()
                 stepped = True
         if stepped:
@@ -455,20 +506,45 @@ def train_lstm(version: int = 1) -> Dict:
 _DL_MODEL_CACHE: dict | None = None  # {'model': BiLSTMModel, 'path': str, 'mtime': float}
 
 
+def _resolve_prediction_date(prediction_date: str = None) -> str:
+    """Resolve run_inference()'s date argument, defaulting to logical_trading_date() rather
+    than a raw wall-clock date (2026-08-06). dl-infer-daily's cron fires at 18:30 UTC = 00:00
+    IST exactly (moved there 2026-07-31 specifically to dodge the 21:00-23:35 IST pg-pool
+    contention window), and no scheduled caller ever passes --date, so every run's "today" was
+    the calendar day AFTER the trading session whose feature_store row it actually reads --
+    deep_learning_predictions.prediction_date was permanently stamped one day ahead of the data
+    it reflects. Same bug class as insider_features.py/screener_performance.py; see
+    as_of.logical_trading_date's docstring. Extracted as its own function so this default is
+    directly unit-testable without invoking run_inference()'s model-loading/DB logic.
+    """
+    if prediction_date is None:
+        return logical_trading_date()
+    return prediction_date
+
+
 def run_inference(prediction_date: str = None) -> None:
     """Run BiLSTM inference on all symbols, write to deep_learning_predictions."""
     global _DL_MODEL_CACHE
 
-    if prediction_date is None:
-        prediction_date = datetime.today().strftime("%Y-%m-%d")
+    prediction_date = _resolve_prediction_date(prediction_date)
 
     cfg = _load_config()
     model_version = cfg.get("lstm_version", 1)
     model_path = MODEL_DIR / f"lstm_v{model_version}.pt"
 
     if not model_path.exists():
-        print(f"[DL] No model at {model_path}. Run --mode train first.")
-        return
+        # A missing file here means dl_model_config.json's pointer and what's actually on disk
+        # have diverged (observed live: the config pointed at lstm_v19.pt after training refused
+        # to save a diverged checkpoint, but the promotion step still activated the version
+        # number). Returning quietly used to let this run to "success" every day while writing
+        # zero predictions -- indistinguishable from a healthy day in every job-monitoring signal.
+        # A raised exception (not sys.exit) so this fails loudly both from the CLI entry point
+        # (uncaught -> non-zero exit, same as any other Python crash) and from python_api.py's
+        # in-process FastAPI call, where sys.exit would raise SystemExit -- a BaseException the
+        # endpoint's `except Exception` does NOT catch, which would have taken down the whole
+        # uvicorn worker instead of just failing this one request.
+        raise RuntimeError(f"No model at {model_path} (config points to version {model_version}). "
+                            f"Run --mode train first.")
 
     mtime = model_path.stat().st_mtime
     if (
@@ -522,6 +598,20 @@ def run_inference(prediction_date: str = None) -> None:
                 continue
             conf   = float(np.mean([pu_1d, pu_5d, pu_15d])) * conf_modifier
             unc    = float(np.std([pu_1d, pu_5d, pu_15d]))
+            # KNOWN DEAD COLUMNS on deep_learning_predictions, investigated 2026-08-07
+            # (dead-column sweep), NOT fixed here -- both need model-architecture changes to a
+            # file with a documented NaN-weights/rollback incident history (see the 2026-08-02
+            # dl_trainer note), not a quick wiring fix:
+            #   exp_ret_1d: this model only has regression heads for 5d/15d (head_ret_5d,
+            #     head_ret_15d) -- 1d has a direction-classification head (head_dir_1d) but no
+            #     accompanying return-magnitude regression head. Populating this column for
+            #     real needs a new head trained from scratch, not a bug fix.
+            #   attention_json/top_features_json: SelfAttention (self.attn) IS computed inside
+            #     forward(), but its weights are consumed internally to build `feat` and never
+            #     returned/serialized -- attention_json is feasible (expose the existing
+            #     tensor) but still an inference-path change; top_features_json would need a
+            #     wholly new attribution mechanism (e.g. gradient-based), not a byproduct of
+            #     the existing forward pass at all. Deliberately not attempted in this pass.
             cur.execute(
                 """INSERT INTO deep_learning_predictions
                    (symbol, prediction_date, model_name, model_version,
@@ -561,13 +651,14 @@ def run_inference(prediction_date: str = None) -> None:
     con.close()
     print(f"[DL] Inference complete: {written} predictions written for {prediction_date}")
     if skipped_nonfinite:
-        # Loud, and non-zero exit when the model produced nothing usable — an all-NaN
-        # checkpoint previously ran to "success" every day while writing pure NaN.
-        print(f"[DL] ERROR: {skipped_nonfinite} predictions dropped as non-finite (NaN/inf). "
-              f"The active checkpoint (lstm_v{model_version}.pt) is likely diverged - retrain.",
-              file=sys.stderr)
+        # Loud, and a raised error (not sys.exit — see the missing-model branch above for why)
+        # when the model produced nothing usable — an all-NaN checkpoint previously ran to
+        # "success" every day while writing pure NaN.
+        msg = (f"{skipped_nonfinite} predictions dropped as non-finite (NaN/inf). "
+               f"The active checkpoint (lstm_v{model_version}.pt) is likely diverged - retrain.")
+        print(f"[DL] ERROR: {msg}", file=sys.stderr)
         if written == 0:
-            sys.exit(1)
+            raise RuntimeError(msg)
 
 
 def _load_config() -> Dict:
@@ -630,7 +721,7 @@ def _promote_lstm_version(new_version: int, metrics: Dict) -> bool:
         ):
             baseline_auc = float(baseline["roc_auc"])
 
-    promote = baseline_auc is None or new_auc >= baseline_auc + LSTM_PROMOTION_MARGIN
+    promote = clears_promotion_bar(new_auc, baseline_auc, LSTM_PROMOTION_MARGIN)
 
     version_metrics[str(new_version)] = {k: (None if isinstance(v, float) and np.isnan(v) else v)
                                           for k, v in metrics.items()}

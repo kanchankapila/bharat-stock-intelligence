@@ -87,14 +87,23 @@ HORIZON_MULT = {
 # table must still sum to 1.0 for the case where all engines have data — screener/cs/breakout
 # are pinned at their documented values and ml/confluence/technical/dl are scaled down from
 # their pre-cs/breakout values to absorb the added weight.
+#
+# `smart_money` (insider buying + institutional block-deal accumulation, 2026-08-04) is flat
+# 0.05 across every regime — same treatment as `cs`, both genuinely orthogonal signals with no
+# regime-dependent rationale for tilting and no backtested edge magnitude to size a bigger
+# weight off (unlike breakout's 5yr OOS AUC). Held out of the momentum-vs-risk-off tilt that
+# governs breakout/technical, since insider/institutional accumulation isn't a momentum signal.
+# ml/confluence/technical/dl were each scaled down proportionally (factor = (pool-0.05)/pool,
+# where pool is their own pre-existing sum in that regime) to absorb the 5pp, same mechanism as
+# the cs/breakout addition documented above — screener/cs/breakout stay pinned.
 REGIME_WEIGHTS = {
-    'BULL':     {'screener': 0.30, 'ml': 0.15,   'cs': 0.05, 'confluence': 0.15,   'technical': 0.12,  'dl': 0.08,   'breakout': 0.15},
-    'BEAR':     {'screener': 0.35, 'ml': 0.183,  'cs': 0.05, 'confluence': 0.183,  'technical': 0.092, 'dl': 0.092,  'breakout': 0.05},
-    'HIGH_VOL': {'screener': 0.20, 'ml': 0.13,   'cs': 0.05, 'confluence': 0.13,   'technical': 0.26,  'dl': 0.13,   'breakout': 0.10},
-    'CRASH':    {'screener': 0.40, 'ml': 0.18,   'cs': 0.05, 'confluence': 0.14,   'technical': 0.09,  'dl': 0.09,   'breakout': 0.05},
+    'BULL':     {'screener': 0.30, 'ml': 0.135,  'cs': 0.05, 'confluence': 0.135,  'technical': 0.108, 'dl': 0.072,  'breakout': 0.15, 'smart_money': 0.05},
+    'BEAR':     {'screener': 0.35, 'ml': 0.166,  'cs': 0.05, 'confluence': 0.166,  'technical': 0.084, 'dl': 0.084,  'breakout': 0.05, 'smart_money': 0.05},
+    'HIGH_VOL': {'screener': 0.20, 'ml': 0.12,   'cs': 0.05, 'confluence': 0.12,   'technical': 0.24,  'dl': 0.12,   'breakout': 0.10, 'smart_money': 0.05},
+    'CRASH':    {'screener': 0.40, 'ml': 0.162,  'cs': 0.05, 'confluence': 0.126,  'technical': 0.081, 'dl': 0.081,  'breakout': 0.05, 'smart_money': 0.05},
     # SIDEWAYS was silently falling back to BULL; a balanced blend is more appropriate for
     # a rangebound tape (lean slightly less on momentum/dl than BULL).
-    'SIDEWAYS': {'screener': 0.32, 'ml': 0.16,   'cs': 0.05, 'confluence': 0.16,   'technical': 0.10,  'dl': 0.08,   'breakout': 0.13},
+    'SIDEWAYS': {'screener': 0.32, 'ml': 0.144,  'cs': 0.05, 'confluence': 0.144,  'technical': 0.09,  'dl': 0.072,  'breakout': 0.13, 'smart_money': 0.05},
 }
 
 # Per-regime CATEGORY tilt (multipliers on CAT_BASE_WT). Rangebound/neutral = SIDEWAYS (no
@@ -363,8 +372,14 @@ BREAKOUT_SIZE_P80 = 0.12   # top quintile → modest tilt
 
 
 def bet_size_from_probability(p, neutral: float = 0.5) -> float:
-    """López de Prado bet size in [0,1] from a win probability (long-only: 0 at/below neutral)."""
-    if p is None or p <= neutral:
+    """López de Prado bet size in [0,1] from a win probability (long-only: 0 at/below neutral).
+
+    isfinite guard: a NaN p fails `p <= neutral` (every NaN comparison is False), so without
+    this it falls through to `min(1.0, nan)`, which -- because Python's min/max keep the FIRST
+    argument when compared against NaN -- returns 1.0, the MAXIMUM bet size for an undefined
+    probability. Same failure shape as the 2026-07-31 dl_score-into-'Buy' incident.
+    """
+    if p is None or not math.isfinite(p) or p <= neutral:
         return 0.0
     denom = math.sqrt(p * (1.0 - p))
     if denom <= 0:
@@ -404,19 +419,219 @@ def normalize_position_sizes(raw: dict, sectors: dict | None = None,
     return {k: round(v, 4) for k, v in weights.items()}
 
 
-def _classify(score, bull, bear):
-    """Directional label (matches stock_scores taxonomy the Top Rated UI renders) from the
-    net screener bias balance, with magnitude gating the 'Strong' tiers."""
+# ── Correlation-cluster exposure cap (#27/#30 follow-up, 2026-08-05) ────────────────────
+# The sector cap above is the "cheap first-order approximation" its own comment already flags
+# as needing a fuller covariance-based fix -- several independently-sized, highly-correlated
+# names that don't share a GICS sector TAG (e.g. IT-services split across sub-sector labels,
+# all riding the same USD/INR tailwind) can each individually approach MAX_POSITION and jointly
+# carry far more single-factor exposure than the sector cap alone implies. This is that fuller
+# fix's cheap first-order version: empirically cluster today's SIZED names by pairwise return
+# correlation (not a static taxonomy) and apply the identical over-cap-then-scale-down
+# mechanism the sector cap already uses, as a second pass on top of it.
+MAX_CORRELATION_CLUSTER_EXPOSURE = 0.35
+CORRELATION_CLUSTER_THRESHOLD = 0.65
+# Minimum overlapping daily-return observations required to trust a pairwise correlation
+# estimate. A short/sparse overlap (a recent listing, a long trading halt) can produce a
+# spuriously high correlation on noise alone -- symbols without enough overlap are left OUT
+# of every cluster rather than force-grouped on an untrustworthy number.
+CORRELATION_MIN_OVERLAP = 20
+RETURN_LOOKBACK_DAYS = 60
+
+
+def _pearson(a: list, b: list):
+    """Pearson correlation of two equal-length numeric sequences, or None if undefined
+    (fewer than 2 points, or one series has zero variance -- e.g. a circuit-locked stretch)."""
+    n = len(a)
+    if n < 2 or n != len(b):
+        return None
+    mean_a, mean_b = sum(a) / n, sum(b) / n
+    cov = sum((x - mean_a) * (y - mean_b) for x, y in zip(a, b))
+    var_a = sum((x - mean_a) ** 2 for x in a)
+    var_b = sum((y - mean_b) ** 2 for y in b)
+    denom = math.sqrt(var_a * var_b)
+    return cov / denom if denom > 0 else None
+
+
+def cluster_by_correlation(returns: dict, threshold: float = CORRELATION_CLUSTER_THRESHOLD,
+                            min_overlap: int = CORRELATION_MIN_OVERLAP) -> dict:
+    """Pure function -- no DB access. `returns`: {symbol: {date: pct_return}} (date-keyed, not
+    a plain list, so two symbols are compared on the SAME trading days rather than by list
+    position -- different symbols miss different days for unrelated reasons -- holidays for a
+    recently-listed name, a circuit lock, a data gap -- and positional alignment would silently
+    pair the wrong days together and produce a spurious estimate).
+
+    Union-find over every pair whose correlation clears `threshold`. Returns {symbol:
+    cluster_id} ONLY for symbols placed in a cluster of size >= 2; a symbol with no correlated
+    peer above threshold (or too little overlapping history to trust an estimate at all) is
+    omitted entirely, so apply_correlation_cap leaves it untouched rather than grouping it into
+    a meaningless catch-all bucket.
+    """
+    symbols = [s for s, r in returns.items() if len(r) >= min_overlap]
+    parent = {s: s for s in symbols}
+
+    def find(x):
+        while parent[x] != x:
+            parent[x] = parent[parent[x]]
+            x = parent[x]
+        return x
+
+    def union(x, y):
+        rx, ry = find(x), find(y)
+        if rx != ry:
+            parent[ry] = rx
+
+    for i, a in enumerate(symbols):
+        for b in symbols[i + 1:]:
+            common = sorted(returns[a].keys() & returns[b].keys())
+            if len(common) < min_overlap:
+                continue
+            xs = [returns[a][d] for d in common]
+            ys = [returns[b][d] for d in common]
+            corr = _pearson(xs, ys)
+            if corr is not None and corr >= threshold:
+                union(a, b)
+
+    groups: dict = {}
+    for s in symbols:
+        groups.setdefault(find(s), []).append(s)
+
+    clusters: dict = {}
+    for cid, (_root, members) in enumerate(g for g in groups.items() if len(g[1]) >= 2):
+        for m in members:
+            clusters[m] = cid
+    return clusters
+
+
+def apply_correlation_cap(weights: dict, clusters: dict,
+                           cap: float = MAX_CORRELATION_CLUSTER_EXPOSURE) -> dict:
+    """Pure function -- no DB access. Same over-cap-then-scale-down mechanism as the sector cap
+    in normalize_position_sizes, keyed on empirical correlation clusters instead of a static
+    sector label. `clusters` maps symbol -> cluster id only for symbols the caller placed in a
+    real >=2-member cluster (see cluster_by_correlation) -- a symbol absent from `clusters` is
+    left untouched here, so a missing or untrustworthy correlation estimate degrades to "no
+    extra cap" rather than to an incorrect one. Can only ever reduce a position's weight, never
+    raise it.
+    """
+    out = dict(weights)
+    totals: dict = {}
+    for sym, w in out.items():
+        cid = clusters.get(sym)
+        if cid is not None and w and w > 0:
+            totals[cid] = totals.get(cid, 0.0) + w
+    for cid, total in totals.items():
+        if total > cap:
+            scale = cap / total
+            for sym in out:
+                if clusters.get(sym) == cid:
+                    out[sym] *= scale
+    return {k: round(v, 4) for k, v in out.items()}
+
+
+# Bounded score-fallback for directionless stocks (2026-08-05 pipeline-review finding,
+# "direction and magnitude are decoupled" -- resolved per explicit user confirmation of the
+# bounded-fallback approach over full multi-engine voting or leaving it as-is). Screeners keep
+# FULL authority whenever they express ANY net opinion (bull != bear) -- this only changes the
+# case where a stock is off every screener's radar for the day (total==0) or exactly tied
+# (bull==bear, a genuine stand-off rather than silence): a multi-engine-consensus score this
+# extreme is itself real evidence the ~1,700-screener catalog simply hasn't caught up to. The
+# bar is set well ABOVE the existing Strong-tier gate (66/34) specifically so this fallback
+# only ever fires on a genuinely standout blended score, never an ordinary one that happened to
+# have no screener coverage that day.
+#
+# FLAG-GATED, DEFAULT OFF (2026-08-06, quant-review finding): the "genuinely standout blended
+# score" premise above does not hold. Three of the eight engines -- screener, cs, confluence,
+# technical -- are percentile-RANK normalized (_normalize_to_100: guarantees a uniform 0-100
+# spread across the scored universe by construction, independent of whether the underlying
+# signal is objectively strong that day). When a stock has no screener opinion (the ONLY case
+# this fallback fires in), screener's weight (0.20-0.40, the single largest of the eight) is
+# redistributed by _blend()'s renormalization onto the remaining seven -- and cs+confluence+
+# technical alone can then represent over half of that redistributed weight (e.g. HIGH_VOL:
+# cs 0.05 + confluence 0.12 + technical 0.24 = 0.41 of the 0.80 remaining after screener drops
+# out). All three lean on the same underlying momentum/trend signal family (technical_score is
+# a raw RSI/MACD composite; confluence's non-screener sum is trend_alignment_score +
+# volume_score; cs_ranker is a cross-sectional alpha-percentile ranker) -- so on any day a
+# cohort of stocks is genuinely "hot," that cohort ranks top-percentile on all three
+# simultaneously and clears this fallback's 70/80 bar from shared momentum exposure alone, not
+# from independent multi-engine agreement. This is not a hypothetical: the platform's own
+# 2026-07-30/07-31 quant-strategy audits already measured short-horizon momentum to have
+# NEGATIVE forward alpha on this exact universe (mom21: -0.53%/5d, t=-3.21; intraday
+# vwap_dev/rvol: all negative, t up to -11) -- so a mechanism that manufactures broad "high
+# score on every parameter" Buy/Strong Buy classifications specifically FOR stocks lacking the
+# one genuinely independent, empirically-diverse check (screener consensus across ~1,700
+# separately-built screens) is systematically leaning into the platform's own documented losing
+# factor, not a validated edge. It also cannot be caught by is_red_flagged()'s hard veto, which
+# reads the same (empty, by construction) screener membership list.
+#
+# Traced directly to a real-world symptom: a 60+-Telegram-alert burst reported the day after
+# this fallback (and a companion websocketService.ts change removing an unrelated but
+# accidentally-protective Telegram threshold) shipped. That burst's Telegram root cause was a
+# separate, already-fixed gate (signals.py's AI-signal win_probability floor reverting to a
+# degenerate 0.40 default -- see the CLAUDE.md session note dated 2026-08-06) -- but reviewing
+# unified_recommendations for the same "why do so many stocks look great on every parameter"
+# question surfaced this mechanism as a second, independent contributor to implausibly broad
+# Buy/Strong Buy classification, on the canonical ranking table itself, not just the AI-signal
+# side channel.
+#
+# Rather than delete the mechanism outright (its actual premise -- screeners under-cover the
+# universe, and a stock can be genuinely strong before any screener catches up -- is real and
+# was an explicit, considered decision), it is disabled by default (missing/non-'true'
+# app_settings row = OFF, matching ml_calibration.is_edge_adjustment_enabled()'s established
+# convention) until it can be validated against live/historical unified_recommendations data:
+# specifically, whether stocks classified via this fallback path actually outperform, and
+# whether requiring genuine cross-engine diversity (e.g. the non-percentile ml/dl/breakout
+# engines, not just cs+confluence+technical) closes the gap. Flip with:
+#   UPDATE app_settings SET value='true' WHERE key='directionless_score_fallback_enabled';
+#   -- or INSERT if the key has never been set.
+DIRECTIONLESS_STRONG_BUY_FLOOR  = 80.0
+DIRECTIONLESS_BUY_FLOOR         = 70.0
+DIRECTIONLESS_STRONG_SELL_CEIL  = 20.0
+DIRECTIONLESS_SELL_CEIL         = 30.0
+
+
+def is_directionless_fallback_enabled(conn) -> bool:
+    """Feature flag gating _classify's directionless-score fallback. Defaults to OFF (missing
+    row) -- see the DIRECTIONLESS_* block's own comment for why this shipped disabled."""
+    try:
+        row = conn.execute(
+            "SELECT value FROM app_settings WHERE key = 'directionless_score_fallback_enabled'"
+        ).fetchone()
+        return bool(row) and row['value'] == 'true'
+    except Exception as e:
+        print(f"[UnifiedRanker] is_directionless_fallback_enabled unavailable: {e}")
+        return False
+
+
+def _classify(score, bull, bear, *, directionless_fallback: bool = False):
+    """Directional label (matches stock_scores taxonomy the Top Rated UI renders). Screeners
+    are the PRIMARY direction source: net screener bias (bull vs bear count) decides Buy vs
+    Sell whenever they express any opinion at all, with the 0-100 unified score only gating
+    the 'Strong' tier threshold. Only when screeners have NO net opinion (see
+    DIRECTIONLESS_* above) does the blended score itself get to set direction, and only past a
+    materially higher bar than the normal Strong-tier gate -- see that block's own comment.
+
+    directionless_fallback defaults to False (disabled) -- pass True only after reading
+    is_directionless_fallback_enabled()'s explanation of why this ships off by default."""
     bull = bull or 0
     bear = bear or 0
     total = bull + bear
-    if total == 0:
-        return 'Hold'
-    r = (bull - bear) / total
+    r = (bull - bear) / total if total else 0.0
     if r > 0:
         return 'Strong Buy' if (r >= 0.5 and score >= 66.0) else 'Buy'
     if r < 0:
         return 'Strong Sell' if (r <= -0.5 and score <= 34.0) else 'Sell'
+    # r == 0: either total==0 (silent) or bull==bear (a tied stand-off) -- both collapse to the
+    # same directionless fallback, since a tie is just as legitimately "no screener opinion" as
+    # outright silence. Disabled by default -- see DIRECTIONLESS_* comment above.
+    if not directionless_fallback:
+        return 'Hold'
+    if score >= DIRECTIONLESS_STRONG_BUY_FLOOR:
+        return 'Strong Buy'
+    if score >= DIRECTIONLESS_BUY_FLOOR:
+        return 'Buy'
+    if score <= DIRECTIONLESS_STRONG_SELL_CEIL:
+        return 'Strong Sell'
+    if score <= DIRECTIONLESS_SELL_CEIL:
+        return 'Sell'
     return 'Hold'
 
 
@@ -646,7 +861,13 @@ class UnifiedRanker:
         acc: dict = {}
         for r in rows:
             p = r['p']
-            if p is None:
+            # isfinite, not just `is None` -- a NaN win_probability/calibrated_win_probability
+            # passes `IS NOT NULL` in SQL (NaN is a real float, not NULL) and passes `is None`
+            # here too, then poisons the whole symbol's sum()/len() average with NaN, which
+            # bet_size_from_probability then turns into a MAXIMUM bet size (see that function's
+            # own guard, added alongside this one) -- the same NaN-is-truthy failure mode as
+            # the 2026-07-31 dl_score incident, just in the win-probability leg instead.
+            if p is None or not math.isfinite(p):
                 continue
             p = float(p)
             if enabled:
@@ -796,14 +1017,34 @@ class UnifiedRanker:
         # (root cause: a blind "column 0" fallback when no header matched
         # nsecode/symbol) — defense in depth even after the legacy rows are purged,
         # in case a similar bug elsewhere reintroduces non-ticker values.
+        #
+        # DECORRELATION FIX (2026-08-05, screener double-counting finding): this used to read
+        # confluence_signals.confluence_score directly, which is
+        # screenerComponent(0-60) + trend(0-15) + volume(0-10) + sector(0-8) + fundamental(0-12)
+        # (confluenceEngine.ts's scoreStock()) -- up to 60 of its ~105 raw points is the SAME
+        # screener membership already blended in full as its own "screener" engine (20-40%
+        # weight). REGIME_WEIGHTS treats "screener" and "confluence" as two independent
+        # opinions; they were not -- a screener-driven mispricing was amplified across both.
+        # confluence_signals already persists the four non-screener sub-scores as their own
+        # columns (trend_alignment_score/volume_score/sector_strength_score/fundamental_score),
+        # so this now sums exactly those four and drops screenerComponent entirely, without
+        # touching confluenceEngine.ts or its own confluence_score output (still used as-is by
+        # the standalone Confluence page, intraday_ranker.py, etc.) -- only what THIS engine
+        # feeds into the unified blend changes. Percentile-normalized to 0-100 like
+        # _get_technical_scores, since the raw sum tops out around 45, not 100.
         cutoff = (date.today() - timedelta(days=1)).isoformat()
         try:
             rows = self.conn.execute(
-                "SELECT symbol, confluence_score FROM confluence_signals "
+                "SELECT symbol, "
+                "  (COALESCE(trend_alignment_score,0) + COALESCE(volume_score,0) "
+                "   + COALESCE(sector_strength_score,0) + COALESCE(fundamental_score,0)"
+                "  ) AS non_screener_score "
+                "FROM confluence_signals "
                 "WHERE computed_at >= ? AND symbol NOT LIKE '%://%' AND LENGTH(symbol) <= 20",
                 (cutoff,),
             ).fetchall()
-            return {r['symbol']: float(r['confluence_score'] or 0) for r in rows}
+            raw = {r['symbol']: float(r['non_screener_score'] or 0) for r in rows}
+            return _normalize_to_100(raw)
         except Exception as e:
             print(f"[UnifiedRanker] _get_confluence_scores failed: {e}")
             self.conn.rollback()
@@ -860,6 +1101,56 @@ class UnifiedRanker:
             self.conn.rollback()
             return {}
 
+    def _get_smart_money_scores(self):
+        """Insider buying (technical_signals.insider_buy_pct_90d, from insider_features.py) +
+        institutional block/bulk buy accumulation (block_deals.pct_transacted, the % of
+        float actually transacted -- cross-sectionally comparable, unlike raw qty/value_cr;
+        tickertape_deals_fetcher.py) -- a genuinely orthogonal signal previously only surfaced
+        on the standalone /smart-money page, never blended into the canonical score. Component
+        score is the average of whichever of the two are present for a symbol, not requiring
+        both -- most symbols will only ever have one.
+        """
+        cutoff = (date.today() - timedelta(days=5)).isoformat()
+        insider_scores = {}
+        try:
+            rows = self.conn.execute(
+                "SELECT symbol, insider_buy_pct_90d, date FROM technical_signals "
+                "WHERE date >= ? AND insider_buy_pct_90d IS NOT NULL ORDER BY date DESC",
+                (cutoff,),
+            ).fetchall()
+            for r in rows:
+                sym = r['symbol']
+                if sym not in insider_scores:
+                    insider_scores[sym] = float(r['insider_buy_pct_90d'] or 0) * 100
+        except Exception as e:
+            print(f"[UnifiedRanker] _get_smart_money_scores (insider) failed: {e}")
+            self.conn.rollback()
+
+        block_scores = {}
+        try:
+            deal_cutoff = (date.today() - timedelta(days=90)).isoformat()
+            rows = self.conn.execute(
+                "SELECT symbol, SUM(pct_transacted) AS total_pct FROM block_deals "
+                "WHERE date >= ? AND trade_type = 'buy' AND pct_transacted IS NOT NULL "
+                "GROUP BY symbol",
+                (deal_cutoff,),
+            ).fetchall()
+            for r in rows:
+                # 10% of float bought over 90d -> 100; scaled linearly, capped at 100. Most
+                # single block deals are 1-3% of float, so this rewards genuine accumulation
+                # (several deals or one large one) without saturating on a single normal-sized deal.
+                block_scores[r['symbol']] = min(100.0, float(r['total_pct'] or 0) * 10.0)
+        except Exception as e:
+            print(f"[UnifiedRanker] _get_smart_money_scores (block deals) failed: {e}")
+            self.conn.rollback()
+
+        result = {}
+        for sym in set(insider_scores) | set(block_scores):
+            parts = [v for v in (insider_scores.get(sym), block_scores.get(sym)) if v is not None]
+            if parts:
+                result[sym] = sum(parts) / len(parts)
+        return result
+
     def _get_avg_track_record(self):
         cutoff = (date.today() - timedelta(days=90)).isoformat()
         try:
@@ -872,9 +1163,14 @@ class UnifiedRanker:
             self.conn.rollback()
             return 0.0
 
+    # Below this many resolved (symbol, 90d) outcomes, a negative average realized return is
+    # noise, not a track record -- don't let it veto a symbol. Mirrors this codebase's own
+    # established thin-sample convention (screener_performance.py's MIN_SIGNALS_FOR_TIER=5).
+    MIN_RL_GATE_SAMPLES = 5
+
     def _get_rl_gate_map(self):
-        """Pre-load per-symbol avg realized return over the trailing 90d, once for the
-        whole universe (was one query per symbol inside the run() loop)."""
+        """Pre-load per-symbol (avg realized return, sample count) over the trailing 90d, once
+        for the whole universe (was one query per symbol inside the run() loop)."""
         cutoff = (date.today() - timedelta(days=90)).isoformat()
         try:
             rows = self.conn.execute(
@@ -883,15 +1179,32 @@ class UnifiedRanker:
                 "GROUP BY symbol",
                 (cutoff,),
             ).fetchall()
-            return {r['symbol']: float(r['avg_r'] or 0) for r in rows if r['cnt'] and r['cnt'] > 0}
+            return {r['symbol']: (float(r['avg_r'] or 0), int(r['cnt']))
+                    for r in rows if r['cnt'] and r['cnt'] > 0}
         except Exception as e:
             print(f"[UnifiedRanker] _get_rl_gate_map failed: {e}")
             self.conn.rollback()
             return {}
 
     def _passes_rl_gate(self, symbol, rl_gate_map):
-        if symbol in rl_gate_map:
-            return rl_gate_map[symbol] >= 0
+        """A track record of losing money (negative average realized return over the trailing
+        90d) removes a symbol from the ranked universe entirely -- but only once there's enough
+        history to trust the average. Without MIN_RL_GATE_SAMPLES this silently, permanently
+        excluded symbols on as few as 1-2 stale outcomes with no log line anywhere: confirmed
+        live (2026-08-06) 825 symbols platform-wide were excluded, 352 of them (43%) on fewer
+        than 5 samples -- e.g. KECL, gated out on exactly 2 technical_scan misses from 2026-05
+        (-5.25% avg) despite currently-strong scores across every other engine (cs_ranker 84.5,
+        confluence 97.8, breakout 74.7)."""
+        entry = rl_gate_map.get(symbol)
+        if entry is None:
+            return True
+        avg_r, cnt = entry
+        if cnt < self.MIN_RL_GATE_SAMPLES:
+            return True
+        if avg_r < 0:
+            print(f"[UnifiedRanker] RL gate excluded {symbol}: "
+                  f"avg_return={avg_r:.2f}% over {cnt} resolved outcomes (90d)")
+            return False
         return True
 
     def _get_confluence_latest_map(self):
@@ -931,6 +1244,15 @@ class UnifiedRanker:
             return {}
 
     def _get_unified_signals_latest_map(self):
+        # WHERE signal_type = 'BUY': unified_signals carries a real direction column with
+        # genuinely different geometry conventions per direction (signals.ts's exit logic
+        # treats BUY/SELL rows' stop/target oppositely). This fallback's own caller
+        # (_get_entry_targets) only ever attaches its result to a long-entry-style setup
+        # (entry_zone_low/high, target above, stop below -- see the fallback-2 branch this
+        # mirrors), so an unfiltered "latest row regardless of direction" could hand a
+        # Buy-classified row a SELL signal's inverted short-style geometry. Filtering here
+        # matches the BUY-only convention _log_recommendations() already established for the
+        # recommendation_log fallback one tier up.
         try:
             rows = self.conn.execute("""
                 SELECT * FROM (
@@ -938,6 +1260,7 @@ class UnifiedRanker:
                            stop_loss AS "stopLoss", reasoning AS trade_reasoning,
                            ROW_NUMBER() OVER (PARTITION BY symbol ORDER BY signal_generated_at DESC) AS rn
                     FROM unified_signals
+                    WHERE signal_type = 'BUY'
                 ) t WHERE rn = 1
             """).fetchall()
             return {r['symbol']: r for r in rows}
@@ -968,6 +1291,48 @@ class UnifiedRanker:
             self.conn.rollback()
             return {}
 
+    def _get_recent_returns(self, symbols: list, lookback_days: int = RETURN_LOOKBACK_DAYS) -> dict:
+        """{symbol: {date: pct_return}} from stock_ohlcv for the correlation-cluster cap
+        (#27/#30 follow-up) -- date-keyed rather than a plain list so cluster_by_correlation
+        can align two symbols on the SAME trading days (see that function's own docstring).
+        Bad-bar-quarantined (is_suspect) the same way backtester.py/performance_tracker.py
+        already are, so a flagged impossible-move bar can't manufacture a fake correlation.
+        lookback_days is calendar days x2 to comfortably cover weekends/holidays within the
+        window; this is a read-side cutoff, not an exact-match write key, so it carries none
+        of the date.today()-anchor write-target risk documented elsewhere in this file.
+        """
+        if not symbols:
+            return {}
+        cutoff = (date.today() - timedelta(days=lookback_days * 2)).isoformat()
+        placeholders = ','.join('?' for _ in symbols)
+        try:
+            rows = self.conn.execute(
+                f"SELECT symbol, date, close FROM stock_ohlcv "
+                f"WHERE symbol IN ({placeholders}) AND date >= ? AND close > 0 "
+                f"AND (is_suspect IS NULL OR is_suspect = 0) "
+                f"ORDER BY symbol, date",
+                tuple(symbols) + (cutoff,),
+            ).fetchall()
+        except Exception as e:
+            print(f"[UnifiedRanker] _get_recent_returns failed: {e}")
+            self.conn.rollback()
+            return {}
+
+        by_symbol: dict = {}
+        for r in rows:
+            by_symbol.setdefault(r['symbol'], []).append((r['date'], float(r['close'])))
+
+        out: dict = {}
+        for sym, series in by_symbol.items():
+            series.sort(key=lambda t: t[0])
+            rets = {}
+            for (d0, c0), (d1, c1) in zip(series, series[1:]):
+                if c0 > 0:
+                    rets[d1] = (c1 - c0) / c0
+            if rets:
+                out[sym] = rets
+        return out
+
     def _get_entry_targets(self, symbol, confluence_map, rec_log_map, unified_map, sector_map):
         # Fallback 1: confluence_signals (best source with entry zones, atr, risk-reward, etc.)
         row = confluence_map.get(symbol)
@@ -986,6 +1351,14 @@ class UnifiedRanker:
             }
 
         # Fallback 2: recommendation_log
+        # rr floor (2026-08-05): unlike fallback 1 (confluence_signals), whose own
+        # buildTradeSetup() can only ever produce risk_reward in {2,3,4} by construction
+        # (reward/risk cancels to the reward multiplier), this reads a genuinely independent
+        # entry/stop/target triple and can legitimately compute rr<1 -- live production had
+        # Buy-classified rows presenting e.g. a 0.69 R:R as an actionable long setup. A
+        # sub-1 R:R isn't a data-integrity bug in the source row itself, but it's not a trade
+        # plan this ranker should hand out as "Buy" geometry either -- fall through to the
+        # next, hopefully-better source instead of accepting it.
         row = rec_log_map.get(symbol)
         if row and row['entry_price'] is not None:
             ep = float(row['entry_price'])
@@ -994,20 +1367,26 @@ class UnifiedRanker:
             rr = None
             if sl is not None and ep - sl > 0 and t1 is not None:
                 rr = round((t1 - ep) / (ep - sl), 2)
-            return {
-                'entry_zone_low':  round(ep * 0.99, 2),
-                'entry_zone_high': round(ep * 1.01, 2),
-                'stop_loss':       sl,
-                'target_1':        t1,
-                'target_2':        float(row['target_2']) if row['target_2'] is not None else None,
-                'target_3':        float(row['target_3']) if row['target_3'] is not None else None,
-                'risk_reward':     rr,
-                'timeframe':       row['timeframe'],
-                'trade_reasoning': row['trade_reasoning'],
-                'sector':          row['sector'],
-            }
+            if rr is None or rr >= 1.0:
+                return {
+                    'entry_zone_low':  round(ep * 0.99, 2),
+                    'entry_zone_high': round(ep * 1.01, 2),
+                    'stop_loss':       sl,
+                    'target_1':        t1,
+                    'target_2':        float(row['target_2']) if row['target_2'] is not None else None,
+                    'target_3':        float(row['target_3']) if row['target_3'] is not None else None,
+                    'risk_reward':     rr,
+                    'timeframe':       row['timeframe'],
+                    'trade_reasoning': row['trade_reasoning'],
+                    'sector':          row['sector'],
+                }
 
-        # Fallback 3: unified_signals
+        # Fallback 3: unified_signals — same rr floor as fallback 2, same reasoning: fall
+        # through to fallback 4 rather than accepting a sub-1 R:R setup. trade_reasoning is
+        # not specially preserved here (unlike a returned row) — the caller's own
+        # screener_summary fallback (see `if not et.get('trade_reasoning')` in run()) already
+        # covers this case with equally relevant context (why the stock scored the way it did),
+        # so there's nothing lost by falling through the same way fallback 2 does.
         row = unified_map.get(symbol)
         if row and row['entry'] is not None:
             ep = float(row['entry'])
@@ -1016,18 +1395,19 @@ class UnifiedRanker:
             rr = None
             if sl is not None and ep - sl > 0 and t1 is not None:
                 rr = round((t1 - ep) / (ep - sl), 2)
-            return {
-                'entry_zone_low':  round(ep * 0.99, 2),
-                'entry_zone_high': round(ep * 1.01, 2),
-                'stop_loss':       sl,
-                'target_1':        t1,
-                'target_2':        None,
-                'target_3':        None,
-                'risk_reward':     rr,
-                'timeframe':       'SWING',
-                'trade_reasoning': row['trade_reasoning'],
-                'sector':          sector_map.get(symbol),
-            }
+            if rr is None or rr >= 1.0:
+                return {
+                    'entry_zone_low':  round(ep * 0.99, 2),
+                    'entry_zone_high': round(ep * 1.01, 2),
+                    'stop_loss':       sl,
+                    'target_1':        t1,
+                    'target_2':        None,
+                    'target_3':        None,
+                    'risk_reward':     rr,
+                    'timeframe':       'SWING',
+                    'trade_reasoning': row['trade_reasoning'],
+                    'sector':          sector_map.get(symbol),
+                }
 
         # Fallback 4: default fallback with sector only
         return {
@@ -1051,6 +1431,7 @@ class UnifiedRanker:
 
         regime, _conf     = self._get_regime()
         base_weights      = REGIME_WEIGHTS.get(regime, REGIME_WEIGHTS['BULL'])
+        directionless_fallback = is_directionless_fallback_enabled(self.conn)
         fund_scores       = self._get_fundamental_scores()
         quality_metrics   = self._get_quality_metrics()
         win_probs         = self._get_win_probabilities()
@@ -1075,6 +1456,7 @@ class UnifiedRanker:
         technical_scores  = self._get_technical_scores()
         dl_scores         = self._get_dl_scores()
         breakout_scores   = self._get_breakout_scores()
+        smart_money_scores = self._get_smart_money_scores()
         avg_track         = self._get_avg_track_record()
 
         # Pre-loaded once for the whole universe (was up to 5 queries PER symbol inside
@@ -1086,17 +1468,22 @@ class UnifiedRanker:
         sector_map     = self._get_sector_map()
         mf_map         = self._get_multi_factor_map()
 
+        # smart_money_scores deliberately excluded from this union: it should raise the
+        # conviction of a stock already surfaced by another engine, not single-handedly
+        # introduce a new stock into the ranking on insider/block-deal activity alone with no
+        # technical/screener support.
         all_symbols = set(screener_scores) | set(ml_scores) | set(cs_scores) | set(confluence_scores) | set(technical_scores) | set(dl_scores) | set(breakout_scores)
         all_symbols = self._restrict_to_tradeable_universe(all_symbols)
 
         engine_maps = {
-            'screener':   screener_scores,
-            'ml':         ml_scores,
-            'cs':         cs_scores,
-            'confluence': confluence_scores,
-            'technical':  technical_scores,
-            'dl':         dl_scores,
-            'breakout':   breakout_scores,
+            'screener':    screener_scores,
+            'ml':          ml_scores,
+            'cs':          cs_scores,
+            'confluence':  confluence_scores,
+            'technical':   technical_scores,
+            'dl':          dl_scores,
+            'breakout':    breakout_scores,
+            'smart_money': smart_money_scores,
         }
         # Sanitize before blending: a single engine emitting NaN would otherwise NaN every
         # score it touches, and NaN survives `if unified < 1` to be written as a fake 'Buy'.
@@ -1130,7 +1517,7 @@ class UnifiedRanker:
 
             bull = bull_counts.get(sym, 0)
             bear = bear_counts.get(sym, 0)
-            classification = _classify(unified, bull, bear)
+            classification = _classify(unified, bull, bear, directionless_fallback=directionless_fallback)
 
             # Red-flag hard veto: a bearish solvency/governance screener removes the name from
             # the buy pool no matter how strong its score is (then it also ranks low + unsized).
@@ -1185,6 +1572,22 @@ class UnifiedRanker:
             if not et.get('trade_reasoning'):
                 et['trade_reasoning'] = screener_summary
 
+            # Direction/geometry backstop: `_get_entry_targets`'s 3 fallback sources
+            # (confluence_signals, recommendation_log, unified_signals) are looked up by
+            # bare symbol only, with no awareness of THIS row's own `classification` --
+            # confluence_signals in particular can carry a long-only setup for a stock this
+            # ranker itself classifies Sell/Strong Sell (different bull/bear-count mechanism,
+            # confirmed live: Sell rows were storing entry/stop/target as if they were long
+            # trade plans). position_size_pct is already zeroed for anything outside
+            # Buy/Strong Buy (see raw_sizes above) -- extend that same "not an actionable long
+            # entry" invariant to the geometry fields themselves, at the point of truth, so no
+            # future drift in any upstream source can reintroduce this. trade_reasoning/sector
+            # stay -- they're informational, not a trade plan.
+            if classification not in ('Strong Buy', 'Buy'):
+                for k in ('entry_zone_low', 'entry_zone_high', 'stop_loss',
+                          'target_1', 'target_2', 'target_3', 'risk_reward', 'timeframe'):
+                    et[k] = None
+
             results.append({
                 'symbol':                  sym,
                 'computed_at':             today,
@@ -1220,6 +1623,23 @@ class UnifiedRanker:
         # Normalize conviction×inverse-vol into capped portfolio weights (# 6), then apply the
         # sector-concentration cap (#27/#30) using the same sector_map already loaded above.
         position_sizes = normalize_position_sizes(raw_sizes, sectors=sector_map)
+
+        # Correlation-cluster cap (#27/#30 follow-up, 2026-08-05): the sector cap alone can miss
+        # highly-correlated names that don't share a GICS sector tag. Best-effort second pass --
+        # a failure here must never block the ranker run, since sizes are already sector-capped
+        # and safe to publish without it.
+        try:
+            sized_symbols = [s for s, v in raw_sizes.items() if v and v > 0]
+            if sized_symbols:
+                returns_map = self._get_recent_returns(sized_symbols)
+                clusters = cluster_by_correlation(returns_map)
+                if clusters:
+                    position_sizes = apply_correlation_cap(position_sizes, clusters)
+                    print(f"[UnifiedRanker] correlation cap applied to "
+                          f"{len(set(clusters.values()))} cluster(s) covering {len(clusters)} symbols.")
+        except Exception as e:
+            print(f"[UnifiedRanker] correlation-cluster cap skipped: {e}")
+
         for r in results:
             r['position_size_pct'] = round(position_sizes.get(r['symbol'], 0.0) * 100, 2)
 

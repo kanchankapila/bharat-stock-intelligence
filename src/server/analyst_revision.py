@@ -36,6 +36,7 @@ from typing import Optional
 import pandas as pd
 
 from db_compat import execute, read_df, executemany
+from as_of import logical_trading_date
 
 # ± tolerance for "snapshot closest to 90 days ago" (days)
 REVISION_WINDOW_DAYS = 90
@@ -174,7 +175,11 @@ def write_revisions(revisions: pd.DataFrame) -> tuple[int, int]:
     if revisions.empty:
         return 0, 0
 
-    today = datetime.date.today().isoformat()
+    # logical_trading_date(), not date.today() (2026-08-01) -- this fetcher runs inside
+    # ml-daily-ops, whose step chain regularly finishes after midnight IST; a raw wall-clock
+    # date silently targets a day with no grid row yet. See as_of.logical_trading_date's
+    # docstring for the incident.
+    today = logical_trading_date()
     params = []
     skipped = 0
     for r in revisions.itertuples(index=False):

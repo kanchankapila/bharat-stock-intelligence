@@ -23,6 +23,7 @@ import argparse
 import pandas as pd
 
 from db_compat import connect
+from as_of import logical_trading_date
 
 
 def compute_oi_delta(conn, date_str: str) -> pd.DataFrame:
@@ -71,7 +72,11 @@ def write_features(conn, date_str: str, df: pd.DataFrame) -> int:
 
 def run(date_str: str | None = None) -> None:
     if date_str is None:
-        date_str = datetime.date.today().isoformat()
+        # logical_trading_date(), not date.today() (2026-08-01) -- this runs inside
+        # ml-daily-ops with no --date arg, so this default is the live write target; the
+        # step chain regularly finishes after midnight IST, which silently targeted a day
+        # with no grid row yet. See as_of.logical_trading_date's docstring for the incident.
+        date_str = logical_trading_date()
     conn = connect()
     try:
         df = compute_oi_delta(conn, date_str)

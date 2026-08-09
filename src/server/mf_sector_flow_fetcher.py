@@ -19,6 +19,7 @@ import calendar
 import datetime
 import io
 import re
+import sys
 import time
 
 import pandas as pd
@@ -30,7 +31,8 @@ except ImportError:
     import requests as cffi_requests
     _USE_CFFI = False
 
-from db_compat import connect, translate, executemany, read_df, query_scalar
+from db_compat import connect, translate, executemany, read_df
+from as_of import logical_write_floor
 
 # ---------------------------------------------------------------------------
 # AMFI portfolio disclosure URL — returns a large pipe-/comma-delimited CSV
@@ -346,8 +348,7 @@ def _update_technical_signals(flow: pd.DataFrame) -> int:
     if not flow_map:
         return 0
 
-    floor = query_scalar("SELECT MAX(date) AS d FROM stock_ohlcv")
-    floor = str(floor)[:10] if floor else datetime.date.today().isoformat()
+    floor = logical_write_floor(fallback=datetime.date.today().isoformat())
 
     # Load only the current trading session's (symbol, date) rows from technical_signals
     # + sector from nse_stocks -- never touch rows before `floor`.
@@ -423,8 +424,17 @@ def run(month_str: str | None = None) -> None:
         print(f"[MFSectorFlow] Parsed {total_holdings} holding rows for {month_str}.")
 
         if holdings.empty:
-            print("[MFSectorFlow] No holdings parsed — AMFI format may have changed.")
-            return
+            # Was a bare `return` (exit 0) -- found live 2026-08-03 via the data-quality sweep:
+            # mf_sector_allocation had 0 rows despite the job "completing successfully" every
+            # run for weeks (AMFI's DownloadSchemeData_Po.aspx?tp=1 endpoint currently returns
+            # the scheme MASTER list, not the portfolio-holdings disclosure this parser expects
+            # -- no "Total AUM"/market-value/%-to-NAV columns at all, so _parse_amfi() correctly
+            # finds zero matching rows every time). A silent zero-row "success" is indistinguishable
+            # from a healthy run in every job-monitoring signal; exit non-zero so it shows up in
+            # job_heartbeat/error logs instead.
+            print("[MFSectorFlow] No holdings parsed — AMFI format may have changed or the "
+                  "endpoint no longer returns portfolio-holdings data.")
+            sys.exit(1)
 
         curr_alloc = _aggregate_by_sector(holdings, sector_map)
         _save_sector_allocation(month_str, curr_alloc)

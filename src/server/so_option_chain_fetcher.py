@@ -213,22 +213,45 @@ def _parse_chain(body: dict, symbol: str, today: str, expiry: str) -> tuple[list
         ))
 
     # Stock-level summary
-    iv_data  = body.get("IV") or {}
+    # BUG FOUND 2026-08-07 (dead-column sweep): live-verified against real RELIANCE/
+    # HDFCBANK responses (with a real expiry from nt_fno_expiry -- an invalid/unlisted
+    # expDate returns a mostly-empty body that looks like a parsing failure but isn't one):
+    #   - body["IV"] is always None -- this endpoint never populates a stock-level summary
+    #     IV. Per-strike IV DOES exist (tableHeaders carries implied_volatility_call/put,
+    #     confirmed populated in `rows` above) -- iv_call/iv_put are now derived from the
+    #     ATM-nearest strike's ce_iv/pe_iv instead of a field that's never sent.
+    #   - body["expiryLevelPCRValues"] is a FLAT dict of PCR sub-metrics for the requested
+    #     expiry (pcr_oi/pcr_oi_change/pcr_volume/...), NOT keyed by expiry date as the old
+    #     `.get(expiry) or list(...)[0]` code assumed -- it "worked" only because pcr_oi
+    #     happens to be the first key in Python's dict iteration order, a landmine that
+    #     breaks the moment Trendlyne reorders the response. Reads pcr_oi explicitly now.
+    #   - body["futureData"] is confirmed genuinely EMPTY ({}) for real stocks/expiries --
+    #     this endpoint does not carry per-stock futures price/OI at all. fut_price/fut_oi/
+    #     fut_oi_chg are NOT fixable by correcting key names; no other fetcher in this
+    #     codebase captures per-stock futures OI/price either (fno_rollover_fetcher.py is
+    #     rollover%/cost-of-carry from NSE bhavcopy, a different metric; nt_dashboard_fetcher.py
+    #     is options OI, not futures). Left NULL with this explanation rather than guessing
+    #     at a replacement source -- see CLAUDE.md's dead-column sweep documentation.
     pcr_data = body.get("expiryLevelPCRValues") or {}
-    fut_data = body.get("futureData") or {}
+    atm = _sf(body.get("atTheMoney"))
+    iv_call = iv_put = None
+    if atm is not None and rows:
+        # rows tuple layout: (symbol, date, expiry, strike, ..., ce_iv[8], ..., pe_iv[20], ...)
+        nearest = min(rows, key=lambda r: abs(r[3] - atm))
+        iv_call, iv_put = nearest[8], nearest[20]
     summary  = {
         "symbol":    symbol,
         "date":      today,
         "expiry":    expiry,
         "max_pain":  _sf(body.get("maxPain")),
-        "atm":       _sf(body.get("atTheMoney")),
+        "atm":       atm,
         "mwpl":      _sf(body.get("MWPL")),
-        "iv_call":   _sf(iv_data.get("ce") or iv_data.get("call")),
-        "iv_put":    _sf(iv_data.get("pe") or iv_data.get("put")),
-        "pcr":       _sf(pcr_data.get(expiry) or (list(pcr_data.values())[0] if pcr_data else None)),
-        "fut_price": _sf(fut_data.get("futurePrice") or fut_data.get("ltp")),
-        "fut_oi":    _sf(fut_data.get("futureOI") or fut_data.get("oi")),
-        "fut_oi_chg": _sf(fut_data.get("futureOIChange") or fut_data.get("oi_change")),
+        "iv_call":   iv_call,
+        "iv_put":    iv_put,
+        "pcr":       _sf(pcr_data.get("pcr_oi")),
+        "fut_price": None,
+        "fut_oi":    None,
+        "fut_oi_chg": None,
     }
     return rows, summary
 

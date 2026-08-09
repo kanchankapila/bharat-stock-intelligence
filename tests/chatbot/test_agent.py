@@ -31,7 +31,6 @@ def agent_db(tmp_path):
         CREATE TABLE news_articles(id TEXT PRIMARY KEY, title TEXT, summary TEXT, source TEXT,
             sentiment TEXT, category TEXT, url TEXT, symbols TEXT,
             timestamp DATETIME DEFAULT CURRENT_TIMESTAMP);
-        CREATE TABLE technical_analysis_signals(symbol TEXT PRIMARY KEY, trend TEXT, rsi REAL);
     """)
     conn.execute("INSERT INTO nse_stocks VALUES ('INFY','Infosys Ltd','IT','Software')")
     conn.execute("INSERT INTO nse_stocks VALUES ('HDFCBANK','HDFC Bank','Banking','Private Bank')")

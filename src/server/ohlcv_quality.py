@@ -18,6 +18,7 @@ import argparse
 import datetime
 
 from db_compat import connect, ConnWrapper
+from hypertable_safe_write import safe_keyed_update
 
 BAD_PRINT_THRESHOLD = 0.35   # > 35% day-over-day vs BOTH neighbours = suspect spike
 ACTION_WINDOW_DAYS = 3       # don't flag within ±3d of a known ex-date
@@ -253,14 +254,10 @@ def flag_malformed_bars(conn: ConnWrapper) -> dict:
            OR close <= 0 OR open <= 0 OR high <= 0 OR low <= 0
     """).fetchall()
     if rows:
-        # stock_ohlcv is a compressed hypertable: a predicate-wide UPDATE makes Timescale
-        # decompress every chunk and fail on max_tuples_decompressed_per_dml_transaction.
-        # Updating by explicit key touches only the affected chunks.
-        conn.execute("SET timescaledb.max_tuples_decompressed_per_dml_transaction = 0")
-        conn.executemany(
+        safe_keyed_update(
+            conn,
             "UPDATE stock_ohlcv SET is_suspect=1 WHERE symbol=? AND date=?",
             [(r[0], r[1]) for r in rows])
-        conn.commit()
     print(f"[OHLCVQuality] flagged {len(rows)} malformed bars (OHLC inconsistent / non-positive)")
     return {'flagged': len(rows)}
 

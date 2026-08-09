@@ -2,17 +2,20 @@ import React from 'react';
 import { Card } from './Card';
 import { trpc } from '../lib/trpc';
 import { cn } from '../lib/utils';
-import { 
-  TrendingUp, TrendingDown, Star, ArrowUpRight, ArrowDownRight, 
-  Zap, Activity, Trophy 
+import {
+  TrendingUp, TrendingDown, Star, ArrowUpRight, ArrowDownRight,
+  Zap, Activity, Trophy
 } from 'lucide-react';
+import { PriceFreshnessBadge } from './PriceFreshnessBadge';
+import { AddToPortfolioButton } from './AddToPortfolioButton';
 
 interface TopMoversIntelligenceProps {
   onSelectStock: (symbol: string) => void;
+  userId?: string | null;
 }
 
-export const TopMoversIntelligence: React.FC<TopMoversIntelligenceProps> = ({ onSelectStock }) => {
-  const { data: movers, isLoading } = trpc.getTopMovers.useQuery(undefined, {
+export const TopMoversIntelligence: React.FC<TopMoversIntelligenceProps> = ({ onSelectStock, userId }) => {
+  const { data: movers, isLoading, dataUpdatedAt } = trpc.getTopMovers.useQuery(undefined, {
     refetchInterval: 60000
   });
 
@@ -30,14 +33,17 @@ export const TopMoversIntelligence: React.FC<TopMoversIntelligenceProps> = ({ on
               Vol: {stock.today_volume ? `${(stock.today_volume / 1000000).toFixed(1)}M` : '—'}
             </p>
           </div>
-          <div className="text-right">
-            <p className="text-white font-black text-xs tabular-nums">₹{Number(stock.today_close).toLocaleString()}</p>
-            <p className={cn(
-              "text-[10px] font-black tabular-nums",
-              Number(stock.change_percent) >= 0 ? "text-emerald-400" : "text-rose-400"
-            )}>
-              {Number(stock.change_percent) >= 0 ? '+' : ''}{Number(stock.change_percent).toFixed(2)}%
-            </p>
+          <div className="flex items-center gap-2">
+            <div className="text-right">
+              <p className="text-white font-black text-xs tabular-nums">₹{Number(stock.today_close).toLocaleString()}</p>
+              <p className={cn(
+                "text-[10px] font-black tabular-nums",
+                Number(stock.change_percent) >= 0 ? "text-emerald-400" : "text-rose-400"
+              )}>
+                {Number(stock.change_percent) >= 0 ? '+' : ''}{Number(stock.change_percent).toFixed(2)}%
+              </p>
+            </div>
+            <AddToPortfolioButton symbol={stock.symbol_name} currentPrice={Number(stock.today_close)} userId={userId} />
           </div>
         </div>
       ))}
@@ -74,9 +80,12 @@ export const TopMoversIntelligence: React.FC<TopMoversIntelligenceProps> = ({ on
           </h2>
           <p className="text-xs text-slate-500 mt-1">Real-time market activity and setup detection</p>
         </div>
-        <div className="flex items-center gap-2 px-3 py-1 bg-slate-900/60 border border-white/[0.08] rounded-full backdrop-blur-sm">
-           <div className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
-           <span className="text-[9px] font-semibold text-slate-400 uppercase tracking-widest">Live NSE</span>
+        <div className="flex flex-col items-end gap-1.5">
+          <div className="flex items-center gap-2 px-3 py-1 bg-slate-900/60 border border-white/[0.08] rounded-full backdrop-blur-sm">
+             <div className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+             <span className="text-[9px] font-semibold text-slate-400 uppercase tracking-widest">Live NSE</span>
+          </div>
+          <PriceFreshnessBadge updatedAt={dataUpdatedAt} thresholdMs={90_000} />
         </div>
       </div>
 

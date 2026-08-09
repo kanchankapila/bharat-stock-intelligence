@@ -17,6 +17,20 @@ import {
 import { router, publicProcedure, adminProcedure } from "../trpc";
 import { SCANNER_CATALOG } from "../config/scannerCatalog";
 
+// Real quant_scores columns runScreener is allowed to filter on (see db.ts's CREATE TABLE).
+// A zod enum, not a free-form string -- prevents a client-supplied "id" from being
+// interpolated into the WHERE clause as arbitrary SQL.
+const SCREENER_CRITERIA_COLUMNS = [
+  'return_1w', 'return_1m', 'return_3m', 'return_6m', 'return_12m',
+  'above_sma200', 'sma200_distance_pct', 'momentum_score',
+  'annualized_vol', 'sharpe_ratio', 'max_drawdown_1y', 'vol_rank', 'sharpe_rank',
+  'trailing_pe', 'forward_pe', 'debt_to_equity', 'return_on_equity',
+  'operating_margins', 'revenue_growth', 'piotroski_f_score', 'valuation_score',
+  'bullish_screener_count', 'bearish_screener_count', 'screener_category_breadth',
+  'screener_net_score', 'confluence_rank',
+  'rank_momentum', 'rank_quality', 'rank_value', 'rank_composite',
+] as const;
+
 export const screenersRouter = router({
   getTrendingScreeners: publicProcedure
     .query(async () => fetchTrendingScreeners()),
@@ -166,12 +180,16 @@ export const screenersRouter = router({
       const { findMcScreenersByStock } = await import('../moneycontrolScreener');
       const { findEtScreenersByStock } = await import('../etnow');
       const { findEtMarketstatsScreenersByStock } = await import('../etMarketstatsSync');
-      return [
-        ...(await findScreenersByStock(input.stockId)),
-        ...(await findMcScreenersByStock(input.stockId)),
-        ...(await findEtScreenersByStock(input.stockId)),
-        ...(await findEtMarketstatsScreenersByStock(input.stockId)),
-      ];
+      // These 4 lookups hit independent tables keyed on the same stockId -- were run
+      // sequentially (await, await, await, await), tripling+ this call's latency for no
+      // reason. Independent, so fan them out concurrently instead.
+      const [trendlyne, mc, et, etMarketstats] = await Promise.all([
+        findScreenersByStock(input.stockId),
+        findMcScreenersByStock(input.stockId),
+        findEtScreenersByStock(input.stockId),
+        findEtMarketstatsScreenersByStock(input.stockId),
+      ]);
+      return [...trendlyne, ...mc, ...et, ...etMarketstats];
     }),
 
   getEtMarketstatsScreeners: publicProcedure
@@ -236,22 +254,98 @@ export const screenersRouter = router({
           spv.data_source,
           spv.last_computed
         FROM screener_performance_v2 spv
-        JOIN screener_master sm ON sm.scan_id = spv.screener_id
+        JOIN screener_master sm ON sm.scan_id = spv.screener_id AND sm.source = spv.source
         ${where}
         ORDER BY spv.bayesian_score DESC
         LIMIT ? OFFSET ?
       `, params);
     }),
 
+  // Screener Confluence Universe: opt-in universe narrowing driven by screener membership,
+  // NOT a replacement for unified_ranker.py's own full-universe scoring. unified_ranker
+  // deliberately scores every symbol regardless of screener presence (screener-membership
+  // selection bias is a real, previously-fought class of bug in this codebase -- restricting
+  // the CORE ranker to only screener-appearing names would just trade survivorship bias for
+  // screener-coverage bias). This procedure is a pure read-only filter/rank layer on top of
+  // the canonical unified_recommendations output -- it narrows the universe for a caller that
+  // explicitly wants a curated, multi-screener-confirmed shortlist (a CANSLIM/Minervini-style
+  // "institutional confirmation" screen: N+ independent bullish screeners agreeing, zero
+  // active bearish screeners), it never feeds back into scoring. See the 2026-08-04 screener
+  // audit memory for why this is additive-only, and why minBullishScreeners defaults to 2 (the
+  // same "at least 2 independent confirming screens" bar screener_signal_generator.py already
+  // uses for its own signal-emission gate, MIN_BULL_SCREENERS).
+  getScreenerConfluenceUniverse: publicProcedure
+    .input(z.object({
+      minBullishScreeners: z.number().min(1).max(20).default(2),
+      excludeBearishSignals: z.boolean().default(true),
+      minUnifiedScore: z.number().min(0).max(100).default(0),
+      conviction: z.enum(['ALL', 'S_ELITE', 'A_HIGH', 'B_MEDIUM', 'C_LOW', 'D_MARGINAL']).default('ALL'),
+      limit: z.number().min(1).max(200).default(50),
+    }))
+    .query(async ({ input }) => {
+      const latestRow = await dbGet<{ ts: string }>(
+        'SELECT CAST(MAX(computed_at) AS TEXT) AS ts FROM unified_recommendations'
+      );
+      const latest = latestRow?.ts ?? null;
+      if (!latest) {
+        return { asOf: null, universeSize: 0, filteredCount: 0, stocks: [] };
+      }
+
+      const universeSizeRow = await dbGet<{ n: number }>(
+        'SELECT COUNT(*) AS n FROM unified_recommendations WHERE CAST(computed_at AS TEXT) = ?',
+        [latest]
+      );
+
+      const conditions = ['CAST(computed_at AS TEXT) = ?', 'bullish_screener_count >= ?', 'unified_score >= ?'];
+      const params: (string | number)[] = [latest, input.minBullishScreeners, input.minUnifiedScore];
+      if (input.excludeBearishSignals) {
+        conditions.push('bearish_screener_count = 0');
+      }
+      if (input.conviction !== 'ALL') {
+        conditions.push('conviction_level = ?');
+        params.push(input.conviction);
+      }
+      params.push(input.limit);
+
+      const stocks = await dbAll<any>(`
+        SELECT symbol, unified_score, conviction_level, classification, timeframe, sector,
+               bullish_screener_count, bearish_screener_count, screener_stock_score,
+               screener_names_json, entry_zone_low, entry_zone_high, stop_loss,
+               target_1, risk_reward, trade_reasoning
+        FROM unified_recommendations
+        WHERE ${conditions.join(' AND ')}
+        ORDER BY unified_score DESC
+        LIMIT ?
+      `, params);
+
+      const stocksParsed = stocks.map((r: any) => {
+        let screenerNames: any = null;
+        try { screenerNames = r.screener_names_json ? JSON.parse(r.screener_names_json) : null; }
+        catch { /* malformed JSON from an older row shape -- surface null, not a crash */ }
+        return { ...r, screener_names_json: undefined, screeners: screenerNames };
+      });
+
+      return {
+        asOf: latest,
+        universeSize: universeSizeRow?.n ?? 0,
+        filteredCount: stocksParsed.length,
+        stocks: stocksParsed,
+      };
+    }),
+
   getScreenerDetail: publicProcedure
     .input(z.object({ screener_id: z.string() }))
+    // NOTE: screener_id (scan_id) alone can still be ambiguous across providers (MC/ETnow
+    // collide, see the 2026-08-04 screener_master memory) -- this procedure has no `source`
+    // input to disambiguate, so dbGet below can return either provider's row when both exist.
+    // The JOIN itself is now correct (sm always matches spv's own source), just not the input.
     .query(async ({ input }) => {
       const perf = await dbGet(`
         SELECT spv.*, sm.name, sm.inferred_category AS category, sm.subcategory,
                sm.inferred_sentiment AS sentiment, sm.inferred_timeframe AS timeframe,
                sm.classified_by
         FROM screener_performance_v2 spv
-        JOIN screener_master sm ON sm.scan_id = spv.screener_id
+        JOIN screener_master sm ON sm.scan_id = spv.screener_id AND sm.source = spv.source
         WHERE spv.screener_id = ?
       `, [input.screener_id]);
 
@@ -298,7 +392,7 @@ export const screenersRouter = router({
           SUM(CASE WHEN spv.tier IN ('A','B') THEN 1 ELSE 0 END)           AS tier_ab_count,
           MAX(spv.bayesian_score)                                           AS best_score
         FROM screener_performance_v2 spv
-        JOIN screener_master sm ON sm.scan_id = spv.screener_id
+        JOIN screener_master sm ON sm.scan_id = spv.screener_id AND sm.source = spv.source
         WHERE sm.inferred_category IS NOT NULL
         GROUP BY sm.inferred_category, sm.subcategory
         ORDER BY avg_win_rate DESC
@@ -330,8 +424,11 @@ export const screenersRouter = router({
           sa.return_20d, sa.outcome_20d, sa.nifty_ret_20d,
           spv.tier AS screener_tier
         FROM screener_appearances sa
-        JOIN screener_master sm ON sm.scan_id = sa.screener_id
-        LEFT JOIN screener_performance_v2 spv ON spv.screener_id = sa.screener_id
+        -- screener_appearances.source is lowercase ('moneycontrol') while screener_master.source
+        -- is not ('MoneyControl') -- a pre-existing casing mismatch between the two tables,
+        -- unrelated to this fix; LOWER() bridges it rather than normalizing either table.
+        JOIN screener_master sm ON sm.scan_id = sa.screener_id AND LOWER(sm.source) = sa.source
+        LEFT JOIN screener_performance_v2 spv ON spv.screener_id = sa.screener_id AND LOWER(spv.source) = sa.source
         ${where}
         ORDER BY sa.appeared_date DESC
         LIMIT ?
@@ -443,24 +540,28 @@ export const screenersRouter = router({
       minMomentum: z.number().default(5.0),
     }))
     .query(async ({ input }) => {
+      // Was a correlated `WHERE ts.date = (SELECT MAX(date) ... WHERE t2.symbol = ts.symbol)`
+      // subquery -- the exact anti-pattern already fixed once in misc.router.ts (Finding #33,
+      // full-stack audit 2026-07-30): it re-executes once per row of the FULL historical
+      // technical_signals table (O(total rows)) instead of O(distinct symbols). Rewritten to
+      // the same ROW_NUMBER() partition used at misc.router.ts's getTradeDecisionCockpitData.
       return dbAll(`
-        SELECT ts.symbol,
-               ts.screener_momentum_score,
-               ts.screener_bull_count,
-               ts.screener_bear_count,
-               ts.screener_tier1_count,
-               ts.screener_cat_breadth,
-               ts.screener_streak_days,
-               ts.screener_name_signal,
-               ts.screener_alpha_score,
-               ns.sector,
-               ns.company_name
-        FROM technical_signals ts
-        LEFT JOIN nse_stocks ns ON ns.symbol = ts.symbol
-        WHERE ts.date = (SELECT MAX(date) FROM technical_signals t2 WHERE t2.symbol = ts.symbol)
-          AND ts.screener_momentum_score >= ?
-          AND ts.screener_bull_count > ts.screener_bear_count
-        ORDER BY ts.screener_momentum_score DESC
+        SELECT symbol, screener_momentum_score, screener_bull_count, screener_bear_count,
+               screener_tier1_count, screener_cat_breadth, screener_streak_days,
+               screener_name_signal, screener_alpha_score, sector, company_name
+        FROM (
+          SELECT ts.symbol, ts.screener_momentum_score, ts.screener_bull_count,
+                 ts.screener_bear_count, ts.screener_tier1_count, ts.screener_cat_breadth,
+                 ts.screener_streak_days, ts.screener_name_signal, ts.screener_alpha_score,
+                 ns.sector, ns.company_name,
+                 ROW_NUMBER() OVER (PARTITION BY ts.symbol ORDER BY ts.date DESC) AS rn
+          FROM technical_signals ts
+          LEFT JOIN nse_stocks ns ON ns.symbol = ts.symbol
+        ) t
+        WHERE rn = 1
+          AND screener_momentum_score >= ?
+          AND screener_bull_count > screener_bear_count
+        ORDER BY screener_momentum_score DESC
         LIMIT ?
       `, [input.minMomentum, input.topN]);
     }),
@@ -482,5 +583,65 @@ export const screenersRouter = router({
         ORDER BY signal_date DESC, screener_momentum_score DESC
         LIMIT ?
       `, [input.days, input.limit]);
+    }),
+    
+    // Ids here must be real quant_scores columns (see SCREENER_CRITERIA_COLUMNS below) --
+    // runScreener whitelists against that same set, so an id added here without a backing
+    // column is rejected at request time rather than silently matching nothing.
+    getScreenerCriteria: publicProcedure
+    .query(async () => {
+      const criteria = {
+        'Fundamental': [
+          { id: 'trailing_pe', name: 'Trailing P/E', type: 'number' },
+          { id: 'forward_pe', name: 'Forward P/E', type: 'number' },
+          { id: 'debt_to_equity', name: 'Debt to Equity', type: 'number' },
+          { id: 'return_on_equity', name: 'Return on Equity', type: 'number' },
+        ],
+        'Technical': [
+          { id: 'return_1m', name: '1-Month Return', type: 'number' },
+          { id: 'return_3m', name: '3-Month Return', type: 'number' },
+          { id: 'above_sma200', name: 'Above 200-Day SMA', type: 'boolean' },
+        ],
+        'Quantitative': [
+            { id: 'momentum_score', name: 'Momentum Score', type: 'number' },
+            { id: 'valuation_score', name: 'Value Score', type: 'number' },
+            { id: 'rank_quality', name: 'Quality Score', type: 'number' },
+            { id: 'rank_composite', name: 'Overall Score', type: 'number' },
+        ]
+      };
+      return criteria;
+    }),
+
+  runScreener: publicProcedure
+    .input(z.array(z.object({
+      id: z.enum(SCREENER_CRITERIA_COLUMNS),
+      operator: z.enum(['gt', 'lt', 'eq', 'gte', 'lte']),
+      value: z.any(),
+    })))
+    .mutation(async ({ input }) => {
+      let query = 'SELECT * FROM quant_scores WHERE ';
+      const params: any[] = [];
+
+      input.forEach((criterion, index) => {
+        if (index > 0) {
+          query += ' AND ';
+        }
+
+        const operatorMap = {
+          'gt': '>',
+          'lt': '<',
+          'eq': '=',
+          'gte': '>=',
+          'lte': '<=',
+        };
+
+        // criterion.id is zod-validated against the SCREENER_CRITERIA_COLUMNS whitelist above,
+        // so this interpolation can't carry client-controlled SQL.
+        query += `${criterion.id} ${operatorMap[criterion.operator]} ?`;
+        params.push(criterion.value);
+      });
+
+      const results = await dbAll<any>(query, params);
+      return results;
     }),
 });

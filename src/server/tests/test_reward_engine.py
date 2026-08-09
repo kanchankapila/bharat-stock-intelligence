@@ -18,7 +18,11 @@ def make_db():
             entry_price REAL, check_date TEXT, exit_price REAL,
             return_pct REAL, outcome TEXT, signal_score INTEGER,
             signals_json TEXT, computed_at TEXT,
-            PRIMARY KEY (symbol, signal_date, horizon_days)
+            -- update_weights() filters signal_outcomes to signal_source='technical' (2026-08
+            -- fix, complementing its own unified_signal_outcomes NOT IN ('TECHNICAL') half of
+            -- the same UNION); default so insert_outcome()'s positional INSERT below still works.
+            signal_source TEXT NOT NULL DEFAULT 'technical',
+            PRIMARY KEY (symbol, signal_date, horizon_days, signal_source)
         );
         CREATE TABLE technical_signals (
             symbol TEXT, date TEXT, nifty_regime TEXT, signals_json TEXT,
@@ -57,6 +61,8 @@ def insert_outcome(conn, symbol, date, return_pct, outcome, regime='BULL',
                    signals='[{"type":"RSI_DIVERGENCE"}]', sector='IT'):
     conn.execute("""
         INSERT OR IGNORE INTO signal_outcomes
+        (symbol, signal_date, horizon_days, entry_price, check_date, exit_price,
+         return_pct, outcome, signal_score, signals_json, computed_at)
         VALUES (?,?,15,100.0,?,?,?,?,6,?,CURRENT_TIMESTAMP)
     """, (symbol, date, date, 100*(1+return_pct/100), return_pct, outcome, signals))
     conn.execute("""

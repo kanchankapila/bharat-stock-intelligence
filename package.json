@@ -3,6 +3,13 @@
   "private": true,
   "version": "0.0.0",
   "type": "module",
+  "overrides": {
+    "js-yaml": "^4.3.1",
+    "uuid": "^11.1.1",
+    "tsx": {
+      "esbuild": "^0.28.1"
+    }
+  },
   "scripts": {
     "start": "concurrently \"npm run dev\" \"npm run api\" \"npm run ml-api\" \"npm run chatbot\"",
     "dev": "node --max-old-space-size=4096 node_modules/tsx/dist/cli.mjs watch server.ts",
@@ -26,6 +33,8 @@
     "update:sectors": "tsx scripts/updateSectors.ts",
     "smoke:ci": "tsx scripts/ci_smoke_test.ts",
     "dq:check": "tsx scripts/run_data_quality_checks.ts",
+    "schema:drift": "tsx scripts/checkSchemaDrift.ts",
+    "schema:regen": "tsx scripts/generatePgSchemaFromLive.ts",
     "migrate:up": "node-pg-migrate up -d POSTGRES_URL",
     "migrate:down": "node-pg-migrate down -d POSTGRES_URL",
     "migrate:create": "node-pg-migrate create -j sql -d POSTGRES_URL"
@@ -67,6 +76,7 @@
     "react-dom": "^19.0.1",
     "react-markdown": "^9.1.0",
     "react-router-dom": "^7.15.1",
+    "react-window": "^2.3.0",
     "recharts": "^3.8.1",
     "remark-gfm": "^4.0.1",
     "superjson": "^2.2.6",
@@ -89,6 +99,6 @@
     "tsx": "^4.21.0",
     "typescript": "~5.8.2",
     "vite": "^6.2.3",
-    "vitest": "^1.5.5"
+    "vitest": "^3.2.7"
   }
 }

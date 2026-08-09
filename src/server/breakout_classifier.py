@@ -28,6 +28,7 @@ import numpy as np
 import pandas as pd
 
 from db_compat import connect, read_df, translate, use_postgres
+from model_promotion import decide_promotion_with_nan_guard
 
 RET_THRESHOLD = 0.06     # +6% forward move = breakout
 HORIZON = 10             # within the next 10 trading days
@@ -162,6 +163,35 @@ def _load_ohlcv(cutoff: str) -> pd.DataFrame:
     )
     if not ohlcv.empty:
         ohlcv["date"] = pd.to_datetime(ohlcv["date"]).dt.strftime("%Y-%m-%d")
+
+    # stock_ohlcv was backfilled by iterating the *current* nse_stocks master, so it
+    # structurally excludes the ~306 companies that have since delisted -- training only on
+    # survivors overstates this classifier's real edge (the 5yr purged-OOF AUC 0.61 headline
+    # figure is itself measured on this same survivorship-biased universe). Fill the gap with
+    # split-adjusted NSE bhavcopy history via backtester.py's own proven fallback (reused, not
+    # duplicated, since it already handles the raw-vs-split-adjusted seam that a naive UNION
+    # would reintroduce -- see Backtester.load_bhavcopy_adjusted's docstring).
+    try:
+        from backtester import Backtester
+        universe = read_df("SELECT DISTINCT symbol FROM nse_universe_history "
+                            "WHERE date >= ? AND series IN ('EQ','BE')", (cutoff,))
+        missing = sorted(set(universe["symbol"]) - set(ohlcv["symbol"] if not ohlcv.empty else []))
+        if missing:
+            bt = Backtester()
+            try:
+                extra = bt.load_bhavcopy_adjusted(missing, cutoff, datetime.date.today().isoformat())
+            finally:
+                bt.close()
+            if not extra.empty:
+                extra = extra.copy()
+                extra["date"] = pd.to_datetime(extra["date"]).dt.strftime("%Y-%m-%d")
+                ohlcv = pd.concat([ohlcv, extra], ignore_index=True) if not ohlcv.empty else extra
+                print(f"[BreakoutClassifier] survivorship fill: +{extra['symbol'].nunique()} "
+                      f"delisted symbols, +{len(extra)} bars")
+    except Exception as e:
+        print(f"[BreakoutClassifier] survivorship fill unavailable ({str(e)[:80]}); "
+              "training on stock_ohlcv's current-universe-only history")
+
     return ohlcv
 
 
@@ -327,15 +357,11 @@ def _load_baseline_test_auc(model_path: str) -> float | None:
 
 def _breakout_promotion_decision(test_auc: float, baseline_test_auc: float | None) -> tuple[bool, str | None]:
     """Pure gate decision: returns (promote, refusal_reason). A NaN held-out AUC (insufficient
-    holdout rows) must never auto-promote just because there happens to be no prior baseline."""
-    if test_auc is None or np.isnan(test_auc):
-        return False, "held-out test AUC is NaN (insufficient holdout data) -- cannot confirm this model is safe to promote."
-    if baseline_test_auc is None:
-        return True, None
-    if test_auc >= baseline_test_auc + BREAKOUT_PROMOTION_MARGIN:
-        return True, None
-    return False, (f"new held-out test AUC {test_auc:.4f} did not beat active model's "
-                    f"{baseline_test_auc:.4f} + {BREAKOUT_PROMOTION_MARGIN} margin.")
+    holdout rows) must never auto-promote just because there happens to be no prior baseline.
+    Delegates to the shared gate in model_promotion.py (also used by movement_predictor.py's
+    identical _movement_promotion_decision) -- same comparison, same NaN handling."""
+    return decide_promotion_with_nan_guard(test_auc, baseline_test_auc, BREAKOUT_PROMOTION_MARGIN,
+                                            metric_name="test AUC")
 
 
 def train(report_only: bool = False, leak_check: bool = False) -> dict:

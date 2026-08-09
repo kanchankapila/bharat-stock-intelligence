@@ -10,15 +10,16 @@ import { initSentry, sentryEnabled, Sentry } from "./src/server/sentry";
 // As early as possible so startup-path errors are captured too. No-op without SENTRY_DSN.
 initSentry();
 
-// Suppress ioredis connection-time WARN about Redis 7 + requirepass ACL mismatch.
-// Every one of the 88 BullMQ connections logs this on startup — it's cosmetic;
-// auth still works (88 clients connected, zero rejections).
-const _origWarn = console.warn.bind(console);
-console.warn = (...args: unknown[]) => {
-  const msg = String(args[0] ?? '');
-  if (msg.includes('does not require a password')) return;
-  _origWarn(...args);
-};
+// Routes every console.log/info/debug/warn/error call in the whole process (not just this
+// file) through the real Winston logger — structured JSON + rotation + levels for the ~140
+// server files' worth of raw console.* calls, none of which need to change. Installed as early
+// as possible so even the uncaughtException/unhandledRejection handlers just below get it.
+// Also absorbs the ioredis ACL-warning suppression that used to be its own standalone
+// console.warn patch here — see installStructuredConsole's own doc comment for why folding it
+// in matters (two independent patches on console.warn is exactly the kind of thing that goes
+// stale silently).
+import { installStructuredConsole } from "./src/server/logger";
+installStructuredConsole();
 
 // EPIPE and ETIMEDOUT on startup are harmless ioredis reconnection noise caused by
 // TIME_WAIT sockets from the previous server instance. ioredis auto-reconnects.
@@ -51,6 +52,8 @@ import { startRedis, stopRedis } from "./src/server/redisManager";
 import { startOllama, stopOllama } from "./src/server/ollamaManager";
 import { wsSignalService } from "./src/server/websocketService";  // PHASE 3.2: WebSocket
 import log from "./src/server/logger";
+import { randomUUID } from "crypto";
+import { isAuthorizedInternalCaller, isAuthorizedInternalOrUser, makeRateLimiter } from "./src/server/internalAuth";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -112,6 +115,11 @@ async function startServer() {
 
   const { bootstrapFundamentals } = await import('./src/server/fundamentalsSyncService');
   await bootstrapFundamentals(bullmqReady);
+
+  // NiftyTrader auto-login token refresh (2026-08-07) — deliberately a background timer, not
+  // on getNiftyTraderHeaders()'s request hot path (see that function's own comment for why).
+  const { startNiftyTraderTokenRefreshTimer } = await import('./src/server/niftytraderAuthService');
+  startNiftyTraderTokenRefreshTimer();
 
   // ── Technical signals: schedule daily + fallback ──────────────────────────
   const { getTechnicalSignalCount, runTechnicalSignalScan } = await import('./src/server/technicalSignalsService');
@@ -251,29 +259,75 @@ async function startServer() {
     import('./src/server/moneycontrolScreener').then(m => m.syncMoneyControlScreeners());
   }
 
-  // Background job for signal accuracy tracking (Phase 4)
-  setInterval(() => {
-    // In a real app, this would iterate through all active signals
-    // For demo, we'll just simulate updates for a few stocks
-    const symbols = ['RELIANCE', 'TCS', 'HDFCBANK'];
-    symbols.forEach(async symbol => {
-      try {
-        const data = await fetchStockDataWithCache(symbol);
-        if (data && data.price) {
-          await updateSignalAccuracy(symbol, data.price);
+  // Real-time signal-accuracy sweep: marks ACTIVE unified_signals COMPLETED/FAILED the moment
+  // live price crosses the stored target/stop, ahead of the batch outcome-resolution jobs that
+  // run post-close. Was hardcoded to 3 demo symbols (RELIANCE/TCS/HDFCBANK) regardless of what
+  // was actually active — every other live signal never got this real-time check. Now sweeps
+  // whatever symbols genuinely carry an ACTIVE unified_signals row, capped so a busy day can't
+  // fan out into hundreds of concurrent price fetches every 30s.
+  setInterval(async () => {
+    const MAX_SYMBOLS_PER_SWEEP = 50;
+    try {
+      const { dbAll } = await import('./src/server/dbAsync');
+      const rows = await dbAll<{ symbol: string }>(
+        `SELECT DISTINCT symbol FROM unified_signals WHERE status = 'ACTIVE' LIMIT ?`,
+        [MAX_SYMBOLS_PER_SWEEP]
+      );
+      for (const { symbol } of rows) {
+        try {
+          const data = await fetchStockDataWithCache(symbol);
+          if (data && data.price) {
+            await updateSignalAccuracy(symbol, data.price);
+          }
+        } catch (error) {
+          console.error(`Failed to update signal accuracy for ${symbol}`, error);
         }
-      } catch (error) {
-        console.error(`Failed to update signal accuracy for ${symbol}`, error);
       }
-    });
+    } catch (error) {
+      console.error('Signal-accuracy sweep failed to load active symbols', error);
+    }
   }, 30000); // Every 30 seconds
 
   // JSON body parser with increased limit for large payloads (e.g. stock list sync)
   app.use(express.json({ limit: '50mb' }));
   app.use(express.urlencoded({ limit: '50mb', extended: true }));
 
-  // MoneyControl API Proxy
+  // Baseline security headers. Not a full helmet() setup (no CSP — this app serves Vite's
+  // dev middleware and inline styles in several places, and getting a CSP wrong blind, with
+  // no way to browser-test in this environment, risks breaking the app more than it protects
+  // it) but these four are safe unconditionally and cost nothing.
+  app.use((req, res, next) => {
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    res.setHeader('X-Frame-Options', 'DENY');
+    res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
+    res.setHeader('X-Permitted-Cross-Domain-Policies', 'none');
+    next();
+  });
+
+  // Scoped rate limiters for the raw (non-tRPC) routes below — /mcapi/* relays to a third party,
+  // /api/export-picks spawns a Python subprocess, /api/internal/notify writes into the live SSE
+  // stream. tRPC procedures aren't covered here; they already sit behind protectedProcedure/
+  // adminProcedure and a blanket limiter tuned blind, with no way to load-test in this sandbox,
+  // would risk throttling legitimate batched tRPC traffic more than it protects anything.
+  const mcapiRateLimited = makeRateLimiter({ windowMs: 60_000, max: 60 });
+  const exportPicksRateLimited = makeRateLimiter({ windowMs: 60_000, max: 5 });
+  const internalNotifyRateLimited = makeRateLimiter({ windowMs: 60_000, max: 120 });
+
+  // MoneyControl API Proxy. Nothing in this app's own frontend calls it (verified: every mcapi
+  // reference elsewhere in src/ is this server's own *direct* calls to api.moneycontrol.com, not
+  // a call to this local route) — so gating it costs no known caller anything, and closes what
+  // was previously an open, anonymous relay any internet caller could drive against MoneyControl.
   app.all('/mcapi/*', async (req, res) => {
+    if (mcapiRateLimited(req)) {
+      log.warn('mcapi_rate_limited', { ip: req.socket.remoteAddress, path: req.originalUrl });
+      res.status(429).json({ error: 'Too many requests' });
+      return;
+    }
+    if (!(await isAuthorizedInternalOrUser(req))) {
+      log.warn('mcapi_unauthorized', { ip: req.socket.remoteAddress, path: req.originalUrl });
+      res.status(401).json({ error: 'Unauthorized' });
+      return;
+    }
     try {
       let path = req.originalUrl;
 
@@ -363,8 +417,23 @@ async function startServer() {
     })
   );
 
-  // Export picks endpoint — returns portfolio JSON for a given strategy and can run backtest
+  // Export picks endpoint — returns portfolio JSON for a given strategy and can run backtest.
+  // Called by the ExportPortfolioView.tsx widget (a logged-in user, in principle — token gate
+  // below) and by scripts/dump_picks.js (a local CLI script hitting localhost, which the
+  // loopback branch of isAuthorizedInternalOrUser covers with no changes needed on its side).
+  // runBacktest:true spawns a Python subprocess, so this previously being open to anyone on the
+  // internet with no auth was a real resource-exhaustion vector, not just a data-leak one.
   app.post('/api/export-picks', async (req, res) => {
+    if (exportPicksRateLimited(req)) {
+      log.warn('export_picks_rate_limited', { ip: req.socket.remoteAddress });
+      res.status(429).json({ success: false, error: 'Too many requests' });
+      return;
+    }
+    if (!(await isAuthorizedInternalOrUser(req))) {
+      log.warn('export_picks_unauthorized', { ip: req.socket.remoteAddress });
+      res.status(401).json({ success: false, error: 'Unauthorized' });
+      return;
+    }
     try {
       const {
         strategy = 'composite',
@@ -392,8 +461,11 @@ async function startServer() {
       const result: any = { success: true, strategy, limit, riskModel, picks };
 
       if (runBacktest) {
-        // Write symbols to temp file
-        const tmp = require('path').join(process.cwd(), 'picks_export_tmp.json');
+        // Per-request filename — was a single static 'picks_export_tmp.json' shared by every
+        // caller, so two concurrent runBacktest requests could interleave writes/reads of each
+        // other's symbol list, and a crash mid-request left debris the next request would
+        // (incorrectly) consume.
+        const tmp = require('path').join(process.cwd(), `picks_export_tmp_${randomUUID()}.json`);
         const fs = require('fs');
         fs.writeFileSync(tmp, JSON.stringify(symbols));
 
@@ -454,7 +526,27 @@ async function startServer() {
   // SSE and Webhook for Alerts
   const { sseHandler, broadcastAlert } = await import('./src/server/sse');
   app.get("/api/stream", sseHandler);
+  // Genuinely internal: only strategy_optimizer.py and scoring_engine.py call this, both via
+  // http://127.0.0.1:3000 on the same host. Was reachable from the internet with no check at
+  // all despite the name — any caller could inject a fabricated alert into every connected
+  // browser's live SSE stream. isAuthorizedInternalCaller requires the real TCP peer to be
+  // loopback (not spoofable via a forwarded-for header) and, if INTERNAL_API_SECRET is set,
+  // also a matching x-internal-secret header.
   app.post("/api/internal/notify", (req, res) => {
+    if (internalNotifyRateLimited(req)) {
+      log.warn('internal_notify_rate_limited', { ip: req.socket.remoteAddress });
+      res.status(429).json({ success: false, error: 'Too many requests' });
+      return;
+    }
+    if (!isAuthorizedInternalCaller(req)) {
+      // A non-loopback caller here means someone off this host tried to inject an alert into
+      // the live SSE stream every connected browser is subscribed to -- worth a distinct event
+      // name from the two rate-limit cases above, since this one specifically means the P0
+      // auth gate is doing its job against a real attempt, not just noisy traffic.
+      log.warn('internal_notify_forbidden', { ip: req.socket.remoteAddress });
+      res.status(403).json({ success: false, error: 'Forbidden' });
+      return;
+    }
     broadcastAlert(req.body);
     res.json({ success: true });
   });

@@ -12,6 +12,7 @@ import pandas as pd
 import pytest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+import iv_features as ivf
 from iv_features import compute_iv_rank, build_iv_features
 from pcr_fetcher import compute_atm_iv_skew
 
@@ -91,3 +92,78 @@ class TestComputeATMIVSkew:
 
     def test_zero_ivs_ignored(self):
         assert compute_atm_iv_skew([(100, 0, 0)], underlying=100) == (None, None)
+
+
+# ── Regression: run(only_date="today") write-target date (2026-08-01) ────────────────────
+#
+# ml-daily-ops calls `iv_features.py --date today`, which set `only_date="today"` and computed
+# `target = datetime.date.today().isoformat()`, then filtered feats down to rows matching
+# `target` (`feats = feats[feats["date"] == target]`). Whenever ml-daily-ops's step chain
+# crossed midnight IST, target became a day with no options data at all, so feats went empty
+# and the write silently became a no-op. Must use as_of.logical_trading_date() instead.
+
+class _FakeConn:
+    def execute(self, sql, params=None):
+        return self
+
+    def fetchall(self):
+        return []
+
+    def close(self):
+        pass
+
+
+class TestRunDateTodayUsesLogicalTradingDate:
+    def _mock_common(self, monkeypatch, feats):
+        monkeypatch.setattr(ivf, "read_df",
+                             lambda *a, **k: pd.DataFrame(columns=["symbol", "date", "atm_iv", "iv_skew"]))
+        monkeypatch.setattr(ivf, "build_iv_features", lambda options: feats)
+        monkeypatch.setattr(ivf, "connect", lambda: _FakeConn())
+        monkeypatch.setattr(ivf, "safe_alter", lambda *a, **k: None)
+        monkeypatch.setattr(ivf, "compute_options_walls",
+                             lambda conn, symbol, spot, as_of_date, rows=None: {
+                                 "call_wall_dist_pct": 0.0, "put_wall_dist_pct": 0.0,
+                                 "near_expiry_gamma": 0.0,
+                             })
+
+    def test_only_date_today_filters_by_logical_trading_date(self, monkeypatch):
+        monkeypatch.setattr(ivf, "logical_trading_date", lambda: "2026-07-31")
+        feats = pd.DataFrame({
+            "symbol": ["INFY", "INFY"],
+            "date":   ["2026-07-31", "2026-08-01"],  # only the mocked "today" should survive
+            "iv_rank": [0.5, 0.9],
+            "iv_skew": [1.0, 1.0],
+        })
+        self._mock_common(monkeypatch, feats)
+        captured = {}
+
+        def _fake_executemany(sql, params):
+            captured["params"] = params
+            return len(params)
+
+        monkeypatch.setattr(ivf, "executemany", _fake_executemany)
+
+        n = ivf.run(only_date="today")
+
+        assert n == 1
+        assert captured["params"][0][-1] == "2026-07-31", (
+            "run(only_date='today') must filter by logical_trading_date()'s value, "
+            "not datetime.date.today()"
+        )
+
+    def test_wrong_calendar_date_would_starve_the_write_silently(self, monkeypatch):
+        """Negative control: documents the original failure mode. If the filter target drifts
+        to a day with no options data, feats goes empty and the write silently becomes a
+        no-op (no error, no rows written)."""
+        monkeypatch.setattr(ivf, "logical_trading_date", lambda: "2026-08-01")
+        feats = pd.DataFrame({
+            "symbol": ["INFY"], "date": ["2026-07-31"],
+            "iv_rank": [0.5], "iv_skew": [1.0],
+        })
+        self._mock_common(monkeypatch, feats)
+        monkeypatch.setattr(ivf, "executemany", lambda sql, params: (_ for _ in ()).throw(
+            AssertionError("executemany should not be called when feats end up empty")))
+
+        n = ivf.run(only_date="today")
+
+        assert n == 0

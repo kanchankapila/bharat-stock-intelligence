@@ -4,7 +4,25 @@ export const DEFAULT_AI_SIGNAL_MIN_CONFIDENCE = 65;
 // Quant-endorsement floor for the AI path: the scoring engine only writes a win_probability
 // for stocks it itself blessed (>=0.40), so requiring one ≥ this floor means an LLM-proposed
 // signal only persists when the quant model independently agrees. Matches scoring_engine's gate.
-export const DEFAULT_AI_SIGNAL_MIN_WIN_PROB = 0.40;
+//
+// FIXED 2026-08-06 (was 0.40): 0.40 sits exactly on a real degenerate-calibration plateau
+// discovered 2026-08-02 -- on most days ~95% of the whole universe shares one identical
+// calibrated_win_probability (observed 0.4064) because the base ensemble's raw predictions are
+// non-monotonic outside BEAR regime, so isotonic calibration collapses a wide raw range into
+// one flat value that sits just above 0.40. At floor=0.40 that value clears the gate for
+// virtually every stock instead of the intended handful/day, and every one of those still gets
+// an LLM call -- so any day the LLM's own (uncorrelated, routinely overconfident)
+// self-reported score clears getAISignalMinConfidence()'s separate 65 floor for a BUY on a
+// meaningful fraction of them produces a burst of persisted signals and, since 2026-08-05,
+// Telegram notifications (see websocketService.ts's AI_SIGNAL_TELEGRAM_DAILY_CAP). 0.42 clears
+// the plateau with margin (verified live 2026-08-02: narrows the pass rate to ~14/2264
+// stocks/day). That verification was previously applied only as a one-off `UPDATE app_settings`
+// on a single running deployment -- never committed anywhere -- so it silently reverted to this
+// stale 0.40 default on any fresh/reset DB (a new environment, a disaster-recovery restore, a
+// second deployment) with no error or warning. Codifying the safe value as the default here, and
+// via migrations/1786300000000_ai-signal-min-win-prob-seed.sql seeding the row itself, closes
+// that gap -- an app_settings override still wins over both if an operator sets one deliberately.
+export const DEFAULT_AI_SIGNAL_MIN_WIN_PROB = 0.42;
 
 let _cachedMinConfidence: number | null = null;
 let _cachedMinConfidenceExp = 0;
@@ -138,13 +156,33 @@ export async function createSignal(signal: Omit<Signal, "id" | "createdAt" | "up
     reasoning: signal.reasoning,
   });
 
+  // target_2/target_3/quant_score/sentiment_score fix (2026-08-07, dead-column sweep): none of
+  // recommendation_log's 3 writers ever populated these 4 columns. target_2/target_3 extend
+  // target_1's own excess-over-entry move again (2x/3x), direction-agnostic (works for both a
+  // BUY target above entry and a SELL target below it). quant_score/sentiment_score are a cheap
+  // best-effort lookup against already-computed values -- this is a low-volume, on-demand
+  // single-signal path, so one extra query per call is negligible.
+  const target2 = signal.target + 2 * (signal.target - signal.entry);
+  const target3 = signal.target + 3 * (signal.target - signal.entry);
+  const extra = await dbGet<{ rank_composite: number | null; news_sentiment_score: number | null }>(`
+    SELECT
+      (SELECT qs.rank_composite FROM quant_scores qs WHERE qs.symbol = ? AND qs.rank_composite IS NOT NULL ORDER BY qs.date DESC LIMIT 1) AS rank_composite,
+      (SELECT ts.news_sentiment_score FROM technical_signals ts WHERE ts.symbol = ? AND ts.news_sentiment_score IS NOT NULL ORDER BY ts.date DESC LIMIT 1) AS news_sentiment_score
+  `, [signal.symbol, signal.symbol]).catch(() => null);
+
   await dbRun(`
     INSERT INTO recommendation_log
       (symbol, rec_type, signal_date, generated_at, entry_price, stop_loss,
-       target_1, confidence_score, reasoning, source, status, horizon_days)
-    VALUES (?, ?, ?, CURRENT_TIMESTAMP, ?, ?, ?, ?, ?, 'platform', 'ACTIVE', 15)
+       target_1, target_2, target_3, confidence_score, quant_score, sentiment_score,
+       reasoning, source, status, horizon_days)
+    VALUES (?, ?, ?, CURRENT_TIMESTAMP, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'platform', 'ACTIVE', 15)
     ON CONFLICT DO NOTHING
-  `, [signal.symbol, signal.type, today, signal.entry, signal.stopLoss, signal.target, signal.confidence, signal.reasoning]);
+  `, [
+    signal.symbol, signal.type, today, signal.entry, signal.stopLoss, signal.target,
+    target2, target3, signal.confidence,
+    extra?.rank_composite ?? null, extra?.news_sentiment_score ?? null,
+    signal.reasoning,
+  ]);
 }
 
 export async function updateSignalAccuracy(symbol: string, currentPrice: number) {

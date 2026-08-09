@@ -16,6 +16,7 @@ import datetime
 from collections import defaultdict
 
 from db_compat import connect, ConnWrapper
+from as_of import logical_trading_date
 
 NIFTY_SYMBOL = "NIFTY50"
 K_PRIOR_STARTUP = 8        # Bayesian prior when <90 days of screener history
@@ -24,10 +25,17 @@ MIN_SIGNALS_FOR_TIER = 5   # below this = Unranked
 
 
 def get_trading_days_after(conn: ConnWrapper, symbol: str, start_date: str, n: int):
-    """Return (price, actual_date) n trading days after start_date from stock_ohlcv."""
+    """Return (price, actual_date) n trading days after start_date from stock_ohlcv.
+
+    Excludes is_suspect bars (2026-07-31 bad-bar quarantine — circuit-locked/impossible-move
+    days) so a screener's measured return doesn't price off a known-bad print. Live-verified
+    2026-08-04: 52% of |return_20d|>50% screener_appearances rows traced to an is_suspect bar
+    in their window; skipping to the next clean bar is the same defensive pattern
+    backtester.py/performance_tracker.py already use.
+    """
     rows = conn.execute("""
         SELECT close, date FROM stock_ohlcv
-        WHERE symbol = ? AND date > ?
+        WHERE symbol = ? AND date > ? AND (is_suspect IS NULL OR is_suspect = 0)
         ORDER BY date ASC
         LIMIT ?
     """, (symbol, start_date, n + 5)).fetchall()
@@ -37,10 +45,10 @@ def get_trading_days_after(conn: ConnWrapper, symbol: str, start_date: str, n: i
 
 
 def get_price_on_or_after(conn: ConnWrapper, symbol: str, date: str):
-    """Return close price on date or next available trading day."""
+    """Return close price on date or next available trading day, excluding is_suspect bars."""
     row = conn.execute("""
         SELECT close FROM stock_ohlcv
-        WHERE symbol = ? AND date >= ?
+        WHERE symbol = ? AND date >= ? AND (is_suspect IS NULL OR is_suspect = 0)
         ORDER BY date ASC LIMIT 1
     """, (symbol, date)).fetchone()
     return row[0] if row else None
@@ -63,12 +71,18 @@ def phase_a_bootstrap(conn: ConnWrapper) -> dict:
     """
     print("[PhaseA] Bootstrapping screener metrics from confluence_signals x signal_outcomes...")
 
-    # Load resolved outcomes — prefer 5D (2,157 rows) since no 20D data exists yet
+    # Load resolved outcomes — prefer 5D (2,157 rows) since no 20D data exists yet.
+    # signal_source='technical' (2026-08): horizon=5 is exclusively written by
+    # outcome_resolver.py (confluence_outcome_tracker.py's own HORIZONS list never includes
+    # 5), so this has always practically read technical-sourced rows despite the docstring
+    # above framing it as a confluence-screener proxy -- made explicit rather than accidental.
     outcomes = conn.execute("""
         SELECT symbol, signal_date, return_pct, outcome
         FROM signal_outcomes
         WHERE outcome IN ('WIN', 'LOSS', 'NEUTRAL')
           AND return_pct IS NOT NULL
+          AND signal_source = 'technical'
+          AND (is_suspect IS NULL OR is_suspect = 0)
         ORDER BY horizon_days DESC, signal_date DESC
     """).fetchall()
 
@@ -76,11 +90,31 @@ def phase_a_bootstrap(conn: ConnWrapper) -> dict:
         print("[PhaseA] No resolved outcomes found. Skipping bootstrap.")
         return {}
 
-    # Build symbol -> [(date, screener_ids)] from confluence_signals
+    # Build symbol -> [(date, screener_ids)] from confluence_signals.
+    #
+    # BUG FOUND 2026-08-09: this previously fetched EVERY confluence_signals row unfiltered --
+    # that table is refreshed every 30 min for the whole universe, so a symbol accumulates ~48
+    # rows/day. The attribution loop below only ever compares dates at DAY granularity
+    # (`str(computed_at)[:10]`), so all ~48 same-day rows for a symbol are functionally
+    # redundant -- only the latest one per (symbol, day) can ever be selected as `best_ids`.
+    # Live-measured 2026-08-09: 4,441,080 raw rows for what's really ~92K distinct
+    # (symbol, day) pairs -- fetching+json.loads-ing+grouping all 4.4M in Python was the
+    # actual cause of this job dying (no error, no stderr -- consistent with an OOM kill) after
+    # completing this phase's own SQL query. ROW_NUMBER() collapses to one (latest) row per
+    # (symbol, day) in SQL instead, matching the exact optimization already used elsewhere in
+    # this codebase for the same "latest row per group" shape (unified_ranker.py,
+    # backfill_sectors.py) -- NOT `DISTINCT ON`, which is Postgres-only and doesn't survive
+    # translation to this file's SQLite dev-fallback path.
     conf_rows = conn.execute("""
-        SELECT symbol, screener_ids_json, computed_at
-        FROM confluence_signals
-        WHERE screener_ids_json IS NOT NULL
+        SELECT symbol, screener_ids_json, computed_at FROM (
+            SELECT symbol, screener_ids_json, computed_at,
+                   ROW_NUMBER() OVER (
+                       PARTITION BY symbol, DATE(computed_at) ORDER BY computed_at DESC
+                   ) AS rn
+            FROM confluence_signals
+            WHERE screener_ids_json IS NOT NULL
+        ) t
+        WHERE rn = 1
         ORDER BY symbol, computed_at DESC
     """).fetchall()
 
@@ -130,26 +164,78 @@ def phase_a_bootstrap(conn: ConnWrapper) -> dict:
 # -- Phase B: Fill screener_appearances returns --------------------------------
 
 def phase_b_fill_returns(conn: ConnWrapper) -> int:
-    """Fill return columns for screener_appearances rows where any short-horizon return is NULL."""
+    """Fill return columns for screener_appearances rows where any horizon return is NULL.
+
+    BUG FOUND 2026-08-07 (dead-column sweep): the original WHERE clause gated purely on
+    `return_5d IS NULL`, so a row was selected AT MOST ONCE -- whenever it first became old
+    enough to fill return_5d (~7 calendar days after appearing). The comment directly above
+    this fix ("Longer horizons will be NULL for recent rows and filled on later runs") states
+    the intended design, but the actual predicate never re-selected a row after return_5d was
+    set, so return_60d/return_120d (which need 60/120 *trading* days of forward price history
+    -- far more than 7 calendar days) were always still None at that point and never revisited.
+    Confirmed live: 671,072/671,072 screener_appearances rows had return_60d/return_120d NULL,
+    100%, while return_5d/return_10d/return_20d were populated normally. Fixed by gating on
+    EACH horizon independently -- a row is now re-selected as long as ANY of its 5 target
+    columns is still NULL and enough calendar time has passed for THAT horizon specifically.
+    """
     print("[PhaseB] Filling screener_appearances returns from stock_ohlcv...")
 
     today = datetime.date.today()
-    # Use the shortest horizon (5 trading days ≈ 7 calendar days) as the gating cutoff.
-    # Longer horizons (10d, 20d) will be NULL for recent rows and filled on later runs.
+    # ~1.4 calendar days per trading day (5 trading days ≈ 7 calendar days, this file's own
+    # existing ratio) + a margin for holiday clusters, applied to each horizon independently.
     cutoff_5d = (today - datetime.timedelta(days=7)).isoformat()
+    cutoff_60d = (today - datetime.timedelta(days=95)).isoformat()
+    cutoff_120d = (today - datetime.timedelta(days=185)).isoformat()
 
-    pending = conn.execute("""
+    # BUG FOUND 2026-08-09: the EACH-horizon fix above correctly widened the predicate, but
+    # never excluded symbols with NO stock_ohlcv rows at all -- those can never be filled
+    # (get_price_on_or_after always returns None) and were being re-selected and re-queried
+    # on EVERY run, forever. Live-verified: 60,007 pending rows across 1,956 distinct symbols,
+    # but 1,943/1,956 (99.3%) have zero OHLCV coverage -- this was the actual cause of
+    # screener-performance's chronic 45min timeout, and because the old code only
+    # conn.commit()'d once at the very end, a timeout-killed run lost 100% of its progress.
+    #
+    # A first attempt fixed this with `AND EXISTS (SELECT 1 FROM stock_ohlcv o WHERE
+    # o.symbol = sa.symbol)` -- correct in principle, but a REAL production incident
+    # (2026-08-09): stock_ohlcv is a compressed TimescaleDB hypertable, and Postgres's
+    # planner satisfied that correlated EXISTS by materializing a HashAggregate over a
+    # 40-million-row Append across every chunk (EXPLAIN showed full DecompressChunk scans
+    # on every compressed chunk instead of any per-symbol pruning) -- crashed the backend
+    # connection twice in a row with "server closed the connection unexpectedly", not a
+    # timeout. `symbol` IS the hypertable's segmentby column, so a LITERAL per-symbol
+    # equality lookup (`WHERE symbol = ?`) prunes to just that symbol's compressed segments
+    # and stays cheap (~40ms even for a miss, live-measured) -- but wrapping the same
+    # equality inside a correlated subquery/JOIN made the planner choose full decompression
+    # instead. Fixed by doing the coverage check as N individual per-symbol lookups in
+    # Python rather than one SQL join -- exactly the same defensive pattern this codebase
+    # already uses elsewhere for this table (see CLAUDE.md's ohlcv_adjust.py notes: "update
+    # by explicit (symbol, date) key in small batches" to avoid the identical decompression
+    # trap). Kept the variable name "pending" -- it now means "pending AND fillable".
+    candidates = conn.execute("""
         SELECT screener_id, symbol, appeared_date
         FROM screener_appearances
-        WHERE return_5d IS NULL
-          AND appeared_date <= ?
-    """, (cutoff_5d,)).fetchall()
+        WHERE (return_5d IS NULL AND appeared_date <= ?)
+           OR (return_60d IS NULL AND appeared_date <= ?)
+           OR (return_120d IS NULL AND appeared_date <= ?)
+    """, (cutoff_5d, cutoff_60d, cutoff_120d)).fetchall()
 
-    if not pending:
+    if not candidates:
         print("[PhaseB] Nothing to fill.")
         return 0
 
-    print(f"[PhaseB] Filling returns for {len(pending)} appearances...")
+    distinct_symbols = {row[1] for row in candidates}
+    covered = {
+        sym for sym in distinct_symbols
+        if conn.execute("SELECT 1 FROM stock_ohlcv WHERE symbol = ? LIMIT 1", (sym,)).fetchone()
+    }
+    pending = [row for row in candidates if row[1] in covered]
+
+    if not pending:
+        print(f"[PhaseB] {len(candidates)} candidates, 0 have OHLCV coverage. Nothing to fill.")
+        return 0
+
+    print(f"[PhaseB] {len(candidates)} candidates ({len(distinct_symbols)} symbols, "
+          f"{len(covered)} with OHLCV coverage) -- filling {len(pending)} appearances...")
     filled = 0
 
     for screener_id, symbol, appeared_date in pending:
@@ -190,6 +276,13 @@ def phase_b_fill_returns(conn: ConnWrapper) -> int:
             screener_id, symbol, appeared_date
         ))
         filled += 1
+
+        # Batched commit (2026-08-09, same bug session as the EXISTS fix above): the old
+        # single commit() at the very end meant a timeout-killed run lost 100% of its
+        # progress -- committing every 500 rows means a killed run keeps whatever it already
+        # filled, so the backlog actually shrinks run over run instead of resetting to zero.
+        if filled % 500 == 0:
+            conn.commit()
 
     conn.commit()
     print(f"[PhaseB] Filled {filled} rows.")
@@ -244,11 +337,28 @@ def _adaptive_k_prior(conn: ConnWrapper) -> float:
     return K_PRIOR_STARTUP if days_of_history < 90 else K_PRIOR_MATURE
 
 
+def _sign_for_sentiment(sentiment) -> float:
+    """+1 measures 'did price rise' (correct for bullish/neutral/unclassified screeners,
+    which is what this whole file measured before this fix). -1 measures 'did price fall
+    relative to benchmark' for a CONFIRMED bearish tag only -- a bearish screener (Near 52
+    Week Low, RSI Bearish, Red Flags) is doing its job when the stock subsequently
+    underperforms, so a raw price-up=win metric was scoring every correctly-functioning
+    bearish/distress screener as near-zero reliability (live-verified 2026-08-04: ~29% of
+    the 1,669-screener catalog is bearish-tagged; 'RSI Bearish'/'Near 52 Week Low' etc all
+    showed reliability_score==0 despite large negative avg_return -- the correct outcome for
+    a bearish screener). 'neutral' is deliberately left at +1, not flipped -- it's not a
+    directional claim to reverse, and this file has no evidence either way for that tag.
+    """
+    return -1.0 if sentiment == 'bearish' else 1.0
+
+
 def phase_c_bayesian(conn: ConnWrapper, proxy_outcomes: dict) -> int:
     """Compute Bayesian scores + tiers. Write to screener_performance_v2."""
     print("[PhaseC] Computing Bayesian scores + tiers...")
 
-    all_screeners = conn.execute("SELECT scan_id, source FROM screener_master").fetchall()
+    all_screeners = conn.execute(
+        "SELECT scan_id, source, inferred_sentiment FROM screener_master"
+    ).fetchall()
 
     # Compute global mean win rate from well-tested screeners
     qualified = conn.execute("""
@@ -271,7 +381,9 @@ def phase_c_bayesian(conn: ConnWrapper, proxy_outcomes: dict) -> int:
 
     updated = 0
 
-    for screener_id, source in all_screeners:
+    for screener_id, source, inferred_sentiment in all_screeners:
+        sign = _sign_for_sentiment(inferred_sentiment)
+
         # Appearance-based returns
         app_rows = conn.execute("""
             SELECT return_5d, return_10d, return_20d, return_60d, return_120d,
@@ -290,19 +402,22 @@ def phase_c_bayesian(conn: ConnWrapper, proxy_outcomes: dict) -> int:
         ret20_list, nifty20_list = [], []
         ret5_list, ret10_list, ret60_list, ret120_list = [], [], [], []
 
+        # sign applies only to the stock-return leg -- nifty20_list stays the raw benchmark
+        # return, so alpha for a bearish screener reads as "outperformance vs. being long the
+        # index," not a doubly-flipped number.
         for row in app_rows:
             r5, r10, r20, r60, r120, nifty20, _ = row
             if r20 is not None:
-                ret20_list.append(float(r20))
+                ret20_list.append(sign * float(r20))
                 nifty20_list.append(float(nifty20) if nifty20 is not None else None)
-            if r5  is not None: ret5_list.append(float(r5))
-            if r10 is not None: ret10_list.append(float(r10))
-            if r60 is not None: ret60_list.append(float(r60))
-            if r120 is not None: ret120_list.append(float(r120))
+            if r5  is not None: ret5_list.append(sign * float(r5))
+            if r10 is not None: ret10_list.append(sign * float(r10))
+            if r60 is not None: ret60_list.append(sign * float(r60))
+            if r120 is not None: ret120_list.append(sign * float(r120))
 
         # Add proxy (20d only, no nifty benchmark available)
         for ret_pct, _ in proxy:
-            ret20_list.append(ret_pct)
+            ret20_list.append(sign * ret_pct)
             nifty20_list.append(None)
 
         resolved_count = len(ret20_list)
@@ -362,7 +477,7 @@ def phase_c_bayesian(conn: ConnWrapper, proxy_outcomes: dict) -> int:
                alpha_20d, alpha_60d, sharpe_20d, max_drawdown, median_ret_20d,
                bayesian_score, tier, data_source, last_computed)
             VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,CURRENT_TIMESTAMP)
-            ON CONFLICT(screener_id) DO UPDATE SET
+            ON CONFLICT(screener_id, source) DO UPDATE SET
               total_appearances=excluded.total_appearances,
               resolved_count=excluded.resolved_count,
               wr_5d=excluded.wr_5d, wr_10d=excluded.wr_10d, wr_20d=excluded.wr_20d,
@@ -398,20 +513,34 @@ def phase_d_sync_back(conn: ConnWrapper) -> None:
     """Sync tier to screener_master and win_rate_* columns to screener_reliability."""
     print("[PhaseD] Syncing tiers to screener_master...")
 
+    # source is required in both subqueries: without it, a scan_id colliding across providers
+    # (2026-08-04 screener_master memory) would either error ("more than one row returned by a
+    # subquery used as an expression") once both providers have a screener_performance_v2 row,
+    # or silently sync the wrong provider's tier.
     conn.execute("""
         UPDATE screener_master
         SET tier = (
             SELECT tier FROM screener_performance_v2
             WHERE screener_performance_v2.screener_id = screener_master.scan_id
+              AND screener_performance_v2.source = screener_master.source
         )
         WHERE EXISTS (
             SELECT 1 FROM screener_performance_v2
             WHERE screener_id = screener_master.scan_id
+              AND source = screener_master.source
         )
     """)
 
     print("[PhaseD] Syncing win_rate_* to screener_reliability...")
 
+    # source-scoped join, matching the (source, scan_id) PK on both tables (2026-08-04
+    # migration): without it, a colliding scan_id (2026-08-04 screener_master memory) joins
+    # screener_reliability's one row against BOTH providers' screener_performance_v2 rows, and
+    # Postgres's UPDATE...FROM applies whichever one happens to match last -- silently writing
+    # one provider's win rates onto the other's screener_reliability row. screener_reliability.
+    # source is lowercase ('trendlyne'), screener_performance_v2.source is capitalized
+    # ('Trendlyne') -- same casing split documented elsewhere in this file/screener_signal_
+    # generator.py, bridged with LOWER() rather than normalized at the source.
     conn.execute("""
         UPDATE screener_reliability
         SET win_rate_5d   = spv.wr_5d,
@@ -421,6 +550,7 @@ def phase_d_sync_back(conn: ConnWrapper) -> None:
             win_rate_120d = spv.wr_120d
         FROM screener_performance_v2 spv
         WHERE screener_reliability.scan_id = spv.screener_id
+          AND screener_reliability.source = LOWER(spv.source)
     """)
 
     conn.commit()
@@ -433,6 +563,11 @@ def phase_e_update_confidence(conn: ConnWrapper) -> None:
     """Drive screener_catalog.confidence from the computed bayesian_score."""
     print("[PhaseE] Updating screener_catalog confidence from bayesian_score...")
 
+    # source-scoped join (2026-08-04, same fix as phase_d_sync_back above): unscoped, this
+    # could apply one provider's bayesian_score-derived confidence onto a DIFFERENT provider's
+    # screener_catalog row whenever their scan_ids collide (20 pairs confirmed live). LOWER()
+    # bridges screener_catalog's historical mixed-case source values (both 'trendlyne' and
+    # 'Trendlyne' rows exist, per screener_signal_generator.py's own comment on this).
     conn.execute("""
         UPDATE screener_catalog sc
         SET confidence = CASE
@@ -443,13 +578,15 @@ def phase_e_update_confidence(conn: ConnWrapper) -> None:
         END
         FROM screener_performance_v2 spv
         WHERE sc.screener_id = spv.screener_id
+          AND LOWER(sc.source) = LOWER(spv.source)
           AND spv.bayesian_score IS NOT NULL
     """)
     conn.commit()
 
     changed = conn.execute("""
         SELECT COUNT(*) FROM screener_catalog sc
-        JOIN screener_performance_v2 spv ON spv.screener_id = sc.screener_id
+        JOIN screener_performance_v2 spv
+          ON spv.screener_id = sc.screener_id AND LOWER(sc.source) = LOWER(spv.source)
         WHERE spv.bayesian_score IS NOT NULL
     """).fetchone()[0]
     print(f"[PhaseE] Updated confidence for {changed} screeners in screener_catalog")
@@ -474,8 +611,18 @@ RESOLUTION_LAG_DAYS = 30   # 20 trading days, with slack for weekends/holidays
 
 
 def ensure_pit_schema(conn: ConnWrapper) -> None:
+    # source-scoped PK (2026-08-06 fix): a 2026-08-05 migration
+    # (1786200000000_screener-performance-history-source-pk) already widened the LIVE table's
+    # PK to (source, screener_id, as_of_date) -- MC/ETnow hand out overlapping scan_ids (see the
+    # 2026-08-04 screener_master (source, scan_id) fix), and this table is no exception. This
+    # CREATE TABLE IF NOT EXISTS is a no-op against an already-migrated live DB, but must match
+    # it for a fresh/reset DB -- the old 2-column definition here silently drifted out of sync
+    # with the live schema for a day, during which every write below crashed with
+    # "no unique or exclusion constraint matching ON CONFLICT" (found via live job_heartbeat:
+    # screener-performance had failed on every run since the migration landed).
     conn.execute("""
         CREATE TABLE IF NOT EXISTS screener_performance_history (
+            source          TEXT NOT NULL,
             screener_id     TEXT NOT NULL,
             as_of_date      TEXT NOT NULL,
             bayesian_score  REAL,
@@ -484,7 +631,7 @@ def ensure_pit_schema(conn: ConnWrapper) -> None:
             alpha_20d       REAL,
             resolved_count  INTEGER,
             computed_at     TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            PRIMARY KEY (screener_id, as_of_date)
+            PRIMARY KEY (source, screener_id, as_of_date)
         )
     """)
     conn.execute("""CREATE INDEX IF NOT EXISTS idx_sph_asof
@@ -493,12 +640,24 @@ def ensure_pit_schema(conn: ConnWrapper) -> None:
 
 
 def compute_pit_scores(conn: ConnWrapper, as_of: str) -> dict:
-    """bayesian_score per screener using ONLY appearances resolved strictly before as_of."""
+    """bayesian_score per (source, screener_id) using ONLY appearances resolved strictly
+    before as_of. Source-scoped (2026-08-06) to match screener_appearances' own (source,
+    screener_id) key and close the same cross-provider scan_id collision this table's PK
+    migration already closed at the schema level -- MC/ETnow independently issue overlapping
+    small-integer scan_ids (confirmed live: scan_id 173 is both ETnow's and MoneyControl's)."""
     cutoff = (datetime.date.fromisoformat(as_of)
               - datetime.timedelta(days=RESOLUTION_LAG_DAYS)).isoformat()
 
+    # screener_appearances.source is lowercase ('moneycontrol'/'etnow'/'trendlyne'/
+    # 'et_marketstats'); screener_master.source is not ('MoneyControl'/'ETnow'/'Trendlyne') --
+    # same pre-existing casing mismatch load_screener_meta already bridges with LOWER(), applied
+    # here too rather than normalizing either table's stored values.
+    sentiment_by_key = {(r[1].lower(), r[0]): r[2] for r in
+                         conn.execute("SELECT scan_id, source, inferred_sentiment "
+                                      "FROM screener_master").fetchall()}
+
     rows = conn.execute("""
-        SELECT screener_id, return_20d, nifty_ret_20d
+        SELECT screener_id, source, return_20d, nifty_ret_20d
         FROM screener_appearances
         WHERE outcome_20d IN ('WIN','LOSS','NEUTRAL')
           AND return_20d IS NOT NULL
@@ -506,8 +665,10 @@ def compute_pit_scores(conn: ConnWrapper, as_of: str) -> dict:
     """, (cutoff,)).fetchall()
 
     by_screener = defaultdict(list)
-    for sid, r20, nifty20 in rows:
-        by_screener[sid].append((float(r20), float(nifty20) if nifty20 is not None else None))
+    for sid, source, r20, nifty20 in rows:
+        key = (source, sid)
+        sign = _sign_for_sentiment(sentiment_by_key.get(key))
+        by_screener[key].append((sign * float(r20), float(nifty20) if nifty20 is not None else None))
 
     # global prior from screeners with enough resolved history AS OF this date
     wrs = [_wr_from_list([r for r, _ in v]) for v in by_screener.values() if len(v) >= 10]
@@ -516,7 +677,7 @@ def compute_pit_scores(conn: ConnWrapper, as_of: str) -> dict:
     K_PRIOR = K_PRIOR_STARTUP if len(by_screener) < 50 else K_PRIOR_MATURE
 
     out = {}
-    for sid, vals in by_screener.items():
+    for key, vals in by_screener.items():
         rets = [r for r, _ in vals]
         niftys = [n for _, n in vals]
         n = len(rets)
@@ -534,7 +695,7 @@ def compute_pit_scores(conn: ConnWrapper, as_of: str) -> dict:
         elif composite >= 0.55: tier = 'B'
         elif composite >= 0.40: tier = 'C'
         else: tier = 'D'
-        out[sid] = {'bayesian_score': composite, 'tier': tier, 'wr_20d': round(wr, 4),
+        out[key] = {'bayesian_score': composite, 'tier': tier, 'wr_20d': round(wr, 4),
                     'alpha_20d': m.get('alpha'), 'resolved_count': n}
     return out
 
@@ -542,16 +703,16 @@ def compute_pit_scores(conn: ConnWrapper, as_of: str) -> dict:
 def phase_f_pit(conn: ConnWrapper, as_of: str) -> int:
     ensure_pit_schema(conn)
     scores = compute_pit_scores(conn, as_of)
-    for sid, s in scores.items():
+    for (source, sid), s in scores.items():
         conn.execute("""
             INSERT INTO screener_performance_history
-              (screener_id, as_of_date, bayesian_score, tier, wr_20d, alpha_20d, resolved_count)
-            VALUES (?,?,?,?,?,?,?)
-            ON CONFLICT(screener_id, as_of_date) DO UPDATE SET
+              (source, screener_id, as_of_date, bayesian_score, tier, wr_20d, alpha_20d, resolved_count)
+            VALUES (?,?,?,?,?,?,?,?)
+            ON CONFLICT(source, screener_id, as_of_date) DO UPDATE SET
               bayesian_score=excluded.bayesian_score, tier=excluded.tier,
               wr_20d=excluded.wr_20d, alpha_20d=excluded.alpha_20d,
               resolved_count=excluded.resolved_count, computed_at=CURRENT_TIMESTAMP
-        """, (sid, as_of, s['bayesian_score'], s['tier'], s['wr_20d'],
+        """, (source, sid, as_of, s['bayesian_score'], s['tier'], s['wr_20d'],
               s['alpha_20d'], s['resolved_count']))
     conn.commit()
     print(f"[PhaseF] as_of={as_of}: wrote {len(scores)} point-in-time screener scores")
@@ -581,7 +742,12 @@ def run():
         phase_c_bayesian(conn, proxy)
         phase_d_sync_back(conn)
         phase_e_update_confidence(conn)
-        phase_f_pit(conn, datetime.date.today().isoformat())
+        # logical_trading_date(), not date.today() (2026-08-06) -- this job is scheduled at
+        # 21:00 UTC = 02:30 IST, i.e. always AFTER midnight relative to the trading day it
+        # summarizes. A raw date.today() call here would permanently stamp every PIT snapshot
+        # one calendar day ahead of the data it actually reflects. See as_of.logical_trading_date's
+        # docstring for the wider incident (insider_features.py/bse_event_classifier.py, 2026-08-01).
+        phase_f_pit(conn, logical_trading_date())
         print("[ScreenerPerf] All phases complete.")
 
         # Print quick summary
@@ -599,7 +765,7 @@ if __name__ == '__main__':
     ap.add_argument('--backfill-pit', action='store_true',
                     help='backfill point-in-time screener scores over a date range')
     ap.add_argument('--start', default='2026-04-01')
-    ap.add_argument('--end', default=datetime.date.today().isoformat())
+    ap.add_argument('--end', default=logical_trading_date())
     ap.add_argument('--step-days', type=int, default=7)
     args = ap.parse_args()
     if args.backfill_pit:
