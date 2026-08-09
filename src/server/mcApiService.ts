@@ -676,11 +676,29 @@ export async function fetchMcShareholdingPattern(scId: string, symbol?: string):
   return mcFetchJson(widgetUrl, 3, symbol);
 }
 
+// The `sc_id` query param is silently ignored by this endpoint -- verified live: 11 different
+// scIds all returned identical currentCount/closedCount and the same unfiltered market-wide
+// list, so `res.list.data` for EVERY stock used to be the same ~50-row global feed rather than
+// that stock's own patterns. The real per-row stock key lives inside meta_data.price_key
+// (`stk_{scId}_N` for equities, `futstk_{scId}_<expiry>` for F&O) -- filter on that instead.
+function matchesScId(row: any, scId: string): boolean {
+  try {
+    const meta = JSON.parse(row?.meta_data || '{}');
+    const key: string = meta?.price_key || '';
+    const m = key.match(/^(?:stk|futstk)_([A-Z0-9]+)_/i);
+    return !!m && m[1].toUpperCase() === scId.toUpperCase();
+  } catch {
+    return false;
+  }
+}
+
 export async function fetchMcChartPatterns(scId: string, symbol?: string): Promise<any | null> {
-  const url = `https://api.moneycontrol.com/mcapi/technicalpicks/chart-patterns?deviceType=W&version=174&start=0&limit=12&pattern_type=all&sc_id=${scId}`;
+  const url = `https://api.moneycontrol.com/mcapi/technicalpicks/chart-patterns?deviceType=W&version=174&start=0&limit=200&pattern_type=all`;
   const res = await mcFetchJson<any>(url, 3, symbol);
-  if (res?.status === 'success' && res.list) return res.list;
-  return null;
+  if (res?.status !== 'success' || !res.list) return null;
+  const data = (res.list.data || []).filter((row: any) => matchesScId(row, scId));
+  if (data.length === 0) return null;
+  return { ...res.list, data };
 }
 
 /**

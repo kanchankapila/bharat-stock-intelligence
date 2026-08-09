@@ -2,11 +2,11 @@ import React from 'react';
 import { Card } from './Card';
 import { trpc } from '../lib/trpc';
 import { cn } from '../lib/utils';
-import { 
-  Bookmark as WatchlistIcon, Minus 
+import {
+  Bookmark as WatchlistIcon, Minus
 } from 'lucide-react';
-import { 
-  ResponsiveContainer, BarChart, Bar 
+import {
+  ResponsiveContainer, BarChart, Bar
 } from 'recharts';
 import { useIntersectionObserver } from '../hooks/useIntersectionObserver';
 import { MarketData } from '../services/marketService';

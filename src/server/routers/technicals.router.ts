@@ -48,7 +48,10 @@ export const technicalsRouter = router({
         [input.symbol]
       );
       if (!row) return null;
-      return { ...row, patterns: JSON.parse(row.patterns || '[]') };
+      // ponytail: technical_signals has no `patterns` column (nothing writes it), so this
+      // used to always JSON.parse(undefined || '[]') into a permanently-empty array. Dropped
+      // rather than fabricated -- add back once a writer actually populates it.
+      return row;
     }),
 
   runTechnicalSignalScan: adminProcedure

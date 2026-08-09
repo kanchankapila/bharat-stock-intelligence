@@ -114,17 +114,23 @@ export const WhyThisPick: React.FC<{ symbol: string; timeframe?: 'long_term' | '
                 )}
               </p>
               <ul className="space-y-1.5">
-                {reasons.slice(0, 8).map((r, i) => (
+                {reasons.slice(0, 8).map((r, i) => {
+                  // scoring_engine.py writes two vocabularies into `reasons`: news-derived
+                  // entries use positive/negative, screener-derived entries use bullish/bearish.
+                  const isUp = r.sentiment === 'positive' || r.sentiment === 'bullish';
+                  const isDown = r.sentiment === 'negative' || r.sentiment === 'bearish';
+                  return (
                   <li key={i} className="text-[11px] text-slate-300 flex items-start gap-2">
-                    <span className={cn("shrink-0 mt-0.5", r.sentiment === 'positive' ? "text-emerald-400" : r.sentiment === 'negative' ? "text-rose-400" : "text-slate-500")}>
-                      {r.sentiment === 'positive' ? '▲' : r.sentiment === 'negative' ? '▼' : '•'}
+                    <span className={cn("shrink-0 mt-0.5", isUp ? "text-emerald-400" : isDown ? "text-rose-400" : "text-slate-500")}>
+                      {isUp ? '▲' : isDown ? '▼' : '•'}
                     </span>
                     <span>
                       {r.name}
                       {r.source && <span className="text-slate-500"> — {r.source}</span>}
                     </span>
                   </li>
-                ))}
+                  );
+                })}
               </ul>
             </div>
           )}

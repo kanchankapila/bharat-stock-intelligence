@@ -552,15 +552,17 @@ export const V3Dashboard: React.FC<V3DashboardProps> = ({
       }));
   }, [stockOhlc]);
 
-  // Pivot levels from the real pivotData already fetched via getNiftyTraderData; '—' when
-  // a level isn't present rather than a synthetic offset that looks like a real computation.
+  // Pivot levels from TradeBrains' real standard-pivot data (unifiedData.tradebrains.pivotData —
+  // getNiftyTraderData has no pivotData field at all, so this previously always resolved to '—'
+  // despite the comment claiming it was wired to real data). '—' when a level isn't present
+  // rather than a synthetic offset that looks like a real computation.
   const pivotLevels = useMemo(() => {
-    const p = (niftyTraderData as any)?.pivotData || {};
+    const p = (unifiedData as any)?.tradebrains?.pivotData?.standard || {};
     const num = (v: any) => (v != null && !isNaN(+v)) ? +v : null;
     return {
-      s2: num(p.s2), s1: num(p.s1), pp: num(p.pp ?? p.pivot), r1: num(p.r1), r2: num(p.r2),
+      s2: num(p.support_two), s1: num(p.support_one), pp: num(p.pivot), r1: num(p.res_one), r2: num(p.res_two),
     };
-  }, [niftyTraderData]);
+  }, [unifiedData]);
 
   // Quant Scores Factor Breakdown mappings
   const factors = unifiedData?.factors;
@@ -635,26 +637,28 @@ export const V3Dashboard: React.FC<V3DashboardProps> = ({
     const price = stock?.price || 0;
     const change = stock?.changePct || 0;
 
-    const nt = niftyTraderData as any;
     const fn = fno as any;
 
-    const isSmaBullish = nt?.movingAverages?.status === 'bullish';
-    const pivot = nt?.pivotData || {};
-    const gap = nt?.gaps || {};
+    // Real intraday gap: today's open vs. previous close (both real MarketData fields),
+    // not a fabricated `nt.gaps` field that never existed in the NiftyTrader response shape.
+    const gapPct = stock?.prevClose ? ((stock.open - stock.prevClose) / stock.prevClose) * 100 : null;
 
     const pe = getRatio('PE Ratio') || '—';
     const de = getRatio('Debt to Equity') || '—';
     const pb = getRatio('PB Ratio') || '—';
-    
+
     const scoreVal = unifiedData?.score?.score || 0;
     const trendSWOT = trendlyneOverview?.swot || {};
     const strengthsCount = trendSWOT.strengths?.length || 0;
     const weaknessesCount = trendSWOT.weaknesses?.length || 0;
-    const optPCR = fn?.pcrIndex?.pcr || '—';
-    const painStrike = fn?.maxPainStrike || '—';
+    // Real F&O sentiment fields (fno?.marketSentiment.pcr/maxPain) — the Derivatives tab
+    // elsewhere in this file reads the same fields; this previously read fn?.pcrIndex/
+    // fn?.maxPainStrike, which don't exist on the getFnOSignals response shape.
+    const optPCR = fn?.marketSentiment?.pcr ?? '—';
+    const painStrike = fn?.marketSentiment?.maxPain ?? '—';
 
     return `=============================================================================
-BBG WARREN-AI FINANCIAL ANALYST SYSTEM v2.1 (INTEGRATED QUANT ENVIRONMENT)
+BBG QUANT SNAPSHOT — AUTO-GENERATED FROM LIVE DATABASE FIELDS (NOT AN LLM CALL)
 =============================================================================
 SECURITY EVALUATED : ${symbol} (${sName})
 MARKET STATUS      : ACTIVE | PRICE: INR ${price.toLocaleString()} (${change >= 0 ? '+' : ''}${change.toFixed(2)}%)
@@ -675,11 +679,10 @@ EVALUATION TIMESTAMP: ${new Date().toISOString()}
 -----------------------------------------------------------------------------
 2. TECHNICAL REGIME & PIVOT MATRIX
 -----------------------------------------------------------------------------
-* Moving Averages Trend : ${isSmaBullish ? 'BULLISH ALIGNMENT (SMA 50 > SMA 200)' : 'MIXED INDICATORS'}
-* Intraday Gap Action   : ${gap.direction ? `${gap.direction.toUpperCase()} GAP OPENING AT ${gap.gapSize ?? '0.00'}%` : 'FLAT PRICE CONSOLIDATION'}
-* Pivot Support (S1)    : INR ${pivot.s1 ?? '—'}
-* Pivot Resistance (R1) : INR ${pivot.r1 ?? '—'}
-* Narrow Range NR7 Alert: ${(niftyTraderData as any)?.nr7Pattern ? 'ALERT: NR7 NARROW RANGE DETECTED (EXPECT BREAKOUT)' : 'NORMAL VOLATILITY'}
+* Technical Factor Read : ${(factors?.technical ?? 0) >= 60 ? 'BULLISH BIAS' : (factors?.technical ?? 0) <= 40 ? 'BEARISH BIAS' : 'NEUTRAL / MIXED'} (score ${factors?.technical ?? '—'}/100)
+* Intraday Gap Action   : ${gapPct != null ? `${gapPct >= 0 ? 'GAP UP' : 'GAP DOWN'} AT OPEN, ${Math.abs(gapPct).toFixed(2)}% VS PREV CLOSE` : 'GAP DATA UNAVAILABLE'}
+* Pivot Support (S1)    : ${pivotLevels.s1 != null ? `INR ${pivotLevels.s1}` : '—'}
+* Pivot Resistance (R1) : ${pivotLevels.r1 != null ? `INR ${pivotLevels.r1}` : '—'}
 
 -----------------------------------------------------------------------------
 3. FUNDAMENTAL DATA & SWOT ANALYSIS
@@ -689,8 +692,8 @@ EVALUATION TIMESTAMP: ${new Date().toISOString()}
 * Trendlyne DVM Audits  : Quality [${qVal ?? '—'}/100] | Valuation [${vVal ?? '—'}/100] | Technicals [${tVal ?? '—'}/100]
 * Checklist Pass Rate   : ${checklistYes}/${checklistTotal} Audit items passed (${checklistScore}%)
 * SWOT Indicators       : ${strengthsCount} Strengths | ${weaknessesCount} Weaknesses
-  - Strength Highlight  : ${trendSWOT.strengths?.[0]?.text || 'Capital structure remains highly stable.'}
-  - Risk Mitigation     : ${trendSWOT.weaknesses?.[0]?.text || 'Higher valuations present slight momentum friction.'}
+  - Strength Highlight  : ${trendSWOT.strengths?.[0]?.text || 'No Trendlyne SWOT data available.'}
+  - Risk Mitigation     : ${trendSWOT.weaknesses?.[0]?.text || 'No Trendlyne SWOT data available.'}
 
 -----------------------------------------------------------------------------
 4. DERIVATIVES & OPTIONS FLOW SCAN
@@ -705,7 +708,7 @@ EVALUATION TIMESTAMP: ${new Date().toISOString()}
 Based on the multi-factor scoring array and SWOT profiles, ${symbol} displays ${scoreVal >= 70 ? 'strong capital appreciation momentum' : 'consolidative regime pricing'}. The quantitative model advises: ${scoreVal >= 70 ? 'ACCUMULATE on minor pullbacks' : 'HOLD position while monitoring PCR shifts'}.
 
 =============================================================================
-[WARREN-AI SYSTEM ONLINE - REPORT GENERATED COMPLETELY - ESC TO EXIT]
+[SNAPSHOT COMPLETE - TEMPLATED FROM LIVE FIELDS ABOVE, NO AI MODEL WAS CALLED - ESC TO EXIT]
 =============================================================================`;
   };
 
@@ -745,7 +748,7 @@ Based on the multi-factor scoring array and SWOT profiles, ${symbol} displays ${
             "- <SYMBOL> OPT: Views Option Chain\n" +
             "- FED / TREAS / ECON: Macro Views\n" +
             "- EXPORT: Download Stock Data JSON\n" +
-            "- ASK '<query>': AI Quant Report Card");
+            "- ASK '<query>': Auto-Generated Quant Snapshot (not an AI call)");
       setTerminalInput('');
       return;
     }
@@ -1996,7 +1999,7 @@ Based on the multi-factor scoring array and SWOT profiles, ${symbol} displays ${
                 <div className="flex items-center gap-2">
                   <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-ping" />
                   <span className="text-[10px] font-black uppercase tracking-wider text-emerald-300 font-mono">
-                    BBG WARREN-AI COGNITIVE DESK | CODENAME: LLAMA-3-LOCAL
+                    BBG QUANT SNAPSHOT | TEMPLATED FROM LIVE DATA, NOT AN LLM
                   </span>
                 </div>
                 <button
@@ -2017,7 +2020,7 @@ Based on the multi-factor scoring array and SWOT profiles, ${symbol} displays ${
                 </div>
 
                 <div className="text-slate-500 uppercase tracking-widest text-[9px] mb-2 font-black border-b border-slate-950 pb-1">
-                  Cognitive Analysis Stream
+                  Auto-Generated Data Snapshot
                 </div>
                 <pre className="whitespace-pre-wrap font-mono text-emerald-400 leading-normal selection:bg-emerald-500/20">
                   {warrenOutput}
@@ -2027,7 +2030,7 @@ Based on the multi-factor scoring array and SWOT profiles, ${symbol} displays ${
 
               {/* Modal Footer */}
               <div className="flex justify-between items-center px-4 py-2.5 bg-slate-950 border-t border-emerald-500/20 select-none text-[9px] font-black text-slate-500 font-mono">
-                <span>WARREN-AI v2.1 (ONLINE)</span>
+                <span>QUANT SNAPSHOT (TEMPLATE ENGINE, NOT AN LLM)</span>
                 <button
                   onClick={() => setWarrenModalOpen(false)}
                   className="px-3 py-1 bg-emerald-600/10 hover:bg-emerald-600/20 text-emerald-400 border border-emerald-500/30 rounded transition-colors uppercase tracking-wider cursor-pointer font-bold"
