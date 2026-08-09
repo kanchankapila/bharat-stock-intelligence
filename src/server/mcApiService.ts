@@ -2,6 +2,7 @@ import { Semaphore } from './semaphore';
 import { findMcScreenersByStock } from './moneycontrolScreener';
 import { findScreenersByStock } from './trendlyneScreener';
 import { findEtScreenersByStock } from './etnow';
+import { dbRun } from './dbAsync';
 
 const mcSemaphore = new Semaphore(10); // Increased concurrency
 
@@ -701,6 +702,60 @@ export async function fetchMcChartPatterns(scId: string, symbol?: string): Promi
   return { ...res.list, data };
 }
 
+// A handful of MoneyControl's own proprietary scores are fetched and rendered by
+// MCStockInfoPanel on every panel open but were never written anywhere — meaning nobody could
+// ever check (the way factor_edge.py already did for Trendlyne's m_score, and found it has zero
+// forward edge) whether MC's own analyst consensus/price-target/composite score actually predicts
+// anything. Piggybacks on the already-fetched response from this request-time call rather than a
+// new scheduled fetcher; `fetched_at` is day-grain (not a full timestamp) so repeated panel opens
+// within the same day upsert the same row instead of accumulating duplicates, while a new day
+// still gets its own row -- giving a real daily time series for a future factor_edge.py pass.
+// Best-effort: never throws (all errors are caught and logged), so the caller below
+// deliberately does NOT `await` this -- it stays fire-and-forget in production. Returns its
+// Promise anyway (rather than `void`) purely so a test can await it deterministically.
+export async function persistMcConsolidatedMetrics(symbol: string, data: {
+  mcInsights?: { classification?: { stockScore?: number } } | null;
+  analystRating?: { finalRating?: string; analystCount?: string } | null;
+  priceForecast?: { high?: string; mean?: string; low?: string } | null;
+  hitsMisses?: { beats?: { total?: string }; misses?: { total?: string }; inline?: { total?: string } } | null;
+}): Promise<void> {
+  try {
+    const today = new Date().toISOString().slice(0, 10);
+    const rows: [string, string, number | null, string | null, string][] = [];
+    const push = (group: string, name: string, num: number | null, text: string | null = null) => {
+      if (num == null && text == null) return;
+      rows.push([group, name, num, text, today]);
+    };
+    const stockScore = data.mcInsights?.classification?.stockScore;
+    if (typeof stockScore === 'number') push('score', 'mc_stock_score', stockScore);
+    if (data.analystRating?.finalRating) push('analyst', 'final_rating', null, data.analystRating.finalRating);
+    const analystCount = Number(data.analystRating?.analystCount);
+    if (Number.isFinite(analystCount) && analystCount > 0) push('analyst', 'analyst_count', analystCount);
+    const high = Number(data.priceForecast?.high), mean = Number(data.priceForecast?.mean), low = Number(data.priceForecast?.low);
+    if (Number.isFinite(high)) push('price_forecast', 'target_high', high);
+    if (Number.isFinite(mean)) push('price_forecast', 'target_mean', mean);
+    if (Number.isFinite(low)) push('price_forecast', 'target_low', low);
+    const beats = Number(data.hitsMisses?.beats?.total) || 0;
+    const misses = Number(data.hitsMisses?.misses?.total) || 0;
+    const inline = Number(data.hitsMisses?.inline?.total) || 0;
+    const totalCalls = beats + misses + inline;
+    if (totalCalls > 0) push('estimates', 'beat_ratio', beats / totalCalls);
+
+    if (rows.length === 0) return;
+    await Promise.all(rows.map(([metric_group, metric_name, metric_value_num, metric_value_text, fetched_at]) =>
+      dbRun(
+        `INSERT INTO mc_general_metrics (symbol, source_api, metric_group, metric_name, metric_value_num, metric_value_text, fetched_at)
+         VALUES (?, 'mc_consolidated', ?, ?, ?, ?, ?)
+         ON CONFLICT(symbol, source_api, metric_group, metric_name, fetched_at) DO UPDATE SET
+           metric_value_num = excluded.metric_value_num, metric_value_text = excluded.metric_value_text`,
+        [symbol.toUpperCase(), metric_group, metric_name, metric_value_num, metric_value_text, fetched_at]
+      )
+    ));
+  } catch (e) {
+    console.warn('[mcApiService] persistMcConsolidatedMetrics failed (non-fatal):', (e as Error)?.message);
+  }
+}
+
 /**
  * Main consolidated fetch - gets ALL MC data for a stock.
  * Optimised: Refreshes Price/Technical data every time, but caches Fundamentals for 1 hour.
@@ -774,6 +829,8 @@ export async function getMcConsolidatedData(scId: string, symbol: string, timefr
     fetchWithCache('shareholding_pattern', () => fetchMcShareholdingPattern(effectiveScId, symbol)),
     fetchWithCache('chart_patterns', () => fetchMcChartPatterns(effectiveScId, symbol)),
   ]);
+
+  persistMcConsolidatedMetrics(symbol, { mcInsights, analystRating, priceForecast, hitsMisses });
 
   return {
     scId: effectiveScId,

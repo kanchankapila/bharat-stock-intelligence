@@ -235,6 +235,35 @@ describe('individual evaluate() functions', () => {
   });
 });
 
+describe('mc-consolidated-metrics-freshness (hand-rolled: needs a WHERE source_api filter the factory cannot express)', () => {
+  const now = new Date('2026-08-03T12:00:00Z'); // a Monday
+  const byId = (id: string) => DATA_QUALITY_CHECKS.find(c => c.id === id)!;
+
+  it('filters on source_api so a sibling writer (et_marketstats) sharing this table cannot mask this source going stale', () => {
+    // The mandate this check exists to satisfy is specifically that a bare MAX(fetched_at)
+    // over the whole table would report "fresh" purely from et_marketstats' own daily writes.
+    expect(byId('mc-consolidated-metrics-freshness').sql).toMatch(/source_api\s*=\s*'mc_consolidated'/);
+  });
+
+  it('is non-critical and reads an empty table as a soft warn, not a fail (request-time writer, no fixed schedule)', () => {
+    const check = byId('mc-consolidated-metrics-freshness');
+    expect(check.critical).toBe(false);
+    const r = check.evaluate(undefined, now);
+    expect(r.status).toBe('warn');
+  });
+
+  it('never fails even when very stale (sparse-by-nature style, matching insider-trades-recency)', () => {
+    const sixtyDaysAgo = new Date(now.getTime() - 60 * 86_400_000).toISOString();
+    const r = byId('mc-consolidated-metrics-freshness').evaluate({ last_date: sixtyDaysAgo }, now);
+    expect(r.status).toBe('warn');
+  });
+
+  it('passes when a recent row exists', () => {
+    const r = byId('mc-consolidated-metrics-freshness').evaluate({ last_date: now.toISOString() }, now);
+    expect(r.status).toBe('pass');
+  });
+});
+
 describe('generated freshness checks (TABLE_FRESHNESS_CHECKS via makeFreshnessCheck)', () => {
   const now = new Date('2026-08-03T12:00:00Z'); // a Monday
   const byId = (id: string) => DATA_QUALITY_CHECKS.find(c => c.id === id)!;
