@@ -123,10 +123,9 @@ export async function isMarketOpen(): Promise<boolean> {
  * schedule is never wrongly suppressed — the worst case is a holiday runs on its usual schedule.
  */
 export async function isTradingHolidayToday(): Promise<boolean> {
-  const istNow = new Date(Date.now() + 5.5 * 60 * 60 * 1000);
-  const day = istNow.getUTCDay(); // 0=Sun, 6=Sat
-  if (day === 0 || day === 6) return false; // weekend, not a trading holiday
-
+  // No separate weekend short-circuit: the BSE feed already reports Sat/Sun with
+  // purpose "Weekly Off", which the purpose.includes('weekly') check below correctly
+  // treats as not-a-holiday. Every real caller's own cron is weekday-only anyway.
   try {
     const res = await fetch(BSE_STATUS_URL, { headers: { 'User-Agent': HEADERS['User-Agent'] }, signal: AbortSignal.timeout(10_000) });
     if (!res.ok) return false;
