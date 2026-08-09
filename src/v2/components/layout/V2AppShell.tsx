@@ -211,7 +211,7 @@ export const V2AppShell: React.FC<V2AppShellProps> = ({
         <span className="text-[9px] font-black uppercase text-slate-400 tracking-wider font-mono">Terminal Dashboard version</span>
         <div className="flex gap-1 bg-slate-950 p-0.5 rounded-lg border border-slate-900 select-none">
           {(['v1', 'v2', 'v3', 'v6'] as const).map((v) => {
-            const active = (dashboardVersion || 'v3') === v;
+            const active = (dashboardVersion || 'v6') === v;
             return (
               <button
                 key={v}

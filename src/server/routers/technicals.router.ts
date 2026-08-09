@@ -9,6 +9,15 @@ import { router, publicProcedure, adminProcedure } from "../trpc";
 import { TRPCError } from "@trpc/server";
 import { fetchWithCache } from "../cacheService";
 
+// Next calendar day (UTC) as a 'YYYY-MM-DD' string, used to build a half-open [d, d+1) range
+// for getTechnicalConfluenceSignals below -- extracted so month/year-boundary correctness is
+// independently testable.
+export function nextCalendarDayUTC(dateStr: string): string {
+  const dNext = new Date(`${dateStr}T00:00:00Z`);
+  dNext.setUTCDate(dNext.getUTCDate() + 1);
+  return dNext.toISOString().slice(0, 10);
+}
+
 export const technicalsRouter = router({
   getTechnicalDetails: publicProcedure
     .input(z.object({ symbol: z.string(), dur: z.enum(['D', 'W', 'M']).optional() }))
@@ -93,6 +102,9 @@ export const technicalsRouter = router({
         const maxRow = await dbGet<{ d: string }>('SELECT MAX(date) as d FROM technical_signals');
         d = maxRow?.d ?? new Date().toISOString().slice(0, 10);
       }
+      // Exclusive upper bound, computed in JS so the query below needs no in-SQL date
+      // arithmetic and stays identical across both dialects.
+      const dExclusive = nextCalendarDayUTC(d);
       return dbAll<any>(`
         WITH scored AS (
           SELECT
@@ -110,8 +122,13 @@ export const technicalsRouter = router({
             ) AS unified_score
           FROM technical_signals ts
           LEFT JOIN nse_stocks ns ON ns.symbol = ts.symbol
+          -- Was date(cs.computed_at) = ? -- wrapping confluence_signals' TimescaleDB
+          -- partitioning column in date() defeats both the existing idx_csi_computed index and
+          -- Timescale's own chunk-exclusion pruning (same bug class already fixed for
+          -- ml.router.ts's getSignalReportCard). A half-open range on the bare column is
+          -- sargable and lets Timescale skip every chunk outside [d, d+1).
           LEFT JOIN confluence_signals cs
-                 ON cs.symbol = ts.symbol AND date(cs.computed_at) = ?
+                 ON cs.symbol = ts.symbol AND cs.computed_at >= ?::timestamptz AND cs.computed_at < ?::timestamptz
           WHERE ts.date = ?
             AND COALESCE(cs.confluence_score, 0) >= ?
         )
@@ -119,7 +136,7 @@ export const technicalsRouter = router({
         WHERE unified_score >= ?
         ORDER BY unified_score DESC
         LIMIT ?
-      `, [d, d, input.minConfluence, input.minUnified, input.limit]);
+      `, [d, dExclusive, d, input.minConfluence, input.minUnified, input.limit]);
     }),
 
   getSignalDates: publicProcedure
