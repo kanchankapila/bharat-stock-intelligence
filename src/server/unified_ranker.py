@@ -815,6 +815,45 @@ class UnifiedRanker:
             return row['regime'], float(row['regime_prob'] or 0.5)
         return 'BULL', 0.5
 
+    # Empirically derived from the platform's full INDIAVIX history (2026-08-09 live audit,
+    # 1170 rows): median~14.0, p75~17.2. regime_detector.py's HIGH_VOL/CRASH names are assigned
+    # PURELY by relative rank among whichever 5 clusters a given retrain discovers -- "2nd/5th
+    # most volatile of 5" says nothing about whether ANY of the 5 states is actually volatile in
+    # absolute terms. Live-confirmed this session: HIGH_VOL was assigned to 07-29..08-07 with
+    # real VIX=12.16-13.27 -- the platform's own BOTTOM QUARTILE of VIX history, i.e. calm, not
+    # elevated. Since REGIME_WEIGHTS/regime_cat_weights key purely off the string name, that
+    # silently applied "reduce risk" weight tilts to a genuinely calm market for those 8 sessions.
+    _HIGH_VOL_VIX_FLOOR = 14.0  # historical median; below this "HIGH_VOL" overclaims
+    _CRASH_VIX_FLOOR     = 17.2  # historical p75; below this "CRASH" overclaims
+
+    def _effective_regime_for_weights(self, regime: str) -> str:
+        """Downgrade HIGH_VOL/CRASH to their calmer neighbor for weight SELECTION only, when
+        today's real India VIX doesn't support the volatility the name claims. Deliberately does
+        NOT touch the stored market_regimes row, app_settings.current_nifty_regime, or the
+        `regime` value this run reports/persists elsewhere -- this is a downstream safety net on
+        top of regime_detector.py's own labeling, not a replacement for fixing it there."""
+        if regime not in ('HIGH_VOL', 'CRASH'):
+            return regime
+        try:
+            row = self.conn.execute(
+                "SELECT close FROM macro_asset_prices WHERE symbol = 'INDIAVIX' "
+                "ORDER BY date DESC LIMIT 1"
+            ).fetchone()
+        except Exception:
+            return regime
+        vix = float(row['close']) if row and row['close'] is not None else None
+        if vix is None:
+            return regime  # nothing to second-guess the label with -- trust it
+        if regime == 'HIGH_VOL' and vix < self._HIGH_VOL_VIX_FLOOR:
+            print(f"[UnifiedRanker] Regime 'HIGH_VOL' downgraded to 'SIDEWAYS' for weight "
+                  f"selection -- real VIX={vix:.2f} < {self._HIGH_VOL_VIX_FLOOR} historical-median floor.")
+            return 'SIDEWAYS'
+        if regime == 'CRASH' and vix < self._CRASH_VIX_FLOOR:
+            print(f"[UnifiedRanker] Regime 'CRASH' downgraded to 'BEAR' for weight selection "
+                  f"-- real VIX={vix:.2f} < {self._CRASH_VIX_FLOOR} historical-p75 floor.")
+            return 'BEAR'
+        return regime
+
     def _get_fundamental_scores(self):
         rows = self.conn.execute(
             "SELECT symbol, score FROM stock_scores WHERE timeframe = 'long_term'"
@@ -1430,7 +1469,8 @@ class UnifiedRanker:
             self.seed_screener_catalog()
 
         regime, _conf     = self._get_regime()
-        base_weights      = REGIME_WEIGHTS.get(regime, REGIME_WEIGHTS['BULL'])
+        regime_for_weights = self._effective_regime_for_weights(regime)
+        base_weights      = REGIME_WEIGHTS.get(regime_for_weights, REGIME_WEIGHTS['BULL'])
         directionless_fallback = is_directionless_fallback_enabled(self.conn)
         fund_scores       = self._get_fundamental_scores()
         quality_metrics   = self._get_quality_metrics()
@@ -1439,7 +1479,7 @@ class UnifiedRanker:
         screener_momentum = self._get_screener_momentum_scores()
 
         screener_scores, bull_counts, bear_counts = compute_screener_stock_scores(
-            membership, fund_scores, cat_weights=regime_cat_weights(regime)
+            membership, fund_scores, cat_weights=regime_cat_weights(regime_for_weights)
         )
 
         # Blend pre-computed screener_momentum_score into the screener engine (10% boost cap).

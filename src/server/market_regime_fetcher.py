@@ -28,7 +28,7 @@ import requests
 from curl_cffi import requests as cffi_requests
 from sqlalchemy import text
 
-from db_compat import get_engine
+from db_compat import get_engine, now_utc_iso
 
 # ---------------------------------------------------------------------------
 # NSE session headers — same pattern used across NSE-sourced fetchers
@@ -97,7 +97,7 @@ def _vix_regime(vix: float) -> str:
 def _save_macro_rows(engine, rows: list[tuple[str, float]]) -> None:
     """Upsert (asset_name, price) rows into macro_asset_prices for today."""
     today      = datetime.date.today().isoformat()
-    fetched_at = datetime.datetime.now().isoformat()
+    fetched_at = now_utc_iso()  # was naive local-time now() into a TIMESTAMPTZ col, see db_compat
 
     with engine.begin() as conn:
         for asset_name, price in rows:

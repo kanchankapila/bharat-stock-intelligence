@@ -38,7 +38,7 @@ warnings.filterwarnings('ignore')
 import numpy as np
 import pandas as pd
 
-from db_compat import connect, read_df, use_postgres, ConnWrapper
+from db_compat import connect, read_df, use_postgres, ConnWrapper, now_utc_iso
 from as_of import as_of_join_sql
 from model_promotion import (clears_promotion_bar, rejections_since,
                               staleness_override_applies,
@@ -2562,7 +2562,10 @@ def train_ensemble(X: pd.DataFrame, y: pd.Series, dates: pd.Series | None = None
         'optimal_threshold':  test.get('optimal_threshold', 0.45),
         'embargo':            embargo,
         'n_samples':          len(X),
-        'trained_at':         datetime.datetime.now().isoformat(),
+        # was naive datetime.datetime.now().isoformat() -- on this box (local clock IST) that
+        # silently stored wall-clock IST into model_registry.trained_at (TIMESTAMPTZ, session
+        # TimeZone=UTC), ~5.5h ahead of true UTC. See db_compat.now_utc_iso().
+        'trained_at':         now_utc_iso(),
     }
 
 

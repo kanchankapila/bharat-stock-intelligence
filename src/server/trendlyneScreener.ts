@@ -168,7 +168,25 @@ export async function saveScreenerStocksToDB(
     );
 
     const now = new Date().toISOString().slice(0, 10);
-    const incomingIds = new Set(stocks.map(s => s.stockId));
+
+    // Trendlyne's own API declares stock_id as {"type":"number"} (live-verified 2026-08-09:
+    // real values are plain integers like 59, 2999). trendlyne_screener_stocks' PK is
+    // (screener_id, stock_id), so a non-numeric stockId (confirmed live: often the resolved
+    // NSE symbol itself, e.g. "ALLCARGO") lands as a SEPARATE row from the real numeric-ID one
+    // instead of updating it -- 57,307 of 112,595 rows (50.9%) were duplicated this way as of
+    // this audit, started 2026-08-08 and still active, silently doubling every screener-count-
+    // based signal (unified_ranker.py's bull/bear tally, screener_appearances) for ~96% of
+    // symbols. Root cause not fully pinned (a fresh direct API probe returns correct numeric
+    // IDs; whatever's producing the bad values server-side wasn't reproducible from here) --
+    // this guard stops the corruption at the one place it's unconditionally verifiable, whatever
+    // upstream cause resurfaces it.
+    const validStocks = stocks.filter(s => /^\d+$/.test(s.stockId));
+    const skipped = stocks.length - validStocks.length;
+    if (skipped > 0) {
+      console.warn(`[TrendlyneScreener] Skipped ${skipped}/${stocks.length} non-numeric stockId `
+        + `rows for screener ${screenerId} (Trendlyne's stock_id is always numeric).`);
+    }
+    const incomingIds = new Set(validStocks.map(s => s.stockId));
 
     await dbTransaction(async (tx) => {
       // Remove stocks no longer in screener
@@ -178,7 +196,7 @@ export async function saveScreenerStocksToDB(
         await tx.run(`DELETE FROM trendlyne_screener_stocks WHERE screener_id = ? AND stock_id = ?`, [screenerId, r.stock_id]);
       }
       // Upsert current stocks
-      for (const stock of stocks) {
+      for (const stock of validStocks) {
         const mapping = getStockMapping(stock.stockId);
         const symbol = mapping ? mapping.symbol : null;
         await tx.run(upsertSql, [screenerId, stock.stockId, symbol, now, now]);

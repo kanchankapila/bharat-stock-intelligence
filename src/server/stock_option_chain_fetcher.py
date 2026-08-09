@@ -28,6 +28,7 @@ import requests
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from db_compat import get_engine, use_postgres
+from as_of import logical_write_floor
 from sql_translate import translate, build_params
 from sqlalchemy import text
 
@@ -469,7 +470,11 @@ def main():
     engine = get_engine()
     ensure_schema(engine)
 
-    today = datetime.date.today().isoformat()
+    # was blind date.today() -- a catch-up run firing outside the weekday schedule (confirmed
+    # live 2026-08-09: a Sunday-morning catch-up wrote 210 rows dated the non-trading Sunday
+    # itself) stamped real option-chain data with a date the market never traded. Anchor to the
+    # last real session instead, matching the established as_of.logical_write_floor() pattern.
+    today = logical_write_floor(fallback=datetime.date.today().isoformat())
 
     if args.symbol:
         symbols = [args.symbol.upper()]

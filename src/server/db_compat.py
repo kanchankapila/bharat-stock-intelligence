@@ -19,6 +19,7 @@ Conversion notes for P3f:
   - SQLite-only SQL (INSERT OR REPLACE, strftime, PRAGMA table_info) must be hand-converted.
 """
 import os
+from datetime import datetime, timezone
 from pathlib import Path
 from urllib.parse import quote_plus
 
@@ -227,6 +228,21 @@ def connect() -> ConnWrapper:
 
 
 # ─── Convenience helpers (open + use + close internally) ───────────────────────
+
+def now_utc_iso() -> str:
+    """Timezone-aware UTC timestamp string, safe to write into any TIMESTAMPTZ column.
+
+    Live-audit finding 2026-08-09: many engines write `datetime.datetime.now().isoformat()`
+    (naive, local system clock) into TIMESTAMPTZ columns. The Postgres session's own TimeZone
+    GUC is UTC, so an offset-less string is taken to already BE UTC -- on a box whose local
+    clock is IST (UTC+5:30), that silently stores the wall-clock IST reading ~5.5h ahead of
+    true UTC (confirmed live: model_registry.trained_at read as being in the future relative
+    to Postgres now()). Use this instead of a bare `datetime.now().isoformat()` anywhere the
+    target column is TIMESTAMPTZ -- the explicit '+00:00' offset makes Postgres's parser
+    correct regardless of the writing process's local timezone.
+    """
+    return datetime.now(timezone.utc).isoformat()
+
 
 def query_all(sql, params=()):
     with get_engine().connect() as conn:
