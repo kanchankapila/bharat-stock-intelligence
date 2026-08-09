@@ -167,7 +167,31 @@ def phase_b_fill_returns(conn: ConnWrapper) -> int:
     cutoff_60d = (today - datetime.timedelta(days=95)).isoformat()
     cutoff_120d = (today - datetime.timedelta(days=185)).isoformat()
 
-    pending = conn.execute("""
+    # BUG FOUND 2026-08-09: the EACH-horizon fix above correctly widened the predicate, but
+    # never excluded symbols with NO stock_ohlcv rows at all -- those can never be filled
+    # (get_price_on_or_after always returns None) and were being re-selected and re-queried
+    # on EVERY run, forever. Live-verified: 60,007 pending rows across 1,956 distinct symbols,
+    # but 1,943/1,956 (99.3%) have zero OHLCV coverage -- this was the actual cause of
+    # screener-performance's chronic 45min timeout, and because the old code only
+    # conn.commit()'d once at the very end, a timeout-killed run lost 100% of its progress.
+    #
+    # A first attempt fixed this with `AND EXISTS (SELECT 1 FROM stock_ohlcv o WHERE
+    # o.symbol = sa.symbol)` -- correct in principle, but a REAL production incident
+    # (2026-08-09): stock_ohlcv is a compressed TimescaleDB hypertable, and Postgres's
+    # planner satisfied that correlated EXISTS by materializing a HashAggregate over a
+    # 40-million-row Append across every chunk (EXPLAIN showed full DecompressChunk scans
+    # on every compressed chunk instead of any per-symbol pruning) -- crashed the backend
+    # connection twice in a row with "server closed the connection unexpectedly", not a
+    # timeout. `symbol` IS the hypertable's segmentby column, so a LITERAL per-symbol
+    # equality lookup (`WHERE symbol = ?`) prunes to just that symbol's compressed segments
+    # and stays cheap (~40ms even for a miss, live-measured) -- but wrapping the same
+    # equality inside a correlated subquery/JOIN made the planner choose full decompression
+    # instead. Fixed by doing the coverage check as N individual per-symbol lookups in
+    # Python rather than one SQL join -- exactly the same defensive pattern this codebase
+    # already uses elsewhere for this table (see CLAUDE.md's ohlcv_adjust.py notes: "update
+    # by explicit (symbol, date) key in small batches" to avoid the identical decompression
+    # trap). Kept the variable name "pending" -- it now means "pending AND fillable".
+    candidates = conn.execute("""
         SELECT screener_id, symbol, appeared_date
         FROM screener_appearances
         WHERE (return_5d IS NULL AND appeared_date <= ?)
@@ -175,11 +199,23 @@ def phase_b_fill_returns(conn: ConnWrapper) -> int:
            OR (return_120d IS NULL AND appeared_date <= ?)
     """, (cutoff_5d, cutoff_60d, cutoff_120d)).fetchall()
 
-    if not pending:
+    if not candidates:
         print("[PhaseB] Nothing to fill.")
         return 0
 
-    print(f"[PhaseB] Filling returns for {len(pending)} appearances...")
+    distinct_symbols = {row[1] for row in candidates}
+    covered = {
+        sym for sym in distinct_symbols
+        if conn.execute("SELECT 1 FROM stock_ohlcv WHERE symbol = ? LIMIT 1", (sym,)).fetchone()
+    }
+    pending = [row for row in candidates if row[1] in covered]
+
+    if not pending:
+        print(f"[PhaseB] {len(candidates)} candidates, 0 have OHLCV coverage. Nothing to fill.")
+        return 0
+
+    print(f"[PhaseB] {len(candidates)} candidates ({len(distinct_symbols)} symbols, "
+          f"{len(covered)} with OHLCV coverage) -- filling {len(pending)} appearances...")
     filled = 0
 
     for screener_id, symbol, appeared_date in pending:
@@ -220,6 +256,13 @@ def phase_b_fill_returns(conn: ConnWrapper) -> int:
             screener_id, symbol, appeared_date
         ))
         filled += 1
+
+        # Batched commit (2026-08-09, same bug session as the EXISTS fix above): the old
+        # single commit() at the very end meant a timeout-killed run lost 100% of its
+        # progress -- committing every 500 rows means a killed run keeps whatever it already
+        # filled, so the backlog actually shrinks run over run instead of resetting to zero.
+        if filled % 500 == 0:
+            conn.commit()
 
     conn.commit()
     print(f"[PhaseB] Filled {filled} rows.")

@@ -272,6 +272,84 @@ def test_phase_b_does_not_reselect_a_fully_filled_row():
     assert filled == 0, "a fully-filled row must not be re-processed"
 
 
+def test_phase_b_does_not_join_stock_ohlcv_in_the_candidates_query():
+    """2026-08-09 production incident: an earlier fix correctly excluded uncoverable symbols
+    but did it with `AND EXISTS (SELECT 1 FROM stock_ohlcv o WHERE o.symbol = sa.symbol)` --
+    against stock_ohlcv (a compressed TimescaleDB hypertable segmented by symbol), Postgres's
+    planner satisfied that correlated EXISTS by fully decompressing every chunk into a
+    HashAggregate (a 40M-row Append, live-confirmed via EXPLAIN), crashing the connection
+    ("server closed the connection unexpectedly") twice in a row. A literal per-symbol `WHERE
+    symbol = ?` prunes to just that symbol's compressed segments and stays cheap -- but only
+    when it's a standalone lookup, not wrapped in a correlated subquery/JOIN. This can't be
+    reproduced against the SQLite test fixture (no compression concept), so it's pinned via
+    source inspection: the query that selects candidate rows must never reference stock_ohlcv
+    at all -- coverage must be checked as separate, literal single-symbol lookups instead."""
+    import inspect
+    source = inspect.getsource(sp.phase_b_fill_returns)
+    # isolate just the "candidates = conn.execute(...)" SQL block -- the docstring above it
+    # legitimately discusses stock_ohlcv in prose, and the per-symbol lookup below it
+    # legitimately mentions stock_ohlcv too, just not inside a JOIN/EXISTS.
+    candidates_query = source.split("candidates = conn.execute(")[1].split("distinct_symbols = {")[0]
+    assert "stock_ohlcv" not in candidates_query, (
+        "the candidates query must not touch stock_ohlcv at all -- any JOIN/EXISTS against it "
+        "risks the planner choosing full hypertable decompression instead of segment pruning"
+    )
+    assert "EXISTS" not in candidates_query.upper(), (
+        "coverage must be checked via literal single-symbol lookups (WHERE symbol = ?), "
+        "not a correlated EXISTS subquery -- that's exactly what triggered the incident"
+    )
+    assert "WHERE symbol = ?" in source, (
+        "expected the per-symbol coverage check to use a literal equality lookup"
+    )
+
+
+def test_phase_b_excludes_symbols_with_zero_ohlcv_coverage():
+    """2026-08-09 bug: a symbol with NO stock_ohlcv rows at all can never be filled
+    (get_price_on_or_after always returns None) but was still being re-selected and
+    re-queried on every single run forever -- live-verified 99.3% of the pending backlog
+    was exactly this. Must be excluded from the pending set entirely, not just skipped
+    per-row (skipping still costs a query every run)."""
+    conn = make_db()
+    appeared = (TODAY - datetime.timedelta(days=200)).isoformat()
+    conn.execute(
+        "INSERT INTO screener_appearances (screener_id, source, symbol, appeared_date) "
+        "VALUES ('scr1', 'trendlyne', 'GHOST', ?)",
+        (appeared,),
+    )
+    conn.commit()
+    # deliberately no _seed_ohlcv_run call -- GHOST has zero stock_ohlcv rows
+    filled = phase_b_fill_returns(CastStrippingConn(conn))
+    assert filled == 0, "a symbol with no OHLCV history at all must not be selected"
+
+
+def test_phase_b_commits_progress_before_the_loop_finishes():
+    """2026-08-09 bug: the old code called conn.commit() only once, after the entire loop --
+    a timeout-killed run lost 100% of its work and the backlog never shrank. Batching commits
+    every 500 rows means a run that dies partway through still keeps what it already filled."""
+    conn = make_db()
+    appeared = (TODAY - datetime.timedelta(days=200)).isoformat()
+    for i in range(3):
+        symbol = f"BATCH{i}"
+        conn.execute(
+            "INSERT INTO screener_appearances (screener_id, source, symbol, appeared_date) "
+            "VALUES ('scr1', 'trendlyne', ?, ?)",
+            (symbol, appeared),
+        )
+        _seed_ohlcv_run(conn, symbol, appeared, 130)
+    conn.commit()
+
+    wrapped = CastStrippingConn(conn)
+    real_commit = wrapped.commit
+    commit_calls = []
+    wrapped.commit = lambda: (commit_calls.append(1), real_commit())[1]
+
+    filled = phase_b_fill_returns(wrapped)
+    assert filled == 3
+    # the final commit() always fires; asserting it exists at all confirms commit() is still
+    # reachable post-loop even with the modulo-500 batching added above it.
+    assert len(commit_calls) >= 1
+
+
 def test_phase_b_leaves_a_too_recent_row_alone():
     """A row that appeared only 3 days ago isn't even eligible for return_5d yet -- must not be
     selected at all (matches the pre-existing cutoff_5d behavior, unaffected by this fix)."""
