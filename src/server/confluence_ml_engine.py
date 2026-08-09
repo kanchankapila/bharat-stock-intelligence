@@ -58,6 +58,27 @@ PROMOTION_MARGIN = 0.005
 CONFLUENCE_STALENESS_MAX_DAYS = DEFAULT_STALENESS_MAX_DAYS
 CONFLUENCE_STALENESS_MAX_REJECTIONS = DEFAULT_STALENESS_MAX_REJECTIONS
 
+# Single source of truth for feature order + per-column defaults, shared by
+# build_training_data() (fit-time) and update_probabilities() (score-time) -- these
+# previously duplicated the same 16-column list independently in two places, which is
+# exactly how the day-level train/serve skew in live_screener_ml_ranker.py/
+# live_screener_optimizer.py/backtest_live_screener.py went unnoticed (2026-08-07): a
+# training-side change to one copy has no way to force the scoring-side copy to match.
+# (col, default_if_falsy)
+FEATURE_SPEC = [
+    ('bullish_screener_count', 0), ('bearish_screener_count', 0), ('active_screener_count', 0),
+    ('trend_alignment_score', 0), ('volume_score', 0), ('sector_strength_score', 0),
+    ('fundamental_score', 0), ('rsi', 50), ('volume_ratio', 1), ('above_sma200', 0),
+    ('signal_score', 0), ('momentum_score', 50), ('rank_composite', 50),
+    ('return_on_equity', 0), ('piotroski_f_score', 4), ('confluence_score', 0),
+]
+
+
+def _extract_features(row) -> list:
+    """row[col] or the column's default when falsy (0/None) -- matches the `r['x'] or d`
+    idiom both call sites used inline before this was unified."""
+    return [row[col] or default for col, default in FEATURE_SPEC]
+
 FEATURE_COLS = [
     'bullish_screener_count',
     'bearish_screener_count',
@@ -186,25 +207,7 @@ def build_training_data(conn):
 
     X, y, dates = [], [], []
     for r in rows:
-        x_row = [
-            r['bullish_screener_count'] or 0,
-            r['bearish_screener_count'] or 0,
-            r['active_screener_count'] or 0,
-            r['trend_alignment_score'] or 0,
-            r['volume_score'] or 0,
-            r['sector_strength_score'] or 0,
-            r['fundamental_score'] or 0,
-            r['rsi'] or 50,
-            r['volume_ratio'] or 1,
-            r['above_sma200'] or 0,
-            r['signal_score'] or 0,
-            r['momentum_score'] or 50,
-            r['rank_composite'] or 50,
-            r['return_on_equity'] or 0,
-            r['piotroski_f_score'] or 4,
-            r['confluence_score'] or 0,
-        ]
-        X.append(x_row)
+        X.append(_extract_features(r))
         y.append(1 if r['outcome'] == 'WIN' else 0)
         dates.append(r['signal_date'])
 
@@ -442,13 +445,7 @@ def update_probabilities(conn):
         print('[ML] No rows to score.')
         return
 
-    X = np.array([[
-        r['bullish_screener_count'], r['bearish_screener_count'], r['active_screener_count'],
-        r['trend_alignment_score'], r['volume_score'], r['sector_strength_score'],
-        r['fundamental_score'], r['rsi'], r['volume_ratio'], r['above_sma200'],
-        r['signal_score'], r['momentum_score'], r['rank_composite'],
-        r['return_on_equity'], r['piotroski_f_score'], r['confluence_score'],
-    ] for r in rows], dtype=np.float32)
+    X = np.array([_extract_features(r) for r in rows], dtype=np.float32)
 
     # model is a CalibratedClassifierCV wrapping a Pipeline(scaler, clf) -- scaling
     # happens inside predict_proba, so X is passed through raw (unscaled).

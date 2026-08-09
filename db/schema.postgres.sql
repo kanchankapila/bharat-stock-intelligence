@@ -3814,6 +3814,9 @@ CREATE TABLE IF NOT EXISTS "unified_recommendations" (
   "classification" TEXT,
   "position_size_pct" DOUBLE PRECISION,
   "engine_coverage_count" INTEGER,
+  "cs_score" DOUBLE PRECISION,
+  "breakout_score" DOUBLE PRECISION,
+  "smart_money_score" DOUBLE PRECISION,
   UNIQUE ("symbol", "computed_at")
 );
 CREATE INDEX idx_ur_conviction ON public.unified_recommendations USING btree (computed_at, conviction_level);

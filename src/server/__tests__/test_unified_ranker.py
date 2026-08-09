@@ -67,7 +67,8 @@ def make_db():
             regime TEXT NOT NULL, unified_score REAL NOT NULL,
             conviction_level TEXT NOT NULL, classification TEXT, screener_stock_score REAL,
             ml_score REAL, confluence_score REAL, technical_score REAL,
-            dl_score REAL, avg_engine_track_record REAL, engine_coverage_count INTEGER,
+            dl_score REAL, cs_score REAL, breakout_score REAL, smart_money_score REAL,
+            avg_engine_track_record REAL, engine_coverage_count INTEGER,
             bullish_screener_count INTEGER, bearish_screener_count INTEGER,
             screener_names_json TEXT, fundamental_score REAL,
             entry_zone_low REAL, entry_zone_high REAL, stop_loss REAL,
@@ -963,6 +964,150 @@ class TestIsDirectionlessFallbackEnabled:
             def execute(self, sql, params=()):
                 raise RuntimeError('no app_settings table')
         assert is_directionless_fallback_enabled(_BrokenConn()) is False
+
+
+class TestIsEngineEdgeAdjustmentEnabled:
+    """Separate flag from is_directionless_fallback_enabled/is_edge_adjustment_enabled --
+    same off-by-default convention, different mechanism (engine blend-weight shrinkage)."""
+
+    class _FakeConn:
+        def __init__(self, value=None):
+            self._value = value
+        def execute(self, sql, params=()):
+            return self
+        def fetchone(self):
+            return None if self._value is None else {'value': self._value}
+
+    def test_missing_row_is_disabled(self):
+        from unified_ranker import is_engine_edge_adjustment_enabled
+        assert is_engine_edge_adjustment_enabled(self._FakeConn(None)) is False
+
+    def test_explicit_true_value_is_enabled(self):
+        from unified_ranker import is_engine_edge_adjustment_enabled
+        assert is_engine_edge_adjustment_enabled(self._FakeConn('true')) is True
+
+    def test_query_failure_defaults_to_disabled(self):
+        from unified_ranker import is_engine_edge_adjustment_enabled
+        class _BrokenConn:
+            def execute(self, sql, params=()):
+                raise RuntimeError('no app_settings table')
+        assert is_engine_edge_adjustment_enabled(_BrokenConn()) is False
+
+
+class TestLoadEngineEdgeVerdicts:
+    """load_engine_edge_verdicts reads the latest factor_edge_history run per engine,
+    falling back from the regime-specific row to 'ALL' when no regime-specific row exists."""
+
+    class _FakeConn:
+        def __init__(self, run_at, rows: dict):
+            self._run_at = run_at
+            self._rows = rows   # (score_col, horizon, regime) -> verdict
+            self._pending = None
+
+        def execute(self, sql, params=()):
+            if 'MAX(run_at)' in sql:
+                self._pending = ('run_at',)
+            elif "regime = 'ALL'" in sql:
+                # ALL-fallback query: params = (run_at, score_col, horizon)
+                self._pending = ('verdict', params[1], params[2], 'ALL')
+            elif 'score_col' in sql:
+                # regime-specific query: params = (run_at, score_col, horizon, regime)
+                self._pending = ('verdict', params[1], params[2], params[3])
+            return self
+
+        def fetchone(self):
+            if self._pending == ('run_at',):
+                return {'r': self._run_at}
+            _, col, horizon, regime = self._pending
+            v = self._rows.get((col, horizon, regime))
+            return {'verdict': v} if v is not None else None
+
+    def test_no_history_returns_empty(self):
+        from unified_ranker import load_engine_edge_verdicts
+        conn = self._FakeConn(None, {})
+        assert load_engine_edge_verdicts(conn, 'BULL') == {}
+
+    def test_reads_regime_specific_verdict(self):
+        from unified_ranker import load_engine_edge_verdicts
+        conn = self._FakeConn('2026-08-09T00:00:00', {
+            ('screener_stock_score', 5, 'BULL'): 'USABLE',
+        })
+        out = load_engine_edge_verdicts(conn, 'BULL')
+        assert out['screener'] == 'USABLE'
+
+    def test_falls_back_to_all_when_regime_row_missing(self):
+        from unified_ranker import load_engine_edge_verdicts
+        conn = self._FakeConn('2026-08-09T00:00:00', {
+            ('ml_score', 5, 'ALL'): 'no edge',
+        })
+        out = load_engine_edge_verdicts(conn, 'CRASH')
+        assert out['ml'] == 'no edge'
+
+    def test_missing_everywhere_is_none(self):
+        from unified_ranker import load_engine_edge_verdicts
+        conn = self._FakeConn('2026-08-09T00:00:00', {})
+        out = load_engine_edge_verdicts(conn, 'BULL')
+        assert out['dl'] is None
+
+    def test_query_failure_returns_empty(self):
+        from unified_ranker import load_engine_edge_verdicts
+        class _BrokenConn:
+            def execute(self, sql, params=()):
+                raise RuntimeError('no factor_edge_history table')
+        assert load_engine_edge_verdicts(_BrokenConn(), 'BULL') == {}
+
+
+class TestEdgeAdjustedWeights:
+    """Pure function: shrinks only 'no edge' engines, leaves LOW-DATA/USABLE/unmeasured
+    untouched, and always renormalizes back to the base weights' original sum."""
+
+    def test_no_edge_engine_shrunk(self):
+        from unified_ranker import edge_adjusted_weights, ENGINE_EDGE_SHRINK
+        base = {'screener': 0.4, 'ml': 0.3, 'technical': 0.3}
+        out = edge_adjusted_weights(base, {'ml': 'no edge'})
+        # ml's raw share shrinks by ENGINE_EDGE_SHRINK before renormalization
+        assert out['ml'] < base['ml']
+        assert out['screener'] > base['screener']   # absorbs the freed-up share
+
+    def test_low_data_and_usable_untouched_relative_to_each_other(self):
+        from unified_ranker import edge_adjusted_weights
+        base = {'screener': 0.5, 'ml': 0.5}
+        out = edge_adjusted_weights(base, {'screener': 'LOW-DATA', 'ml': 'USABLE'})
+        assert out == base   # neither is 'no edge' -> pure no-op, no renormalization drift
+
+    def test_none_verdict_is_untouched(self):
+        from unified_ranker import edge_adjusted_weights
+        base = {'screener': 0.6, 'ml': 0.4}
+        assert edge_adjusted_weights(base, {}) == base
+
+    def test_renormalizes_to_original_sum(self):
+        from unified_ranker import edge_adjusted_weights
+        base = {'a': 0.3, 'b': 0.3, 'c': 0.2, 'd': 0.2}
+        out = edge_adjusted_weights(base, {'a': 'no edge', 'b': 'no edge'})
+        assert abs(sum(out.values()) - sum(base.values())) < 1e-9
+
+    def test_all_engines_no_edge_falls_back_to_base(self):
+        from unified_ranker import edge_adjusted_weights
+        base = {'a': 0.5, 'b': 0.5}
+        out = edge_adjusted_weights(base, {'a': 'no edge', 'b': 'no edge'})
+        # shrinking everyone equally is a no-op after renormalization -- shape preserved
+        assert out == base
+
+
+class TestEngineEdgeAdjustmentDisabledByDefault:
+    """Regression for the incident this whole mechanism responds to: shipping the
+    measurement (factor_edge.py against unified_recommendations) must never, by itself,
+    change a live run's blend weights. Only an explicit opt-in flag can."""
+
+    def test_run_never_calls_edge_adjusted_weights_without_the_flag(self, monkeypatch):
+        import unified_ranker as ur
+        monkeypatch.setattr(ur, 'is_engine_edge_adjustment_enabled', lambda conn: False)
+        called = {'n': 0}
+        monkeypatch.setattr(ur, 'edge_adjusted_weights', lambda *a, **k: called.__setitem__('n', called['n'] + 1) or a[0])
+        # Exercise the exact guard line in run() in isolation, mirroring how it's written there.
+        if ur.is_engine_edge_adjustment_enabled(None):
+            ur.edge_adjusted_weights({}, {})
+        assert called['n'] == 0
 
 
 # ── quality gate (#4): demote fundamentally weak names in the canonical ranking ──

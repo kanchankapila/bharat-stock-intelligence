@@ -43,6 +43,38 @@ def _row(symbol, signal_date, outcome, confluence_score=50):
     }
 
 
+class TestExtractFeaturesSharedBetweenTrainAndScore:
+    """FEATURE_SPEC/_extract_features is the single source of truth build_training_data()
+    (fit-time) and update_probabilities() (score-time) both read -- a train/serve column-order
+    mismatch here would silently feed the model the wrong feature in the wrong slot, the same
+    failure class fixed in live_screener_ml_ranker.py/live_screener_optimizer.py (2026-08-07),
+    just caught here before it could ever happen instead of after."""
+
+    def test_extract_features_matches_declared_order_and_defaults(self):
+        row = _row("INFY", "2026-08-01", "WIN", confluence_score=77)
+        out = cme._extract_features(row)
+        assert out == [row[col] for col, _ in cme.FEATURE_SPEC]
+        assert out[-1] == 77   # confluence_score stays last, matching both original inline lists
+
+    def test_falsy_values_fall_back_to_declared_default(self):
+        row = _row("INFY", "2026-08-01", "WIN")
+        row["rsi"] = 0            # falsy but a real, meaningful RSI-of-zero would be unusual
+        row["above_sma200"] = None
+        out = cme._extract_features(row)
+        rsi_idx = [c for c, _ in cme.FEATURE_SPEC].index("rsi")
+        assert out[rsi_idx] == 50   # falls back to FEATURE_SPEC's declared default
+
+    def test_build_training_data_and_update_probabilities_read_the_same_spec(self):
+        # Both functions must reference the module-level _extract_features -- grepping the
+        # source is the only way to catch a future re-duplication of the inline list, since
+        # a unit test on correct behavior can't detect "someone pasted it back in".
+        import inspect
+        train_src = inspect.getsource(cme.build_training_data)
+        score_src = inspect.getsource(cme.update_probabilities)
+        assert "_extract_features(" in train_src
+        assert "_extract_features(" in score_src
+
+
 class TestComputeEmbargo:
     def test_embargo_scales_with_horizon_and_row_density(self):
         # 100 rows across 10 unique dates -> 10 rows/day; horizon=7 -> raw embargo ~70,

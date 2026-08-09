@@ -3080,6 +3080,52 @@ runMigration('075_signal_outcomes_signal_source', `
   CREATE INDEX IF NOT EXISTS idx_sout_source  ON signal_outcomes(signal_source);
 `);
 
+runMigration('076_unified_recommendations_cs_breakout_smartmoney', `
+  ALTER TABLE unified_recommendations ADD COLUMN cs_score REAL;
+  ALTER TABLE unified_recommendations ADD COLUMN breakout_score REAL;
+  ALTER TABLE unified_recommendations ADD COLUMN smart_money_score REAL;
+`);
+
+// intraday_recommendation_outcomes gained a direction column (2026-08): Sell/Strong-Sell
+// classifications were never quality-gated on realised outcomes at all, unlike Buy/Strong-Buy
+// (gated since 2026-07-31) -- extending the emission gate to the short side needs its own
+// outcome rows, resolved independently of the long side's. All existing rows are LONG (Sell was
+// never resolved before this). Same rename->recreate->copy->drop dance as migration 075, since
+// SQLite can't alter an inline PK.
+runMigration('077_intraday_recommendation_outcomes_direction', `
+  PRAGMA foreign_keys=OFF;
+
+  ALTER TABLE intraday_recommendation_outcomes RENAME TO intraday_recommendation_outcomes_old;
+
+  CREATE TABLE intraday_recommendation_outcomes (
+    symbol             TEXT,
+    computed_at        TEXT,
+    direction          TEXT NOT NULL DEFAULT 'LONG',
+    entry_price        REAL,
+    target_1           REAL,
+    stop_loss          REAL,
+    day_high           REAL,
+    day_low            REAL,
+    day_close          REAL,
+    exit_price         REAL,
+    exit_reason        TEXT,
+    pnl_pct            REAL,
+    outcome            TEXT,
+    resolved_at        TIMESTAMP,
+    PRIMARY KEY (symbol, computed_at, direction)
+  );
+
+  INSERT INTO intraday_recommendation_outcomes
+    (symbol, computed_at, direction, entry_price, target_1, stop_loss, day_high, day_low,
+     day_close, exit_price, exit_reason, pnl_pct, outcome, resolved_at)
+  SELECT
+    symbol, computed_at, 'LONG', entry_price, target_1, stop_loss, day_high, day_low,
+    day_close, exit_price, exit_reason, pnl_pct, outcome, resolved_at
+  FROM intraday_recommendation_outcomes_old;
+
+  DROP TABLE intraday_recommendation_outcomes_old;
+`);
+
 // Keep startup diagnostics off stdout so stdio-based clients can parse JSON-RPC.
 console.error('[DB] Schema normalization complete (Phase 3.5)');
 
