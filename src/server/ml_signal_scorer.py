@@ -33,7 +33,8 @@ import pandas as pd
 
 from db_compat import connect, read_df, ConnWrapper
 
-MODEL_PATH = os.path.join(os.getcwd(), 'src', 'server', 'ml_signal_model.pkl')
+# Script-relative, not os.getcwd()-relative -- see ml_ensemble.py's MODELS_DIR comment.
+MODEL_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'ml_signal_model.pkl')
 
 REGIME_MAP   = {'BULL': 1.0, 'SIDEWAYS': 0.0, 'BEAR': -1.0}
 SIGNAL_TYPES = [

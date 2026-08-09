@@ -28,7 +28,8 @@ import pandas as pd
 from db_compat import connect, read_df, ConnWrapper
 from as_of import as_of_join_sql
 
-MODELS_DIR     = os.path.join(os.getcwd(), 'src', 'server', 'ml_models')
+# Script-relative, not os.getcwd()-relative -- see ml_ensemble.py's MODELS_DIR comment.
+MODELS_DIR     = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'ml_models')
 ONLINE_PATH    = os.path.join(MODELS_DIR, 'online_sgd.pkl')
 ENSEMBLE_PATH  = os.path.join(MODELS_DIR, 'ensemble.pkl')
 

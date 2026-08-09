@@ -22,6 +22,18 @@ from db_compat import read_df, execute
 MODEL_DIR  = Path(__file__).parent / "ml_models"
 HMM_PATH   = MODEL_DIR / "hmm_regime.pkl"
 N_STATES   = 5
+# Sticky Dirichlet prior on the transition matrix diagonal: without this, a 5-state/full-
+# covariance HMM fit on ~1200 daily rows with only 8 features is overparameterized (44 params/
+# state) and readily finds a spurious local optimum where two states with nearly-identical means
+# (e.g. two flavors of "calm, mildly-positive" market) get connected by a near-deterministic
+# alternation instead of being one persistent regime -- literally 0% self-transition, so the
+# Viterbi path flips between them every single trading day regardless of what the market actually
+# did. Live-confirmed 2026-08-09: this happened for real (states labeled HIGH_VOL/BEAR had
+# transmat_[i][i]==0 and near-identical means -- ret~+0.5%, vol~12%, VIX~14, i.e. not bearish or
+# high-vol at all), and dominated 410 of 686 historical days (60%). A real market regime persists
+# for at least a few days; this prior encodes that as a soft bias, not a hard constraint.
+MIN_SELF_TRANSITION = 0.5  # expected regime duration >= 2 days; below this, reject the model
+STICKY_PRIOR_WEIGHT = 15.0
 
 
 class NoRegimeData(Exception):
@@ -110,9 +122,16 @@ def _load_hmm_features(lookback_days: int = 756,
 def _assign_state_labels(model) -> dict[int, str]:
     """
     Assign human-readable labels to HMM states.
-    Sorts by mean nifty_ret_21d (dim 0) descending (best return = BULL).
-    Among the bottom 2 states, assigns CRASH to the higher-volatility one
-    (nifty_vol_21d, dim 1) for label-switching resilience across retrains.
+    Sorts by mean nifty_ret_21d (dim 0) descending (best return = BULL, worst = CRASH-or-BEAR).
+    Two vol-based (nifty_vol_21d, dim 1) swaps then correct the two positions whose *name*
+    makes a volatility claim the raw return-rank alone doesn't verify:
+      - Among the bottom 2 (BEAR/CRASH candidates), CRASH must be the higher-vol one.
+      - Among the middle 2 (SIDEWAYS/HIGH_VOL candidates), HIGH_VOL must be the higher-vol one.
+    Live-caught 2026-08-09: without the second swap, a real retrain produced "SIDEWAYS" with
+    HIGHER vol (11.4%) than "HIGH_VOL" (8.5%) -- exactly backwards, because pure return-rank
+    says nothing about which of two similarly-performing states is actually the choppy one.
+    BULL is left alone (best return = BULL regardless of its own volatility, matching how the
+    bottom-2 swap never changes which state is "worst return" -- only CRASH vs BEAR's order).
     """
     means  = model.means_[:, 0]  # nifty_ret_21d per state
     vols   = model.means_[:, 1]  # nifty_vol_21d per state
@@ -123,6 +142,12 @@ def _assign_state_labels(model) -> dict[int, str]:
         # Ensure higher-vol state is last (CRASH), lower-vol is second-to-last (BEAR)
         if vols[bottom2[0]] > vols[bottom2[1]]:
             order[-2], order[-1] = bottom2[1], bottom2[0]
+
+    if len(order) >= 4:
+        mid2 = order[1:3]  # SIDEWAYS/HIGH_VOL candidate indices (ranks 1, 2)
+        # Ensure higher-vol state is HIGH_VOL (rank 2), lower-vol is SIDEWAYS (rank 1)
+        if vols[mid2[0]] > vols[mid2[1]]:
+            order[1], order[2] = mid2[1], mid2[0]
 
     label_seq = ["BULL", "SIDEWAYS", "HIGH_VOL", "BEAR", "CRASH"]
     return {int(state_idx): label_seq[rank] for rank, state_idx in enumerate(order)}
@@ -173,29 +198,41 @@ def train_hmm(lookback_days: int = 1260, holdout_days: int = 60, force: bool = F
     scaler = StandardScaler()
     X = scaler.fit_transform(train_df.fillna(0))
 
+    transmat_prior = np.ones((N_STATES, N_STATES)) + np.eye(N_STATES) * STICKY_PRIOR_WEIGHT
     model = hmm.GaussianHMM(
         n_components=N_STATES, covariance_type="full",
+        transmat_prior=transmat_prior,
         n_iter=200, random_state=42,
     )
     model.fit(X)
 
     state_labels = _assign_state_labels(model)
 
-    decision = {"promoted": True, "reason": "forced" if force else "no_prior_model_or_no_holdout"}
-    if holdout_df is not None and not holdout_df.empty and HMM_PATH.exists() and not force:
-        holdout_raw = holdout_df.fillna(0).values
-        new_ll = _log_likelihood_per_sample(model, scaler, holdout_raw)
-        try:
-            with open(HMM_PATH, "rb") as f:
-                prior = pickle.load(f)
-            old_ll = _log_likelihood_per_sample(prior["model"], prior["scaler"], holdout_raw)
-            decision = {
-                "promoted": new_ll >= old_ll,
-                "reason": f"new_ll={new_ll:.4f} vs old_ll={old_ll:.4f}",
-                "new_ll": new_ll, "old_ll": old_ll,
-            }
-        except Exception as e:
-            print(f"[HMM] Could not load prior model for comparison, promoting: {e}")
+    min_self_transition = float(np.min(np.diag(model.transmat_)))
+    if min_self_transition < MIN_SELF_TRANSITION and not force:
+        worst_state = int(np.argmin(np.diag(model.transmat_)))
+        decision = {
+            "promoted": False,
+            "reason": f"degenerate transition matrix: state {worst_state} "
+                      f"({state_labels.get(worst_state)}) has self-transition "
+                      f"{min_self_transition:.3f} < {MIN_SELF_TRANSITION} -- not a persistent regime",
+        }
+    else:
+        decision = {"promoted": True, "reason": "forced" if force else "no_prior_model_or_no_holdout"}
+        if holdout_df is not None and not holdout_df.empty and HMM_PATH.exists() and not force:
+            holdout_raw = holdout_df.fillna(0).values
+            new_ll = _log_likelihood_per_sample(model, scaler, holdout_raw)
+            try:
+                with open(HMM_PATH, "rb") as f:
+                    prior = pickle.load(f)
+                old_ll = _log_likelihood_per_sample(prior["model"], prior["scaler"], holdout_raw)
+                decision = {
+                    "promoted": new_ll >= old_ll,
+                    "reason": f"new_ll={new_ll:.4f} vs old_ll={old_ll:.4f}",
+                    "new_ll": new_ll, "old_ll": old_ll,
+                }
+            except Exception as e:
+                print(f"[HMM] Could not load prior model for comparison, promoting: {e}")
 
     MODEL_DIR.mkdir(parents=True, exist_ok=True)
     payload = {"model": model, "scaler": scaler, "state_labels": state_labels}

@@ -20,18 +20,25 @@ Run:  python exit_policy.py --train
 """
 
 import argparse
+import datetime
 import os
 import pickle
 
 import numpy as np
 import pandas as pd
 
-from db_compat import read_df
+from db_compat import connect, read_df
 from ml_ensemble import build_features
 from as_of import as_of_join_sql
+from model_promotion import decide_promotion_with_nan_guard
 
-MODELS_DIR = os.path.join(os.getcwd(), 'src', 'server', 'ml_models')
+# Script-relative, not os.getcwd()-relative -- see ml_ensemble.py's MODELS_DIR comment.
+MODELS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'ml_models')
 EXIT_MODEL_PATH = os.path.join(MODELS_DIR, 'exit_policy.pkl')
+EXIT_CANDIDATE_PATH = EXIT_MODEL_PATH + '.candidate'
+# Required MAE improvement (percentage points) over the active baseline to promote. Same
+# modest-margin convention as cs_ranker.py/live_screener_ml_ranker.py's PROMOTION_MARGIN.
+EXIT_PROMOTION_MARGIN = 0.1
 
 # Defaults for translating predicted excursions into levels.
 MFE_CAPTURE = 0.6   # bank 60% of the expected favourable run (you don't sell the exact high)
@@ -91,11 +98,17 @@ def train_from_df(df: pd.DataFrame, min_samples: int = 100) -> dict | None:
     y_mfe = pd.to_numeric(df['mfe_pct'], errors='coerce').fillna(0.0).values
     y_mae = pd.to_numeric(df['mae_pct'], errors='coerce').fillna(0.0).values
 
-    # Date-based split with an embargo equal to the excursion horizon. A plain row-index
-    # 80/20 cut left the forward MFE/MAE windows of rows just before the cut overlapping
-    # the holdout rows just after it -- the holdout wasn't genuinely out-of-sample.
+    # Date-based split with an embargo sized to the TYPICAL excursion horizon in this dataset.
+    # Live bug, 2026-08-09: this used to take max(horizon_days) across the WHOLE dataset --
+    # signal_excursions mixes many horizons (1/3/5/7/14/15/30 days), and the 30-day bucket is
+    # only ~0.8% of rows, yet its presence alone forced a 30-day embargo. Since train_end_date
+    # (the 80th-percentile row) already sits near the data's own max date, adding 30 more days
+    # pushed embargo_end_date past every remaining date -- test_mask was empty on EVERY run
+    # with any horizon=30 rows present (confirmed: printed "Holdout MAE ... nan% nan%" with no
+    # error, and the model was saved anyway). The median horizon is robust to this minority-
+    # horizon distortion and still embargoes the bulk of the data correctly.
     dates = pd.to_datetime(df['signal_date'])
-    horizon_days = int(pd.to_numeric(df['horizon_days'], errors='coerce').fillna(0).max()) or 1
+    horizon_days = int(pd.to_numeric(df['horizon_days'], errors='coerce').dropna().median()) or 1
     cut = max(min_samples // 2, int(len(df) * 0.8))
     train_end_date = dates.iloc[min(cut, len(df) - 1)]
     embargo_end_date = train_end_date + pd.Timedelta(days=horizon_days)
@@ -117,23 +130,117 @@ def train_from_df(df: pd.DataFrame, min_samples: int = 100) -> dict | None:
         models[name] = model
         metrics[f'{name}_holdout_mae'] = mae
 
-    payload = {
+    print(f"[EXIT-POLICY] Trained on {len(df)} excursions (embargo={horizon_days}d, "
+          f"holdout n={int(test_mask.sum())}). "
+          f"Holdout MAE — MFE: {metrics['mfe_holdout_mae']:.2f}%  MAE: {metrics['mae_holdout_mae']:.2f}%")
+
+    return {
         'mfe_model': models['mfe'],
         'mae_model': models['mae'],
         'feature_names': feature_names,
         'metrics': metrics,
         'n_samples': len(df),
+        'trained_at': datetime.datetime.utcnow().isoformat(),
     }
+
+
+def _active_exit_baseline(conn) -> dict | None:
+    """{mfe_holdout_mae, mae_holdout_mae} of the currently active exit_policy model, or None.
+
+    model_registry.cv_roc_auc/cv_accuracy are shared columns across every model_type this
+    platform registers -- for exit_policy (a pair of GradientBoostingRegressors, no AUC
+    concept at all) they instead hold mfe_holdout_mae/mae_holdout_mae respectively. Same
+    column-reuse convention cs_ranker.py already documents for its own Spearman rho.
+    """
+    try:
+        row = conn.execute(
+            "SELECT cv_roc_auc, cv_accuracy FROM model_registry "
+            "WHERE model_name = 'exit_policy' AND is_active = 1 ORDER BY id DESC LIMIT 1"
+        ).fetchone()
+        if row and row[0] is not None and row[1] is not None:
+            return {'mfe_holdout_mae': float(row[0]), 'mae_holdout_mae': float(row[1])}
+    except Exception:
+        pass
+    return None
+
+
+def _register_exit_model(conn, payload: dict) -> int:
+    """Champion/challenger promotion gate (2026-08-09 audit): this file had NONE at all,
+    unlike every sibling training script in this codebase -- train_from_df() used to
+    unconditionally overwrite the live pickle regardless of holdout quality, including the
+    empty-holdout NaN case the embargo fix above addresses. Lower MAE is better, so both
+    sub-metrics are negated before going through the same NaN-guarded comparison
+    ml_ensemble.py/movement_predictor.py/breakout_classifier.py already share -- a NaN
+    holdout MAE (from either regressor) is refused outright, matching that shared contract.
+    Promotes only if BOTH mfe and mae holdout MAE improve (or there's no active baseline
+    yet) -- they're one combined pickle file, so a partial improvement can't partially
+    overwrite it.
+    """
+    metrics = payload['metrics']
+    baseline = _active_exit_baseline(conn)
+    base_mfe = baseline['mfe_holdout_mae'] if baseline else None
+    base_mae = baseline['mae_holdout_mae'] if baseline else None
+
+    promote_mfe, reason_mfe = decide_promotion_with_nan_guard(
+        -metrics['mfe_holdout_mae'], -base_mfe if base_mfe is not None else None,
+        EXIT_PROMOTION_MARGIN, metric_name="MFE MAE")
+    promote_mae, reason_mae = decide_promotion_with_nan_guard(
+        -metrics['mae_holdout_mae'], -base_mae if base_mae is not None else None,
+        EXIT_PROMOTION_MARGIN, metric_name="MAE MAE")
+    promote = promote_mfe and promote_mae
+
     os.makedirs(MODELS_DIR, exist_ok=True)
+    version = datetime.datetime.utcnow().strftime('%Y%m%d_%H%M%S')
+    cur = conn.cursor()
+
+    if not promote:
+        with open(EXIT_CANDIDATE_PATH, 'wb') as f:
+            pickle.dump(payload, f, protocol=pickle.HIGHEST_PROTOCOL)
+        reason = reason_mfe or reason_mae or "did not clear the promotion bar"
+        print(f"[EXIT-POLICY] Candidate REJECTED: {reason} Saved to {EXIT_CANDIDATE_PATH} "
+              f"for inspection; active model unchanged.")
+        cur.execute("""
+            INSERT INTO model_registry
+                (model_name, model_version, model_type, trained_at, training_samples,
+                 cv_roc_auc, cv_accuracy, feature_count, model_path, is_active, notes)
+            VALUES ('exit_policy', ?, 'GradientBoosting Regressor Pair', ?, ?, ?, ?, ?, ?, 0, ?)
+            RETURNING id
+        """, (version, payload['trained_at'], payload['n_samples'],
+              metrics['mfe_holdout_mae'], metrics['mae_holdout_mae'],
+              len(payload['feature_names']), EXIT_CANDIDATE_PATH, f"REJECTED: {reason}"))
+        model_id = cur.fetchone()[0]
+        conn.commit()
+        return model_id
+
     with open(EXIT_MODEL_PATH, 'wb') as f:
-        pickle.dump(payload, f)
-    print(f"[EXIT-POLICY] Trained on {len(df)} excursions. "
-          f"Holdout MAE — MFE: {metrics['mfe_holdout_mae']:.2f}%  MAE: {metrics['mae_holdout_mae']:.2f}%")
-    return payload
+        pickle.dump(payload, f, protocol=pickle.HIGHEST_PROTOCOL)
+    cur.execute("UPDATE model_registry SET is_active = 0 WHERE model_name = 'exit_policy' AND is_active = 1")
+    note = (f"mfe_mae={metrics['mfe_holdout_mae']:.4f} mae_mae={metrics['mae_holdout_mae']:.4f}"
+            + (" (bootstrap, no prior baseline)" if baseline is None else
+               f" (beat baseline mfe={base_mfe:.4f} mae={base_mae:.4f})"))
+    cur.execute("""
+        INSERT INTO model_registry
+            (model_name, model_version, model_type, trained_at, training_samples,
+             cv_roc_auc, cv_accuracy, feature_count, model_path, is_active, notes)
+        VALUES ('exit_policy', ?, 'GradientBoosting Regressor Pair', ?, ?, ?, ?, ?, ?, 1, ?)
+        RETURNING id
+    """, (version, payload['trained_at'], payload['n_samples'],
+          metrics['mfe_holdout_mae'], metrics['mae_holdout_mae'],
+          len(payload['feature_names']), EXIT_MODEL_PATH, note))
+    model_id = cur.fetchone()[0]
+    conn.commit()
+    print(f"[EXIT-POLICY] Promoted: {note}")
+    print(f"[EXIT-POLICY] Registered as model_id={model_id} version={version} (ACTIVE)")
+    return model_id
 
 
 def train(min_samples: int = 100) -> dict | None:
-    return train_from_df(load_exit_training_data(), min_samples=min_samples)
+    payload = train_from_df(load_exit_training_data(), min_samples=min_samples)
+    if payload is None:
+        return None
+    conn = connect()
+    _register_exit_model(conn, payload)
+    return payload
 
 
 def predict_levels(df_row: pd.DataFrame, entry: float, model: dict | None = None) -> tuple:

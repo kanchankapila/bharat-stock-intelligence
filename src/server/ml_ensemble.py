@@ -44,7 +44,12 @@ from model_promotion import (clears_promotion_bar, rejections_since,
                               staleness_override_applies,
                               DEFAULT_STALENESS_MAX_DAYS, DEFAULT_STALENESS_MAX_REJECTIONS)
 
-MODELS_DIR  = os.path.join(os.getcwd(), 'src', 'server', 'ml_models')
+# Script-relative, not os.getcwd()-relative (2026-08-09): the old cwd-relative join silently
+# wrote/read the model at a doubled src/server/src/server/ml_models path when this script was
+# invoked from src/server instead of the repo root -- a real, previously-documented gotcha
+# (see [[weekly_jobs_and_closed_day_scheduling_2026_07_12]]) that this makes structural instead
+# of relying on every future invocation remembering the right cwd.
+MODELS_DIR  = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'ml_models')
 ENSEMBLE_PATH = os.path.join(MODELS_DIR, 'ensemble.pkl')
 # Promotion bar: a retrain must beat the active model's purged-OOF CV AUC by this margin to go
 # live, else the current model is kept (rejected candidate is saved here + registered inactive).

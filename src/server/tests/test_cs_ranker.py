@@ -14,7 +14,8 @@ import pandas as pd
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
-from cs_ranker import MIN_DATE_SIGNALS, train_cs_ranker, load_cs_model, save_cs_model
+from cs_ranker import (MIN_DATE_SIGNALS, train_cs_ranker, load_cs_model, save_cs_model,
+                        _date_balanced_weights, _mean_daily_ic)
 from ml_ensemble import build_features
 
 
@@ -195,6 +196,72 @@ class TestSpearmanRho:
         preds   = np.array([5.5, 4.4, 3.3, 2.2, 1.1], dtype=float)
         rho, _ = spearmanr(actuals, preds)
         assert rho == pytest.approx(-1.0)
+
+
+# ── Date-balanced training weight + mean-daily-IC (2026-08-09) ────────────────
+# Live-checked: per-date signal counts range 1-807 (2026-05-30 had 2, 2026-07-23 had 807),
+# and 96% of one real held-out set's rows came from just 3 of 9 test dates -- both the
+# training loss and the held-out rho used to be dominated by a handful of dense days.
+
+class TestDateBalancedWeights:
+    def test_dense_date_gets_lower_per_row_weight_than_sparse_date(self):
+        dates = pd.Series(['2026-01-01'] * 100 + ['2026-01-02'] * 2)
+        w = _date_balanced_weights(dates)
+        assert w[:100] == pytest.approx(1.0 / 100)
+        assert w[100:] == pytest.approx(1.0 / 2)
+
+    def test_each_date_contributes_equal_total_weight(self):
+        """Sum of weights within each date should be equal (both dates contribute '1 vote')."""
+        dates = pd.Series(['2026-01-01'] * 50 + ['2026-01-02'] * 5 + ['2026-01-03'] * 500)
+        w = _date_balanced_weights(dates)
+        df = pd.DataFrame({'date': dates.values, 'w': w})
+        totals = df.groupby('date')['w'].sum()
+        assert totals.nunique() == 1, f"expected equal per-date weight totals, got {totals.to_dict()}"
+        assert totals.iloc[0] == pytest.approx(1.0)
+
+
+class TestMeanDailyIC:
+    def test_matches_pooled_when_all_dates_equal_size(self):
+        """With uniform per-date counts, mean-daily-IC and pooled Spearman should be close
+        (not identical in general, but both should detect a strong same-direction signal)."""
+        rng = np.random.default_rng(0)
+        dates, y, pred = [], [], []
+        for d in range(10):
+            n = 20
+            actual = rng.uniform(0, 100, n)
+            dates += [f'2026-01-{d+1:02d}'] * n
+            y += list(actual)
+            pred += list(actual + rng.normal(0, 5, n))  # noisy but strongly correlated
+        rho, n_dates = _mean_daily_ic(pd.Series(dates), np.array(y), np.array(pred))
+        assert n_dates == 10
+        assert rho > 0.8
+
+    def test_dense_date_no_longer_dominates_the_metric(self):
+        """A model that ranks well on the one dense date but randomly on 8 sparse dates
+        should score much LOWER under mean-daily-IC than a pooled Spearman would report --
+        this is the exact live-observed imbalance (2,643 of 2,759 rows from 3 dates)."""
+        from scipy.stats import spearmanr
+        rng = np.random.default_rng(1)
+        dates, y, pred = [], [], []
+        # 1 dense date: perfect ranking.
+        dense_actual = rng.uniform(0, 100, 700)
+        dates += ['2026-02-01'] * 700
+        y += list(dense_actual)
+        pred += list(dense_actual)  # perfect rank on the dense date
+        # 8 sparse dates: random (no signal) predictions.
+        for d in range(8):
+            n = 10
+            actual = rng.uniform(0, 100, n)
+            dates += [f'2026-02-{d+2:02d}'] * n
+            y += list(actual)
+            pred += list(rng.uniform(0, 100, n))  # unrelated to actual
+
+        pooled_rho, _ = spearmanr(y, pred)
+        mean_rho, n_dates = _mean_daily_ic(pd.Series(dates), np.array(y), np.array(pred))
+
+        assert n_dates == 9
+        assert pooled_rho > 0.5, "pooled Spearman should be inflated by the one dense, perfect date"
+        assert mean_rho < 0.3, "mean-daily-IC should reflect that 8 of 9 days have no real signal"
 
 
 # ── Test 5: unified_ranker integration ───────────────────────────────────────
