@@ -31,6 +31,17 @@ def _make_test_conn():
         "promoter_buy_90d_cr REAL, promoter_sell_90d_cr REAL, promoter_net_90d REAL, "
         "insider_buy_flag INTEGER, insider_sell_flag INTEGER)"
     )
+    # compute_and_write_features() reads from insider_trades (a DIFFERENT, older table this
+    # fetcher does NOT write to -- see test_insider_transactions_fetcher.py's own
+    # TestComputeAndWriteFeaturesReadsInsiderTrades fixture, which this mirrors), not the
+    # insider_transactions table upsert_transactions() writes above -- by design, not a bug
+    # (found missing from this fixture 2026-08-07 while strengthening the before_pct/after_pct
+    # assertions; this table was never created, so the second test always failed here
+    # regardless of before_pct/after_pct, a pre-existing gap unrelated to that fix).
+    conn.execute(
+        'CREATE TABLE insider_trades (symbol TEXT, "typeOfTransaction" TEXT, '
+        '"valueInr" REAL, category TEXT, date_iso TEXT)'
+    )
     conn.execute(
         "INSERT INTO technical_signals (symbol, date) VALUES (?, ?)",
         (REAL_SYMBOL, date.today().isoformat()),
@@ -62,6 +73,21 @@ class TestInsiderTransactionsLiveDataSource:
         for p in parsed:
             assert_looks_like_ticker(p["symbol"], "insider record symbol")
             assert p["transaction_date"], "parsed record missing transaction_date"
+
+        # Regression guard added 2026-08-07: before_pct/after_pct were derived from a
+        # totSharesNo field that doesn't exist in NSE's real response at all, so they were
+        # 100% NULL for every row ever written (23,596/23,596) despite this whole test
+        # passing throughout, because it never checked these two fields specifically. NSE
+        # supplies the percentage directly (befAcqSharesPer/afterAcqSharesPer) -- assert at
+        # least one real filing in this window has a non-null value for each, not just that
+        # the field exists on the dict.
+        assert any(p["before_pct"] is not None for p in parsed), (
+            "every before_pct came back None -- check befAcqSharesPer is still the real NSE "
+            "field name (this table has no totSharesNo field to derive a ratio from)"
+        )
+        assert any(p["after_pct"] is not None for p in parsed), (
+            "every after_pct came back None -- check afterAcqSharesPer is still the real NSE field name"
+        )
 
     def test_real_fetch_stores_ml_usable_rows_and_computes_features(self, monkeypatch):
         """Step 4-5: write through the fetcher's own upsert_transactions()/

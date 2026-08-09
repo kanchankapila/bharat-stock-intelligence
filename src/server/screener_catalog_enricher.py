@@ -150,9 +150,18 @@ def run():
     # source is required both to fetch (so trendlyne_screeners is only consulted for a
     # Trendlyne row) and to scope the UPDATE below -- scan_id collides across providers
     # (2026-08-04 memory), and an unscoped UPDATE would tag both colliding rows identically.
+    # BUG FOUND 2026-08-07 (dead-column sweep): the original WHERE clause gated re-selection
+    # purely on signal_type_tag, so once that column reached 100% coverage (confirmed live:
+    # 1,669/1,669), this loop selected ZERO rows on every subsequent run -- permanently, even
+    # though the loop body ALSO derives screener_url, which was 0/1,669 the whole time as a
+    # result (same bug class fixed earlier this session in screener_appearances.phase_b_fill_returns:
+    # a fill-missing-columns loop gated on only one of the columns it fills). Now re-selects a
+    # row if EITHER target column is still missing -- extract_signal_keywords() is a cheap pure
+    # function, so recomputing it for already-tagged rows is harmless and idempotent.
     sm_rows = con.execute("""
         SELECT scan_id, name, source FROM screener_master
         WHERE signal_type_tag IS NULL OR signal_type_tag = ''
+           OR screener_url IS NULL OR screener_url = ''
     """).fetchall()
 
     sm_updated = 0

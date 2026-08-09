@@ -196,12 +196,23 @@ const UPSERT_HISTORICAL_PHASE1_SQL = `
     updated_at        = CURRENT_TIMESTAMP
 `;
 
+// net_margin fix (2026-08-07, dead-column sweep): had zero writers (confirmed live,
+// 62,240/62,240 rows null) despite the value being a one-line read away -- Yahoo's
+// financialData module (already fetched for every other Phase2 field) carries
+// fd.profitMargins, never consumed. Stored as the raw fraction (e.g. 0.15, not 15.0),
+// matching operating_margin's existing convention on this same table -- see operatingMargins
+// below, also stored unscaled. roce is deliberately NOT added here: Yahoo's
+// financialData/defaultKeyStatistics modules don't expose it directly (it needs
+// EBIT/total-assets/current-liabilities from balance-sheet/income-statement modules this
+// call doesn't fetch), and it's already well-covered elsewhere -- tl_financial_quality.roce
+// (financial_ratios_fetcher.py) sits at 97.7% live coverage, so this is a genuinely unused
+// column on this specific historical-time-series table, not a real analytical gap.
 const UPSERT_HISTORICAL_PHASE2_SQL = `
   INSERT INTO historical_fundamentals (
     symbol, date, debt_to_equity, roe, revenue_growth,
-    operating_margin, piotroski_score, updated_at
+    operating_margin, piotroski_score, net_margin, updated_at
   ) VALUES (
-    ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP
+    ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP
   )
   ON CONFLICT(symbol, date) DO UPDATE SET
     debt_to_equity    = excluded.debt_to_equity,
@@ -209,6 +220,7 @@ const UPSERT_HISTORICAL_PHASE2_SQL = `
     revenue_growth    = excluded.revenue_growth,
     operating_margin  = excluded.operating_margin,
     piotroski_score   = excluded.piotroski_score,
+    net_margin        = excluded.net_margin,
     updated_at        = CURRENT_TIMESTAMP
 `;
 
@@ -354,6 +366,7 @@ interface Phase2Row {
   operatingMargins: number | null;
   currentRatio: number | null;
   piotroski: number;
+  netMargin: number | null;
 }
 
 async function fetchPhase2Data(
@@ -388,6 +401,7 @@ async function fetchPhase2Data(
     operatingMargins: fd.operatingMargins?.raw ?? null,
     currentRatio:    fd.currentRatio?.raw    ?? null,
     piotroski:       computePiotroski({ ...fd, ...ks }),
+    netMargin:       fd.profitMargins?.raw   ?? null,
   };
 }
 
@@ -414,6 +428,7 @@ async function writePhase2Batch(rows: Phase2Row[]): Promise<void> {
         row.revenueGrowth,
         row.operatingMargins,
         row.piotroski,
+        row.netMargin,
       ]);
     }
   });

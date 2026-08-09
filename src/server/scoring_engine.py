@@ -1108,27 +1108,43 @@ class AlphaQuantScoringEngine:
         try:
             with self.engine.connect() as conn:
                 placeholders = ', '.join(f':s{i}' for i in range(len(symbols)))
+                # BUG FOUND 2026-08-07 (dead-column sweep): quant_score/sentiment_score/target_2/
+                # target_3 have zero writers anywhere in the codebase (checked all 3
+                # recommendation_log writers -- scoring_engine.py, signals.ts,
+                # technicalSignalsService.ts -- none of them included these 4 keys in their
+                # INSERT dict). news_sentiment_score/rank_composite are added to this same
+                # batched lookup (mirroring how entry_price/ATR were added 2026-07-30) rather
+                # than threaded through this file's internal news_df/screener-composite
+                # pipeline, which is not something to touch casually in this file.
                 price_rows = conn.execute(text(f"""
-                    SELECT ts.symbol, ts.cmp,
+                    SELECT ts.symbol, ts.cmp, ts.news_sentiment_score,
                            (SELECT cs.atr FROM confluence_signals cs
                             WHERE cs.symbol = ts.symbol AND cs.atr IS NOT NULL
-                            ORDER BY cs.computed_at DESC LIMIT 1) AS atr
+                            ORDER BY cs.computed_at DESC LIMIT 1) AS atr,
+                           (SELECT qs.rank_composite FROM quant_scores qs
+                            WHERE qs.symbol = ts.symbol AND qs.rank_composite IS NOT NULL
+                            ORDER BY qs.date DESC LIMIT 1) AS rank_composite
                     FROM technical_signals ts
                     WHERE ts.symbol IN ({placeholders})
                       AND ts.date = (SELECT MAX(date) FROM technical_signals ts2 WHERE ts2.symbol = ts.symbol)
                 """), {f's{i}': s for i, s in enumerate(symbols)}).fetchall()
                 for row in price_rows:
-                    price_atr_map[row[0]] = (row[1], row[2])
+                    price_atr_map[row[0]] = (row[1], row[2], row[3], row[4])
         except Exception as e:
             print(f"[ScoringEngine] price/ATR lookup for recommendation_log failed (entry_price will be null): {e}")
 
         rows = []
         for r in candidates:
-            cmp_val, atr_val = price_atr_map.get(r['symbol'], (None, None))
+            cmp_val, sentiment_val, atr_val, quant_val = price_atr_map.get(r['symbol'], (None, None, None, None))
             entry_price = float(cmp_val) if cmp_val else None
-            target_1 = stop_loss = None
+            target_1 = target_2 = target_3 = stop_loss = None
             if entry_price and entry_price > 0:
                 target_1, stop_loss = compute_atr_barriers(entry_price, atr_val, 'long')
+                # Scaled profit-taking ladder: each further target extends the same excess-
+                # over-entry move again (target_1's own excess, doubled/tripled), not a new
+                # ATR multiplier constant -- avoids inventing a second barrier formula.
+                target_2 = round(entry_price + 2 * (target_1 - entry_price), 2)
+                target_3 = round(entry_price + 3 * (target_1 - entry_price), 2)
 
             rows.append({
                 'symbol':         r['symbol'],
@@ -1139,8 +1155,12 @@ class AlphaQuantScoringEngine:
                 'entry_price':    entry_price,
                 'stop_loss':      stop_loss,
                 'target_1':       target_1,
+                'target_2':       target_2,
+                'target_3':       target_3,
                 'confidence_score': r.get('confidence'),
                 'screener_score': r.get('score'),
+                'quant_score':    float(quant_val) if quant_val is not None else None,
+                'sentiment_score': float(sentiment_val) if sentiment_val is not None else None,
                 'reasoning':      r.get('reasons', ''),
                 'source':         'scoring_engine',
                 'status':         'ACTIVE',

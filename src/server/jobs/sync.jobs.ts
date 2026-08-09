@@ -24,6 +24,25 @@ export const QUEUE_SCREENER_PERFORMANCE = 'screener-performance';
 export const QUEUE_COMPANY_PROFILES_SYNC = 'company-profiles-sync';
 export const QUEUE_TICKERTAPE_SCORECARD = 'tickertape-scorecard';
 export const QUEUE_NSE_SYNC = 'nse-sync';
+export const QUEUE_CORPORATE_ACTIONS_INGEST = 'corporate-actions-ingest';
+
+async function processCorporateActionsIngest(_job: Job): Promise<{ success: boolean }> {
+  // corporate_actions.ratio fix (2026-08-07, dead-column sweep): ohlcv_quality.py's
+  // ingest_corporate_actions() genuinely writes real split ratios from yfinance's own
+  // .splits data (live-verified: HDFCBANK 2025 1:2, WIPRO 2024 1:2, RELIANCE 2024 1:2 --
+  // all real, publicly known splits), but BOTH existing scheduled calls to ohlcv_quality.py
+  // (queues.ts, operations.jobs.ts) pass --no-ingest, correctly, since ingest_corporate_actions
+  // does a per-symbol yfinance network call and would make the daily bad-bar-flagging run far
+  // too slow. Nobody had ever scheduled a SEPARATE run WITH ingest enabled, so
+  // corporate_actions.ratio was 0/389 rows populated (confirmed live) despite the writer
+  // being real and correct. Measured 1.76s/symbol on a live 10-symbol sample (17.6s total) --
+  // extrapolated ~70min for the ~2,366-symbol universe; budget below is a generous multiple
+  // of that estimate (not yet confirmed against a real full-universe run), matching this
+  // codebase's convention of erring wide rather than under-budgeting an unmeasured full run.
+  await runPython('ohlcv_quality.py', [], 150 * 60_000)
+    .catch(e => console.warn('[QUEUE] ohlcv_quality (full ingest) failed:', (e as Error).message));
+  return { success: true };
+}
 
 async function processScreenerPerf(job: Job): Promise<void> {
   // 2026-08-07: skip entirely on a trading holiday -- every phase here (discovery/enrichment,
@@ -282,5 +301,25 @@ export async function registerSyncJobs(connection: any) {
     onCompleted: (result: any) => console.log(`[QUEUE] nse-sync completed (${result?.stockCount || 0} stocks)`),
   });
 
-  return { screenerPerf, companyProfilesSync, tickertapeScorecard, nseSync };
+  const corporateActionsIngest = await registerRepeatableJob({
+    connection,
+    queueName: QUEUE_CORPORATE_ACTIONS_INGEST,
+    jobName: 'corporate-actions-ingest-weekly',
+    // Saturday 14:00 UTC (7:30 PM IST) -- after tickertape-scorecard-weekly (13:00 UTC
+    // Saturday) clears, ahead of the Sunday 2:00 AM UTC nse-sync-weekly cluster. Splits/
+    // bonuses/dividends change slowly (weekly is ample, matches financial_ratios_fetcher.py's
+    // own weekly-not-daily reasoning for similarly slow-moving data).
+    repeat: { pattern: '0 14 * * 6' },
+    jobId: 'corporate-actions-ingest-weekly',
+    removeOnComplete: 3,
+    removeOnFail: 3,
+    processor: processCorporateActionsIngest,
+    monitorName: 'corporate-actions-ingest',
+    concurrency: 1,
+    lockDuration: 170 * 60_000,
+    lockRenewTime: 15 * 60_000,
+    monitorFn: updateMonitorState,
+  });
+
+  return { screenerPerf, companyProfilesSync, tickertapeScorecard, nseSync, corporateActionsIngest };
 }

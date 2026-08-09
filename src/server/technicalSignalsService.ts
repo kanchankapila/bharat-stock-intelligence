@@ -1377,6 +1377,21 @@ export async function runTechnicalSignalScan(options: {
       : [];
     const pcrMap = new Map(pcrRows.map(r => [r.symbol, { pcr_oi: r.pcr_oi ?? null, pcr_vol: r.pcr_vol ?? null }]));
 
+    // Pre-fetch quant_scores.rank_composite for recommendation_log.quant_score (2026-08-07,
+    // dead-column sweep -- see recLogUpsertSql below for the fuller writeup).
+    const quantRows = symbolsInScan.length
+      ? (await dbAll(
+          `SELECT symbol, rank_composite FROM (
+             SELECT symbol, rank_composite,
+                    ROW_NUMBER() OVER (PARTITION BY symbol ORDER BY date DESC) AS rn
+             FROM quant_scores
+             WHERE rank_composite IS NOT NULL AND symbol IN (${symbolsInScan.map(() => '?').join(',')})
+           ) t WHERE rn = 1`,
+          symbolsInScan
+        ) as { symbol: string; rank_composite: number | null }[])
+      : [];
+    const quantMap = new Map(quantRows.map(r => [r.symbol, r.rank_composite]));
+
     // Pre-fetch symbols that already have an ACTIVE technical_scan signal (was one lookup per result).
     const activeRows = await dbAll(
       `SELECT DISTINCT symbol FROM recommendation_log WHERE status = 'ACTIVE' AND source = 'technical_scan'`
@@ -1422,12 +1437,20 @@ export async function runTechnicalSignalScan(options: {
         computed_at=excluded.computed_at
     `;
 
+    // target_2/target_3/quant_score/sentiment_score fix (2026-08-07, dead-column sweep): none
+    // of recommendation_log's 3 writers ever populated these 4 columns (confirmed live,
+    // 23,874/23,874 rows). target_2/target_3 extend target_1's own excess-over-entry move
+    // again (2x/3x) rather than a new ATR-multiplier formula. sentiment_score reuses
+    // r.newsSentimentScore, already computed above for the technical_signals upsert;
+    // quant_score comes from the new quantMap pre-fetch above (same pattern as pcrMap/
+    // marketCapMap/sectorRows already established in this function).
     const recLogUpsertSql = `
       INSERT INTO recommendation_log
         (symbol, rec_type, signal_date, generated_at, entry_price, stop_loss,
-         target_1, confidence_score, signal_score, signals_json, nifty_regime,
-         win_probability, source, status, horizon_days)
-      VALUES (?, 'BUY', ?, CURRENT_TIMESTAMP, ?, ?, ?, ?, ?, ?, ?, ?, 'technical_scan', 'ACTIVE', 5)
+         target_1, target_2, target_3, confidence_score, signal_score, signals_json,
+         nifty_regime, win_probability, quant_score, sentiment_score,
+         source, status, horizon_days)
+      VALUES (?, 'BUY', ?, CURRENT_TIMESTAMP, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'technical_scan', 'ACTIVE', 5)
       ON CONFLICT DO NOTHING
     `;
 
@@ -1544,10 +1567,13 @@ export async function runTechnicalSignalScan(options: {
                 return m ? parseFloat(m[1].replace(/,/g, '')) : null;
               })()
             : null;
+          const t2 = (t1 !== null && r.cmp) ? Math.round((r.cmp + 2 * (t1 - r.cmp)) * 100) / 100 : null;
+          const t3 = (t1 !== null && r.cmp) ? Math.round((r.cmp + 3 * (t1 - r.cmp)) * 100) / 100 : null;
           await tx.run(recLogUpsertSql, [
-            r.symbol, scanDate, r.cmp ?? null, sl, t1,
+            r.symbol, scanDate, r.cmp ?? null, sl, t1, t2, t3,
             r.signalScore, r.signalScore, JSON.stringify(r.signals),
             r.niftyRegime ?? null, (r as any).winProbability ?? null,
+            quantMap.get(r.symbol) ?? null, r.newsSentimentScore ?? null,
           ]);
           if (r.cmp) {
             await tx.run(seedOutcomeSql, [r.symbol, scanDate, 5,  r.cmp]);

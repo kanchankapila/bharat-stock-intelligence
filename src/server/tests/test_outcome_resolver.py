@@ -224,7 +224,9 @@ def make_unified_db():
         CREATE TABLE unified_signal_outcomes (
             unified_signal_id INTEGER, signal_source TEXT, symbol TEXT, signal_date TEXT,
             horizon_days INTEGER, entry_price REAL, entry_time TEXT, check_date TEXT,
-            exit_price REAL, outcome TEXT, return_pct REAL, exit_reason TEXT, computed_at TEXT,
+            exit_price REAL, outcome TEXT, return_pct REAL, exit_reason TEXT,
+            signal_score INTEGER, intraday_max_return_pct REAL, intraday_min_return_pct REAL,
+            exit_time TEXT, computed_at TEXT,
             PRIMARY KEY (unified_signal_id, horizon_days)
         );
         CREATE TABLE stock_ohlcv (
@@ -269,6 +271,48 @@ def test_unified_target_capture_beats_faded_horizon_close():
     assert row[1] == pytest.approx(2.5 - 0.30, abs=0.05)
     assert row[0] == 'WIN'
     assert row[2] in ('TIME_EXIT_PARTIAL', 'TRAILING_STOP', 'TARGET')
+
+
+def test_unified_outcomes_populates_signal_score_and_mfe_mae():
+    """Regression test for the 2026-08-07 dead-column fix: signal_score/
+    intraday_max_return_pct/intraday_min_return_pct had zero writers (confirmed live,
+    89,713/89,713 rows null). Reuses the exact fixture from
+    test_unified_target_capture_beats_faded_horizon_close (entry=100, spikes to high=106,
+    dips to low=99) since its bars already exercise a real MFE/MAE range."""
+    from outcome_resolver import resolve_unified_outcomes
+    conn = make_unified_db()
+    sig_date = (datetime.date.today() - datetime.timedelta(days=20)).isoformat()
+    base = datetime.date.fromisoformat(sig_date)
+    for i in range(15, 0, -1):
+        d = (base - datetime.timedelta(days=i)).isoformat()
+        conn.execute("INSERT OR IGNORE INTO stock_ohlcv (symbol,date,open,high,low,close,volume) VALUES (?,?,100,100,100,100,100000)", ('QSC', d))
+    conn.execute("INSERT INTO unified_signals (symbol, signal_date, entry_price, target_price, stop_loss, signal_source, confidence_score) "
+                 "VALUES ('QSC', ?, 100, 105, 97, 'AI', 73.4)", (sig_date,))
+    bars = [
+        (1, 100, 106, 100, 104),
+        (2, 102, 103, 100, 101),
+        (3, 101, 102,  99, 100),
+        (4, 100, 101,  99, 100),
+        (5, 100, 100,  99, 100),
+    ]
+    for off, o, h, l, c in bars:
+        d = (base + datetime.timedelta(days=off)).isoformat()
+        conn.execute("INSERT INTO stock_ohlcv (symbol,date,open,high,low,close,volume) VALUES (?,?,?,?,?,?,100000)", ('QSC', d, o, h, l, c))
+    conn.commit()
+
+    resolve_unified_outcomes(conn, horizon_days=5, dry_run=False)
+    row = conn.execute(
+        "SELECT signal_score, intraday_max_return_pct, intraday_min_return_pct, exit_time "
+        "FROM unified_signal_outcomes WHERE symbol='QSC'"
+    ).fetchone()
+    assert row is not None
+    signal_score, mfe, mae, exit_time = row
+    assert signal_score == 73, "signal_score must be round(confidence_score) -- 73.4 -> 73"
+    assert mfe == pytest.approx(6.0, abs=0.05), "MFE must reflect the real high of 106 vs entry 100"
+    assert mae == pytest.approx(-1.0, abs=0.05), "MAE must reflect the real low of 99 vs entry 100"
+    # Daily-bar path (no intraday_ohlcv seeded in this fixture) -- exit_time must stay NULL
+    # rather than fabricate a midnight timestamp implying precision that isn't real.
+    assert exit_time is None
 
 
 def make_reclog_db():
@@ -375,7 +419,9 @@ def make_multi_horizon_db():
         CREATE TABLE unified_signal_outcomes (
             unified_signal_id INTEGER, signal_source TEXT, symbol TEXT, signal_date TEXT,
             horizon_days INTEGER, entry_price REAL, entry_time TEXT, check_date TEXT,
-            exit_price REAL, outcome TEXT, return_pct REAL, exit_reason TEXT, computed_at TEXT,
+            exit_price REAL, outcome TEXT, return_pct REAL, exit_reason TEXT,
+            signal_score INTEGER, intraday_max_return_pct REAL, intraday_min_return_pct REAL,
+            exit_time TEXT, computed_at TEXT,
             PRIMARY KEY (unified_signal_id, horizon_days)
         );
     """)

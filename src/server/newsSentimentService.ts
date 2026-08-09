@@ -990,13 +990,22 @@ async function buildMarketSentimentSnapshot(): Promise<void> {
   let globalScore = 0;
 
   try {
-    const globalData = await fetchGlobalMarketData();
-    const nifty = globalData.find(d =>
-      d.symbol?.toLowerCase().includes('nifty') || d.country?.toLowerCase().includes('india')
-    );
-    if (nifty) {
-      niftyClose = parseFloat(nifty.current_price?.replace(/,/g, '') ?? '0') || null;
+    // BUG FOUND 2026-08-07 (dead-column sweep): this used to search fetchGlobalMarketData()'s
+    // result for a 'nifty'/'india' entry -- but that endpoint (NiftyTrader's usstock/global-
+    // market) is a global-EX-INDIA indices feed by design (live-verified: SHANGHAI/HANG SENG/
+    // NIKKEI/CAC 40/DAX/FTSE 100/DOW JONES/NASDAQ FUTURES/S&P 500 FUTURES -- zero India/Nifty
+    // entries, ever), so the .find() could never match and market_sentiment_snapshots.
+    // nifty_last_close/nifty_support/nifty_resistance were 100% NULL (confirmed live,
+    // 669/669 rows) despite this whole block looking fully wired. Reads NIFTY50's own real
+    // close from stock_ohlcv (this platform's canonical, already-collected source) instead.
+    const niftyRow = await dbGet<{ close: number }>(
+      "SELECT close FROM stock_ohlcv WHERE symbol = 'NIFTY50' ORDER BY date DESC LIMIT 1"
+    ).catch(() => null);
+    if (niftyRow?.close) {
+      niftyClose = niftyRow.close;
     }
+
+    const globalData = await fetchGlobalMarketData();
 
     // Global cue: average change% of US, Japan, HK, Europe indices
     const globalIndices = globalData.filter(d =>

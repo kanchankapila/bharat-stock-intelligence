@@ -156,13 +156,33 @@ export async function createSignal(signal: Omit<Signal, "id" | "createdAt" | "up
     reasoning: signal.reasoning,
   });
 
+  // target_2/target_3/quant_score/sentiment_score fix (2026-08-07, dead-column sweep): none of
+  // recommendation_log's 3 writers ever populated these 4 columns. target_2/target_3 extend
+  // target_1's own excess-over-entry move again (2x/3x), direction-agnostic (works for both a
+  // BUY target above entry and a SELL target below it). quant_score/sentiment_score are a cheap
+  // best-effort lookup against already-computed values -- this is a low-volume, on-demand
+  // single-signal path, so one extra query per call is negligible.
+  const target2 = signal.target + 2 * (signal.target - signal.entry);
+  const target3 = signal.target + 3 * (signal.target - signal.entry);
+  const extra = await dbGet<{ rank_composite: number | null; news_sentiment_score: number | null }>(`
+    SELECT
+      (SELECT qs.rank_composite FROM quant_scores qs WHERE qs.symbol = ? AND qs.rank_composite IS NOT NULL ORDER BY qs.date DESC LIMIT 1) AS rank_composite,
+      (SELECT ts.news_sentiment_score FROM technical_signals ts WHERE ts.symbol = ? AND ts.news_sentiment_score IS NOT NULL ORDER BY ts.date DESC LIMIT 1) AS news_sentiment_score
+  `, [signal.symbol, signal.symbol]).catch(() => null);
+
   await dbRun(`
     INSERT INTO recommendation_log
       (symbol, rec_type, signal_date, generated_at, entry_price, stop_loss,
-       target_1, confidence_score, reasoning, source, status, horizon_days)
-    VALUES (?, ?, ?, CURRENT_TIMESTAMP, ?, ?, ?, ?, ?, 'platform', 'ACTIVE', 15)
+       target_1, target_2, target_3, confidence_score, quant_score, sentiment_score,
+       reasoning, source, status, horizon_days)
+    VALUES (?, ?, ?, CURRENT_TIMESTAMP, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'platform', 'ACTIVE', 15)
     ON CONFLICT DO NOTHING
-  `, [signal.symbol, signal.type, today, signal.entry, signal.stopLoss, signal.target, signal.confidence, signal.reasoning]);
+  `, [
+    signal.symbol, signal.type, today, signal.entry, signal.stopLoss, signal.target,
+    target2, target3, signal.confidence,
+    extra?.rank_composite ?? null, extra?.news_sentiment_score ?? null,
+    signal.reasoning,
+  ]);
 }
 
 export async function updateSignalAccuracy(symbol: string, currentPrice: number) {
