@@ -280,10 +280,10 @@ export const IndexDetailPage: React.FC<{
         </div>
       )}
 
-      {/* Derivative Intelligence */}
-      {['NIFTY 50', 'NIFTY BANK', 'NIFTY FIN SERVICE'].includes(indexName.toUpperCase()) && (
-        <IndexFnoOverview symbol={indexName} />
-      )}
+      {/* Derivative Intelligence -- works for any index now (getFnoOptionChainSummary resolves
+          the symbol's own expiry via nt_fno_expiry); component self-hides with an empty state
+          for indices with no F&O contracts (e.g. sectoral BSE indices). */}
+      <IndexFnoOverview symbol={indexName} />
 
       {/* Extended MC Index Intelligence Panel — PE/PB charts, fundamentals, intraday A/D breadth */}
       <MCIndexDetailPanel indId={indexId} name={indexName} bridgeSymbol={d?.bridgeSymbol ?? ''} />

@@ -20,6 +20,26 @@ export const fnoRouter = router({
       return getTrendlyneFnoScanners(input.mtype, input.screenType, input.instType);
     }),
 
+  // Per-symbol PCR/OI/max-pain summary -- works for any F&O symbol (index or stock),
+  // unlike getTrendlyneFnoScanners's oi-gainers screens which only ever surface NIFTY.
+  // `expiry` selects the horizon (near-week/near-month vs. further-out); omit for nearest.
+  getFnoOptionChainSummary: publicProcedure
+    .input(z.object({ symbol: z.string(), expiry: z.string().optional() }))
+    .query(async ({ input }) => {
+      const { getFnoOptionChainSummary } = await import('../fnoService');
+      const key = `fno:chain-summary:${input.symbol.toUpperCase()}:${input.expiry ?? 'nearest'}`;
+      return fetchWithCache(key, () => getFnoOptionChainSummary(input.symbol, input.expiry), 120);
+    }),
+
+  // The list of upcoming expiry horizons a symbol trades -- drives the horizon selector
+  // above getFnoOptionChainSummary's chain-summary card.
+  getFnoAvailableExpiries: publicProcedure
+    .input(z.object({ symbol: z.string() }))
+    .query(async ({ input }) => {
+      const { getFnoAvailableExpiries } = await import('../fnoService');
+      return fetchWithCache(`fno:expiries:${input.symbol.toUpperCase()}`, () => getFnoAvailableExpiries(input.symbol), 3600);
+    }),
+
   getMCFnoOverview: publicProcedure
     .input(z.object({ id: z.string(), instType: z.enum(['futures', 'options']).optional().default('futures') }))
     .query(async ({ input }) => {

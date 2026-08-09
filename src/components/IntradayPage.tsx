@@ -5,6 +5,7 @@ import {
 } from 'lucide-react';
 import { trpc } from '../lib/trpc';
 import { cn } from '../lib/utils';
+import { FnOIndexInsight } from '../v4/components/FnOIndexInsight';
 
 // ── Types (loosely mirror intraday_recommendations / getIntradayBreadth) ──────
 interface IntradayRec {
@@ -158,6 +159,10 @@ const IntradayPage: React.FC<{ onSelectStock: (symbol: string) => void }> = ({ o
           </div>
         </div>
       </div>
+
+      {/* ── F&O read (NIFTY/BANKNIFTY PCR, max pain, key strikes) — same live positioning
+          context Command Center shows, relevant here since intraday regime is index-driven */}
+      <FnOIndexInsight />
 
       {/* ── KPI strip ───────────────────────────────────────────────────── */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">

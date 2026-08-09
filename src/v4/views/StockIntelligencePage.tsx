@@ -9,6 +9,7 @@ import { Card } from '../../components/Card';
 import { cn } from '../../lib/utils';
 import { V2LightweightChart } from '../../v2/components/widgets/V2LightweightChart';
 import { OptionChainView } from '../../components/OptionChainView';
+import IndexFnoOverview from '../../components/IndexFnoOverview';
 import { WhyThisPick } from '../../components/WhyThisPick';
 import { McNewsCard, McNewsLinks, McNewsEmptyState } from '../../components/McNewsCard';
 import { StockTagRow, ConvictionPill } from '../../components/StockTagRow';
@@ -476,9 +477,15 @@ const OwnershipTab: React.FC<{ symbol: string }> = ({ symbol }) => {
 const FnoTab: React.FC<{ symbol: string }> = ({ symbol }) => {
   const { data: signals } = trpc.getFnOSignals.useQuery({ symbol });
   const sentiment = signals?.marketSentiment;
+  // Full F&O-eligible universe (already cached NiftyTrader-sourced list) -- gates the richer
+  // PCR/max-pain/key-strikes card below so it only renders for symbols that actually trade
+  // options (most of the ~2000-stock universe doesn't), instead of a per-stock empty state.
+  const { data: fnoSymbols } = trpc.getFnoSymbols.useQuery();
+  const isFnoEligible = fnoSymbols?.includes(symbol.toUpperCase());
 
   return (
     <div className="space-y-4">
+      {isFnoEligible && <IndexFnoOverview symbol={symbol} />}
       {sentiment && (
         <Card title="Options-Implied Sentiment" icon={Landmark}>
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
