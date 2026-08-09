@@ -46,6 +46,21 @@ function asIso(value: unknown): string | null {
   return Number.isNaN(d.getTime()) ? null : d.toISOString();
 }
 
+// A getLastRunAt() value that's a bare 'YYYY-MM-DD' (no time component -- e.g. trendlyne-midweek's
+// MIN(MAX(date)) over two DATE columns) parses via `new Date(...)` as UTC midnight. Compared
+// against a cron's specific fire time-of-day (e.g. '30 14 * * 2' = 14:30 UTC), midnight is
+// always earlier -- so a genuinely fresh, same-day success reads as "late" forever, every week,
+// regardless of actual freshness. Found 2026-08-09: trendlyne-midweek stayed permanently flagged
+// 'stale' in the daily digest even right after a real Tuesday success. Treat a date-only value as
+// having happened by the END of that UTC day instead, since that's the most that can honestly be
+// said about a timestamp we only know to day granularity.
+function toComparableMs(lastRunAt: string): number {
+  if (/^\d{4}-\d{2}-\d{2}$/.test(lastRunAt)) {
+    return new Date(lastRunAt + 'T23:59:59.999Z').getTime();
+  }
+  return new Date(lastRunAt).getTime();
+}
+
 function percentileFromSorted(values: number[], p: number): number | null {
   if (!values.length) return null;
   if (values.length === 1) return values[0];
@@ -403,11 +418,11 @@ export async function getSystemStatus(now: Date = new Date()) {
         isLate = computeCronLateness(
           cronPatterns,
           (s as any).graceMinutes ?? 60,
-          new Date(lastRunAt).getTime(),
+          toComparableMs(lastRunAt),
           now,
         ).late;
       } else {
-        const ageHours = (now.getTime() - new Date(lastRunAt).getTime()) / 3600000;
+        const ageHours = (now.getTime() - toComparableMs(lastRunAt)) / 3600000;
         isLate = ageHours > s.staleLimitHours;
       }
       runState = !isLate ? 'success' : (rawState === 'running' ? 'running' : (rawState === 'failed' ? 'failed' : 'stale'));

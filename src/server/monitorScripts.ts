@@ -385,7 +385,15 @@ export const MONITOR_SCRIPTS = [
     schedule: 'Weekly Sunday',
     pyScript: 'trendlyne_fundamentals_fetcher.py',
     queueName: 'ml-weekly-retrain',
-    staleLimitHours: 200,
+    // 200h assumed a flat 168h (Sunday-to-Sunday) worst case, but the written `date` value is
+    // logical_write_floor()-anchored to the last completed trading session (Friday), not the
+    // Sunday run itself -- so the OLD value sits 2 extra days stale before each week's run
+    // overwrites it. True worst case (checked right before this week's ~10:30 IST run, off the
+    // OLD Friday-anchored value from 9 days earlier): ~221h. 260h leaves real margin. Found
+    // 2026-08-09: this exact boundary false-flagged 'stale' in the daily digest, then silently
+    // "recovered" a few hours later once the week's run landed -- a real, weekly-recurring
+    // false positive, not a one-off.
+    staleLimitHours: 260,
   },
   {
     id: 'trendlyne-midweek',
@@ -429,9 +437,14 @@ export const MONITOR_SCRIPTS = [
     // (168h worst case + margin). working-capital below is genuinely still monthly-gated and
     // keeps its own correct 900h.
     schedule: 'Weekly Sunday',
+    // 200h was still wrong, found 2026-08-09: `as_of_date` is logical_write_floor()-anchored to
+    // the last completed trading session (Friday), 2 days behind the Sunday run that writes it --
+    // same lag as trendlyne-fundamentals above. True worst case checked right before this week's
+    // ~18:00 IST run: ~228h. Confirmed live-recurring (flagged 'stale' at 216-222h, well under a
+    // genuine break) -- bumped to match trendlyne-fundamentals' 260h.
     pyScript: 'financial_ratios_fetcher.py',
     queueName: 'trendlyne-ratios-monthly',
-    staleLimitHours: 200,
+    staleLimitHours: 260,
   },
   {
     id: 'working-capital',

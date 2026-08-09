@@ -49,8 +49,17 @@ HEADERS = {
 }
 
 RATE_LIMIT_SEC = 0.5
-BATCH_SIZE     = 15
-BATCH_GAP_SEC  = 0.5
+# Reduced from 15/0.5s 2026-08-09: the last two scheduled runs (07-28, 08-04) both hit 100%
+# failure -- live-reproduced by hand the same day, a burst of concurrent requests to THIS
+# specific endpoint (trendlyne_adv_tech_fetcher.py's sibling job, identical batch settings,
+# succeeded both times) reliably trips Trendlyne's WAF into serving a "Human Verification"
+# page (405) for every request, including previously-working ones, for the rest of the run.
+# Lower concurrency + wider gap to stay under whatever burst threshold this endpoint enforces.
+# ponytail: no adaptive backoff/proxy rotation -- if this still trips the WAF, the run now
+# fails loud (FetchTracker/job_heartbeat) instead of silently, so the next tightening is a
+# data-driven follow-up, not a guess made now.
+BATCH_SIZE     = 5
+BATCH_GAP_SEC  = 2.0
 
 # Map period name from returnsComparison to column key
 PERIOD_MAP = {

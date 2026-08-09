@@ -301,8 +301,16 @@ def main():
             d = datetime.date.fromisoformat(a.date) if a.date else datetime.date.today()
             n = run_one(conn, d)
             if not n:
-                _log(f"{d}: no data (holiday/weekend or not yet published)")
-                sys.exit(1)
+                if d.weekday() >= 5:
+                    # Sat/Sun structurally never has a bhavcopy -- this fires routinely from
+                    # a BullMQ catchup replay (server restart) resolving 'today' to a weekend,
+                    # since the script defaults --date to today with no trading-calendar
+                    # awareness. Not an error: exit 0 so it doesn't fail the ml-daily-ops step
+                    # and cascade into a false "late"/"failed" job-health alert.
+                    _log(f"{d}: weekend, no bhavcopy expected")
+                else:
+                    _log(f"{d}: no data (holiday/weekend or not yet published)")
+                    sys.exit(1)
     finally:
         conn.close()
 

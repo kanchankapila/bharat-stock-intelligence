@@ -234,3 +234,31 @@ def test_backfill_no_longer_filters_out_weekends():
         "backfill() is filtering weekdays again -- NSE runs live weekend sessions "
         "(Budget day, Diwali Muhurat) and they would be silently skipped"
     )
+
+
+class TestMainNoDataExitCode:
+    """A BullMQ catchup replay after a restart calls main() with no --date, which defaults
+    to today -- if 'today' has rolled over to a weekend by the time the catchup fires, the
+    bhavcopy legitimately doesn't exist. That must not sys.exit(1) and fail the whole
+    ml-daily-ops step (2026-08-09 incident: a Sunday catchup run marked the job 'failed' and
+    the daily digest reported it 40+ hours late)."""
+
+    def _run_main_for_date(self, monkeypatch, date_str, run_one_returns=0):
+        import nse_bhavcopy_fetcher as nbf
+        monkeypatch.setattr(sys, "argv", ["nse_bhavcopy_fetcher.py", "--date", date_str])
+        fake_conn = _FakeConn()
+        fake_conn.close = lambda: None
+        monkeypatch.setattr(nbf, "connect", lambda: fake_conn)
+        monkeypatch.setattr(nbf, "ensure_schema", lambda conn: None)
+        monkeypatch.setattr(nbf, "run_one", lambda conn, d: run_one_returns)
+        nbf.main()
+
+    def test_weekend_no_data_exits_zero(self, monkeypatch):
+        # 2026-08-09 is a Sunday.
+        self._run_main_for_date(monkeypatch, "2026-08-09")  # must not raise SystemExit
+
+    def test_weekday_no_data_still_exits_one(self, monkeypatch):
+        # 2026-08-07 is a Friday -- a real trading day with no data is still a genuine failure.
+        with pytest.raises(SystemExit) as exc:
+            self._run_main_for_date(monkeypatch, "2026-08-07")
+        assert exc.value.code == 1

@@ -5,7 +5,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 import screener_performance as sp  # noqa: E402
 from screener_performance import (  # noqa: E402
     _sign_for_sentiment, get_price_on_or_after, get_trading_days_after,
-    phase_c_bayesian, phase_b_fill_returns,
+    phase_c_bayesian, phase_b_fill_returns, phase_a_bootstrap,
 )
 
 TODAY = datetime.date.today()
@@ -208,6 +208,55 @@ def test_run_passes_logical_trading_date_to_phase_f_pit():
 
     assert seen['as_of'] == '2026-07-31', (
         "run() must pass logical_trading_date()'s value to phase_f_pit(), not date.today()"
+    )
+
+
+# ─── phase_a_bootstrap: same-day confluence_signals dedup (2026-08-09 fix) ────────
+
+def test_phase_a_uses_the_latest_same_day_confluence_entry_not_an_earlier_one():
+    """Correctness-preservation check for the 2026-08-09 dedup optimization below, NOT a
+    regression test for a correctness bug -- the pre-fix linear scan (ORDER BY computed_at
+    DESC + a strict `>` tie-break) already picked the latest same-day entry by coincidence of
+    row order, it just did so after loading every 30-min snapshot into Python first. This
+    confirms the ROW_NUMBER dedup, which does the same reduction in SQL, still produces the
+    identical "latest same-day entry wins" result."""
+    conn = make_db()
+    conn.execute(
+        "INSERT INTO signal_outcomes (symbol, signal_date, horizon_days, return_pct, outcome, "
+        "signal_source, is_suspect) VALUES ('RELIANCE', '2026-08-01', 5, 2.5, 'WIN', 'technical', 0)"
+    )
+    # Same day, two snapshots 6 hours apart -- different screener membership each time.
+    conn.execute(
+        "INSERT INTO confluence_signals (symbol, screener_ids_json, computed_at) "
+        "VALUES ('RELIANCE', '[\"early_screener\"]', '2026-08-01T03:00:00')"
+    )
+    conn.execute(
+        "INSERT INTO confluence_signals (symbol, screener_ids_json, computed_at) "
+        "VALUES ('RELIANCE', '[\"late_screener\"]', '2026-08-01T09:00:00')"
+    )
+    conn.commit()
+
+    result = phase_a_bootstrap(conn)
+
+    assert 'late_screener' in result, "the later same-day snapshot must win the attribution"
+    assert 'early_screener' not in result, (
+        "an earlier same-day snapshot must not also be attributed -- ROW_NUMBER dedup should "
+        "have collapsed both rows to just the latest one before the day-granularity match ran"
+    )
+
+
+def test_phase_a_confluence_query_dedupes_via_row_number_not_raw_full_fetch():
+    """Regression guard, 2026-08-09: this query used to fetch every 30-min confluence_signals
+    row unfiltered (4.44M rows for ~92K distinct (symbol, day) pairs, live-measured) --
+    fetching + json.loads-ing + grouping all of it in Python is what killed this job (no
+    error, no stderr -- consistent with an OOM kill) after Phase A's own query finished.
+    ROW_NUMBER() collapses to one row per (symbol, day) in SQL instead."""
+    import inspect
+    src = inspect.getsource(phase_a_bootstrap)
+    assert 'ROW_NUMBER()' in src, (
+        "phase_a_bootstrap's confluence_signals query must dedupe to one row per "
+        "(symbol, day) via ROW_NUMBER() -- reverting to a raw unfiltered fetch reintroduces "
+        "the OOM-killing full 30-min-granularity load"
     )
 
 

@@ -90,11 +90,31 @@ def phase_a_bootstrap(conn: ConnWrapper) -> dict:
         print("[PhaseA] No resolved outcomes found. Skipping bootstrap.")
         return {}
 
-    # Build symbol -> [(date, screener_ids)] from confluence_signals
+    # Build symbol -> [(date, screener_ids)] from confluence_signals.
+    #
+    # BUG FOUND 2026-08-09: this previously fetched EVERY confluence_signals row unfiltered --
+    # that table is refreshed every 30 min for the whole universe, so a symbol accumulates ~48
+    # rows/day. The attribution loop below only ever compares dates at DAY granularity
+    # (`str(computed_at)[:10]`), so all ~48 same-day rows for a symbol are functionally
+    # redundant -- only the latest one per (symbol, day) can ever be selected as `best_ids`.
+    # Live-measured 2026-08-09: 4,441,080 raw rows for what's really ~92K distinct
+    # (symbol, day) pairs -- fetching+json.loads-ing+grouping all 4.4M in Python was the
+    # actual cause of this job dying (no error, no stderr -- consistent with an OOM kill) after
+    # completing this phase's own SQL query. ROW_NUMBER() collapses to one (latest) row per
+    # (symbol, day) in SQL instead, matching the exact optimization already used elsewhere in
+    # this codebase for the same "latest row per group" shape (unified_ranker.py,
+    # backfill_sectors.py) -- NOT `DISTINCT ON`, which is Postgres-only and doesn't survive
+    # translation to this file's SQLite dev-fallback path.
     conf_rows = conn.execute("""
-        SELECT symbol, screener_ids_json, computed_at
-        FROM confluence_signals
-        WHERE screener_ids_json IS NOT NULL
+        SELECT symbol, screener_ids_json, computed_at FROM (
+            SELECT symbol, screener_ids_json, computed_at,
+                   ROW_NUMBER() OVER (
+                       PARTITION BY symbol, DATE(computed_at) ORDER BY computed_at DESC
+                   ) AS rn
+            FROM confluence_signals
+            WHERE screener_ids_json IS NOT NULL
+        ) t
+        WHERE rn = 1
         ORDER BY symbol, computed_at DESC
     """).fetchall()
 
