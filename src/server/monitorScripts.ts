@@ -439,9 +439,13 @@ export const MONITOR_SCRIPTS = [
     schedule: 'Weekly Sunday',
     // 200h was still wrong, found 2026-08-09: `as_of_date` is logical_write_floor()-anchored to
     // the last completed trading session (Friday), 2 days behind the Sunday run that writes it --
-    // same lag as trendlyne-fundamentals above. True worst case checked right before this week's
+    // same lag as trendlyne-fundamentals above. True worst case checked right before that week's
     // ~18:00 IST run: ~228h. Confirmed live-recurring (flagged 'stale' at 216-222h, well under a
     // genuine break) -- bumped to match trendlyne-fundamentals' 260h.
+    // Same day (2026-08-09): the driving job (trendlyneWeekly.jobs.ts) moved from 18:00 IST to
+    // 06:00 IST -- 12h earlier means ~12h LESS elapsed since Friday's close, so the real gap is
+    // now ~216h, not ~228h. 260h stays a safe (now slightly more generous) margin; no change
+    // needed to the threshold itself.
     pyScript: 'financial_ratios_fetcher.py',
     queueName: 'trendlyne-ratios-monthly',
     staleLimitHours: 260,

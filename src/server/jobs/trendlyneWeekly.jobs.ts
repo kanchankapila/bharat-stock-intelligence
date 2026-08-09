@@ -153,9 +153,19 @@ export async function registerTrendlyneWeeklyJobs(connection: any) {
     connection,
     queueName: QUEUE_TRENDLYNE_RATIOS_MONTHLY,
     jobName: 'trendlyne-ratios-monthly-check',
-    // Every Sunday 12:30 UTC. financial_ratios_fetcher runs on ALL of them (weekly);
-    // working_capital + mf_stock_holdings only on the first Sunday of the month.
-    repeat: { pattern: '30 12 * * 0' },
+    // 2026-08-09: moved 12:30 UTC (18:00 IST, evening) -> 00:30 UTC (06:00 IST, early morning).
+    // This job's own real crash today traced to Postgres OOMing under a too-small container
+    // memory limit (fixed separately, docker-compose.yml), but the box was ALSO under real
+    // host-level memory pressure at the time -- mostly Chrome (~6.6GB across 8 processes),
+    // which is presumably heaviest during active daytime/evening use. 06:00 IST runs before
+    // typical waking/browsing hours, and deliberately BEFORE the 07:30-11:30+ IST cluster
+    // (nse-sync/fundamentals-sync/ml-weekly-retrain/dl-retrain-weekly) rather than after it --
+    // dl-retrain-weekly has a 24h lockDuration and no predictable finish time, so scheduling
+    // after it risked open-ended overlap instead of a bounded one. financial_ratios_fetcher
+    // runs on ALL Sundays (weekly); working_capital + mf_stock_holdings only on the first
+    // Sunday of the month. Weekly cadence (168h gap) is unchanged by the hour-of-day move, so
+    // financial-ratios/working-capital's staleLimitHours in monitorScripts.ts need no change.
+    repeat: { pattern: '30 0 * * 0' },
     jobId: 'trendlyne-ratios-monthly-weekly-check',
     removeOnComplete: 3,
     removeOnFail: 3,
