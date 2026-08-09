@@ -3,6 +3,13 @@
   "private": true,
   "version": "0.0.0",
   "type": "module",
+  "overrides": {
+    "js-yaml": "^4.3.1",
+    "uuid": "^11.1.1",
+    "tsx": {
+      "esbuild": "^0.28.1"
+    }
+  },
   "scripts": {
     "start": "concurrently \"npm run dev\" \"npm run api\" \"npm run ml-api\" \"npm run chatbot\"",
     "dev": "node --max-old-space-size=4096 node_modules/tsx/dist/cli.mjs watch server.ts",
@@ -92,6 +99,6 @@
     "tsx": "^4.21.0",
     "typescript": "~5.8.2",
     "vite": "^6.2.3",
-    "vitest": "^1.5.5"
+    "vitest": "^3.2.7"
   }
 }
