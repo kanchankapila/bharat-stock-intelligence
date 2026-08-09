@@ -368,11 +368,11 @@ const DashboardPage: React.FC<DashboardPageProps> = ({
   const [aiSignals, setAiSignals] = useState<any[]>([]);
   const [isGenerating, setIsGenerating] = useState(false);
   const [queueProgress, setQueueProgress] = useState<{ completed: number; total: number } | null>(null);
-  const [selectedSignal, setSelectedSignal] = useState<any | null>(null);
   const [historySymbol, setHistorySymbol] = useState<string | null>(null);
 
   const { data: niftyOhlc } = trpc.getOHLCData.useQuery({ symbol: 'in;NSX', dur: '1M' });
   const { data: vixData } = trpc.getIndiaVix.useQuery(undefined, { refetchInterval: 30000 });
+  const { data: accuracyMetrics } = trpc.getAccuracyMetrics.useQuery();
   const graphData = useMemo(() => {
     const candles: any[] = niftyOhlc?.data ?? [];
     return candles.slice(-30).map((d: any, i: number) => ({
@@ -510,11 +510,11 @@ const DashboardPage: React.FC<DashboardPageProps> = ({
           icon={<Radio size={9} />}
         />
         <KpiChip
-          label="Win Rate (84d)"
-          value="84%"
-          sub="Backtested ML ensemble"
-          up={true}
-          accent={emerald}
+          label="Win Rate (All-Time)"
+          value={accuracyMetrics ? `${accuracyMetrics.profitHitRate.toFixed(0)}%` : '—'}
+          sub={accuracyMetrics ? `${accuracyMetrics.totalSignals} signals resolved` : 'Loading…'}
+          up={(accuracyMetrics?.profitHitRate ?? 0) >= 50}
+          accent={(accuracyMetrics?.profitHitRate ?? 0) >= 50 ? emerald : rose}
           icon={<TrendingUp size={9} />}
         />
       </div>
@@ -878,72 +878,9 @@ const DashboardPage: React.FC<DashboardPageProps> = ({
         )}
       </AnimatePresence>
 
-      <AnimatePresence>
-        {selectedSignal && (
-          <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
-            <motion.div
-              initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-              onClick={() => setSelectedSignal(null)}
-              className="absolute inset-0 bg-black/70 backdrop-blur-sm"
-            />
-            <motion.div
-              initial={{ opacity: 0, scale: 0.95, y: 16 }}
-              animate={{ opacity: 1, scale: 1, y: 0 }}
-              exit={{ opacity: 0, scale: 0.95, y: 16 }}
-              className="relative w-full max-w-lg"
-              style={{
-                background: '#0a0b0e', border: '1px solid rgba(255,255,255,0.08)',
-                borderRadius: 14, overflow: 'hidden',
-              }}
-            >
-              <div style={{ borderBottom: '1px solid rgba(255,255,255,0.06)', padding: '16px 20px' }}
-                className="flex items-center justify-between">
-                <div>
-                  <div style={{ fontFamily: FONT_FAMILY_DISPLAY, fontSize: 20, fontWeight: 700, color: '#f8fafc', letterSpacing: 1 }}>
-                    {selectedSignal.symbol}
-                  </div>
-                  <div style={{ fontFamily: FONT_FAMILY_MONO, fontSize: 9, color: '#475569', marginTop: 2, letterSpacing: 2 }}>
-                    AI DEEP ANALYSIS · {selectedSignal.confidence}% CONFIDENCE
-                  </div>
-                </div>
-                <button onClick={() => setSelectedSignal(null)} className="text-slate-400 hover:text-white transition-colors">
-                  <Plus className="w-5 h-5 rotate-45" />
-                </button>
-              </div>
-              <div style={{ padding: '16px 20px', display: 'flex', flexDirection: 'column', gap: 12 }}>
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8 }}>
-                  {[
-                    { l: 'ENTRY', v: `₹${selectedSignal.entry}`, c: '#f8fafc' },
-                    { l: 'TARGET', v: `₹${selectedSignal.target}`, c: emerald },
-                    { l: 'STOP LOSS', v: `₹${selectedSignal.stopLoss}`, c: rose },
-                  ].map(({ l, v, c }) => (
-                    <div key={l} style={{ background: '#0d0f13', border: '1px solid rgba(255,255,255,0.05)', borderRadius: 8, padding: '10px 12px', textAlign: 'center' }}>
-                      <div style={{ fontFamily: FONT_FAMILY_MONO, fontSize: 8, color: '#475569', letterSpacing: 2, marginBottom: 4 }}>{l}</div>
-                      <div style={{ fontFamily: FONT_FAMILY_MONO, fontSize: 14, fontWeight: 700, color: c }}>{v}</div>
-                    </div>
-                  ))}
-                </div>
-                <div style={{ background: '#0d0f13', border: '1px solid rgba(255,255,255,0.05)', borderRadius: 8, padding: '12px 14px' }}>
-                  <div style={{ fontFamily: FONT_FAMILY_MONO, fontSize: 8, color: '#475569', letterSpacing: 2, marginBottom: 6 }}>REASONING</div>
-                  <p style={{ fontFamily: FONT_FAMILY_MONO, fontSize: 10, color: '#94a3b8', lineHeight: 1.6 }}>
-                    {selectedSignal.reasoning}
-                  </p>
-                </div>
-                <button
-                  onClick={() => setSelectedSignal(null)}
-                  style={{
-                    fontFamily: FONT_FAMILY_DISPLAY, fontSize: 12, fontWeight: 700, letterSpacing: 3,
-                    background: amber, color: '#000', border: 'none', borderRadius: 8,
-                    padding: '12px', cursor: 'pointer', textTransform: 'uppercase',
-                  }}
-                >
-                  ACKNOWLEDGE
-                </button>
-              </div>
-            </motion.div>
-          </div>
-        )}
-      </AnimatePresence>
+      {/* ponytail: dead "AI Deep Analysis" modal deleted — selectedSignal was never set to
+          non-null anywhere (card click already navigates to the full stock page instead),
+          so nothing in this file requests a second, weaker preview path. */}
     </div>
   );
 };

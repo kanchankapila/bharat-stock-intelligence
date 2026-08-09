@@ -12,6 +12,7 @@ import { PreMarketBriefing } from '../components/PreMarketBriefing';
 import { FnOIndexInsight } from '../components/FnOIndexInsight';
 import { SentimentPulseWidget } from '../components/SentimentPulseWidget';
 import { EarningsPulseWidget } from '../components/EarningsPulseWidget';
+import { HighFlyerWidget } from '../components/HighFlyerWidget';
 
 const REGIME_STYLE: Record<string, { color: string; bg: string; label: string }> = {
   BULL:     { color: 'text-emerald-400', bg: 'bg-emerald-500/10 border-emerald-500/25', label: 'BULL' },
@@ -126,6 +127,8 @@ export const MarketCommandCenter: React.FC<MarketCommandCenterProps> = ({ onSele
         <SentimentPulseWidget />
         <EarningsPulseWidget onSelectStock={onSelectStock} />
       </div>
+
+      <HighFlyerWidget onSelectStock={onSelectStock} />
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         <InstitutionalInsights />

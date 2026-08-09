@@ -1287,6 +1287,50 @@ export const MCStockInfoPanel: React.FC<MCStockInfoPanelProps> = ({
             </div>
           )}
 
+          {/* Industry Comparison (getMcConsolidated.detailedInsights.industryComparison — had no UI) */}
+          {Array.isArray(detailedInsights?.industryComparison) && detailedInsights.industryComparison.length > 0 && (
+            <Card title="Industry Comparison" icon={Users}>
+              <div className="space-y-2 pt-2">
+                {detailedInsights.industryComparison.map((ic: any, i: number) => (
+                  <div key={i} className="flex items-center justify-between p-3 bg-slate-950 rounded-xl border border-slate-800/50">
+                    <div className="min-w-0">
+                      <p className="text-[10px] font-black text-slate-300 uppercase tracking-widest truncate">{ic.title}</p>
+                      <p className="text-[9px] text-slate-500 font-medium mt-0.5">{ic.shortDesc}</p>
+                    </div>
+                    {ic.value != null && (
+                      <span className={cn("text-sm font-black italic shrink-0 ml-3",
+                        ic.color === 'green' ? "text-emerald-400" : ic.color === 'red' ? "text-rose-400" : "text-amber-400"
+                      )}>{ic.value}</span>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </Card>
+          )}
+
+          {/* Earnings Call Transcripts (getMcConsolidated.detailedInsights.earningTranscripts — had no UI) */}
+          {Array.isArray(detailedInsights?.earningTranscripts) && detailedInsights.earningTranscripts.length > 0 && (
+            <Card title="Earnings Call Transcripts" icon={Newspaper}>
+              <div className="space-y-2 pt-2">
+                {detailedInsights.earningTranscripts.slice(0, 8).map((et: any, i: number) => (
+                  <a
+                    key={i}
+                    href={et.pdfUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="flex items-center justify-between p-3 bg-slate-950 rounded-xl border border-slate-800/50 hover:border-indigo-500/40 transition-colors"
+                  >
+                    <div className="min-w-0">
+                      <p className="text-[10px] font-black text-slate-300 uppercase tracking-widest truncate">{et.title}</p>
+                      {et.description && <p className="text-[9px] text-slate-500 font-medium mt-0.5 truncate">{et.description}</p>}
+                    </div>
+                    {et.datetime && <p className="text-[9px] text-slate-600 font-bold shrink-0 ml-3">{String(et.datetime).slice(0, 10)}</p>}
+                  </a>
+                ))}
+              </div>
+            </Card>
+          )}
+
           {/* Credit Ratings */}
           {Array.isArray(tb?.creditRating) && tb.creditRating.length > 0 && (
             <Card title="Credit Ratings" icon={Filter}>
@@ -2063,6 +2107,102 @@ export const MCStockInfoPanel: React.FC<MCStockInfoPanelProps> = ({
               </div>
             );
           })()}
+
+          {/* Historical Rating sentiment (mc.historicalRating — had no UI; the underlying
+              trend history is MC Pro-locked, only today's sentiment snapshot is public) */}
+          {historicalRating?.data?.[0] && (() => {
+            const h = historicalRating.data[0];
+            const sentiment: string = h.currSentiment || '';
+            const isBull = /bullish/i.test(sentiment);
+            const isBear = /bearish/i.test(sentiment);
+            return (
+              <div className={cn("p-3 rounded-2xl border flex items-center justify-between gap-3 text-xs",
+                isBull ? "bg-emerald-500/5 border-emerald-500/20" : isBear ? "bg-rose-500/5 border-rose-500/20" : "bg-slate-950 border-slate-800"
+              )}>
+                <span className="text-slate-500 uppercase tracking-widest text-[9px] font-black">Sentiment on {h.currdate}</span>
+                <span className={cn("font-black italic", isBull ? "text-emerald-400" : isBear ? "text-rose-400" : "text-slate-300")}>
+                  {sentiment || 'Neutral'} @ ₹{h.closePrice}
+                </span>
+                {historicalRating.displayLock === 'Y' && (
+                  <span className="text-[9px] text-slate-600 italic">Trend history is MC Pro</span>
+                )}
+              </div>
+            );
+          })()}
+
+          {/* Detailed Technical Indicators (mc.technicalAnalysisV2 — had no UI; distinct from
+              the buy/sell-count summary above, this is the actual indicator readout) */}
+          {technicalAnalysisV2?.data && (
+            <Card title="Detailed Technical Indicators" icon={Activity}>
+              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2 pt-2">
+                {(technicalAnalysisV2.data.indicators || []).map((ind: any) => (
+                  <div key={ind.id} className="p-2 bg-slate-950 rounded-xl border border-slate-800/50 text-center">
+                    <p className="text-[8px] font-black text-slate-500 uppercase tracking-widest truncate">{ind.displayName}</p>
+                    <p className="text-sm font-black text-slate-200 font-mono mt-0.5">
+                      {(ind.values || []).map((v: any) => v.value).join(' / ')}
+                    </p>
+                  </div>
+                ))}
+              </div>
+              {Array.isArray(technicalAnalysisV2.data.crossover) && technicalAnalysisV2.data.crossover.length > 0 && (
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 mt-3 pt-3 border-t border-slate-800/60">
+                  {technicalAnalysisV2.data.crossover.map((c: any) => (
+                    <div key={c.key} className="p-2 bg-slate-950 rounded-xl border border-slate-800/50 text-center">
+                      <p className="text-[8px] font-black text-slate-500 uppercase tracking-widest">{c.displayValue}</p>
+                      <p className="text-[10px] text-slate-300 mt-0.5">{c.indication || c.period}</p>
+                    </div>
+                  ))}
+                </div>
+              )}
+              {(technicalAnalysisV2.data.smaNote || technicalAnalysisV2.data.crossNote || technicalAnalysisV2.data.indicatorNote) && (
+                <div className="mt-3 pt-3 border-t border-slate-800/60 space-y-1">
+                  {[technicalAnalysisV2.data.smaNote, technicalAnalysisV2.data.crossNote, technicalAnalysisV2.data.indicatorNote]
+                    .filter(Boolean)
+                    .map((note: string, i: number) => (
+                      <p key={i} className="text-[10px] text-slate-400 italic">{note}</p>
+                    ))}
+                </div>
+              )}
+            </Card>
+          )}
+
+          {/* Chart Patterns (mc.chartPatterns — had no UI, AND the fetcher itself was broken:
+              the MC endpoint silently ignores its sc_id filter param and always returned the
+              same market-wide list; fixed in mcApiService.ts to filter on each row's own
+              meta_data.price_key, the only field that actually identifies the stock) */}
+          {Array.isArray(chartPatterns?.data) && chartPatterns.data.length > 0 && (
+            <Card title="Chart Patterns Detected" icon={BarChart3}>
+              <div className="space-y-2 pt-2">
+                {chartPatterns.data.map((p: any, i: number) => {
+                  let meta: any = {};
+                  try { meta = JSON.parse(p.meta_data || '{}'); } catch { /* ignore */ }
+                  const isBuy = meta.pattern_type === 'buy';
+                  return (
+                    <div key={i} className="p-3 bg-slate-950 rounded-xl border border-slate-800/50">
+                      <div className="flex items-center justify-between">
+                        <div className="min-w-0">
+                          <p className="text-[10px] font-black text-slate-300 uppercase tracking-widest truncate">{p.pattern_name}</p>
+                          <p className={cn("text-[9px] font-bold mt-0.5", isBuy ? "text-emerald-400" : "text-rose-400")}>
+                            {p.comment} · {p.p_status} · {p.time_frame}
+                          </p>
+                        </div>
+                        {meta.target_return_prcnt != null && (
+                          <span className="text-sm font-black text-emerald-400 italic shrink-0 ml-3">+{meta.target_return_prcnt}%</span>
+                        )}
+                      </div>
+                      {(meta.entry_price || meta.target_price || meta.stoploss_price) && (
+                        <div className="flex gap-4 mt-2 text-[9px] font-mono text-slate-500">
+                          {meta.entry_price && <span>Entry ₹{meta.entry_price}</span>}
+                          {meta.target_price && <span className="text-emerald-500">Target ₹{meta.target_price}</span>}
+                          {meta.stoploss_price && <span className="text-rose-500">Stop ₹{meta.stoploss_price}</span>}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            </Card>
+          )}
 
           {/* NiftyTrader Technical Data */}
           {niftyTraderData && (

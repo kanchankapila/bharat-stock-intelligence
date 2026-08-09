@@ -5,9 +5,6 @@ import { cn } from '../lib/utils';
 import { 
   Bookmark as WatchlistIcon, Minus 
 } from 'lucide-react';
-import { 
-  ResponsiveContainer, BarChart, Bar 
-} from 'recharts';
 import { useIntersectionObserver } from '../hooks/useIntersectionObserver';
 import { MarketData } from '../services/marketService';
 
@@ -71,6 +68,9 @@ export const Watchlist: React.FC<WatchlistProps> = ({
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
           {watchlistStocks.map(stock => {
             const isUp = stock.changePct >= 0;
+            const dayRangePct = stock.high > stock.low
+              ? Math.min(100, Math.max(0, ((stock.price - stock.low) / (stock.high - stock.low)) * 100))
+              : 50;
             return (
               <Card 
                 key={stock.symbol} 
@@ -108,12 +108,17 @@ export const Watchlist: React.FC<WatchlistProps> = ({
                         <p className="text-[7px] font-black text-slate-400 uppercase tracking-widest mb-1">LTP</p>
                         <p className="text-xl font-black text-white tabular-nums tracking-tight italic">₹{stock.price.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</p>
                      </div>
-                     <div className="h-8 w-20">
-                        <ResponsiveContainer width="100%" height="100%">
-                           <BarChart data={Array.from({length: 8}, () => ({ v: Math.random() }))}>
-                              <Bar dataKey="v" fill={isUp ? "#10b981" : "#f43f5e"} opacity={0.3} radius={[2, 2, 0, 0]} />
-                           </BarChart>
-                        </ResponsiveContainer>
+                     <div className="h-8 w-20 flex flex-col justify-center gap-1" title={`Day range: ${'₹'}${stock.low.toLocaleString('en-IN')} - ${'₹'}${stock.high.toLocaleString('en-IN')}`}>
+                        <div className="relative h-1.5 w-full bg-slate-800 rounded-full overflow-hidden">
+                           <div
+                              className="absolute top-0 bottom-0 w-[3px] rounded-full"
+                              style={{ left: `calc(${dayRangePct}% - 1.5px)`, background: isUp ? '#10b981' : '#f43f5e' }}
+                           />
+                        </div>
+                        <div className="flex justify-between text-[6px] text-slate-500 font-black tabular-nums leading-none">
+                           <span>{stock.low.toLocaleString('en-IN')}</span>
+                           <span>{stock.high.toLocaleString('en-IN')}</span>
+                        </div>
                      </div>
                   </div>
                 </div>

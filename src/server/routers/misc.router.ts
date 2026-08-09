@@ -200,6 +200,27 @@ export const miscRouter = router({
   getDeals: publicProcedure
     .query(async () => fetchDealsAll()),
 
+  // block_deals (tickertape_deals_fetcher.py + block_deal_fetcher.py) has no other reader —
+  // pct_transacted (% of float) is the field this source exists for, since raw qty/value alone
+  // isn't comparable across a microcap vs. a large-cap.
+  getBlockDeals: publicProcedure
+    .input(z.object({ symbol: z.string().optional(), limit: z.number().min(1).max(200).optional().default(100) }))
+    .query(async ({ input }) => {
+      try {
+        const rows = await dbAll<any>(
+          `SELECT symbol, date, qty, price, value_cr, pct_transacted, client_name, trade_type, category
+           FROM block_deals
+           ${input.symbol ? "WHERE symbol = ?" : ""}
+           ORDER BY date DESC
+           LIMIT ?`,
+          input.symbol ? [input.symbol.toUpperCase(), input.limit] : [input.limit]
+        );
+        return rows || [];
+      } catch {
+        return [];
+      }
+    }),
+
   // Raw NSE PIT (insider) filings: promoter/designated-person transactions with before/after
   // %holding — richer than getDeals, previously only consumed as a binary flag by the scoring
   // engine (technical_signals.insider_buy_flag/sell_flag).

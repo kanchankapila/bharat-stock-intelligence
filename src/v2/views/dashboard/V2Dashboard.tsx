@@ -1,5 +1,6 @@
 import React from 'react';
 import { trpc } from '../../../lib/trpc';
+import { cn } from '../../../lib/utils';
 import { 
   TrendingUp, TrendingDown, Activity, Cpu, ShieldAlert, BarChart3, 
   Layers, CheckCircle, RefreshCw 
@@ -7,8 +8,8 @@ import {
 import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, CartesianGrid, AreaChart, Area } from 'recharts';
 
 export const V2Dashboard: React.FC = () => {
-  const { data: dashboardData, isLoading: loadingDash } = trpc.getPerformanceDashboard.useQuery() as { data: any; isLoading: boolean };
-  const { data: fiiDiiData, isLoading: loadingFii } = trpc.getFiiDiiFlow.useQuery({ days: 10 });
+  const { data: dashboardData, isLoading: loadingDash, isError: errorDash, refetch: refetchDash } = trpc.getPerformanceDashboard.useQuery() as { data: any; isLoading: boolean; isError: boolean; refetch: () => void };
+  const { data: fiiDiiData, isLoading: loadingFii, isError: errorFii, refetch: refetchFii } = trpc.getFiiDiiFlow.useQuery({ days: 10 });
   const { data: featImportance } = trpc.getFeatureImportance.useQuery({ modelName: 'ensemble', topN: 8 });
 
   if (loadingDash || loadingFii) {
@@ -16,6 +17,23 @@ export const V2Dashboard: React.FC = () => {
       <div className="py-20 flex flex-col items-center justify-center">
         <Activity className="w-12 h-12 text-indigo-500/20 animate-pulse mb-4" />
         <p className="text-slate-400 text-xs font-black uppercase tracking-widest animate-pulse">Syncing Quantitative Data Feeds...</p>
+      </div>
+    );
+  }
+
+  // A real query failure previously fell straight through to empty-state rendering,
+  // indistinguishable from "no data yet" — surface it and let the user retry.
+  if (errorDash || errorFii) {
+    return (
+      <div className="py-20 flex flex-col items-center justify-center gap-3">
+        <ShieldAlert className="w-10 h-10 text-rose-500/60" />
+        <p className="text-rose-400 text-xs font-black uppercase tracking-widest">Failed to load dashboard data.</p>
+        <button
+          onClick={() => { refetchDash(); refetchFii(); }}
+          className="text-[10px] px-3 py-1.5 rounded-lg bg-slate-800 text-slate-300 hover:bg-slate-700 uppercase tracking-widest font-bold"
+        >
+          Retry
+        </button>
       </div>
     );
   }
@@ -78,12 +96,20 @@ export const V2Dashboard: React.FC = () => {
         <div className="p-4 bg-terminal-panel border border-terminal-border rounded-2xl">
           <p className="text-[9px] font-black text-slate-500 uppercase tracking-widest mb-1">Alpha vs Nifty 50</p>
           <div className="flex items-baseline gap-2">
-            <span className="text-2xl font-black text-emerald-400 font-mono italic">
-              +{((dashboardData?.overall?.alpha_vs_nifty ?? 0.052) * 100).toFixed(2)}%
+            <span className={cn(
+              "text-2xl font-black font-mono italic",
+              dashboardData?.overall?.alpha_vs_nifty == null ? "text-slate-500" :
+                dashboardData.overall.alpha_vs_nifty >= 0 ? "text-emerald-400" : "text-rose-400"
+            )}>
+              {dashboardData?.overall?.alpha_vs_nifty != null
+                ? `${dashboardData.overall.alpha_vs_nifty >= 0 ? '+' : ''}${(dashboardData.overall.alpha_vs_nifty * 100).toFixed(2)}%`
+                : '—'}
             </span>
-            <span className="text-[9px] text-emerald-400 font-bold uppercase">Excess Outperformance</span>
+            <span className="text-[9px] text-slate-400 font-bold uppercase">Excess Outperformance</span>
           </div>
-          <p className="text-[8px] text-slate-400 font-bold uppercase mt-2">Statistically significant</p>
+          <p className="text-[8px] text-slate-400 font-bold uppercase mt-2">
+            {dashboardData?.overall?.alpha_vs_nifty != null ? 'From strategy_performance' : 'Not yet computed'}
+          </p>
         </div>
       </div>
 

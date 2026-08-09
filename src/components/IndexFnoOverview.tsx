@@ -100,7 +100,7 @@ const PCRGauge: React.FC<{ pcr: number }> = ({ pcr }) => {
     pcr > 1.5 ? { label: 'Extreme Bullish', sub: 'Oversold — reversal likely', color: 'text-emerald-400', bar: 'bg-emerald-500' } :
     pcr > 1.3 ? { label: 'Bullish',          sub: 'Put writers dominate',       color: 'text-emerald-400', bar: 'bg-emerald-500' } :
     pcr > 1.0 ? { label: 'Slightly Bullish', sub: 'Puts > Calls — mild bias',  color: 'text-yellow-400', bar: 'bg-yellow-500'  } :
-    pcr > 0.8 ? { label: 'Neutral',           sub: 'Balanced positioning',       color: 'text-slate-300',  bar: 'bg-slate-9000'   } :
+    pcr > 0.8 ? { label: 'Neutral',           sub: 'Balanced positioning',       color: 'text-slate-300',  bar: 'bg-slate-500'   } :
     pcr > 0.6 ? { label: 'Slightly Bearish', sub: 'Calls > Puts — cautious',   color: 'text-amber-400',  bar: 'bg-amber-500'   } :
                 { label: 'Bearish',           sub: 'Call writers in control',    color: 'text-rose-400',   bar: 'bg-rose-500'    };
 

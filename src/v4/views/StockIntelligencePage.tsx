@@ -83,7 +83,10 @@ const OverviewTab: React.FC<{ symbol: string }> = ({ symbol }) => {
             {score?.classification ?? 'No score yet'}
           </span>
           {score?.confidence != null && (
-            <span className="text-[10px] text-slate-600 mt-0.5">{Math.round(score.confidence * 100)}% confidence</span>
+            // confidence is already a 5-95 integer (scoring_engine.py caps it there directly),
+            // not a 0-1 fraction — see TopRatedStocks.tsx's `stock.confidence.toFixed(0)` for
+            // the same field used correctly elsewhere.
+            <span className="text-[10px] text-slate-600 mt-0.5">{Math.round(score.confidence)}% confidence</span>
           )}
         </div>
         {factors && (
@@ -114,7 +117,11 @@ const OverviewTab: React.FC<{ symbol: string }> = ({ symbol }) => {
             {score.reasons.slice(0, 6).map((r, i: number) => (
               <li key={i} className="text-[11px] text-slate-400 flex gap-1.5">
                 <span className={cn(
-                  r.sentiment === 'bullish' ? 'text-emerald-400' : r.sentiment === 'bearish' ? 'text-rose-400' : 'text-indigo-400'
+                  // scoring_engine.py writes two vocabularies into `reasons`: screener-derived
+                  // entries use bullish/bearish, news-derived entries use positive/negative.
+                  r.sentiment === 'bullish' || r.sentiment === 'positive' ? 'text-emerald-400'
+                    : r.sentiment === 'bearish' || r.sentiment === 'negative' ? 'text-rose-400'
+                    : 'text-indigo-400'
                 )}>›</span>
                 {r.name}
                 {r.source && <span className="text-slate-600 ml-1">({r.source})</span>}
@@ -178,13 +185,6 @@ const TechnicalsTab: React.FC<{ symbol: string }> = ({ symbol }) => {
               )
             ))}
           </div>
-          {Array.isArray(predictions.patterns) && predictions.patterns.length > 0 && (
-            <div className="flex flex-wrap gap-1.5 mt-3 pt-3 border-t border-slate-800/60">
-              {predictions.patterns.map((p: string, i: number) => (
-                <span key={i} className="text-[10px] px-2 py-0.5 rounded-full bg-indigo-500/10 text-indigo-300 border border-indigo-500/20">{p}</span>
-              ))}
-            </div>
-          )}
         </Card>
       )}
     </div>
@@ -192,9 +192,17 @@ const TechnicalsTab: React.FC<{ symbol: string }> = ({ symbol }) => {
 };
 
 // ─── Fundamentals tab ──────────────────────────────────────────────────────
+const DVM_COLOR: Record<string, string> = {
+  green: 'text-emerald-400 bg-emerald-500/10 border-emerald-500/20',
+  yellow: 'text-amber-400 bg-amber-500/10 border-amber-500/20',
+  red: 'text-rose-400 bg-rose-500/10 border-rose-500/20',
+};
+
 const FundamentalsTab: React.FC<{ symbol: string }> = ({ symbol }) => {
   const { data: fundamentals } = trpc.getStockFundamentals.useQuery({ symbol });
   const { data: ratios } = trpc.getRatios.useQuery({ symbol });
+  const { data: dvm } = trpc.getTrendlyneDVM.useQuery({ symbol });
+  const { data: checklist } = trpc.getTrendlyneChecklist.useQuery({ symbol });
 
   const rows: [string, any, string?][] = [
     ['Market Cap (Cr)', fundamentals?.market_cap],
@@ -209,21 +217,45 @@ const FundamentalsTab: React.FC<{ symbol: string }> = ({ symbol }) => {
     ['Earnings Yield %', fundamentals?.earnings_yield],
   ];
 
+  const dvmRows: [string, any][] = [
+    ['Durability', dvm?.durability],
+    ['Valuation', dvm?.valuation],
+    ['Momentum', dvm?.momentum],
+  ];
+
   return (
-    <Card title="Fundamentals" icon={BadgeDollarSign}>
-      {!fundamentals ? (
-        <div className="text-xs text-slate-500 py-4">No fundamentals data captured yet for {symbol}.</div>
-      ) : (
-        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-3">
-          {rows.map(([label, value]) => (
-            <div key={label} className="glass rounded-xl p-2.5">
-              <div className="text-sm font-mono font-bold text-slate-100">{fmt(value)}</div>
-              <div className="text-[9px] text-slate-500 uppercase tracking-widest mt-1">{label}</div>
-            </div>
-          ))}
-        </div>
+    <div className="space-y-4">
+      {(dvm || checklist) && (
+        <Card title="Trendlyne DVM & Checklist" icon={BadgeDollarSign}>
+          <div className="flex flex-wrap items-center gap-4">
+            {dvm && dvmRows.map(([label, v]) => v && (
+              <div key={label} className={cn('px-3 py-1.5 rounded-lg border text-xs font-bold', DVM_COLOR[v.color] ?? 'text-slate-300 bg-slate-800 border-slate-700')}>
+                {label}: {v.score}
+              </div>
+            ))}
+            {checklist && (
+              <div className="px-3 py-1.5 rounded-lg border border-slate-700 bg-slate-800 text-xs font-bold text-slate-200">
+                Checklist: {checklist.yesCount}/{checklist.total} passed ({checklist.score}%)
+              </div>
+            )}
+          </div>
+        </Card>
       )}
-    </Card>
+      <Card title="Fundamentals" icon={BadgeDollarSign}>
+        {!fundamentals ? (
+          <div className="text-xs text-slate-500 py-4">No fundamentals data captured yet for {symbol}.</div>
+        ) : (
+          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-3">
+            {rows.map(([label, value]) => (
+              <div key={label} className="glass rounded-xl p-2.5">
+                <div className="text-sm font-mono font-bold text-slate-100">{fmt(value)}</div>
+                <div className="text-[9px] text-slate-500 uppercase tracking-widest mt-1">{label}</div>
+              </div>
+            ))}
+          </div>
+        )}
+      </Card>
+    </div>
   );
 };
 
@@ -231,14 +263,17 @@ const FundamentalsTab: React.FC<{ symbol: string }> = ({ symbol }) => {
 const OwnershipTab: React.FC<{ symbol: string }> = ({ symbol }) => {
   const { data: shareholding } = trpc.getShareholding.useQuery({ symbol });
   const { data: insiders } = trpc.getInsiderTransactions.useQuery({ symbol, limit: 25 });
-  const { data: mf } = trpc.getMFInvestments.useQuery({ symbol });
 
-  const sh = shareholding?.data ?? shareholding;
+  const sh: any = shareholding;
+  // getShareholding has two possible shapes: the live ET path returns
+  // { summary: { promoters: { percentage }, fii: { percentage }, mf: { percentage } } },
+  // the DB fallback returns flat { promoter_pct, fii_pct, mf_pct, pledge_pct } (see App.tsx's
+  // working consumer of the same procedure for the live shape).
   const holdingRows: [string, any][] = [
-    ['Promoter %', sh?.promoter_pct ?? sh?.promoterHolding],
-    ['FII %', sh?.fii_pct ?? sh?.fiiHolding],
-    ['DII / MF %', sh?.mf_pct ?? sh?.mfHolding],
-    ['Pledge %', sh?.pledge_pct ?? sh?.pledgePct],
+    ['Promoter %', sh?.summary?.promoters?.percentage ?? sh?.promoter_pct],
+    ['FII %', sh?.summary?.fii?.percentage ?? sh?.fii_pct],
+    ['DII / MF %', sh?.summary?.mf?.percentage ?? sh?.mf_pct],
+    ['Pledge %', sh?.summary?.pledge?.percentage ?? sh?.pledge_pct],
   ];
 
   return (
@@ -257,17 +292,6 @@ const OwnershipTab: React.FC<{ symbol: string }> = ({ symbol }) => {
                   {value != null ? `${fmt(value)}%` : '—'}
                 </div>
                 <div className="text-[9px] text-slate-500 uppercase tracking-widest mt-1">{label}</div>
-              </div>
-            ))}
-          </div>
-        )}
-        {mf && Array.isArray(mf) && mf.length > 0 && (
-          <div className="mt-3 pt-3 border-t border-slate-800/60">
-            <div className="text-[10px] text-slate-500 uppercase tracking-widest mb-1.5">Mutual Fund Holders</div>
-            {mf.slice(0, 5).map((m: any, i: number) => (
-              <div key={i} className="flex justify-between text-[11px] text-slate-400 py-0.5">
-                <span className="truncate">{m.fund_name ?? m.fundName ?? '—'}</span>
-                <span className="font-mono text-slate-300">{fmt(m.holding_pct ?? m.pct)}%</span>
               </div>
             ))}
           </div>
@@ -348,24 +372,33 @@ const EarningsTab: React.FC<{ symbol: string }> = ({ symbol }) => {
         {!hasAnyData ? (
           <div className="text-xs text-slate-500 py-4">No analyst coverage data captured yet for {symbol}.</div>
         ) : (
-          <pre className="text-[11px] text-slate-300 whitespace-pre-wrap font-mono leading-relaxed">
-            {JSON.stringify({ rating, consensus, priceTarget, forecast }, null, 2).slice(0, 1500)}
+          // ponytail: these 4 MC endpoints pass through raw third-party JSON with no fixed
+          // schema, so a scrollable dump beats hand-building a renderer for shapes that can
+          // change upstream. Was hard-truncated at 1500 chars before, which could cut mid-token
+          // into invalid JSON — scroll instead of truncate.
+          <pre className="text-[11px] text-slate-300 whitespace-pre-wrap font-mono leading-relaxed max-h-72 overflow-y-auto terminal-scrollbar">
+            {JSON.stringify({ rating, consensus, priceTarget, forecast }, null, 2)}
           </pre>
         )}
       </Card>
       <Card title="Corporate Actions" icon={CalendarClock}>
-        {!actions || (Array.isArray(actions) && actions.length === 0) ? (
-          <div className="text-xs text-slate-500 py-4">No recent corporate actions for {symbol}.</div>
-        ) : (
-          <div className="space-y-1.5 max-h-72 overflow-y-auto terminal-scrollbar">
-            {(Array.isArray(actions) ? actions : []).map((a: any, i: number) => (
-              <div key={i} className="flex justify-between text-[11px] text-slate-400 border-b border-slate-800/40 pb-1">
-                <span>{a.action_type ?? a.purpose}</span>
-                <span className="font-mono text-slate-300">{a.ex_date}</span>
-              </div>
-            ))}
-          </div>
-        )}
+        {(() => {
+          // getCorporateActions returns the raw ET response object { corporate_actions: [...] },
+          // not an array directly — see App.tsx's working consumer of the same procedure.
+          const corpActions: any[] = (actions as any)?.corporate_actions ?? [];
+          return corpActions.length === 0 ? (
+            <div className="text-xs text-slate-500 py-4">No recent corporate actions for {symbol}.</div>
+          ) : (
+            <div className="space-y-1.5 max-h-72 overflow-y-auto terminal-scrollbar">
+              {corpActions.map((a: any, i: number) => (
+                <div key={i} className="flex justify-between text-[11px] text-slate-400 border-b border-slate-800/40 pb-1">
+                  <span>{a.purpose ?? 'Action'}</span>
+                  <span className="font-mono text-slate-300">{a.date ?? a.ex_date ?? 'TBA'}</span>
+                </div>
+              ))}
+            </div>
+          );
+        })()}
       </Card>
     </div>
   );

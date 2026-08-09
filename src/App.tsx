@@ -616,7 +616,7 @@ const Dashboard: React.FC<{
                           <div className={cn(
                             "px-2 py-0.5 rounded text-[8px] font-black tracking-widest uppercase",
                             signal.signal === 'BUY' ? "bg-emerald-500/10 text-emerald-500 border border-emerald-500/20" : 
-                            signal.signal === 'SELL' ? "bg-rose-500/10 text-rose-500 border border-rose-500/20" : "bg-slate-9000/10 text-slate-400 border border-slate-500/20"
+                            signal.signal === 'SELL' ? "bg-rose-500/10 text-rose-500 border border-rose-500/20" : "bg-slate-500/10 text-slate-400 border border-slate-500/20"
                           )}>
                             {signal.signal} Signal
                           </div>
@@ -634,7 +634,7 @@ const Dashboard: React.FC<{
                             className={cn(
                               "h-full",
                               signal.signal === 'BUY' ? "bg-emerald-500" : 
-                              signal.signal === 'SELL' ? "bg-rose-500" : "bg-slate-9000"
+                              signal.signal === 'SELL' ? "bg-rose-500" : "bg-slate-500"
                             )}
                           />
                         </div>
@@ -2140,27 +2140,6 @@ const Backtest: React.FC<{ stocks?: MarketData[] }> = () => {
                        </AreaChart>
                      </ResponsiveContainer>
                    </div>
-                 </div>
-
-                 <div className="p-6 bg-blue-500/10 border border-blue-500/20 rounded-3xl flex flex-col md:flex-row items-center justify-between gap-6 overflow-hidden relative">
-                    <div className="absolute top-0 right-0 p-4 opacity-5">
-                       <Zap className="w-32 h-32 text-blue-500" />
-                    </div>
-                    <div className="flex items-center gap-4 relative z-10">
-                        <div className="w-12 h-12 bg-blue-500 text-blue-950 rounded-2xl flex items-center justify-center font-black italic">
-                           AI
-                        </div>
-                        <div>
-                            <h5 className="text-white font-black text-lg tracking-tight uppercase italic mb-1">Adaptive Strategy Intelligence</h5>
-                            <p className="text-slate-400 font-medium text-xs max-w-md">Gemini has analyzed this strategy and recommends tightening the stop-loss during high volatility regimes to preserve the alpha generated.</p>
-                        </div>
-                    </div>
-                    <button 
-                      onClick={startBacktest}
-                      className="px-6 py-3 bg-white text-blue-900 font-black rounded-xl text-[10px] tracking-widest uppercase hover:bg-blue-50 transition-all relative z-10"
-                    >
-                      Optimize Strategy
-                    </button>
                  </div>
               </div>
             )}
@@ -3865,7 +3844,6 @@ export default function App() {
   const [toasts, setToasts] = useState<Toast[]>([]);
   const { stocks, dataUpdatedAt: stocksUpdatedAt } = useMarketData();
   const { data: realIndices } = trpc.getAllIndices.useQuery();
-  const syncNSEStocksMutation = trpc.syncNSEStocks.useMutation();
 
   const handleSelectIndexByName = (indexName: string) => {
     const u = indexName.toUpperCase();
@@ -3893,12 +3871,6 @@ export default function App() {
       navigate('/indices');
     }
   };
-
-  // Initialize NSE stocks on app load
-  useEffect(() => {
-    console.log('📊 Initializing NSE stocks database...');
-    syncNSEStocksMutation.mutate();
-  }, []);
 
   const displayIndices = useMemo(() => {
     const rawIndexData = realIndices?.data;
