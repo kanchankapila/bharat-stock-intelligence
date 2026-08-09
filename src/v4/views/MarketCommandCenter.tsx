@@ -17,7 +17,13 @@ import { TopPicksWidget } from '../components/TopPicksWidget';
 import { MoneyFlowPulseWidget } from '../components/MoneyFlowPulseWidget';
 import { MarketBreadthIntraday } from '../../components/MarketBreadthIntraday';
 import { ActivityFeed } from '../../components/ActivityFeed';
+import { MarketMoodGauge } from '../../components/MarketMoodGauge';
 import { currentTimeInZone } from '../../lib/timeFormat';
+import { SectorRotationGraph } from '../components/SectorRotationGraph';
+import { SectorCorrelationWidget } from '../components/SectorCorrelationWidget';
+import { InstitutionalDealFeed } from '../components/InstitutionalDealFeed';
+import { ConcallTakeawaysWidget } from '../components/ConcallTakeawaysWidget';
+import { SuperstarActivityFeed } from '../components/SuperstarActivityFeed';
 
 const REGIME_STYLE: Record<string, { color: string; bg: string; label: string }> = {
   BULL:     { color: 'text-emerald-400', bg: 'bg-emerald-500/10 border-emerald-500/25', label: 'BULL' },
@@ -93,13 +99,14 @@ export const MarketCommandCenter: React.FC<MarketCommandCenterProps> = ({ onSele
           <LiveClock />
         </div>
 
-        <div className="flex flex-col lg:flex-row gap-4 lg:items-start">
-          <div className="flex-1">
-            <IndexOverview onSelectIndex={onSelectIndex} />
-          </div>
-          <div className="shrink-0">
+        <div className="flex flex-col gap-4">
+          <div className="flex items-center gap-4 flex-wrap">
             <RegimeBadge />
+            <div className="flex-1 min-w-[220px] px-3 py-2 rounded-xl border border-slate-800 bg-slate-950/40">
+              <MarketMoodGauge />
+            </div>
           </div>
+          <IndexOverview onSelectIndex={onSelectIndex} />
         </div>
       </div>
 
@@ -148,6 +155,13 @@ export const MarketCommandCenter: React.FC<MarketCommandCenterProps> = ({ onSele
         <SectorHeatmap />
       </div>
 
+      {/* Rotation trend + diversification -- complements the heatmap above (today's move) with
+          the multi-week trend regime and whether these sector bets actually move independently. */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        <SectorRotationGraph />
+        <SectorCorrelationWidget />
+      </div>
+
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         <div>
           <div className="flex items-center gap-2 mb-3">
@@ -165,7 +179,16 @@ export const MarketCommandCenter: React.FC<MarketCommandCenterProps> = ({ onSele
         </div>
       </div>
 
-      <EarningsPulseWidget onSelectStock={onSelectStock} />
+      {/* Ownership/institutional conviction -- who's buying, ranked, not just what moved. */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        <InstitutionalDealFeed onSelectStock={onSelectStock} />
+        <SuperstarActivityFeed onSelectStock={onSelectStock} />
+      </div>
+
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        <EarningsPulseWidget onSelectStock={onSelectStock} />
+        <ConcallTakeawaysWidget onSelectStock={onSelectStock} />
+      </div>
     </div>
   );
 };

@@ -272,6 +272,35 @@ export const fundamentalsRouter = router({
       }
     }, 3600)),
 
+  // Market-wide feed of the same table (no symbol filter) -- the per-stock procedure above has
+  // no discovery surface: you need to already know a symbol to see any superstar activity at
+  // all. This backs a leaderboard/feed widget instead.
+  getSuperstarActivityFeed: publicProcedure
+    .input(z.object({
+      changeType: z.enum(['entry', 'exit', 'increase', 'decrease']).optional(),
+      limit: z.number().min(1).max(100).optional().default(30),
+    }))
+    .query(async ({ input }) => fetchWithCache(`fund:superstar-feed:${input.changeType ?? 'all'}:${input.limit}`, async () => {
+      try {
+        const params: any[] = [];
+        let where = '1=1';
+        if (input.changeType) { where += ' AND change_type = ?'; params.push(input.changeType); }
+        params.push(input.limit);
+        const rows = await dbAll<any>(
+          `SELECT symbol, investor_slug, investor_name, change_type, curr_pct_holding, pct_holding_change, period_end_date, fetched_at
+           FROM superstar_investor_activity
+           WHERE ${where}
+           ORDER BY fetched_at DESC, period_end_date DESC
+           LIMIT ?`,
+          params
+        );
+        return rows || [];
+      } catch (e) {
+        console.error('[Fundamentals Router] getSuperstarActivityFeed failed:', e);
+        return [];
+      }
+    }, 3600)),
+
   getInsights: publicProcedure
     .input(z.object({ symbol: z.string() }))
     .query(async ({ input }) => getMoneycontrolInsights(input.symbol)),
