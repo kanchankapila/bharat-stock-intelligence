@@ -29,45 +29,103 @@ function fmtNum(n: number | null | undefined, digits = 2): string {
   return n.toFixed(digits);
 }
 
-const FactorPaperScreen: React.FC<{ onSelectStock?: (symbol: string) => void }> = ({ onSelectStock }) => {
-  const { data, isLoading } = trpc.getFactorPaperPicks.useQuery(undefined, { staleTime: 5 * 60_000 });
-  if (isLoading) return <Card dense title="12-1 Momentum Paper Screen" icon={TrendingUp}><p className="text-xs text-slate-500 font-mono">Loading scheduled factor snapshot…</p></Card>;
-  if (!data?.picks.length) return null;
+// Both validated standalone paper screens. value_book_to_price is rendered FIRST because it
+// is the stronger of the two on every measured axis (t 2.67 vs 2.08, Sharpe 1.47 vs 1.10,
+// turnover 0.28 vs 0.35, max DD -17.9% vs -19.5%) -- it was validated but unwired until
+// 2026-08-10, so this panel could previously only show the weaker factor.
+const FACTOR_META: Record<string, { title: string; scoreLabel: string; blurb: string }> = {
+  value_book_to_price: {
+    title: 'Book-to-Price Value Screen',
+    scoreLabel: 'B/P',
+    blurb: 'Fama-French HML book-to-market. Strongest factor measured here: +0.93%/mo excess over 65 monthly rebalances (t=2.67), Sharpe 1.47, lowest turnover of anything that works. Valuation history is a vendor backfill, so treat the t-stat as provisional.',
+  },
+  momentum_12_1: {
+    title: '12-1 Momentum Paper Screen',
+    scoreLabel: '12-1 Return',
+    blurb: 'Twelve-month return skipping the last month. +0.86%/mo excess (t=2.08), positive in all 9 cost x size configurations tested.',
+  },
+};
+
+const FactorCard: React.FC<{
+  snap: { factor: string; asOf?: string; validatedTopKMin?: number; picks: any[];
+          entryStatus?: string; entrySession?: string | null };
+  onSelectStock?: (symbol: string) => void;
+}> = ({ snap, onSelectStock }) => {
+  const meta = FACTOR_META[snap.factor] ?? { title: snap.factor, scoreLabel: 'Score', blurb: '' };
   // A list whose entry open has already traded is a record, not a trade. Say so instead of
-  // showing an `asOf` date that reads identically to a fresh one.
-  const expired = data.entryStatus === 'entry_passed';
+  // showing an `asOf` that reads identically to a fresh one. Evaluated PER CARD: the two
+  // factors have different asOf dates (value lags momentum, its vendor history settles
+  // later), so one can be actionable while the other has expired.
+  const expired = snap.entryStatus === 'entry_passed';
   return (
-    <Card dense title="12-1 Momentum Paper Screen" icon={TrendingUp} action={
+    <Card dense title={meta.title} icon={TrendingUp} action={
       <span className={`text-[10px] font-mono ${expired ? 'text-slate-500' : 'text-amber-400'}`}>
-        {expired ? 'EXPIRED' : 'PAPER TRADE'} · AS OF {data.asOf}
+        {expired ? 'EXPIRED' : 'PAPER TRADE'} · AS OF {snap.asOf}
       </span>
     }>
       {expired ? (
         <p className="text-[11px] text-rose-300/90 mb-3">
-          Not actionable — the entry open for this list{data.entrySession ? ` (${data.entrySession})` : ''} has already traded. Shown as a record of the last generated signal; wait for the next refresh.
+          Not actionable — the entry open for this list{snap.entrySession ? ` (${snap.entrySession})` : ''} has already traded. Shown as a record of the last generated signal; wait for the next refresh.
         </p>
       ) : (
-        <p className="text-[11px] text-slate-500 mb-3">
-          Standalone literature factor, ranked across the validated top-{data.validatedTopKMin} universe. Entry is the next session's open. This is not the canonical Alpha score or a buy recommendation.
-        </p>
+        <p className="text-[11px] text-slate-500 mb-1">{meta.blurb} Entry is the next session's open.</p>
       )}
+      {/* The decay caveat travels with the picks on purpose -- both factors fade to ~zero in
+          2026 and that is the single most important thing about them. */}
+      <p className="text-[11px] text-amber-500/80 mb-3">
+        Decaying: excess has fallen toward zero through 2025-26, and neither clears a
+        multiple-testing bar across the 18 factors tested. Not the canonical Alpha score, and
+        not a buy recommendation.
+      </p>
       <div className={`overflow-x-auto ${expired ? 'opacity-50' : ''}`}>
         <table className="w-full text-xs">
           <thead><tr className="text-[10px] text-slate-500 uppercase border-b border-slate-800">
-            <th className="text-left py-2">Rank</th><th className="text-left py-2">Symbol</th><th className="text-right py-2">12-1 Return</th><th className="text-right py-2">20D ADT</th><th className="text-right py-2">Close</th>
+            <th className="text-left py-2">Rank</th><th className="text-left py-2">Symbol</th>
+            <th className="text-right py-2">{meta.scoreLabel}</th>
+            <th className="text-right py-2">20D ADT</th><th className="text-right py-2">Close</th>
           </tr></thead>
-          <tbody>{data.picks.slice(0, 10).map((pick, index) => (
-            <tr key={pick.symbol} className="border-b border-slate-900">
-              <td className="py-2 text-slate-600 font-mono">{index + 1}</td>
-              <td className="py-2"><button onClick={() => onSelectStock?.(pick.symbol)} className="font-bold text-slate-100 hover:text-indigo-300">{pick.symbol}</button></td>
-              <td className="py-2 text-right font-mono text-emerald-400">{fmtPct(pick.r12_1 ?? pick.score)}</td>
-              <td className="py-2 text-right font-mono text-slate-400">{pick.adt20 == null ? '—' : `₹${(pick.adt20 / 10_000_000).toFixed(1)}cr`}</td>
-              <td className="py-2 text-right font-mono text-slate-300">{fmtNum(pick.close)}</td>
-            </tr>
-          ))}</tbody>
+          <tbody>{snap.picks.slice(0, 10).map((pick, index) => {
+            // Below ~Rs 5cr ADT the backtest's 25bps/side cost assumption is optimistic, so
+            // flag it on the row rather than presenting every name as equally tradeable.
+            const thin = pick.adt20 != null && pick.adt20 < 50_000_000;
+            return (
+              <tr key={pick.symbol} className="border-b border-slate-900">
+                <td className="py-2 text-slate-600 font-mono">{index + 1}</td>
+                <td className="py-2">
+                  <button onClick={() => onSelectStock?.(pick.symbol)}
+                          className="font-bold text-slate-100 hover:text-indigo-300">{pick.symbol}</button>
+                  {thin && <span className="ml-1.5 text-[9px] font-mono text-amber-500/70" title="Below Rs 5cr ADT: real slippage will exceed the 25bps/side the backtest assumed">THIN</span>}
+                </td>
+                <td className="py-2 text-right font-mono text-emerald-400">
+                  {snap.factor === 'momentum_12_1' ? fmtPct(pick.r12_1 ?? pick.score) : fmtNum(pick.score)}
+                </td>
+                <td className="py-2 text-right font-mono text-slate-400">
+                  {pick.adt20 == null ? '—' : `₹${(pick.adt20 / 10_000_000).toFixed(1)}cr`}
+                </td>
+                <td className="py-2 text-right font-mono text-slate-300">{fmtNum(pick.close)}</td>
+              </tr>
+            );
+          })}</tbody>
         </table>
       </div>
     </Card>
+  );
+};
+
+const FactorPaperScreen: React.FC<{ onSelectStock?: (symbol: string) => void }> = ({ onSelectStock }) => {
+  const { data, isLoading } = trpc.getFactorPaperPicks.useQuery(undefined, { staleTime: 5 * 60_000 });
+  if (isLoading) return <Card dense title="Factor Paper Screens" icon={TrendingUp}><p className="text-xs text-slate-500 font-mono">Loading scheduled factor snapshots…</p></Card>;
+  const snaps = data?.factors?.length
+    ? data.factors
+    // Fallback for a snapshot written before the multi-factor key split.
+    : (data?.picks?.length ? [{ factor: 'momentum_12_1', ...data }] : []);
+  if (!snaps.length) return null;
+  return (
+    <div className="space-y-4">
+      {snaps.map(snap => (
+        <FactorCard key={snap.factor} snap={snap as any} onSelectStock={onSelectStock} />
+      ))}
+    </div>
   );
 };
 

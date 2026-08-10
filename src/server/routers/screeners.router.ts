@@ -247,11 +247,23 @@ export const screenersRouter = router({
 
   // ── Screener Intelligence (Sub-project A) ─────────────────────────────────
 
+  // Both validated standalone paper screens, strongest first. value_book_to_price beats
+  // momentum_12_1 on every measured axis (t 2.67 vs 2.08, Sharpe 1.47 vs 1.10, turnover 0.28
+  // vs 0.35, max DD -17.9% vs -19.5%) but was unwired until 2026-08-10, so this endpoint
+  // could only ever show the weaker one. Shape kept backward compatible: the top-level fields
+  // still describe momentum_12_1 for any existing caller, with `factors` added alongside.
   getFactorPaperPicks: publicProcedure.query(async () => {
-    const row = await dbGet<{ value: string }>(
-      "SELECT value FROM app_settings WHERE key = 'factor_picks_momentum_12_1'"
-    );
-    return parseFactorPicksSnapshot(row?.value);
+    const keys = ['value_book_to_price', 'momentum_12_1'] as const;
+    const rows = await Promise.all(keys.map(f =>
+      dbGet<{ value: string }>(
+        'SELECT value FROM app_settings WHERE key = ?', [`factor_picks_${f}`]
+      )
+    ));
+    const factors = keys
+      .map((f, i) => ({ factor: f, ...parseFactorPicksSnapshot(rows[i]?.value) }))
+      .filter(s => s.picks?.length);
+    const legacy = parseFactorPicksSnapshot(rows[keys.indexOf('momentum_12_1')]?.value);
+    return { ...legacy, factors };
   }),
 
   getScreenerLeaderboard: publicProcedure

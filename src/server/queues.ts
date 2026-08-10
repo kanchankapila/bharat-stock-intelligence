@@ -894,6 +894,14 @@ async function processMlDailyOps(job: Job): Promise<{ success: boolean }> {
   await T.run('densify-feature-matrix',
     () => runPython('densify_feature_matrix.py', [], 15 * 60_000));
 
+  // Per-symbol EVENT triggers (screener exit-ratio, screener tenure, news attention). Runs
+  // AFTER the screener syncs and the news cycles so exited_date and published_at are current
+  // for today; it reads screener_appearances + news_symbol_link, writes stock_event_triggers.
+  // Advisory only -- deliberately NOT an input to unified_score (see event_triggers.py's
+  // docstring for the measurements and for why they are not blended yet).
+  await T.run('event-triggers',
+    () => runPython('event_triggers.py', [], 10 * 60_000));
+
   // NOTE: bad-bar flagging deliberately lives in ohlcv_quality.py (which runs earlier in this
   // chain), NOT here. ohlcv_quality.flag_bad_prints() RESETS is_suspect=0 at the top of every
   // run, so a second flagging pass scheduled after it would be silently wiped on the next
