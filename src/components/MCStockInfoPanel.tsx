@@ -5,7 +5,8 @@ import stockData from '../data/stocklist';
 import {
   TrendingUp, TrendingDown, Activity, Zap, Info, AlertCircle,
   BarChart3, PieChart, Users, Filter, ArrowUpRight,
-  CheckCircle2, BrainCircuit, Search, Database, History, Newspaper, Gift
+  CheckCircle2, BrainCircuit, Search, Database, History, Newspaper, Gift,
+  ShieldAlert, Compass
 } from 'lucide-react';
 import { motion } from 'motion/react';
 import {
@@ -45,6 +46,8 @@ const Candlestick = (props: any) => {
 
 import { Card, SentimentBadge, ValueDisplay, IndicatorRow, CompactMetricCard } from './MCCommon';
 import ScreenerDetailsModal from './ScreenerDetailsModal';
+import { PriceFreshnessBadge } from './PriceFreshnessBadge';
+import { ConvictionPill, StockTagRow } from './StockTagRow';
 
 const TrendlyneDVMCards: React.FC<{ dvm: any }> = ({ dvm }) => {
   if (!dvm) return null;
@@ -283,9 +286,63 @@ export const MCStockInfoPanel: React.FC<MCStockInfoPanelProps> = ({
     { enabled: isVisible && activeTab === 'technical', staleTime: 60000 }
   );
 
-  const { data: unifiedData, isLoading, error } = trpc.getAlphaQuantDetail.useQuery(
+  const { data: unifiedData, isLoading, error, dataUpdatedAt } = trpc.getAlphaQuantDetail.useQuery(
     { symbol, timeframe },
     { enabled: isVisible, refetchInterval: isVisible ? 60000 : false, staleTime: 30000 }
+  );
+
+  // Canonical unified_recommendations context (the platform's documented canonical ranker,
+  // see CLAUDE.md "Scoring Authority") -- previously absent from this panel entirely, which
+  // only ever showed the per-timeframe stock_scores rank and MoneyControl's own proprietary
+  // score, never what the ranker itself concluded (entry/target/stop, conviction, why).
+  const { data: unifiedScore } = trpc.getUnifiedScoreForSymbol.useQuery(
+    { symbol },
+    { enabled: isVisible, staleTime: 300000 }
+  );
+
+  // AI-generated earnings-call tone/takeaway (concall_takeaways, 2026-08-06) -- already wired
+  // into v4/v5's stock pages, never into this one.
+  const { data: concallTakeaways } = trpc.getConcallTakeaways.useQuery(
+    { symbol, limit: 8 },
+    { enabled: isVisible && activeTab === 'earnings', staleTime: 900000 }
+  );
+
+  // Smart-money / ownership activity: which known institutional investors hold/added/exited
+  // this stock, real topInvestor block-deal trend, bulk/block deals with %-of-float, and raw
+  // NSE PIT insider filings -- four symbol-filterable procedures already built and used
+  // elsewhere (SmartMoneyMonitor, v4/v5 stock pages) but never surfaced on this panel.
+  const { data: superstarActivity } = trpc.getSuperstarInvestorActivity.useQuery(
+    { symbol, limit: 20 },
+    { enabled: isVisible && (activeTab === 'financials' || activeTab === 'earnings'), staleTime: 3600000 }
+  );
+  const { data: institutionalDeals } = trpc.getInstitutionalDealHistory.useQuery(
+    { symbol, days: 30 },
+    { enabled: isVisible && (activeTab === 'financials' || activeTab === 'earnings'), staleTime: 900000 }
+  );
+  const { data: blockDealsForStock } = trpc.getBlockDeals.useQuery(
+    { symbol, limit: 20 },
+    { enabled: isVisible && (activeTab === 'financials' || activeTab === 'earnings'), staleTime: 900000 }
+  );
+  const { data: insiderTxForStock } = trpc.getInsiderTransactions.useQuery(
+    { symbol, limit: 20 },
+    { enabled: isVisible && (activeTab === 'financials' || activeTab === 'earnings'), staleTime: 900000 }
+  );
+
+  // Cross-provider screener membership (Trendlyne + MoneyControl + ETnow + ET Marketstats) --
+  // was previously only MC+Trendlyne, pulled off the getAlphaQuantDetail blob. getStockScreeners
+  // unions all 4 providers and, post the 2026-08-04/05 (source, scan_id) collision fix, carries
+  // correct per-provider classification.
+  const { data: stockScreenersAll } = trpc.getStockScreeners.useQuery(
+    { stockId: symbol },
+    { enabled: isVisible, staleTime: 900000 }
+  );
+
+  // Sector RRG (Relative Rotation Graph) context -- is this stock's sector currently Leading/
+  // Improving/Weakening/Lagging right now. Market-wide payload, filtered client-side to this
+  // stock's own sector below.
+  const { data: sectorRotation } = trpc.getSectorRotationIntel.useQuery(
+    undefined,
+    { enabled: isVisible, staleTime: 1800000 }
   );
 
   const { data: techD_fixed } = trpc.getMcTechnical.useQuery(
@@ -454,9 +511,16 @@ export const MCStockInfoPanel: React.FC<MCStockInfoPanelProps> = ({
 
   const mc = unifiedData;
   const alphaData = (unifiedData as any).score ? { score: (unifiedData as any).score, factors: (unifiedData as any).factors } : null;
-  const mcScreeners = (unifiedData as any).screeners?.moneycontrol || [];
-  const tlScreeners = (unifiedData as any).screeners?.trendlyne || [];
-  const allScreeners = [...mcScreeners, ...tlScreeners];
+  // Was MC + Trendlyne only, pulled off the getAlphaQuantDetail blob -- getStockScreeners
+  // (stockScreenersAll, fetched above) unions all 4 providers (+ ETnow, + ET Marketstats).
+  // ET Marketstats' finder carries no sentiment/screenpk field (its source data has no
+  // bull/bear signal, just membership) -- default both so every downstream consumer
+  // (ScreenerDetailsModal, the sentiment badge below) keeps working without a null check.
+  const allScreeners = (stockScreenersAll ?? []).map((s: any) => ({
+    ...s,
+    sentiment: s.sentiment ?? 'neutral',
+    screenpk: s.screenpk ?? s.id,
+  }));
 
   const hasAnyData = mc.technical || mc.equityCash || mc.stockPrice || mc.swot || mc.essentials || mc.mcInsights;
   if (!hasAnyData) {
@@ -478,7 +542,10 @@ export const MCStockInfoPanel: React.FC<MCStockInfoPanelProps> = ({
   const sp = mc.stockPrice;
   const swot = mc.swot;
   const essentials = mc.essentials;
-  const classification = mc.mcInsights?.classification;
+  // Renamed from `classification` to avoid colliding with unified_recommendations'
+  // Buy/Sell/Hold "classification" (see unifiedScore below) -- this is MoneyControl's own
+  // proprietary 0-100 stockScore/longDesc object, an unrelated concept with the same name.
+  const mcScoreClass = mc.mcInsights?.classification;
   const detailedInsights = mc.detailedInsights;
   const pv = mc.priceVolume;
   const ar = mc.analystRating;
@@ -499,7 +566,7 @@ export const MCStockInfoPanel: React.FC<MCStockInfoPanelProps> = ({
   const changePct = eq?.pricepercentchange || sp?.perChange || '—';
 
   const providerStatus = [
-    { name: 'MoneyControl', ok: !!eq || !!tech || !!classification },
+    { name: 'MoneyControl', ok: !!eq || !!tech || !!mcScoreClass },
     { name: 'Trendlyne', ok: !!trendlyneOverview || !!trendlyneTa },
     { name: 'TradeBrains', ok: !!tb },
     { name: 'NSE/NiftyTrader', ok: !!niftyTraderData || !!nseStockData },
@@ -539,6 +606,7 @@ export const MCStockInfoPanel: React.FC<MCStockInfoPanelProps> = ({
             <div className="text-[10px] font-black uppercase tracking-widest text-slate-500">
               {changePct ? `${parseFloat(String(changePct)) >= 0 ? '+' : ''}${changePct}%` : 'day move unavailable'}
             </div>
+            <PriceFreshnessBadge updatedAt={dataUpdatedAt} thresholdMs={90000} label="data" className="mt-0.5" />
           </div>
         </div>
 
@@ -563,6 +631,23 @@ export const MCStockInfoPanel: React.FC<MCStockInfoPanelProps> = ({
       {(!section || section === 'all' || section === 'overview') && (
         <div className="flex items-center justify-between flex-wrap gap-2">
           <div className="flex flex-wrap items-center gap-3">
+            {unifiedScore && (
+              <div className="flex items-center gap-2 pr-4 border-r border-slate-800">
+                <Compass className="w-4 h-4 text-indigo-400" />
+                <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Unified (Canonical)</span>
+                <ConvictionPill level={unifiedScore.conviction_level} />
+                {unifiedScore.unified_score != null && (
+                  <span className={cn(
+                    "text-[9px] font-black px-2 py-0.5 rounded uppercase",
+                    unifiedScore.unified_score >= 66 ? "bg-indigo-500/20 text-indigo-300" :
+                    unifiedScore.unified_score >= 34 ? "bg-slate-800 text-slate-400" :
+                    "bg-rose-500/10 text-rose-500"
+                  )}>
+                    {unifiedScore.classification ?? 'Hold'} · {Number(unifiedScore.unified_score).toFixed(1)}
+                  </span>
+                )}
+              </div>
+            )}
             <div className="flex items-center gap-2 pr-4 border-r border-slate-800">
               <Zap className="w-4 h-4 text-blue-500" />
               <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest">AlphaQuant V2</span>
@@ -583,14 +668,14 @@ export const MCStockInfoPanel: React.FC<MCStockInfoPanelProps> = ({
             <div className="flex items-center gap-2">
               <BrainCircuit className="w-4 h-4 text-emerald-500" />
               <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest">MoneyControl</span>
-              {classification && (
+              {mcScoreClass && (
                 <span className={cn(
                   "text-[9px] font-black px-2 py-0.5 rounded uppercase",
-                  classification.stockScore >= 70 ? "bg-emerald-500/10 text-emerald-500" :
-                  classification.stockScore >= 50 ? "bg-amber-500/10 text-amber-500" :
+                  mcScoreClass.stockScore >= 70 ? "bg-emerald-500/10 text-emerald-500" :
+                  mcScoreClass.stockScore >= 50 ? "bg-amber-500/10 text-amber-500" :
                   "bg-rose-500/10 text-rose-500"
                 )}>
-                  Score: {classification.stockScore}
+                  Score: {mcScoreClass.stockScore}
                 </span>
               )}
             </div>
@@ -637,6 +722,59 @@ export const MCStockInfoPanel: React.FC<MCStockInfoPanelProps> = ({
               </button>
             ))}
           </div>
+        </div>
+      )}
+
+      {/* ── Why: canonical score's own reasoning + engine coverage + sector rotation context ── */}
+      {(!section || section === 'all' || section === 'overview') && (unifiedScore?.trade_reasoning || sectorRotation?.rrg) && (
+        <div className="bg-slate-950/40 border border-slate-800/80 rounded-2xl p-3 space-y-2">
+          {unifiedScore?.trade_reasoning && (
+            <p className="text-[11px] text-slate-300 leading-relaxed">
+              <span className="text-indigo-400 font-black uppercase tracking-widest text-[9px] mr-1.5">Why:</span>
+              {unifiedScore.trade_reasoning}
+              {unifiedScore.engine_coverage_count != null && (
+                <span className="text-slate-600 ml-1.5 text-[10px]">
+                  ({unifiedScore.engine_coverage_count}/8 engines · {unifiedScore.computed_at})
+                </span>
+              )}
+            </p>
+          )}
+          {unifiedScore && (unifiedScore.entry_zone_low != null || unifiedScore.stop_loss != null) && (
+            <div className="flex flex-wrap items-center gap-3 text-[10px] font-mono pt-1 border-t border-slate-800/60">
+              {unifiedScore.entry_zone_low != null && (
+                <span className="text-slate-400">Entry: <span className="text-slate-200 font-bold">₹{Number(unifiedScore.entry_zone_low).toFixed(1)}–{Number(unifiedScore.entry_zone_high ?? unifiedScore.entry_zone_low).toFixed(1)}</span></span>
+              )}
+              {unifiedScore.target_1 != null && (
+                <span className="text-emerald-400">Target: <span className="font-bold">₹{Number(unifiedScore.target_1).toFixed(1)}</span>{unifiedScore.target_2 != null ? ` / ₹${Number(unifiedScore.target_2).toFixed(1)}` : ''}</span>
+              )}
+              {unifiedScore.stop_loss != null && (
+                <span className="text-rose-400">Stop: <span className="font-bold">₹{Number(unifiedScore.stop_loss).toFixed(1)}</span></span>
+              )}
+              {unifiedScore.risk_reward != null && (
+                <span className="text-slate-500">R:R {Number(unifiedScore.risk_reward).toFixed(1)}</span>
+              )}
+            </div>
+          )}
+          {(() => {
+            const sectorRow = (sectorRotation?.rrg as any[] | undefined)?.find((r) => r.sector === nseStockData?.sector);
+            if (!sectorRow) return null;
+            const quadrantColor: Record<string, string> = {
+              Leading: 'text-emerald-400 bg-emerald-500/10 border-emerald-500/20',
+              Improving: 'text-sky-400 bg-sky-500/10 border-sky-500/20',
+              Weakening: 'text-amber-400 bg-amber-500/10 border-amber-500/20',
+              Lagging: 'text-rose-400 bg-rose-500/10 border-rose-500/20',
+            };
+            return (
+              <div className="flex items-center gap-2 pt-1 border-t border-slate-800/60">
+                <Compass className="w-3.5 h-3.5 text-indigo-400 shrink-0" />
+                <span className="text-[10px] text-slate-500">Sector rotation — <span className="text-slate-300 font-semibold">{sectorRow.sector}</span> is currently</span>
+                <span className={cn("text-[9px] font-black px-2 py-0.5 rounded border uppercase", quadrantColor[sectorRow.quadrant] || "text-slate-400 bg-slate-800 border-slate-700")}>
+                  {sectorRow.quadrant ?? 'Unclassified'}
+                </span>
+              </div>
+            );
+          })()}
+          {unifiedScore && <StockTagRow p={unifiedScore} className="pt-1 border-t border-slate-800/60" />}
         </div>
       )}
 
@@ -970,10 +1108,10 @@ export const MCStockInfoPanel: React.FC<MCStockInfoPanelProps> = ({
           {/* Expert Classification & Checklist */}
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
             {/* MC Classification */}
-            {classification?.longDesc && (
+            {mcScoreClass?.longDesc && (
               <div className={cn("p-3 rounded-2xl border relative overflow-hidden flex flex-col justify-between",
-                classification.stockScore >= 70 ? "bg-emerald-500/5 border-emerald-500/20" :
-                classification.stockScore >= 50 ? "bg-amber-500/5 border-amber-500/20" :
+                mcScoreClass.stockScore >= 70 ? "bg-emerald-500/5 border-emerald-500/20" :
+                mcScoreClass.stockScore >= 50 ? "bg-amber-500/5 border-amber-500/20" :
                 "bg-rose-500/5 border-rose-500/20"
               )}>
                 <div className="absolute top-0 right-0 p-4 opacity-[0.03] pointer-events-none"><BrainCircuit className="w-16 h-16" /></div>
@@ -981,17 +1119,17 @@ export const MCStockInfoPanel: React.FC<MCStockInfoPanelProps> = ({
                   <p className="text-[9px] font-black text-emerald-500 uppercase tracking-widest mb-1.5 flex items-center gap-1.5">
                     <CheckCircle2 className="w-3.5 h-3.5" /> MC Expert Analysis
                   </p>
-                  <p className="text-[11px] text-slate-300 font-medium italic leading-relaxed">{classification.longDesc}</p>
+                  <p className="text-[11px] text-slate-300 font-medium italic leading-relaxed">{mcScoreClass.longDesc}</p>
                 </div>
                 <div className="flex items-center gap-3 mt-3 relative z-10">
                   <span className="text-[8px] font-black text-slate-400 uppercase tracking-widest">Score</span>
                   <div className="flex-1 h-1 bg-slate-800 rounded-full overflow-hidden">
-                    <motion.div initial={{ width: 0 }} animate={{ width: `${classification.stockScore}%` }}
-                      className={cn("h-full rounded-full", classification.stockScore >= 70 ? "bg-emerald-500" : classification.stockScore >= 50 ? "bg-amber-500" : "bg-rose-500")} />
+                    <motion.div initial={{ width: 0 }} animate={{ width: `${mcScoreClass.stockScore}%` }}
+                      className={cn("h-full rounded-full", mcScoreClass.stockScore >= 70 ? "bg-emerald-500" : mcScoreClass.stockScore >= 50 ? "bg-amber-500" : "bg-rose-500")} />
                   </div>
                   <span className={cn("text-[10px] font-black italic",
-                    classification.stockScore >= 70 ? "text-emerald-400" : classification.stockScore >= 50 ? "text-amber-400" : "text-rose-400"
-                  )}>{classification.stockScore}<span className="text-[7px] text-slate-400 font-bold ml-0.5">/100</span></span>
+                    mcScoreClass.stockScore >= 70 ? "text-emerald-400" : mcScoreClass.stockScore >= 50 ? "text-amber-400" : "text-rose-400"
+                  )}>{mcScoreClass.stockScore}<span className="text-[7px] text-slate-400 font-bold ml-0.5">/100</span></span>
                 </div>
               </div>
             )}
@@ -1208,6 +1346,42 @@ export const MCStockInfoPanel: React.FC<MCStockInfoPanelProps> = ({
               </div>
             );
           })()}
+
+          {/* AI-generated earnings-call tone/takeaway (concall_takeaways) — already wired into
+              v4/v5's stock pages, previously never reached this panel. Directly answers the
+              unstructured-text-LLM-edge opportunity this codebase's own quant-strategy audit
+              flagged (bounded component score, source-document-stamped, not a free-floating
+              verdict — shown as read-only qualitative context, not scored into anything). */}
+          {activeTab === 'earnings' && concallTakeaways && concallTakeaways.length > 0 && (
+            <Card title="Concall Takeaways (AI-Generated)" icon={BrainCircuit} className="mb-6">
+              <div className="space-y-3 pt-2">
+                {concallTakeaways.map((c: any, i: number) => (
+                  <div key={i} className="p-3 bg-slate-950 rounded-xl border border-slate-800/50">
+                    <div className="flex items-center justify-between gap-2 mb-1.5">
+                      <span className="text-[10px] font-black text-slate-300 uppercase tracking-widest">
+                        {c.quarter || c.fiscal_year || 'Latest concall'}
+                      </span>
+                      {c.tone_assessment && (
+                        <span className={cn(
+                          "text-[9px] font-black px-2 py-0.5 rounded uppercase",
+                          /positive|bullish/i.test(c.tone_assessment) ? "bg-emerald-500/10 text-emerald-400" :
+                          /negative|bearish|cautio/i.test(c.tone_assessment) ? "bg-rose-500/10 text-rose-400" :
+                          "bg-slate-800 text-slate-400"
+                        )}>
+                          {c.tone_assessment}
+                        </span>
+                      )}
+                    </div>
+                    <p className="text-[11px] text-slate-300 leading-relaxed">{c.key_takeaway}</p>
+                    <p className="text-[9px] text-slate-600 mt-1.5">
+                      {c.transcript_source ? `Source: ${c.transcript_source}` : ''}
+                      {c.announcement_date ? ` · ${c.announcement_date}` : ''}
+                    </p>
+                  </div>
+                ))}
+              </div>
+            </Card>
+          )}
 
           {/* High-Density Valuation & Key Metrics */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
@@ -1774,6 +1948,110 @@ export const MCStockInfoPanel: React.FC<MCStockInfoPanelProps> = ({
                   </div>
                 </div>
 
+              </div>
+            </Card>
+          )}
+
+          {/* Smart Money & Ownership Activity — superstar investors, institutional block-deal
+              trend, bulk/block deals (%-of-float), raw NSE insider filings. Four symbol-scoped
+              procedures already built and used elsewhere (SmartMoneyMonitor, v4/v5 stock pages)
+              that never reached this panel. */}
+          {(!!superstarActivity?.length || !!institutionalDeals?.length || !!blockDealsForStock?.length || !!insiderTxForStock?.length) && (
+            <Card title="Smart Money & Ownership Activity" icon={ShieldAlert}>
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 pt-2">
+                <div>
+                  <p className="text-[9px] font-black text-violet-400 uppercase tracking-widest border-l-2 border-violet-500 pl-2 mb-2">
+                    Superstar Investors
+                  </p>
+                  {!superstarActivity?.length ? (
+                    <p className="text-[10px] text-slate-500 italic">No tracked superstar-investor activity for {symbol}.</p>
+                  ) : (
+                    <div className="space-y-1.5 max-h-56 overflow-y-auto terminal-scrollbar pr-1">
+                      {superstarActivity.map((row: any, i: number) => {
+                        const activity = String(row.change_type ?? 'update').toUpperCase();
+                        const pctChange = row.pct_holding_change != null ? Number(row.pct_holding_change) : null;
+                        const isNeg = activity === 'EXIT' || (pctChange != null && pctChange < 0);
+                        return (
+                          <div key={`${row.investor_slug}-${i}`} className="flex items-center justify-between gap-2 p-2 bg-slate-950 rounded-lg border border-slate-800/50 text-[10px]">
+                            <span className="text-slate-300 font-semibold truncate">{String(row.investor_slug ?? 'investor').replace(/-/g, ' ')}</span>
+                            <span className={cn("font-mono font-bold shrink-0", isNeg ? "text-rose-400" : "text-emerald-400")}>
+                              {activity} {pctChange != null ? `${pctChange >= 0 ? '+' : ''}${pctChange.toFixed(2)}%` : ''}
+                            </span>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+
+                <div>
+                  <p className="text-[9px] font-black text-sky-400 uppercase tracking-widest border-l-2 border-sky-500 pl-2 mb-2">
+                    Institutional Deal Trend (30d)
+                  </p>
+                  {!institutionalDeals?.length ? (
+                    <p className="text-[10px] text-slate-500 italic">No topInvestor block-deal activity for {symbol} in the last 30 days.</p>
+                  ) : (
+                    <div className="space-y-1.5 max-h-56 overflow-y-auto terminal-scrollbar pr-1">
+                      {institutionalDeals.map((row: any, i: number) => (
+                        <div key={i} className="flex items-center justify-between gap-2 p-2 bg-slate-950 rounded-lg border border-slate-800/50 text-[10px]">
+                          <div className="min-w-0">
+                            <span className="text-slate-300 font-semibold truncate block">{row.counterparty ?? '—'}</span>
+                            <span className="text-slate-600 font-mono">{row.deal_date}</span>
+                          </div>
+                          <span className={cn("font-mono font-bold shrink-0", /buy/i.test(row.action ?? '') ? "text-emerald-400" : "text-rose-400")}>
+                            {row.action} ₹{Number(row.deal_value_cr_1w ?? 0).toFixed(1)}Cr
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                <div>
+                  <p className="text-[9px] font-black text-amber-400 uppercase tracking-widest border-l-2 border-amber-500 pl-2 mb-2">
+                    Bulk / Block Deals
+                  </p>
+                  {!blockDealsForStock?.length ? (
+                    <p className="text-[10px] text-slate-500 italic">No bulk/block deals on record for {symbol}.</p>
+                  ) : (
+                    <div className="space-y-1.5 max-h-56 overflow-y-auto terminal-scrollbar pr-1">
+                      {blockDealsForStock.map((row: any, i: number) => (
+                        <div key={i} className="flex items-center justify-between gap-2 p-2 bg-slate-950 rounded-lg border border-slate-800/50 text-[10px]">
+                          <div className="min-w-0">
+                            <span className="text-slate-300 font-semibold truncate block">{row.client_name ?? '—'}</span>
+                            <span className="text-slate-600 font-mono">{row.date} · {row.trade_type}</span>
+                          </div>
+                          <span className="font-mono font-bold shrink-0 text-slate-300">
+                            {row.pct_transacted != null ? `${Number(row.pct_transacted).toFixed(2)}% of float` : `₹${Number(row.value_cr ?? 0).toFixed(1)}Cr`}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                <div>
+                  <p className="text-[9px] font-black text-rose-400 uppercase tracking-widest border-l-2 border-rose-500 pl-2 mb-2">
+                    Insider / Promoter Filings (NSE PIT)
+                  </p>
+                  {!insiderTxForStock?.length ? (
+                    <p className="text-[10px] text-slate-500 italic">No insider/promoter filings on record for {symbol}.</p>
+                  ) : (
+                    <div className="space-y-1.5 max-h-56 overflow-y-auto terminal-scrollbar pr-1">
+                      {insiderTxForStock.map((tx: any, i: number) => (
+                        <div key={i} className="flex items-center justify-between gap-2 p-2 bg-slate-950 rounded-lg border border-slate-800/50 text-[10px]">
+                          <div className="min-w-0">
+                            <span className="text-slate-300 font-semibold truncate block">{tx.person_name} <span className="text-slate-600 font-normal">({tx.person_category})</span></span>
+                            <span className="text-slate-600 font-mono">{tx.transaction_date}</span>
+                          </div>
+                          <span className={cn("font-mono font-bold shrink-0", /buy|acqui/i.test(tx.transaction_mode ?? '') ? "text-emerald-400" : "text-rose-400")}>
+                            {tx.transaction_mode} · {tx.before_pct != null && tx.after_pct != null ? `${tx.before_pct}%→${tx.after_pct}%` : Number(tx.quantity ?? 0).toLocaleString('en-IN')}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
               </div>
             </Card>
           )}
@@ -3643,6 +3921,7 @@ export const MCStockInfoPanel: React.FC<MCStockInfoPanelProps> = ({
                       <th className="text-left px-2 py-2 font-medium">Type</th>
                       <th className="text-right px-2 py-2 font-medium">Ratio / Amount</th>
                       <th className="text-left px-2 py-2 font-medium">Announced</th>
+                      <th className="text-left px-2 py-2 font-medium">Verified</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-800/30">
@@ -3661,6 +3940,21 @@ export const MCStockInfoPanel: React.FC<MCStockInfoPanelProps> = ({
                             : '—'}
                         </td>
                         <td className="px-2 py-1.5 font-mono text-slate-500">{a.announce_date || '—'}</td>
+                        <td className="px-2 py-1.5">
+                          {/* Cross-checked against ohlcv_adjustment_factors -- see
+                              getCorporateActionHistory's crossCheck annotation. */}
+                          {a.crossCheck === 'confirmed_by_bhavcopy' || a.crossCheck === 'confirmed_via_this_source' ? (
+                            <span className="text-[9px] px-1.5 py-0.5 rounded font-bold text-emerald-400 bg-emerald-500/10" title="A matching adjustment factor exists in ohlcv_adjustment_factors within ±5 days / 2.5% ratio tolerance">
+                              ✓ Confirmed
+                            </span>
+                          ) : a.crossCheck === 'unconfirmed' ? (
+                            <span className="text-[9px] px-1.5 py-0.5 rounded font-bold text-amber-400 bg-amber-500/10" title="No matching bhavcopy-derived adjustment factor found for this action">
+                              ⚠ Unconfirmed
+                            </span>
+                          ) : (
+                            <span className="text-[9px] text-slate-600">—</span>
+                          )}
+                        </td>
                       </tr>
                     ))}
                   </tbody>
@@ -3706,9 +4000,15 @@ export const MCStockInfoPanel: React.FC<MCStockInfoPanelProps> = ({
       )}
 
       {/* ── Footer ── */}
-      <div className="text-center pt-4 border-t border-slate-800">
+      <div className="text-center pt-4 border-t border-slate-800 space-y-1">
         <p className="text-[8px] text-slate-700 font-bold uppercase tracking-widest">
-          Data sourced from MoneyControl{tb ? ' · TradeBrains' : ''} · Refreshes every 60s
+          Data sourced from MoneyControl{tb ? ' · TradeBrains' : ''}
+        </p>
+        {/* Was a hardcoded, inaccurate "Refreshes every 60s" claim -- real per-tab staleTime
+            ranges from 30s to 1h. The freshness badge next to the price header (dataUpdatedAt-
+            driven) is the honest per-request signal; this just says caching varies by tab. */}
+        <p className="text-[8px] text-slate-800 font-semibold uppercase tracking-widest">
+          Refresh cadence varies by tab (30s–60min) — see the freshness indicator above
         </p>
       </div>
 

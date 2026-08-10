@@ -213,6 +213,13 @@ const TABLE_FRESHNESS_CHECKS: TableFreshnessConfig[] = [
     category: 'fundamentals', critical: false, table: 'stock_earnings_beats', dateColumn: 'fetched_at', warnDays: 10 },
   { id: 'eps-surprise-history-recency', label: 'eps_surprise_history',
     category: 'fundamentals', critical: false, table: 'eps_surprise_history', dateColumn: 'fetched_at', warnDays: 10 },
+  // Written at request time (MCStockInfoPanel opens, see persistMcConsolidatedMetrics() in
+  // mcApiService.ts) alongside mc_general_metrics' source_api=mc_consolidated rows above --
+  // same "sparse by nature, no fixed schedule" reasoning, but this is its own dedicated table
+  // (not shared with another writer), so the generic factory's bare MAX(fetched_at) is safe
+  // here unlike mc_general_metrics, which needed the hand-rolled WHERE filter.
+  { id: 'mc-swot-history-freshness', label: 'mc_swot_history (per-stock strengths/weaknesses/opportunities/threats)',
+    category: 'fundamentals', critical: false, table: 'mc_swot_history', dateColumn: 'fetched_at', warnDays: 10 },
   // 2026-08-06 urls.txt data analysis (docs/url_explorer) -- see investsights_concall_fetcher.py.
   // Sparse by nature: the source's own "recent" window only has content when companies are
   // actively holding earnings calls, so a quiet week outside results season is not a failure.
@@ -768,6 +775,28 @@ export const DATA_QUALITY_CHECKS: DataQualityCheck[] = [
         return { status: 'warn', detail: `${breachedCount} of ${readyCount} regime(s) with sufficient history now sit below the 0.55 live-edge trust floor.` };
       }
       return { status: 'pass', detail: `All ${readyCount} regime(s) with sufficient history clear the live-edge trust floor.` };
+    },
+  },
+
+  // mc_general_metrics is a shared multi-source table (also written by ET Marketstats' daily
+  // sync) -- the TABLE_FRESHNESS_CHECKS factory only supports a bare MAX(dateColumn), which
+  // would report "fresh" off et_marketstats' own writes even if this source_api stopped
+  // writing entirely, so this needs the WHERE filter a hand-rolled check can express.
+  // mc_consolidated is written at request time (MCStockInfoPanel opens, see
+  // persistMcConsolidatedMetrics() in mcApiService.ts), not on a fixed schedule, so a quiet
+  // day with zero panel opens is expected -- soft-warn only, matching insider-trades-recency's
+  // "sparse by nature" style rather than failing.
+  {
+    id: 'mc-consolidated-metrics-freshness',
+    label: 'mc_general_metrics (source_api=mc_consolidated, per-stock MC scores)',
+    category: 'fundamentals',
+    critical: false,
+    sql: `SELECT MAX(fetched_at) AS last_date FROM mc_general_metrics WHERE source_api = 'mc_consolidated'`,
+    evaluate: (row, now) => {
+      const stale = tradingDaysStale(row?.last_date, now);
+      if (stale == null) return { status: 'warn', detail: 'No mc_consolidated rows written yet — expected until a stock panel has been opened at least once.' };
+      if (stale > 10) return { status: 'warn', detail: `Latest mc_consolidated metric row is ${fmtDays(stale)} old (sparse by nature, so a soft warn)` };
+      return { status: 'pass', detail: `Latest mc_consolidated metric row ${fmtDays(stale)} old` };
     },
   },
 

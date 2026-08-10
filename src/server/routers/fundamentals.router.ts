@@ -177,14 +177,50 @@ export const fundamentalsRouter = router({
     .input(z.object({ symbol: z.string() }))
     .query(async ({ input }) => fetchWithCache(`fund:corp-action-history:${input.symbol}`, async () => {
       try {
-        const rows = await dbAll<any>(
-          `SELECT action_type, announce_date, record_date, ratio_text, ratio_factor, amount, source
-           FROM stock_corporate_action_history
-           WHERE symbol = ?
-           ORDER BY COALESCE(record_date, announce_date) DESC`,
-          [input.symbol.toUpperCase()]
-        );
-        return rows || [];
+        const upperSymbol = input.symbol.toUpperCase();
+        const [rows, factorRows] = await Promise.all([
+          dbAll<any>(
+            `SELECT action_type, announce_date, record_date, ratio_text, ratio_factor, amount, source
+             FROM stock_corporate_action_history
+             WHERE symbol = ?
+             ORDER BY COALESCE(record_date, announce_date) DESC`,
+            [upperSymbol]
+          ),
+          // ohlcv_adjustment_factors carries both bhavcopy-heuristic-detected splits/bonuses
+          // (source='bhavcopy_prev_close', the DB default) and ones only ever found via this
+          // same MC ledger (source='mc_corporate_action', see ohlcv_adjust.cross_validate_
+          // with_mc_actions()). Cross-referencing here surfaces that reconciliation to the
+          // user instead of leaving it as an internal-only backtest-accuracy check.
+          dbAll<{ ex_date: string; factor: number; source: string }>(
+            `SELECT ex_date, factor, source FROM ohlcv_adjustment_factors WHERE symbol = ?`,
+            [upperSymbol]
+          ).catch(() => []),
+        ]);
+
+        // Mirrors ohlcv_adjust.py's own DATE_WINDOW_DAYS=5 / RATIO_TOL=0.025 constants -- keep
+        // both in sync with that file if either is ever retuned there.
+        const DATE_WINDOW_DAYS = 5;
+        const RATIO_TOL = 0.025;
+        const annotated = (rows || []).map((a: any) => {
+          const factor = Number(a.ratio_factor);
+          if (!a.record_date || !Number.isFinite(factor) || factor <= 0) {
+            return { ...a, crossCheck: 'not_applicable' as const };
+          }
+          const recordDate = new Date(a.record_date);
+          if (Number.isNaN(recordDate.getTime())) return { ...a, crossCheck: 'not_applicable' as const };
+          const match = (factorRows || []).find((f) => {
+            const exDate = new Date(f.ex_date);
+            if (Number.isNaN(exDate.getTime())) return false;
+            const daysApart = Math.abs((exDate.getTime() - recordDate.getTime()) / 86_400_000);
+            return daysApart <= DATE_WINDOW_DAYS && Math.abs(f.factor - factor) / factor <= RATIO_TOL;
+          });
+          if (!match) return { ...a, crossCheck: 'unconfirmed' as const };
+          return {
+            ...a,
+            crossCheck: match.source === 'mc_corporate_action' ? 'confirmed_via_this_source' as const : 'confirmed_by_bhavcopy' as const,
+          };
+        });
+        return annotated;
       } catch (e: any) {
         console.error("[Fundamentals Router] Error fetching corporate action history:", e);
         return [];
