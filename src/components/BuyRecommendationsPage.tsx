@@ -102,9 +102,9 @@ function StockCard({ p, onSelect }: { p: any; onSelect: (sym: string) => void })
           {p.engine_coverage_count != null && (
             <span
               className="text-[9px] text-slate-500"
-              title="How many of the ranker's component engines (screener/ml/confluence/technical/dl/cs/breakout) had data for this stock — higher means the unified_score is backed by more independent sources, not just one"
+              title="How many of the ranker's component engines (screener/ml/confluence/technical/dl/cs/breakout/smart_money) had data for this stock — higher means the unified_score is backed by more independent sources, not just one"
             >
-              {p.engine_coverage_count}/7 engines
+              {p.engine_coverage_count}/8 engines
             </span>
           )}
         </div>

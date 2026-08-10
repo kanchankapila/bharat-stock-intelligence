@@ -45,6 +45,14 @@ export const TopPicksWidget: React.FC<{ onSelectStock?: (symbol: string) => void
                     {p.sector && <span className="text-[10px] text-slate-500 truncate">{p.sector}</span>}
                   </div>
                   <div className="flex items-center gap-2 shrink-0">
+                    {p.engine_coverage_count != null && (
+                      <span
+                        className="text-[10px] text-slate-500"
+                        title="How many of the ranker's 8 component engines (screener/ml/confluence/technical/dl/cs/breakout/smart_money) had data for this stock — a better at-a-glance confidence signal than the blended score alone"
+                      >
+                        {p.engine_coverage_count}/8
+                      </span>
+                    )}
                     {winPct != null && (
                       <span className={cn('text-[10px] font-semibold', winPct >= 55 ? 'text-emerald-400' : 'text-amber-400')}>{winPct}% win</span>
                     )}

@@ -147,7 +147,7 @@ const SellStockPanel: React.FC<{ holding: any; onDone: () => void; onCancel: () 
 
   return (
     <div className="mt-2 p-3 bg-slate-950/60 border border-indigo-500/30 rounded-lg space-y-2">
-      <div className="grid grid-cols-3 gap-2">
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
         <div>
           <FieldLabel>Sell Qty</FieldLabel>
           <input type="number" min="0" max={holding.quantity} step="any" value={sellQty} onChange={(e) => setSellQty(e.target.value)} className={inputCls} />

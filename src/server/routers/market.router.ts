@@ -318,6 +318,22 @@ export const marketRouter = router({
       };
     }),
 
+  // Go/no-go return-alpha backtest status for any of this platform's forward-return
+  // classifiers (scripts/{flyer,breakout}_return_alpha_backtest.py --persist). Research
+  // status only, keyed off app_settings.`${modelKey}_backtest` -- a good purged-CV AUC is
+  // classification skill, not proof of tradeable edge (see each script's own docstring).
+  // Never treat this as a trading signal in the frontend; z.enum whitelists modelKey so a
+  // client can't probe arbitrary app_settings rows via this passthrough.
+  getModelBacktestStatus: publicProcedure
+    .input(z.object({ modelKey: z.enum(['flyer_classifier', 'breakout_classifier']) }))
+    .query(async ({ input }) => {
+      const row = await dbGet<{ value: string }>(
+        'SELECT value FROM app_settings WHERE key = ?',
+        [`${input.modelKey}_backtest`]
+      );
+      return row ? JSON.parse(row.value || '{}') : null;
+    }),
+
   refreshEarlyHoursSpotter: adminProcedure
     .mutation(async () => {
       console.log('[TRPC] Running preopen_fetcher.py manually...');
