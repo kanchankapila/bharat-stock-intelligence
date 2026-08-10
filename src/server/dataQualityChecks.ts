@@ -356,7 +356,11 @@ export const DATA_QUALITY_CHECKS: DataQualityCheck[] = [
     sql: `SELECT COUNT(*) AS total, COUNT(win_probability) AS scored, MAX(date) AS last_date
           FROM technical_signals WHERE date >= date('now','-3 days')`,
     evaluate: (row, now) => {
-      const stale = daysStale(row?.last_date, now);
+      // technical-signals-daily only runs 8:30am-4pm IST on NSE trading days (queues.ts), so a
+      // plain calendar-day gap false-fails every Monday morning purely from the Sat/Sun gap --
+      // the exact class already fixed for ohlcv/fii-dii/market-regimes freshness on 2026-08-03,
+      // just never migrated to this hand-rolled check. tradingDaysStale() subtracts the weekend.
+      const stale = tradingDaysStale(row?.last_date, now);
       const total = Number(row?.total) || 0;
       const coverage = safeRatio(row?.scored, row?.total);
       if (stale == null || total === 0) return { status: 'fail', detail: 'No technical_signals rows in the last 3 days' };
