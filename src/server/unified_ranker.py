@@ -1064,12 +1064,40 @@ class UnifiedRanker:
             # feeds the composite unified_recommendations rank/classification directly, so the
             # same raw-vs-regime-honest gap applied to ranking, not just sizing. COALESCE keeps
             # not-yet-calibrated rows working on the raw value (2026-07-18 gating follow-up).
+            #
+            # 2026-08-10: per-row edge-adjustment added (mirrors _get_win_probabilities exactly,
+            # see its docstring for the mechanism). Live-traced: HIGH_VOL's own isotonic
+            # calibrator collapsed calibrated_win_probability to a near-constant ~0.78 for 90%
+            # of the universe -- correctly reflecting HIGH_VOL's own live AUC of ~0.518 (no real
+            # edge, per regime_edge_status), not a broken calibration. That near-constant value
+            # was still carrying this engine's full regime weight (12-24%) in the
+            # RANKING/CLASSIFICATION blend even though the platform already knew, via
+            # regime_edge_status, that it had no edge right now -- only sizing ever consulted
+            # that knowledge. Shrinking here too collapses a no-edge regime's near-constant
+            # score toward neutral (50), so _blend's per-symbol renormalization leans on the
+            # OTHER engines instead of diluting the ranking with what amounts to noise.
             rows = self.conn.execute(
-                "SELECT symbol, AVG(COALESCE(calibrated_win_probability, win_probability)) AS p "
-                "FROM technical_signals WHERE date >= ? GROUP BY symbol",
+                "SELECT symbol, nifty_regime, COALESCE(calibrated_win_probability, win_probability) AS p "
+                "FROM technical_signals WHERE date >= ?",
                 (cutoff,),
             ).fetchall()
-            return {r['symbol']: float(r['p'] or 0) * 100 for r in rows}
+
+            from ml_calibration import is_edge_adjustment_enabled, edge_adjusted_probability, load_regime_edge_status
+            enabled = is_edge_adjustment_enabled(self.conn)
+            edge_status = load_regime_edge_status(self.conn) if enabled else {}
+
+            acc: dict = {}
+            for r in rows:
+                p = r['p']
+                # isfinite, not just `is None` -- see _get_win_probabilities' identical guard
+                # for the NaN-is-truthy failure mode this prevents.
+                if p is None or not math.isfinite(p):
+                    continue
+                p = float(p)
+                if enabled:
+                    p = edge_adjusted_probability(p, r['nifty_regime'], edge_status)
+                acc.setdefault(r['symbol'], []).append(p)
+            return {sym: (sum(v) / len(v)) * 100 for sym, v in acc.items() if v}
         except Exception as e:
             print(f"[UnifiedRanker] _get_ml_scores failed: {e}")
             self.conn.rollback()

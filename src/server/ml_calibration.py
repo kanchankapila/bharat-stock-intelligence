@@ -353,16 +353,32 @@ def regime_edge_weight(regime, edge_status: dict,
          distinct-days/episode floor) -- an un-ready regime's AUC may be one autocorrelated
          episode (the same concurrency problem recalibrate_win_probabilities already guards
          against for the isotonic fit).
-      2. the pooled '__GLOBAL__' auc, if present.
-      3. neither available -> weight = 1.0 (pass through unchanged). Absence of evidence is not
+      2. the 3-class collapsed regime's auc (collapse_regime5), if the 5-class regime's own row
+         isn't ready -- e.g. HIGH_VOL/CRASH borrowing BEAR's reading when they individually
+         lack enough history yet.
+      3. the pooled '__GLOBAL__' auc, if present.
+      4. neither available -> weight = 1.0 (pass through unchanged). Absence of evidence is not
          evidence of no edge.
+
+    Live bug, 2026-08-10: this used to collapse straight to the 3-class key BEFORE ever checking
+    edge_status, so HIGH_VOL/CRASH could never reach their OWN row even when
+    persist_regime_edge_status() had already computed and stored one (confirmed live: HIGH_VOL's
+    own AUC was 0.518 -- no edge -- while it was silently borrowing BEAR's 0.61-0.65 -- proven
+    edge -- meaning a HIGH_VOL-regime probability was never actually shrunk at all). The raw
+    5-class regime is now checked first, exactly as this docstring already claimed.
 
     weight = clip((auc_used - auc_random) / (auc_trust_floor - auc_random), 0, 1)
     """
-    reg3 = collapse_regime5(regime)
-    key = reg3 if reg3 is not None else 'UNKNOWN'
-    row = edge_status.get(key)
-    auc_used = row['auc'] if (row and row.get('ready') and row.get('auc') is not None) else None
+    def _ready_auc(key):
+        row = edge_status.get(key)
+        return row['auc'] if (row and row.get('ready') and row.get('auc') is not None) else None
+
+    raw_key = regime if regime is not None else 'UNKNOWN'
+    auc_used = _ready_auc(raw_key)
+    if auc_used is None:
+        reg3 = collapse_regime5(regime)
+        key = reg3 if reg3 is not None else 'UNKNOWN'
+        auc_used = _ready_auc(key)
     if auc_used is None:
         g = edge_status.get('__GLOBAL__')
         auc_used = g['auc'] if (g and g.get('auc') is not None) else None

@@ -1437,3 +1437,79 @@ def test_max_ml_bet_bo_bet_hedge_still_wins_in_no_edge_regime():
     # run() still lets a strong breakout signal drive sizing even though ml_bet is zero here.
     bo_bet = 0.42   # a representative strong cross-sectional breakout bet
     assert max(ml_bet, bo_bet) == bo_bet
+
+
+# ── _get_ml_scores: per-row regime edge adjustment (2026-08-10) ─────────────────
+# Live-traced finding: HIGH_VOL's own isotonic calibrator collapsed calibrated_win_probability
+# to a near-constant ~0.78 for 90% of the universe -- correctly reflecting HIGH_VOL's own live
+# AUC of ~0.518 (no real edge). _get_win_probabilities (sizing) already shrank this correctly;
+# _get_ml_scores (feeding the canonical RANKING/CLASSIFICATION blend) did not. Same fixture
+# pattern as _get_win_probabilities' own tests above.
+
+def test_get_ml_scores_flag_off_is_plain_average():
+    from unified_ranker import UnifiedRanker
+    conn = make_db()
+    _seed_edge_status_row(conn, 'BULL', auc=0.50, ready=True)  # present but flag is off
+    conn.execute("INSERT INTO technical_signals (symbol, date, win_probability, nifty_regime) "
+                 "VALUES ('X', date('now'), 0.85, 'BULL')")
+    conn.commit()
+    ranker = UnifiedRanker(conn=conn)
+    scores = ranker._get_ml_scores()
+    assert scores['X'] == pytest.approx(85.0)   # unchanged -- flag off, no per-row adjustment
+
+
+def test_get_ml_scores_edge_adjusts_per_row_regime_when_enabled():
+    from unified_ranker import UnifiedRanker
+    conn = make_db()
+    conn.execute("INSERT INTO app_settings (key, value) VALUES ('edge_adjustment_enabled', 'true')")
+    # 0.518 is the live-measured HIGH_VOL AUC (2026-08-09) -- essentially chance (AUC_RANDOM=0.50),
+    # so this is PARTIAL trust (weight=(0.518-0.50)/(0.55-0.50)=0.36), not a full shrink to 50.
+    _seed_edge_status_row(conn, 'HIGH_VOL', auc=0.518, ready=True)
+    _seed_edge_status_row(conn, 'BEAR', auc=0.61, ready=True)       # proven edge
+    conn.execute("INSERT INTO technical_signals (symbol, date, win_probability, nifty_regime) "
+                 "VALUES ('HVSYM', date('now'), 0.78, 'HIGH_VOL')")
+    conn.execute("INSERT INTO technical_signals (symbol, date, win_probability, nifty_regime) "
+                 "VALUES ('BEARSYM', date('now'), 0.72, 'BEAR')")
+    conn.commit()
+    ranker = UnifiedRanker(conn=conn)
+    scores = ranker._get_ml_scores()
+    assert scores['HVSYM'] == pytest.approx(60.08)   # 0.5 + 0.36*(0.78-0.5) = 0.6008, ×100
+    assert scores['BEARSYM'] == pytest.approx(72.0)  # unchanged -- BEAR has proven edge
+
+
+def test_get_ml_scores_high_vol_uses_its_own_auc_not_bears():
+    """Live bug, 2026-08-10 (regime_edge_weight): HIGH_VOL used to collapse straight to BEAR's
+    key BEFORE ever checking edge_status, so it silently borrowed BEAR's proven edge instead of
+    its own. With BEAR's AUC clearly above the trust floor and HIGH_VOL's clearly at/below the
+    random baseline, this proves HIGH_VOL's OWN (no-edge) row is what actually gets used."""
+    from unified_ranker import UnifiedRanker
+    conn = make_db()
+    conn.execute("INSERT INTO app_settings (key, value) VALUES ('edge_adjustment_enabled', 'true')")
+    _seed_edge_status_row(conn, 'HIGH_VOL', auc=0.50, ready=True)  # exactly chance -> weight=0
+    _seed_edge_status_row(conn, 'BEAR', auc=0.65, ready=True)      # strong proven edge
+    conn.execute("INSERT INTO technical_signals (symbol, date, win_probability, nifty_regime) "
+                 "VALUES ('HVSYM', date('now'), 0.90, 'HIGH_VOL')")
+    conn.commit()
+    ranker = UnifiedRanker(conn=conn)
+    scores = ranker._get_ml_scores()
+    # If HIGH_VOL still collapsed to BEAR's key, weight would be 1.0 and this would read 90.0.
+    assert scores['HVSYM'] == pytest.approx(50.0), (
+        "HIGH_VOL must use its own AUC (weight=0, full shrink to neutral), "
+        "not silently borrow BEAR's proven-edge weight"
+    )
+
+
+def test_get_ml_scores_nan_guard_still_applies_with_edge_adjustment():
+    """The per-row NaN guard (matching _get_win_probabilities' identical one) must still fire
+    even when edge-adjustment is enabled -- a NaN calibrated_win_probability must never reach
+    edge_adjusted_probability() or the acc[] accumulator."""
+    from unified_ranker import UnifiedRanker
+    conn = make_db()
+    conn.execute("INSERT INTO app_settings (key, value) VALUES ('edge_adjustment_enabled', 'true')")
+    _seed_edge_status_row(conn, 'HIGH_VOL', auc=0.518, ready=True)
+    conn.execute("INSERT INTO technical_signals (symbol, date, win_probability, nifty_regime) "
+                 "VALUES ('NANSYM', date('now'), 'NaN', 'HIGH_VOL')")
+    conn.commit()
+    ranker = UnifiedRanker(conn=conn)
+    scores = ranker._get_ml_scores()
+    assert 'NANSYM' not in scores
