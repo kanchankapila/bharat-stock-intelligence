@@ -14,6 +14,7 @@ import { SentimentPulseWidget } from '../components/SentimentPulseWidget';
 import { EarningsPulseWidget } from '../components/EarningsPulseWidget';
 import { HighFlyerWidget } from '../components/HighFlyerWidget';
 import { ModelBacktestStatusCard } from '../components/ModelBacktestStatusCard';
+import { ScreenerComboFinderCard } from '../components/ScreenerComboFinderCard';
 import { V4QuickNav } from '../components/V4QuickNav';
 import { TopPicksWidget } from '../components/TopPicksWidget';
 import { MoneyFlowPulseWidget } from '../components/MoneyFlowPulseWidget';
@@ -192,6 +193,7 @@ export const MarketCommandCenter: React.FC<MarketCommandCenterProps> = ({ onSele
         <ModelBacktestStatusCard modelKey="flyer_classifier" title="Flyer Model — Research Status" />
         <ModelBacktestStatusCard modelKey="breakout_classifier" title="Breakout Model — Research Status" />
       </div>
+      <ScreenerComboFinderCard />
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         <EarningsPulseWidget onSelectStock={onSelectStock} />
