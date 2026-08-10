@@ -1498,3 +1498,52 @@ def test_get_ml_scores_nan_guard_still_applies_with_edge_adjustment():
     ranker = UnifiedRanker(conn=conn)
     scores = ranker._get_ml_scores()
     assert 'NANSYM' not in scores
+
+
+class TestBuyFloorSelectivityReporting:
+    """The Buy floor is an ABSOLUTE cut on a score scale that is demonstrably not
+    stationary: live 2026-08-09 -> 08-10 the same floor selected 15.6% then 1.2% of the
+    universe, a 13x swing caused entirely by two unrelated engine fixes landing that day
+    (LSTM v4->v3 rollback, ml edge adjustment), not by anything in the Buy rule.
+
+    No score cut has measurable edge over the 30 dates with forward returns, so the floor
+    is deliberately NOT recalibrated -- but the drift is made visible so the next such
+    shift is caught on the day it happens rather than weeks later."""
+
+    @staticmethod
+    def _ur():
+        import unified_ranker as ur
+        return ur
+
+    def _rows(self, n_buy, n_other):
+        return ([{'classification': 'Buy'}] * n_buy) + ([{'classification': 'Hold'}] * n_other)
+
+    def test_reports_fraction_and_warns_when_far_too_few_buys(self, capsys):
+        # The real 2026-08-10 shape: 22 of 1842 cleared the floor.
+        frac = self._ur()._report_buy_floor_selectivity(self._rows(22, 1820))
+        out = capsys.readouterr().out
+        assert abs(frac - 22 / 1842) < 1e-9
+        assert 'buy-floor selectivity' in out
+        assert 'WARNING' in out, "a 1.2% selectivity must trip the tripwire"
+
+    def test_no_warning_inside_the_expected_band(self, capsys):
+        # The pre-drift shape: ~33% of the universe actionable.
+        frac = self._ur()._report_buy_floor_selectivity(self._rows(600, 1200))
+        out = capsys.readouterr().out
+        assert 0.32 < frac < 0.34
+        assert 'buy-floor selectivity' in out
+        assert 'WARNING' not in out
+
+    def test_warns_when_far_too_many_buys(self, capsys):
+        self._ur()._report_buy_floor_selectivity(self._rows(900, 100))
+        assert 'WARNING' in capsys.readouterr().out
+
+    def test_empty_result_set_is_a_clean_no_op(self, capsys):
+        assert self._ur()._report_buy_floor_selectivity([]) is None
+        assert capsys.readouterr().out == ''
+
+    def test_is_pure_reporting_and_never_mutates_rows(self):
+        rows = self._rows(5, 5)
+        before = [dict(r) for r in rows]
+        self._ur()._report_buy_floor_selectivity(rows)
+        assert rows == before, "reporting must never change a score, label or size"

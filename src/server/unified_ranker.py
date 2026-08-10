@@ -726,6 +726,47 @@ def edge_adjusted_weights(base_weights: dict, verdicts: dict) -> dict:
     return {e: w / total * sum(base_weights.values()) for e, w in adjusted.items()}
 
 
+#: Selectivity band the Buy floor is expected to land in, as a fraction of the scored
+#: universe. NOT a target to tune the floor to -- purely a tripwire. Measured live
+#: 2026-08-05..08-10, the same absolute floor selected 15.6% of the universe on 08-09 and
+#: 1.2% on 08-10, a 13x swing driven entirely by two unrelated (and correct) engine fixes
+#: landing the same day: the LSTM v4->v3 rollback (dl_score avg 78.5 -> 28.1) and the
+#: _get_ml_scores edge adjustment (ml_score avg 70.8 -> 47.9). Nothing about the Buy rule
+#: changed; the SCALE moved underneath it.
+#:
+#: That is the real fragility here: DIRECTIONLESS_BUY_FLOOR is an ABSOLUTE cut on a score
+#: whose distribution is not stationary -- it shifts whenever an engine is fixed, rolled
+#: back, or dropped by drop_zero_dispersion_engines(). Deliberately NOT "fixed" by
+#: recalibrating the constant or switching to a percentile: measured per-date over the 30
+#: dates with forward returns, NO score cut has significant edge (top-10 -0.242%/t=-0.57,
+#: top-20 +0.102%/t=0.33, top-50 -0.215%/t=-1.02, top-100 -0.001%/t=-0.01, top-200
+#: +0.160%/t=1.75 -- non-monotone, and the very top of the distribution is negative). There
+#: is no evidence supporting 70, 60, or any percentile, so changing it would be a guess.
+#: What CAN be done today is make the drift visible instead of discovering it as a 96%
+#: collapse in actionable recommendations weeks later.
+BUY_FLOOR_EXPECTED_SELECTIVITY = (0.03, 0.40)
+
+
+def _report_buy_floor_selectivity(results, band=BUY_FLOOR_EXPECTED_SELECTIVITY):
+    """Log what fraction of the scored universe cleared the Buy floor, and warn when the
+    absolute floor has drifted out of its expected selectivity band. Pure reporting -- it
+    never changes a score, a label, or a size."""
+    total = len(results)
+    if not total:
+        return None
+    buys = sum(1 for r in results if r.get('classification') in ('Buy', 'Strong Buy'))
+    frac = buys / total
+    lo, hi = band
+    print(f'[UnifiedRanker] buy-floor selectivity: {buys}/{total} ({frac*100:.1f}%) cleared '
+          f'DIRECTIONLESS_BUY_FLOOR={DIRECTIONLESS_BUY_FLOOR}')
+    if frac < lo or frac > hi:
+        print(f'[UnifiedRanker] WARNING: buy-floor selectivity {frac*100:.1f}% is outside the '
+              f'expected {lo*100:.0f}-{hi*100:.0f}% band. The floor is an ABSOLUTE cut on a '
+              f'non-stationary score scale -- check whether an engine was fixed, rolled back, '
+              f'or dropped for zero dispersion before reading this as a change in the market.')
+    return frac
+
+
 def _classify(score, bull, bear):
     """Directional label (matches stock_scores taxonomy the Top Rated UI renders). Direction
     comes from the blended 0-100 score. Screener counts are accepted and IGNORED here -- they
@@ -2164,6 +2205,7 @@ class UnifiedRanker:
         _tot = len(all_symbols)
         print('[UnifiedRanker] layer firing counts over %d candidates: %s' % (
             _tot, ', '.join(f'{k}={v} ({v/max(1,_tot)*100:.1f}%)' for k, v in fired.items())))
+        _report_buy_floor_selectivity(results)
         position_sizes = normalize_position_sizes(raw_sizes, sectors=sector_map)
 
         # Correlation-cluster cap (#27/#30 follow-up, 2026-08-05): the sector cap alone can miss
