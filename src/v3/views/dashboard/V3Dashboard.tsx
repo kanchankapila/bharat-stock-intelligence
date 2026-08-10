@@ -7,7 +7,8 @@ import {
   History, Plus, RefreshCw, Cpu, Radio, BarChart2,
   Search, ShieldAlert, Target, Sparkles, Layers, BookOpen,
   CheckCircle, ChevronDown, HelpCircle, Briefcase, Award,
-  Sliders, TrendingDown, Eye, PlusCircle, Check, X
+  Sliders, TrendingDown, Eye, PlusCircle, Check, X,
+  Users, CalendarClock, ShieldCheck, Star, Landmark, ShoppingBag, Mic2, Compass, Gift, Gauge,
 } from 'lucide-react';
 import { format } from 'date-fns';
 import { cn } from '../../../lib/utils';
@@ -333,7 +334,7 @@ export const V3Dashboard: React.FC<V3DashboardProps> = ({
   const [searchSymbol, setSearchSymbol] = useState(initialSymbol || 'RELIANCE');
   const [searchQuery, setSearchQuery] = useState('');
   const [showSuggestions, setShowSuggestions] = useState(false);
-  const [stockDetailTab, setStockDetailTab] = useState<'Technicals' | 'Fundamentals' | 'Options'>('Technicals');
+  const [stockDetailTab, setStockDetailTab] = useState<'Technicals' | 'Fundamentals' | 'Ownership' | 'Earnings' | 'Options'>('Technicals');
   
   // Bloomberg Terminal Command Bar States
   const [terminalInput, setTerminalInput] = useState('');
@@ -416,12 +417,56 @@ export const V3Dashboard: React.FC<V3DashboardProps> = ({
   const { data: featImportance } = trpc.getFeatureImportance.useQuery({ modelName: 'ensemble', topN: 8 });
 
   // Stock Intelligence Queries
-  const { data: unifiedDataRaw, isLoading: loadingUnified } = trpc.getAlphaQuantDetail.useQuery({ symbol: searchSymbol }, { enabled: !!searchSymbol });
+  const { data: unifiedDataRaw, isLoading: loadingUnified, dataUpdatedAt: unifiedDataUpdatedAt } = trpc.getAlphaQuantDetail.useQuery({ symbol: searchSymbol }, { enabled: !!searchSymbol });
   const unifiedData = unifiedDataRaw as any;
   const { data: niftyTraderData, isLoading: loadingNiftyTrader } = trpc.getNiftyTraderData.useQuery({ symbol: searchSymbol }, { enabled: !!searchSymbol });
   const { data: trendlyneOverview } = trpc.getTrendlyneOverview.useQuery({ symbol: searchSymbol }, { enabled: !!searchSymbol });
   const { data: fno } = trpc.getFnOSignals.useQuery({ symbol: searchSymbol }, { enabled: !!searchSymbol });
   const { data: stockOhlc } = trpc.getOHLCData.useQuery({ symbol: searchSymbol, dur: '6M' }, { enabled: !!searchSymbol });
+
+  // Company description + dividend/board-meeting event calendar -- these fields were previously
+  // read off `unifiedData` (getAlphaQuantDetail), whose response has neither companyProfileData
+  // nor eventsData at all (that shape only exists on getCompanyOverview's response), so those
+  // three cards below have silently rendered their empty-state fallback since this was written.
+  const { data: companyOverviewRaw } = trpc.getCompanyOverview.useQuery({ symbol: searchSymbol }, { enabled: !!searchSymbol });
+  const companyOverview = companyOverviewRaw as any;
+
+  // Real canonical unified_recommendations score -- previously absent entirely; ScoreGauge above
+  // shows the composite (per-timeframe stock_scores) score, correctly labeled "QUANT SCORE", so
+  // no rename was needed there, just adding the real one alongside it in the header.
+  const { data: unifiedScoreData } = trpc.getUnifiedScoreForSymbol.useQuery({ symbol: searchSymbol }, { enabled: !!searchSymbol });
+
+  // Sector Relative Rotation Graph -- market-wide payload, filtered client-side to
+  // currentStockData's own sector below (already available from the stocks prop, no extra
+  // symbol->sector lookup query needed).
+  const { data: sectorRotationData } = trpc.getSectorRotationIntel.useQuery(undefined, { staleTime: 1_800_000 });
+
+  // swot/chartPatterns/historicalRating/hitsMisses all live in the same getMcConsolidated
+  // response. Trendlyne's SWOT (trendlyneOverview.swot, already rendered below) already covers
+  // the SWOT need, so only chartPatterns/historicalRating/hitsMisses are read from this --
+  // adding a second, MC-sourced SWOT card alongside the existing one would be the exact
+  // same-category duplication this pass is meant to avoid.
+  const { data: mcConsolidated } = trpc.getMcConsolidated.useQuery({ symbol: searchSymbol }, { enabled: !!searchSymbol, staleTime: 3_600_000 });
+
+  // Ownership sub-tab -- shareholding %, insider filings, superstar-investor tracking, and
+  // transaction-level institutional/block-deal activity. None of this existed anywhere in V3's
+  // stock-intelligence view before.
+  const { data: shareholdingData } = trpc.getShareholding.useQuery({ symbol: searchSymbol }, { enabled: !!searchSymbol });
+  const { data: insiderTxData } = trpc.getInsiderTransactions.useQuery({ symbol: searchSymbol, limit: 25 }, { enabled: !!searchSymbol });
+  const { data: superstarActivityData } = trpc.getSuperstarInvestorActivity.useQuery({ symbol: searchSymbol, limit: 20 }, { enabled: !!searchSymbol });
+  const { data: institutionalDealsData } = trpc.getInstitutionalDealHistory.useQuery({ symbol: searchSymbol, days: 30 }, { enabled: !!searchSymbol });
+  const { data: blockDealsData } = trpc.getBlockDeals.useQuery({ symbol: searchSymbol, limit: 20 }, { enabled: !!searchSymbol });
+
+  // Earnings sub-tab -- analyst coverage, price targets, consensus, earnings estimates,
+  // concall takeaways, and the persisted + cross-checked corporate-action ledger. None of this
+  // existed anywhere in V3's stock-intelligence view before either -- the Dividends/Board
+  // Meetings cards above are a narrower, Trendlyne-event-calendar slice, not a substitute.
+  const { data: mcAnalystRatingData } = trpc.getMcAnalystRating.useQuery({ symbol: searchSymbol }, { enabled: !!searchSymbol });
+  const { data: mcPriceForecastData } = trpc.getMcPriceForecast.useQuery({ symbol: searchSymbol }, { enabled: !!searchSymbol });
+  const { data: mcEarningsForecastData } = trpc.getMcEarningsForecast.useQuery({ symbol: searchSymbol }, { enabled: !!searchSymbol });
+  const { data: concallTakeawaysData } = trpc.getConcallTakeaways.useQuery({ symbol: searchSymbol, limit: 8 }, { enabled: !!searchSymbol, staleTime: 900_000 });
+  const { data: actionHistoryData } = trpc.getCorporateActionHistory.useQuery({ symbol: searchSymbol }, { enabled: !!searchSymbol });
+  const { data: filedActionsData } = trpc.getFiledCorporateActionsCalendar.useQuery({ symbol: searchSymbol }, { enabled: !!searchSymbol });
 
   // Signal Engine Enqueue Mutation
   const enqueueSignalsMutation = trpc.enqueueSignals.useMutation();
@@ -583,6 +628,26 @@ export const V3Dashboard: React.FC<V3DashboardProps> = ({
     { key: 'opportunities', label: 'Opportunities', badgeColor: 'bg-blue-500/10 text-blue-400 border-blue-500/20', dot: '#3b82f6' },
     { key: 'threats', label: 'Threats', badgeColor: 'bg-amber-500/10 text-amber-400 border-amber-500/20', dot: amber },
   ] : [];
+
+  // Real canonical unified score + conviction (see unifiedScoreData query above)
+  const CONVICTION_META: Record<string, { label: string; color: string }> = {
+    S_ELITE:    { label: 'S — Elite',    color: 'text-emerald-400 bg-emerald-500/10 border-emerald-500/20' },
+    A_HIGH:     { label: 'A — High',     color: 'text-sky-400 bg-sky-500/10 border-sky-500/20' },
+    B_MEDIUM:   { label: 'B — Medium',   color: 'text-amber-400 bg-amber-500/10 border-amber-500/20' },
+    C_LOW:      { label: 'C — Low',      color: 'text-slate-400 bg-slate-700/40 border-slate-600/40' },
+    D_MARGINAL: { label: 'D — Marginal', color: 'text-zinc-500 bg-zinc-800/60 border-zinc-700/40' },
+  };
+  const unifiedScore = unifiedScoreData?.unified_score != null ? Number(unifiedScoreData.unified_score) : null;
+  const convictionMeta = unifiedScoreData?.conviction_level ? CONVICTION_META[unifiedScoreData.conviction_level] : null;
+
+  // Sector rotation -- filtered client-side to currentStockData's own sector.
+  const sectorRow = (sectorRotationData as any)?.rrg?.find((r: any) => r.sector === currentStockData?.sector);
+
+  // chartPatterns/historicalRating/hitsMisses from the shared getMcConsolidated response.
+  const mcChartPatterns = (mcConsolidated as any)?.chartPatterns;
+  const mcHistoricalRating = (mcConsolidated as any)?.historicalRating;
+  const mcHrSnapshot = mcHistoricalRating?.data?.[0];
+  const mcHitsMisses = (mcConsolidated as any)?.hitsMisses;
 
   // Trendlyne Checklist variables
   const checklistData = trendlyneOverview?.checklist?.checklistData || {};
@@ -1447,21 +1512,47 @@ Based on the multi-factor scoring array and SWOT profiles, ${symbol} displays ${
                   {/* Stock Profile Header Details */}
                   <div className="glass border border-slate-800/60 rounded-2xl p-5 flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
                     <div>
-                      <div className="flex items-center gap-3">
+                      <div className="flex items-center gap-3 flex-wrap">
                         <span className="text-2xl font-black text-slate-100 font-mono tracking-tighter uppercase italic">{searchSymbol}</span>
                         <span className="text-xs bg-indigo-500/10 border border-indigo-500/20 text-indigo-400 px-2 py-0.5 rounded font-bold tracking-widest uppercase font-mono">
                           {currentStockData?.sector || niftyTraderData?.analysisData?.symbolData?.industry_name || 'Stock'}
                         </span>
+                        {unifiedScore != null && (
+                          <span className={cn("text-[10px] px-2 py-0.5 rounded font-black uppercase tracking-widest font-mono border",
+                            unifiedScore >= 66 ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/20" :
+                            unifiedScore >= 34 ? "bg-slate-800 text-slate-400 border-slate-700" :
+                            "bg-rose-500/10 text-rose-500 border-rose-500/20"
+                          )}>
+                            Unified {unifiedScoreData?.classification ?? 'Hold'} · {unifiedScore.toFixed(1)}
+                          </span>
+                        )}
+                        {convictionMeta && (
+                          <span className={cn("text-[9px] px-2 py-0.5 rounded-full font-black uppercase tracking-widest font-mono border", convictionMeta.color)}>
+                            {convictionMeta.label}
+                          </span>
+                        )}
                       </div>
                       <h4 className="text-xs font-bold text-slate-400 mt-1 uppercase">
                         {currentStockData?.name || niftyTraderData?.analysisData?.symbolData?.company_name || 'NSE Equities'}
                       </h4>
+                      {sectorRow && (
+                        <div className="flex items-center gap-1.5 mt-2 text-[9px] font-mono">
+                          <Compass className="w-3 h-3 text-indigo-400 shrink-0" />
+                          <span className="text-slate-500">Sector rotation — <span className="text-slate-300 font-bold">{sectorRow.sector}</span> is currently</span>
+                          <span className="text-slate-300 font-black uppercase bg-slate-900 border border-slate-800 px-1.5 py-0.5 rounded">{sectorRow.quadrant ?? 'Unclassified'}</span>
+                        </div>
+                      )}
                     </div>
 
                     <div className="flex gap-6 text-right select-none font-mono">
                       <div>
                         <span className="text-[9px] text-slate-500 font-black block">LTP PRICE</span>
                         <span className="text-xl font-black text-slate-200">₹{currentStockPrice.toFixed(2)}</span>
+                        {unifiedDataUpdatedAt ? (
+                          <span className={cn("text-[8px] block mt-0.5 font-bold", (Date.now() - unifiedDataUpdatedAt) > 90000 ? "text-rose-500" : "text-slate-600")}>
+                            {Math.round((Date.now() - unifiedDataUpdatedAt) / 1000)}s ago
+                          </span>
+                        ) : null}
                       </div>
                       <div>
                         <span className="text-[9px] text-slate-500 font-black block">CHANGE</span>
@@ -1478,6 +1569,16 @@ Based on the multi-factor scoring array and SWOT profiles, ${symbol} displays ${
                     </div>
                   </div>
 
+                  {unifiedScoreData?.trade_reasoning && (
+                    <div className="glass border border-slate-800/60 rounded-2xl p-3 text-[11px] text-slate-300 leading-relaxed font-mono">
+                      <span className="text-indigo-400 font-black uppercase tracking-widest text-[9px] mr-1.5">Why:</span>
+                      {unifiedScoreData.trade_reasoning}
+                      {unifiedScoreData.engine_coverage_count != null && (
+                        <span className="text-slate-600 ml-1.5">({unifiedScoreData.engine_coverage_count}/8 engines)</span>
+                      )}
+                    </div>
+                  )}
+
                   <WhyThisPick symbol={searchSymbol} />
 
                   {/* Stock detail tabs */}
@@ -1485,6 +1586,8 @@ Based on the multi-factor scoring array and SWOT profiles, ${symbol} displays ${
                     {[
                       { id: 'Technicals', label: 'Technicals', icon: BarChart2 },
                       { id: 'Fundamentals', label: 'Fundamentals & SWOT', icon: BookOpen },
+                      { id: 'Ownership', label: 'Ownership', icon: Users },
+                      { id: 'Earnings', label: 'Earnings & Analyst', icon: CalendarClock },
                       { id: 'Options', label: 'Derivatives (F&O)', icon: Target }
                     ].map(st => {
                       const Icon = st.icon;
@@ -1611,6 +1714,48 @@ Based on the multi-factor scoring array and SWOT profiles, ${symbol} displays ${
 
                       </div>
 
+                      {/* MC Historical Rating sentiment + Chart Patterns Detected */}
+                      {mcHrSnapshot?.currSentiment && (() => {
+                        const isBull = /bullish/i.test(mcHrSnapshot.currSentiment);
+                        const isBear = /bearish/i.test(mcHrSnapshot.currSentiment);
+                        return (
+                          <div className={cn("p-3 rounded-2xl border flex items-center justify-between gap-3 text-xs font-mono",
+                            isBull ? "bg-emerald-500/5 border-emerald-500/20" : isBear ? "bg-rose-500/5 border-rose-500/20" : "glass border-slate-800/60"
+                          )}>
+                            <span className="text-slate-500 uppercase tracking-widest text-[9px] font-black">MC Historical Rating — sentiment on {mcHrSnapshot.currdate ?? '—'}</span>
+                            <span className={cn("font-black italic", isBull ? "text-emerald-400" : isBear ? "text-rose-400" : "text-slate-300")}>
+                              {mcHrSnapshot.currSentiment} @ ₹{mcHrSnapshot.closePrice}
+                            </span>
+                          </div>
+                        );
+                      })()}
+
+                      {Array.isArray(mcChartPatterns?.data) && mcChartPatterns.data.length > 0 && (
+                        <div className="glass border border-slate-800/60 rounded-2xl p-5">
+                          <SectionLabel>
+                            <span className="inline-flex items-center gap-1.5"><Gauge className="w-3 h-3" /> Chart Patterns Detected (MoneyControl)</span>
+                          </SectionLabel>
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                            {mcChartPatterns.data.map((p: any, i: number) => {
+                              let meta: any = {};
+                              try { meta = JSON.parse(p.meta_data || '{}'); } catch { /* ignore malformed meta_data */ }
+                              const isBuy = meta.pattern_type === 'buy';
+                              return (
+                                <div key={i} className="p-3 bg-slate-900/30 border border-slate-800 rounded-xl font-mono">
+                                  <div className="flex items-center justify-between gap-2">
+                                    <span className="text-[10px] font-black text-slate-200 truncate">{p.pattern_name}</span>
+                                    {meta.target_return_prcnt != null && <span className="text-xs font-black text-emerald-400">+{meta.target_return_prcnt}%</span>}
+                                  </div>
+                                  <div className={cn("text-[9px] font-bold mt-0.5", isBuy ? "text-emerald-400" : "text-rose-400")}>
+                                    {p.comment} · {p.p_status} · {p.time_frame}
+                                  </div>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      )}
+
                     </div>
                   )}
 
@@ -1657,7 +1802,7 @@ Based on the multi-factor scoring array and SWOT profiles, ${symbol} displays ${
                               </div>
                             </div>
                             <p className="text-[11px] text-slate-300 leading-relaxed font-medium">
-                              {unifiedData?.companyProfileData?.companyDescription || 'Cognitive profile is compiling details from latest exchange filings. Growth prospects remain inline with core sector indices.'}
+                              {companyOverview?.companyProfileData?.companyDescription || 'Cognitive profile is compiling details from latest exchange filings. Growth prospects remain inline with core sector indices.'}
                             </p>
                           </div>
                           
@@ -1838,8 +1983,8 @@ Based on the multi-factor scoring array and SWOT profiles, ${symbol} displays ${
                         <div className="glass border border-slate-800/60 rounded-2xl p-5">
                           <SectionLabel>Dividends declared</SectionLabel>
                           <div className="space-y-2 mt-2 font-mono text-[10px]">
-                            {unifiedData?.eventsData?.dividendTableData?.length ? (
-                              unifiedData.eventsData.dividendTableData.slice(0, 4).map((d: any, i: number) => (
+                            {companyOverview?.eventsData?.dividendTableData?.length ? (
+                              companyOverview.eventsData.dividendTableData.slice(0, 4).map((d: any, i: number) => (
                                 <div key={i} className="flex justify-between items-center p-2.5 bg-slate-900/30 border border-slate-800 rounded-xl">
                                   <div>
                                     <span className="text-[8px] font-black text-amber-400 uppercase tracking-widest">{d.dividendType}</span>
@@ -1857,8 +2002,8 @@ Based on the multi-factor scoring array and SWOT profiles, ${symbol} displays ${
                         <div className="glass border border-slate-800/60 rounded-2xl p-5">
                           <SectionLabel>Board Meetings Calendar</SectionLabel>
                           <div className="space-y-2 mt-2 font-mono text-[10px]">
-                            {unifiedData?.eventsData?.boardMeetingTableData?.length ? (
-                              unifiedData.eventsData.boardMeetingTableData.slice(0, 4).map((meeting: any, i: number) => (
+                            {companyOverview?.eventsData?.boardMeetingTableData?.length ? (
+                              companyOverview.eventsData.boardMeetingTableData.slice(0, 4).map((meeting: any, i: number) => (
                                 <div key={i} className="flex justify-between items-center p-2.5 bg-slate-900/30 border border-slate-800 rounded-xl">
                                   <span className="font-bold text-slate-300 w-48 truncate leading-tight">{meeting.purpose}</span>
                                   <span className="text-[9px] text-slate-400 bg-slate-950 px-2 py-0.5 border border-slate-800 rounded shrink-0">{meeting.boardMeetDate}</span>
@@ -1867,6 +2012,319 @@ Based on the multi-factor scoring array and SWOT profiles, ${symbol} displays ${
                             ) : (
                               <div className="text-slate-500 text-center py-6 font-bold uppercase tracking-widest text-[9px]">No upcoming board meetings scheduled</div>
                             )}
+                          </div>
+                        </div>
+                      </div>
+
+                    </div>
+                  )}
+
+                  {/* ── STOCK OWNERSHIP TAB ── */}
+                  {stockDetailTab === 'Ownership' && (
+                    <div className="space-y-6">
+
+                      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+                        {/* Shareholding Pattern */}
+                        <div className="lg:col-span-5 glass border border-slate-800/60 rounded-2xl p-5">
+                          <SectionLabel>
+                            <span className="inline-flex items-center gap-1.5"><Users className="w-3 h-3" /> Shareholding Pattern</span>
+                          </SectionLabel>
+                          {(() => {
+                            const sh: any = (shareholdingData as any)?.data ?? shareholdingData;
+                            const rows: [string, any][] = [
+                              ['Promoter %', sh?.summary?.promoters?.percentage ?? sh?.promoter_pct],
+                              ['FII %', sh?.summary?.fii?.percentage ?? sh?.fii_pct],
+                              ['DII %', sh?.summary?.dii?.percentage ?? sh?.dii_pct],
+                              ['MF %', sh?.summary?.mf?.percentage ?? sh?.mf_pct],
+                              ['Pledge %', sh?.summary?.pledge?.percentage ?? sh?.pledge_pct],
+                            ];
+                            if (!sh) return <div className="text-slate-500 text-center py-8 uppercase font-black font-mono tracking-widest text-[10px]">No shareholding data captured</div>;
+                            return (
+                              <div className="grid grid-cols-2 gap-3 font-mono">
+                                {rows.map(([label, value]) => (
+                                  <div key={label} className="p-3 bg-slate-900/30 border border-slate-800 rounded-xl">
+                                    <span className="text-[8px] font-black text-slate-500 uppercase tracking-widest block">{label}</span>
+                                    <span className={cn("text-sm font-black block mt-1", label === 'Pledge %' && Number(value) > 0 ? "text-rose-400" : "text-slate-200")}>
+                                      {value != null ? `${Number(value).toFixed(2)}%` : '—'}
+                                    </span>
+                                  </div>
+                                ))}
+                              </div>
+                            );
+                          })()}
+                        </div>
+
+                        {/* Insider / Promoter Transactions */}
+                        <div className="lg:col-span-7 glass border border-slate-800/60 rounded-2xl p-5">
+                          <SectionLabel>
+                            <span className="inline-flex items-center gap-1.5"><ShieldCheck className="w-3 h-3" /> Insider / Promoter Transactions (NSE PIT)</span>
+                          </SectionLabel>
+                          <div className="space-y-2 max-h-[220px] overflow-y-auto pr-1 terminal-scrollbar font-mono">
+                            {(insiderTxData as any[] ?? []).length === 0 ? (
+                              <div className="text-slate-500 text-center py-8 uppercase font-black font-mono tracking-widest text-[10px]">No insider transactions recorded</div>
+                            ) : (insiderTxData as any[]).map((tx: any, i: number) => (
+                              <div key={i} className="flex items-center justify-between text-[10px] border-b border-slate-800/40 pb-1.5">
+                                <div className="min-w-0">
+                                  <div className="text-slate-200 truncate">{tx.person_name} <span className="text-slate-600">({tx.person_category})</span></div>
+                                  <div className="text-slate-600">{tx.transaction_date}</div>
+                                </div>
+                                <span className={cn("font-black shrink-0 ml-2", /buy|acqui/i.test(tx.transaction_mode ?? '') ? "text-emerald-400" : "text-rose-400")}>
+                                  {tx.transaction_mode} · {Number(tx.quantity ?? 0).toLocaleString('en-IN')}
+                                </span>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="glass border border-slate-800/60 rounded-2xl p-5">
+                        <SectionLabel>
+                          <span className="inline-flex items-center gap-1.5"><Star className="w-3 h-3" /> Superstar Investor Activity (InvestSights)</span>
+                        </SectionLabel>
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 max-h-[220px] overflow-y-auto pr-1 terminal-scrollbar font-mono">
+                          {(superstarActivityData as any[] ?? []).length === 0 ? (
+                            <div className="text-slate-500 text-center py-8 uppercase font-black font-mono tracking-widest text-[10px] sm:col-span-2">No superstar investor activity recorded</div>
+                          ) : (superstarActivityData as any[]).map((row: any, i: number) => {
+                            const activity = String(row.change_type ?? 'update').toUpperCase();
+                            const pctChange = row.pct_holding_change != null ? Number(row.pct_holding_change) : null;
+                            const isNeg = activity === 'EXIT' || (pctChange != null && pctChange < 0);
+                            return (
+                              <div key={`${row.investor_slug}-${i}`} className="p-2.5 bg-slate-900/30 border border-slate-800 rounded-xl">
+                                <div className="flex items-center justify-between gap-2">
+                                  <span className="text-[10px] font-bold text-slate-200 truncate">{String(row.investor_slug ?? 'investor').replace(/-/g, ' ')}</span>
+                                  <span className={cn("text-[9px] font-black uppercase px-1.5 py-0.5 rounded-full border shrink-0", isNeg ? "text-rose-400 border-rose-800/60 bg-rose-500/10" : "text-emerald-400 border-emerald-800/60 bg-emerald-500/10")}>
+                                    {activity}
+                                  </span>
+                                </div>
+                                <div className="flex flex-wrap gap-x-3 gap-y-0.5 mt-1 text-[9px] text-slate-500">
+                                  <span>Holding: <span className="text-slate-300">{row.curr_pct_holding != null ? `${Number(row.curr_pct_holding).toFixed(2)}%` : '—'}</span></span>
+                                  <span>Change: <span className={isNeg ? "text-rose-400" : "text-emerald-400"}>{pctChange != null ? `${pctChange >= 0 ? '+' : ''}${pctChange.toFixed(2)}%` : '—'}</span></span>
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+
+                      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                        <div className="glass border border-slate-800/60 rounded-2xl p-5">
+                          <SectionLabel>
+                            <span className="inline-flex items-center gap-1.5"><Landmark className="w-3 h-3" /> Institutional Deal Trend (30d)</span>
+                          </SectionLabel>
+                          <div className="space-y-2 max-h-[220px] overflow-y-auto pr-1 terminal-scrollbar font-mono">
+                            {(institutionalDealsData as any[] ?? []).length === 0 ? (
+                              <div className="text-slate-500 text-center py-8 uppercase font-black font-mono tracking-widest text-[10px]">No topInvestor block-deal activity in the last 30 days</div>
+                            ) : (institutionalDealsData as any[]).map((row: any, i: number) => (
+                              <div key={i} className="flex items-center justify-between text-[10px] border-b border-slate-800/40 pb-1.5">
+                                <div className="min-w-0">
+                                  <div className="text-slate-200 truncate">{row.counterparty ?? '—'}</div>
+                                  <div className="text-slate-600">{row.deal_date}</div>
+                                </div>
+                                <span className={cn("font-black shrink-0 ml-2", /buy/i.test(row.action ?? '') ? "text-emerald-400" : "text-rose-400")}>
+                                  {row.action} ₹{Number(row.deal_value_cr_1w ?? 0).toFixed(1)}Cr
+                                </span>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+
+                        <div className="glass border border-slate-800/60 rounded-2xl p-5">
+                          <SectionLabel>
+                            <span className="inline-flex items-center gap-1.5"><ShoppingBag className="w-3 h-3" /> Bulk / Block Deals</span>
+                          </SectionLabel>
+                          <div className="space-y-2 max-h-[220px] overflow-y-auto pr-1 terminal-scrollbar font-mono">
+                            {(blockDealsData as any[] ?? []).length === 0 ? (
+                              <div className="text-slate-500 text-center py-8 uppercase font-black font-mono tracking-widest text-[10px]">No bulk/block deals on record</div>
+                            ) : (blockDealsData as any[]).map((row: any, i: number) => (
+                              <div key={i} className="flex items-center justify-between text-[10px] border-b border-slate-800/40 pb-1.5">
+                                <div className="min-w-0">
+                                  <div className="text-slate-200 truncate">{row.client_name ?? '—'}</div>
+                                  <div className="text-slate-600">{row.date} · {row.trade_type}</div>
+                                </div>
+                                <span className="font-black shrink-0 ml-2 text-slate-300">
+                                  {row.pct_transacted != null ? `${Number(row.pct_transacted).toFixed(2)}% of float` : `₹${Number(row.value_cr ?? 0).toFixed(1)}Cr`}
+                                </span>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      </div>
+
+                    </div>
+                  )}
+
+                  {/* ── STOCK EARNINGS & ANALYST COVERAGE TAB ── */}
+                  {stockDetailTab === 'Earnings' && (
+                    <div className="space-y-6">
+
+                      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                        <div className="glass border border-slate-800/60 rounded-2xl p-5">
+                          <SectionLabel>Analyst Rating & Price Target</SectionLabel>
+                          {(() => {
+                            const rating: any = mcAnalystRatingData;
+                            const target: any = mcPriceForecastData;
+                            const hasRating = rating?.finalRating;
+                            const hasTarget = target && (target.high || target.mean || target.low);
+                            if (!hasRating && !hasTarget) {
+                              return <div className="text-slate-500 text-center py-8 uppercase font-black font-mono tracking-widest text-[10px]">No analyst coverage captured yet</div>;
+                            }
+                            return (
+                              <div className="space-y-3 font-mono">
+                                {hasRating && (
+                                  <div className="flex items-center justify-between">
+                                    <div>
+                                      <span className={cn("text-sm font-black uppercase", /buy/i.test(rating.finalRating) ? "text-emerald-400" : /sell/i.test(rating.finalRating) ? "text-rose-400" : "text-amber-400")}>
+                                        {rating.finalRating}
+                                      </span>
+                                      <div className="text-[9px] text-slate-500 mt-0.5">{rating.analystCount} analysts covering</div>
+                                    </div>
+                                  </div>
+                                )}
+                                {hasTarget && (
+                                  <div className="grid grid-cols-3 gap-2 pt-2 border-t border-slate-800/60">
+                                    <div className="p-2.5 bg-slate-900/30 border border-slate-800 rounded-xl text-center">
+                                      <span className="text-[8px] font-black text-slate-500 block">LOW</span>
+                                      <span className="text-xs font-black text-rose-400 block mt-1">₹{target.low ?? '—'}</span>
+                                    </div>
+                                    <div className="p-2.5 bg-slate-900/30 border border-slate-800 rounded-xl text-center">
+                                      <span className="text-[8px] font-black text-slate-500 block">MEAN</span>
+                                      <span className="text-xs font-black text-slate-100 block mt-1">₹{target.mean ?? '—'}</span>
+                                    </div>
+                                    <div className="p-2.5 bg-slate-900/30 border border-slate-800 rounded-xl text-center">
+                                      <span className="text-[8px] font-black text-slate-500 block">HIGH</span>
+                                      <span className="text-xs font-black text-emerald-400 block mt-1">₹{target.high ?? '—'}</span>
+                                    </div>
+                                  </div>
+                                )}
+                              </div>
+                            );
+                          })()}
+                        </div>
+
+                        <div className="glass border border-slate-800/60 rounded-2xl p-5">
+                          <SectionLabel>Earnings Estimates (latest period)</SectionLabel>
+                          {(() => {
+                            const forecast: any = mcEarningsForecastData;
+                            const latest = (rows?: any[]) => (rows && rows.length > 0 ? rows[rows.length - 1] : null);
+                            const items: [string, any][] = [
+                              ['EPS', latest(forecast?.eps)], ['Net Profit', latest(forecast?.netProfit)], ['Revenue', latest(forecast?.revenue)],
+                            ];
+                            const any_ = items.some(([, row]) => row);
+                            if (!any_) return <div className="text-slate-500 text-center py-8 uppercase font-black font-mono tracking-widest text-[10px]">No earnings estimate data captured</div>;
+                            return (
+                              <div className="space-y-2 font-mono">
+                                {items.map(([label, row]) => row && (
+                                  <div key={label} className="p-2.5 bg-slate-900/30 border border-slate-800 rounded-xl">
+                                    <div className="flex items-center justify-between text-[9px] text-slate-500 uppercase tracking-widest mb-1">
+                                      <span>{label}</span><span>{row.date}</span>
+                                    </div>
+                                    <div className="grid grid-cols-4 gap-2 text-center">
+                                      <div><div className="text-[10px] font-black text-slate-100">{row.avg}</div><div className="text-[7px] text-slate-600">AVG</div></div>
+                                      <div><div className="text-[10px] font-black text-rose-400">{row.low}</div><div className="text-[7px] text-slate-600">LOW</div></div>
+                                      <div><div className="text-[10px] font-black text-emerald-400">{row.high}</div><div className="text-[7px] text-slate-600">HIGH</div></div>
+                                      <div><div className="text-[10px] font-black text-indigo-300">{row.actual || '—'}</div><div className="text-[7px] text-slate-600">ACTUAL</div></div>
+                                    </div>
+                                  </div>
+                                ))}
+                              </div>
+                            );
+                          })()}
+                        </div>
+                      </div>
+
+                      {mcHitsMisses?.list && mcHitsMisses.list.length > 0 && (
+                        <div className="glass border border-slate-800/60 rounded-2xl p-5">
+                          <SectionLabel>Earnings Hits & Misses (EPS estimate track record)</SectionLabel>
+                          <div className="overflow-x-auto terminal-scrollbar">
+                            <table className="w-full text-left font-mono text-[10px]">
+                              <thead>
+                                <tr className="text-[8px] font-black uppercase tracking-widest text-slate-500 border-b border-slate-800">
+                                  <th className="pb-2 pr-3">Quarter</th><th className="pb-2 pr-3 text-right">Actual</th><th className="pb-2 pr-3 text-right">Estimate</th><th className="pb-2 text-right">Type</th>
+                                </tr>
+                              </thead>
+                              <tbody className="divide-y divide-slate-800/40">
+                                {mcHitsMisses.list.map((row: any, i: number) => (
+                                  <tr key={i} className="font-bold">
+                                    <td className="py-1.5 pr-3 text-slate-300">{row.quarter}</td>
+                                    <td className="py-1.5 pr-3 text-right text-white">{row.actual || '—'}</td>
+                                    <td className="py-1.5 pr-3 text-right text-slate-300">{row.estimates || '—'}</td>
+                                    <td className="py-1.5 text-right">
+                                      <span className={cn("text-[8px] font-black px-1.5 py-0.5 rounded uppercase",
+                                        row.type === 'positive' ? "bg-emerald-500/10 text-emerald-400" : row.type === 'negative' ? "bg-rose-500/10 text-rose-400" : "bg-slate-800 text-slate-400"
+                                      )}>{row.type}</span>
+                                    </td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          </div>
+                        </div>
+                      )}
+
+                      {(concallTakeawaysData as any[] ?? []).length > 0 && (
+                        <div className="glass border border-slate-800/60 rounded-2xl p-5">
+                          <SectionLabel>
+                            <span className="inline-flex items-center gap-1.5"><Mic2 className="w-3 h-3" /> Concall Takeaways (AI-Generated)</span>
+                          </SectionLabel>
+                          <div className="space-y-2.5 max-h-[260px] overflow-y-auto pr-1 terminal-scrollbar font-mono">
+                            {(concallTakeawaysData as any[]).map((c: any, i: number) => (
+                              <div key={i} className="p-2.5 bg-slate-900/30 border border-slate-800 rounded-xl">
+                                <div className="flex items-center justify-between gap-2 mb-1">
+                                  <span className="text-[9px] font-black text-slate-300 uppercase tracking-widest">{c.quarter || c.fiscal_year || 'Latest concall'}</span>
+                                  {c.tone_assessment && (
+                                    <span className={cn("text-[8px] font-black px-1.5 py-0.5 rounded uppercase",
+                                      /positive|bullish/i.test(c.tone_assessment) ? "bg-emerald-500/10 text-emerald-400" : /negative|bearish|cautio/i.test(c.tone_assessment) ? "bg-rose-500/10 text-rose-400" : "bg-slate-800 text-slate-400"
+                                    )}>{c.tone_assessment}</span>
+                                  )}
+                                </div>
+                                <p className="text-[10px] text-slate-300 leading-relaxed">{c.key_takeaway}</p>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+
+                      <div className="glass border border-slate-800/60 rounded-2xl p-5">
+                        <SectionLabel>
+                          <span className="inline-flex items-center gap-1.5"><Gift className="w-3 h-3" /> Corporate Action History (MoneyControl, NSE cross-checked)</span>
+                        </SectionLabel>
+                        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                          <div>
+                            <span className="text-[8px] font-black text-slate-500 uppercase tracking-widest block mb-2">MoneyControl ledger</span>
+                            <div className="space-y-1.5 max-h-[220px] overflow-y-auto pr-1 terminal-scrollbar font-mono">
+                              {(actionHistoryData as any[] ?? []).length === 0 ? (
+                                <div className="text-slate-500 text-center py-6 uppercase font-black tracking-widest text-[9px]">No dividend, bonus, split or rights history on record</div>
+                              ) : (actionHistoryData as any[]).map((a: any, i: number) => (
+                                <div key={i} className="flex items-center justify-between gap-2 text-[10px] text-slate-400 border-b border-slate-800/40 pb-1.5">
+                                  <div className="flex items-center gap-2 min-w-0">
+                                    <span className="text-[8px] px-1.5 py-0.5 rounded font-bold uppercase shrink-0 bg-slate-800 text-slate-300">{a.action_type}</span>
+                                    <span className="shrink-0 text-slate-300">{a.record_date || '—'}</span>
+                                    <span className="truncate">{a.ratio_text ?? (a.amount != null ? `₹${Number(a.amount).toFixed(2)}` : '')}</span>
+                                  </div>
+                                  {(a.crossCheck === 'confirmed_by_bhavcopy' || a.crossCheck === 'confirmed_via_this_source') ? (
+                                    <span className="shrink-0 font-black text-emerald-400">✓</span>
+                                  ) : a.crossCheck === 'unconfirmed' ? (
+                                    <span className="shrink-0 font-black text-amber-400">⚠</span>
+                                  ) : null}
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                          <div>
+                            <span className="text-[8px] font-black text-slate-500 uppercase tracking-widest block mb-2">Filed with NSE (last/next 6 months)</span>
+                            <div className="space-y-1.5 max-h-[220px] overflow-y-auto pr-1 terminal-scrollbar font-mono">
+                              {(filedActionsData as any[] ?? []).length === 0 ? (
+                                <div className="text-slate-500 text-center py-6 uppercase font-black tracking-widest text-[9px]">No NSE-filed corporate action in this window</div>
+                              ) : (filedActionsData as any[]).map((f: any, i: number) => (
+                                <a key={i} href={f.source_url} target="_blank" rel="noreferrer" className="block p-2 bg-slate-900/30 border border-slate-800 rounded-xl hover:border-slate-700">
+                                  <div className="flex items-center justify-between gap-2">
+                                    <span className="text-[8px] px-1.5 py-0.5 rounded font-bold uppercase text-emerald-400 bg-emerald-500/10 shrink-0">{(f.category || '').split('|')[0] || 'filing'}</span>
+                                    <span className="text-[8px] text-slate-500">{f.filing_date}</span>
+                                  </div>
+                                  <p className="text-[10px] text-slate-200 mt-1 leading-snug line-clamp-2">{f.headline}</p>
+                                </a>
+                              ))}
+                            </div>
                           </div>
                         </div>
                       </div>
