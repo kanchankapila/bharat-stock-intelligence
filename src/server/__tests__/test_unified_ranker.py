@@ -308,6 +308,59 @@ class TestUnifiedRankerRun:
         )
         os.unlink(csv_path)
 
+    def test_rl_gate_does_not_veto_on_an_insignificant_negative(self):
+        """2026-08-10 fix: MIN_RL_GATE_SAMPLES alone left `avg_r < 0` as a bare SIGN test, so a
+        symbol whose trailing average is negative-but-indistinguishable-from-zero was excluded
+        exactly as hard as one losing 8% a trade.
+
+        Modelled on the live case that motivated the fix: SBCL, 22 resolved outcomes averaging
+        -0.174% (t=-0.45), gated out of the ranked universe from 2026-07-10 -- then the top
+        liquid gainer on 2026-08-10 at +19.08%. Platform-wide this excluded 519 of 958 eligible
+        symbols, 359 (69%) of them on noise, while the excluded set did not underperform the
+        kept set at any horizon tested (37 dates, point-in-time: +0.098%, t=1.22)."""
+        import os
+        ranker, conn, csv_path = self._setup()
+        conn.execute("INSERT INTO trendlyne_screener_stocks VALUES ('bull1','NOISYLOSS','NOISYLOSS')")
+        conn.execute("INSERT INTO stock_scores VALUES ('NOISYLOSS','long_term',60)")
+        conn.execute("INSERT INTO technical_signals (symbol, date, win_probability, signal_score) VALUES ('NOISYLOSS', date('now'), 0.72, 68)")
+        # Mean is negative but tiny relative to the spread: mean -0.25%, sd ~2.4%, n=8 -> t~-0.3.
+        returns = [-3.0, 2.5, -2.0, 3.0, -2.5, 1.5, -1.5, 0.0]
+        assert sum(returns) / len(returns) < 0, "fixture must have a NEGATIVE mean to be a valid test"
+        assert len(returns) >= ranker.MIN_RL_GATE_SAMPLES, "fixture must clear the sample floor"
+        for i, r in enumerate(returns):
+            conn.execute(
+                "INSERT INTO recommendation_log (symbol, signal_date, actual_return_pct, generated_at) "
+                "VALUES ('NOISYLOSS', ?, ?, date('now','-10 days'))",
+                (f'2026-05-{i+1:02d}', r))
+        conn.commit()
+        results = ranker.run()
+        symbols = [r['symbol'] for r in results]
+        assert 'NOISYLOSS' in symbols, (
+            "a negative average that is statistical noise (t > RL_GATE_MAX_T) must not exclude "
+            "a symbol from the ranked universe"
+        )
+        os.unlink(csv_path)
+
+    def test_rl_gate_still_excludes_a_consistent_zero_variance_loser(self):
+        """Guards the significance test's own edge case: every resolved outcome identical and
+        negative gives stddev == 0. That is maximally significant (t -> -inf), NOT untestable,
+        and must still exclude -- reading a zero stddev as 'cannot establish significance'
+        would silently disable the gate for its most clear-cut case."""
+        import os
+        ranker, conn, csv_path = self._setup()
+        conn.execute("INSERT INTO trendlyne_screener_stocks VALUES ('bull1','FLATLOSER','FLATLOSER')")
+        conn.execute("INSERT INTO stock_scores VALUES ('FLATLOSER','long_term',60)")
+        conn.execute("INSERT INTO technical_signals (symbol, date, win_probability, signal_score) VALUES ('FLATLOSER', date('now'), 0.72, 68)")
+        for i in range(ranker.MIN_RL_GATE_SAMPLES):
+            conn.execute(
+                "INSERT INTO recommendation_log (symbol, signal_date, actual_return_pct, generated_at) "
+                "VALUES ('FLATLOSER', ?, -8.0, date('now','-10 days'))",
+                (f'2026-05-{i+1:02d}',))
+        conn.commit()
+        results = ranker.run()
+        assert 'FLATLOSER' not in [r['symbol'] for r in results]
+        os.unlink(csv_path)
+
     def test_quality_gate_demotes_weak_fundamentals(self):
         import os
         ranker, conn, csv_path = self._setup()
@@ -408,16 +461,21 @@ class TestUnifiedRankerRun:
         os.unlink(csv_path)
 
     def test_conviction_tiers_assigned_correctly(self):
+        """classification is REQUIRED since 2026-08-10 -- conviction is a tier of the row's
+        OWN direction, and a bullish-only reading ran the ladder backwards on every short."""
         from unified_ranker import _conviction
-        assert _conviction(90) == 'S_ELITE'
-        assert _conviction(80) == 'S_ELITE'
-        assert _conviction(70) == 'A_HIGH'
-        assert _conviction(65) == 'A_HIGH'
-        assert _conviction(50) == 'B_MEDIUM'
-        assert _conviction(45) == 'B_MEDIUM'
-        assert _conviction(30) == 'C_LOW'
-        assert _conviction(25) == 'C_LOW'
-        assert _conviction(10) == 'D_MARGINAL'
+        assert _conviction(90, 'Buy') == 'S_ELITE'
+        assert _conviction(80, 'Buy') == 'S_ELITE'
+        assert _conviction(70, 'Buy') == 'A_HIGH'
+        assert _conviction(65, 'Buy') == 'A_HIGH'
+        assert _conviction(50, 'Buy') == 'B_MEDIUM'
+        assert _conviction(45, 'Buy') == 'B_MEDIUM'
+        assert _conviction(30, 'Buy') == 'C_LOW'
+        assert _conviction(25, 'Buy') == 'C_LOW'
+        assert _conviction(10, 'Buy') == 'D_MARGINAL'
+        # the mirror: a short's strength is 100-score
+        assert _conviction(10, 'Sell') == 'S_ELITE'
+        assert _conviction(90, 'Sell') == 'D_MARGINAL'
 
     def test_regime_weights_sum_to_one(self):
         from unified_ranker import REGIME_WEIGHTS
@@ -845,7 +903,9 @@ class TestUIGradeRanking:
         as a direction source; it no longer votes. Identical score => identical label no
         matter how lopsided the screener opinion is."""
         from unified_ranker import _classify
-        for bull, bear in [(8, 0), (0, 8), (3, 3), (0, 0), (5, 1), (1, 5)]:
+        # (0, 0) is deliberately absent: an UNCOVERED name is Hold at any score -- that is the
+        # coverage half of the merged rule, pinned separately below.
+        for bull, bear in [(8, 0), (0, 8), (3, 3), (5, 1), (1, 5)]:
             assert _classify(85.0, bull, bear) == 'Strong Buy'
             assert _classify(75.0, bull, bear) == 'Buy'
             assert _classify(50.0, bull, bear) == 'Hold'
@@ -861,15 +921,25 @@ class TestUIGradeRanking:
         assert _classify(95.0, bull=0, bear=9) == 'Strong Buy'
 
     def test_classify_thresholds_are_pinned(self):
+        """Thresholds asserted on a COVERED name (1, 1): coverage is required to label at
+        all, so (0, 0) would be Hold at every score and pin nothing."""
         from unified_ranker import (_classify, DIRECTIONLESS_STRONG_BUY_FLOOR,
                                     DIRECTIONLESS_BUY_FLOOR, DIRECTIONLESS_SELL_CEIL,
                                     DIRECTIONLESS_STRONG_SELL_CEIL)
-        assert _classify(DIRECTIONLESS_STRONG_BUY_FLOOR, 0, 0) == 'Strong Buy'
-        assert _classify(DIRECTIONLESS_BUY_FLOOR, 0, 0) == 'Buy'
-        assert _classify(DIRECTIONLESS_BUY_FLOOR - 0.01, 0, 0) == 'Hold'
-        assert _classify(DIRECTIONLESS_SELL_CEIL, 0, 0) == 'Sell'
-        assert _classify(DIRECTIONLESS_SELL_CEIL + 0.01, 0, 0) == 'Hold'
-        assert _classify(DIRECTIONLESS_STRONG_SELL_CEIL, 0, 0) == 'Strong Sell'
+        assert _classify(DIRECTIONLESS_STRONG_BUY_FLOOR, 1, 1) == 'Strong Buy'
+        assert _classify(DIRECTIONLESS_BUY_FLOOR, 1, 1) == 'Buy'
+        assert _classify(DIRECTIONLESS_BUY_FLOOR - 0.01, 1, 1) == 'Hold'
+        assert _classify(DIRECTIONLESS_SELL_CEIL, 1, 1) == 'Sell'
+        assert _classify(DIRECTIONLESS_SELL_CEIL + 0.01, 1, 1) == 'Hold'
+        assert _classify(DIRECTIONLESS_STRONG_SELL_CEIL, 1, 1) == 'Strong Sell'
+
+    def test_uncovered_name_is_hold_at_any_score(self):
+        """The coverage half of the merged rule: unified_score ranks returns within the
+        screener-covered population (IC +0.0241, t=+2.36) and NOT outside it (-0.0150,
+        t=-1.51), so a name no screener surfaced is not labelled on score alone."""
+        from unified_ranker import _classify
+        for score in (0.0, 25.0, 50.0, 75.0, 100.0):
+            assert _classify(score, 0, 0) == 'Hold'
 
     def test_screener_direction_machinery_is_gone_not_just_bypassed(self):
         """A dormant flag reads as if it still works. The whole directionless-fallback

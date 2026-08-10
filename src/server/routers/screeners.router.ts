@@ -45,6 +45,13 @@ const factorPickSchema = z.object({
 const factorPicksSnapshotSchema = z.object({
   factor: z.literal('momentum_12_1'),
   asOf: z.string(),
+  // Entry state, not just age. 'entry_passed' means the open this list would have entered on
+  // has already traded, so the list is a record and not a trade — a distinction `asOf` alone
+  // cannot express. Defaulted rather than required so a snapshot written by the pre-2026-08-10
+  // producer still parses instead of the panel silently vanishing; it degrades to the
+  // pessimistic reading, which is the safe direction for a stale snapshot.
+  entryStatus: z.enum(['pending_next_open', 'entry_passed']).default('entry_passed'),
+  entrySession: z.string().nullable().default(null),
   generatedAt: z.string(),
   validatedTopKMin: z.number().int().min(50),
   evidence: z.literal('paper_trade_candidate'),

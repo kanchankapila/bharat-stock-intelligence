@@ -52,6 +52,10 @@ def _panel(prices: dict[str, list[float]], dates: list[str], deliv=None,
     df['beta'] = 1.0
     df['idio_vol'] = df['vol21']
     df = df.drop(columns=['_hi'])
+    # signal_eligible (factor+liquidity known at the close) is deliberately WIDER than
+    # eligible (next open also known) -- see load_price_panel. todays_picks selects on the
+    # former, run_backtest on the latter.
+    df['signal_eligible'] = True
     df['eligible'] = df['next_open'].notna()
     return df
 
@@ -459,8 +463,11 @@ class TestPicksSafetyWarnings:
         """No second implementation to drift from what was measured."""
         p = self._panel_with_liquidity([1e9] * 10)
         picks = fb.todays_picks(p, 'momentum_21d', top_k=3)
-        last = p[p['eligible']]['date'].max()
-        expected = (p[(p['date'] == last) & p['eligible']]
+        # signal_eligible, not eligible: picks are generated off the newest CLOSE, whose next
+        # open does not exist yet. Selecting on `eligible` is what made the live screen a
+        # session stale (2026-08-10 review).
+        last = p[p['signal_eligible']]['date'].max()
+        expected = (p[(p['date'] == last) & p['signal_eligible']]
                     .assign(s=lambda d: fb.FACTORS['momentum_21d'](d))
                     .nlargest(3, 's')['symbol'].tolist())
         assert picks['symbol'].tolist() == expected

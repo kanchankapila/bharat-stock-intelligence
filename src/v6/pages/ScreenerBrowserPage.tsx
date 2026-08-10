@@ -37,7 +37,7 @@ const FACTOR_META: Record<string, { title: string; scoreLabel: string; blurb: st
   value_book_to_price: {
     title: 'Book-to-Price Value Screen',
     scoreLabel: 'B/P',
-    blurb: 'Fama-French HML book-to-market. Strongest factor measured here: +0.93%/mo excess over 65 monthly rebalances (t=2.67), Sharpe 1.47, lowest turnover of anything that works.',
+    blurb: 'Fama-French HML book-to-market. Strongest factor measured here: +0.93%/mo excess over 65 monthly rebalances (t=2.67), Sharpe 1.47, lowest turnover of anything that works. Valuation history is a vendor backfill, so treat the t-stat as provisional.',
   },
   momentum_12_1: {
     title: '12-1 Momentum Paper Screen',
@@ -47,14 +47,29 @@ const FACTOR_META: Record<string, { title: string; scoreLabel: string; blurb: st
 };
 
 const FactorCard: React.FC<{
-  snap: { factor: string; asOf?: string; validatedTopKMin?: number; picks: any[] };
+  snap: { factor: string; asOf?: string; validatedTopKMin?: number; picks: any[];
+          entryStatus?: string; entrySession?: string | null };
   onSelectStock?: (symbol: string) => void;
 }> = ({ snap, onSelectStock }) => {
   const meta = FACTOR_META[snap.factor] ?? { title: snap.factor, scoreLabel: 'Score', blurb: '' };
+  // A list whose entry open has already traded is a record, not a trade. Say so instead of
+  // showing an `asOf` that reads identically to a fresh one. Evaluated PER CARD: the two
+  // factors have different asOf dates (value lags momentum, its vendor history settles
+  // later), so one can be actionable while the other has expired.
+  const expired = snap.entryStatus === 'entry_passed';
   return (
-    <Card dense title={meta.title} icon={TrendingUp}
-          action={<span className="text-[10px] font-mono text-amber-400">PAPER TRADE · AS OF {snap.asOf}</span>}>
-      <p className="text-[11px] text-slate-500 mb-1">{meta.blurb}</p>
+    <Card dense title={meta.title} icon={TrendingUp} action={
+      <span className={`text-[10px] font-mono ${expired ? 'text-slate-500' : 'text-amber-400'}`}>
+        {expired ? 'EXPIRED' : 'PAPER TRADE'} · AS OF {snap.asOf}
+      </span>
+    }>
+      {expired ? (
+        <p className="text-[11px] text-rose-300/90 mb-3">
+          Not actionable — the entry open for this list{snap.entrySession ? ` (${snap.entrySession})` : ''} has already traded. Shown as a record of the last generated signal; wait for the next refresh.
+        </p>
+      ) : (
+        <p className="text-[11px] text-slate-500 mb-1">{meta.blurb} Entry is the next session's open.</p>
+      )}
       {/* The decay caveat travels with the picks on purpose -- both factors fade to ~zero in
           2026 and that is the single most important thing about them. */}
       <p className="text-[11px] text-amber-500/80 mb-3">
@@ -62,7 +77,7 @@ const FactorCard: React.FC<{
         multiple-testing bar across the 18 factors tested. Not the canonical Alpha score, and
         not a buy recommendation.
       </p>
-      <div className="overflow-x-auto">
+      <div className={`overflow-x-auto ${expired ? 'opacity-50' : ''}`}>
         <table className="w-full text-xs">
           <thead><tr className="text-[10px] text-slate-500 uppercase border-b border-slate-800">
             <th className="text-left py-2">Rank</th><th className="text-left py-2">Symbol</th>

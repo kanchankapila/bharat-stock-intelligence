@@ -98,7 +98,9 @@ class TestNaNFallsThroughDownstreamGuards:
         assert _classify(float('nan'), bull=0, bear=9) == 'Hold'
 
     def test_nan_score_conviction_is_marginal(self):
-        assert _conviction(float('nan')) == 'D_MARGINAL'
+        # NaN fails every tier comparison and falls through, on both directions.
+        assert _conviction(float('nan'), 'Buy') == 'D_MARGINAL'
+        assert _conviction(float('nan'), 'Sell') == 'D_MARGINAL'
 
     def test_nan_survives_the_less_than_one_filter(self):
         """`if unified < 1: continue` does not stop NaN -- hence the explicit isfinite check."""

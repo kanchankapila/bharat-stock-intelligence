@@ -82,37 +82,37 @@ class TestAsofReversalForDate:
         assert result.iloc[0]["vwap_deviation_pct"] == pytest.approx(1.157, abs=0.01)
         assert result.iloc[0]["intraday_range_pos"] == pytest.approx(0.75, abs=0.001)
 
-    def test_scalar_broadcast_ts_dtype_does_not_crash_merge_asof(self):
-        """score()'s real construction (`pd.DataFrame({'ts': run_ts, ...})` with run_ts a bare
-        scalar datetime.datetime from query_one()'s raw cursor read, broadcast against the
-        symbol index) produces datetime64[us, UTC], while bars['datetime'] (built via
-        pd.to_datetime() over a read_df()-sourced Series) is datetime64[ns, UTC] --
-        merge_asof raises a hard MergeError on that mismatch rather than silently coercing.
-        Live-caught 2026-08-07: --train worked (both sides come from read_df(), same dtype)
-        but --score crashed against the real DB on exactly this. Reproduces the precise
-        scalar-broadcast shape rather than a list-wrapped column, which pandas normalizes to
-        [ns] and does NOT reproduce the bug.
+    @pytest.mark.parametrize("as_of_unit,bars_unit", [("us", "ns"), ("ns", "us")])
+    def test_ts_dtype_mismatch_does_not_crash_merge_asof(self, as_of_unit, bars_unit):
+        """merge_asof raises a hard MergeError on a [us] vs [ns] mismatch rather than silently
+        coercing, so _asof_reversal_for_date must normalise one side to the other.
 
-        UPDATED 2026-08-10: the mismatch is now constructed EXPLICITLY via .astype() instead
-        of relying on pandas producing it incidentally. Under pandas 3.0.3 both sides come
-        back as datetime64[us, UTC], so the scalar-broadcast trick no longer reproduces it and
-        this test's own setup assertion (correctly) started failing -- it was guarding nothing.
-        Pinning both dtypes keeps the production code under test across pandas versions;
-        whether a given pandas happens to produce the mismatch is not the point, surviving it
-        is.
-        """
+        Live-caught 2026-08-07: --train worked (both sides come from read_df(), same dtype)
+        but --score crashed against the real DB, because score()'s `run_ts` arrives as a bare
+        datetime.datetime from query_one()'s raw cursor read and broadcasts at a different
+        resolution than a read_df()-sourced Series.
+
+        The mismatch is now pinned EXPLICITLY on both sides, and both orderings are covered.
+        The original version relied on pandas inferring [us] for the scalar broadcast and [ns]
+        for pd.to_datetime, then asserted the two differed as a setup check -- but which
+        resolution pandas infers is a version-dependent detail, and when it changed (both
+        sides came out [us], 2026-08-10) that setup assert fired and the test stopped
+        exercising the guard at all. A test must construct the condition it is testing, not
+        hope a library default happens to produce it."""
         import datetime
         bars = _rising_price_bars()
-        bars = bars.assign(datetime=bars["datetime"].astype("datetime64[ns, UTC]"))
         raw_dt = datetime.datetime(2026, 6, 1, 4, 30, 0, tzinfo=datetime.timezone.utc)
         idx = pd.Index(["TESTCO"], name="symbol")
+        # Keep the real scalar-broadcast shape (not a list-wrapped column) as documentation of
+        # score()'s actual construction, then pin the precision rather than inferring it.
         as_of = pd.DataFrame({"run_id": 1, "symbol": idx, "ts": raw_dt})
-        as_of["ts"] = as_of["ts"].astype("datetime64[us, UTC]")
-        assert as_of["ts"].dtype != bars["datetime"].dtype, (
-            "test setup didn't reproduce the real dtype mismatch -- adjust the construction"
-        )
-        result = lsmr._asof_reversal_for_date(bars, as_of)  # must not raise MergeError
+        as_of["ts"] = as_of["ts"].astype(f"datetime64[{as_of_unit}, UTC]")
+        bars["datetime"] = bars["datetime"].astype(f"datetime64[{bars_unit}, UTC]")
+        assert as_of["ts"].dtype != bars["datetime"].dtype   # guaranteed by construction now
+        result = lsmr._asof_reversal_for_date(bars, as_of)   # must not raise MergeError
         assert not result.empty
+        # ...and still computes, rather than merging to an empty/NaN row.
+        assert pd.notna(result.iloc[0]["vwap_deviation_pct"])
 
     def test_asof_before_any_bar_is_nan_not_zero(self):
         """A run timestamped before the session's first bar has genuinely nothing to compute

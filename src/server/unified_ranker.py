@@ -260,6 +260,24 @@ CONVICTION_TIERS = [
     ('D_MARGINAL',  1),
 ]
 
+# Directional agreement floor (2026-08-10). A screener direction vote alone used to be enough
+# to label a row at ANY composite score: bull>bear returned 'Buy' even at score 2, bear>bull
+# returned 'Sell' even at score 98 -- only the *Strong* tiers ever consulted the score. A
+# direction and a magnitude that flatly contradict each other are not an actionable call, so
+# they now resolve to Hold. Expressed as ONE number mirrored around 50 (Buy needs
+# score >= FLOOR, Sell needs score <= 100-FLOOR) so the long and short sides cannot drift
+# apart -- an asymmetry between the two is precisely the class of bug this is fixing.
+DIRECTIONAL_AGREEMENT_FLOOR = 45.0
+
+# Position-size confidence coupling (2026-08-10). Sizing was bet/vol only, so the final score,
+# conviction and engine coverage did not reach the allocation at all: a marginal Buy could be
+# sized above a better-supported Strong Buy, and a row blended from 2 engines was sized
+# identically to one blended from 8. This multiplier is bounded [FLOOR, 1.0] and can therefore
+# only SHRINK a position -- the part of it that has not been backtested can reduce risk, never
+# inflate it beyond what the validated probability/volatility core already allows.
+SIZE_CONFIDENCE_FLOOR = 0.5
+FULL_ENGINE_COVERAGE = 5
+
 
 def _fund_mult(score):
     if score is None:
@@ -714,35 +732,51 @@ def _classify(score, bull, bear):
     remain real, displayed, and still feed the score itself and is_red_flagged()'s hard veto;
     they just no longer get a direct vote on direction.
 
-    WHY THIS CHANGED (2026-08-10). Net screener bias used to be the PRIMARY direction source,
-    with the score only gating the 'Strong' tier. Measured against realised forward returns on
-    live unified_recommendations (liquid names >=Rs 1cr ADT, winsorised, next-open entry,
-    excess computed PER DATE against that day's own universe then averaged -- pooling across
-    dates gives a different and wrong answer here, cf. the same artifact fixed in
-    cs_ranker._mean_daily_ic):
+    DIRECTION RULE (2026-08-10, merged from two PRs that each measured half of it).
 
-        21d excess vs universe   Buy+Strong Buy under screener direction   -0.440%  t=-5.14
-        21d excess vs universe   Buy+Strong Buy under score thresholds     +0.758%  t=+2.39
-         5d excess vs universe   screener direction                        +0.008%  t=+0.14
-         5d excess vs universe   score thresholds                          +0.253%  t=+1.19
+    Two independent changes reached opposite conclusions and the live data says BOTH were
+    partly right, so this is neither one:
 
-    and the driver, net (bull-bear) screeners bucketed against forward 21d return, is monotone
-    in the WRONG direction (<=-3: +2.90% ... >+3: +2.24%; rank IC -0.0159). So the one input
-    that decided Buy vs Sell was the input with negative predictive value, while the score it
-    overrode was mildly positive (top-50 by score: +0.453% excess). That is why the label was
-    worse than the ordering it was derived from.
+      * Screener DIRECTION (net bull-bear) used to decide Buy vs Sell. Measured against
+        realised forward returns it is HARMFUL: Buy+Strong Buy under screener direction gave
+        -0.440% 21d excess (t=-5.14) vs +0.758% (t=+2.39) under score thresholds, and net
+        bias bucketed against forward return is monotone the WRONG way (<=-3: +2.90% ...
+        >+3: +2.24%, rank IC -0.0159). The decisive case: score>=70 with net-BEARISH
+        screeners is the BEST performing group at +3.015% (t=+3.60) -- a rule that requires
+        screeners to agree throws exactly those away. So screeners get NO vote on direction.
 
-    HONEST LIMIT on those numbers: only 7-14 ranker days carry a full 21d forward window, and
-    those windows overlap, so |t| is inflated and none of this is a clean significance test.
-    It is not close, it is consistent across every cut tried, and nothing measured points the
-    other way -- but the reason to prefer score direction is that screener direction is
-    measurably harmful, NOT that score direction is proven to work (t=+2.39 on 7 overlapping
-    days is a reason to keep measuring, not a validated edge).
+      * Screener COVERAGE, separately, does matter. unified_score ranks returns within the
+        covered population (IC +0.0241, t=+2.36) and NOT for uncovered names (-0.0150,
+        t=-1.51, ~19% of rows); score>=70 with no screener opinion returns -0.066%
+        (t=-0.12), i.e. nothing. Labelling a stock no screener has ever surfaced, on score
+        alone, is labelling a population the score demonstrably does not rank.
 
-    Deliberately NOT done: inverting the screener signal to go long the bearish tail. IC
-    -0.0159 at t=-1.21 is not significant, and trading the inverse of a non-significant
-    negative is data-mining a coin flip.
+    Hence: coverage is REQUIRED to label at all, direction comes purely from the score, and
+    the bull/bear counts themselves are ignored. They remain real, displayed, and still feed
+    the score and is_red_flagged()'s hard veto.
+
+    This also satisfies DIRECTIONAL_AGREEMENT_FLOOR structurally and with margin -- a Buy
+    always scores >= DIRECTIONLESS_BUY_FLOOR (70) and a Sell <= 30, against that constant's
+    45/55 -- so direction and magnitude can no longer contradict by construction.
+
+    HONEST LIMIT: 5-14 ranker days carry a full 21d window and they overlap, so every |t|
+    here is inflated; the bearish-screener group is n=135 over 7 days. The case for this rule
+    is that both halves are consistent with every other cut tried and nothing measured points
+    the other way -- not that either is a clean significance test.
     """
+    total = (bull or 0) + (bear or 0)
+    if total == 0:
+        # No screener has surfaced this name: the score does not rank this population.
+        return 'Hold'
+    if score >= DIRECTIONLESS_STRONG_BUY_FLOOR:
+        return 'Strong Buy'
+    if score >= DIRECTIONLESS_BUY_FLOOR:
+        return 'Buy'
+    if score <= DIRECTIONLESS_STRONG_SELL_CEIL:
+        return 'Strong Sell'
+    if score <= DIRECTIONLESS_SELL_CEIL:
+        return 'Sell'
+    return 'Hold'
     if score >= DIRECTIONLESS_STRONG_BUY_FLOOR:
         return 'Strong Buy'
     if score >= DIRECTIONLESS_BUY_FLOOR:
@@ -754,11 +788,45 @@ def _classify(score, bull, bear):
     return 'Hold'
 
 
-def _conviction(score):
+def _directional_strength(score, classification):
+    """How strongly the 0-100 unified score supports THE DIRECTION THIS ROW IS CLAIMING.
+
+    The score is bullish-oriented (100 = maximally attractive long), so a bearish row's
+    strength is its mirror image. Without this, conviction ran backwards on every short:
+    a high-scoring plain Sell was persisted S_ELITE while a correctly low-scoring Strong
+    Sell could only ever be D_MARGINAL. Hold has no direction and therefore no strength.
+    """
+    if classification in ('Strong Buy', 'Buy'):
+        return score
+    if classification in ('Strong Sell', 'Sell'):
+        return 100.0 - score
+    return 0.0
+
+
+def _conviction(score, classification):
+    """Conviction tier of the row's own direction. `classification` is REQUIRED — the
+    single-argument form was the bug (see _directional_strength), so there is deliberately
+    no default that would silently reinstate the bullish-only reading."""
+    strength = _directional_strength(score, classification)
+    if strength <= 0:
+        return 'D_MARGINAL'
     for tier, threshold in CONVICTION_TIERS:
-        if score >= threshold:
+        if strength >= threshold:
             return tier
     return 'D_MARGINAL'
+
+
+def size_confidence_multiplier(strength, coverage):
+    """Bounded [SIZE_CONFIDENCE_FLOOR, 1.0], monotonically non-decreasing in BOTH inputs.
+
+    Shrink-only by construction, so it cannot size a position above the probability/vol core
+    that was actually backtested. `strength` is _directional_strength; `coverage` is the count
+    of engines that genuinely informed the blend (len(present), not len(engine_maps_all)).
+    """
+    span = 100.0 - DIRECTIONAL_AGREEMENT_FLOOR
+    q = max(0.0, min(1.0, (strength - DIRECTIONAL_AGREEMENT_FLOOR) / span)) if span > 0 else 0.0
+    c = max(0.0, min(1.0, coverage / FULL_ENGINE_COVERAGE))
+    return SIZE_CONFIDENCE_FLOOR + (1.0 - SIZE_CONFIDENCE_FLOOR) * q * c
 
 
 def compute_screener_stock_scores(membership, fundamental_scores, cat_weights=None):
@@ -1470,19 +1538,62 @@ class UnifiedRanker:
     # established thin-sample convention (screener_performance.py's MIN_SIGNALS_FOR_TIER=5).
     MIN_RL_GATE_SAMPLES = 5
 
+    # A sample count alone was never sufficient: `avg_r < 0` is a bare SIGN test, so a symbol
+    # averaging -0.17% over 22 outcomes (t=-0.45, i.e. indistinguishable from zero) was
+    # excluded from the ranked universe exactly as hard as one averaging -8%. Measured live
+    # 2026-08-10: 519 of 958 eligible symbols (54%) were gated out, 359 of them (69%) on a
+    # statistically insignificant negative -- and the excluded set does NOT underperform the
+    # kept set at any horizon tested (point-in-time, 37 dates, liquid universe, 5d forward:
+    # excluded-minus-kept +0.098%, t=1.22, excluded won on 51% of dates; splitting by evidence
+    # strength doesn't rescue it either -- t<=-2 exclusions +0.148%/t=1.23, noise exclusions
+    # +0.073%/t=0.77). So the gate's premise (a poor trailing record predicts poor forward
+    # returns) is unsupported by this platform's own data, while its cost is real and
+    # confirmed: SBCL sat outside the ranked universe from 2026-07-10 on a -0.174%/22-sample
+    # average, then gained +19.08% on 2026-08-10 as the day's top liquid gainer.
+    #
+    # Requiring significance is the minimum defensible change: it drops exclusions 519 -> 160
+    # and keeps the original intent for genuinely bad records. Note the surviving 160 are not
+    # positively justified by the data either (t=1.23 is not evidence the gate helps) -- but
+    # deleting a risk control outright on a non-significant result would be the same
+    # over-reach in the other direction. Revisit once more resolved history accumulates.
+    RL_GATE_MAX_T = -2.0
+
     def _get_rl_gate_map(self):
-        """Pre-load per-symbol (avg realized return, sample count) over the trailing 90d, once
-        for the whole universe (was one query per symbol inside the run() loop)."""
+        """Pre-load per-symbol (avg realized return, sample count, stddev) over the trailing
+        90d, once for the whole universe (was one query per symbol inside the run() loop).
+
+        A sample stddev is carried so _passes_rl_gate can require the negative average to be
+        statistically distinguishable from zero rather than merely negative -- see
+        RL_GATE_MAX_T. It is derived here from SUM/SUM-of-squares/COUNT rather than SQL's
+        STDDEV: STDDEV is Postgres-only and does not exist in the SQLite dev/test fallback,
+        where it fails the whole query and silently returns an empty map -- i.e. it would
+        disable the gate entirely instead of erroring. These three aggregates are portable.
+        sd is None for a single sample (no sample variance defined)."""
         cutoff = (date.today() - timedelta(days=90)).isoformat()
         try:
             rows = self.conn.execute(
-                "SELECT symbol, AVG(actual_return_pct) AS avg_r, COUNT(*) AS cnt "
+                "SELECT symbol, COUNT(*) AS cnt, SUM(actual_return_pct) AS s, "
+                "SUM(actual_return_pct * actual_return_pct) AS ss "
                 "FROM recommendation_log WHERE generated_at >= ? AND actual_return_pct IS NOT NULL "
                 "GROUP BY symbol",
                 (cutoff,),
             ).fetchall()
-            return {r['symbol']: (float(r['avg_r'] or 0), int(r['cnt']))
-                    for r in rows if r['cnt'] and r['cnt'] > 0}
+            out = {}
+            for r in rows:
+                cnt = int(r['cnt'] or 0)
+                if cnt <= 0:
+                    continue
+                s = float(r['s'] or 0.0)
+                mean = s / cnt
+                if cnt > 1:
+                    # Sample variance; clamp at 0 -- floating-point cancellation can make this
+                    # a tiny negative when every value is identical.
+                    var = max(0.0, (float(r['ss'] or 0.0) - cnt * mean * mean) / (cnt - 1))
+                    sd = math.sqrt(var)
+                else:
+                    sd = None
+                out[r['symbol']] = (mean, cnt, sd)
+            return out
         except Exception as e:
             print(f"[UnifiedRanker] _get_rl_gate_map failed: {e}")
             self.conn.rollback()
@@ -1500,14 +1611,28 @@ class UnifiedRanker:
         entry = rl_gate_map.get(symbol)
         if entry is None:
             return True
-        avg_r, cnt = entry
+        avg_r, cnt, sd = entry
         if cnt < self.MIN_RL_GATE_SAMPLES:
             return True
-        if avg_r < 0:
-            print(f"[UnifiedRanker] RL gate excluded {symbol}: "
-                  f"avg_return={avg_r:.2f}% over {cnt} resolved outcomes (90d)")
-            return False
-        return True
+        if avg_r >= 0:
+            return True
+        # Negative average -- but only exclude if it is distinguishable from zero.
+        # sd is None only when a single sample survived the COUNT filter, which
+        # MIN_RL_GATE_SAMPLES already precludes; there is nothing to test against, so pass.
+        # sd == 0 is the opposite case and must NOT be read as "untestable": a perfectly
+        # consistent negative (every resolved outcome identical and losing) is maximally
+        # significant, t -> -inf, so it excludes.
+        if sd is None:
+            return True
+        if sd > 0:
+            t_stat = avg_r / (sd / math.sqrt(cnt))
+            if t_stat > self.RL_GATE_MAX_T:
+                return True
+        else:
+            t_stat = float('-inf')
+        print(f"[UnifiedRanker] RL gate excluded {symbol}: "
+              f"avg_return={avg_r:.2f}% over {cnt} resolved outcomes (90d), t={t_stat:.2f}")
+        return False
 
     def _get_confluence_latest_map(self):
         # Same symbol-shape guard as _get_confluence_scores (see comment there) — this
@@ -1833,7 +1958,7 @@ class UnifiedRanker:
         fired = {k: 0 for k in ('rl_gate_skip', 'nonfinite_or_tiny_skip', 'quality_gate',
                                 'red_flag_veto', 'high_vol_veto', 'factor_crowding',
                                 'ml_bet_nonzero', 'breakout_computed',
-                                'breakout_ACTUALLY_BINDS')}
+                                'breakout_ACTUALLY_BINDS', 'size_confidence_haircut')}
         for sym in all_symbols:
             if not self._passes_rl_gate(sym, rl_gate_map):
                 fired['rl_gate_skip'] += 1
@@ -1847,12 +1972,48 @@ class UnifiedRanker:
             # renormalize weights over engines that actually have data for this symbol, so
             # empty confluence/dl tables don't drag every score down to ~15.
             unified = _blend(engine_scores, present, base_weights)
+
+            # ORDERING INVARIANT (2026-08-10): every ordinary score MULTIPLIER runs here,
+            # BEFORE the single _classify call, and nothing may touch `unified` after it.
+            # Previously the factor-crowding discount was applied *after* classification, so a
+            # row kept a Strong Buy/Buy label while the score persisted alongside it had already
+            # fallen below that label's own threshold -- and _conviction then read the post-
+            # multiplier score while the label came from the pre-multiplier one, i.e. the two
+            # columns described different numbers. The categorical vetoes below are the only
+            # thing allowed to change the label afterwards, because demoting is their whole
+            # purpose; they apply their score multiplier here and their demotion there.
             qm = quality_metrics.get(sym)
             if qm:
                 _qg = quality_gate(qm['piotroski'], qm['roe'])
                 if _qg < 1.0:
                     fired['quality_gate'] += 1
                 unified *= _qg
+
+            # Red-flag hard veto: a bearish solvency/governance screener removes the name from
+            # the buy pool no matter how strong its score is (then it also ranks low + unsized).
+            red_flagged = is_red_flagged(membership.get(sym, []))
+            if red_flagged:
+                fired['red_flag_veto'] += 1
+                unified *= RED_FLAG_VETO_MULT
+
+            # High-realized-vol veto: the top vol decile underperformed the universe by
+            # -0.949%/month (t=-3.00) over 67 monthly rebalances -- the only cross-sectionally
+            # significant result in 4.5 years of this platform's own price history. A name only
+            # missing hv_20d is NOT vetoed (fail open), same as every other missing-data path here.
+            sym_vol = realized_vol.get(sym)
+            high_vol_vetoed = (hv_cut is not None and sym_vol is not None and sym_vol >= hv_cut)
+            if high_vol_vetoed:
+                fired['high_vol_veto'] += 1
+                unified *= HIGH_VOL_VETO_MULT
+
+            # Factor-crowding discount (#28): demote (not veto) names where >70% of the
+            # multi-factor deviation-from-neutral traces to one factor — a high score that's
+            # really just one undiversified bet wearing a diversified-looking wrapper.
+            crowd_mult, crowd_factor = factor_crowding_multiplier(mf_map.get(sym, {}))
+            if crowd_mult < 1.0:
+                fired['factor_crowding'] += 1
+                unified *= crowd_mult
+
             # Explicit non-finite check: `unified < 1` is False for NaN, so without this a
             # NaN score is written out and mislabelled 'Buy' by _classify's fall-through.
             if not math.isfinite(unified) or unified < 1:
@@ -1862,32 +2023,9 @@ class UnifiedRanker:
             bull = bull_counts.get(sym, 0)
             bear = bear_counts.get(sym, 0)
             classification = _classify(unified, bull, bear)
-
-            # Red-flag hard veto: a bearish solvency/governance screener removes the name from
-            # the buy pool no matter how strong its score is (then it also ranks low + unsized).
-            red_flagged = is_red_flagged(membership.get(sym, []))
-            if red_flagged:
-                fired['red_flag_veto'] += 1
-                unified *= RED_FLAG_VETO_MULT
+            if red_flagged or high_vol_vetoed:
                 classification = veto_classification(classification)
-
-            # High-realized-vol veto: the top vol decile underperformed the universe by
-            # -0.949%/month (t=-3.00) over 67 monthly rebalances -- the only cross-sectionally
-            # significant result in 4.5 years of this platform's own price history. A name only
-            # missing hv_20d is NOT vetoed (fail open), same as every other missing-data path here.
-            sym_vol = realized_vol.get(sym)
-            if hv_cut is not None and sym_vol is not None and sym_vol >= hv_cut:
-                fired['high_vol_veto'] += 1
-                unified *= HIGH_VOL_VETO_MULT
-                classification = veto_classification(classification)
-
-            # Factor-crowding discount (#28): demote (not veto) names where >70% of the
-            # multi-factor deviation-from-neutral traces to one factor — a high score that's
-            # really just one undiversified bet wearing a diversified-looking wrapper.
-            crowd_mult, crowd_factor = factor_crowding_multiplier(mf_map.get(sym, {}))
-            if crowd_mult < 1.0:
-                fired['factor_crowding'] += 1
-                unified *= crowd_mult
+            strength = _directional_strength(unified, classification)
 
             # #6 position size: back the stronger of the two validated edges — the López de Prado
             # bet on the calibrated ML meta-label, OR a cross-sectional breakout tilt — inverse-vol
@@ -1909,7 +2047,14 @@ class UnifiedRanker:
                 fired['breakout_ACTUALLY_BINDS'] += 1
             bet = max(ml_bet, bo_bet)
             vol = max(VOL_FLOOR_PCT, (qm or {}).get('vol') or DEFAULT_VOL_PCT)
-            raw_sizes[sym] = (bet / vol) if classification in ('Strong Buy', 'Buy') else 0.0
+            # Confidence coupling: bet/vol is the validated risk core; this can only shrink it,
+            # so a marginal Buy or a thin-coverage row is sized below an equally-probable but
+            # better-supported one instead of identically to it. Counted, not assumed -- if the
+            # haircut never binds it is dead weight and this counter says so.
+            conf_mult = size_confidence_multiplier(strength, len(present))
+            if conf_mult < 1.0:
+                fired['size_confidence_haircut'] += 1
+            raw_sizes[sym] = (bet / vol * conf_mult) if classification in ('Strong Buy', 'Buy') else 0.0
             cats = sorted({s.get('category', 'other') for s in membership.get(sym, [])} - {'other', ''})
             # Store actual screener names (not just categories) for richer UI display
             sym_screeners = membership.get(sym, [])
@@ -1969,7 +2114,7 @@ class UnifiedRanker:
                 'computed_at':             today,
                 'regime':                  regime,
                 'unified_score':           round(unified, 2),
-                'conviction_level':        _conviction(unified),
+                'conviction_level':        _conviction(unified, classification),
                 'classification':          classification,
                 'screener_names_json':     json.dumps(screener_names_payload),
                 'screener_stock_score':    round(engine_scores['screener'], 2),
