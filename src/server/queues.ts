@@ -2124,17 +2124,29 @@ export async function initQueues(): Promise<boolean> {
     });
 
     // Startup check: if stock_ohlcv has fewer than 1000 rows trigger full backfill once
-    const ohlcvCount = ((await dbGet<any>('SELECT COUNT(*) as c FROM stock_ohlcv'))?.c) ?? 0;
-    if (ohlcvCount < 1000) {
-      console.log(`[QUEUE] stock_ohlcv sparse (${ohlcvCount} rows) ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â queuing full backfill`);
+    // 2026-08-10: this was `SELECT COUNT(*) FROM stock_ohlcv` and it BLOCKED SERVER STARTUP.
+    // stock_ohlcv is a compressed TimescaleDB hypertable (~2.6M rows, 24 chunks), so an
+    // unbounded COUNT(*) must touch every chunk; measured >2 MINUTES under concurrent write
+    // load. initializeQueues() is awaited BEFORE httpServer.listen(), so the symptom was not a
+    // database error -- port 3000 simply never opened while pm2 reported the process "online"
+    // and BullMQ jobs kept running normally. Spelled out because it is near-undiagnosable from
+    // the outside.
+    //
+    // The question is "are there at least 1000 rows?", which never needed an exact count.
+    // LIMIT 1 OFFSET 999 stops at the 1000th row: milliseconds, and O(1) in table size.
+    const hasEnoughOhlcv = await dbGet<any>('SELECT 1 AS c FROM stock_ohlcv LIMIT 1 OFFSET 999');
+    if (!hasEnoughOhlcv) {
+      console.log('[QUEUE] stock_ohlcv sparse (<1000 rows) - queuing full backfill');
       await addJobWithCatchup(ohlcvBackfillQueue, 'ohlcv-full-backfill-startup', { mode: 'full' }, {
         jobId: 'ohlcv-full-backfill-startup',
         removeOnComplete: 1, removeOnFail: 3,
       });
     } else {
       // Always ensure NIFTY50 index history is present
-      const niftyCount = ((await dbGet<any>("SELECT COUNT(*) as c FROM stock_ohlcv WHERE symbol='NIFTY50'"))?.c) ?? 0;
-      if (niftyCount === 0) {
+      // Same reasoning: EXISTS, not COUNT(*). Only presence matters, and the symbol index
+      // makes this a single index probe instead of a per-chunk scan.
+      const hasNifty = await dbGet<any>("SELECT 1 AS c FROM stock_ohlcv WHERE symbol='NIFTY50' LIMIT 1");
+      if (!hasNifty) {
         console.log('[QUEUE] NIFTY50 missing from stock_ohlcv ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â queuing index backfill');
         await addJobWithCatchup(ohlcvBackfillQueue, 'ohlcv-indices-startup', { mode: 'indices' }, {
           jobId: 'ohlcv-indices-startup',

@@ -20,7 +20,23 @@ export default defineConfig(({mode}) => {
       // Do not modify—file watching is disabled to prevent flickering during agent edits.
       hmr: process.env.DISABLE_HMR !== 'true',
       watch: {
-        ignored: ['**/database.sqlite*', '**/redis/**'],
+        // `.claude/worktrees/` holds one FULL COPY of this repo per concurrent agent session
+        // — 16 of them / ~1GB as of 2026-08-10. Chokidar walks the project root, so without
+        // this it opens file handles across every copy and createViteServer() never returns.
+        // Because server.ts awaits createViteServer() BEFORE httpServer.listen(), the symptom
+        // is not a Vite error: it is port 3000 silently never opening while pm2 reports the
+        // process "online" and BullMQ jobs keep running normally. The historical crash in
+        // pm2-err.log is chokidar's own NodeFsHandler._addToNodeFs / createFsWatchInstance.
+        // logs/ and graphify-out/ are excluded for the same reason: churn no page imports.
+        ignored: [
+          '**/database.sqlite*',
+          '**/redis/**',
+          '**/.claude/**',
+          '**/logs/**',
+          '**/graphify-out/**',
+          '**/backend-python/venv/**',
+          '**/.venv/**',
+        ],
       },
     },
     build: {
