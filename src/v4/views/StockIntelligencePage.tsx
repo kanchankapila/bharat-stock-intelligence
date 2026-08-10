@@ -2,7 +2,7 @@ import React, { useState, useEffect, useMemo } from 'react';
 import {
   Search, LayoutGrid, LineChart, BadgeDollarSign, Users, Landmark,
   CalendarClock, Newspaper, ShieldAlert, Star, StarOff, ArrowUpRight, ArrowDownRight,
-  Building2, Tags,
+  Building2, Tags, Compass, Mic2, Gauge, ShoppingBag,
 } from 'lucide-react';
 import { trpc } from '../../lib/trpc';
 import { Card } from '../../components/Card';
@@ -16,6 +16,7 @@ import { StockTagRow, ConvictionPill } from '../../components/StockTagRow';
 import { relativeFromNow } from '../../lib/timeFormat';
 import { V4QuickNav } from '../components/V4QuickNav';
 import { AddToPortfolioButton } from '../../components/AddToPortfolioButton';
+import { PriceFreshnessBadge } from '../../components/PriceFreshnessBadge';
 
 type TabId = 'overview' | 'technicals' | 'fundamentals' | 'ownership' | 'fno' | 'earnings' | 'news';
 
@@ -69,8 +70,78 @@ const SymbolSearch: React.FC<{ onSelect: (symbol: string) => void }> = ({ onSele
   );
 };
 
+const SWOT_CATEGORIES = [
+  { key: 'strengths' as const,     label: 'Strengths',     badge: 'bg-emerald-500/10 text-emerald-300 border-emerald-500/30', bullet: 'text-emerald-400' },
+  { key: 'weaknesses' as const,    label: 'Weaknesses',    badge: 'bg-rose-500/10 text-rose-300 border-rose-500/30',       bullet: 'text-rose-400'    },
+  { key: 'opportunities' as const, label: 'Opportunities', badge: 'bg-sky-500/10 text-sky-300 border-sky-500/30',         bullet: 'text-sky-400'     },
+  { key: 'threats' as const,       label: 'Threats',        badge: 'bg-amber-500/10 text-amber-300 border-amber-500/30',   bullet: 'text-amber-400'   },
+];
+
+// MoneyControl's per-stock SWOT -- fetched via getMcConsolidated (also sourced by
+// TechnicalsTab/EarningsTab below for chartPatterns/historicalRating/hitsMisses, which live
+// in the same response; each tab pulls only its own piece so nothing is shown twice). Not the
+// same component as MCStockInfoPanel's TrendlyneSWOTCard -- rebuilt with this page's own
+// Card/glass conventions rather than importing a differently-styled component cross-module.
+const SwotCard: React.FC<{ symbol: string }> = ({ symbol }) => {
+  const { data: mc } = trpc.getMcConsolidated.useQuery({ symbol }, { enabled: !!symbol, staleTime: 3600_000 });
+  const swot = mc?.swot as { strengths?: string[]; weaknesses?: string[]; opportunities?: string[]; threats?: string[] } | undefined;
+  const hasAny = SWOT_CATEGORIES.some((c) => (swot?.[c.key]?.length ?? 0) > 0);
+  if (!hasAny) return null;
+
+  return (
+    <Card title="SWOT Analysis" icon={LayoutGrid}>
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+        {SWOT_CATEGORIES.map((cat) => {
+          const items = swot?.[cat.key] ?? [];
+          if (items.length === 0) return null;
+          return (
+            <div key={cat.key}>
+              <span className={cn('text-[9px] font-black px-2 py-0.5 rounded-full border uppercase tracking-wide', cat.badge)}>
+                {cat.label} ({items.length})
+              </span>
+              <ul className="mt-2 space-y-1.5">
+                {items.map((item, i) => (
+                  <li key={i} className="text-[10px] text-slate-400 leading-relaxed flex items-start gap-1.5">
+                    <span className={cn('font-black shrink-0', cat.bullet)}>•</span>
+                    <span>{item}</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          );
+        })}
+      </div>
+    </Card>
+  );
+};
+
+const RRG_QUADRANT_STYLE: Record<string, string> = {
+  Leading:    'text-emerald-400 bg-emerald-500/10 border-emerald-500/30',
+  Improving:  'text-sky-400 bg-sky-500/10 border-sky-500/30',
+  Weakening:  'text-amber-400 bg-amber-500/10 border-amber-500/30',
+  Lagging:    'text-rose-400 bg-rose-500/10 border-rose-500/30',
+};
+
+// Sector Relative Rotation Graph context -- is this stock's sector currently outperforming or
+// falling behind the market right now. Market-wide payload (getSectorRotationIntel), filtered
+// client-side to this stock's own sector.
+const SectorRotationBadge: React.FC<{ sector?: string | null }> = ({ sector }) => {
+  const { data } = trpc.getSectorRotationIntel.useQuery(undefined, { enabled: !!sector, staleTime: 1_800_000 });
+  const row = (data?.rrg as any[] | undefined)?.find((r) => r.sector === sector);
+  if (!sector || !row) return null;
+  return (
+    <div className="flex items-center gap-2 px-3 py-2 glass rounded-xl">
+      <Compass className="w-4 h-4 text-indigo-400 shrink-0" />
+      <span className="text-[10px] text-slate-500">Sector rotation — <span className="text-slate-300 font-semibold">{row.sector}</span> is currently</span>
+      <span className={cn('text-[9px] font-black px-2 py-0.5 rounded-full border uppercase', RRG_QUADRANT_STYLE[row.quadrant] ?? 'text-slate-400 bg-slate-800 border-slate-700')}>
+        {row.quadrant ?? 'Unclassified'}
+      </span>
+    </div>
+  );
+};
+
 // ─── Overview tab: unified score + reasoning (the "why", not shown anywhere else today) ──
-const OverviewTab: React.FC<{ symbol: string }> = ({ symbol }) => {
+const OverviewTab: React.FC<{ symbol: string; sector?: string | null }> = ({ symbol, sector }) => {
   const { data: scoreDetail } = trpc.getStockScoreDetail.useQuery({ symbol, timeframe: 'long_term' });
   const { data: quote } = trpc.getLiveStockQuote.useQuery({ symbol }, { enabled: !!symbol, retry: false });
   const score = scoreDetail?.score;
@@ -160,7 +231,9 @@ const OverviewTab: React.FC<{ symbol: string }> = ({ symbol }) => {
             ))}
           </div>
         </Card>
+        <SectorRotationBadge sector={sector} />
         <WhyThisPick symbol={symbol} timeframe="long_term" />
+        <SwotCard symbol={symbol} />
       </div>
     </div>
   );
@@ -170,6 +243,13 @@ const OverviewTab: React.FC<{ symbol: string }> = ({ symbol }) => {
 const TechnicalsTab: React.FC<{ symbol: string }> = ({ symbol }) => {
   const { data: ohlc, isLoading } = trpc.getOHLCData.useQuery({ symbol, dur: '6m' });
   const { data: predictions } = trpc.getTechnicalPredictions.useQuery({ symbol });
+  // chartPatterns/historicalRating live in the same getMcConsolidated response SwotCard/
+  // HitsMissesCard also read (each destructures only its own piece, see those components'
+  // own comments) -- not re-fetching a separate endpoint for the same underlying MC blob.
+  const { data: mc } = trpc.getMcConsolidated.useQuery({ symbol }, { enabled: !!symbol, staleTime: 3600_000 });
+  const chartPatterns = (mc as any)?.chartPatterns;
+  const historicalRating = (mc as any)?.historicalRating;
+  const hrSnapshot = historicalRating?.data?.[0];
 
   const chartData = useMemo(() => {
     const rows = ohlc?.data ?? [];
@@ -216,6 +296,59 @@ const TechnicalsTab: React.FC<{ symbol: string }> = ({ symbol }) => {
           {/* predictions.patterns dead-array rendering dropped -- technical_signals has no
               patterns column (nothing writes it), see technicals.router.ts. */}
           <TechnicalReadTags predictions={predictions} />
+        </Card>
+      )}
+
+      {hrSnapshot?.currSentiment && (() => {
+        const isBull = /bullish/i.test(hrSnapshot.currSentiment);
+        const isBear = /bearish/i.test(hrSnapshot.currSentiment);
+        return (
+          <div className={cn(
+            'flex items-center justify-between gap-3 px-3 py-2.5 rounded-xl border text-xs',
+            isBull ? 'bg-emerald-500/5 border-emerald-500/20' : isBear ? 'bg-rose-500/5 border-rose-500/20' : 'glass'
+          )}>
+            <span className="text-slate-500 uppercase tracking-widest text-[9px] font-black">
+              MC Historical Rating — sentiment on {hrSnapshot.currdate ?? '—'}
+            </span>
+            <span className={cn('font-black italic', isBull ? 'text-emerald-400' : isBear ? 'text-rose-400' : 'text-slate-300')}>
+              {hrSnapshot.currSentiment} @ ₹{fmt(hrSnapshot.closePrice)}
+            </span>
+            {historicalRating?.displayLock === 'Y' && (
+              <span className="text-[9px] text-slate-600 italic shrink-0">Trend history is MC Pro</span>
+            )}
+          </div>
+        );
+      })()}
+
+      {Array.isArray(chartPatterns?.data) && chartPatterns.data.length > 0 && (
+        <Card title="Chart Patterns Detected (MoneyControl)" icon={Gauge}>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+            {chartPatterns.data.map((p: any, i: number) => {
+              let meta: any = {};
+              try { meta = JSON.parse(p.meta_data || '{}'); } catch { /* ignore malformed meta_data */ }
+              const isBuy = meta.pattern_type === 'buy';
+              return (
+                <div key={i} className="glass rounded-xl p-2.5">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-[11px] font-bold text-slate-200 truncate">{p.pattern_name}</span>
+                    {meta.target_return_prcnt != null && (
+                      <span className="text-xs font-black text-emerald-400 shrink-0">+{meta.target_return_prcnt}%</span>
+                    )}
+                  </div>
+                  <div className={cn('text-[10px] font-semibold mt-0.5', isBuy ? 'text-emerald-400' : 'text-rose-400')}>
+                    {p.comment} · {p.p_status} · {p.time_frame}
+                  </div>
+                  {(meta.entry_price || meta.target_price || meta.stoploss_price) && (
+                    <div className="flex gap-3 mt-1.5 text-[9px] font-mono text-slate-500">
+                      {meta.entry_price && <span>Entry ₹{meta.entry_price}</span>}
+                      {meta.target_price && <span className="text-emerald-500">Target ₹{meta.target_price}</span>}
+                      {meta.stoploss_price && <span className="text-rose-500">Stop ₹{meta.stoploss_price}</span>}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
         </Card>
       )}
     </div>
@@ -375,6 +508,12 @@ const OwnershipTab: React.FC<{ symbol: string }> = ({ symbol }) => {
   // proposal). Grafted here rather than v5's own layout/classes so it matches this tab's existing
   // Card/glass conventions instead of mixing two different styling systems in one page.
   const { data: superstarActivity } = trpc.getSuperstarInvestorActivity.useQuery({ symbol, limit: 20 });
+  // Transaction-level smart-money activity -- distinct from the % shareholding and per-filing
+  // insider data above: real topInvestor block-deal trend with counterparty names, and NSE
+  // bulk/block deals carrying pct_transacted (% of float, comparable across cap sizes, unlike
+  // raw qty/value). Neither was on this page before.
+  const { data: institutionalDeals } = trpc.getInstitutionalDealHistory.useQuery({ symbol, days: 30 }, { enabled: !!symbol });
+  const { data: blockDeals } = trpc.getBlockDeals.useQuery({ symbol, limit: 20 }, { enabled: !!symbol });
 
   const sh = shareholding?.data ?? shareholding;
   // The live ET endpoint (fetchETShareholding) returns a nested { summary: { promoters: {
@@ -469,6 +608,46 @@ const OwnershipTab: React.FC<{ symbol: string }> = ({ symbol }) => {
           </div>
         )}
       </Card>
+
+      <Card title="Institutional Deal Trend (30d)" icon={Landmark}>
+        {!institutionalDeals || institutionalDeals.length === 0 ? (
+          <div className="text-xs text-slate-500 py-4">No topInvestor block-deal activity for {symbol} in the last 30 days.</div>
+        ) : (
+          <div className="space-y-2 max-h-80 overflow-y-auto terminal-scrollbar">
+            {institutionalDeals.map((row: any, i: number) => (
+              <div key={i} className="flex items-center justify-between text-[11px] border-b border-slate-800/40 pb-1.5">
+                <div className="min-w-0">
+                  <div className="text-slate-200 truncate">{row.counterparty ?? '—'}</div>
+                  <div className="text-slate-600">{row.deal_date}</div>
+                </div>
+                <span className={cn('font-mono font-bold shrink-0 ml-2', /buy/i.test(row.action ?? '') ? 'text-emerald-400' : 'text-rose-400')}>
+                  {row.action} ₹{fmt(row.deal_value_cr_1w, 1)}Cr
+                </span>
+              </div>
+            ))}
+          </div>
+        )}
+      </Card>
+
+      <Card title="Bulk / Block Deals" icon={ShoppingBag}>
+        {!blockDeals || blockDeals.length === 0 ? (
+          <div className="text-xs text-slate-500 py-4">No bulk/block deals on record for {symbol}.</div>
+        ) : (
+          <div className="space-y-2 max-h-80 overflow-y-auto terminal-scrollbar">
+            {blockDeals.map((row: any, i: number) => (
+              <div key={i} className="flex items-center justify-between text-[11px] border-b border-slate-800/40 pb-1.5">
+                <div className="min-w-0">
+                  <div className="text-slate-200 truncate">{row.client_name ?? '—'}</div>
+                  <div className="text-slate-600">{row.date} · {row.trade_type}</div>
+                </div>
+                <span className="font-mono font-bold shrink-0 ml-2 text-slate-300">
+                  {row.pct_transacted != null ? `${fmt(row.pct_transacted)}% of float` : `₹${fmt(row.value_cr, 1)}Cr`}
+                </span>
+              </div>
+            ))}
+          </div>
+        )}
+      </Card>
     </div>
   );
 };
@@ -511,12 +690,27 @@ const FnoTab: React.FC<{ symbol: string }> = ({ symbol }) => {
 };
 
 // ─── Earnings tab ───────────────────────────────────────────────────────────
+const ACTION_TYPE_COLOR: Record<string, string> = {
+  dividend: 'text-emerald-400 bg-emerald-500/10',
+  bonus:    'text-indigo-400 bg-indigo-500/10',
+  split:    'text-sky-400 bg-sky-500/10',
+  rights:   'text-amber-400 bg-amber-500/10',
+};
+
 const EarningsTab: React.FC<{ symbol: string }> = ({ symbol }) => {
   const { data: forecast } = trpc.getMcEarningsForecast.useQuery({ symbol });
   const { data: rating } = trpc.getMcAnalystRating.useQuery({ symbol });
   const { data: consensus } = trpc.getMcConsensus.useQuery({ symbol });
   const { data: priceTarget } = trpc.getMcPriceForecast.useQuery({ symbol });
-  const { data: actions } = trpc.getCorporateActions.useQuery({ symbol });
+  // Replaces getCorporateActions (raw ET live proxy, no persistence, no cross-check) with the
+  // persisted + cross-checked pair (see MCStockInfoPanel's "actions" tab) -- same underlying
+  // data, better quality, so this is a swap, not a second corporate-actions source on the page.
+  const { data: actionHistory } = trpc.getCorporateActionHistory.useQuery({ symbol }, { enabled: !!symbol });
+  const { data: filedActions } = trpc.getFiledCorporateActionsCalendar.useQuery({ symbol }, { enabled: !!symbol });
+  // hitsMisses lives in the same getMcConsolidated response SwotCard/TechnicalsTab also read.
+  const { data: mc } = trpc.getMcConsolidated.useQuery({ symbol }, { enabled: !!symbol, staleTime: 3600_000 });
+  const hitsMisses = (mc as any)?.hitsMisses;
+  const { data: concallTakeaways } = trpc.getConcallTakeaways.useQuery({ symbol, limit: 8 }, { enabled: !!symbol, staleTime: 900_000 });
 
   const hasRating = rating && rating.finalRating;
   const hasPriceTarget = priceTarget && (priceTarget.high || priceTarget.mean || priceTarget.low);
@@ -611,24 +805,125 @@ const EarningsTab: React.FC<{ symbol: string }> = ({ symbol }) => {
         )}
       </Card>
 
-      <Card title="Corporate Actions" icon={CalendarClock} className="lg:col-span-2">
-        {(() => {
-          // getCorporateActions returns the raw ET response object { corporate_actions: [...] },
-          // not an array directly — see App.tsx's working consumer of the same procedure.
-          const corpActions: any[] = (actions as any)?.corporate_actions ?? [];
-          return corpActions.length === 0 ? (
-            <div className="text-xs text-slate-500 py-4">No recent corporate actions for {symbol}.</div>
-          ) : (
-            <div className="space-y-1.5 max-h-72 overflow-y-auto terminal-scrollbar">
-              {corpActions.map((a: any, i: number) => (
-                <div key={i} className="flex justify-between text-[11px] text-slate-400 border-b border-slate-800/40 pb-1">
-                  <span>{a.purpose ?? 'Action'}</span>
-                  <span className="font-mono text-slate-300">{a.date ?? a.ex_date ?? 'TBA'}</span>
+      {hitsMisses?.list && hitsMisses.list.length > 0 && (
+        <Card title="Earnings Hits & Misses (EPS estimate track record)" icon={CalendarClock}>
+          <div className="overflow-x-auto">
+            <table className="w-full text-left text-[11px]">
+              <thead>
+                <tr className="text-[9px] font-black uppercase tracking-widest text-slate-500 border-b border-slate-800">
+                  <th className="pb-2 pr-3">Quarter</th>
+                  <th className="pb-2 pr-3 text-right">Actual</th>
+                  <th className="pb-2 pr-3 text-right">Estimate</th>
+                  <th className="pb-2 text-right">Type</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-800/50">
+                {hitsMisses.list.map((row: any, i: number) => (
+                  <tr key={i} className="font-bold">
+                    <td className="py-1.5 pr-3 text-slate-300">{row.quarter}</td>
+                    <td className="py-1.5 pr-3 text-right text-white">{row.actual || '—'}</td>
+                    <td className="py-1.5 pr-3 text-right text-slate-300">{row.estimates || '—'}</td>
+                    <td className="py-1.5 text-right">
+                      <span className={cn(
+                        'text-[9px] font-black px-2 py-0.5 rounded uppercase',
+                        row.type === 'positive' ? 'bg-emerald-500/10 text-emerald-400' :
+                        row.type === 'negative' ? 'bg-rose-500/10 text-rose-400' : 'bg-slate-800 text-slate-400'
+                      )}>{row.type}</span>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </Card>
+      )}
+
+      {concallTakeaways && concallTakeaways.length > 0 && (
+        <Card title="Concall Takeaways (AI-Generated)" icon={Mic2}>
+          <div className="space-y-2.5 max-h-72 overflow-y-auto terminal-scrollbar pr-1">
+            {concallTakeaways.map((c: any, i: number) => (
+              <div key={i} className="glass rounded-xl p-2.5">
+                <div className="flex items-center justify-between gap-2 mb-1">
+                  <span className="text-[10px] font-black text-slate-300 uppercase tracking-widest">
+                    {c.quarter || c.fiscal_year || 'Latest concall'}
+                  </span>
+                  {c.tone_assessment && (
+                    <span className={cn(
+                      'text-[9px] font-black px-2 py-0.5 rounded uppercase shrink-0',
+                      /positive|bullish/i.test(c.tone_assessment) ? 'bg-emerald-500/10 text-emerald-400' :
+                      /negative|bearish|cautio/i.test(c.tone_assessment) ? 'bg-rose-500/10 text-rose-400' :
+                      'bg-slate-800 text-slate-400'
+                    )}>
+                      {c.tone_assessment}
+                    </span>
+                  )}
                 </div>
-              ))}
-            </div>
-          );
-        })()}
+                <p className="text-[11px] text-slate-300 leading-relaxed">{c.key_takeaway}</p>
+                <p className="text-[9px] text-slate-600 mt-1">
+                  {c.transcript_source ? `Source: ${c.transcript_source}` : ''}{c.announcement_date ? ` · ${c.announcement_date}` : ''}
+                </p>
+              </div>
+            ))}
+          </div>
+        </Card>
+      )}
+
+      <Card title="Corporate Actions" icon={CalendarClock} className="lg:col-span-2">
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+          <div>
+            <div className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-2">MoneyControl history</div>
+            {!actionHistory || actionHistory.length === 0 ? (
+              <div className="text-xs text-slate-500 py-4">No dividend, bonus, split or rights history on record for {symbol}.</div>
+            ) : (
+              <div className="space-y-1.5 max-h-72 overflow-y-auto terminal-scrollbar">
+                {actionHistory.map((a: any, i: number) => (
+                  <div key={i} className="flex items-center justify-between gap-2 text-[11px] text-slate-400 border-b border-slate-800/40 pb-1.5">
+                    <div className="flex items-center gap-2 min-w-0">
+                      <span className={cn('text-[9px] px-1.5 py-0.5 rounded font-bold uppercase shrink-0', ACTION_TYPE_COLOR[a.action_type] ?? 'text-slate-400 bg-slate-500/10')}>
+                        {a.action_type}
+                      </span>
+                      <span className="font-mono text-slate-300 shrink-0">{a.record_date || '—'}</span>
+                      <span className="truncate">{a.ratio_text ?? (a.amount != null ? `₹${fmt(a.amount)}` : '')}</span>
+                    </div>
+                    {/* Cross-checked against ohlcv_adjustment_factors -- see getCorporateActionHistory's
+                        crossCheck annotation and MCStockInfoPanel's identical "Verified" column. */}
+                    {(a.crossCheck === 'confirmed_by_bhavcopy' || a.crossCheck === 'confirmed_via_this_source') ? (
+                      <span className="text-[9px] px-1.5 py-0.5 rounded font-bold text-emerald-400 bg-emerald-500/10 shrink-0">✓ Confirmed</span>
+                    ) : a.crossCheck === 'unconfirmed' ? (
+                      <span className="text-[9px] px-1.5 py-0.5 rounded font-bold text-amber-400 bg-amber-500/10 shrink-0">⚠ Unconfirmed</span>
+                    ) : null}
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+          <div>
+            <div className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-2">Filed with NSE (last/next 6 months)</div>
+            {!filedActions || filedActions.length === 0 ? (
+              <div className="text-xs text-slate-500 py-4">No NSE-filed corporate action in this window.</div>
+            ) : (
+              <div className="space-y-1.5 max-h-72 overflow-y-auto terminal-scrollbar">
+                {filedActions.map((f: any, i: number) => (
+                  <a
+                    key={i}
+                    href={f.source_url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="block p-2 bg-slate-950/50 border border-slate-800/60 rounded-lg hover:border-slate-700 transition-colors"
+                  >
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-[9px] px-1.5 py-0.5 rounded font-bold uppercase text-emerald-400 bg-emerald-500/10 shrink-0">
+                        {(f.category || '').split('|')[0] || 'filing'}
+                      </span>
+                      <span className="text-[9px] text-slate-500 font-mono shrink-0">{f.filing_date}</span>
+                    </div>
+                    <p className="text-[11px] text-slate-200 mt-1 leading-snug line-clamp-2">{f.headline}</p>
+                  </a>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
       </Card>
     </div>
   );
@@ -715,7 +1010,7 @@ const StockHeaderCard: React.FC<{
   onToggleWatchlist?: (symbol: string) => void;
   userId?: string | null;
 }> = ({ symbol, stockMeta, isWatched, onToggleWatchlist, userId }) => {
-  const { data: quote } = trpc.getLiveStockQuote.useQuery({ symbol }, { enabled: !!symbol, refetchInterval: 30_000, retry: false });
+  const { data: quote, dataUpdatedAt: quoteUpdatedAt } = trpc.getLiveStockQuote.useQuery({ symbol }, { enabled: !!symbol, refetchInterval: 30_000, retry: false });
   const { data: predictions } = trpc.getTechnicalPredictions.useQuery({ symbol }, { enabled: !!symbol });
   const { data: unifiedScore, dataUpdatedAt } = trpc.getUnifiedScoreForSymbol.useQuery({ symbol }, { enabled: !!symbol });
   const { data: fundamentals } = trpc.getStockFundamentals.useQuery({ symbol }, { enabled: !!symbol });
@@ -752,6 +1047,7 @@ const StockHeaderCard: React.FC<{
                 {isUp ? <ArrowUpRight className="w-3 h-3" /> : <ArrowDownRight className="w-3 h-3" />}
                 {fmt(quote.change, 2)} ({fmt(quote.changePct, 2)}%)
               </div>
+              <PriceFreshnessBadge updatedAt={quoteUpdatedAt} thresholdMs={90_000} label="price" className="block mt-0.5" />
             </div>
           )}
           {onToggleWatchlist && (
@@ -834,7 +1130,7 @@ export const StockIntelligencePage: React.FC<StockIntelligencePageProps> = ({
           </div>
 
           <div>
-            {tab === 'overview' && <OverviewTab symbol={symbol} />}
+            {tab === 'overview' && <OverviewTab symbol={symbol} sector={stockMeta?.sector} />}
             {tab === 'technicals' && <TechnicalsTab symbol={symbol} />}
             {tab === 'fundamentals' && <FundamentalsTab symbol={symbol} />}
             {tab === 'ownership' && <OwnershipTab symbol={symbol} />}
