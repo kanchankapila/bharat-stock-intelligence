@@ -257,13 +257,23 @@ def load_inference_sequence(
 def walk_forward_validate(model: BiLSTMModel, X: np.ndarray, y5: np.ndarray,
                            y15: np.ndarray, yr5: np.ndarray,
                            fold_size: int = 30) -> Dict:
-    """Expanding window walk-forward. Returns mean metrics across folds."""
+    """Expanding window walk-forward. Returns mean metrics across folds.
+
+    Also tracks frac_saturated -- the fraction of held-out predictions within
+    SATURATION_EPS of 0 or 1 -- across ALL folds' predictions pooled together. Live bug,
+    2026-08-10: AUC only measures rank order, so a model that outputs ~1.0/~0.0 for nearly
+    everything (confidently wrong in absolute terms, not just miscalibrated) can still clear
+    the AUC promotion bar. Confirmed live: BiLSTM v4 (promoted 2026-08-06) jumped from 19%
+    saturated predictions (the prior, healthier version) to 70% the very next inference day,
+    with output then barely changing day-to-day -- a real regression the AUC-only gate missed
+    entirely. See _promote_lstm_version's MAX_SATURATION_FRAC check.
+    """
     n = len(X)
     min_train = 300
     if n < min_train + fold_size * 2:
-        return {"directional_accuracy": np.nan, "roc_auc": np.nan}
+        return {"directional_accuracy": np.nan, "roc_auc": np.nan, "frac_saturated": np.nan}
 
-    accs, aucs = [], []
+    accs, aucs, all_probs = [], [], []
     fold = 0
     while True:
         train_end = min_train + fold * fold_size
@@ -294,12 +304,19 @@ def walk_forward_validate(model: BiLSTMModel, X: np.ndarray, y5: np.ndarray,
         accs.append(accuracy_score(y_te, pred_dir))
         if len(np.unique(y_te)) > 1:
             aucs.append(roc_auc_score(y_te, prob_up))
+        all_probs.extend(prob_up.tolist())
         fold += 1
 
+    SATURATION_EPS = 0.01
+    frac_saturated = (
+        float(np.mean([(p <= SATURATION_EPS or p >= 1 - SATURATION_EPS) for p in all_probs]))
+        if all_probs else np.nan
+    )
     return {
         "directional_accuracy": float(np.mean(accs)) if accs else np.nan,
         "roc_auc":              float(np.mean(aucs)) if aucs else np.nan,
         "n_folds":              fold,
+        "frac_saturated":       frac_saturated,
     }
 
 
@@ -708,6 +725,23 @@ def _promote_lstm_version(new_version: int, metrics: Dict) -> bool:
               f"(metrics={metrics}) -- cannot confirm v{new_version} is safe to promote. "
               f"Weights saved to lstm_v{new_version}.pt but NOT activated; "
               f"re-run --mode train once validation succeeds.")
+        return False
+
+    # Live bug, 2026-08-10: AUC only measures rank order -- a model that outputs ~1.0/~0.0 for
+    # nearly every prediction (confidently wrong in absolute terms) can still clear the AUC bar
+    # as long as its rank ordering happens to be directionally fine. Confirmed live: v4 (this
+    # exact gate, promoted 2026-08-06) went from 19% saturated predictions to 70% the very next
+    # day, then barely varied day-to-day -- a real regression this gate did not catch. 0.5 is a
+    # deliberately generous ceiling (well above the 19% baseline, well below the 70% regression)
+    # so a model with a genuinely high-conviction minority of predictions isn't blocked.
+    MAX_SATURATION_FRAC = 0.5
+    frac_saturated = metrics.get("frac_saturated")
+    if frac_saturated is not None and not (isinstance(frac_saturated, float) and np.isnan(frac_saturated)) \
+            and frac_saturated > MAX_SATURATION_FRAC:
+        print(f"[DL] REFUSED: v{new_version} frac_saturated={frac_saturated:.2f} exceeds "
+              f"{MAX_SATURATION_FRAC} -- {frac_saturated:.0%} of walk-forward predictions are "
+              f"within 1% of 0 or 1, regardless of roc_auc={new_auc:.4f}. Weights saved to "
+              f"lstm_v{new_version}.pt but NOT activated.")
         return False
 
     cfg = _load_config()

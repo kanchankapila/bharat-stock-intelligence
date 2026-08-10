@@ -79,3 +79,57 @@ class TestPromoteLstmVersion:
         dle._promote_lstm_version(1, {"roc_auc": 0.60})
         promoted = dle._promote_lstm_version(2, {"roc_auc": 0.601})  # +0.001, within the 0.005 margin
         assert promoted is False
+
+
+class TestSaturationGate:
+    """Live bug, 2026-08-10: AUC only measures rank order, not the absolute magnitude of a
+    prediction -- a model that outputs ~1.0/~0.0 for nearly everything can still clear the AUC
+    bar as long as its rank order happens to be directionally fine. Confirmed live: BiLSTM v4
+    (promoted 2026-08-06, this exact gate) jumped from 19% saturated predictions to 70% the very
+    next inference day, with output then barely varying day-to-day -- a real regression the
+    AUC-only check missed entirely. walk_forward_validate() now also tracks frac_saturated;
+    this is the gate that acts on it.
+    """
+
+    def test_high_saturation_refuses_promotion_even_with_good_auc(self, monkeypatch, tmp_path):
+        monkeypatch.setattr(dle, "MODEL_DIR", tmp_path)
+        monkeypatch.setattr(dle, "CONFIG_PATH", tmp_path / "dl_model_config.json")
+
+        # A strong roc_auc alone would otherwise clear the bar -- this is exactly what v4 did.
+        promoted = dle._promote_lstm_version(1, {"roc_auc": 0.70, "frac_saturated": 0.70})
+        assert promoted is False, "70% saturated predictions must block promotion regardless of roc_auc"
+        assert not dle.CONFIG_PATH.exists() or json.loads(dle.CONFIG_PATH.read_text()).get("lstm_version") != 1
+
+    def test_moderate_saturation_at_the_healthy_baseline_still_promotes(self, monkeypatch, tmp_path):
+        monkeypatch.setattr(dle, "MODEL_DIR", tmp_path)
+        monkeypatch.setattr(dle, "CONFIG_PATH", tmp_path / "dl_model_config.json")
+
+        # 19% was the live-observed healthy baseline (the pre-v4 model) -- must not be blocked.
+        promoted = dle._promote_lstm_version(1, {"roc_auc": 0.65, "frac_saturated": 0.19})
+        assert promoted is True
+
+    def test_missing_frac_saturated_does_not_block_promotion(self, monkeypatch, tmp_path):
+        """Backward compatibility: metrics dicts from before this field existed (or any future
+        caller that omits it) must not be treated as a saturation failure."""
+        monkeypatch.setattr(dle, "MODEL_DIR", tmp_path)
+        monkeypatch.setattr(dle, "CONFIG_PATH", tmp_path / "dl_model_config.json")
+
+        promoted = dle._promote_lstm_version(1, {"roc_auc": 0.65})
+        assert promoted is True
+
+    def test_nan_frac_saturated_does_not_block_promotion(self, monkeypatch, tmp_path):
+        """walk_forward_validate() returns NaN frac_saturated when there are no predictions at
+        all (n < min_train) -- must fall through to the existing roc_auc-based decision, not be
+        treated as a saturation failure."""
+        monkeypatch.setattr(dle, "MODEL_DIR", tmp_path)
+        monkeypatch.setattr(dle, "CONFIG_PATH", tmp_path / "dl_model_config.json")
+
+        promoted = dle._promote_lstm_version(1, {"roc_auc": 0.65, "frac_saturated": float("nan")})
+        assert promoted is True
+
+    def test_saturation_just_at_ceiling_is_not_blocked(self, monkeypatch, tmp_path):
+        monkeypatch.setattr(dle, "MODEL_DIR", tmp_path)
+        monkeypatch.setattr(dle, "CONFIG_PATH", tmp_path / "dl_model_config.json")
+
+        promoted = dle._promote_lstm_version(1, {"roc_auc": 0.65, "frac_saturated": 0.5})
+        assert promoted is True, "exactly at the ceiling should not be blocked (only strictly above it)"
