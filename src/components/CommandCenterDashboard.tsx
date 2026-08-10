@@ -35,6 +35,23 @@ const pct = (n: number | null | undefined) =>
 const pctColor = (n: number | null | undefined) =>
   n == null ? 'text-slate-400' : n >= 0 ? 'text-emerald-400' : 'text-rose-400';
 
+function pickExplanation(pick: any): { label: string; text: string } | null {
+  if (pick.trade_reasoning) return { label: 'Trade reasoning', text: pick.trade_reasoning };
+  if (!pick.screener_names_json) return null;
+  try {
+    const parsed = JSON.parse(pick.screener_names_json);
+    const names = Array.isArray(parsed?.bull_screeners)
+      ? parsed.bull_screeners
+      : Array.isArray(parsed) ? parsed : [];
+    const clean = names.filter((name: unknown): name is string => typeof name === 'string' && name.trim().length > 0);
+    return clean.length > 0
+      ? { label: 'Bullish screeners', text: clean.slice(0, 6).join(' · ') }
+      : null;
+  } catch {
+    return null;
+  }
+}
+
 function ScoreBar({ label, value, color = 'bg-sky-500' }: {
   label: string; value: number; color?: string;
 }) {
@@ -53,6 +70,7 @@ function ScoreBar({ label, value, color = 'bg-sky-500' }: {
 function EodPickCard({ pick, onSelect }: { pick: any; onSelect: (sym: string) => void }) {
   const [expanded, setExpanded] = useState(false);
   const style = CONVICTION_STYLE[pick.conviction_level] ?? CONVICTION_STYLE.C_LOW;
+  const explanation = pickExplanation(pick);
 
   return (
     <motion.div
@@ -142,24 +160,24 @@ function EodPickCard({ pick, onSelect }: { pick: any; onSelect: (sym: string) =>
         <ScoreBar label="DL"         value={pick.dl_score ?? 0}             color="bg-pink-500"   />
       </div>
 
-      {pick.trade_reasoning && (
+      {explanation && (
         <button
           className="flex items-center gap-1 text-[10px] text-slate-500 hover:text-slate-300 w-full"
           onClick={(e) => { e.stopPropagation(); setExpanded(!expanded); }}
         >
           {expanded ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
-          Trade reasoning
+          {explanation.label}
         </button>
       )}
       <AnimatePresence>
-        {expanded && pick.trade_reasoning && (
+        {expanded && explanation && (
           <motion.div
             initial={{ height: 0, opacity: 0 }}
             animate={{ height: 'auto', opacity: 1 }}
             exit={{ height: 0, opacity: 0 }}
             className="overflow-hidden"
           >
-            <p className="text-[11px] text-slate-400 mt-2 leading-relaxed">{pick.trade_reasoning}</p>
+            <p className="text-[11px] text-slate-400 mt-2 leading-relaxed">{explanation.text}</p>
           </motion.div>
         )}
       </AnimatePresence>

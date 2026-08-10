@@ -13,7 +13,8 @@ export const IndicesPage: React.FC<{
   onSelectStock: (symbol: string) => void;
   selectedIndex: { id: string; name: string } | null;
   setSelectedIndex: (idx: { id: string; name: string } | null) => void;
-}> = ({ onSelectStock, selectedIndex, setSelectedIndex }) => {
+  userId?: string | null;
+}> = ({ onSelectStock, selectedIndex, setSelectedIndex, userId }) => {
   const { data: indicesData, isLoading } = trpc.getAllIndices.useQuery(undefined, { refetchInterval: 30000 });
   const { data: advDecData } = trpc.getIndexAdvanceDecline.useQuery(undefined, { refetchInterval: marketHoursRefetchInterval(10000) });
 
@@ -24,6 +25,7 @@ export const IndicesPage: React.FC<{
         indexName={selectedIndex.name}
         onBack={() => setSelectedIndex(null)}
         onSelectStock={onSelectStock}
+        userId={userId}
       />
     );
   }

@@ -29,6 +29,35 @@ function fmtNum(n: number | null | undefined, digits = 2): string {
   return n.toFixed(digits);
 }
 
+const FactorPaperScreen: React.FC<{ onSelectStock?: (symbol: string) => void }> = ({ onSelectStock }) => {
+  const { data, isLoading } = trpc.getFactorPaperPicks.useQuery(undefined, { staleTime: 5 * 60_000 });
+  if (isLoading) return <Card dense title="12-1 Momentum Paper Screen" icon={TrendingUp}><p className="text-xs text-slate-500 font-mono">Loading scheduled factor snapshot…</p></Card>;
+  if (!data?.picks.length) return null;
+  return (
+    <Card dense title="12-1 Momentum Paper Screen" icon={TrendingUp} action={<span className="text-[10px] font-mono text-amber-400">PAPER TRADE · AS OF {data.asOf}</span>}>
+      <p className="text-[11px] text-slate-500 mb-3">
+        Standalone literature factor, ranked across the validated top-{data.validatedTopKMin} universe. This is not the canonical Alpha score or a buy recommendation.
+      </p>
+      <div className="overflow-x-auto">
+        <table className="w-full text-xs">
+          <thead><tr className="text-[10px] text-slate-500 uppercase border-b border-slate-800">
+            <th className="text-left py-2">Rank</th><th className="text-left py-2">Symbol</th><th className="text-right py-2">12-1 Return</th><th className="text-right py-2">20D ADT</th><th className="text-right py-2">Close</th>
+          </tr></thead>
+          <tbody>{data.picks.slice(0, 10).map((pick, index) => (
+            <tr key={pick.symbol} className="border-b border-slate-900">
+              <td className="py-2 text-slate-600 font-mono">{index + 1}</td>
+              <td className="py-2"><button onClick={() => onSelectStock?.(pick.symbol)} className="font-bold text-slate-100 hover:text-indigo-300">{pick.symbol}</button></td>
+              <td className="py-2 text-right font-mono text-emerald-400">{fmtPct(pick.r12_1 ?? pick.score)}</td>
+              <td className="py-2 text-right font-mono text-slate-400">{pick.adt20 == null ? '—' : `₹${(pick.adt20 / 10_000_000).toFixed(1)}cr`}</td>
+              <td className="py-2 text-right font-mono text-slate-300">{fmtNum(pick.close)}</td>
+            </tr>
+          ))}</tbody>
+        </table>
+      </div>
+    </Card>
+  );
+};
+
 // ─── Stock symbol search (mirrors StockIntelligencePage's SymbolSearch) ───────
 const StockSearchBox: React.FC<{ onSelect: (symbol: string) => void }> = ({ onSelect }) => {
   const [q, setQ] = useState('');
@@ -128,7 +157,7 @@ const StockScreenerMembership: React.FC<{ symbol: string; onSelectStock?: (symbo
 const HORIZONS: Horizon[] = ['5d', '10d', '20d', '60d', '120d'];
 const LIMIT = 30;
 
-const ScreenerBrowser: React.FC<{ onOpenScreener?: (id: string, source: string) => void }> = () => {
+const ScreenerBrowser: React.FC<{ onSelectStock?: (symbol: string) => void }> = ({ onSelectStock }) => {
   const [source, setSource] = useState<SourceFilter>('all');
   const [category, setCategory] = useState<string>('');
   const [tier, setTier] = useState<TierFilter>('ALL');
@@ -159,6 +188,7 @@ const ScreenerBrowser: React.FC<{ onOpenScreener?: (id: string, source: string) 
 
   return (
     <div className="space-y-4">
+      <FactorPaperScreen onSelectStock={onSelectStock} />
       {/* Filter bar */}
       <div className="flex flex-wrap items-center gap-2">
         <div className="flex items-center gap-2 glass rounded-xl px-3 py-2 flex-1 min-w-[220px]">
@@ -231,7 +261,7 @@ const ScreenerBrowser: React.FC<{ onOpenScreener?: (id: string, source: string) 
       )}
 
       {/* Results table */}
-      <Card title={`Screeners (${filteredRows.length}${nameQuery ? ` of ${rows.length} on this page` : ''})`} icon={ListFilter}>
+      <Card dense title={`Screeners (${filteredRows.length}${nameQuery ? ` of ${rows.length} on this page` : ''})`} icon={ListFilter}>
         {leaderboardQ.isLoading ? (
           <p className="text-xs text-slate-500 font-mono">Loading screener leaderboard…</p>
         ) : filteredRows.length === 0 ? (
@@ -304,20 +334,24 @@ export const ScreenerBrowserPage: React.FC<{ onSelectStock?: (symbol: string) =>
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between flex-wrap gap-3">
-        <div className="flex gap-1 p-1 bg-slate-900/60 rounded-xl w-fit">
+        <div>
+          <h1 className="text-base font-bold text-slate-100">Screener Browser</h1>
+          <p className="text-[11px] text-slate-500">Explore 1,600+ screeners across 4 providers or look up which screeners a stock belongs to</p>
+        </div>
+        <div className="flex gap-0.5 p-0.5 bg-slate-900/60 rounded-xl">
           <button
             onClick={() => setMode('screeners')}
-            className={cn('flex items-center gap-1.5 px-4 py-2 rounded-lg text-xs font-bold transition-colors', mode === 'screeners' ? 'bg-indigo-600 text-white' : 'text-slate-400 hover:text-slate-200')}
-          ><Layers3 className="w-3.5 h-3.5" /> Screeners</button>
+            className={cn('flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-colors', mode === 'screeners' ? 'bg-indigo-600 text-white' : 'text-slate-400 hover:text-slate-200')}
+          ><Layers3 className="w-3.5 h-3.5" /> Browse Screeners</button>
           <button
             onClick={() => setMode('stocks')}
-            className={cn('flex items-center gap-1.5 px-4 py-2 rounded-lg text-xs font-bold transition-colors', mode === 'stocks' ? 'bg-indigo-600 text-white' : 'text-slate-400 hover:text-slate-200')}
-          ><Filter className="w-3.5 h-3.5" /> Stocks</button>
+            className={cn('flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-colors', mode === 'stocks' ? 'bg-indigo-600 text-white' : 'text-slate-400 hover:text-slate-200')}
+          ><Search className="w-3.5 h-3.5" /> Stock Lookup</button>
         </div>
       </div>
 
       {mode === 'screeners' ? (
-        <ScreenerBrowser />
+        <ScreenerBrowser onSelectStock={onSelectStock} />
       ) : (
         <div className="space-y-4">
           <StockSearchBox onSelect={setStockSymbol} />
@@ -326,7 +360,15 @@ export const ScreenerBrowserPage: React.FC<{ onSelectStock?: (symbol: string) =>
               <StockScreenerMembership symbol={stockSymbol} onSelectStock={onSelectStock} />
             </Card>
           ) : (
-            <p className="text-xs text-slate-500 font-mono px-1">Search a stock above to see every screener (Trendlyne, MoneyControl, ETnow, ET Marketstats) it's currently a member of.</p>
+            <div className="flex flex-col items-center justify-center py-12 text-center gap-3">
+              <div className="w-12 h-12 rounded-xl flex items-center justify-center" style={{ background: 'rgba(99,102,241,0.1)', border: '1px solid rgba(99,102,241,0.15)' }}>
+                <Search className="w-6 h-6 text-indigo-400" />
+              </div>
+              <div>
+                <p className="text-sm font-semibold text-slate-300">Search a stock above</p>
+                <p className="text-xs text-slate-500 mt-1">See every Trendlyne, MoneyControl, ETnow, and ET Marketstats<br />screener that stock currently belongs to, with bullish/bearish tagging.</p>
+              </div>
+            </div>
           )}
         </div>
       )}

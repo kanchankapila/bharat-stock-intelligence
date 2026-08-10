@@ -133,11 +133,12 @@ export const MarketCommandCenter: React.FC<MarketCommandCenterProps> = ({ onSele
           relative to v5's MarketPulsePage, per the Phase 3 home-page composition
           ("V6 Canonical Workbench" proposal). Reuses the same shared component
           DashboardPage.tsx already embeds, not a new implementation. */}
-      <Card title="Activity Feed" icon={Flame}>
-        <ActivityFeed onSelectStock={onSelectStock} />
-      </Card>
-
-      <PreMarketBriefing />
+      <div className="grid grid-cols-1 2xl:grid-cols-2 gap-4 items-start">
+        <Card dense title="Activity Feed" icon={Flame}>
+          <ActivityFeed onSelectStock={onSelectStock} />
+        </Card>
+        <PreMarketBriefing />
+      </div>
 
       <FnOIndexInsight />
 

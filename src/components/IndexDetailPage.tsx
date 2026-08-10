@@ -5,13 +5,15 @@ import { cn } from '../lib/utils';
 import { marketHoursRefetchInterval } from '../lib/timeFormat';
 import IndexFnoOverview from './IndexFnoOverview';
 import { MCIndexDetailPanel, resolveConstituentSymbol } from './MCIndexDetailPanel';
+import { AddToPortfolioButton } from './AddToPortfolioButton';
 
 export const IndexDetailPage: React.FC<{
   indexId: string;
   indexName: string;
   onBack: () => void;
   onSelectStock: (symbol: string) => void;
-}> = ({ indexId, indexName, onBack, onSelectStock }) => {
+  userId?: string | null;
+}> = ({ indexId, indexName, onBack, onSelectStock, userId }) => {
   const [techPeriod, setTechPeriod] = useState<'D' | 'W' | 'M'>('D');
 
   const { data: details } = trpc.getIndexDetails.useQuery({ indexId }, { refetchInterval: 30000 });
@@ -304,6 +306,7 @@ export const IndexDetailPage: React.FC<{
                   <th className="text-right pb-3 pr-4">Chg%</th>
                   <th className="text-right pb-3 pr-4">Volume</th>
                   <th className="text-right pb-3">Mkt Cap (Cr)</th>
+                  <th className="pb-3 pl-3" aria-label="Portfolio action" />
                 </tr>
               </thead>
               <tbody>
@@ -339,6 +342,13 @@ export const IndexDetailPage: React.FC<{
                       </td>
                       <td className="py-2.5 pr-4 text-right text-[10px] font-bold text-slate-400 tabular-nums">{s.volume}</td>
                       <td className="py-2.5 text-right text-[10px] font-bold text-slate-400 tabular-nums">{s.mktcap}</td>
+                      <td className="py-2.5 pl-3" onClick={(event) => event.stopPropagation()}>
+                        <AddToPortfolioButton
+                          symbol={nseSym}
+                          currentPrice={Number(s.lastvalue)}
+                          userId={userId}
+                        />
+                      </td>
                     </tr>
                   );
                 })}

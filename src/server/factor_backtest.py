@@ -122,7 +122,7 @@ import math
 import numpy as np
 import pandas as pd
 
-from db_compat import read_df
+from db_compat import read_df, transaction
 
 # -- Cost model -------------------------------------------------------------------
 DEFAULT_COST_BPS_PER_SIDE = 25.0     # see COST MODEL above; sweep this, don't trust one value
@@ -141,6 +141,7 @@ RETURN_CLAMP_PCT = 50.0
 # the one measured, so --picks says so out loud rather than implying the backtest covers it.
 VALIDATED_MIN_TOP_K = 50
 THIN_LIQUIDITY_WARN = 50_000_000     # Rs 5cr ADT: below this, 25bps/side is optimistic
+FACTOR_PICKS_SETTING = 'factor_picks_momentum_12_1'
 
 
 # -- Factor definitions -----------------------------------------------------------
@@ -625,6 +626,43 @@ def todays_picks(panel: pd.DataFrame, factor: str, top_k: int = 50) -> pd.DataFr
     return cur[[c for c in cols if c in cur.columns]].reset_index(drop=True)
 
 
+def factor_picks_payload(picks: pd.DataFrame, factor: str) -> dict:
+    if picks.empty:
+        raise RuntimeError('cannot persist an empty factor-picks snapshot')
+    rows = []
+    for row in picks.to_dict(orient='records'):
+        clean = {}
+        for key, value in row.items():
+            if pd.isna(value):
+                continue
+            clean[key] = (
+                value.isoformat() if hasattr(value, 'isoformat')
+                else float(value) if isinstance(value, (np.floating, np.integer))
+                else value
+            )
+        rows.append(clean)
+    return {
+        'factor': factor,
+        'asOf': str(picks['date'].iloc[0])[:10],
+        'generatedAt': datetime.datetime.now(datetime.timezone.utc).isoformat(),
+        'validatedTopKMin': VALIDATED_MIN_TOP_K,
+        'evidence': 'paper_trade_candidate',
+        'caveat': 'Research screen only; not the canonical Alpha score or a buy recommendation.',
+        'picks': rows,
+    }
+
+
+def persist_factor_picks(picks: pd.DataFrame, factor: str) -> dict:
+    payload = factor_picks_payload(picks, factor)
+    with transaction() as tx:
+        tx.execute(
+            'INSERT INTO app_settings (key, value) VALUES (?, ?) '
+            'ON CONFLICT (key) DO UPDATE SET value = excluded.value',
+            (FACTOR_PICKS_SETTING, json.dumps(payload)),
+        )
+    return payload
+
+
 def main() -> None:
     p = argparse.ArgumentParser(description=__doc__,
                                 formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -641,14 +679,20 @@ def main() -> None:
     p.add_argument('--json', action='store_true')
     p.add_argument('--picks', action='store_true',
                    help="print today's top-K names for --factor instead of backtesting")
+    p.add_argument('--persist-picks', action='store_true',
+                   help='persist --picks output for cheap API/UI reads')
     a = p.parse_args()
 
     panel = load_price_panel(a.start, a.end, a.min_adt, not a.no_survivorship_fill)
 
-    if a.picks:
+    if a.picks or a.persist_picks:
         if a.factor == 'all':
-            p.error("--picks needs a specific --factor, not 'all'")
+            p.error("--picks/--persist-picks needs a specific --factor, not 'all'")
         picks = todays_picks(panel, a.factor, a.top_k)
+        if a.persist_picks:
+            payload = persist_factor_picks(picks, a.factor)
+            print(json.dumps({'success': True, 'setting': FACTOR_PICKS_SETTING, 'count': len(payload['picks']), 'asOf': payload['asOf']}))
+            return
         print(f"\n=== top {len(picks)} by {a.factor} as of {picks['date'].iloc[0]} ===")
         print(picks.to_string(index=False))
         print("\nEntry is the NEXT session's open. Single-factor, marginal evidence "

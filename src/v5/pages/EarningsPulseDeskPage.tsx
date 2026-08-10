@@ -3,7 +3,7 @@ import { CalendarClock, TrendingDown, TrendingUp } from 'lucide-react';
 import { trpc } from '../../lib/trpc';
 import { fmtFixed, numOrNull, s } from '../utils';
 import { V5KpiStrip } from '../components/V5KpiStrip';
-import { V5DecisionSummaryStrip, V5InsightPanel, V5MiniBarChart } from '../components/V5Visuals';
+import { V5DecisionSummaryStrip, V5DeskSkeleton, V5InsightPanel, V5MiniBarChart } from '../components/V5Visuals';
 
 export function EarningsPulseDeskPage({
   onSelectSymbol,
@@ -70,6 +70,8 @@ export function EarningsPulseDeskPage({
       : 'No stock-level earnings list entries available in the payload.',
     'Click a symbol to open the dedicated Stock Intelligence desk for deeper analysis.',
   ];
+
+  if (earningsQ.isLoading) return <V5DeskSkeleton />;
 
   return (
     <section className="v5-grid">

@@ -529,6 +529,11 @@ export const TradeDecisionCockpit: React.FC<{ onSelectStock: (symbol: string) =>
                         </div>
                       ))}
                     </div>
+                    {!selectedCand.entryPrice && !selectedCand.targetPrice && !selectedCand.stopLoss && (
+                      <p className="text-[10px] leading-relaxed text-amber-400/80">
+                        No actionable trade geometry is available. Treat this as a watch candidate, not an entry plan.
+                      </p>
+                    )}
                     {(() => {
                       const e = parseFloat(selectedCand.entryPrice);
                       const t = parseFloat(selectedCand.targetPrice);

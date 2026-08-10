@@ -31,6 +31,37 @@ const SCREENER_CRITERIA_COLUMNS = [
   'rank_momentum', 'rank_quality', 'rank_value', 'rank_composite',
 ] as const;
 
+const factorPickSchema = z.object({
+  symbol: z.string().min(1),
+  date: z.string(),
+  score: z.number().finite(),
+  close: z.number().finite().optional(),
+  next_open: z.number().finite().optional(),
+  r12_1: z.number().finite().optional(),
+  vol21: z.number().finite().optional(),
+  adt20: z.number().finite().optional(),
+});
+
+const factorPicksSnapshotSchema = z.object({
+  factor: z.literal('momentum_12_1'),
+  asOf: z.string(),
+  generatedAt: z.string(),
+  validatedTopKMin: z.number().int().min(50),
+  evidence: z.literal('paper_trade_candidate'),
+  caveat: z.string().min(1),
+  picks: z.array(factorPickSchema),
+});
+
+export function parseFactorPicksSnapshot(value: string | null | undefined) {
+  if (!value) return null;
+  try {
+    const parsed = factorPicksSnapshotSchema.safeParse(JSON.parse(value));
+    return parsed.success ? parsed.data : null;
+  } catch {
+    return null;
+  }
+}
+
 export const screenersRouter = router({
   getTrendingScreeners: publicProcedure
     .query(async () => fetchTrendingScreeners()),
@@ -208,6 +239,13 @@ export const screenersRouter = router({
     .mutation(async () => recategorizeAllScreeners()),
 
   // ── Screener Intelligence (Sub-project A) ─────────────────────────────────
+
+  getFactorPaperPicks: publicProcedure.query(async () => {
+    const row = await dbGet<{ value: string }>(
+      "SELECT value FROM app_settings WHERE key = 'factor_picks_momentum_12_1'"
+    );
+    return parseFactorPicksSnapshot(row?.value);
+  }),
 
   getScreenerLeaderboard: publicProcedure
     .input(z.object({

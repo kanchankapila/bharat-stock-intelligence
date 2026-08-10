@@ -612,24 +612,42 @@ export const PortfolioTrackerPage: React.FC<{ userId?: string | null; onSelectSt
 
   if (!userId) {
     return (
-      <div className="glass rounded-2xl p-8 text-center">
-        <Briefcase className="w-8 h-8 text-slate-600 mx-auto mb-3" />
-        <p className="text-sm text-slate-400">Sign in to build and track your stock and mutual fund portfolio.</p>
+      <div className="flex flex-col items-center justify-center py-20 text-center gap-5">
+        <div className="w-16 h-16 rounded-2xl flex items-center justify-center" style={{ background: 'rgba(99,102,241,0.12)', border: '1px solid rgba(99,102,241,0.2)' }}>
+          <Briefcase className="w-8 h-8 text-indigo-400" />
+        </div>
+        <div className="space-y-1.5">
+          <h2 className="text-lg font-bold text-slate-100">Portfolio Tracker</h2>
+          <p className="text-sm text-slate-400 max-w-xs">Track your stocks and mutual funds with live P&L, sector allocation, and performance analytics.</p>
+        </div>
+        <div className="flex flex-col gap-2 text-left text-xs text-slate-500 bg-slate-900/50 border border-slate-800 rounded-xl p-4 max-w-xs w-full">
+          <div className="flex items-center gap-2"><span className="text-emerald-400 font-bold">✓</span> Live unrealized P&amp;L</div>
+          <div className="flex items-center gap-2"><span className="text-emerald-400 font-bold">✓</span> Realized gain/loss history</div>
+          <div className="flex items-center gap-2"><span className="text-emerald-400 font-bold">✓</span> Sector allocation breakdown</div>
+          <div className="flex items-center gap-2"><span className="text-emerald-400 font-bold">✓</span> Best &amp; worst performers</div>
+        </div>
+        <p className="text-xs text-slate-600">Sign in with Google to get started.</p>
       </div>
     );
   }
 
   return (
     <div className="space-y-4">
-      <div className="flex gap-1 p-1 bg-slate-900/60 rounded-xl w-fit">
-        <button
-          onClick={() => setTab('stocks')}
-          className={cn('flex items-center gap-1.5 px-4 py-2 rounded-lg text-xs font-bold transition-colors', tab === 'stocks' ? 'bg-indigo-600 text-white' : 'text-slate-400 hover:text-slate-200')}
-        ><Briefcase className="w-3.5 h-3.5" /> Stocks</button>
-        <button
-          onClick={() => setTab('mf')}
-          className={cn('flex items-center gap-1.5 px-4 py-2 rounded-lg text-xs font-bold transition-colors', tab === 'mf' ? 'bg-indigo-600 text-white' : 'text-slate-400 hover:text-slate-200')}
-        ><PiggyBank className="w-3.5 h-3.5" /> Mutual Funds</button>
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-base font-bold text-slate-100">Portfolio</h1>
+          <p className="text-[11px] text-slate-500">Track positions, P&amp;L, and sector allocation</p>
+        </div>
+        <div className="flex gap-1 p-0.5 bg-slate-900/60 rounded-xl">
+          <button
+            onClick={() => setTab('stocks')}
+            className={cn('flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-colors', tab === 'stocks' ? 'bg-indigo-600 text-white' : 'text-slate-400 hover:text-slate-200')}
+          ><Briefcase className="w-3.5 h-3.5" /> Stocks</button>
+          <button
+            onClick={() => setTab('mf')}
+            className={cn('flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-colors', tab === 'mf' ? 'bg-indigo-600 text-white' : 'text-slate-400 hover:text-slate-200')}
+          ><PiggyBank className="w-3.5 h-3.5" /> MF</button>
+        </div>
       </div>
 
       {tab === 'stocks' ? <StocksTab onSelectStock={onSelectStock} /> : <MfTab />}

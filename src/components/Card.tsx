@@ -11,6 +11,7 @@ export interface CardProps {
   onClick?: () => void;
   action?: React.ReactNode;
   variant?: CardVariant;
+  dense?: boolean;
 }
 
 const variantBase: Record<CardVariant, string> = {
@@ -35,6 +36,7 @@ export const Card = React.forwardRef<HTMLDivElement, CardProps>(({
   onClick,
   action,
   variant = 'default',
+  dense = false,
 }, ref) => (
   <div
     ref={ref}
@@ -47,7 +49,7 @@ export const Card = React.forwardRef<HTMLDivElement, CardProps>(({
     onClick={onClick}
   >
     {title && (
-      <div className="px-5 py-3.5 border-b border-slate-800/50 flex items-center justify-between bg-slate-950/20">
+      <div className={cn(dense ? 'px-3 py-2.5' : 'px-5 py-3.5', 'border-b border-slate-800/50 flex items-center justify-between bg-slate-950/20')}>
         <h3 className="text-[10px] font-semibold text-slate-400 flex items-center gap-2 uppercase tracking-widest">
           {Icon && <Icon className="w-3.5 h-3.5 text-indigo-600" />}
           {title}
@@ -55,7 +57,7 @@ export const Card = React.forwardRef<HTMLDivElement, CardProps>(({
         {action ?? null}
       </div>
     )}
-    <div className="p-5">{children}</div>
+    <div className={dense ? 'p-3' : 'p-5'}>{children}</div>
   </div>
 ));
 

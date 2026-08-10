@@ -4,6 +4,7 @@ The point of this file is that every number factor_backtest.py prints is only as
 as its turnover accounting and its entry timing. Both are verified here against cases whose
 answers can be worked out by hand, on synthetic panels — no DB, no network.
 """
+import json
 import math
 import os
 import sys
@@ -410,6 +411,19 @@ class TestLiteratureFactorSigns:
 
 
 class TestPicksSafetyWarnings:
+    def test_factor_picks_payload_is_json_safe_and_carries_evidence(self):
+        picks = pd.DataFrame([{
+            'symbol': 'RELIANCE', 'date': pd.Timestamp('2026-08-10'), 'score': np.float64(1.25),
+            'close': np.float64(1400), 'next_open': np.nan,
+        }])
+        payload = fb.factor_picks_payload(picks, 'momentum_12_1')
+        assert payload['factor'] == 'momentum_12_1'
+        assert payload['asOf'] == '2026-08-10'
+        assert payload['evidence'] == 'paper_trade_candidate'
+        assert payload['picks'][0]['score'] == 1.25
+        assert 'next_open' not in payload['picks'][0]
+        json.dumps(payload)
+
     """--picks output is the one thing a person might act on directly, so the two ways it can
     mislead (too-narrow K, untradeably thin names) must be shouted, not buried in a docstring."""
 

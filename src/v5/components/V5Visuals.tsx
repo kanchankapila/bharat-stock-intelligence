@@ -5,6 +5,21 @@ type BarItem = {
   suffix?: string;
 };
 
+export function V5DeskSkeleton({ rows = 3 }: { rows?: number }) {
+  return (
+    <section className="v5-grid animate-pulse" aria-label="Loading desk data">
+      <div className="col-span-12 grid grid-cols-2 gap-3 xl:grid-cols-4">
+        {Array.from({ length: 4 }).map((_, index) => (
+          <div key={index} className="v5-card h-20 bg-[var(--v5-surface-2)]" />
+        ))}
+      </div>
+      {Array.from({ length: rows }).map((_, index) => (
+        <div key={index} className="v5-card col-span-12 h-36 bg-[var(--v5-surface-2)] xl:col-span-6" />
+      ))}
+    </section>
+  );
+}
+
 export function V5MiniBarChart({
   title,
   items,

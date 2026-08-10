@@ -49,6 +49,7 @@ const V2Settings         = React.lazy(() => import('./v2/views/settings/V2Settin
 const V2Dashboard        = React.lazy(() => import('./v2/views/dashboard/V2Dashboard').then(m => ({ default: m.V2Dashboard })));
 const V3Dashboard        = React.lazy(() => import('./v3/views/dashboard/V3Dashboard').then(m => ({ default: m.V3Dashboard })));
 const MarketCommandCenter = React.lazy(() => import('./v4/views/MarketCommandCenter').then(m => ({ default: m.MarketCommandCenter })));
+const PreMarketBriefing = React.lazy(() => import('./v4/components/PreMarketBriefing'));
 const StockIntelligencePage = React.lazy(() => import('./v4/views/StockIntelligencePage').then(m => ({ default: m.StockIntelligencePage })));
 const V2SignalTracking   = React.lazy(() => import('./v2/views/signals/V2SignalTracking').then(m => ({ default: m.V2SignalTracking })));
 const ScreenerPage_v2    = React.lazy(() => import('./v2/views/screener/ScreenerPage').then(m => ({ default: m.ScreenerPage })));
@@ -406,6 +407,11 @@ export default function App() {
               userId={user?.uid}
               />
             } />
+            <Route path="/premarket" element={
+              <div className="p-4 sm:p-6 max-w-6xl mx-auto">
+                <PreMarketBriefing />
+              </div>
+            } />
             <Route path="/stock-intelligence-hub" element={
               <StockIntelligencePage
                 initialSymbol={selectedSymbol}
@@ -493,7 +499,7 @@ export default function App() {
             } />
             <Route path="/top-rated" element={<TopRatedStocks onSelectStock={handleSelectStock} watchlist={watchlist} onToggleWatchlist={toggleWatchlist} />} />
             <Route path="/intraday" element={<IntradayPage onSelectStock={handleSelectStock} />} />
-            <Route path="/indices" element={<IndicesPage onSelectStock={handleSelectStock} selectedIndex={selectedIndex} setSelectedIndex={setSelectedIndex} />} />
+            <Route path="/indices" element={<IndicesPage onSelectStock={handleSelectStock} selectedIndex={selectedIndex} setSelectedIndex={setSelectedIndex} userId={user?.uid} />} />
             <Route path="/market-map" element={
               <div className="p-6 space-y-6">
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
@@ -642,6 +648,7 @@ export default function App() {
             changeDashboardVersion(v);
             window.location.reload();
           }}
+          userId={user?.uid}
         >
           {routedContent}
         </V6Shell>

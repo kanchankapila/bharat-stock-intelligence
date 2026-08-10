@@ -3,7 +3,7 @@ import { AlertTriangle, Search, ShieldCheck } from 'lucide-react';
 import { trpc } from '../../lib/trpc';
 import { fmtFixed, n, numOrNull, s } from '../utils';
 import { V5KpiStrip } from '../components/V5KpiStrip';
-import { V5DecisionSummaryStrip, V5InsightPanel, V5MiniBarChart } from '../components/V5Visuals';
+import { V5DecisionSummaryStrip, V5DeskSkeleton, V5InsightPanel, V5MiniBarChart } from '../components/V5Visuals';
 import { stockDisplayName } from '../stockIdentity';
 
 export function RiskDeskPage({ onSelectSymbol }: { onSelectSymbol?: (symbol: string) => void }) {
@@ -61,6 +61,8 @@ export function RiskDeskPage({ onSelectSymbol }: { onSelectSymbol?: (symbol: str
     topTier ? `Largest risk bucket: ${topTier[0]} with ${n(topTier[1])} symbols.` : 'Risk tier distribution unavailable.',
     `Multi-factor leaders shown: ${(topQ.data ?? []).length} at min score ${minScore}.`,
   ];
+
+  if (regimeQ.isLoading && distributionQ.isLoading && topQ.isLoading) return <V5DeskSkeleton />;
 
   return (
     <section className="v5-grid">

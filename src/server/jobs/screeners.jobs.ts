@@ -145,6 +145,16 @@ async function processQuantScoring(job: Job): Promise<{ success: boolean }> {
   // from it would have badly overestimated. 5min budget is ample margin over the real number.
   await runPython('risk_metrics_engine.py', [], 5 * 60_000)
     .catch(e => console.warn('[QUEUE] risk_metrics_engine failed:', (e as Error).message));
+  // Persist the validated standalone 12-1 momentum paper screen for cheap API/UI reads.
+  // It remains outside unified_ranker: the factor's evidence supports paper trading, not
+  // dilution into the canonical multi-engine blend. A recent start date is sufficient to
+  // compute today's 12-month-minus-1-month rank and avoids rebuilding the 5-year research
+  // panel every night. This advisory snapshot must never fail canonical quant scoring.
+  await runPython(
+    'factor_backtest.py',
+    ['--factor', 'momentum_12_1', '--top-k', '50', '--start', '2024-01-01', '--persist-picks'],
+    15 * 60_000,
+  ).catch(e => console.warn('[QUEUE] factor picks snapshot failed:', (e as Error).message));
   return { success: true };
 }
 

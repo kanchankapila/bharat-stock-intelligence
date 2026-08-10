@@ -3,7 +3,7 @@ import { Landmark } from 'lucide-react';
 import { trpc } from '../../lib/trpc';
 import { fmtFixed, numOrNull, s } from '../utils';
 import { V5KpiStrip } from '../components/V5KpiStrip';
-import { V5DecisionSummaryStrip, V5InsightPanel, V5MiniBarChart, V5Sparkline } from '../components/V5Visuals';
+import { V5DecisionSummaryStrip, V5DeskSkeleton, V5InsightPanel, V5MiniBarChart, V5Sparkline } from '../components/V5Visuals';
 
 type FlowRow = {
   date: string;
@@ -73,6 +73,8 @@ export function InstitutionalFlowDeskPage() {
     fiiNet == null ? 'FII snapshot unavailable.' : `FII net is ${signedCr(fiiNet)} on latest row.`,
     diiNet == null ? 'DII snapshot unavailable.' : `DII net is ${signedCr(diiNet)} on latest row.`,
   ];
+
+  if (flowQ.isLoading && detailsQ.isLoading) return <V5DeskSkeleton />;
 
   return (
     <section className="v5-grid">
