@@ -7,7 +7,7 @@ import json
 import csv
 import math
 from pathlib import Path
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta, timezone
 
 from db_compat import connect
 
@@ -1893,6 +1893,14 @@ class UnifiedRanker:
 
     def run(self):
         today = date.today().isoformat()
+        # computed_at is a bare DATE and the upsert key is (symbol, computed_at), so a manual
+        # same-day re-run silently replaces that morning's 07:30 IST cron row. Nothing recorded
+        # WHEN a row was actually produced, which made this table ungradeable: a genuine
+        # pre-market signal and a post-close re-run of the same date were indistinguishable, so
+        # measuring a session against its own date's row could silently be look-ahead.
+        # One timestamp for the whole run -- one run is one generation event, and a per-row
+        # now() would imply a precision that does not exist.
+        generated_at = datetime.now(timezone.utc)
 
         if self.conn.execute('SELECT COUNT(*) FROM screener_catalog').fetchone()[0] == 0:
             self.seed_screener_catalog()
@@ -2153,6 +2161,7 @@ class UnifiedRanker:
             results.append({
                 'symbol':                  sym,
                 'computed_at':             today,
+                'generated_at':            generated_at,
                 'regime':                  regime,
                 'unified_score':           round(unified, 2),
                 'conviction_level':        _conviction(unified, classification),
@@ -2231,7 +2240,8 @@ class UnifiedRanker:
         for r in results:
             cur.execute('''
                 INSERT INTO unified_recommendations
-                (symbol, computed_at, regime, unified_score, conviction_level, classification,
+                (symbol, computed_at, generated_at, regime, unified_score, conviction_level,
+                 classification,
                  screener_names_json,
                  screener_stock_score, ml_score, confluence_score, technical_score, dl_score,
                  cs_score, breakout_score, smart_money_score,
@@ -2240,7 +2250,8 @@ class UnifiedRanker:
                  fundamental_score, entry_zone_low, entry_zone_high, stop_loss,
                  target_1, target_2, target_3, risk_reward, timeframe, trade_reasoning, sector,
                  position_size_pct)
-                VALUES (:symbol, :computed_at, :regime, :unified_score, :conviction_level, :classification,
+                VALUES (:symbol, :computed_at, :generated_at, :regime, :unified_score,
+                        :conviction_level, :classification,
                         :screener_names_json,
                         :screener_stock_score, :ml_score, :confluence_score, :technical_score,
                         :dl_score, :cs_score, :breakout_score, :smart_money_score,
@@ -2251,6 +2262,11 @@ class UnifiedRanker:
                         :risk_reward, :timeframe, :trade_reasoning, :sector,
                         :position_size_pct)
                 ON CONFLICT(symbol, computed_at) DO UPDATE SET
+                    -- Deliberately overwritten, not preserved: this row IS the later run's
+                    -- output, so generated_at must describe the run that actually wrote what
+                    -- is now stored. Keeping the first run's timestamp would label a
+                    -- post-close re-run as pre-market -- the precise defect being fixed.
+                    generated_at=excluded.generated_at,
                     regime=excluded.regime, unified_score=excluded.unified_score,
                     conviction_level=excluded.conviction_level, classification=excluded.classification,
                     screener_names_json=excluded.screener_names_json,

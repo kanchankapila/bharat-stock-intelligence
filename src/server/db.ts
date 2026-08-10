@@ -3099,6 +3099,17 @@ runMigration('076_unified_recommendations_cs_breakout_smartmoney', `
   ALTER TABLE unified_recommendations ADD COLUMN smart_money_score REAL;
 `);
 
+// computed_at is a bare DATE and the upsert key is (symbol, computed_at), so a manual
+// same-day re-run silently replaced that morning's 07:30 IST cron row with no trace --
+// making the canonical ranking table ungradeable, because a genuine pre-market signal and a
+// post-close re-run were indistinguishable. generated_at records the wall-clock instant of
+// the run that produced the row. NOT part of the key: adding it there would create multiple
+// snapshots per day and change what "the latest snapshot" means for every consumer.
+// Mirrors migrations/1786800000000_unified-recommendations-generated-at.sql.
+runMigration('078_unified_recommendations_generated_at', `
+  ALTER TABLE unified_recommendations ADD COLUMN generated_at TEXT;
+`);
+
 // intraday_recommendation_outcomes gained a direction column (2026-08): Sell/Strong-Sell
 // classifications were never quality-gated on realised outcomes at all, unlike Buy/Strong-Buy
 // (gated since 2026-07-31) -- extending the emission gate to the short side needs its own

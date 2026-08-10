@@ -64,6 +64,10 @@ def make_db():
         CREATE TABLE unified_recommendations (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             symbol TEXT NOT NULL, computed_at TEXT NOT NULL,
+            -- Wall-clock instant of the producing run (2026-08-10). computed_at is a bare
+            -- DATE and the upsert key is (symbol, computed_at), so without this a post-close
+            -- re-run is indistinguishable from the 07:30 IST cron row it replaced.
+            generated_at TEXT,
             regime TEXT NOT NULL, unified_score REAL NOT NULL,
             conviction_level TEXT NOT NULL, classification TEXT, screener_stock_score REAL,
             ml_score REAL, confluence_score REAL, technical_score REAL,
