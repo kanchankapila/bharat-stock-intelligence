@@ -1,6 +1,8 @@
-// Negative-controlled self-check for verify-gate.mjs. Run: node .claude/hooks/verify-gate.test.mjs
-// The first case is the whole point: the gate this replaced passed it.
-import assert from 'node:assert/strict';
+// Negative-controlled tests for verify-gate.mjs, the Stop hook that blocks "done" claims
+// when nothing was actually run. Picked up by `npx vitest run` like any other suite, so the
+// gate is itself gated -- relying on someone remembering to run it by hand is the exact
+// failure mode this hook exists to prevent.
+import { describe, it, expect } from 'vitest';
 import { decide, classify, verificationsPassed } from './verify-gate.mjs';
 
 const line = o => JSON.stringify(o);
@@ -13,41 +15,49 @@ const text = t => line({ message: { role: 'assistant', content: [{ type: 'text',
 const PY = ['unified_ranker.py'];
 const TS = ['src/server/router.ts'];
 
-// 1. NEGATIVE CONTROL — prose only. The old regex-the-transcript gate passed this.
-assert.match(
-  decide(PY, text('I ran pytest and npx tsc --noEmit, everything passes.')),
-  /never ran to a passing exit/,
-  'prose claiming a test ran must not satisfy the gate',
-);
+describe('verify-gate', () => {
+  it('NEGATIVE CONTROL: prose claiming a test ran does not satisfy the gate', () => {
+    // The implementation this replaced regexed the transcript for /pytest/ and passed this.
+    expect(decide(PY, text('I ran pytest and npx tsc --noEmit, everything passes.')))
+      .toMatch(/never ran to a passing exit/);
+  });
 
-// 2. A real, passing run satisfies it.
-assert.equal(decide(PY, [use('a', 'python -m pytest src/server/tests/ -q'), result('a', false)].join('\n')), null);
+  it('a real, passing run satisfies it', () => {
+    expect(decide(PY, [use('a', 'python -m pytest src/server/tests/ -q'), result('a', false)].join('\n')))
+      .toBeNull();
+  });
 
-// 3. A run that exited non-zero does not.
-assert.match(decide(PY, [use('b', 'python -m pytest -q'), result('b', true)].join('\n')), /pytest/);
+  it('a run that exited non-zero does not', () => {
+    expect(decide(PY, [use('b', 'python -m pytest -q'), result('b', true)].join('\n'))).toMatch(/pytest/);
+  });
 
-// 4. A tool_use with no result yet (still running / interrupted) does not count.
-assert.match(decide(PY, use('c', 'python -m pytest -q')), /pytest/);
+  it('a tool_use with no result yet does not count', () => {
+    expect(decide(PY, use('c', 'python -m pytest -q'))).toMatch(/pytest/);
+  });
 
-// 5. .ts changes need both tsc and vitest; one alone still blocks, naming only what's missing.
-const tscOnly = [use('d', 'npx tsc --noEmit'), result('d', false)].join('\n');
-const r = decide(TS, tscOnly);
-assert.match(r, /vitest/);
-assert.doesNotMatch(r, /tsc --noEmit/);
-assert.equal(decide(TS, [tscOnly, use('e', 'npx vitest run'), result('e', false)].join('\n')), null);
+  it('.ts changes need both tsc and vitest, and only the missing one is named', () => {
+    const tscOnly = [use('d', 'npx tsc --noEmit'), result('d', false)].join('\n');
+    const r = decide(TS, tscOnly);
+    expect(r).toMatch(/vitest/);
+    expect(r).not.toMatch(/tsc --noEmit/);
+    expect(decide(TS, [tscOnly, use('e', 'npx vitest run'), result('e', false)].join('\n'))).toBeNull();
+  });
 
-// 6. No code changed -> never block, whatever the transcript says.
-assert.equal(decide([], ''), null);
+  it('never blocks when no code changed', () => {
+    expect(decide([], '')).toBeNull();
+  });
 
-// 7. Malformed lines are skipped, not fatal.
-assert.equal(decide(PY, ['not json', '', use('f', 'pytest'), result('f', false)].join('\n')), null);
+  it('skips malformed transcript lines rather than throwing', () => {
+    expect(decide(PY, ['not json', '', use('f', 'pytest'), result('f', false)].join('\n'))).toBeNull();
+  });
 
-// 8. --collect-only is not a verification run.
-assert.equal(classify('pytest --collect-only -q'), null);
-assert.equal(classify('npm run lint'), 'tsc');
+  it('does not count --collect-only as a verification run', () => {
+    expect(classify('pytest --collect-only -q')).toBeNull();
+    expect(classify('npm run lint')).toBe('tsc');
+  });
 
-// 9. PowerShell counts too; a non-shell tool whose input happens to contain "pytest" does not.
-assert.ok(verificationsPassed([use('g', 'python -m pytest -q', 'PowerShell'), result('g', false)].join('\n')).has('pytest'));
-assert.equal(verificationsPassed([use('h', 'pytest', 'Read'), result('h', false)].join('\n')).size, 0);
-
-console.log('verify-gate: 9 cases passed');
+  it('counts PowerShell but not a non-shell tool whose input merely contains the word', () => {
+    expect(verificationsPassed([use('g', 'python -m pytest -q', 'PowerShell'), result('g', false)].join('\n')).has('pytest')).toBe(true);
+    expect(verificationsPassed([use('h', 'pytest', 'Read'), result('h', false)].join('\n')).size).toBe(0);
+  });
+});
