@@ -204,6 +204,27 @@ describe('individual evaluate() functions', () => {
     expect(r.detail).toMatch(/coverage/);
   });
 
+  it('technical-signals-freshness-coverage does not false-fail on a Monday morning check for Friday data (regression 2026-08-10)', () => {
+    // data-quality-daily runs 08:40 IST, well before technical-signals-daily's own 8:30am-4pm
+    // IST weekday window has produced a fresh Monday row -- Friday's last scan is correctly
+    // only ~0.7 trading-days old, not the ~2.7-3.1 raw calendar days that flagged this "fail"
+    // every Monday until this check used tradingDaysStale() like its 3 siblings already did.
+    const mondayMorning = new Date('2026-08-10T03:10:00Z');
+    const r = byId('technical-signals-freshness-coverage').evaluate(
+      { total: 2200, scored: 1800, last_date: '2026-08-07' }, mondayMorning,
+    );
+    expect(r.status).toBe('pass');
+  });
+
+  it('technical-signals-freshness-coverage still fails a real multi-weekday outage', () => {
+    const aWeekLater = new Date('2026-08-14T12:00:00Z');
+    const r = byId('technical-signals-freshness-coverage').evaluate(
+      { total: 2200, scored: 1800, last_date: '2026-08-07' }, aWeekLater,
+    );
+    expect(r.status).toBe('fail');
+    expect(r.detail).toMatch(/old/);
+  });
+
   it('technical-signals-range-bounds fails when any row violates RSI/probability bounds', () => {
     const r = byId('technical-signals-range-bounds').evaluate({ bad: 3 }, now);
     expect(r.status).toBe('fail');
