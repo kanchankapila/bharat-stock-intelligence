@@ -30,6 +30,29 @@ own hard-won discipline (five prior audit passes on exactly this kind of thing),
 wired into unified_ranker.py in this file — only after real held-out AND live edge is
 demonstrated, the same bar breakout_classifier had to clear first.
 
+VERDICT 2026-08-10 — IT DID NOT CLEAR THAT BAR. DO NOT WIRE THIS IN, AND DO NOT SCHEDULE IT.
+------------------------------------------------------------------------------------------
+scripts/flyer_return_alpha_backtest.py was run over the full walk-forward out-of-sample set
+(766,199 scored rows, 475 distinct dates, every score from a model that never trained on the
+date it is scoring). Ranking the tradeable universe by flyer_probability is not merely
+unproven — it is significantly NEGATIVE:
+
+    cross-sectional Spearman IC (oof_prob vs open->close):  -0.0410   t=-9.02   473 days
+    top-20 basket vs universe @ 0.00% cost:                 -0.0504%/day  t=-1.35
+    top-20 basket vs universe @ 0.15% cost:                 -0.2004%/day  t=-5.36
+    top-20 basket vs universe @ 0.25% cost:                 -0.3004%/day  t=-8.03
+
+The purged-OOF AUC is 0.81 and the held-out test AUC is 0.81. That is the whole point of the
+go/no-go script and the reason this block exists: a high AUC here means the model is good at
+identifying WHO flies, and says nothing about WHEN — exactly the incidence-not-timing failure
+the 2026-07-10 walk-forward already found in high_flyer_retrospective.py's heuristic
+predecessor, reproduced by its ML successor. An AUC of 0.81 read on its own is a trap.
+
+Consequently this file is deliberately left UNSCHEDULED (it appears in no queues.ts /
+jobs/*.ts chain), and flyer_probability is in densify_feature_matrix.NEVER_FILL so its
+residue cannot be forward-filled into the ML feature matrix. Re-run the backtest before
+reconsidering; the verdict is also persisted to app_settings.flyer_classifier_backtest.
+
 Run:
     python flyer_classifier.py --train    # fit + report purged-OOF AUC
     python flyer_classifier.py --report   # evaluate only, don't save a model

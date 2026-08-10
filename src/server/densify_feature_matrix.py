@@ -42,6 +42,18 @@ MAX_FILL_AGE_DAYS = 120
 NEVER_FILL = {
     'symbol', 'date', 'id', 'created_at', 'updated_at', 'signals_json', 'ai_insight',
     'win_probability', 'calibrated_win_probability', 'breakout_probability',
+    # Every OTHER model-output column in technical_signals (2026-08-10). The set above
+    # listed only 3 of the 7 predictions this table carries, so a model whose producer
+    # failed for a day would have its last prediction carried forward for up to
+    # MAX_FILL_DAYS and presented as if it had been made on each of those days -- the exact
+    # fabrication this set exists to prevent, just for the models nobody had enumerated yet.
+    # Found via flyer_probability, which is populated on exactly ONE date and was therefore
+    # a live candidate to be smeared across the whole grid.
+    # No behavioural change when added: movement_probability and cs_score are already at
+    # 100% coverage from their own daily jobs and pead_score's ~76% is its real producer
+    # coverage (PEAD only applies to names with a recent earnings print), so there is
+    # nothing for the filler to have been doing here. This is a guard, not a correction.
+    'flyer_probability', 'movement_probability', 'pead_score', 'cs_score',
     'close', 'cmp', 'open', 'high', 'low', 'volume', 'change_pct',
     'entry_zone', 'stop_loss', 'targets', 'setup_quality', 'time_horizon',
     'enrichment_ffill_age_days',   # this script's own bookkeeping column

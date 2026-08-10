@@ -11,6 +11,7 @@ Each repair is idempotent and can be run independently:
   --holidays        populate market_holidays from observed trading gaps
   --news-link       build an indexed news_symbol_link table from symbols_json
   --labels          add label_definition/producer to signal_outcomes + flag implausible returns
+  --nan-recommendations  delete unified_recommendations rows with a non-finite unified_score
   --all             run everything
 
 Run:  python data_integrity_repair.py --all [--dry-run]
@@ -21,6 +22,7 @@ import json
 import re
 
 from db_compat import connect, ConnWrapper
+from sql_translate import use_postgres
 from hypertable_safe_write import safe_keyed_update
 
 # A bar is physically impossible if OHLC is internally inconsistent, or if it implies a
@@ -354,6 +356,59 @@ def repair_labels(conn: ConnWrapper, dry: bool) -> None:
 
 # ── entry point ──────────────────────────────────────────────────────────────
 
+def repair_nan_recommendations(conn: ConnWrapper, dry: bool) -> None:
+    """Delete rows in unified_recommendations whose unified_score is non-finite.
+
+    These are residue of the 2026-07-31 NaN-poisoning bug (a NaN dl_score propagating
+    through _blend). They are NOT harmless leftovers: every comparison against NaN is
+    False, so `if unified < 1: continue` failed to skip them and _classify's thresholds
+    fell through to a plain label -- the rows carry fabricated Buy/Sell/Hold
+    classifications with no score behind them.
+
+    Source is already fixed (_finite_engine_map + the math.isfinite(unified) guard in
+    unified_ranker.run), and run() purges rows it did not produce -- but only for the
+    date it is currently writing, so historical dates keep their NaN rows forever.
+
+    Live consumers read the latest snapshot only, so this is not current trading P&L.
+    It matters because it silently corrupts every measurement taken over this table:
+    high_flyer_retrospective.py reads `MAX(computed_at) < day` and matches
+    `classification LIKE '%Buy%'`, so a --backfill into that window attributes
+    predictions the system never actually made.
+
+    Deletes rather than nulls the score: a row with no valid score is not a
+    recommendation, and a missing symbol on a historical date is honest where a
+    fabricated 'Buy' is not.
+    """
+    # NaN detection is dialect-specific ON PURPOSE. The portable IEEE trick `x != x`
+    # does NOT work here: Postgres deliberately treats NaN as equal to itself so that
+    # btree ordering is total, so `x != x` is FALSE for NaN. Cast-to-text is the
+    # reliable Postgres test. SQLite cannot store NaN (it coerces to NULL on insert),
+    # so there is nothing to clean on the dev fallback path.
+    if not use_postgres():
+        _log("nan-recommendations: SQLite stores NaN as NULL -- nothing to repair.")
+        return
+
+    rows = conn.execute(
+        "SELECT classification, COUNT(*) AS c, MIN(computed_at) AS lo, MAX(computed_at) AS hi "
+        "FROM unified_recommendations WHERE unified_score::text IN ('NaN','Infinity','-Infinity') "
+        "GROUP BY classification ORDER BY c DESC"
+    ).fetchall()
+    total = sum(int(r['c']) for r in rows)
+    if total == 0:
+        _log("nan-recommendations: none found -- clean.")
+        return
+    for r in rows:
+        _log(f"  {r['classification']:<12} {int(r['c']):>6} fabricated rows "
+             f"({r['lo']} .. {r['hi']})")
+    if dry:
+        _log(f"nan-recommendations: would delete {total} non-finite rows (dry run).")
+        return
+    conn.execute("DELETE FROM unified_recommendations "
+                 "WHERE unified_score::text IN ('NaN','Infinity','-Infinity')")
+    conn.commit()
+    _log(f"nan-recommendations: deleted {total} non-finite rows.")
+
+
 TASKS = {
     'bad_bars': repair_bad_bars,
     'adjustment': repair_adjustment_basis,
@@ -361,6 +416,7 @@ TASKS = {
     'holidays': repair_holidays,
     'news_link': repair_news_link,
     'labels': repair_labels,
+    'nan_recommendations': repair_nan_recommendations,
 }
 
 

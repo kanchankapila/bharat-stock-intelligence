@@ -274,8 +274,20 @@ class IntradayRanker:
         ).fetchall()
         out = {}
         for r in rows:
-            if r["symbol"] not in out:
-                out[r["symbol"]] = float(r["breakout_probability"] or 0) * 100
+            if r["symbol"] in out:
+                continue
+            # isfinite, not `or 0`: NaN is TRUTHY, so `float(nan or 0)` is nan, not 0 -- the
+            # exact idiom that let a NaN dl_score be written as a fake 'Buy' (2026-07-31).
+            # Skip rather than coerce: a non-finite probability is absent, and coercing it to
+            # 0 would fabricate the WORST possible breakout score for that symbol. Falling
+            # through leaves an older finite row for the same symbol usable.
+            v = r["breakout_probability"]
+            if v is None:
+                continue
+            v = float(v)
+            if not math.isfinite(v):
+                continue
+            out[r["symbol"]] = v * 100
         return out
 
     def _reversal_scores(self):
@@ -440,8 +452,16 @@ class IntradayRanker:
                 syms = _json.loads(r["symbols_json"])
             except Exception:
                 continue
+            # Same NaN-is-truthy trap as _breakout_scores: one non-finite sentiment_score
+            # would make the MEAN nan for every symbol tagged on that article, not just skew it.
+            sc = r["sentiment_score"]
+            if sc is None:
+                continue
+            sc = float(sc)
+            if not math.isfinite(sc):
+                continue
             for s in syms:
-                acc.setdefault(s, []).append(float(r["sentiment_score"] or 0))
+                acc.setdefault(s, []).append(sc)
         return {s: sum(v) / len(v) for s, v in acc.items() if v}
 
     def _learned_weights(self):
