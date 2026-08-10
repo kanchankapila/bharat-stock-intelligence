@@ -311,6 +311,47 @@ def _finite_engine_map(name, raw):
     return clean
 
 
+# ── Zero-dispersion engine guard (2026-08-10) ────────────────────────────────────
+# An engine that emits the SAME value for every symbol cannot rank anything, but it still
+# consumes its full REGIME_WEIGHTS share in _blend. That is not harmless: _blend renormalizes
+# over each symbol's own present-engine set, so a constant c contributes w/W * c where W
+# varies BY COVERAGE GROUP -- injecting a meaningless coverage-dependent offset into
+# cross-symbol comparisons. Dropping it is arithmetic, not a view on the engine's merit: the
+# weight redistributes onto engines that actually vary, and symbols become comparable again.
+#
+# This is live, not theoretical. Measured on the 2026-08-10 snapshot (1,843 symbols):
+#   ml         modal share 0.896   <- technical_signals.calibrated_win_probability had
+#                                     EXACTLY 1 distinct value (0.7800, sd 0.0000) across all
+#                                     2,193 rows, while raw win_probability had 1,501. The
+#                                     isotonic calibrator is correctly reporting "no monotonic
+#                                     edge in this regime"; the ranker was consuming that
+#                                     verdict as if it were a score.
+#   technical  modal share 0.863
+#   => 28.4% of total blend weight was carried by engines with no cross-sectional dispersion.
+#
+# Threshold is deliberately ~zero dispersion, NOT a modal-share heuristic. A 50%-modal-share
+# cutoff was tested over 29 ranker-days and was a wash (IC 0.0082 vs 0.0126, top-20 0.428%
+# vs 0.378% -- neither significant), so it is not shipped. Only the unambiguous case is
+# handled here, where inclusion is provably pure dilution rather than a judgement call.
+ZERO_DISPERSION_EPS = 1e-9
+ZERO_DISPERSION_MIN_SYMBOLS = 50   # below this a flat map is thin coverage, not a dead engine
+
+
+def drop_zero_dispersion_engines(engine_maps):
+    """Remove engines whose scores carry no cross-sectional information at all.
+
+    Returns (kept_maps, dropped_engine_names). Missing/!=constant engines pass through.
+    """
+    kept, dropped = {}, []
+    for name, m in engine_maps.items():
+        vals = list(m.values())
+        if len(vals) >= ZERO_DISPERSION_MIN_SYMBOLS and (max(vals) - min(vals)) <= ZERO_DISPERSION_EPS:
+            dropped.append(name)
+            continue
+        kept[name] = m
+    return kept, dropped
+
+
 def _blend(engine_scores, present_engines, weights):
     """Weighted blend that renormalizes weights over the engines that actually have data
     for this symbol, so missing engines (empty confluence/dl tables) don't deflate the score."""
@@ -773,6 +814,49 @@ def veto_classification(classification):
     return 'Hold' if classification in ('Strong Buy', 'Buy') else classification
 
 
+# ── High-realized-volatility veto (2026-08-10) ───────────────────────────────────
+# The single most statistically robust cross-sectional result available in this platform's
+# own price history, and the only one that survives a 4.5-year test:
+#
+#   67 monthly rebalances (2022-02 -> 2026-07), liquid universe (>=1cr ADT), winsorized
+#   +/-40%, 21-day forward return, entry at next open:
+#       top-decile 21d realized vol   0.453%/month   vs universe 1.403%   -> -0.949%, t=-3.00
+#       bottom-decile (low vol)       0.953%/month                        -> -0.450%, t=-1.38
+#   For comparison, NOTHING else tested clears |t|>1.4: momentum_21d -0.158 (t=-0.51),
+#   momentum_63d -0.175 (t=-0.55), reversal_5d +0.251 (t=1.08), reversal_21d +0.269 (t=0.97).
+#
+# So this is not an alpha source -- it is an EXCLUSION. Both tails underperform the mean
+# (the middle of the vol distribution does best), but only the high tail is significant, and
+# avoiding it costs nothing because it is a filter rather than an extra trade.
+#
+# WHY hv_20d AND NOT quant_scores.annualized_vol -- this distinction is load-bearing and was
+# established by a refuted counterfactual, not by preference. annualized_vol is a 253-DAY
+# window (institutional_quant_engine.py:85) and correlates only 0.366 with 21-day realized
+# vol; running this exact veto on it REVERSES the sign (-0.272%/5d, t=-2.41 -- i.e. actively
+# harmful), whereas the point-in-time hv_20d matches the quantity validated above and is
+# directionally consistent (+0.303%/5d, t=0.94 over the 18 ranker-days available).
+# quant_scores is also a CURRENT-SNAPSHOT table with no history, so it cannot be evaluated
+# point-in-time at all. Do not "simplify" this to reuse the vol already loaded for sizing.
+#
+# Deliberately NOT changed: inverse-vol position sizing still uses annualized_vol. A 1-year
+# vol is the standard, stable choice for sizing and nothing measured here contradicts it.
+HIGH_VOL_VETO_PCTILE = 0.80   # exclude the top 20% most volatile names from the buy pool
+HIGH_VOL_VETO_MULT = 0.7      # and demote the score so a vetoed name also ranks low
+
+
+def high_vol_cutoff(vols, pctile: float = HIGH_VOL_VETO_PCTILE):
+    """Cross-sectional realized-vol cutoff for today's universe, or None if unavailable.
+
+    Cross-sectional rather than an absolute threshold on purpose: "volatile" is only
+    meaningful relative to the rest of the tape on the same day, and an absolute cutoff would
+    silently veto everything in a HIGH_VOL regime and nothing in a calm one.
+    """
+    clean = sorted(v for v in vols if v is not None and math.isfinite(v) and v > 0)
+    if len(clean) < 50:
+        return None      # too thin to define a percentile; fail open rather than veto blind
+    return clean[min(len(clean) - 1, int(pctile * len(clean)))]
+
+
 # ── Factor crowding (#28) ────────────────────────────────────────────────────────
 # Mirrors multi_factor_scorer.py's FACTOR_WEIGHTS — duplicated rather than imported so this
 # DB-only script doesn't pick up numpy/pandas as a new dependency just for one dict. Keep the
@@ -1100,6 +1184,31 @@ class UnifiedRanker:
             return {sym: (sum(v) / len(v)) * 100 for sym, v in acc.items() if v}
         except Exception as e:
             print(f"[UnifiedRanker] _get_ml_scores failed: {e}")
+            self.conn.rollback()
+            return {}
+
+    def _get_realized_vol(self):
+        """Point-in-time 20-day realized vol per symbol (hv_features.py -> technical_signals).
+
+        Latest row per symbol within the lookback, NOT an average: vol is a level, and
+        averaging across a regime shift blurs exactly the spike this veto exists to catch.
+        See HIGH_VOL_VETO_PCTILE's comment for why this column and not quant_scores.
+        """
+        cutoff = (date.today() - timedelta(days=7)).isoformat()
+        try:
+            # ROW_NUMBER(), not DISTINCT ON: the latter is Postgres-only and is not translated
+            # for the SQLite fallback path. Matches _get_confluence_latest_map() et al.
+            rows = self.conn.execute(
+                "SELECT symbol, hv_20d FROM ("
+                "  SELECT symbol, hv_20d,"
+                "         ROW_NUMBER() OVER (PARTITION BY symbol ORDER BY date DESC) AS rn"
+                "  FROM technical_signals WHERE date >= ? AND hv_20d IS NOT NULL"
+                ") t WHERE rn = 1",
+                (cutoff,),
+            ).fetchall()
+            return {r['symbol']: float(r['hv_20d']) for r in rows}
+        except Exception as e:
+            print(f"[UnifiedRanker] _get_realized_vol failed: {e}")
             self.conn.rollback()
             return {}
 
@@ -1639,6 +1748,21 @@ class UnifiedRanker:
         # Sanitize before blending: a single engine emitting NaN would otherwise NaN every
         # score it touches, and NaN survives `if unified < 1` to be written as a fake 'Buy'.
         engine_maps = {name: _finite_engine_map(name, m) for name, m in engine_maps.items()}
+        # A constant engine cannot rank but still eats its weight share — see
+        # drop_zero_dispersion_engines() for the measurement and why the threshold is ~0.
+        # NOTE the two maps below are deliberately different and must stay that way:
+        #   engine_maps      -> BLEND only (constant engines removed, weight redistributes)
+        #   engine_maps_all  -> REPORTING only (every engine, so the persisted *_score columns
+        #                       still show what each engine actually said — a collapsed engine
+        #                       reading a flat 59.89 is exactly the diagnostic you want kept)
+        # Building engine_scores off engine_maps instead would KeyError on engine_scores['ml']
+        # the first time an engine collapsed. That is not hypothetical: it crashed the first
+        # live run of this change.
+        engine_maps_all = engine_maps
+        engine_maps, _flat = drop_zero_dispersion_engines(engine_maps)
+        if _flat:
+            print(f"[UnifiedRanker] engines with ZERO cross-sectional dispersion dropped from "
+                  f"the blend (weight redistributed): {', '.join(sorted(_flat))}")
 
         results = []
         raw_sizes = {}   # symbol -> conviction×inverse-vol (normalized into weights after the loop)
@@ -1649,12 +1773,21 @@ class UnifiedRanker:
                 return None
             return _bo_sorted[min(len(_bo_sorted) - 1, int(q * len(_bo_sorted)))]
         bo_p90, bo_p80 = _bo_pctl(0.90), _bo_pctl(0.80)
+        # High-realized-vol veto cutoff for today's tape (see HIGH_VOL_VETO_PCTILE).
+        realized_vol = self._get_realized_vol()
+        hv_cut = high_vol_cutoff(realized_vol.values())
+        if hv_cut is None:
+            print(f"[UnifiedRanker] high-vol veto INACTIVE (only {len(realized_vol)} symbols "
+                  f"with hv_20d; need 50+). Buy pool is unfiltered for volatility today.")
         for sym in all_symbols:
             if not self._passes_rl_gate(sym, rl_gate_map):
                 continue
 
-            engine_scores = {e: m.get(sym, 0.0) for e, m in engine_maps.items()}
+            # Reporting view: every engine, so the persisted *_score columns stay complete.
+            engine_scores = {e: m.get(sym, 0.0) for e, m in engine_maps_all.items()}
+            # Blend view: only engines that carry cross-sectional information for this symbol.
             present = {e for e, m in engine_maps.items() if sym in m}
+            has_data = {e for e, m in engine_maps_all.items() if sym in m}
             # renormalize weights over engines that actually have data for this symbol, so
             # empty confluence/dl tables don't drag every score down to ~15.
             unified = _blend(engine_scores, present, base_weights)
@@ -1675,6 +1808,15 @@ class UnifiedRanker:
             red_flagged = is_red_flagged(membership.get(sym, []))
             if red_flagged:
                 unified *= RED_FLAG_VETO_MULT
+                classification = veto_classification(classification)
+
+            # High-realized-vol veto: the top vol decile underperformed the universe by
+            # -0.949%/month (t=-3.00) over 67 monthly rebalances -- the only cross-sectionally
+            # significant result in 4.5 years of this platform's own price history. A name only
+            # missing hv_20d is NOT vetoed (fail open), same as every other missing-data path here.
+            sym_vol = realized_vol.get(sym)
+            if hv_cut is not None and sym_vol is not None and sym_vol >= hv_cut:
+                unified *= HIGH_VOL_VETO_MULT
                 classification = veto_classification(classification)
 
             # Factor-crowding discount (#28): demote (not veto) names where >70% of the
@@ -1752,10 +1894,17 @@ class UnifiedRanker:
                 'confluence_score':        round(engine_scores['confluence'], 2),
                 'technical_score':         round(engine_scores['technical'], 2),
                 'dl_score':                round(engine_scores['dl'], 2),
-                'cs_score':                round(engine_scores['cs'], 2) if 'cs' in present else None,
-                'breakout_score':          round(engine_scores['breakout'], 2) if 'breakout' in present else None,
-                'smart_money_score':       round(engine_scores['smart_money'], 2) if 'smart_money' in present else None,
+                # has_data (not present): report what the engine said even if it was excluded
+                # from the blend for zero dispersion — otherwise the column silently goes NULL
+                # and the collapse becomes invisible in the very table you'd debug it from.
+                'cs_score':                round(engine_scores['cs'], 2) if 'cs' in has_data else None,
+                'breakout_score':          round(engine_scores['breakout'], 2) if 'breakout' in has_data else None,
+                'smart_money_score':       round(engine_scores['smart_money'], 2) if 'smart_money' in has_data else None,
                 'avg_engine_track_record': round(avg_track, 2),
+                # len(present), NOT len(has_data): this backs the UI's "N/7 engines" badge, and
+                # an engine that collapsed to a constant did not actually support the pick. The
+                # badge therefore drops on days an engine dies — which is the honest signal, not
+                # a regression. (Before the zero-dispersion guard the two sets were identical.)
                 'engine_coverage_count':   len(present),
                 'bullish_screener_count':  bull_counts.get(sym, 0),
                 'bearish_screener_count':  bear_counts.get(sym, 0),
