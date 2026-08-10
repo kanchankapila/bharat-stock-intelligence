@@ -86,8 +86,16 @@ class TestNaNFallsThroughDownstreamGuards:
     relabelled as an actionable Buy. These assert the fall-through, so if someone later makes
     _classify/_conviction NaN-aware these tests point at the guard that must stay."""
 
-    def test_nan_score_classifies_as_buy(self):
-        assert _classify(float('nan'), bull=5, bear=1) == 'Buy'
+    def test_nan_score_no_longer_classifies_as_buy(self):
+        """Was 'Buy': net-bullish screeners decided direction and NaN only had to get past a
+        score gate that every NaN comparison fails silently. Since direction moved to the
+        score (2026-08-10), a NaN fails EVERY threshold and falls through to Hold -- so this
+        particular path can no longer mint an actionable long out of a poisoned score.
+
+        This is a second line of defence, not the fix: _finite_engine_map still has to keep
+        NaN out of the blend, because a NaN score reaching here at all is already a bug."""
+        assert _classify(float('nan'), bull=5, bear=1) == 'Hold'
+        assert _classify(float('nan'), bull=0, bear=9) == 'Hold'
 
     def test_nan_score_conviction_is_marginal(self):
         assert _conviction(float('nan')) == 'D_MARGINAL'

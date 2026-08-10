@@ -280,6 +280,8 @@ const TABLE_FRESHNESS_CHECKS: TableFreshnessConfig[] = [
     category: 'signals', critical: false, table: 'unified_signals', dateColumn: 'signal_date', warnDays: 3, failDays: 5 },
   { id: 'screener-appearances-freshness', label: 'screener_appearances (feeds screener_momentum_score)',
     category: 'signals', critical: true, table: 'screener_appearances', dateColumn: 'appeared_date', warnDays: 3, failDays: 5 },
+  { id: 'stock-event-triggers-freshness', label: 'stock_event_triggers (screener exit/tenure + news attention)',
+    category: 'signals', critical: false, table: 'stock_event_triggers', dateColumn: 'date', warnDays: 3, failDays: 5 },
   { id: 'screener-sector-rotation-freshness', label: 'screener_sector_rotation',
     category: 'signals', critical: false, table: 'screener_sector_rotation', dateColumn: 'date', warnDays: 3, failDays: 5 },
   { id: 'intraday-recommendations-freshness', label: 'intraday_recommendations',

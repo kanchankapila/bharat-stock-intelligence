@@ -255,7 +255,11 @@ def run():
         elif category == 'sector_theme':
             bias = 'neutral'
         else:
-            bias = 'bullish'
+            # Was 'bullish' (2026-08-10). A catch-all that defaults to BULLISH makes every
+            # screener nobody classified into a buy vote, which systematically tilts
+            # bullish_screener_count and every score derived from it. "We could not tell"
+            # is neutral, not bullish -- abstain instead of guessing a direction.
+            bias = 'neutral'
 
         cat_norm = category if category in CATEGORY_DEFAULTS else 'other'
         _, horizon, confidence = CATEGORY_DEFAULTS.get(cat_norm, ('neutral', 'medium_term', 0.65))
