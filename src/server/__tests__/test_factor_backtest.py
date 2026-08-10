@@ -44,6 +44,13 @@ def _panel(prices: dict[str, list[float]], dates: list[str], deliv=None,
     dr = g['close'].pct_change()
     df['vol21'] = (dr.groupby(df['symbol'], sort=False)
                      .transform(lambda s: s.rolling(5, min_periods=2).std()) * 100).fillna(0.0)
+    df['max_ret_21d'] = (dr.groupby(df['symbol'], sort=False)
+                           .transform(lambda x: x.rolling(5, min_periods=2).max()) * 100).fillna(0.0)
+    df['_hi'] = g['close'].transform(lambda x: x.rolling(10, min_periods=2).max())
+    df['pct_of_52w_high'] = (df['close'] / df['_hi']).fillna(1.0)
+    df['beta'] = 1.0
+    df['idio_vol'] = df['vol21']
+    df = df.drop(columns=['_hi'])
     df['eligible'] = df['next_open'].notna()
     return df
 
@@ -318,6 +325,136 @@ class TestPerYearBreakdown:
         r = fb.run_backtest(_panel(prices, dates), 'reversal_5d', 3, 4, cost_bps_per_side=0)
         assert set(r['excess_by_year_pct']) == {2023, 2024}
         assert r['years_positive'].endswith('/2')
+
+
+
+class TestBetaAndIdioVol:
+    """The riskiest new maths in the module: rolling cov/var instead of a real regression.
+
+    Verified against cases whose answer is known exactly rather than approximately.
+    """
+
+    @staticmethod
+    def _mkt_panel(n=260, seed=7):
+        rng = np.random.default_rng(seed)
+        mkt = rng.normal(0, 0.01, n)
+        idx = 100 * np.cumprod(1 + mkt)
+        # LEVER is exactly 2x the market each day -> beta 2.0, zero residual by construction
+        lever = 100 * np.cumprod(1 + 2 * mkt)
+        # NOISY is 1x market plus independent noise -> beta ~1.0, idio_vol > 0
+        noisy = 100 * np.cumprod(1 + mkt + rng.normal(0, 0.01, n))
+        dates = pd.date_range('2022-01-03', periods=n, freq='B').strftime('%Y-%m-%d').tolist()
+        rows = []
+        for sym, px in (('NIFTY50', idx), ('LEVER', lever), ('NOISY', noisy)):
+            for i, d in enumerate(dates):
+                rows.append({'symbol': sym, 'date': d, 'close': px[i]})
+        df = pd.DataFrame(rows).sort_values(['symbol', 'date']).reset_index(drop=True)
+        df['_dr'] = df.groupby('symbol', sort=False)['close'].pct_change()
+        return df
+
+    def test_beta_of_a_2x_levered_series_is_2(self):
+        out = fb._add_beta_and_idio_vol(self._mkt_panel())
+        b = out.loc[out['symbol'] == 'LEVER', 'beta'].dropna()
+        assert len(b) > 0
+        assert b.iloc[-1] == pytest.approx(2.0, abs=0.01)
+
+    def test_levered_series_has_essentially_zero_idio_vol(self):
+        out = fb._add_beta_and_idio_vol(self._mkt_panel())
+        iv = out.loc[out['symbol'] == 'LEVER', 'idio_vol'].dropna()
+        assert iv.iloc[-1] == pytest.approx(0.0, abs=0.05)
+
+    def test_noisy_series_has_beta_near_one_and_real_idio_vol(self):
+        out = fb._add_beta_and_idio_vol(self._mkt_panel())
+        sub = out[out['symbol'] == 'NOISY'].dropna(subset=['beta', 'idio_vol'])
+        assert sub['beta'].iloc[-1] == pytest.approx(1.0, abs=0.20)
+        assert sub['idio_vol'].iloc[-1] > 0.5
+
+    def test_market_proxy_is_removed_from_the_cross_section(self):
+        """NIFTY50 is a benchmark, not an investable name -- it must not be rankable."""
+        out = fb._add_beta_and_idio_vol(self._mkt_panel())
+        assert 'NIFTY50' not in set(out['symbol'])
+
+    def test_missing_market_series_degrades_loudly_without_crashing(self, capsys):
+        df = pd.DataFrame({'symbol': ['A'] * 5, 'date': [f'2024-01-0{i}' for i in range(1, 6)],
+                           'close': [1.0, 2, 3, 4, 5], '_dr': [np.nan, 1, .5, .33, .25]})
+        out = fb._add_beta_and_idio_vol(df)
+        assert out['beta'].isna().all() and out['idio_vol'].isna().all()
+        assert 'WARNING' in capsys.readouterr().out
+
+
+class TestLiteratureFactorSigns:
+    """Each factor must point the direction its source paper predicts."""
+
+    def test_low_max_ret_prefers_the_non_lottery_name(self):
+        d = pd.DataFrame({'max_ret_21d': [2.0, 15.0]})
+        s = fb.FACTORS['low_max_ret'](d)
+        assert s.iloc[0] > s.iloc[1]
+
+    def test_low_beta_and_low_idio_vol_prefer_the_calmer_name(self):
+        d = pd.DataFrame({'beta': [0.6, 1.8], 'idio_vol': [1.0, 4.0]})
+        assert fb.FACTORS['low_beta'](d).iloc[0] > fb.FACTORS['low_beta'](d).iloc[1]
+        assert fb.FACTORS['low_idio_vol'](d).iloc[0] > fb.FACTORS['low_idio_vol'](d).iloc[1]
+
+    def test_near_52w_high_prefers_the_name_closest_to_its_high(self):
+        d = pd.DataFrame({'pct_of_52w_high': [0.99, 0.55]})
+        assert fb.FACTORS['near_52w_high'](d).iloc[0] > fb.FACTORS['near_52w_high'](d).iloc[1]
+
+    def test_momentum_ex_lottery_rewards_momentum_and_penalises_both_tails(self):
+        d = pd.DataFrame({'r12_1':       [40.0, 40.0, -10.0],
+                          'max_ret_21d': [ 3.0, 20.0,   3.0],
+                          'vol21':       [ 1.0,  6.0,   1.0]})
+        s = fb.FACTORS['momentum_ex_lottery'](d)
+        assert s.iloc[0] > s.iloc[1]     # same momentum, lottery/vol tail is demoted
+        assert s.iloc[0] > s.iloc[2]     # same calmness, more momentum wins
+
+
+
+class TestPicksSafetyWarnings:
+    """--picks output is the one thing a person might act on directly, so the two ways it can
+    mislead (too-narrow K, untradeably thin names) must be shouted, not buried in a docstring."""
+
+    @staticmethod
+    def _panel_with_liquidity(adt_values):
+        n = 30
+        dates = [f'2024-01-{i:02d}' for i in range(1, n + 1)]
+        prices = {f'S{k}': [100.0 + k * i * 0.1 for i in range(n)] for k in range(len(adt_values))}
+        p = _panel(prices, dates)
+        for k, adt in enumerate(adt_values):
+            p.loc[p['symbol'] == f'S{k}', 'adt20'] = adt
+        return p
+
+    def test_warns_when_top_k_is_narrower_than_validated(self, capsys):
+        p = self._panel_with_liquidity([1e9] * 10)
+        fb.todays_picks(p, 'momentum_21d', top_k=5)
+        out = capsys.readouterr().out
+        assert 'NARROWER than the validated range' in out
+
+    def test_no_narrow_k_warning_at_the_validated_size(self, capsys):
+        p = self._panel_with_liquidity([1e9] * 60)
+        fb.todays_picks(p, 'momentum_21d', top_k=fb.VALIDATED_MIN_TOP_K)
+        assert 'NARROWER' not in capsys.readouterr().out
+
+    def test_warns_about_thin_names_and_names_them(self, capsys):
+        p = self._panel_with_liquidity([1e9] * 8 + [1.2e7, 1.4e7])   # 2 thin
+        fb.todays_picks(p, 'momentum_21d', top_k=10)
+        out = capsys.readouterr().out
+        assert 'under Rs 5cr ADT' in out
+        assert '2 of' in out
+
+    def test_picks_use_the_same_scoring_path_as_the_backtest(self):
+        """No second implementation to drift from what was measured."""
+        p = self._panel_with_liquidity([1e9] * 10)
+        picks = fb.todays_picks(p, 'momentum_21d', top_k=3)
+        last = p[p['eligible']]['date'].max()
+        expected = (p[(p['date'] == last) & p['eligible']]
+                    .assign(s=lambda d: fb.FACTORS['momentum_21d'](d))
+                    .nlargest(3, 's')['symbol'].tolist())
+        assert picks['symbol'].tolist() == expected
+
+    def test_unknown_factor_raises(self):
+        p = self._panel_with_liquidity([1e9] * 10)
+        with pytest.raises(KeyError):
+            fb.todays_picks(p, 'nope', top_k=3)
 
 
 if __name__ == '__main__':

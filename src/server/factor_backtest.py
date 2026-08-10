@@ -58,11 +58,46 @@ assumes you are small relative to 1cr ADT), no short book, no leverage, no divid
 return only -- Indian large-cap yields ~1-1.5%/yr, so a long-only result here is understated by
 roughly that against a total-return benchmark, and a long/short spread is unaffected).
 
+RESULTS AS OF 2026-08-10 (14 factors, 53 monthly rebalances, top-50, 25bps/side)
+--------------------------------------------------------------------------------
+Read this before adding a factor, because the pattern is consistent and it is the opposite
+of what "more signal = better" would predict.
+
+  ONLY POSITIVE AND SIGNIFICANT:
+    momentum_12_1        +0.86%/mo  t=+2.08   turnover 0.35   <- the only one
+  SIGNIFICANTLY NEGATIVE (useful only as exclusions):
+    low_vol              -1.66%     t=-2.95
+    low_max_ret          -1.54%     t=-3.12   <- MAX (Bali et al.) INVERTS on Indian equities
+    reversal_21d         -1.39%     t=-3.97
+    momentum_ex_lottery  -1.25%     t=-2.69   <- see below
+    high_vol             -1.21%     t=-3.89
+    reversal_x_delivery  -0.89%     t=-2.15
+  NOT SIGNIFICANT: momentum_63d, momentum_21d, near_52w_high, delivery_pct, low_beta,
+                   low_idio_vol, reversal_5d
+
+FOUR of the five imported literature factors FAILED to replicate here (near_52w_high,
+low_beta, low_idio_vol all insignificant; low_max_ret significantly INVERTED). Do not assume
+a US-published factor transfers to this universe -- test it.
+
+COMBINING MADE IT WORSE, EVERY TIME. This is the single most useful thing measured:
+    momentum_12_1 alone                          +0.86%  t=+2.08
+    momentum_12_1 + 2 exclusions (ex_lottery)    -1.25%  t=-2.69   (-2.1pp)
+    momentum_12_1 long-only                      +0.86%  t=+2.08
+    momentum_12_1 long/short                     +0.49%  t=+0.50   (short leg destroys it)
+    8-engine unified_score blend                  IC 0.0001, t=0.02
+Adding components to this dataset has reduced performance in every case tested. Prefer the
+simplest thing that works; a new factor needs to beat momentum_12_1 ALONE, not add to it.
+
+momentum_12_1 caveats: positive in all 9 cost x size configs and sign-consistent across all
+holding periods, and NOT survivorship-driven (0.861% with fill vs 0.847% without). But t=2.08
+does not survive a multiple-testing correction across 14 factors (~t=3.0 needed), and monthly
+per-year excess decays (2023 +1.37, 2024 +2.32, 2025 +0.37, 2026 +0.02). Paper-trade it.
+
 USAGE
 -----
-    python factor_backtest.py --factor momentum_21d --rebalance 21 --top-k 50
     python factor_backtest.py --factor all --rebalance 21 --cost-bps 25
-    python factor_backtest.py --factor reversal_5d --rebalance 5 --long-short
+    python factor_backtest.py --factor momentum_12_1 --picks --top-k 25
+    python factor_backtest.py --factor momentum_12_1 --cost-bps 40 --no-survivorship-fill
 """
 from __future__ import annotations
 
@@ -88,6 +123,12 @@ DEFAULT_START = '2021-01-01'
 # trustworthy and must say so rather than silently absorbing it into the mean.
 RETURN_CLAMP_PCT = 50.0
 
+# The configuration momentum_12_1 was actually validated at (t>2 only at K=50 and K=100).
+# Below this, momentum concentrates into speculative microcaps -- a different strategy from
+# the one measured, so --picks says so out loud rather than implying the backtest covers it.
+VALIDATED_MIN_TOP_K = 50
+THIN_LIQUIDITY_WARN = 50_000_000     # Rs 5cr ADT: below this, 25bps/side is optimistic
+
 
 # -- Factor definitions -----------------------------------------------------------
 # Each takes the panel and returns a score where HIGHER = more attractive to go long.
@@ -105,6 +146,28 @@ FACTORS = {
     # short-horizon reversal gated on delivery quality, avoiding the high-vol tail.
     'reversal_x_delivery': lambda d: (
         _z(-d['r5']) + _z(d['deliv_pct']) - _z(d['vol21'])
+    ),
+
+    # -- Pre-registered literature factors (2026-08-10) ---------------------------
+    # These are NOT data-mined: each is a specific published result being retested on
+    # Indian equities. Naming the source matters, because the multiple-testing penalty for
+    # "I tried 20 things and 1 worked" does not apply the same way to "the literature
+    # predicts X; does X hold here". Anything that fails here is reported as failing.
+    #
+    # Ang/Hodrick/Xing/Zhang (2006): high idiosyncratic vol UNDERPERFORMS. Expect negative.
+    'low_idio_vol':   lambda d: -d['idio_vol'],
+    # Frazzini/Pedersen (2014) Betting Against Beta: low beta wins risk-adjusted.
+    'low_beta':       lambda d: -d['beta'],
+    # Bali/Cakici/Whitelaw (2011) MAX: lottery demand: high max-daily-return UNDERPERFORMS.
+    'low_max_ret':    lambda d: -d['max_ret_21d'],
+    # George/Hwang (2004): nearness to the 52-week high often DOMINATES raw momentum.
+    'near_52w_high':  lambda d: d['pct_of_52w_high'],
+    # The two things this dataset actually supports, combined: the only factor with positive
+    # cost-adjusted excess (momentum_12_1) with the two robustly-negative tails removed.
+    # Deliberately equal-weighted -- fitting the blend weights on 65 observations would be
+    # exactly the overfit this repo has been burned by before.
+    'momentum_ex_lottery': lambda d: (
+        _z(d['r12_1']) - _z(d['max_ret_21d']) - _z(d['vol21'])
     ),
 }
 
@@ -180,11 +243,67 @@ def load_price_panel(start: str = DEFAULT_START,
     px['vol21'] = (px.groupby('symbol', sort=False)['_dr']
                      .rolling(20, min_periods=10).std()
                      .reset_index(level=0, drop=True)) * 100
-    px = px.drop(columns=['_dr'])
+
+    gs = px.groupby('symbol', sort=False)
+    # MAX (Bali/Cakici/Whitelaw): the single largest daily return in the trailing month.
+    px['max_ret_21d'] = (gs['_dr'].rolling(21, min_periods=10).max()
+                           .reset_index(level=0, drop=True)) * 100
+    # George/Hwang: where the price sits within its own 52-week range (1.0 = at the high).
+    px['_hi252'] = gs['close'].rolling(252, min_periods=120).max().reset_index(level=0, drop=True)
+    px['pct_of_52w_high'] = px['close'] / px['_hi252']
+
+    px = _add_beta_and_idio_vol(px)
+    px = px.drop(columns=['_dr', '_hi252', '_mkt'], errors='ignore')
 
     px['eligible'] = (px['adt20'] >= min_adt) & px['next_open'].notna() & (px['next_open'] > 0)
     print(f"[FactorBacktest] eligible (>=Rs {min_adt/1e7:.0f}cr ADT & tradeable next open): "
           f"{int(px['eligible'].sum()):,} symbol-days")
+    return px
+
+
+BETA_WINDOW = 252
+BETA_MIN_OBS = 120
+
+
+def _add_beta_and_idio_vol(px: pd.DataFrame) -> pd.DataFrame:
+    """Rolling market beta and idiosyncratic vol vs NIFTY50.
+
+    Computed from rolling cov/var rather than an explicit per-symbol regression -- same
+    numbers, and a real regression over 3,400 symbols x 5 years would take minutes:
+        beta      = cov(r_i, r_m) / var(r_m)
+        idio_vol  = sqrt(max(0, var(r_i) - beta^2 * var(r_m)))
+    Both NaN where the market series is missing; NaN is treated as "no signal" by the
+    factor loop rather than being filled, so a symbol is dropped from those factors only.
+    """
+    mkt = px.loc[px['symbol'] == 'NIFTY50', ['date', '_dr']].rename(columns={'_dr': '_mkt'})
+    if mkt.empty or mkt['_mkt'].notna().sum() < BETA_MIN_OBS:
+        print('[FactorBacktest] WARNING: no NIFTY50 series -- beta / idio_vol unavailable, '
+              'the factors using them will be skipped.')
+        px['beta'] = np.nan
+        px['idio_vol'] = np.nan
+        return px
+
+    px = px.merge(mkt, on='date', how='left')
+    px['_xy'] = px['_dr'] * px['_mkt']
+
+    # Sample covariance via rolling SUMS rather than .rolling().cov():
+    #     cov = (sum(xy) - sum(x)sum(y)/n) / (n-1)
+    # Identical to pandas' ddof=1 result, but .rolling().cov() builds a MultiIndex covariance
+    # matrix per window and then needs an .unstack() over 3M rows -- minutes vs seconds here.
+    def _roll(col, how):
+        r = px.groupby('symbol', sort=False)[col].rolling(BETA_WINDOW, min_periods=BETA_MIN_OBS)
+        return getattr(r, how)().reset_index(level=0, drop=True)
+
+    n = _roll('_dr', 'count')
+    s_xy, s_x, s_y = _roll('_xy', 'sum'), _roll('_dr', 'sum'), _roll('_mkt', 'sum')
+    cov = (s_xy - s_x * s_y / n) / (n - 1)
+    var_m = _roll('_mkt', 'var')
+    var_i = _roll('_dr', 'var')
+    px['beta'] = cov / var_m.replace(0, np.nan)
+    resid_var = var_i - px['beta'] ** 2 * var_m
+    px['idio_vol'] = np.sqrt(resid_var.clip(lower=0)) * 100
+    # NIFTY50 is a market proxy, not an investable constituent of this cross-section.
+    px = px[px['symbol'] != 'NIFTY50']
     return px
 
 
@@ -399,6 +518,40 @@ def _print(r: dict) -> None:
         print("\n  VERDICT: positive and significant net of costs -- worth a live paper test.")
 
 
+def todays_picks(panel: pd.DataFrame, factor: str, top_k: int = 50) -> pd.DataFrame:
+    """The top-K names by `factor` on the most recent eligible date.
+
+    Same scoring path the backtest uses, so what you see here is exactly what was measured --
+    no second implementation to drift. Entry price is the NEXT session's open, which is why
+    `next_open` may be blank on the newest bar: that name is not yet tradeable.
+    """
+    if factor not in FACTORS:
+        raise KeyError(f"unknown factor {factor!r}; known: {sorted(FACTORS)}")
+    eligible = panel[panel['eligible']]
+    if eligible.empty:
+        raise RuntimeError('no eligible rows in panel')
+    last = eligible['date'].max()
+    cur = eligible[eligible['date'] == last].copy()
+    cur['score'] = FACTORS[factor](cur)
+    cur = cur.dropna(subset=['score']).sort_values('score', ascending=False).head(top_k)
+
+    # Two ways this list can mislead someone who skips the docstring, both worth shouting about.
+    if top_k < VALIDATED_MIN_TOP_K:
+        print(f"[FactorBacktest] WARNING: top-{top_k} is NARROWER than the validated range "
+              f"({VALIDATED_MIN_TOP_K}-100). Momentum concentrates into speculative microcaps at "
+              "small K, and that configuration was NOT the one measured. Widen K or treat this "
+              "as a watchlist, not a portfolio.")
+    thin = cur[cur['adt20'] < THIN_LIQUIDITY_WARN] if 'adt20' in cur.columns else cur.iloc[:0]
+    if len(thin):
+        print(f"[FactorBacktest] WARNING: {len(thin)} of {len(cur)} names sit under "
+              f"Rs {THIN_LIQUIDITY_WARN/1e7:.0f}cr ADT ({', '.join(thin['symbol'].head(8))}). "
+              "The backtest's cost model assumes you are small relative to daily turnover; at "
+              "this liquidity real slippage will exceed the 25bps/side assumed.")
+
+    cols = ['symbol', 'date', 'close', 'next_open', 'score', 'r12_1', 'vol21', 'adt20']
+    return cur[[c for c in cols if c in cur.columns]].reset_index(drop=True)
+
+
 def main() -> None:
     p = argparse.ArgumentParser(description=__doc__,
                                 formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -413,9 +566,22 @@ def main() -> None:
     p.add_argument('--no-survivorship-fill', action='store_true',
                    help='measure the survivorship bias by leaving delisted names out')
     p.add_argument('--json', action='store_true')
+    p.add_argument('--picks', action='store_true',
+                   help="print today's top-K names for --factor instead of backtesting")
     a = p.parse_args()
 
     panel = load_price_panel(a.start, a.end, a.min_adt, not a.no_survivorship_fill)
+
+    if a.picks:
+        if a.factor == 'all':
+            p.error("--picks needs a specific --factor, not 'all'")
+        picks = todays_picks(panel, a.factor, a.top_k)
+        print(f"\n=== top {len(picks)} by {a.factor} as of {picks['date'].iloc[0]} ===")
+        print(picks.to_string(index=False))
+        print("\nEntry is the NEXT session's open. Single-factor, marginal evidence "
+              "(see this module's docstring) -- paper-trade before committing capital.")
+        return
+
     by_date = index_by_date(panel)          # grouped once, reused by every factor
     factors = sorted(FACTORS) if a.factor == 'all' else [a.factor]
 
