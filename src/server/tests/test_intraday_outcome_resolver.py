@@ -101,6 +101,53 @@ class TestPaperTradeUsesOnlyPostEntryBars:
         assert ior.paper_trade(100.0, 105.0, 95.0, []) == (None, None, None, None)
 
 
+class TestPaperTradeShort:
+    """direction='SHORT' -- target below entry, stop above; profit when price FALLS. Added
+    2026-08 alongside the Sell-side emission gate (intraday_recommendation_outcomes.direction).
+    """
+
+    def test_price_falling_to_target_is_a_win(self):
+        bars = _bars((100.0, 101.0, 99.0, 100.0), (100.0, 100.0, 93.0, 94.0))
+        exit_p, reason, pnl, outcome = ior.paper_trade(100.0, 95.0, 105.0, bars, "SHORT")
+        assert reason == "TARGET"
+        assert exit_p == pytest.approx(95.0)
+        assert outcome == "WIN" and pnl > 0
+
+    def test_price_rising_to_stop_is_a_loss(self):
+        bars = _bars((100.0, 101.0, 99.0, 100.0), (100.0, 106.0, 100.0, 105.0))
+        exit_p, reason, pnl, outcome = ior.paper_trade(100.0, 95.0, 105.0, bars, "SHORT")
+        assert reason == "STOP"
+        assert exit_p == pytest.approx(105.0)
+        assert outcome == "LOSS" and pnl < 0
+
+    def test_entry_bar_cannot_trigger_its_own_stop(self):
+        bars = _bars((100.0, 150.0, 100.0, 100.0), (100.0, 100.0, 100.0, 100.0))
+        _exit, reason, _pnl, _out = ior.paper_trade(100.0, 95.0, 105.0, bars, "SHORT")
+        assert reason == "CLOSE"
+
+    def test_stop_wins_ties_within_one_bar(self):
+        """Same conservative tie-break as the long side: an ambiguous bar assumes the worst."""
+        bars = _bars((100.0, 100.0, 100.0, 100.0), (100.0, 110.0, 90.0, 100.0))
+        _exit, reason, _pnl, _out = ior.paper_trade(100.0, 95.0, 105.0, bars, "SHORT")
+        assert reason == "STOP"
+
+    def test_flat_round_trip_loses_exactly_the_modelled_cost(self):
+        bars = _bars((100.0, 100.0, 100.0, 100.0), (100.0, 100.0, 100.0, 100.0))
+        _e, _r, pnl, outcome = ior.paper_trade(100.0, 95.0, 105.0, bars, "SHORT")
+        expected = -(ior.INTRADAY_SLIPPAGE_BPS / 100.0) - (2 * ior.INTRADAY_COMMISSION_BPS / 100.0)
+        assert pnl == pytest.approx(expected, abs=0.01)
+        assert outcome == "LOSS"
+
+    def test_long_and_short_are_never_conflated_by_default_argument(self):
+        """Negative control: omitting direction must resolve to LONG (existing call sites don't
+        pass it), never silently to SHORT."""
+        long_bars = _bars((100.0, 101.0, 99.0, 100.0), (100.0, 106.0, 100.0, 105.5))
+        no_direction = ior.paper_trade(100.0, 105.0, 95.0, long_bars)
+        explicit_long = ior.paper_trade(100.0, 105.0, 95.0, long_bars, "LONG")
+        assert no_direction == explicit_long
+        assert no_direction[1] == "TARGET"  # would be "STOP"-prone under SHORT's inverted test
+
+
 class TestTimestampNormalisation:
     def test_naive_text_is_treated_as_utc(self):
         ts = ior._parse_ts("2026-07-30T03:57:45.409921")

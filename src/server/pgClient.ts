@@ -237,12 +237,12 @@ export async function pgEnsureColumns(): Promise<void> {
      )`,
     `CREATE INDEX IF NOT EXISTS idx_irh_symbol_date ON intraday_recommendations_history(symbol, computed_at, cycle_at)`,
     `CREATE TABLE IF NOT EXISTS intraday_recommendation_outcomes (
-       symbol TEXT, computed_at TEXT,
+       symbol TEXT, computed_at TEXT, direction TEXT NOT NULL DEFAULT 'LONG',
        entry_price DOUBLE PRECISION, target_1 DOUBLE PRECISION, stop_loss DOUBLE PRECISION,
        day_high DOUBLE PRECISION, day_low DOUBLE PRECISION, day_close DOUBLE PRECISION,
        exit_price DOUBLE PRECISION, exit_reason TEXT, pnl_pct DOUBLE PRECISION, outcome TEXT,
        resolved_at TIMESTAMP,
-       PRIMARY KEY (symbol, computed_at)
+       PRIMARY KEY (symbol, computed_at, direction)
      )`,
     `CREATE INDEX IF NOT EXISTS idx_intraday_outcomes_date ON intraday_recommendation_outcomes(computed_at DESC)`,
     `CREATE TABLE IF NOT EXISTS intraday_strategy_lifts (

@@ -298,6 +298,23 @@ export const miscRouter = router({
       }, 900);
     }),
 
+  // intraday_ranker.py's emission gate (both directions) -- app_settings row it writes on
+  // every run. Short TTL: the ranker re-runs every 15 min during market hours and the gate can
+  // in principle flip mid-session, so a stale cached read here would show a wrong state longer
+  // than necessary.
+  getIntradayEmissionGateStatus: publicProcedure
+    .query(async () => fetchWithCache('intraday_emission_gate_status', async () => {
+      const row = await dbGet<{ value: string }>(
+        `SELECT value FROM app_settings WHERE key = 'intraday_emission_gate_status'`
+      );
+      if (!row?.value) return null;
+      try {
+        return JSON.parse(row.value);
+      } catch {
+        return null;
+      }
+    }, 60)),
+
   getMarketMoodIndex: publicProcedure
     .query(async () => fetchWithCache('market_mood_index', async () => {
       const rows = await dbAll<any>(`
