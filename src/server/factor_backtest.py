@@ -63,8 +63,9 @@ RESULTS AS OF 2026-08-10 (14 factors, 53 monthly rebalances, top-50, 25bps/side)
 Read this before adding a factor, because the pattern is consistent and it is the opposite
 of what "more signal = better" would predict.
 
-  ONLY POSITIVE AND SIGNIFICANT:
-    momentum_12_1        +0.86%/mo  t=+2.08   turnover 0.35   <- the only one
+  POSITIVE AND SIGNIFICANT:
+    value_book_to_price  +0.93%/mo  t=+2.67   turnover 0.28   <- strongest found
+    momentum_12_1        +0.86%/mo  t=+2.08   turnover 0.35
   SIGNIFICANTLY NEGATIVE (useful only as exclusions):
     low_vol              -1.66%     t=-2.95
     low_max_ret          -1.54%     t=-3.12   <- MAX (Bali et al.) INVERTS on Indian equities
@@ -87,6 +88,18 @@ COMBINING MADE IT WORSE, EVERY TIME. This is the single most useful thing measur
     8-engine unified_score blend                  IC 0.0001, t=0.02
 Adding components to this dataset has reduced performance in every case tested. Prefer the
 simplest thing that works; a new factor needs to beat momentum_12_1 ALONE, not add to it.
+
+value_book_to_price: positive in all 6 cost x size configs (+0.54 to +0.99), survives 40bps
+(+0.85, t=2.44), not survivorship-driven (0.933 t=2.67 with fill vs 0.857 t=2.42 without),
+Sharpe 1.47 and max DD -17.9% -- better than momentum on both. Lowest turnover of any factor
+that works (0.28 -> 1.65%/yr cost drag).
+
+BOTH SURVIVING FACTORS ARE DECAYING, and this is the most important caveat on the page:
+    book_to_price  2021 +1.51 | 2022 +1.53 | 2023 +1.33 | 2024 +0.66 | 2025 +0.16 | 2026 -0.06
+    momentum_12_1  2022 -0.15 | 2023 +1.37 | 2024 +2.32 | 2025 +0.37 | 2026 +0.02
+Two independent, canonical factors both monotonically decaying to ~zero over the last 18
+months is more likely a regime/crowding effect than two coincidences. Neither clears a
+multiple-testing bar across 18 tested factors (~t=3.0 needed). Size accordingly.
 
 momentum_12_1 caveats: positive in all 9 cost x size configs and sign-consistent across all
 holding periods, and NOT survivorship-driven (0.861% with fill vs 0.847% without). But t=2.08
@@ -168,6 +181,19 @@ FACTORS = {
     # exactly the overfit this repo has been burned by before.
     'momentum_ex_lottery': lambda d: (
         _z(d['r12_1']) - _z(d['max_ret_21d']) - _z(d['vol21'])
+    ),
+
+    # -- Value (2026-08-10). Fama-French HML is book-to-market; Basu (1977) is earnings yield.
+    # Testable after all -- see _add_valuation's correction note.
+    'value_earnings_yield': lambda d: d['earnings_yield'],
+    'value_book_to_price': lambda d: d['book_to_price'],
+    'value_composite':     lambda d: _z(d['earnings_yield']) + _z(d['book_to_price']),
+    # Value + momentum is THE canonical pair because the two are negatively correlated, so the
+    # combination diversifies rather than concentrates. This is the one composite with a prior
+    # reason to expect it beats its parts -- every other combination tested here made things
+    # worse, so it is stated as a hypothesis to be tested, not an assumption.
+    'value_x_momentum':    lambda d: (
+        _z(d['earnings_yield']) + _z(d['book_to_price']) + _z(d['r12_1'])
     ),
 }
 
@@ -252,12 +278,59 @@ def load_price_panel(start: str = DEFAULT_START,
     px['_hi252'] = gs['close'].rolling(252, min_periods=120).max().reset_index(level=0, drop=True)
     px['pct_of_52w_high'] = px['close'] / px['_hi252']
 
+    px = _add_valuation(px, start, end)
     px = _add_beta_and_idio_vol(px)
     px = px.drop(columns=['_dr', '_hi252', '_mkt'], errors='ignore')
 
     px['eligible'] = (px['adt20'] >= min_adt) & px['next_open'].notna() & (px['next_open'] > 0)
     print(f"[FactorBacktest] eligible (>=Rs {min_adt/1e7:.0f}cr ADT & tradeable next open): "
           f"{int(px['eligible'].sum()):,} symbol-days")
+    return px
+
+
+def _add_valuation(px: pd.DataFrame, start: str, end: str) -> pd.DataFrame:
+    """Daily cross-sectional P/E and P/B from trendlyne_*_history.
+
+    CORRECTION (2026-08-10): an earlier pass concluded "no fundamental history exists" after
+    checking only fundamentals_history / historical_fundamentals / stock_fundamentals /
+    tl_financial_quality / quant_scores -- all of which do start 2026-06-30. It never looked
+    for trendlyne_pe_history / trendlyne_pb_history, which carry ~2.3M rows over 2,325 symbols
+    and 1,384 daily dates covering the ENTIRE price window. Value factors are testable.
+
+    CAVEAT that must travel with any result from these columns: fetched_at spans only
+    2026-06-30..2026-08-08, so this is the vendor's CURRENT view of history, backfilled -- not
+    a series accumulated day by day. If Trendlyne restates trailing EPS after the fact, the
+    historical P/E embeds the restatement. That is the standard situation with vendor history
+    and is not disqualifying, but it is NOT the same guarantee as observing daily and storing
+    immutably (which is precisely what the rebuild's bitemporal store exists to provide).
+    """
+    for tbl, col in (("trendlyne_pe_history", "pe_ttm"), ("trendlyne_pb_history", "pb_ratio")):
+        try:
+            df = read_df(
+                f"SELECT symbol, date, {col} FROM {tbl} "
+                f"WHERE date >= ? AND date <= ? AND {col} IS NOT NULL",
+                (start, end),
+            )
+        except Exception as e:                                  # noqa: BLE001
+            print(f"[FactorBacktest] WARNING: {tbl} unavailable ({str(e)[:80]}); "
+                  "value factors will be skipped.")
+            px[col] = np.nan
+            continue
+        if df.empty:
+            px[col] = np.nan
+            continue
+        df["date"] = pd.to_datetime(df["date"]).dt.strftime("%Y-%m-%d")
+        px = px.merge(df, on=["symbol", "date"], how="left")
+
+    # E/P and B/P rather than P/E and P/B: the reciprocal is the well-behaved form. A P/E near
+    # zero explodes; the yield form keeps loss-making firms ranked at the BOTTOM (negative
+    # yield) instead of at the top, which is what a raw 1/PE sort on a negative denominator
+    # would do. 17.6% of rows are loss-making, so this is not an edge case.
+    px["earnings_yield"] = np.where(px["pe_ttm"].abs() > 1e-6, 1.0 / px["pe_ttm"], np.nan)
+    px["book_to_price"] = np.where(px["pb_ratio"].abs() > 1e-6, 1.0 / px["pb_ratio"], np.nan)
+    n_ey = int(px["earnings_yield"].notna().sum())
+    print(f"[FactorBacktest] valuation: earnings_yield on {n_ey:,} rows, "
+          f"book_to_price on {int(px['book_to_price'].notna().sum()):,}")
     return px
 
 
