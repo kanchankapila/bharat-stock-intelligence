@@ -35,6 +35,34 @@ NIFTY_SYMBOLS  = ('NIFTY50', 'NIFTY', '^NSEI')
 INITIAL_CAPITAL = 1_000_000   # ₹10L default
 MAX_KELLY_FRAC = 0.25
 
+def warn_on_signal_quality_discontinuity(signals: pd.DataFrame, threshold: float = 0.15) -> str | None:
+    """technical_signals.win_probability/stop_loss/targets reflect whatever scoring code was
+    active when each row was written -- there is no single "the fix landed on date X" cutoff
+    clean enough to hardcode as a --start floor (many different columns were touched by many
+    different fixes on many different dates across this project's history). Instead of guessing
+    one, detect it empirically: if the loaded window's quarterly average win_probability swings
+    more than `threshold`, the window likely spans a real scoring-logic change, not just a market
+    regime shift -- narrow --start before trusting this run as a "does today's system work"
+    backtest. Returns the warning string (also printed) or None if nothing looks discontinuous;
+    returning it makes this testable without capturing stdout.
+    """
+    if signals.empty or 'signal_date' not in signals.columns or 'win_probability' not in signals.columns:
+        return None
+    q = pd.to_numeric(signals['win_probability'], errors='coerce')
+    by_q = q.groupby(signals['signal_date'].dt.to_period('Q')).mean().dropna()
+    if len(by_q) < 2:
+        return None
+    spread = by_q.max() - by_q.min()
+    if spread <= threshold:
+        return None
+    msg = (f"[Backtester] WARNING: win_probability's quarterly average swings {spread:.3f} "
+           f"across this window ({by_q.idxmin()}={by_q.min():.3f} vs {by_q.idxmax()}={by_q.max():.3f}) "
+           f"-- this usually means the window spans a scoring-logic change, not just a market "
+           f"regime. Consider narrowing --start before trusting this as a current-system backtest.")
+    print(msg)
+    return msg
+
+
 def _kelly_fraction(win_prob: float | None, target: float | None, entry: float, stop: float | None) -> float | None:
     """Fractional Kelly size as fraction of capital. Returns None → fall back to equal-weight."""
     if win_prob is None or not (0.01 < win_prob < 0.99):
@@ -1093,6 +1121,7 @@ class Backtester:
         if signals.empty:
             print("[Backtester] No signals found for the given parameters.")
             return {}
+        warn_on_signal_quality_discontinuity(signals)
 
         # Point-in-time universe: never trade a name on a date it was not actually trading.
         # Applied BEFORE the symbol list is taken so untraded names don't reach OHLCV loading.

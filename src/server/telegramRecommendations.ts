@@ -329,7 +329,11 @@ export function renderDigest(d: DigestData): string {
     if (d.intradayGated) {
       // Be explicit about provenance: the dedicated intraday engine is suppressed, so these
       // are the unified ranker's intraday-horizon picks — a different engine, not a bypass.
-      out.push(`_Dedicated intraday engine is paused (${d.intradayGateReason}). Below are the unified ranker's intraday-horizon picks._`);
+      // Their entry levels come from confluence_signals, which only computes pre-open and
+      // in the evening (gated off during market hours since 2026-08-05) and is never
+      // refreshed once trading starts — so "Entry" here can be a stale pre-market price by
+      // the time this is read mid-session. Say so rather than let it look like a live quote.
+      out.push(`_Dedicated intraday engine is paused (${d.intradayGateReason}). Below are the unified ranker's intraday-horizon picks — their entry levels are a pre-market (~07:30 IST) snapshot that does not update once trading begins; check a live quote before acting._`);
     }
     d.intraday.forEach((p, i) => out.push(renderPick(p, i + 1)));
   } else if (d.intradayGated) {
