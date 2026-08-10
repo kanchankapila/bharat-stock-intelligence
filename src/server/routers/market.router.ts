@@ -318,6 +318,38 @@ export const marketRouter = router({
       };
     }),
 
+  // Go/no-go return-alpha backtest status for any of this platform's forward-return
+  // classifiers (scripts/{flyer,breakout}_return_alpha_backtest.py --persist). Research
+  // status only, keyed off app_settings.`${modelKey}_backtest` -- a good purged-CV AUC is
+  // classification skill, not proof of tradeable edge (see each script's own docstring).
+  // Never treat this as a trading signal in the frontend; z.enum whitelists modelKey so a
+  // client can't probe arbitrary app_settings rows via this passthrough.
+  getModelBacktestStatus: publicProcedure
+    .input(z.object({ modelKey: z.enum(['flyer_classifier', 'breakout_classifier']) }))
+    .query(async ({ input }) => {
+      const row = await dbGet<{ value: string }>(
+        'SELECT value FROM app_settings WHERE key = ?',
+        [`${input.modelKey}_backtest`]
+      );
+      return row ? JSON.parse(row.value || '{}') : null;
+    }),
+
+  // screener_combo_finder.py's reverse-engineered screener-combination result: which
+  // precursor screens (gap up/down, open=high/low, top gainers/losers, NiftyTrader live
+  // filters, EOD screener categories) best predict which stocks make a big move the next
+  // session. Tier 1 (deep OHLCV history, real statistical power) is the validated result;
+  // Tier 2 (live/EOD screener membership, only ~3-4 weeks of history) is explicitly
+  // low_data and must never be shown as if it were equally reliable.
+  getScreenerComboFinderStatus: publicProcedure
+    .input(z.object({ tier: z.union([z.literal(1), z.literal(2)]) }))
+    .query(async ({ input }) => {
+      const row = await dbGet<{ value: string }>(
+        'SELECT value FROM app_settings WHERE key = ?',
+        [`screener_combo_finder_tier${input.tier}`]
+      );
+      return row ? JSON.parse(row.value || '{}') : null;
+    }),
+
   refreshEarlyHoursSpotter: adminProcedure
     .mutation(async () => {
       console.log('[TRPC] Running preopen_fetcher.py manually...');

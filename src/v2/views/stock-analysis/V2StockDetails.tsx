@@ -23,7 +23,6 @@ export const V2StockDetails: React.FC<V2StockDetailsProps> = ({ symbol, stock, o
 
   const { data: unifiedData } = trpc.getAlphaQuantDetail.useQuery({ symbol });
   const { data: trendlyneOverview } = trpc.getTrendlyneOverview.useQuery({ symbol });
-  const { data: actions } = trpc.getCorporateActions.useQuery({ symbol });
   const { data: fno } = trpc.getFnOSignals.useQuery({ symbol });
   const { data: overview } = trpc.getCompanyOverview.useQuery({ symbol });
   const { data: profileAnalysis } = trpc.getCompanyProfileAnalysis.useQuery({ symbol });
@@ -126,16 +125,32 @@ export const V2StockDetails: React.FC<V2StockDetailsProps> = ({ symbol, stock, o
 
           <div className="p-6 bg-terminal-panel border border-terminal-border rounded-2xl">
             <h3 className="text-xs font-black text-slate-300 uppercase tracking-widest mb-4 font-mono">Pivot Points (Standard)</h3>
-            <div className="grid grid-cols-5 gap-3">
-              {['S2', 'S1', 'Pivot', 'R1', 'R2'].map((lvl) => (
-                <div key={lvl} className="p-4 bg-terminal-panel-header/50 border border-terminal-border rounded-xl text-center">
-                  <span className="text-[9px] font-black text-slate-500 uppercase tracking-wider block mb-1">{lvl}</span>
-                  <span className="text-sm font-black text-slate-100 font-mono">
-                    ₹{(stock?.price ? stock.price * (lvl === 'Pivot' ? 1.0 : lvl.includes('R') ? 1.02 : 0.98) : 100).toFixed(2)}
-                  </span>
+            {(() => {
+              // Real TradeBrains standard-pivot data (same source MCStockInfoPanel.tsx uses
+              // correctly) — this used to be a fake ±2% offset off the current price.
+              const pivots = (unifiedData as any)?.tradebrains?.pivotData?.standard;
+              const levels = [
+                { key: 'support_two', label: 'S2' },
+                { key: 'support_one', label: 'S1' },
+                { key: 'pivot', label: 'Pivot' },
+                { key: 'res_one', label: 'R1' },
+                { key: 'res_two', label: 'R2' },
+              ];
+              return pivots ? (
+                <div className="grid grid-cols-5 gap-3">
+                  {levels.map(({ key, label }) => (
+                    <div key={label} className="p-4 bg-terminal-panel-header/50 border border-terminal-border rounded-xl text-center">
+                      <span className="text-[9px] font-black text-slate-500 uppercase tracking-wider block mb-1">{label}</span>
+                      <span className="text-sm font-black text-slate-100 font-mono">
+                        {pivots[key] != null ? `₹${Number(pivots[key]).toFixed(2)}` : '—'}
+                      </span>
+                    </div>
+                  ))}
                 </div>
-              ))}
-            </div>
+              ) : (
+                <p className="text-xs text-slate-500 py-2">No pivot data available for this stock right now.</p>
+              );
+            })()}
           </div>
 
           {/* NiftyTrader Technical Signals */}

@@ -298,7 +298,7 @@ def evaluate_purged_cv(df: pd.DataFrame, embargo: int = EMBARGO, n_folds: int = 
               f"need more history (only {len(dates)} labelled dates available).")
         return {"trained": False, "n": len(y), "auc": float("nan"), "base_rate": base_rate,
                 "test_auc": float("nan"), "lift": float("nan"), "X": X, "y": y, "spw": spw,
-                "df": df, "cv_df": cv_df}
+                "df": df, "cv_df": cv_df, "oof": oof}
     auc = float(roc_auc_score(y[mask], oof[mask]))
 
     # top-decile lift: of the highest-scored decile, how much more often do they break out?
@@ -323,7 +323,13 @@ def evaluate_purged_cv(df: pd.DataFrame, embargo: int = EMBARGO, n_folds: int = 
         if tr_ho.sum() >= 200 and va_ho.sum() >= 50 and len(set(y[tr_ho])) >= 2 and len(set(y[va_ho])) >= 2:
             ho_model = _make_model(spw)
             ho_model.fit(X[tr_ho], y[tr_ho])
-            test_auc = float(roc_auc_score(y[va_ho], ho_model.predict_proba(X[va_ho])[:, 1]))
+            ho_probs = ho_model.predict_proba(X[va_ho])[:, 1]
+            test_auc = float(roc_auc_score(y[va_ho], ho_probs))
+            # Extend oof to also cover the reserved holdout window -- these predictions are
+            # genuinely out-of-sample (ho_model never trained on va_ho's dates) and give a
+            # walk-forward-honest score for downstream callers that need one per historical
+            # row, not just an AUC (e.g. a return-alpha backtest -- see flyer_classifier.py).
+            oof[va_ho] = ho_probs
             print(f"[Breakout] held-out test AUC={test_auc:.4f} on {va_ho.sum()} rows across "
                   f"{len(holdout_dates)} never-cross-validated final dates")
         else:
@@ -332,7 +338,7 @@ def evaluate_purged_cv(df: pd.DataFrame, embargo: int = EMBARGO, n_folds: int = 
 
     return {"trained": True, "n": len(y), "auc": auc, "test_auc": test_auc,
             "base_rate": base_rate, "lift": lift, "X": X, "y": y, "spw": spw,
-            "df": df, "cv_df": cv_df}
+            "df": df, "cv_df": cv_df, "oof": oof}
 
 
 def _load_baseline_test_auc(model_path: str) -> float | None:

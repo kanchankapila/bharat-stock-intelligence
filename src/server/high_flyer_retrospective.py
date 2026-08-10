@@ -11,6 +11,12 @@ never asks:
 2. ATTRIBUTION — which observable precursors were present the day BEFORE the
    move, across the whole universe? Rolling lift per precursor tells us which
    setups actually precede big moves here, not in a textbook.
+3. WRONG-DIRECTION — the sharper failure than a plain miss: a flyer that was
+   classified Sell/Strong Sell the day before (rallied against our own call),
+   or a diver (big down-move / fresh 52w low) that was classified Buy/Strong
+   Buy (crashed after our own call). Plain recall only asks "did anything
+   flag this"; it never catches the opposite-signed call. See the 2026-08-06
+   CELLO incident (Sell called, then +15.69%) for why this matters.
 
 The learned lifts then score TODAY's universe to produce tomorrow's
 high_flyer_candidates watchlist — which tomorrow's run grades, closing the loop.
@@ -30,7 +36,7 @@ import math
 
 import pandas as pd
 
-from db_compat import connect, read_df, translate
+from db_compat import connect, read_df, translate, safe_alter
 
 RET_THRESHOLD = 0.04        # +4% day move
 VOL_RATIO_THRESHOLD = 1.5   # on >=1.5x 20d avg volume
@@ -58,6 +64,11 @@ def ensure_schema(con) -> None:
             PRIMARY KEY (symbol, date)
         )
     """))
+    # direction/wrong_call added after the table's initial ship — safe_alter is a no-op
+    # once applied, so this stays correct on every run against an already-migrated DB.
+    safe_alter(cur, "ALTER TABLE high_flyer_retrospective ADD COLUMN direction TEXT DEFAULT 'up'")
+    safe_alter(cur, "ALTER TABLE high_flyer_retrospective ADD COLUMN wrong_call INTEGER DEFAULT 0")
+    safe_alter(cur, "ALTER TABLE high_flyer_retrospective ADD COLUMN prior_classification TEXT")
     cur.execute(translate("""
         CREATE TABLE IF NOT EXISTS high_flyer_daily_stats (
             date                  TEXT PRIMARY KEY,
@@ -106,6 +117,31 @@ def detect_flyers(close: pd.DataFrame, volume: pd.DataFrame, day) -> pd.DataFram
         "new_52w_high": new_high.astype(int),
     })
     return out[is_flyer.reindex(close.columns).fillna(False).values].reset_index(drop=True)
+
+
+def detect_divers(close: pd.DataFrame, volume: pd.DataFrame, day) -> pd.DataFrame:
+    """Mirror of detect_flyers for big DOWN moves / fresh 52w lows. Same shape output
+    (return_pct is negative, new_52w_high is repurposed as new_52w_low)."""
+    if day not in close.index:
+        return pd.DataFrame(columns=["symbol", "return_pct", "volume_ratio", "new_52w_high"])
+    hist = close.loc[:day]
+    vhist = volume.loc[:day]
+    enough = hist.notna().sum() >= MIN_BARS
+    ret = hist.iloc[-1] / hist.iloc[:-1].ffill().iloc[-1] - 1.0
+    vol_avg20 = vhist.iloc[:-1].tail(20).mean()
+    vol_ratio = vhist.iloc[-1] / vol_avg20.where(vol_avg20 > 0)
+    low_252 = hist.iloc[:-1].tail(252).min()
+    new_low = (hist.iloc[-1] < low_252) & (ret < 0)
+    is_diver = enough & (hist.iloc[-1] >= MIN_PRICE) & (
+        ((ret <= -RET_THRESHOLD) & (vol_ratio >= VOL_RATIO_THRESHOLD)) | new_low
+    )
+    out = pd.DataFrame({
+        "symbol": close.columns,
+        "return_pct": (ret * 100).round(2),
+        "volume_ratio": vol_ratio.round(2),
+        "new_52w_high": new_low.astype(int),   # column name kept for schema reuse; means "new low" here
+    })
+    return out[is_diver.reindex(close.columns).fillna(False).values].reset_index(drop=True)
 
 
 def ohlcv_precursor_flags(close: pd.DataFrame, volume: pd.DataFrame, asof) -> pd.DataFrame:
@@ -219,6 +255,15 @@ def _load_predicted_sets(con, day: str, prev_day: str) -> dict:
     return sets
 
 
+def _load_prior_classification(con, day: str) -> dict:
+    """symbol -> unified_recommendations.classification as of the run immediately before
+    `day`'s session (same MAX(computed_at) < day convention as _load_predicted_sets)."""
+    df = read_df(
+        "SELECT symbol, classification FROM unified_recommendations WHERE computed_at = "
+        "(SELECT MAX(computed_at) FROM unified_recommendations WHERE computed_at < ?)", (day,))
+    return dict(zip(df["symbol"], df["classification"])) if not df.empty else {}
+
+
 def run(target_date: str | None = None, backfill: int = 0) -> dict:
     con = connect()
     ensure_schema(con)
@@ -251,10 +296,16 @@ def run(target_date: str | None = None, backfill: int = 0) -> dict:
     return result
 
 
+_SELL_CLASSES = {"Sell", "Strong Sell"}
+_BUY_CLASSES = {"Buy", "Strong Buy"}
+
+
 def _process_day(con, close, volume, day, prev_day) -> dict:
     # 1. RECALL — today's flyers vs what we had flagged in advance
     flyers = detect_flyers(close, volume, day)
+    divers = detect_divers(close, volume, day)
     predicted = _load_predicted_sets(con, day, prev_day)
+    prior_class = _load_prior_classification(con, day)
 
     # Precursor flags as of the PREVIOUS session, whole universe
     px_flags = ohlcv_precursor_flags(close, volume, prev_day)
@@ -264,22 +315,51 @@ def _process_day(con, close, volume, day, prev_day) -> dict:
     cur = con.cursor()
     recall_hits = {k: 0 for k in predicted}
     any_hits = 0
+    wrong_bearish_miss = 0   # flyer that rallied despite a prior Sell/Strong Sell call
     for r in flyers.itertuples(index=False):
         srcs = [k for k, syms in predicted.items() if r.symbol in syms]
         any_hits += bool(srcs)
         for k in srcs:
             recall_hits[k] += 1
+        pc = prior_class.get(r.symbol)
+        wrong = bool(pc in _SELL_CLASSES)
+        wrong_bearish_miss += wrong
         active = ",".join(flags.columns[flags.loc[r.symbol]]) if r.symbol in flags.index else ""
         cur.execute(translate(
             "INSERT INTO high_flyer_retrospective "
-            "(symbol, date, return_pct, volume_ratio, new_52w_high, predicted_by, precursors) "
-            "VALUES (?,?,?,?,?,?,?) "
+            "(symbol, date, return_pct, volume_ratio, new_52w_high, predicted_by, precursors, "
+            "direction, wrong_call, prior_classification) "
+            "VALUES (?,?,?,?,?,?,?,?,?,?) "
             "ON CONFLICT (symbol, date) DO UPDATE SET return_pct = excluded.return_pct, "
             "volume_ratio = excluded.volume_ratio, new_52w_high = excluded.new_52w_high, "
-            "predicted_by = excluded.predicted_by, precursors = excluded.precursors"),
+            "predicted_by = excluded.predicted_by, precursors = excluded.precursors, "
+            "direction = excluded.direction, wrong_call = excluded.wrong_call, "
+            "prior_classification = excluded.prior_classification"),
             (r.symbol, day, float(r.return_pct),
              None if pd.isna(r.volume_ratio) else float(r.volume_ratio),
-             int(r.new_52w_high), ",".join(srcs), active))
+             int(r.new_52w_high), ",".join(srcs), active, "up", int(wrong), pc))
+
+    # WRONG-DIRECTION (bullish miss): today's divers that were classified Buy/Strong Buy
+    # the session before — crashed right after our own bullish call.
+    wrong_bullish_miss = 0
+    for r in divers.itertuples(index=False):
+        pc = prior_class.get(r.symbol)
+        wrong = bool(pc in _BUY_CLASSES)
+        wrong_bullish_miss += wrong
+        active = ",".join(flags.columns[flags.loc[r.symbol]]) if r.symbol in flags.index else ""
+        cur.execute(translate(
+            "INSERT INTO high_flyer_retrospective "
+            "(symbol, date, return_pct, volume_ratio, new_52w_high, predicted_by, precursors, "
+            "direction, wrong_call, prior_classification) "
+            "VALUES (?,?,?,?,?,?,?,?,?,?) "
+            "ON CONFLICT (symbol, date) DO UPDATE SET return_pct = excluded.return_pct, "
+            "volume_ratio = excluded.volume_ratio, new_52w_high = excluded.new_52w_high, "
+            "predicted_by = excluded.predicted_by, precursors = excluded.precursors, "
+            "direction = excluded.direction, wrong_call = excluded.wrong_call, "
+            "prior_classification = excluded.prior_classification"),
+            (r.symbol, day, float(r.return_pct),
+             None if pd.isna(r.volume_ratio) else float(r.volume_ratio),
+             int(r.new_52w_high), "", active, "down", int(wrong), pc))
 
     n_fly = len(flyers)
     recall = {k: round(v / n_fly, 3) if n_fly else None for k, v in recall_hits.items()}
@@ -292,6 +372,9 @@ def _process_day(con, close, volume, day, prev_day) -> dict:
         for k, syms in predicted.items()
     }
     recall["flagged_n"] = {k: len(syms & tradeable) for k, syms in predicted.items()}
+    recall["wrong_bearish_miss"] = wrong_bearish_miss   # flyers we had called Sell/Strong Sell on
+    recall["wrong_bullish_miss"] = wrong_bullish_miss   # divers we had called Buy/Strong Buy on
+    recall["diver_n"] = len(divers)
 
     # 2. ATTRIBUTION — per-precursor counts for today, then rolling lift
     fly_syms = set(flyers["symbol"])
@@ -335,7 +418,8 @@ def _process_day(con, close, volume, day, prev_day) -> dict:
             (day, r.symbol, float(r.score), r.precursors))
     con.commit()
 
-    print(f"[HFR] {day}: {n_fly} flyers | recall {json.dumps(recall)} | "
+    print(f"[HFR] {day}: {n_fly} flyers, {len(divers)} divers | recall {json.dumps(recall)} | "
+          f"wrong-direction: {wrong_bearish_miss} bearish-miss, {wrong_bullish_miss} bullish-miss | "
           f"{len(lifts)} precursor lifts | {len(cands)} candidates for next session")
     if not cands.empty:
         top = ", ".join(f"{r.symbol}({r.score:.2f})" for r in cands.head(10).itertuples(index=False))

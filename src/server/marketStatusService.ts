@@ -158,5 +158,19 @@ export async function isTradingHolidayToday(): Promise<boolean> {
  */
 export async function shouldSkipOnTradingHoliday(job?: { name?: string } | null): Promise<boolean> {
   if (job?.name === 'closed-day-early') return false;
+  // 2026-08-09: every current caller's own cron is weekday-only ('1-5'), and this check's own
+  // isTradingHolidayToday() deliberately treats Sat/Sun as "not a holiday" (see its docstring)
+  // on the assumption that a weekday-only cron would never invoke it on a weekend anyway. That
+  // assumption breaks for addJobWithCatchup's "was the last scheduled occurrence missed"
+  // recovery path, which does NOT respect the day-of-week field -- confirmed live: a server
+  // restart fired catchup runs for stock-refresh/technical-scan/etnow-screener-sync/et-
+  // marketstats-sync/mc-screener-sync on a Sunday, several of which re-wrote stale/duplicate
+  // data (e.g. stock_ohlcv rows dated that Sunday, byte-identical to the prior Friday's bar).
+  // Every call site here is verified weekday-only, so a weekend is unconditionally treated as
+  // a skip -- this is a property of "should THIS caller's already-weekday-only job run today",
+  // not a claim that weekends are holidays in general (isTradingHolidayToday() itself is left
+  // unchanged for that reason).
+  const istDay = new Date(Date.now() + 5.5 * 3600_000).getUTCDay(); // 0=Sun, 6=Sat
+  if (istDay === 0 || istDay === 6) return true;
   return isTradingHolidayToday();
 }

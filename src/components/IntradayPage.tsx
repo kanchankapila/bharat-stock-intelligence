@@ -5,6 +5,7 @@ import {
 } from 'lucide-react';
 import { trpc } from '../lib/trpc';
 import { cn } from '../lib/utils';
+import { FnOIndexInsight } from '../v4/components/FnOIndexInsight';
 
 // ── Types (loosely mirror intraday_recommendations / getIntradayBreadth) ──────
 interface IntradayRec {
@@ -29,6 +30,17 @@ interface BreadthRow {
   adv: number; dec: number; unch: number; total: number;
   adv_decline_ratio: number; pct_positive: number; avg_change_pct: number;
   breadth_score: number; risk_tilt: string;
+}
+interface EmissionGateSide {
+  open: boolean;
+  reason: string | null;
+  avg_pnl_pct: number | null;
+  n_trades: number;
+}
+interface EmissionGateStatus {
+  computed_at: string;
+  long: EmissionGateSide;
+  short: EmissionGateSide;
 }
 
 // ── Regime / tilt visual language ─────────────────────────────────────────────
@@ -56,6 +68,7 @@ const IntradayPage: React.FC<{ onSelectStock: (symbol: string) => void }> = ({ o
   const recsQ = trpc.getIntradayRecommendations.useQuery({ limit: 100 }, { refetchInterval: 60_000 });
   const breadthQ = trpc.getIntradayBreadth.useQuery(undefined, { refetchInterval: 60_000 });
   const accuracyQ = trpc.getIntradayAccuracy.useQuery({ days: 30 });
+  const gateQ = trpc.getIntradayEmissionGateStatus.useQuery(undefined, { refetchInterval: 60_000 });
 
   const [sortKey, setSortKey] = useState<SortKey>('intraday_score');
   const [query, setQuery] = useState('');
@@ -159,6 +172,10 @@ const IntradayPage: React.FC<{ onSelectStock: (symbol: string) => void }> = ({ o
         </div>
       </div>
 
+      {/* ── F&O read (NIFTY/BANKNIFTY PCR, max pain, key strikes) — same live positioning
+          context Command Center shows, relevant here since intraday regime is index-driven */}
+      <FnOIndexInsight />
+
       {/* ── KPI strip ───────────────────────────────────────────────────── */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
         <Kpi icon={Flame} label="Buy Setups" value={n0(buyCount)} accent="text-cyan-300" sub="ranked long" />
@@ -166,6 +183,46 @@ const IntradayPage: React.FC<{ onSelectStock: (symbol: string) => void }> = ({ o
         <Kpi icon={Gauge} label="Avg R:R" value={avgRR ? avgRR.toFixed(2) : '—'} accent="text-amber-300" sub="target ÷ stop" />
         <Kpi icon={Radio} label="Ranked" value={n0(rows.length)} accent="text-slate-200" sub="intraday universe" />
       </div>
+
+      {/* ── Emission gate status (both directions) ─────────────────────────
+          The engine only publishes an actionable Buy/Sell while ITS OWN trailing realised
+          PnL over the last 10 sessions is positive on a large-enough sample -- otherwise the
+          row is downgraded to Hold. Without this badge, a page full of Hold looks identical
+          to "nothing is happening" and "the engine is protecting you from a currently
+          unprofitable setup" -- there was no way to tell the two apart. */}
+      {(() => {
+        const gate = gateQ.data as EmissionGateStatus | null | undefined;
+        if (!gate) return null;
+        const side = (label: string, s: EmissionGateSide) => (
+          <div className={cn('rounded-xl ring-1 p-3 flex items-center justify-between gap-3',
+            s.open ? 'ring-emerald-400/25 bg-emerald-500/[0.06]' : 'ring-amber-400/25 bg-amber-500/[0.06]')}>
+            <div className="min-w-0">
+              <div className="flex items-center gap-1.5 text-[10px] font-black uppercase tracking-widest text-slate-500">
+                {label} Gate
+                <span className={cn('w-1.5 h-1.5 rounded-full', s.open ? 'bg-emerald-400' : 'bg-amber-400')} />
+              </div>
+              <div className={cn('text-sm font-bold', s.open ? 'text-emerald-300' : 'text-amber-300')}>
+                {s.open ? 'OPEN' : 'CLOSED — Buy/Sell downgraded to Hold'}
+              </div>
+              <div className="text-[11px] text-slate-500 truncate" title={s.reason ?? undefined}>{s.reason ?? '—'}</div>
+            </div>
+            {s.avg_pnl_pct != null && (
+              <div className="shrink-0 text-right">
+                <div className={cn('text-lg font-black tabular-nums', s.avg_pnl_pct >= 0 ? 'text-emerald-300' : 'text-rose-300')}>
+                  {s.avg_pnl_pct >= 0 ? '+' : ''}{s.avg_pnl_pct.toFixed(2)}%
+                </div>
+                <div className="text-[10px] text-slate-600">{s.n_trades} trades / 10d</div>
+              </div>
+            )}
+          </div>
+        );
+        return (
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+            {side('Long', gate.long)}
+            {side('Short', gate.short)}
+          </div>
+        );
+      })()}
 
       {/* ── Backtest accuracy (paper-trade outcomes, last 30d) ──────────── */}
       {(() => {

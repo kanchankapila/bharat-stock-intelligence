@@ -204,6 +204,27 @@ describe('individual evaluate() functions', () => {
     expect(r.detail).toMatch(/coverage/);
   });
 
+  it('technical-signals-freshness-coverage does not false-fail on a Monday morning check for Friday data (regression 2026-08-10)', () => {
+    // data-quality-daily runs 08:40 IST, well before technical-signals-daily's own 8:30am-4pm
+    // IST weekday window has produced a fresh Monday row -- Friday's last scan is correctly
+    // only ~0.7 trading-days old, not the ~2.7-3.1 raw calendar days that flagged this "fail"
+    // every Monday until this check used tradingDaysStale() like its 3 siblings already did.
+    const mondayMorning = new Date('2026-08-10T03:10:00Z');
+    const r = byId('technical-signals-freshness-coverage').evaluate(
+      { total: 2200, scored: 1800, last_date: '2026-08-07' }, mondayMorning,
+    );
+    expect(r.status).toBe('pass');
+  });
+
+  it('technical-signals-freshness-coverage still fails a real multi-weekday outage', () => {
+    const aWeekLater = new Date('2026-08-14T12:00:00Z');
+    const r = byId('technical-signals-freshness-coverage').evaluate(
+      { total: 2200, scored: 1800, last_date: '2026-08-07' }, aWeekLater,
+    );
+    expect(r.status).toBe('fail');
+    expect(r.detail).toMatch(/old/);
+  });
+
   it('technical-signals-range-bounds fails when any row violates RSI/probability bounds', () => {
     const r = byId('technical-signals-range-bounds').evaluate({ bad: 3 }, now);
     expect(r.status).toBe('fail');
@@ -231,6 +252,35 @@ describe('individual evaluate() functions', () => {
 
   it('signal-outcomes-resolution-rate passes when the backlog is mostly resolved', () => {
     const r = byId('signal-outcomes-resolution-rate').evaluate({ total: 200, pending: 10 }, now);
+    expect(r.status).toBe('pass');
+  });
+});
+
+describe('mc-consolidated-metrics-freshness (hand-rolled: needs a WHERE source_api filter the factory cannot express)', () => {
+  const now = new Date('2026-08-03T12:00:00Z'); // a Monday
+  const byId = (id: string) => DATA_QUALITY_CHECKS.find(c => c.id === id)!;
+
+  it('filters on source_api so a sibling writer (et_marketstats) sharing this table cannot mask this source going stale', () => {
+    // The mandate this check exists to satisfy is specifically that a bare MAX(fetched_at)
+    // over the whole table would report "fresh" purely from et_marketstats' own daily writes.
+    expect(byId('mc-consolidated-metrics-freshness').sql).toMatch(/source_api\s*=\s*'mc_consolidated'/);
+  });
+
+  it('is non-critical and reads an empty table as a soft warn, not a fail (request-time writer, no fixed schedule)', () => {
+    const check = byId('mc-consolidated-metrics-freshness');
+    expect(check.critical).toBe(false);
+    const r = check.evaluate(undefined, now);
+    expect(r.status).toBe('warn');
+  });
+
+  it('never fails even when very stale (sparse-by-nature style, matching insider-trades-recency)', () => {
+    const sixtyDaysAgo = new Date(now.getTime() - 60 * 86_400_000).toISOString();
+    const r = byId('mc-consolidated-metrics-freshness').evaluate({ last_date: sixtyDaysAgo }, now);
+    expect(r.status).toBe('warn');
+  });
+
+  it('passes when a recent row exists', () => {
+    const r = byId('mc-consolidated-metrics-freshness').evaluate({ last_date: now.toISOString() }, now);
     expect(r.status).toBe('pass');
   });
 });
@@ -309,6 +359,14 @@ describe('generated freshness checks (TABLE_FRESHNESS_CHECKS via makeFreshnessCh
   it('news-sentiment-freshness reads empty as a warn (non-critical)', () => {
     const r = byId('news-sentiment-freshness').evaluate(undefined, now);
     expect(r.status).toBe('warn');
+  });
+
+  it('mc-swot-history-freshness (request-time writer, no fixed schedule) never fails, only warns/passes', () => {
+    const check = byId('mc-swot-history-freshness');
+    expect(check.critical).toBe(false);
+    const sixtyDaysAgo = new Date(now.getTime() - 60 * 86_400_000).toISOString();
+    expect(check.evaluate({ last_date: sixtyDaysAgo }, now).status).toBe('warn');
+    expect(check.evaluate({ last_date: now.toISOString() }, now).status).toBe('pass');
   });
 });
 

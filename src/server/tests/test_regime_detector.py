@@ -91,6 +91,37 @@ class TestLabelAssignment:
         assert labels[3] == 'CRASH', f"Expected state 3 (vol=0.35) to be CRASH, got {labels[3]}"
         assert labels[4] == 'BEAR',  f"Expected state 4 (vol=0.20) to be BEAR, got {labels[4]}"
 
+    def test_high_vol_swap_when_sideways_candidate_has_more_vol(self):
+        """Live bug, 2026-08-09: a real retrain assigned 'SIDEWAYS' to a state with HIGHER vol
+        (11.4%) than 'HIGH_VOL' (8.5%) -- exactly backwards, since pure return-rank never
+        checked volatility for this pair. Fixture: state 1 (2nd-best return) has higher vol
+        than state 2 (3rd-best return) -- HIGH_VOL must land on state 1, not state 2."""
+        model = _make_mock_hmm(
+            return_means=[0.04, 0.03, 0.01, -0.01, -0.03],
+            vol_means=[0.20, 0.15, 0.09, 0.11, 0.13],
+        )
+        labels = _assign_state_labels(model)
+        assert labels[0] == 'BULL'
+        assert labels[1] == 'HIGH_VOL', f"Expected state 1 (vol=0.15) to be HIGH_VOL, got {labels[1]}"
+        assert labels[2] == 'SIDEWAYS', f"Expected state 2 (vol=0.09) to be SIDEWAYS, got {labels[2]}"
+
+    def test_high_vol_always_has_more_vol_than_sideways(self):
+        """Resilience check across random configurations, mirroring test_label_switching_resilience
+        for the BEAR/CRASH pair but for the SIDEWAYS/HIGH_VOL pair instead."""
+        for seed in range(10):
+            rng = np.random.default_rng(seed)
+            returns = sorted(rng.uniform(-0.05, 0.05, 5), reverse=True)
+            vols    = rng.uniform(0.05, 0.30, 5)
+            model   = _make_mock_hmm(returns, vols)
+            labels  = _assign_state_labels(model)
+
+            sideways_idx = [k for k, v in labels.items() if v == 'SIDEWAYS'][0]
+            highvol_idx  = [k for k, v in labels.items() if v == 'HIGH_VOL'][0]
+            assert model.means_[sideways_idx, 1] <= model.means_[highvol_idx, 1], (
+                f"Seed {seed}: SIDEWAYS vol ({model.means_[sideways_idx,1]:.3f}) "
+                f"should be <= HIGH_VOL vol ({model.means_[highvol_idx,1]:.3f})"
+            )
+
 
 class TestDateAnchoredFeatures:
     def _make_nifty_conn(self, dates):
@@ -192,12 +223,24 @@ class TestTrainHmmPromotionGate:
 
     @staticmethod
     def _synthetic_features(n=340, seed=0):
+        """Contiguous, persistent blocks (like real regimes) rather than iid noise -- a fully
+        iid fixture has no temporal structure for an HMM to find, so its fitted self-transition
+        probabilities are coin-flip-fragile near the degenerate-transition gate's floor
+        (see TestDegenerateTransitionGate) for reasons unrelated to whatever the test actually
+        checks. Real regimes persist for many days; the fixture should too."""
         rng = np.random.default_rng(seed)
         idx = pd.date_range('2024-01-01', periods=n, freq='D')
         cols = ['nifty_ret_21d', 'nifty_vol_21d', 'nifty_vix', 'fii_5d_net_norm',
                 'advance_decline_ratio', 'us10y_chg5d', 'dxy_ret_5d', 'sp500_ret_5d']
-        data = {c: rng.normal(loc=i, scale=1.0, size=n) for i, c in enumerate(cols)}
-        return pd.DataFrame(data, index=idx)
+        n_blocks = max(5, n // 40)
+        block_len = n // n_blocks
+        block_means = rng.uniform(-3, 3, size=(n_blocks, len(cols)))
+        rows = []
+        for b in range(n_blocks):
+            length = block_len if b < n_blocks - 1 else n - block_len * (n_blocks - 1)
+            rows.append(rng.normal(loc=block_means[b], scale=0.3, size=(length, len(cols))))
+        data = np.vstack(rows)
+        return pd.DataFrame(data, index=idx, columns=cols)
 
     def test_first_ever_train_promotes_without_prior_model(self, tmp_path, monkeypatch):
         hmm_path = tmp_path / "hmm_regime.pkl"
@@ -269,6 +312,82 @@ class TestTrainHmmPromotionGate:
         result = regime_detector.train_hmm(holdout_days=60)
         assert result['promotion']['promoted'] is True
         assert hmm_path.read_bytes() != prior_bytes, "live model must be updated on improvement"
+
+
+class TestDegenerateTransitionGate:
+    """2026-08-09 live audit: a real production retrain produced two states with means_ nearly
+    identical (both mildly-positive-return, moderate-vol -- i.e. the SAME underlying "calm"
+    regime) connected by transmat_[i][i]==0, forcing the Viterbi path to alternate between them
+    every single trading day regardless of actual market behavior. This mislabeled the last two
+    weeks of a genuinely calm NIFTY uptrend as BEAR/HIGH_VOL alternating, and this exact pair
+    dominated 410 of 686 (60%) of the model's historical days. A held-out-likelihood comparison
+    alone cannot catch this (a degenerate model can still fit training data well) -- the fix adds
+    an explicit floor on the minimum self-transition probability."""
+
+    class _StubModel:
+        """Picklable stand-in for a fitted GaussianHMM with a chosen means_/transmat_."""
+        def __init__(self, means, transmat):
+            self.means_ = np.array(means)
+            self.transmat_ = np.array(transmat)
+
+        def fit(self, X):
+            return self
+
+    def test_degenerate_self_transition_is_rejected(self, tmp_path, monkeypatch):
+        hmm_path = tmp_path / "hmm_regime.pkl"
+        monkeypatch.setattr(regime_detector, 'HMM_PATH', hmm_path)
+        n = 340
+        idx = pd.date_range('2024-01-01', periods=n, freq='D')
+        cols = ['nifty_ret_21d', 'nifty_vol_21d', 'nifty_vix', 'fii_5d_net_norm',
+                'advance_decline_ratio', 'us10y_chg5d', 'dxy_ret_5d', 'sp500_ret_5d']
+        df = pd.DataFrame(np.random.default_rng(1).normal(size=(n, 8)), index=idx, columns=cols)
+        monkeypatch.setattr(regime_detector, '_load_hmm_features', lambda lookback_days: df)
+
+        # 5 states, but state 0 and 1 have a real 0.0 self-transition (the observed live bug).
+        transmat = np.array([
+            [0.00, 0.95, 0.02, 0.02, 0.01],
+            [0.96, 0.00, 0.02, 0.01, 0.01],
+            [0.02, 0.02, 0.94, 0.01, 0.01],
+            [0.02, 0.01, 0.02, 0.90, 0.05],
+            [0.02, 0.02, 0.01, 0.05, 0.90],
+        ])
+        means = np.zeros((5, 8))
+        means[:, 0] = [0.03, 0.01, 0.0055, 0.0051, -0.05]  # ret_21d per state
+        stub = self._StubModel(means, transmat)
+        monkeypatch.setattr(regime_detector.hmm, 'GaussianHMM', MagicMock(return_value=stub))
+
+        result = regime_detector.train_hmm(holdout_days=60)
+
+        assert result['promotion']['promoted'] is False
+        assert 'degenerate transition matrix' in result['promotion']['reason']
+        assert not hmm_path.exists(), "a degenerate model must never reach the live path"
+        assert (tmp_path / "hmm_regime.pkl.candidate").exists()
+
+    def test_healthy_transition_matrix_is_not_blocked(self, tmp_path, monkeypatch):
+        hmm_path = tmp_path / "hmm_regime.pkl"
+        monkeypatch.setattr(regime_detector, 'HMM_PATH', hmm_path)
+        n = 340
+        idx = pd.date_range('2024-01-01', periods=n, freq='D')
+        cols = ['nifty_ret_21d', 'nifty_vol_21d', 'nifty_vix', 'fii_5d_net_norm',
+                'advance_decline_ratio', 'us10y_chg5d', 'dxy_ret_5d', 'sp500_ret_5d']
+        df = pd.DataFrame(np.random.default_rng(1).normal(size=(n, 8)), index=idx, columns=cols)
+        monkeypatch.setattr(regime_detector, '_load_hmm_features', lambda lookback_days: df)
+
+        transmat = np.array([
+            [0.95, 0.02, 0.01, 0.01, 0.01],
+            [0.02, 0.90, 0.03, 0.03, 0.02],
+            [0.01, 0.02, 0.92, 0.03, 0.02],
+            [0.02, 0.01, 0.02, 0.90, 0.05],
+            [0.02, 0.02, 0.01, 0.05, 0.90],
+        ])
+        means = np.zeros((5, 8))
+        means[:, 0] = [0.03, 0.01, -0.01, -0.03, -0.05]
+        stub = self._StubModel(means, transmat)
+        monkeypatch.setattr(regime_detector.hmm, 'GaussianHMM', MagicMock(return_value=stub))
+
+        result = regime_detector.train_hmm(holdout_days=60)
+        assert result['promotion']['promoted'] is True
+        assert hmm_path.exists()
 
 
 class TestSilentNoWriteGuards:

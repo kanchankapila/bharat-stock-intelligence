@@ -1147,6 +1147,15 @@ async function processMlWeeklyRetrain(_job: Job): Promise<{ success: boolean }> 
     ['--table', 'trendlyne_dvm_scores', '--scores', 'd_score,v_score,m_score',
      '--horizons', '5,10,21,63', '--by-regime', '--persist'], 15 * 60_000)
     .catch(e => console.warn('[QUEUE] factor_edge (dvm) failed:', (e as Error).message));
+  // Same discipline applied to our OWN 8 unified_ranker.py engines, not just third-party scores:
+  // does screener/ml/cs/confluence/technical/dl/breakout/smart_money each actually predict
+  // forward returns, or is it dead weight in the blend? Advisory only for now (see
+  // engine_edge_weight/edge_adjusted_engine_score below, flag-gated off) -- this just measures.
+  await runPython('factor_edge.py',
+    ['--table', 'unified_recommendations', '--date-col', 'computed_at',
+     '--scores', 'screener_stock_score,ml_score,confluence_score,technical_score,dl_score,cs_score,breakout_score,smart_money_score',
+     '--horizons', '5,10,21', '--by-regime', '--persist'], 15 * 60_000)
+    .catch(e => console.warn('[QUEUE] factor_edge (unified engines) failed:', (e as Error).message));
   T.finish();
   return { success: true };
 }

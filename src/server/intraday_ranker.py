@@ -95,6 +95,22 @@ EMISSION_GATE_MIN_AVG_PNL = 0.0     # required trailing mean net PnL % per trade
 # Escape hatch so the gate can be overridden deliberately (app_settings key, default off).
 EMISSION_GATE_SETTING = "intraday_emission_gate_disabled"
 
+# Sell/Strong-Sell mirror of the above, tracked independently (2026-08). Until this shipped,
+# Sell classifications were never quality-gated at all -- they carry no entry/target/stop or
+# position size (see the buy-pool-only sizing block below), but the CLASSIFICATION LABEL itself
+# was still published with no evidence it's predictive, unlike Buy which the gate above protects.
+# A long-side reversal edge existing says nothing about the short side: the 2026-07-31 intraday
+# audit measured fading intraday strength at +0.838%/day gross (alpha +0.739%, t=2.88) on the
+# full universe, but that collapses to +0.017%/day (alpha -0.031%, t=-0.27) once restricted to
+# the F&O universe -- the only realistically shortable set most brokers actually offer. The whole
+# apparent edge lived in unshortable small/mid caps. Gated the same way, on its own outcome
+# history, so it can re-open on real evidence rather than staying permanently on or off by fiat.
+EMISSION_GATE_SETTING_SHORT = "intraday_emission_gate_short_disabled"
+
+# app_settings key the frontend reads for a live gate-state badge (both directions in one row,
+# refreshed every run) -- see getIntradayEmissionGateStatus in misc.router.ts.
+EMISSION_GATE_STATUS_KEY = "intraday_emission_gate_status"
+
 # Minimum 20-day average daily turnover (₹ crore) to be eligible for an intraday recommendation.
 # Intraday trades need enough same-day volume to enter AND exit without material slippage --
 # unlike a positional trade, there's no multi-day window to work an illiquid fill.
@@ -138,6 +154,23 @@ def _atr_barriers(price: float, atr: float):
     tgt_frac = min(max(TARGET_ATR_MULT * frac, TARGET_PCT_FLOOR), TARGET_PCT_CAP)
     target = round(price * (1 + tgt_frac), 2)
     stop = round(price * (1 - stop_frac), 2)
+    rr = round(tgt_frac / stop_frac, 2) if stop_frac > 0 else None
+    return target, stop, rr
+
+
+def _atr_barriers_short(price: float, atr: float):
+    """Mirror of _atr_barriers for a short (Sell/Strong Sell) setup -- same ATR multiples and
+    %% guardrails, direction inverted: target below entry, stop above. Used only to build the
+    outcome-tracking geometry written to intraday_recommendations_history (see run() below);
+    Sell rows in the user-facing intraday_recommendations table still carry no entry/stop/
+    target/size, same as before -- this does not make Sell an actionable trade to display."""
+    if not price or price <= 0:
+        return None, None, None
+    frac = (atr / price) if atr and atr > 0 else 0.0
+    stop_frac = min(max(STOP_ATR_MULT * frac, STOP_PCT_FLOOR), STOP_PCT_CAP)
+    tgt_frac = min(max(TARGET_ATR_MULT * frac, TARGET_PCT_FLOOR), TARGET_PCT_CAP)
+    target = round(price * (1 - tgt_frac), 2)
+    stop = round(price * (1 + stop_frac), 2)
     rr = round(tgt_frac / stop_frac, 2) if stop_frac > 0 else None
     return target, stop, rr
 
@@ -323,8 +356,9 @@ class IntradayRanker:
                 out[sym] = (1.0 - sum(parts) / len(parts)) * 100.0
         return out
 
-    def _emission_edge(self):
-        """(avg_net_pnl_pct, n_trades) over the engine's own recently-resolved recommendations.
+    def _emission_edge(self, direction: str):
+        """(avg_net_pnl_pct, n_trades) over the engine's own recently-resolved recommendations
+        for the given direction ('LONG' or 'SHORT').
 
         Reads intraday_recommendation_outcomes, which as of 2026-07-31 is produced by an
         honest post-signal-only simulation on 15m bars. Before that rewrite it graded against
@@ -336,31 +370,54 @@ class IntradayRanker:
             row = self.conn.execute(
                 "SELECT AVG(pnl_pct) AS avg_pnl, COUNT(*) AS n "
                 "FROM intraday_recommendation_outcomes "
-                "WHERE computed_at >= ? AND pnl_pct IS NOT NULL", (cutoff,)
+                "WHERE computed_at >= ? AND direction = ? AND pnl_pct IS NOT NULL",
+                (cutoff, direction)
             ).fetchone()
         except Exception as e:
-            print(f"[IntradayRanker] emission-edge lookup failed: {str(e)[:80]}")
+            print(f"[IntradayRanker] emission-edge lookup failed ({direction}): {str(e)[:80]}")
             return None, 0
         if not row or not row["n"]:
             return None, 0
         return (float(row["avg_pnl"]) if row["avg_pnl"] is not None else None), int(row["n"])
 
-    def _emission_allowed(self):
-        """(allowed, reason). Buy/Strong-Buy may only be published when the engine's own
-        trailing realised edge is positive on a large enough sample."""
+    def _emission_allowed(self, direction: str):
+        """(allowed, reason, avg_pnl, n). direction='LONG' gates Buy/Strong-Buy, 'SHORT' gates
+        Sell/Strong-Sell -- each may only be published when THAT direction's own trailing
+        realised edge is positive on a large enough sample. Independent gates: see
+        EMISSION_GATE_SETTING_SHORT above for why long edge existing says nothing about short."""
+        setting_key = EMISSION_GATE_SETTING if direction == "LONG" else EMISSION_GATE_SETTING_SHORT
         row = self.conn.execute(
-            "SELECT value FROM app_settings WHERE key=?", (EMISSION_GATE_SETTING,)
+            "SELECT value FROM app_settings WHERE key=?", (setting_key,)
         ).fetchone()
         if row and str(row["value"]).lower() in ("1", "true", "yes"):
-            return True, "gate manually disabled via app_settings"
-        avg_pnl, n = self._emission_edge()
+            return True, "gate manually disabled via app_settings", None, 0
+        avg_pnl, n = self._emission_edge(direction)
         if n < EMISSION_GATE_MIN_TRADES:
             return False, (f"only {n} resolved trades in the last "
-                           f"{EMISSION_GATE_LOOKBACK_DAYS}d (need {EMISSION_GATE_MIN_TRADES})")
+                           f"{EMISSION_GATE_LOOKBACK_DAYS}d (need {EMISSION_GATE_MIN_TRADES})"), avg_pnl, n
         if avg_pnl is None or avg_pnl <= EMISSION_GATE_MIN_AVG_PNL:
             return False, (f"trailing realised net PnL {avg_pnl:+.3f}%/trade over {n} trades "
-                           f"is not above {EMISSION_GATE_MIN_AVG_PNL:+.2f}%")
-        return True, f"trailing realised net PnL {avg_pnl:+.3f}%/trade over {n} trades"
+                           f"is not above {EMISSION_GATE_MIN_AVG_PNL:+.2f}%"), avg_pnl, n
+        return True, f"trailing realised net PnL {avg_pnl:+.3f}%/trade over {n} trades", avg_pnl, n
+
+    def _persist_gate_status(self, long_state, short_state):
+        """Write both gate states to app_settings as one JSON row -- the frontend badge
+        (getIntradayEmissionGateStatus, misc.router.ts) reads this instead of parsing job logs."""
+        ok_l, reason_l, avg_l, n_l = long_state
+        ok_s, reason_s, avg_s, n_s = short_state
+        payload = json.dumps({
+            "computed_at": datetime.utcnow().isoformat(),
+            "long": {"open": ok_l, "reason": reason_l, "avg_pnl_pct": avg_l, "n_trades": n_l},
+            "short": {"open": ok_s, "reason": reason_s, "avg_pnl_pct": avg_s, "n_trades": n_s},
+        })
+        try:
+            self.conn.execute(
+                "INSERT INTO app_settings (key, value) VALUES (?, ?) "
+                "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+                (EMISSION_GATE_STATUS_KEY, payload)
+            )
+        except Exception as e:
+            print(f"[IntradayRanker] gate-status persist failed: {str(e)[:80]}")
 
     def _news_sentiment(self, days: int = 2):
         """Avg recent news sentiment per symbol in [-1, +1] (mirrors technicalSignalsService's
@@ -502,8 +559,10 @@ class IntradayRanker:
         tilt = REGIME_TILT.get(regime, 1.0)
         # Blend weights: learned from realized outcomes if available, else defaults (self-improving).
         w_breakout, w_screener, news_tilt = self._learned_weights()
-        emission_ok, emission_reason = self._emission_allowed()
-        print(f"[IntradayRanker] emission gate: {'OPEN' if emission_ok else 'CLOSED'} -- {emission_reason}")
+        emission_ok, emission_reason, _emission_avg, _emission_n = self._emission_allowed("LONG")
+        sell_emission_ok, sell_emission_reason, _sell_avg, _sell_n = self._emission_allowed("SHORT")
+        print(f"[IntradayRanker] emission gate (LONG): {'OPEN' if emission_ok else 'CLOSED'} -- {emission_reason}")
+        print(f"[IntradayRanker] emission gate (SHORT): {'OPEN' if sell_emission_ok else 'CLOSED'} -- {sell_emission_reason}")
         if reversal_scores:
             print(f"[IntradayRanker] reversal component: {len(reversal_scores)} symbols scored "
                   f"from today's 15m bars")
@@ -540,7 +599,9 @@ class IntradayRanker:
 
         rows = []
         buy_syms = []
+        sell_syms = []
         gated = 0
+        sell_gated = 0
         for sym in all_symbols:
             s_sc = screener_scores.get(sym)
             b_sc = breakout_scores.get(sym)
@@ -562,16 +623,25 @@ class IntradayRanker:
             news_mult = 1.0 + news_tilt * max(-1.0, min(1.0, news)) if news is not None else 1.0
             score = min(100.0, max(0.0, base * tilt * news_mult))
             bull, bear = bull_counts.get(sym, 0), bear_counts.get(sym, 0)
-            classification = _classify(score, bull, bear)
+            raw_classification = _classify(score, bull, bear)
+            classification = raw_classification
             # Emission gate: the score is still computed and stored (it is the input the
-            # strategy learner and the UI ranking need), but an actionable Buy is only
-            # published while the engine's own trailing realised edge justifies it.
+            # strategy learner and the UI ranking need), but an actionable Buy/Sell is only
+            # published while THAT direction's own trailing realised edge justifies it.
+            # raw_classification (pre-gate) is kept separately below and is what gets written
+            # to intraday_recommendations_history -- see the "shadow geometry" block after the
+            # buy-pool sizing loop for why: gating on the DISPLAYED classification here starved
+            # the outcome resolver of anything to grade the moment the gate closed.
             if not emission_ok and classification in ("Strong Buy", "Buy"):
                 classification = "Hold"
                 gated += 1
+            elif not sell_emission_ok and classification in ("Strong Sell", "Sell"):
+                classification = "Hold"
+                sell_gated += 1
             rows.append({
                 "symbol": sym, "score": round(score, 2),
                 "conviction": _conviction(score), "classification": classification,
+                "raw_classification": raw_classification,
                 "screener_score": round(s_sc, 2) if s_sc is not None else None,
                 "breakout_score": round(b_sc, 2) if b_sc is not None else None,
                 "reversal_score": round(r_sc, 2) if r_sc is not None else None,
@@ -581,6 +651,8 @@ class IntradayRanker:
             })
             if classification in ("Strong Buy", "Buy"):
                 buy_syms.append(sym)
+            elif classification in ("Strong Sell", "Sell"):
+                sell_syms.append(sym)
 
         # Entry/target/stop + inverse-vol sizing for the buy pool only.
         cmp_atr = self._cmp_atr_map(buy_syms)
@@ -628,17 +700,48 @@ class IntradayRanker:
             print(f"[IntradayRanker] {minutes_to_close}min to close -- late-cutoff active, "
                   f"no new position sizing this cycle.")
 
+        # Shadow geometry for outcome tracking, keyed off raw_classification (pre-gate) so the
+        # resolver keeps grading what the engine would have recommended even while a gate is
+        # closed -- computed independently of, and never copied into, the live entry/stop/target
+        # fields above (those stay gate-aware: a Hold never shows a target). Long reuses cmp_atr
+        # (already computed for the buy pool) where the symbol wasn't gated out of buy_syms;
+        # anything gated out needs its own lookup since it never entered buy_syms/cmp_atr above.
+        raw_buy_syms = [r["symbol"] for r in rows if r["raw_classification"] in ("Strong Buy", "Buy")]
+        raw_sell_syms = [r["symbol"] for r in rows if r["raw_classification"] in ("Strong Sell", "Sell")]
+        shadow_buy_extra = self._cmp_atr_map([s for s in raw_buy_syms if s not in cmp_atr])
+        shadow_cmp_atr_sell = self._cmp_atr_map(raw_sell_syms)
+        shadow_geom = {}
+        for sym in raw_buy_syms:
+            cmp_atr_pair = cmp_atr.get(sym) or shadow_buy_extra.get(sym)
+            if cmp_atr_pair is None:
+                continue
+            cmp_, atr = cmp_atr_pair
+            target, stop, rr = _atr_barriers(cmp_, atr)
+            shadow_geom[sym] = (round(cmp_, 2), stop, target, rr)
+        for sym in raw_sell_syms:
+            cmp_atr_pair = shadow_cmp_atr_sell.get(sym)
+            if cmp_atr_pair is None:
+                continue
+            cmp_, atr = cmp_atr_pair
+            target, stop, rr = _atr_barriers_short(cmp_, atr)
+            shadow_geom[sym] = (round(cmp_, 2), stop, target, rr)
+
         today = date.today().isoformat()
         cycle_at = datetime.utcnow().isoformat()
         cur = self.conn.cursor()
         for r in rows:
+            if r["raw_classification"] in ("Strong Buy", "Buy") and not emission_ok:
+                gate_note = "; EMISSION GATED (engine's trailing realised LONG edge is not positive)"
+            elif r["raw_classification"] in ("Strong Sell", "Sell") and not sell_emission_ok:
+                gate_note = "; EMISSION GATED (engine's trailing realised SHORT edge is not positive)"
+            else:
+                gate_note = ""
             reasoning = (f"{r['bull']} bullish / {r['bear']} bearish intraday screeners "
                          f"({r['classification']}); regime {regime}"
                          + (f"; reversal {r['reversal_score']:.0f}/100" if r.get("reversal_score") is not None else "")
                          + (f"; breakout P={r['breakout_prob']:.2f}" if r["breakout_prob"] else "")
                          + (f"; news {r['news_sentiment']:+.2f}" if r["news_sentiment"] is not None else "")
-                         + ("; EMISSION GATED (engine's trailing realised edge is not positive)"
-                            if not emission_ok else "")
+                         + gate_note
                          + (f"; EVENT RISK: {r['event_risk_flag']} (size cut {int((1 - EVENT_RISK_TILT) * 100)}%)"
                             if r.get("event_risk_flag") else ""))
             cur.execute(
@@ -665,8 +768,15 @@ class IntradayRanker:
             )
             # Append-only trail of this specific cycle -- intraday_recommendations above is
             # overwrite-in-place per (symbol, day), so it's the LATEST cycle's row only. The
-            # outcome resolver reads this history table to paper-trade the FIRST Buy-classified
-            # cycle of the day per symbol, not whichever cycle happened to run last.
+            # outcome resolver reads this history table to paper-trade the FIRST Buy/Sell-
+            # classified cycle of the day per symbol, not whichever cycle happened to run last.
+            #
+            # Deliberately writes raw_classification (pre-gate) and the shadow entry/stop/target
+            # here, NOT r["classification"]/r["entry_price"] (the gate-aware, live-facing values
+            # used in the insert above) -- those are correctly "Hold"/None once a gate closes,
+            # but that means the resolver would find nothing to grade, and the gate would freeze
+            # on stale evidence forever instead of re-measuring whether the edge has recovered.
+            hist_entry, hist_stop, hist_target, hist_rr = shadow_geom.get(r["symbol"], (None, None, None, None))
             cur.execute(
                 """INSERT INTO intraday_recommendations_history
                    (symbol, computed_at, cycle_at, intraday_regime, intraday_score, conviction_level,
@@ -674,16 +784,24 @@ class IntradayRanker:
                     bearish_count, cmp, entry_price, stop_loss, target_1, risk_reward, position_size_pct)
                    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
                    ON CONFLICT(symbol, cycle_at) DO NOTHING""",
-                (r["symbol"], today, cycle_at, regime, r["score"], r["conviction"], r["classification"],
+                (r["symbol"], today, cycle_at, regime, r["score"], r["conviction"], r["raw_classification"],
                  r["screener_score"], r["breakout_score"], r["news_sentiment"], r["bull"], r["bear"],
-                 r["cmp"], r["entry_price"], r["stop_loss"], r["target_1"], r["risk_reward"],
+                 hist_entry, hist_entry, hist_stop, hist_target, hist_rr,
                  r["position_size_pct"]),
             )
         self.conn.commit()
         buys = sum(1 for r in rows if r["classification"] in ("Strong Buy", "Buy"))
-        print(json.dumps({"success": True, "ranked": len(rows), "buy_pool": buys,
-                          "emission_gate": "open" if emission_ok else "closed",
-                          "emission_gate_reason": emission_reason, "gated_to_hold": gated,
+        sells = sum(1 for r in rows if r["classification"] in ("Strong Sell", "Sell"))
+        self._persist_gate_status(
+            (emission_ok, emission_reason, _emission_avg, _emission_n),
+            (sell_emission_ok, sell_emission_reason, _sell_avg, _sell_n),
+        )
+        self.conn.commit()
+        print(json.dumps({"success": True, "ranked": len(rows), "buy_pool": buys, "sell_pool": sells,
+                          "emission_gate_long": "open" if emission_ok else "closed",
+                          "emission_gate_long_reason": emission_reason, "gated_to_hold": gated,
+                          "emission_gate_short": "open" if sell_emission_ok else "closed",
+                          "emission_gate_short_reason": sell_emission_reason, "sell_gated_to_hold": sell_gated,
                           "reversal_scored": len(reversal_scores),
                           "intraday_regime": regime}))
         return rows

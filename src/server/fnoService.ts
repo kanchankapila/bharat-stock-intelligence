@@ -1,5 +1,6 @@
 import { getStockMapping } from './stockMapping';
 import { fetchOptionChain } from './optionChainService';
+import { dbAll } from './dbAsync';
 
 export interface FnOSignal {
   type: 'UNUSUAL_VOLUME' | 'OI_SPIKE' | 'BUILDUP' | 'PCR_SIGNAL';
@@ -276,6 +277,136 @@ export async function getTrendlyneFnoScanners(mtype: 'options' | 'futures', scre
   } catch (error) {
     console.error(`[TRENDLYNE FNO] Error fetching ${screenType}:`, error);
     return { header: [], tableData: [], error: String(error) };
+  }
+}
+
+// ── Per-symbol option-chain PCR/OI summary (works for ANY F&O symbol -- index or stock) ──
+// Replaces the old index-only PCR card, which sourced from Trendlyne's "oi-gainers"
+// screeners (getTrendlyneFnoScanners above) -- those rank across the WHOLE index-options
+// universe and NIFTY's volume fills every slot, so BANKNIFTY/FINNIFTY/etc never appeared
+// (0 rows, confirmed live) regardless of expiry. This hits Trendlyne's per-symbol chain
+// endpoint instead (same one so_option_chain_fetcher.py already uses for the full F&O
+// stock universe), which has no such ranking bias.
+//
+// Expiry is resolved from nt_fno_expiry (already populated for every index+stock by
+// sync_nt_fno_symbols.py) rather than Trendlyne's own numeric per-stock id -- this table
+// already solves "what's this symbol's correct current expiry" for the whole platform, so
+// there's no need for a second, Trendlyne-id-keyed resolution scheme.
+const CHAIN_UNIQUE_NAME_TO_FIELD: Record<string, string> = {
+  current_price_call: 'ce_price', open_interest_call: 'ce_oi', implied_volatility_call: 'ce_iv',
+  get_built_up_str_call: 'ce_buildup', strike_price: 'strike',
+  current_price_put: 'pe_price', open_interest_put: 'pe_oi', implied_volatility_put: 'pe_iv',
+  get_built_up_str_put: 'pe_buildup',
+};
+
+export interface FnoChainSummary {
+  symbol: string;
+  expiry: string;
+  spot: number | null;
+  pcr: number | null;
+  pcrVolume: number | null;
+  maxPain: number | null;
+  atm: number | null;
+  callTotalOI: number;
+  putTotalOI: number;
+  avgCallIV: number | null;
+  avgPutIV: number | null;
+  ivSkew: number | null;
+  top3Calls: { strike: number; oi: number; ltp: number; iv: number | null; buildup: string | null }[];
+  top3Puts: { strike: number; oi: number; ltp: number; iv: number | null; buildup: string | null }[];
+}
+
+// All upcoming expiries for a symbol (near-week/near-month through far quarter/half-year) --
+// each one is a distinct "horizon" a trader reads OI/PCR positioning for differently: the
+// nearest expiry reflects immediate positioning, further ones reflect longer-term hedging.
+export async function getFnoAvailableExpiries(symbol: string, limit = 6): Promise<string[]> {
+  const rows = await dbAll<{ expiry: string }>(
+    `SELECT expiry FROM nt_fno_expiry WHERE symbol = ? AND expiry >= ? ORDER BY expiry LIMIT ?`,
+    [symbol.toUpperCase(), new Date().toISOString().slice(0, 10), limit]
+  ).catch(() => []);
+  return rows.map(r => r.expiry.slice(0, 10));
+}
+
+async function resolveFnoExpiry(symbol: string): Promise<string> {
+  const rows = await dbAll<{ expiry: string }>(
+    `SELECT expiry FROM nt_fno_expiry WHERE symbol = ? AND expiry >= ? ORDER BY expiry LIMIT 1`,
+    [symbol.toUpperCase(), new Date().toISOString().slice(0, 10)]
+  ).catch(() => []);
+  if (rows[0]) return rows[0].expiry.slice(0, 10);
+  // Fallback: nearest Thursday (NSE weekly expiry), matching so_option_chain_fetcher.py's
+  // own _nearest_thursday() -- only reached if nt_fno_expiry hasn't synced this symbol yet.
+  const d = new Date();
+  d.setDate(d.getDate() + ((4 - d.getDay() + 7) % 7));
+  return d.toISOString().slice(0, 10);
+}
+
+// Pure parser (no network) so the column-resolution logic is independently testable.
+export function parseFnoChainBody(symbol: string, expiry: string, body: any): FnoChainSummary | null {
+  const headers: any[] = body?.tableHeaders || [];
+  const rows: any[][] = body?.tableData || [];
+  const col: Record<string, number> = {};
+  for (let i = 0; i < headers.length; i++) {
+    const field = CHAIN_UNIQUE_NAME_TO_FIELD[headers[i]?.unique_name];
+    if (field) col[field] = i;
+  }
+  if (col.strike === undefined || col.ce_oi === undefined || col.pe_oi === undefined) return null;
+
+  const calls: { strike: number; oi: number; ltp: number; iv: number | null; buildup: string | null }[] = [];
+  const puts: { strike: number; oi: number; ltp: number; iv: number | null; buildup: string | null }[] = [];
+  let callTotalOI = 0, putTotalOI = 0;
+  for (const r of rows) {
+    const strike = r[col.strike];
+    if (typeof strike !== 'number') continue;
+    const ceOi = typeof r[col.ce_oi] === 'number' ? r[col.ce_oi] : 0;
+    const peOi = typeof r[col.pe_oi] === 'number' ? r[col.pe_oi] : 0;
+    callTotalOI += ceOi;
+    putTotalOI += peOi;
+    if (ceOi > 0) calls.push({ strike, oi: ceOi, ltp: r[col.ce_price] ?? 0, iv: r[col.ce_iv] ?? null, buildup: r[col.ce_buildup] ?? null });
+    if (peOi > 0) puts.push({ strike, oi: peOi, ltp: r[col.pe_price] ?? 0, iv: r[col.pe_iv] ?? null, buildup: r[col.pe_buildup] ?? null });
+  }
+
+  const pcrData = body?.expiryLevelPCRValues || {};
+  const avg = (vals: (number | null)[]) => {
+    const nums = vals.filter((v): v is number => typeof v === 'number');
+    return nums.length ? nums.reduce((a, b) => a + b, 0) / nums.length : null;
+  };
+  const avgCallIV = avg(calls.map(c => c.iv));
+  const avgPutIV = avg(puts.map(p => p.iv));
+
+  return {
+    symbol, expiry,
+    spot: typeof body?.stockLevelData?.stockCurrentPrice === 'number' ? body.stockLevelData.stockCurrentPrice : null,
+    pcr: typeof pcrData.pcr_oi === 'number' ? pcrData.pcr_oi : null,
+    pcrVolume: typeof pcrData.pcr_volume === 'number' ? pcrData.pcr_volume : null,
+    maxPain: typeof body?.maxPain === 'number' ? body.maxPain : null,
+    atm: typeof body?.atTheMoney === 'number' ? body.atTheMoney : null,
+    callTotalOI, putTotalOI,
+    avgCallIV, avgPutIV,
+    ivSkew: avgCallIV != null && avgPutIV != null ? avgPutIV - avgCallIV : null,
+    top3Calls: [...calls].sort((a, b) => b.oi - a.oi).slice(0, 3),
+    top3Puts: [...puts].sort((a, b) => b.oi - a.oi).slice(0, 3),
+  };
+}
+
+export async function getFnoOptionChainSummary(symbol: string, expiryOverride?: string): Promise<FnoChainSummary | null> {
+  const expiry = expiryOverride || await resolveFnoExpiry(symbol);
+  const url = `https://smartoptions.trendlyne.com/phoenix/api/fno/option/chain/?stockCode=${encodeURIComponent(symbol.toUpperCase())}&expDate=${expiry}`;
+  try {
+    const response = await fetch(url, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Accept': 'application/json',
+        'Origin': 'https://smartoptions.trendlyne.com',
+        'Referer': 'https://smartoptions.trendlyne.com/',
+      },
+      signal: AbortSignal.timeout(10000),
+    });
+    if (!response.ok) return null;
+    const json = await response.json();
+    return parseFnoChainBody(symbol.toUpperCase(), expiry, json?.body || json);
+  } catch (error) {
+    console.error(`[FNO CHAIN] Error fetching ${symbol}:`, error);
+    return null;
   }
 }
 

@@ -82,7 +82,17 @@ function EodPickCard({ pick, onSelect }: { pick: any; onSelect: (sym: string) =>
 
       <div className="mb-3">
         <div className="flex items-center justify-between mb-1">
-          <span className="text-[10px] text-slate-400">Unified Score</span>
+          <span className="flex items-center gap-1.5 text-[10px] text-slate-400">
+            Unified Score
+            {pick.engine_coverage_count != null && (
+              <span
+                className="text-slate-500"
+                title="How many of the ranker's 8 component engines (screener/ml/confluence/technical/dl/cs/breakout/smart_money) had data for this stock — a better at-a-glance confidence signal than the blended score alone"
+              >
+                · {pick.engine_coverage_count}/8
+              </span>
+            )}
+          </span>
           <span className={cn('text-sm font-bold', style.text)}>{pick.unified_score}</span>
         </div>
         <div className="h-1.5 bg-slate-700 rounded-full overflow-hidden">

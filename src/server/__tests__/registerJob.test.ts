@@ -12,7 +12,7 @@ import { addJobWithCatchup } from '../jobs/registerJob';
 
 function makeQueue(opts: {
   staleRepeatable?: boolean;   // getRepeatableJobs() returns an entry whose `next` is in the past
-  inFlight?: Array<{ name: string }>; // active/waiting/delayed jobs already in the queue
+  inFlight?: Array<{ name: string; data?: any }>; // active/waiting/delayed jobs already in the queue
 } = {}) {
   const { staleRepeatable = true, inFlight = [] } = opts;
   const add = vi.fn().mockResolvedValue({});
@@ -43,8 +43,8 @@ describe('addJobWithCatchup', () => {
     expect(catchupCall[1]).toMatchObject({ isCatchup: true });
   });
 
-  it('does NOT queue a second catchup when one is already active/waiting/delayed', async () => {
-    const queue = makeQueue({ staleRepeatable: true, inFlight: [{ name: 'test-job' }] });
+  it('does NOT queue a second catchup when a real catchup is already active/waiting/delayed', async () => {
+    const queue = makeQueue({ staleRepeatable: true, inFlight: [{ name: 'test-job', data: { isCatchup: true } }] });
     await addJobWithCatchup(queue, 'test-job', {}, {
       repeat: { pattern: '0 0 * * *' },
       jobId: 'test-job-id',
@@ -52,6 +52,19 @@ describe('addJobWithCatchup', () => {
     // Only the normal repeatable registration -- no duplicate catchup.
     expect(queue.add).toHaveBeenCalledTimes(1);
     expect(queue.add.mock.calls[0][1]).not.toMatchObject({ isCatchup: true });
+  });
+
+  it('regression (2026-08-09): DOES queue a catchup even though the repeatable\'s own normal ' +
+     'next occurrence sits in delayed with the same name and no isCatchup flag -- trendlyne-' +
+     'ratios-monthly missed its whole Sunday run and 3 restarts each wrongly skipped catch-up ' +
+     'against nothing but this placeholder', async () => {
+    const queue = makeQueue({ staleRepeatable: true, inFlight: [{ name: 'test-job' /* no data.isCatchup */ }] });
+    await addJobWithCatchup(queue, 'test-job', {}, {
+      repeat: { pattern: '0 0 * * *' },
+      jobId: 'test-job-id',
+    });
+    expect(queue.add).toHaveBeenCalledTimes(2);
+    expect(queue.add.mock.calls[1][1]).toMatchObject({ isCatchup: true });
   });
 
   it('does not touch catchup logic when the schedule was not missed', async () => {

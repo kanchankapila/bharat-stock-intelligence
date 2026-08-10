@@ -6,17 +6,24 @@ import { PieChart, TrendingUp, TrendingDown, Activity, Building2 } from 'lucide-
 import { resolveConstituentSymbol } from '../lib/resolveConstituentSymbol';
 
 export const SectorHeatmap: React.FC<{ indexId?: string; className?: string }> = ({ indexId, className }) => {
-  const { data: sectors, isLoading } = trpc.getSectorPerformance.useQuery({ indexId }, {
+  const { data: sectors, isLoading, isError } = trpc.getSectorPerformance.useQuery({ indexId }, {
     refetchInterval: 60000,
     refetchOnWindowFocus: false,
   });
 
-  if (isLoading || !sectors) return <div className={cn("h-72 bg-slate-900/50 animate-pulse rounded-2xl", className)} />;
+  // Distinguish "still loading" from "settled with no/errored data" — isLoading only covers
+  // the pre-settlement window, so this used to pulse the skeleton forever on a real failure.
+  const settledEmpty = !isLoading && (isError || !sectors || sectors.length === 0);
+
+  if (isLoading) return <div className={cn("h-72 bg-slate-900/50 animate-pulse rounded-2xl", className)} />;
 
   return (
     <Card title="Sector Heatmap" icon={PieChart} className={cn("h-full", className)}>
+      {settledEmpty ? (
+        <div className="text-xs text-slate-500 py-6 text-center">No sector performance data available right now.</div>
+      ) : (
       <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3 pt-2">
-        {sectors.map((sector) => (
+        {sectors!.map((sector) => (
           <div 
             key={sector.name}
             className={cn(
@@ -36,6 +43,7 @@ export const SectorHeatmap: React.FC<{ indexId?: string; className?: string }> =
           </div>
         ))}
       </div>
+      )}
     </Card>
   );
 };

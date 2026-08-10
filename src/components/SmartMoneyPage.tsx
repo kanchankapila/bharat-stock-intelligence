@@ -13,10 +13,11 @@ interface SmartMoneyPageProps {
   onSelectStock?: (symbol: string) => void;
 }
 
-type DealTab = 'large' | 'insider' | 'institutional' | 'sector' | 'fii_mf_flows' | 'seasonality';
+type DealTab = 'large' | 'block' | 'insider' | 'institutional' | 'sector' | 'fii_mf_flows' | 'seasonality';
 
 const DEAL_TABS: { key: DealTab; label: string; icon: React.ElementType }[] = [
   { key: 'large',         label: 'Large Deals',     icon: DollarSign },
+  { key: 'block',         label: 'Block Deals',      icon: DollarSign },
   { key: 'insider',       label: 'Insider Trading',  icon: Users      },
   { key: 'institutional', label: 'Institutional',    icon: TrendingUp },
   { key: 'sector',        label: 'By Sector',        icon: BarChart2  },
@@ -94,9 +95,73 @@ const InsiderFilingsTable: React.FC<{ onSelectStock?: (symbol: string) => void }
   );
 };
 
+// pct_transacted (% of the company's float) is the reason this source was chosen — a ₹12cr
+// deal is a control transaction in a microcap and a rounding error in a large-cap, so raw
+// value_cr alone isn't comparable across symbols.
+const BlockDealsTable: React.FC<{ onSelectStock?: (symbol: string) => void }> = ({ onSelectStock }) => {
+  const { data: deals = [], isLoading } = trpc.getBlockDeals.useQuery({ limit: 100 }, {
+    staleTime: 15 * 60 * 1000,
+  });
+
+  return (
+    <div className="bg-slate-800/50 rounded-xl border border-slate-800/30 overflow-hidden">
+      <div className="px-3 py-2 bg-slate-900/60 border-b border-slate-800/50 flex items-center justify-between">
+        <span className="text-xs font-bold text-slate-300">Bulk / Block Deals</span>
+        <span className="text-[10px] text-slate-500 font-mono">% of float transacted, from NSE + Tickertape</span>
+      </div>
+      {isLoading ? (
+        <div className="p-4 text-xs text-slate-500 font-mono">Loading deals&hellip;</div>
+      ) : deals.length === 0 ? (
+        <div className="p-4 text-xs text-slate-500 font-mono">No recent block deals.</div>
+      ) : (
+        <div className="overflow-y-auto max-h-96">
+          <table className="w-full text-xs">
+            <thead className="sticky top-0 bg-slate-900/80">
+              <tr className="text-[10px] text-slate-500 uppercase tracking-wider">
+                <th className="text-left px-3 py-2 font-medium">Symbol</th>
+                <th className="text-left px-3 py-2 font-medium">Client</th>
+                <th className="text-left px-3 py-2 font-medium">Type</th>
+                <th className="text-right px-3 py-2 font-medium">Value (₹Cr)</th>
+                <th className="text-right px-3 py-2 font-medium">% of Float</th>
+                <th className="text-right px-3 py-2 font-medium">Date</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-800/30">
+              {deals.map((d: any, i: number) => {
+                const isBuy = /buy|purch|acqui/i.test(d.trade_type || '');
+                const isSell = /sell|sale|dispos/i.test(d.trade_type || '');
+                return (
+                  <tr
+                    key={i}
+                    className="hover:bg-slate-800/40 cursor-pointer"
+                    onClick={() => onSelectStock?.(d.symbol)}
+                  >
+                    <td className="px-3 py-1.5 font-bold text-slate-200">{d.symbol}</td>
+                    <td className="px-3 py-1.5 text-slate-300 truncate max-w-[220px]">{d.client_name || '—'}</td>
+                    <td className={cn("px-3 py-1.5 font-medium", isBuy ? "text-emerald-400" : isSell ? "text-red-400" : "text-slate-400")}>
+                      {d.trade_type || '—'}
+                    </td>
+                    <td className="px-3 py-1.5 text-right font-mono text-slate-300">
+                      {d.value_cr != null ? Number(d.value_cr).toFixed(2) : '—'}
+                    </td>
+                    <td className="px-3 py-1.5 text-right font-mono text-slate-200">
+                      {d.pct_transacted != null ? `${Number(d.pct_transacted).toFixed(2)}%` : '—'}
+                    </td>
+                    <td className="px-3 py-1.5 text-right font-mono text-slate-500">{d.date}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+};
+
 export const SmartMoneyPage: React.FC<SmartMoneyPageProps> = ({ onSelectStock }) => {
   const [activeTab, setActiveTab] = useState<DealTab>('large');
-  const { data, isLoading, refetch } = trpc.getDeals.useQuery(undefined, {
+  const { data, isLoading, isError, refetch } = trpc.getDeals.useQuery(undefined, {
     staleTime: 5 * 60 * 1000,
     refetchOnWindowFocus: false,
   });
@@ -104,6 +169,15 @@ export const SmartMoneyPage: React.FC<SmartMoneyPageProps> = ({ onSelectStock })
   if (isLoading) return (
     <div className="flex items-center justify-center h-64">
       <div className="animate-spin w-10 h-10 border-2 border-emerald-500 border-t-transparent rounded-full" />
+    </div>
+  );
+
+  if (isError) return (
+    <div className="flex flex-col items-center justify-center h-64 gap-3 text-center">
+      <p className="text-sm text-rose-400 font-bold">Failed to load smart-money deal data.</p>
+      <button onClick={() => refetch()} className="text-xs px-3 py-1.5 rounded-lg bg-slate-800 text-slate-300 hover:bg-slate-700">
+        Retry
+      </button>
     </div>
   );
 
@@ -223,6 +297,8 @@ export const SmartMoneyPage: React.FC<SmartMoneyPageProps> = ({ onSelectStock })
           </div>
         </div>
       )}
+
+      {activeTab === 'block' && <BlockDealsTable onSelectStock={onSelectStock} />}
 
       {activeTab === 'insider' && (
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">

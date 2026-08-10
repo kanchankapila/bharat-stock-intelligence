@@ -1,12 +1,60 @@
 import React, { useState } from 'react';
 import { trpc } from '../lib/trpc';
-import { Loader2, TrendingUp, Shield, Zap, Target, Activity, CheckCircle2 } from 'lucide-react';
+import { Loader2, TrendingUp, Shield, Zap, Target, Activity, CheckCircle2, Layers } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { LegacyScoreBanner } from './CanonicalSourceNote';
 
+// ponytail: 3 pre-built scanners with no UI (getConvergenceSignals/getRegimeSectorSignals/
+// getQualityOversoldSignals) — all return the same flat {symbol, score, classification, ...}
+// shape, so one generic list covers all three instead of three bespoke cards.
+type ScannerKey = 'convergence' | 'regime' | 'oversold';
+const SCANNERS: { key: ScannerKey; label: string; desc: string }[] = [
+  { key: 'convergence', label: 'Cross-Source Convergence', desc: 'Bullish on Trendlyne, MoneyControl, and ETNow screeners at once.' },
+  { key: 'regime', label: 'Regime Sector Leaders', desc: "Top-scoring stocks in the market's currently leading sectors (BULL regime only)." },
+  { key: 'oversold', label: 'Quality Oversold', desc: 'Zero-debt/cash-cow screener names currently RSI-oversold.' },
+];
+
+const ScannerPanel: React.FC<{ scanner: ScannerKey; onSelectStock: (symbol: string) => void }> = ({ scanner, onSelectStock }) => {
+  const convergence = trpc.getConvergenceSignals.useQuery(undefined, { enabled: scanner === 'convergence' });
+  const regime = trpc.getRegimeSectorSignals.useQuery(undefined, { enabled: scanner === 'regime' });
+  const oversold = trpc.getQualityOversoldSignals.useQuery(undefined, { enabled: scanner === 'oversold' });
+  const { data, isLoading } = scanner === 'convergence' ? convergence : scanner === 'regime' ? regime : oversold;
+  const rows = (data ?? []) as any[];
+
+  if (isLoading) return <div className="text-center py-12 text-slate-400 text-sm">Loading…</div>;
+  if (rows.length === 0) return (
+    <div className="text-center py-12 text-slate-400 bg-slate-950/30 rounded-xl border border-slate-800/50">
+      No stocks currently match this scanner.
+    </div>
+  );
+  return (
+    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+      {rows.map((r) => (
+        <button
+          key={r.symbol}
+          onClick={() => onSelectStock(r.symbol)}
+          className="text-left bg-slate-900/40 border border-slate-800/50 hover:border-indigo-500/50 transition-colors rounded-xl p-3"
+        >
+          <div className="flex justify-between items-center">
+            <span className="font-black text-white">{r.symbol}</span>
+            <span className="text-lg font-black text-indigo-400">{r.score ?? r.rsi}</span>
+          </div>
+          <div className="flex flex-wrap gap-1.5 mt-2 text-[10px] text-slate-400">
+            {r.classification && <span className="px-1.5 py-0.5 rounded bg-slate-800">{r.classification}</span>}
+            {r.sector && <span className="px-1.5 py-0.5 rounded bg-slate-800">{r.sector}</span>}
+            {r.rsi != null && r.score != null && <span className="px-1.5 py-0.5 rounded bg-slate-800">RSI {r.rsi}</span>}
+            {r.qualityScreener && <span className="px-1.5 py-0.5 rounded bg-slate-800">{r.qualityScreener}</span>}
+          </div>
+        </button>
+      ))}
+    </div>
+  );
+};
+
 export function InvestmentStrategy({ onSelectStock }: { onSelectStock: (symbol: string) => void }) {
-  const [activeTab, setActiveTab] = useState<'INVESTMENT' | 'INTRADAY'>('INVESTMENT');
-  const { data: strategies, isLoading } = trpc.getStrategyPicks.useQuery(undefined, { refetchInterval: 5 * 60 * 1000 });
+  const [activeTab, setActiveTab] = useState<'INVESTMENT' | 'INTRADAY' | 'SCANNERS'>('INVESTMENT');
+  const [activeScanner, setActiveScanner] = useState<ScannerKey>('convergence');
+  const { data: strategies, isLoading } = trpc.getStrategyPicks.useQuery(undefined, { refetchInterval: 5 * 60 * 1000, enabled: activeTab !== 'SCANNERS' });
 
   if (isLoading) {
     return (
@@ -55,10 +103,40 @@ export function InvestmentStrategy({ onSelectStock }: { onSelectStock: (symbol: 
           >
             <Zap className="w-4 h-4" /> Intraday Momentum
           </button>
+          <button
+            onClick={() => setActiveTab('SCANNERS')}
+            className={cn(
+              "px-4 py-2 rounded-lg text-sm font-bold transition-all flex items-center gap-2",
+              activeTab === 'SCANNERS' ? "bg-violet-600 text-white shadow-lg shadow-violet-500/20" : "text-slate-400 hover:text-white"
+            )}
+          >
+            <Layers className="w-4 h-4" /> More Scanners
+          </button>
         </div>
       </div>
 
       <LegacyScoreBanner note="Ranked by an independent screener-confluence formula (ET/MoneyControl/Trendlyne membership counts), not the unified cross-engine model -- check Alpha / Buy Recs for the canonical, regime-aware view of the same stocks." />
+
+      {activeTab === 'SCANNERS' && (
+        <div className="space-y-4">
+          <div className="flex flex-wrap gap-2">
+            {SCANNERS.map((s) => (
+              <button
+                key={s.key}
+                onClick={() => setActiveScanner(s.key)}
+                className={cn(
+                  "px-3 py-1.5 rounded-lg text-xs font-bold transition-all border",
+                  activeScanner === s.key ? "bg-violet-600 text-white border-violet-500" : "bg-slate-900/40 text-slate-400 border-slate-800/50 hover:text-white"
+                )}
+              >
+                {s.label}
+              </button>
+            ))}
+          </div>
+          <p className="text-xs text-slate-400">{SCANNERS.find((s) => s.key === activeScanner)?.desc}</p>
+          <ScannerPanel scanner={activeScanner} onSelectStock={onSelectStock} />
+        </div>
+      )}
 
       {/* Content */}
       {activeTab === 'INVESTMENT' && (

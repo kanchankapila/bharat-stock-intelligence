@@ -38,13 +38,18 @@ warnings.filterwarnings('ignore')
 import numpy as np
 import pandas as pd
 
-from db_compat import connect, read_df, use_postgres, ConnWrapper
+from db_compat import connect, read_df, use_postgres, ConnWrapper, now_utc_iso
 from as_of import as_of_join_sql
 from model_promotion import (clears_promotion_bar, rejections_since,
                               staleness_override_applies,
                               DEFAULT_STALENESS_MAX_DAYS, DEFAULT_STALENESS_MAX_REJECTIONS)
 
-MODELS_DIR  = os.path.join(os.getcwd(), 'src', 'server', 'ml_models')
+# Script-relative, not os.getcwd()-relative (2026-08-09): the old cwd-relative join silently
+# wrote/read the model at a doubled src/server/src/server/ml_models path when this script was
+# invoked from src/server instead of the repo root -- a real, previously-documented gotcha
+# (see [[weekly_jobs_and_closed_day_scheduling_2026_07_12]]) that this makes structural instead
+# of relying on every future invocation remembering the right cwd.
+MODELS_DIR  = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'ml_models')
 ENSEMBLE_PATH = os.path.join(MODELS_DIR, 'ensemble.pkl')
 # Promotion bar: a retrain must beat the active model's purged-OOF CV AUC by this margin to go
 # live, else the current model is kept (rejected candidate is saved here + registered inactive).
@@ -2562,7 +2567,10 @@ def train_ensemble(X: pd.DataFrame, y: pd.Series, dates: pd.Series | None = None
         'optimal_threshold':  test.get('optimal_threshold', 0.45),
         'embargo':            embargo,
         'n_samples':          len(X),
-        'trained_at':         datetime.datetime.now().isoformat(),
+        # was naive datetime.datetime.now().isoformat() -- on this box (local clock IST) that
+        # silently stored wall-clock IST into model_registry.trained_at (TIMESTAMPTZ, session
+        # TimeZone=UTC), ~5.5h ahead of true UTC. See db_compat.now_utc_iso().
+        'trained_at':         now_utc_iso(),
     }
 
 

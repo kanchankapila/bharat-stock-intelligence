@@ -13,11 +13,14 @@ import pandas as pd
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 from high_flyer_retrospective import (
     detect_flyers,
+    detect_divers,
     ohlcv_precursor_flags,
     ts_precursor_flags,
     compute_lifts,
     score_candidates,
     MIN_SUPPORT,
+    _SELL_CLASSES,
+    _BUY_CLASSES,
 )
 
 
@@ -63,6 +66,56 @@ class TestDetectFlyers:
     def test_missing_day_returns_empty(self):
         close, vol = _frames()
         assert detect_flyers(close, vol, "1999-01-01").empty
+
+
+def _diver_frames(n_days=80, diver_ret=-0.06, vol_x=3.0):
+    """Mirror of _frames() for down-moves: DIVE crashes -6% on 3x volume."""
+    dates = pd.date_range("2026-01-01", periods=n_days, freq="B").strftime("%Y-%m-%d")
+    base = np.full(n_days, 100.0)
+    dive = base.copy(); dive[-1] = 100.0 * (1 + diver_ret)
+    close = pd.DataFrame({"DIVE": dive, "FLAT": base}, index=dates)
+    vol = pd.DataFrame({"DIVE": np.full(n_days, 1000.0), "FLAT": np.full(n_days, 1000.0)}, index=dates)
+    vol.iloc[-1, vol.columns.get_loc("DIVE")] = 1000.0 * vol_x
+    return close, vol
+
+
+class TestDetectDivers:
+    def test_detects_big_down_move_on_volume(self):
+        close, vol = _diver_frames()
+        out = detect_divers(close, vol, close.index[-1])
+        assert list(out["symbol"]) == ["DIVE"]
+        assert out.iloc[0]["return_pct"] == -6.0
+
+    def test_up_move_is_not_a_diver(self):
+        close, vol = _frames()   # FLY jumps +6% — must never show up as a diver
+        out = detect_divers(close, vol, close.index[-1])
+        assert out.empty
+
+    def test_short_history_excluded(self):
+        close, vol = _diver_frames(n_days=30)
+        assert detect_divers(close, vol, close.index[-1]).empty
+
+    def test_new_52w_low_without_volume_still_a_diver(self):
+        close, vol = _diver_frames(vol_x=1.0)
+        # -6% on flat history IS a new 252d low, so still a diver via that path
+        out = detect_divers(close, vol, close.index[-1])
+        assert out.iloc[0]["new_52w_high"] == 1   # column reused to mean "new low" for divers
+
+
+class TestWrongDirectionClassSets:
+    """Guards against the exact string-matching typo class this repo has hit before
+    (e.g. querying 'BUY' against a title-case 'Buy' column silently matches nothing)."""
+
+    def test_sell_classes_match_unified_ranker_classify_output(self):
+        # unified_ranker._classify emits title-case 'Sell'/'Strong Sell', never SCREAMING_CASE.
+        assert _SELL_CLASSES == {"Sell", "Strong Sell"}
+
+    def test_buy_classes_match_unified_ranker_classify_output(self):
+        assert _BUY_CLASSES == {"Buy", "Strong Buy"}
+
+    def test_hold_is_in_neither_class(self):
+        assert "Hold" not in _SELL_CLASSES
+        assert "Hold" not in _BUY_CLASSES
 
 
 class TestOhlcvPrecursorFlags:

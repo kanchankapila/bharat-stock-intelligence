@@ -38,19 +38,19 @@ function scoreLabel(score: number) {
   if (score >= 20)  return { label: 'Greed',         color: 'text-lime-400',    bg: 'bg-lime-500/10 border-lime-500/30' };
   if (score <= -50) return { label: 'Extreme Fear',  color: 'text-rose-400',    bg: 'bg-rose-500/10 border-rose-500/30' };
   if (score <= -20) return { label: 'Fear',          color: 'text-orange-400',  bg: 'bg-orange-500/10 border-orange-500/30' };
-  return { label: 'Neutral', color: 'text-slate-300', bg: 'bg-slate-9000/10 border-slate-500/30' };
+  return { label: 'Neutral', color: 'text-slate-300', bg: 'bg-slate-500/10 border-slate-500/30' };
 }
 
 function impactColor(impact: string) {
   return impact === 'HIGH' ? 'text-rose-400 bg-rose-500/10 border-rose-500/30'
        : impact === 'MEDIUM' ? 'text-amber-400 bg-amber-500/10 border-amber-500/30'
-       : 'text-slate-400 bg-slate-9000/10 border-slate-800/30';
+       : 'text-slate-400 bg-slate-500/10 border-slate-800/30';
 }
 
 function sentimentBadge(s: string) {
   return s === 'BULLISH' ? 'text-emerald-400 bg-emerald-500/10 border-emerald-500/30'
        : s === 'BEARISH' ? 'text-rose-400 bg-rose-500/10 border-rose-500/30'
-       : 'text-slate-400 bg-slate-9000/10 border-slate-800/30';
+       : 'text-slate-400 bg-slate-500/10 border-slate-800/30';
 }
 
 function categoryColor(c: string): string {
@@ -62,7 +62,7 @@ function categoryColor(c: string): string {
     IPO:      'text-pink-400 bg-pink-500/10 border-pink-500/30',
     GLOBAL:   'text-teal-400 bg-teal-500/10 border-teal-500/30',
     SECTOR:   'text-orange-400 bg-orange-500/10 border-orange-500/30',
-    GENERAL:  'text-slate-400 bg-slate-9000/10 border-slate-800/30',
+    GENERAL:  'text-slate-400 bg-slate-500/10 border-slate-800/30',
   };
   return map[c] ?? map.GENERAL;
 }

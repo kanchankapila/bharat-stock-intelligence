@@ -156,6 +156,29 @@ class TestSessionVwap:
         assert bars, "mid-session bars should still be written"
         assert all(b["vwap"] is None for b in bars)
 
+    def test_known_open_days_widens_trust_beyond_this_payload(self):
+        """A later fetch cycle's own payload can genuinely omit the open bar for an illiquid
+        name even though an earlier cycle already captured it and it's sitting in the DB --
+        found live 2026-08-09: ~16% of a session's bars sat NULL for exactly this reason.
+        known_open_days lets run() tell parse_bars "trust this day anyway"."""
+        import datetime as _dt
+        mid_session = self._session(3, base_ts=SESSION_OPEN_TS + 3 * 3600)
+        without_hint = itf.parse_bars(mid_session, "X")
+        assert all(b["vwap"] is None for b in without_hint), "sanity: absent the hint, still NULL"
+
+        session_date = _dt.datetime.fromtimestamp(SESSION_OPEN_TS, tz=itf._IST).date()
+        with_hint = itf.parse_bars(mid_session, "X", known_open_days={session_date})
+        assert all(b["vwap"] is not None for b in with_hint)
+
+    def test_known_open_days_for_a_different_date_does_not_help(self):
+        """The hint is per-date -- knowing yesterday had an open bar must not validate today's
+        VWAP if today's own payload never showed an open bar."""
+        import datetime as _dt
+        mid_session = self._session(3, base_ts=SESSION_OPEN_TS + 3 * 3600)
+        wrong_date = _dt.datetime.fromtimestamp(SESSION_OPEN_TS - 86400, tz=itf._IST).date()
+        bars = itf.parse_bars(mid_session, "X", known_open_days={wrong_date})
+        assert all(b["vwap"] is None for b in bars)
+
     def test_vwap_resets_across_sessions(self):
         day1 = self._session(2, SESSION_OPEN_TS)
         day2 = self._session(2, SESSION_OPEN_TS + 86400)
@@ -286,6 +309,57 @@ class TestRunDb:
         _, con = _make_db([("INFY", "IT"), ("TCS", "TCS01"), ("HDFC", "HDF01")])
         n = itf.run(fetch_fn=_good_fetch)
         assert n == 9   # 3 bars × 3 symbols
+
+
+class TestKnownOpenDaysEndToEnd:
+    """run() must consult the DB's own already-recorded bars, not just the current payload, so
+    a later cycle whose fetch happens to omit the open bar doesn't overwrite a previously-good
+    VWAP with NULL. Regression for the live 2026-08-09 finding (~16% of a session's bars sat
+    NULL despite the DB already holding a real 09:15 bar for those symbols)."""
+
+    def _today_session_open(self):
+        """run()'s from_ts/to_ts are wall-clock-relative (time.time()), unlike the pure-function
+        parse_bars tests above which use a fixed historical epoch -- fixtures here must be
+        anchored to real "now" or _known_open_days' window filter would never see them."""
+        import time as _time
+        now_ist = itf.datetime.datetime.fromtimestamp(_time.time(), tz=itf._IST)
+        return int(now_ist.replace(hour=9, minute=15, second=0, microsecond=0).timestamp())
+
+    def _mid_session_fetch(self, mcsymbol, from_ts, to_ts):
+        base = self._today_session_open() + 3 * 3600  # 3h in -- no open bar in this payload
+        return {
+            "t": [base, base + 900],
+            "o": [100.0, 100.0], "h": [110.0, 110.0], "l": [90.0, 90.0], "c": [100.0, 100.0],
+            "v": [1000, 1000],
+        }
+
+    def test_db_known_open_bar_lets_a_later_cycle_still_compute_vwap(self):
+        _, con = _make_db([("INFY", "IT")])
+        # Simulate an earlier cycle already having captured today's real 09:15 bar.
+        open_dt = itf.datetime.datetime.fromtimestamp(self._today_session_open(), tz=itf._IST)
+        open_str = open_dt.strftime("%Y-%m-%dT%H:%M:%S+05:30")
+        con.execute(
+            "INSERT INTO intraday_ohlcv (symbol, datetime, open, high, low, close, volume, vwap, interval) "
+            "VALUES ('INFY', ?, 100.0, 100.0, 100.0, 100.0, 0, NULL, '15m')", (open_str,)
+        )
+        con.commit()
+        itf.run(fetch_fn=self._mid_session_fetch, lookback_days=1)
+        rows = con.execute(
+            "SELECT vwap FROM intraday_ohlcv WHERE symbol='INFY' AND datetime > ?", (open_str,)
+        ).fetchall()
+        assert rows, "the mid-session payload's bars must still be written"
+        assert all(r[0] is not None for r in rows), (
+            "the DB already had a real open bar for this symbol/day -- this cycle's own "
+            "payload lacking it must not force VWAP back to NULL"
+        )
+
+    def test_without_a_prior_open_bar_vwap_stays_null_as_before(self):
+        """Negative control: no known-open hint exists anywhere -- behaviour must be unchanged
+        from before this fix (NULL, not a guess)."""
+        _, con = _make_db([("INFY", "IT")])
+        itf.run(fetch_fn=self._mid_session_fetch, lookback_days=1)
+        rows = con.execute("SELECT vwap FROM intraday_ohlcv WHERE symbol='INFY'").fetchall()
+        assert rows and all(r[0] is None for r in rows)
 
 
 # ── Dual-source (MC + Yahoo) dispatch ───────────────────────────────────────────

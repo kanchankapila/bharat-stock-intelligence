@@ -601,6 +601,85 @@ def is_directionless_fallback_enabled(conn) -> bool:
         return False
 
 
+# ── Engine-level live edge (factor_edge.py measures unified_recommendations.*_score
+# columns weekly, see queues.ts) → optional weight shrinkage ──────────────────────────
+#
+# factor_edge.py already answers "does this score column actually predict forward
+# returns?" for third-party scores (Trendlyne DVM); it's now pointed at our OWN 8 blend
+# engines too. This reads the latest verdict and shrinks an engine's REGIME_WEIGHTS share
+# toward 0 when it's shown "no edge" on enough history -- same shrinkage philosophy as
+# shrink_tilt() above, not a hard cutoff. Ships OFF by default: 30-ish accumulated trading
+# days is not enough to act on yet (see the live run this shipped with -- every engine
+# showed near-zero IC, consistent with the regime's already-known negative momentum, but
+# too little history to trust as a standing decision). Flip on once factor_edge_history
+# has enough dates per regime to be worth trusting:
+#   UPDATE app_settings SET value='true' WHERE key='engine_edge_adjustment_enabled';
+ENGINE_TO_SCORE_COL = {
+    'screener': 'screener_stock_score', 'ml': 'ml_score', 'cs': 'cs_score',
+    'confluence': 'confluence_score', 'technical': 'technical_score', 'dl': 'dl_score',
+    'breakout': 'breakout_score', 'smart_money': 'smart_money_score',
+}
+ENGINE_EDGE_SHRINK = 0.5     # multiplier applied to a "no edge" engine's weight share
+ENGINE_EDGE_HORIZON = 5      # which persisted horizon to read (matches the ranker's swing focus)
+
+
+def is_engine_edge_adjustment_enabled(conn) -> bool:
+    """Separate flag from is_edge_adjustment_enabled (that one calibrates win_probability;
+    this one shrinks engine blend weights) -- different mechanism, different scope, deliberately
+    not conflated. Defaults to OFF (missing row)."""
+    try:
+        row = conn.execute(
+            "SELECT value FROM app_settings WHERE key = 'engine_edge_adjustment_enabled'"
+        ).fetchone()
+        return bool(row) and row['value'] == 'true'
+    except Exception as e:
+        print(f"[UnifiedRanker] is_engine_edge_adjustment_enabled unavailable: {e}")
+        return False
+
+
+def load_engine_edge_verdicts(conn, regime: str, horizon: int = ENGINE_EDGE_HORIZON) -> dict:
+    """engine -> verdict ('USABLE'/'no edge'/'LOW-DATA'/None) from the most recent
+    factor_edge.py run against unified_recommendations, for this regime falling back to
+    'ALL' when the regime-specific row doesn't exist (matches factor_edge's own groups)."""
+    try:
+        row = conn.execute(
+            "SELECT MAX(run_at) AS r FROM factor_edge_history WHERE table_name = 'unified_recommendations'"
+        ).fetchone()
+        run_at = row['r'] if row else None
+        if not run_at:
+            return {}
+        out = {}
+        for engine, col in ENGINE_TO_SCORE_COL.items():
+            r = conn.execute(
+                "SELECT verdict FROM factor_edge_history WHERE run_at = ? AND table_name = "
+                "'unified_recommendations' AND score_col = ? AND horizon_days = ? AND regime = ?",
+                (run_at, col, horizon, regime)).fetchone()
+            if not r:
+                r = conn.execute(
+                    "SELECT verdict FROM factor_edge_history WHERE run_at = ? AND table_name = "
+                    "'unified_recommendations' AND score_col = ? AND horizon_days = ? AND regime = 'ALL'",
+                    (run_at, col, horizon)).fetchone()
+            out[engine] = r['verdict'] if r else None
+        return out
+    except Exception as e:
+        print(f"[UnifiedRanker] load_engine_edge_verdicts unavailable: {e}")
+        return {}
+
+
+def edge_adjusted_weights(base_weights: dict, verdicts: dict) -> dict:
+    """Pure function: shrink a REGIME_WEIGHTS dict's per-engine share toward 0 for any engine
+    verdict-'no edge' (LOW-DATA/USABLE/None left untouched -- shrink only on demonstrated
+    absence of edge, never on insufficient evidence). Renormalizes so weights still sum to 1."""
+    adjusted = {
+        e: (w * ENGINE_EDGE_SHRINK if verdicts.get(e) == 'no edge' else w)
+        for e, w in base_weights.items()
+    }
+    total = sum(adjusted.values())
+    if total <= 0:
+        return dict(base_weights)
+    return {e: w / total * sum(base_weights.values()) for e, w in adjusted.items()}
+
+
 def _classify(score, bull, bear, *, directionless_fallback: bool = False):
     """Directional label (matches stock_scores taxonomy the Top Rated UI renders). Screeners
     are the PRIMARY direction source: net screener bias (bull vs bear count) decides Buy vs
@@ -815,6 +894,45 @@ class UnifiedRanker:
             return row['regime'], float(row['regime_prob'] or 0.5)
         return 'BULL', 0.5
 
+    # Empirically derived from the platform's full INDIAVIX history (2026-08-09 live audit,
+    # 1170 rows): median~14.0, p75~17.2. regime_detector.py's HIGH_VOL/CRASH names are assigned
+    # PURELY by relative rank among whichever 5 clusters a given retrain discovers -- "2nd/5th
+    # most volatile of 5" says nothing about whether ANY of the 5 states is actually volatile in
+    # absolute terms. Live-confirmed this session: HIGH_VOL was assigned to 07-29..08-07 with
+    # real VIX=12.16-13.27 -- the platform's own BOTTOM QUARTILE of VIX history, i.e. calm, not
+    # elevated. Since REGIME_WEIGHTS/regime_cat_weights key purely off the string name, that
+    # silently applied "reduce risk" weight tilts to a genuinely calm market for those 8 sessions.
+    _HIGH_VOL_VIX_FLOOR = 14.0  # historical median; below this "HIGH_VOL" overclaims
+    _CRASH_VIX_FLOOR     = 17.2  # historical p75; below this "CRASH" overclaims
+
+    def _effective_regime_for_weights(self, regime: str) -> str:
+        """Downgrade HIGH_VOL/CRASH to their calmer neighbor for weight SELECTION only, when
+        today's real India VIX doesn't support the volatility the name claims. Deliberately does
+        NOT touch the stored market_regimes row, app_settings.current_nifty_regime, or the
+        `regime` value this run reports/persists elsewhere -- this is a downstream safety net on
+        top of regime_detector.py's own labeling, not a replacement for fixing it there."""
+        if regime not in ('HIGH_VOL', 'CRASH'):
+            return regime
+        try:
+            row = self.conn.execute(
+                "SELECT close FROM macro_asset_prices WHERE symbol = 'INDIAVIX' "
+                "ORDER BY date DESC LIMIT 1"
+            ).fetchone()
+        except Exception:
+            return regime
+        vix = float(row['close']) if row and row['close'] is not None else None
+        if vix is None:
+            return regime  # nothing to second-guess the label with -- trust it
+        if regime == 'HIGH_VOL' and vix < self._HIGH_VOL_VIX_FLOOR:
+            print(f"[UnifiedRanker] Regime 'HIGH_VOL' downgraded to 'SIDEWAYS' for weight "
+                  f"selection -- real VIX={vix:.2f} < {self._HIGH_VOL_VIX_FLOOR} historical-median floor.")
+            return 'SIDEWAYS'
+        if regime == 'CRASH' and vix < self._CRASH_VIX_FLOOR:
+            print(f"[UnifiedRanker] Regime 'CRASH' downgraded to 'BEAR' for weight selection "
+                  f"-- real VIX={vix:.2f} < {self._CRASH_VIX_FLOOR} historical-p75 floor.")
+            return 'BEAR'
+        return regime
+
     def _get_fundamental_scores(self):
         rows = self.conn.execute(
             "SELECT symbol, score FROM stock_scores WHERE timeframe = 'long_term'"
@@ -946,12 +1064,40 @@ class UnifiedRanker:
             # feeds the composite unified_recommendations rank/classification directly, so the
             # same raw-vs-regime-honest gap applied to ranking, not just sizing. COALESCE keeps
             # not-yet-calibrated rows working on the raw value (2026-07-18 gating follow-up).
+            #
+            # 2026-08-10: per-row edge-adjustment added (mirrors _get_win_probabilities exactly,
+            # see its docstring for the mechanism). Live-traced: HIGH_VOL's own isotonic
+            # calibrator collapsed calibrated_win_probability to a near-constant ~0.78 for 90%
+            # of the universe -- correctly reflecting HIGH_VOL's own live AUC of ~0.518 (no real
+            # edge, per regime_edge_status), not a broken calibration. That near-constant value
+            # was still carrying this engine's full regime weight (12-24%) in the
+            # RANKING/CLASSIFICATION blend even though the platform already knew, via
+            # regime_edge_status, that it had no edge right now -- only sizing ever consulted
+            # that knowledge. Shrinking here too collapses a no-edge regime's near-constant
+            # score toward neutral (50), so _blend's per-symbol renormalization leans on the
+            # OTHER engines instead of diluting the ranking with what amounts to noise.
             rows = self.conn.execute(
-                "SELECT symbol, AVG(COALESCE(calibrated_win_probability, win_probability)) AS p "
-                "FROM technical_signals WHERE date >= ? GROUP BY symbol",
+                "SELECT symbol, nifty_regime, COALESCE(calibrated_win_probability, win_probability) AS p "
+                "FROM technical_signals WHERE date >= ?",
                 (cutoff,),
             ).fetchall()
-            return {r['symbol']: float(r['p'] or 0) * 100 for r in rows}
+
+            from ml_calibration import is_edge_adjustment_enabled, edge_adjusted_probability, load_regime_edge_status
+            enabled = is_edge_adjustment_enabled(self.conn)
+            edge_status = load_regime_edge_status(self.conn) if enabled else {}
+
+            acc: dict = {}
+            for r in rows:
+                p = r['p']
+                # isfinite, not just `is None` -- see _get_win_probabilities' identical guard
+                # for the NaN-is-truthy failure mode this prevents.
+                if p is None or not math.isfinite(p):
+                    continue
+                p = float(p)
+                if enabled:
+                    p = edge_adjusted_probability(p, r['nifty_regime'], edge_status)
+                acc.setdefault(r['symbol'], []).append(p)
+            return {sym: (sum(v) / len(v)) * 100 for sym, v in acc.items() if v}
         except Exception as e:
             print(f"[UnifiedRanker] _get_ml_scores failed: {e}")
             self.conn.rollback()
@@ -1430,7 +1576,12 @@ class UnifiedRanker:
             self.seed_screener_catalog()
 
         regime, _conf     = self._get_regime()
-        base_weights      = REGIME_WEIGHTS.get(regime, REGIME_WEIGHTS['BULL'])
+        regime_for_weights = self._effective_regime_for_weights(regime)
+        base_weights      = REGIME_WEIGHTS.get(regime_for_weights, REGIME_WEIGHTS['BULL'])
+        if is_engine_edge_adjustment_enabled(self.conn):
+            verdicts = load_engine_edge_verdicts(self.conn, regime_for_weights)
+            base_weights = edge_adjusted_weights(base_weights, verdicts)
+            print(f"[UnifiedRanker] engine edge adjustment applied: {verdicts}")
         directionless_fallback = is_directionless_fallback_enabled(self.conn)
         fund_scores       = self._get_fundamental_scores()
         quality_metrics   = self._get_quality_metrics()
@@ -1439,7 +1590,7 @@ class UnifiedRanker:
         screener_momentum = self._get_screener_momentum_scores()
 
         screener_scores, bull_counts, bear_counts = compute_screener_stock_scores(
-            membership, fund_scores, cat_weights=regime_cat_weights(regime)
+            membership, fund_scores, cat_weights=regime_cat_weights(regime_for_weights)
         )
 
         # Blend pre-computed screener_momentum_score into the screener engine (10% boost cap).
@@ -1601,6 +1752,9 @@ class UnifiedRanker:
                 'confluence_score':        round(engine_scores['confluence'], 2),
                 'technical_score':         round(engine_scores['technical'], 2),
                 'dl_score':                round(engine_scores['dl'], 2),
+                'cs_score':                round(engine_scores['cs'], 2) if 'cs' in present else None,
+                'breakout_score':          round(engine_scores['breakout'], 2) if 'breakout' in present else None,
+                'smart_money_score':       round(engine_scores['smart_money'], 2) if 'smart_money' in present else None,
                 'avg_engine_track_record': round(avg_track, 2),
                 'engine_coverage_count':   len(present),
                 'bullish_screener_count':  bull_counts.get(sym, 0),
@@ -1650,6 +1804,7 @@ class UnifiedRanker:
                 (symbol, computed_at, regime, unified_score, conviction_level, classification,
                  screener_names_json,
                  screener_stock_score, ml_score, confluence_score, technical_score, dl_score,
+                 cs_score, breakout_score, smart_money_score,
                  avg_engine_track_record, engine_coverage_count, bullish_screener_count,
                  bearish_screener_count,
                  fundamental_score, entry_zone_low, entry_zone_high, stop_loss,
@@ -1658,7 +1813,8 @@ class UnifiedRanker:
                 VALUES (:symbol, :computed_at, :regime, :unified_score, :conviction_level, :classification,
                         :screener_names_json,
                         :screener_stock_score, :ml_score, :confluence_score, :technical_score,
-                        :dl_score, :avg_engine_track_record, :engine_coverage_count,
+                        :dl_score, :cs_score, :breakout_score, :smart_money_score,
+                        :avg_engine_track_record, :engine_coverage_count,
                         :bullish_screener_count,
                         :bearish_screener_count, :fundamental_score, :entry_zone_low,
                         :entry_zone_high, :stop_loss, :target_1, :target_2, :target_3,
@@ -1670,7 +1826,9 @@ class UnifiedRanker:
                     screener_names_json=excluded.screener_names_json,
                     screener_stock_score=excluded.screener_stock_score, ml_score=excluded.ml_score,
                     confluence_score=excluded.confluence_score, technical_score=excluded.technical_score,
-                    dl_score=excluded.dl_score, avg_engine_track_record=excluded.avg_engine_track_record,
+                    dl_score=excluded.dl_score, cs_score=excluded.cs_score,
+                    breakout_score=excluded.breakout_score, smart_money_score=excluded.smart_money_score,
+                    avg_engine_track_record=excluded.avg_engine_track_record,
                     engine_coverage_count=excluded.engine_coverage_count,
                     bullish_screener_count=excluded.bullish_screener_count,
                     bearish_screener_count=excluded.bearish_screener_count,

@@ -2,6 +2,24 @@ import { z } from 'zod';
 import { dbGet, dbAll } from '../dbAsync';
 import { router, publicProcedure, adminProcedure } from '../trpc';
 import { computeConfluenceSignals, getLatestConfluenceSignals } from '../confluenceEngine';
+import { usePostgres } from '../pgConfig';
+
+// Was `DATE(cs.computed_at)::text = so.signal_date` in both getConfluenceOutcomes queries below
+// -- wrapping confluence_signals' TimescaleDB partitioning column in DATE() defeats both
+// idx_csi_computed and Timescale's own chunk-exclusion pruning (same bug class already fixed in
+// technicals.router.ts's getTechnicalConfluenceSignals). so.signal_date varies per outer row
+// here, so the boundary can't be precomputed once in JS the way a single-literal query can --
+// express it as a half-open range on the bare column instead, using each dialect's own date-add
+// syntax (the shared sqlTranslate.ts regex only rewrites the `date('now', ...)` literal shape,
+// not an arbitrary column argument, so this needs an explicit per-dialect branch). Computed at
+// call time, not module load -- usePostgres() is read fresh per-call everywhere else in this
+// codebase specifically because tests flip USE_POSTGRES after import (see dbAsync.ts's own
+// per-call env read); a module-level const here would freeze whatever was true at import time.
+export function confluenceJoinOnSignalDate(): string {
+  return usePostgres()
+    ? `cs.computed_at >= so.signal_date::timestamptz AND cs.computed_at < so.signal_date::timestamptz + interval '1 day'`
+    : `cs.computed_at >= so.signal_date AND cs.computed_at < date(so.signal_date, '+1 day')`;
+}
 
 // Cached latest computed_at for confluence_signals — avoids a MAX() scan on every request.
 // Invalidated when refreshConfluenceSignals() runs.
@@ -146,23 +164,16 @@ export const confluenceRouter = router({
     .query(async ({ input }) => {
       const symbol = input?.symbol;
       const limit = input?.limit ?? 50;
-      // Was `DATE(cs.computed_at) = so.signal_date` -- comparing a DATE-typed expression
-      // (computed_at is TIMESTAMPTZ) against so.signal_date (TEXT). Postgres has no `date =
-      // text` operator for a column with a declared TEXT type (only untyped literals get an
-      // implicit cast), so this JOIN condition throws `operator does not exist: date = text` on
-      // Postgres -- the exact bug class documented repeatedly in this codebase's history
-      // (2026-07-22/23 date('now')::text fixes). It only "worked" on the SQLite dev fallback,
-      // where DATE()/date comparisons are untyped string comparisons. Appending `::text` casts
-      // the DATE side to match -- this is the same established pattern already applied to
-      // confluence_signals.computed_at elsewhere (ml.router.ts's getSignalReportCard), and is a
-      // no-op on SQLite (the cast is stripped by stripPgCasts, leaving the already-working
-      // native `DATE(...)` comparison unchanged).
+      // Range-based join (see confluenceJoinOnSignalDate above) -- also fixes the type-mismatch
+      // crash the previous `DATE(cs.computed_at) = so.signal_date` form needed a bare ::text
+      // cast for (a DATE-typed expression has no implicit-cast comparison against a TEXT-typed
+      // column in Postgres); a plain range on computed_at needs no such cast at all.
+      const joinCond = confluenceJoinOnSignalDate();
       if (symbol) {
         return dbAll(`
           SELECT so.*, cs.conviction_level, cs.bullish_screener_count, cs.screener_names_json
           FROM signal_outcomes so
-          LEFT JOIN confluence_signals cs ON cs.symbol = so.symbol
-            AND DATE(cs.computed_at)::text = so.signal_date
+          LEFT JOIN confluence_signals cs ON cs.symbol = so.symbol AND ${joinCond}
           WHERE so.symbol = ? AND so.signal_source = 'confluence'
           ORDER BY so.signal_date DESC
           LIMIT ?
@@ -171,8 +182,7 @@ export const confluenceRouter = router({
       return dbAll(`
         SELECT so.*, cs.conviction_level, cs.bullish_screener_count, cs.screener_names_json
         FROM signal_outcomes so
-        LEFT JOIN confluence_signals cs ON cs.symbol = so.symbol
-          AND DATE(cs.computed_at)::text = so.signal_date
+        LEFT JOIN confluence_signals cs ON cs.symbol = so.symbol AND ${joinCond}
         WHERE so.signal_source = 'confluence'
         ORDER BY so.signal_date DESC
         LIMIT ?

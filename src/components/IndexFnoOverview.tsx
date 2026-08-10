@@ -1,7 +1,7 @@
-import React, { useMemo } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { cn } from '../lib/utils';
 import { trpc } from '../lib/trpc';
-import { Activity, BarChart3, Clock, ShieldCheck, AlertTriangle, Zap } from 'lucide-react';
+import { Activity, Clock, ShieldCheck, AlertTriangle, Zap } from 'lucide-react';
 import { Card } from './MCCommon';
 import { marketHoursRefetchInterval } from '../lib/timeFormat';
 
@@ -9,88 +9,20 @@ interface IndexFnoOverviewProps {
   symbol: string;
 }
 
+const INDEX_SYMBOLS = new Set(['NIFTY', 'BANKNIFTY', 'FINNIFTY', 'MIDCPNIFTY', 'SENSEX', 'NIFTYNXT50']);
+
 function toFnoSymbol(symbol: string) {
   const s = symbol.toUpperCase();
   if (s === 'NIFTY 50' || s === 'NIFTY50') return 'NIFTY';
   if (s === 'NIFTY BANK' || s === 'BANKNIFTY') return 'BANKNIFTY';
   if (s === 'NIFTY FIN SERVICE' || s === 'FINNIFTY') return 'FINNIFTY';
   if (s === 'NIFTY MIDCAP SELECT' || s === 'MIDCPNIFTY') return 'MIDCPNIFTY';
-  return s;
-}
-
-// ── Option row index positions (Trendlyne Phoenix API) ─────────────────────
-// [0]=stock, [1]=type, [2]=strike, [3]=ltp, [4]=dayChg%,
-// [5]=vol, [6]=volChg%, [7]=ttv, [8]=oi, [9]=oiChg(abs),
-// [10]=oiChg%, [11]=iv, [12]=ivChg%, [13]=spot,
-// [14]=delta, [15]=gamma, [16]=rho, [17]=theta, [18]=vega, [19]=buildup
-
-// ── Futures row index positions ─────────────────────────────────────────────
-// [0]=stock, [1]=ltp, [2]=dayChg%?, [3]=vol, [4]=volChg%?,
-// [5]=ttv, [6]=oi?, ... varies; use headers dynamically
-
-function getOptNum(row: any[], idx: number): number | null {
-  const v = row[idx];
-  return typeof v === 'number' ? v : null;
+  return s.replace(/\s+/g, '');
 }
 
 function getBuildup(row: any[]): string | null {
   const last = row[row.length - 1];
   return typeof last === 'string' ? last : null;
-}
-
-// ── PCR & Key Level Analysis ───────────────────────────────────────────────
-interface OIAnalysis {
-  pcr: number;
-  callTotalOI: number;
-  putTotalOI: number;
-  maxCallStrike: number | null;
-  maxCallOI: number;
-  maxPutStrike: number | null;
-  maxPutOI: number;
-  avgCallIV: number | null;
-  avgPutIV: number | null;
-  ivSkew: number | null;
-  callBuildupDist: Record<string, number>;
-  putBuildupDist: Record<string, number>;
-  top3Calls: { strike: number; oi: number; ltp: number; iv: number | null; buildup: string | null }[];
-  top3Puts: { strike: number; oi: number; ltp: number; iv: number | null; buildup: string | null }[];
-}
-
-function analyseOI(callRows: any[][], putRows: any[][]): OIAnalysis {
-  const callOIs = callRows.map(r => ({ strike: getOptNum(r, 2) ?? 0, oi: getOptNum(r, 8) ?? 0, ltp: getOptNum(r, 3) ?? 0, iv: getOptNum(r, 11), buildup: getBuildup(r) }));
-  const putOIs  = putRows.map(r  => ({ strike: getOptNum(r, 2) ?? 0, oi: getOptNum(r, 8) ?? 0, ltp: getOptNum(r, 3) ?? 0, iv: getOptNum(r, 11), buildup: getBuildup(r) }));
-
-  const callTotalOI = callOIs.reduce((s, r) => s + r.oi, 0);
-  const putTotalOI  = putOIs.reduce((s, r)  => s + r.oi, 0);
-  const pcr = callTotalOI > 0 ? putTotalOI / callTotalOI : 0;
-
-  const topCall = callOIs.sort((a, b) => b.oi - a.oi)[0] || null;
-  const topPut  = putOIs.sort((a, b)  => b.oi - a.oi)[0] || null;
-
-  const callIVs = callOIs.map(r => r.iv).filter((v): v is number => v != null);
-  const putIVs  = putOIs.map(r  => r.iv).filter((v): v is number => v != null);
-  const avgCallIV = callIVs.length ? callIVs.reduce((a, b) => a + b, 0) / callIVs.length : null;
-  const avgPutIV  = putIVs.length  ? putIVs.reduce((a, b)  => a + b, 0) / putIVs.length  : null;
-  const ivSkew = avgCallIV != null && avgPutIV != null ? avgPutIV - avgCallIV : null;
-
-  const countBuildup = (rows: typeof callOIs) => {
-    const dist: Record<string, number> = {};
-    rows.forEach(r => { if (r.buildup) dist[r.buildup] = (dist[r.buildup] || 0) + 1; });
-    return dist;
-  };
-
-  const top3Calls = [...callOIs].sort((a, b) => b.oi - a.oi).slice(0, 3);
-  const top3Puts  = [...putOIs].sort((a, b)  => b.oi - a.oi).slice(0, 3);
-
-  return {
-    pcr, callTotalOI, putTotalOI,
-    maxCallStrike: topCall?.strike ?? null, maxCallOI: topCall?.oi ?? 0,
-    maxPutStrike:  topPut?.strike  ?? null, maxPutOI:  topPut?.oi  ?? 0,
-    avgCallIV, avgPutIV, ivSkew,
-    callBuildupDist: countBuildup(callOIs),
-    putBuildupDist:  countBuildup(putOIs),
-    top3Calls, top3Puts,
-  };
 }
 
 // ── PCR Gauge ──────────────────────────────────────────────────────────────
@@ -101,7 +33,7 @@ const PCRGauge: React.FC<{ pcr: number }> = ({ pcr }) => {
     pcr > 1.5 ? { label: 'Extreme Bullish', sub: 'Oversold — reversal likely', color: 'text-emerald-400', bar: 'bg-emerald-500' } :
     pcr > 1.3 ? { label: 'Bullish',          sub: 'Put writers dominate',       color: 'text-emerald-400', bar: 'bg-emerald-500' } :
     pcr > 1.0 ? { label: 'Slightly Bullish', sub: 'Puts > Calls — mild bias',  color: 'text-yellow-400', bar: 'bg-yellow-500'  } :
-    pcr > 0.8 ? { label: 'Neutral',           sub: 'Balanced positioning',       color: 'text-slate-300',  bar: 'bg-slate-9000'   } :
+    pcr > 0.8 ? { label: 'Neutral',           sub: 'Balanced positioning',       color: 'text-slate-300',  bar: 'bg-slate-500'   } :
     pcr > 0.6 ? { label: 'Slightly Bearish', sub: 'Calls > Puts — cautious',   color: 'text-amber-400',  bar: 'bg-amber-500'   } :
                 { label: 'Bearish',           sub: 'Call writers in control',    color: 'text-rose-400',   bar: 'bg-rose-500'    };
 
@@ -213,18 +145,21 @@ const StrikeRow: React.FC<{
 // ── Main Component ──────────────────────────────────────────────────────────
 const IndexFnoOverview: React.FC<IndexFnoOverviewProps> = ({ symbol }) => {
   const fnoSymbol = toFnoSymbol(symbol);
+  const instType = INDEX_SYMBOLS.has(fnoSymbol) ? 'index' : 'stock';
 
-  const { data: futData,  isLoading: lFut }  = trpc.getTrendlyneFnoScanners.useQuery({ mtype: 'futures', screenType: 'most-active-contract', instType: 'index' }, { refetchInterval: marketHoursRefetchInterval(10000) });
-  const { data: callData, isLoading: lCall } = trpc.getTrendlyneFnoScanners.useQuery({ mtype: 'options', screenType: 'oi-gainers-call',     instType: 'index' }, { refetchInterval: marketHoursRefetchInterval(10000) });
-  const { data: putData,  isLoading: lPut }  = trpc.getTrendlyneFnoScanners.useQuery({ mtype: 'options', screenType: 'oi-gainers-put',      instType: 'index' }, { refetchInterval: marketHoursRefetchInterval(10000) });
+  // Horizon (expiry) selector -- undefined = nearest, matching the backend default.
+  const [selectedExpiry, setSelectedExpiry] = useState<string | undefined>(undefined);
+  useEffect(() => { setSelectedExpiry(undefined); }, [fnoSymbol]);
+  const { data: expiries } = trpc.getFnoAvailableExpiries.useQuery({ symbol: fnoSymbol });
 
-  const futRows  = useMemo(() => (futData?.tableData  || []).filter((r: any[]) => r[0]?.name === fnoSymbol), [futData, fnoSymbol]);
-  const callRows = useMemo(() => (callData?.tableData || []).filter((r: any[]) => r[0]?.name === fnoSymbol), [callData, fnoSymbol]);
-  const putRows  = useMemo(() => (putData?.tableData  || []).filter((r: any[]) => r[0]?.name === fnoSymbol), [putData, fnoSymbol]);
+  // Per-symbol option-chain summary -- works for any F&O symbol (previously the PCR/IV-skew/
+  // key-strikes cards below only ever populated for NIFTY; see getFnoOptionChainSummary).
+  const { data: analysis, isLoading: lAnalysis } = trpc.getFnoOptionChainSummary.useQuery({ symbol: fnoSymbol, expiry: selectedExpiry }, { refetchInterval: marketHoursRefetchInterval(10000) });
+  const { data: futData,  isLoading: lFut }  = trpc.getTrendlyneFnoScanners.useQuery({ mtype: 'futures', screenType: 'most-active-contract', instType }, { refetchInterval: marketHoursRefetchInterval(10000) });
 
-  const analysis = useMemo(() => callRows.length || putRows.length ? analyseOI(callRows, putRows) : null, [callRows, putRows]);
+  const futRows = useMemo(() => (futData?.tableData || []).filter((r: any[]) => r[0]?.name === fnoSymbol), [futData, fnoSymbol]);
 
-  if (lFut || lCall || lPut) return <div className="h-64 glass/50 animate-pulse rounded-3xl" />;
+  if (lFut || lAnalysis) return <div className="h-64 glass/50 animate-pulse rounded-3xl" />;
 
   if (!analysis && !futRows.length) {
     return (
@@ -237,8 +172,42 @@ const IndexFnoOverview: React.FC<IndexFnoOverviewProps> = ({ symbol }) => {
 
   return (
     <div className="space-y-5">
+      {/* Horizon (expiry) selector -- each expiry is a distinct positioning horizon: nearest
+          reflects immediate sentiment, further ones reflect longer-dated hedging/rollover. */}
+      {expiries && expiries.length > 1 && (
+        <div className="flex items-center gap-2 flex-wrap">
+          <span className="text-[9.5px] font-black text-slate-400 uppercase tracking-widest">Horizon:</span>
+          {expiries.map((exp, i) => {
+            const active = (selectedExpiry ?? expiries[0]) === exp;
+            return (
+              <button key={exp} onClick={() => setSelectedExpiry(exp)}
+                className={cn("px-2.5 py-1 rounded-lg text-[9.5px] font-black uppercase tracking-widest transition-all",
+                  active ? "bg-indigo-500/20 text-indigo-300 border border-indigo-500/40" : "bg-slate-900/40 text-slate-400 border border-slate-800/50 hover:text-slate-200")}>
+                {exp}{i === 0 ? ' · Near' : ''}
+              </button>
+            );
+          })}
+        </div>
+      )}
+
+      {/* Max Pain / ATM / Spot strip */}
+      {analysis && (analysis.maxPain != null || analysis.atm != null || analysis.spot != null) && (
+        <div className="flex items-center gap-6 px-5 py-3 glass-strong border border-slate-800/50 rounded-2xl">
+          {analysis.spot != null && (
+            <div><p className="text-[9.5px] font-bold text-slate-400 uppercase">Spot</p><p className="text-sm font-black text-white tabular-nums italic">₹{analysis.spot.toLocaleString('en-IN')}</p></div>
+          )}
+          {analysis.maxPain != null && (
+            <div><p className="text-[9.5px] font-bold text-slate-400 uppercase">Max Pain</p><p className="text-sm font-black text-amber-400 tabular-nums italic">₹{analysis.maxPain.toLocaleString('en-IN')}</p></div>
+          )}
+          {analysis.atm != null && (
+            <div><p className="text-[9.5px] font-bold text-slate-400 uppercase">ATM Strike</p><p className="text-sm font-black text-white tabular-nums italic">₹{analysis.atm.toLocaleString('en-IN')}</p></div>
+          )}
+          <div className="ml-auto"><p className="text-[9.5px] font-bold text-slate-400 uppercase">Expiry</p><p className="text-sm font-black text-white tabular-nums italic">{analysis.expiry}</p></div>
+        </div>
+      )}
+
       {/* PCR + IV Skew row */}
-      {analysis && (
+      {analysis && analysis.pcr != null && (
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
           <PCRGauge pcr={analysis.pcr} />
           <IVSkewWidget callIV={analysis.avgCallIV} putIV={analysis.avgPutIV} skew={analysis.ivSkew} />
@@ -354,13 +323,13 @@ const IndexFnoOverview: React.FC<IndexFnoOverviewProps> = ({ symbol }) => {
             <div>
               <p className="text-[9.5px] font-bold text-slate-400 uppercase">Key Resistance</p>
               <p className="text-sm font-black text-white tabular-nums italic">
-                {analysis.maxCallStrike != null ? `₹${analysis.maxCallStrike.toLocaleString('en-IN')}` : '—'}
+                {analysis.top3Calls[0] ? `₹${analysis.top3Calls[0].strike.toLocaleString('en-IN')}` : '—'}
               </p>
             </div>
             <div>
               <p className="text-[9.5px] font-bold text-slate-400 uppercase">Key Support</p>
               <p className="text-sm font-black text-white tabular-nums italic">
-                {analysis.maxPutStrike != null ? `₹${analysis.maxPutStrike.toLocaleString('en-IN')}` : '—'}
+                {analysis.top3Puts[0] ? `₹${analysis.top3Puts[0].strike.toLocaleString('en-IN')}` : '—'}
               </p>
             </div>
           </div>
@@ -387,13 +356,15 @@ const IndexFnoOverview: React.FC<IndexFnoOverviewProps> = ({ symbol }) => {
               </span>
             </div>
           </div>
-          <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest mt-3">
-            {analysis.pcr > 1.2
-              ? `PCR of ${analysis.pcr.toFixed(2)} indicates put-heavy positioning — market views current levels as support. Options traders are net bullish via put writing.`
-              : analysis.pcr < 0.8
-              ? `PCR of ${analysis.pcr.toFixed(2)} indicates call-heavy positioning — participants hedging upside risk or expressing bearish views via call buying.`
-              : `PCR of ${analysis.pcr.toFixed(2)} reflects balanced positioning — no dominant directional bias detected at current levels.`}
-          </p>
+          {analysis.pcr != null && (
+            <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest mt-3">
+              {analysis.pcr > 1.2
+                ? `PCR of ${analysis.pcr.toFixed(2)} indicates put-heavy positioning — market views current levels as support. Options traders are net bullish via put writing.`
+                : analysis.pcr < 0.8
+                ? `PCR of ${analysis.pcr.toFixed(2)} indicates call-heavy positioning — participants hedging upside risk or expressing bearish views via call buying.`
+                : `PCR of ${analysis.pcr.toFixed(2)} reflects balanced positioning — no dominant directional bias detected at current levels.`}
+            </p>
+          )}
         </div>
       )}
     </div>

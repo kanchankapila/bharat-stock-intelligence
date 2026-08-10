@@ -70,8 +70,45 @@ function buildBriefing(bySymbol: Record<string, MacroTile>) {
   return lines;
 }
 
+function fmtGap(v: number | null | undefined) {
+  if (v == null || !Number.isFinite(v)) return '—';
+  return `${v > 0 ? '+' : ''}${fmtFixed(v, 2)}%`;
+}
+
+type PreMarketMover = {
+  symbol: string;
+  iep: number;
+  prevClose: number;
+  iepGapPct: number;
+  imbalance: number | null;
+};
+
+function MoversList({ title, movers, tone }: { title: string; movers: PreMarketMover[]; tone: 'positive' | 'negative' }) {
+  return (
+    <div className="rounded-2xl border border-[var(--v5-border)] bg-[var(--v5-surface-2)] p-3">
+      <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-[var(--v5-muted)]">{title}</div>
+      {!movers.length && <p className="text-xs text-[var(--v5-muted)]">No pre-open matches yet.</p>}
+      <div className="space-y-1">
+        {movers.map((m) => (
+          <div key={m.symbol} className="flex items-center justify-between rounded-lg border border-[var(--v5-border)] bg-[var(--v5-surface)] px-2 py-1.5 text-xs">
+            <span className="font-semibold text-[var(--v5-ink)]">{m.symbol}</span>
+            <span className="text-[var(--v5-muted)]">IEP {fmtFixed(m.iep, 2)}</span>
+            <span className={tone === 'positive' ? 'font-semibold text-[var(--v5-positive)]' : 'font-semibold text-[var(--v5-negative)]'}>
+              {fmtGap(m.iepGapPct)}
+            </span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 export function PreMarketBriefingDeskPage() {
   const macroQ = trpc.getMacroSnapshot.useQuery(undefined, {
+    refetchInterval: 120_000,
+    refetchOnWindowFocus: true,
+  });
+  const moversQ = trpc.getPreMarketMovers.useQuery({ limit: 8 }, {
     refetchInterval: 120_000,
     refetchOnWindowFocus: true,
   });
@@ -162,6 +199,19 @@ export function PreMarketBriefingDeskPage() {
             );
           })}
           {!marketTiles.length && <p className="text-sm text-[var(--v5-muted)]">No macro tiles available in the current snapshot.</p>}
+        </div>
+      </div>
+
+      <div className="v5-card col-span-12 p-4">
+        <div className="mb-3 flex items-center justify-between">
+          <h3 className="v5-title text-base font-semibold">Pre-Market Movers (IEP vs. Prev Close)</h3>
+          <span className="text-[10px] text-[var(--v5-muted)]">
+            {moversQ.data?.asOfDate ? `As of ${moversQ.data.asOfDate}` : 'No pre-open snapshot yet today'}
+          </span>
+        </div>
+        <div className="grid gap-3 md:grid-cols-2">
+          <MoversList title="Gap Up" movers={moversQ.data?.gapUp ?? []} tone="positive" />
+          <MoversList title="Gap Down" movers={moversQ.data?.gapDown ?? []} tone="negative" />
         </div>
       </div>
     </section>

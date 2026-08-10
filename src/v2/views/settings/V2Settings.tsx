@@ -171,7 +171,6 @@ export const V2Settings: React.FC = () => {
           <div className="space-y-1.5">
             <label className="text-[10px] font-black text-slate-400 uppercase tracking-wider flex justify-between">
               <span>Bearer Authorization Token</span>
-              <span className="text-[9px] text-indigo-400 font-mono font-medium normal-case">exp: July 19, 2026 (Default Fallback)</span>
             </label>
             <input 
               type="password" 

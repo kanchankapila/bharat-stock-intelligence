@@ -80,43 +80,44 @@ def test_breakout_no_longer_dominates():
 class TestEmissionGate:
     def test_closed_when_trailing_edge_is_negative(self):
         r = _ranker(outcome_row=_Row(avg_pnl=-0.456, n=3015))
-        allowed, reason = r._emission_allowed()
+        allowed, reason, avg, n = r._emission_allowed("LONG")
         assert allowed is False
         assert "-0.456" in reason
+        assert avg == pytest.approx(-0.456) and n == 3015
 
     def test_closed_when_trailing_edge_is_exactly_zero(self):
         r = _ranker(outcome_row=_Row(avg_pnl=0.0, n=3015))
-        assert r._emission_allowed()[0] is False
+        assert r._emission_allowed("LONG")[0] is False
 
     def test_open_when_trailing_edge_is_positive_on_enough_trades(self):
         r = _ranker(outcome_row=_Row(avg_pnl=0.25, n=3015))
-        allowed, reason = r._emission_allowed()
+        allowed, reason, _avg, _n = r._emission_allowed("LONG")
         assert allowed is True
         assert "+0.250" in reason
 
     def test_closed_on_thin_sample_even_if_positive(self):
         """A handful of lucky trades must not re-open the gate."""
         r = _ranker(outcome_row=_Row(avg_pnl=5.0, n=3))
-        allowed, reason = r._emission_allowed()
+        allowed, reason, _avg, _n = r._emission_allowed("LONG")
         assert allowed is False
         assert "need" in reason
 
     def test_closed_when_no_outcomes_exist(self):
         r = _ranker(outcome_row=None)
-        assert r._emission_allowed()[0] is False
+        assert r._emission_allowed("LONG")[0] is False
 
     def test_manual_override_reopens_the_gate(self):
         """Deliberate escape hatch -- the gate must be overridable, but only explicitly."""
         r = _ranker(settings={ir.EMISSION_GATE_SETTING: "true"},
                     outcome_row=_Row(avg_pnl=-9.9, n=3015))
-        allowed, reason = r._emission_allowed()
+        allowed, reason, _avg, _n = r._emission_allowed("LONG")
         assert allowed is True
         assert "manually disabled" in reason
 
     def test_override_is_off_by_default(self):
         r = _ranker(settings={ir.EMISSION_GATE_SETTING: "false"},
                     outcome_row=_Row(avg_pnl=-0.5, n=3015))
-        assert r._emission_allowed()[0] is False
+        assert r._emission_allowed("LONG")[0] is False
 
     def test_gate_never_raises_on_db_error(self):
         class _Boom(_FakeConn):
@@ -127,8 +128,46 @@ class TestEmissionGate:
 
         r = ir.IntradayRanker.__new__(ir.IntradayRanker)
         r.conn = _Boom()
-        allowed, _reason = r._emission_allowed()
+        allowed, _reason, _avg, _n = r._emission_allowed("LONG")
         assert allowed is False, "a failed edge lookup must fail CLOSED, not open"
+
+
+class TestEmissionGateShort:
+    """Mirror of TestEmissionGate for direction='SHORT' -- the Sell/Strong-Sell gate added
+    2026-08 alongside intraday_recommendation_outcomes.direction. Must behave identically to
+    the long side under the same inputs (it's the same gate function, parameterised), and must
+    be governed by its OWN app_settings key so disabling one side never silently reopens the
+    other."""
+
+    def test_closed_when_trailing_edge_is_negative(self):
+        r = _ranker(outcome_row=_Row(avg_pnl=-0.031, n=150))
+        allowed, reason, avg, n = r._emission_allowed("SHORT")
+        assert allowed is False
+        assert avg == pytest.approx(-0.031) and n == 150
+
+    def test_open_when_trailing_edge_is_positive_on_enough_trades(self):
+        r = _ranker(outcome_row=_Row(avg_pnl=0.10, n=150))
+        assert r._emission_allowed("SHORT")[0] is True
+
+    def test_closed_on_thin_sample(self):
+        r = _ranker(outcome_row=_Row(avg_pnl=5.0, n=3))
+        assert r._emission_allowed("SHORT")[0] is False
+
+    def test_uses_its_own_settings_key_not_the_long_one(self):
+        """Disabling the LONG gate must not touch the SHORT gate, and vice versa."""
+        r = _ranker(settings={ir.EMISSION_GATE_SETTING: "true"},
+                    outcome_row=_Row(avg_pnl=-9.9, n=150))
+        assert r._emission_allowed("SHORT")[0] is False, (
+            "the LONG override key must not reopen the SHORT gate"
+        )
+
+    def test_its_own_override_reopens_only_itself(self):
+        r = _ranker(settings={ir.EMISSION_GATE_SETTING_SHORT: "true"},
+                    outcome_row=_Row(avg_pnl=-9.9, n=150))
+        assert r._emission_allowed("SHORT")[0] is True
+        assert r._emission_allowed("LONG")[0] is False, (
+            "the SHORT override key must not reopen the LONG gate"
+        )
 
 
 class TestEmissionGateConstantsArePinned:
@@ -163,6 +202,33 @@ class TestEmissionGateConstantsArePinned:
             f"EMISSION_GATE_LOOKBACK_DAYS changed to {ir.EMISSION_GATE_LOOKBACK_DAYS} -- "
             "shortening this window makes the realised-edge estimate noisier, not more current."
         )
+
+    def test_short_gate_has_its_own_distinct_override_key(self):
+        assert ir.EMISSION_GATE_SETTING_SHORT != ir.EMISSION_GATE_SETTING, (
+            "the short-side gate must not share the long side's override key -- collapsing "
+            "them back to one key would let disabling one silently reopen the other"
+        )
+
+
+# ── Short-side ATR barriers ────────────────────────────────────────────────────
+
+class TestAtrBarriersShort:
+    def test_target_is_below_entry_stop_is_above(self):
+        target, stop, rr = ir._atr_barriers_short(100.0, 2.0)
+        assert target < 100.0 < stop
+
+    def test_mirrors_long_side_distances_exactly(self):
+        """Same ATR multiples/guardrails, direction inverted -- the two must be symmetric
+        around price, not just 'roughly the opposite shape'."""
+        price, atr = 250.0, 5.0
+        long_target, long_stop, long_rr = ir._atr_barriers(price, atr)
+        short_target, short_stop, short_rr = ir._atr_barriers_short(price, atr)
+        assert (long_target - price) == pytest.approx(price - short_target, abs=0.01)
+        assert (price - long_stop) == pytest.approx(short_stop - price, abs=0.01)
+        assert long_rr == pytest.approx(short_rr)
+
+    def test_zero_price_returns_nones(self):
+        assert ir._atr_barriers_short(0, 5.0) == (None, None, None)
 
 
 # ── Reversal component ────────────────────────────────────────────────────────

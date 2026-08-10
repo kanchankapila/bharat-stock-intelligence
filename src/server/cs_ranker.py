@@ -195,6 +195,37 @@ def _compute_date_split(dates_sorted: list, test_frac: float = 0.20,
     return train_dates, test_dates
 
 
+def _date_balanced_weights(dates: pd.Series) -> np.ndarray:
+    """Inverse-frequency sample weight per row so each trading date contributes equally to
+    the training loss, regardless of how many signals happened to fire that day.
+
+    Live-checked 2026-08-09: per-date signal counts in this table range from 1 to 807 (e.g.
+    2026-05-30 had 2 signals, 2026-07-23 had 807) -- without this, the handful of dense dates
+    dominate the fit even though score_batch() re-ranks every day's batch independently at
+    inference time, where every day matters equally regardless of how many signals it produced.
+    """
+    counts = dates.groupby(dates).transform('count')
+    return (1.0 / counts).values
+
+
+def _mean_daily_ic(dates: pd.Series, y_true: np.ndarray, y_pred: np.ndarray) -> tuple[float, int]:
+    """Mean per-date Spearman rank-IC across dates, NOT a single Spearman pooled across all
+    rows. Live-checked 2026-08-09: of 2,759 held-out rows across 9 test dates, 2,643 (96%) came
+    from just 3 dense dates -- a pooled spearmanr() over all rows mostly measures rank quality
+    on those 3 days, not a representative daily average. Standard cross-sectional Information
+    Coefficient practice computes correlation per period and averages, not pooled-then-computed.
+    Dates with <2 rows can't produce a rank correlation and are excluded (their signal count is
+    too sparse to rank meaningfully anyway -- MIN_DATE_SIGNALS already filters most of these).
+    """
+    tmp = pd.DataFrame({'date': dates.values, 'y': y_true, 'pred': y_pred})
+    daily_rho = tmp.groupby('date').apply(
+        lambda g: spearmanr(g['y'], g['pred'])[0] if len(g) >= 2 else np.nan
+    ).dropna()
+    if len(daily_rho) == 0:
+        return float('nan'), 0
+    return float(daily_rho.mean()), len(daily_rho)
+
+
 def train_cs_ranker(df: pd.DataFrame, min_samples: int = 50) -> dict:
     """
     Train LightGBM regressor on cs_percentile. Returns a model dict with keys:
@@ -216,6 +247,7 @@ def train_cs_ranker(df: pd.DataFrame, min_samples: int = 50) -> dict:
 
     X_tr, y_tr = X[train_mask], y[train_mask]
     X_te, y_te = X[test_mask],  y[test_mask]
+    w_tr = _date_balanced_weights(df.loc[train_mask, 'signal_date'])
 
     model = LGBMRegressor(
         objective='regression_l2',
@@ -228,16 +260,16 @@ def train_cs_ranker(df: pd.DataFrame, min_samples: int = 50) -> dict:
         random_state=42,
         verbose=-1,
     )
-    model.fit(X_tr, y_tr)
+    model.fit(X_tr, y_tr, sample_weight=w_tr)
 
     preds_te = model.predict(X_te)
-    rho, pval = spearmanr(y_te, preds_te)
-    print(f"[CSRanker] Held-out Spearman rho={rho:.4f}  (p={pval:.3g}, n={len(y_te)})")
+    rho, n_test_dates = _mean_daily_ic(df.loc[test_mask, 'signal_date'], y_te, preds_te)
+    print(f"[CSRanker] Held-out mean daily IC={rho:.4f}  (n_dates={n_test_dates}, n_rows={len(y_te)})")
     if rho < 0.10:
         print(f"[CSRanker] WARNING: rho={rho:.4f} below acceptance threshold 0.10 — model saved anyway")
 
-    # Retrain on full data
-    model.fit(X, y)
+    # Retrain on full data (date-balanced weights again)
+    model.fit(X, y, sample_weight=_date_balanced_weights(df['signal_date']))
 
     return {
         'model':         model,
@@ -308,6 +340,16 @@ def _register_cs_model(conn: ConnWrapper, m: dict) -> int:
     been ~0.05-0.24) that correctly beat every later retrain attempt's rho (0.078-0.094, all
     4 logged REJECTED in this same table) under the gate above. Don't re-flag this as a
     promotion-gate bypass without checking model_type first.
+
+    NOTE on metric methodology change (2026-08-09): rho used to be a single Spearman computed
+    by pooling ALL held-out rows across ALL test dates -- live-checked, 96% of one such
+    held-out set's rows came from just 3 of 9 test dates, so the pooled number mostly measured
+    rank quality on those 3 dense days. Now it's the MEAN of per-date Spearman correlations
+    (see _mean_daily_ic), the standard cross-sectional Information Coefficient convention.
+    Rho values registered before this date used the old (pooled) methodology and are not
+    directly comparable to rho values registered after it -- the first post-fix retrain's
+    promotion decision compares a correctly-measured rho against a baseline measured the old,
+    imbalance-prone way, which is an apples-to-oranges comparison the gate has no way to detect.
     """
     import json
     version  = datetime.datetime.utcnow().strftime('%Y%m%d_%H%M%S')

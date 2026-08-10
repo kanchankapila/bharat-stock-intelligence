@@ -374,13 +374,29 @@ def test_regime_edge_weight_no_data_passes_through():
     assert regime_edge_weight('BULL', es) == pytest.approx(1.0)
 
 
-def test_regime_edge_weight_high_vol_and_crash_resolve_via_bear_row():
-    # HIGH_VOL/CRASH aren't keys in edge_status (only BULL/SIDEWAYS/BEAR/UNKNOWN/__GLOBAL__
-    # ever get persisted) -- collapse_regime5 must route them to the BEAR row, not silently
-    # miss and fall through to weight=1.0.
+def test_regime_edge_weight_high_vol_and_crash_fall_back_to_bear_row_when_own_data_absent():
+    # persist_regime_edge_status() may not always have enough HIGH_VOL/CRASH history yet (thin
+    # regimes) -- when their OWN row is missing, collapse_regime5 must still route them to the
+    # BEAR row, not silently miss and fall through to weight=1.0.
     es = _edge_status(BEAR={'auc': AUC_RANDOM, 'ready': True})
     assert regime_edge_weight('HIGH_VOL', es) == pytest.approx(0.0)
     assert regime_edge_weight('CRASH', es) == pytest.approx(0.0)
+
+
+def test_regime_edge_weight_high_vol_and_crash_use_their_own_row_when_present():
+    # Live bug, 2026-08-10: persist_regime_edge_status() DOES persist a separate row per raw
+    # 5-class regime (confirmed live: HIGH_VOL AUC 0.518, CRASH AUC 0.593, distinct from BEAR's
+    # 0.61-0.65) -- but regime_edge_weight() used to collapse to the 3-class key BEFORE ever
+    # checking edge_status, so it could never actually see HIGH_VOL/CRASH's own row even when
+    # persisted, silently borrowing BEAR's (often much higher) trust instead. The prior test's
+    # own comment ("HIGH_VOL/CRASH aren't keys in edge_status") documented an assumption that
+    # had already gone stale by the time this was found. Own-row-first is now checked, matching
+    # what this function's docstring already claimed all along.
+    es = _edge_status(
+        HIGH_VOL={'auc': AUC_RANDOM, 'ready': True},   # no edge -- must shrink fully
+        BEAR={'auc': 0.65, 'ready': True},              # strong edge -- must NOT be borrowed
+    )
+    assert regime_edge_weight('HIGH_VOL', es) == pytest.approx(0.0)
 
 
 def test_regime_edge_weight_none_regime_uses_unknown_key():

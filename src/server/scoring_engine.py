@@ -7,7 +7,7 @@ from sqlalchemy import text
 from nlp_engine import NLPScreenerInference, NLP_VERSION
 from typing import Dict, Any, List
 
-from db_compat import get_engine, connect as db_connect
+from db_compat import get_engine, connect as db_connect, now_utc_iso
 from technical_analysis_engine import compute_atr_barriers
 
 
@@ -312,7 +312,9 @@ class AlphaQuantScoringEngine:
                     'inferred_timeframe': inference['timeframe'],
                     'confidence':         confidence,
                     'signal_type_tag':    inference.get('signal_type_tag', 'OTHER'),
-                    'last_updated':       datetime.datetime.now().isoformat(),
+                    # was naive datetime.now() -- silently stored local IST wall-clock into a
+                    # TIMESTAMPTZ column ~5.5h ahead of true UTC. See db_compat.now_utc_iso().
+                    'last_updated':       now_utc_iso(),
                 })
 
             if new_master_data:
@@ -981,7 +983,7 @@ class AlphaQuantScoringEngine:
                     'negative_count':   len(data['negative_screeners']),
                     'reasons':          json.dumps(data['positive_screeners'] + data['negative_screeners']),
                     'factor_breakdown': json.dumps(data['factors']),
-                    'last_updated':     datetime.datetime.now().isoformat(),
+                    'last_updated':     now_utc_iso(),  # see db_compat.now_utc_iso() docstring
                 })
 
         self.save_results(all_timeframe_results)
@@ -1082,7 +1084,7 @@ class AlphaQuantScoringEngine:
 
     def _log_recommendations(self, results: list):
         """Write top BUY/STRONG BUY recommendations to recommendation_log for outcome tracking."""
-        now        = datetime.datetime.now().isoformat()
+        now        = now_utc_iso()  # see db_compat.now_utc_iso() docstring
         today      = datetime.date.today().isoformat()
         candidates = [r for r in results if r.get('classification') in ('Strong Buy', 'Buy')]
         if not candidates:

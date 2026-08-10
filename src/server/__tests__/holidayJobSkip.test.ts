@@ -12,13 +12,21 @@ import { shouldSkipOnTradingHoliday } from '../marketStatusService';
  */
 describe('shouldSkipOnTradingHoliday', () => {
   const originalFetch = global.fetch;
+  // Pinned to a known Wednesday (IST) so these holiday/normal-day tests are never accidentally
+  // flaky depending on which real-world weekday the suite happens to run on -- 2026-08-09 (the
+  // date this weekend-skip behavior was added) is itself a Sunday, which would otherwise make
+  // every one of these tests fail against the new weekend short-circuit below.
+  const WEEKDAY_NOON_UTC = new Date('2026-08-05T12:00:00Z'); // Wednesday
 
   beforeEach(() => {
     vi.resetAllMocks();
+    vi.useFakeTimers();
+    vi.setSystemTime(WEEKDAY_NOON_UTC);
   });
 
   afterEach(() => {
     global.fetch = originalFetch;
+    vi.useRealTimers();
   });
 
   it('never skips a closed-day-early dispatch, and never even checks the holiday status', async () => {
@@ -32,7 +40,10 @@ describe('shouldSkipOnTradingHoliday', () => {
   });
 
   it('never skips when no job is passed at all (defensive default)', async () => {
-    const fetchSpy = vi.fn();
+    const fetchSpy = vi.fn(async () => ({
+      ok: true,
+      json: async () => ({ currentMarketStatus: 'Live', purpose: 'Normal Market' }),
+    }));
     global.fetch = fetchSpy as any;
 
     expect(await shouldSkipOnTradingHoliday(undefined)).toBe(false);
@@ -57,6 +68,74 @@ describe('shouldSkipOnTradingHoliday', () => {
 
     const result = await shouldSkipOnTradingHoliday({ name: 'mc-sync' });
     expect(result).toBe(false);
+  });
+});
+
+/**
+ * 2026-08-09: every current caller's own cron is weekday-only, but BullMQ's
+ * addJobWithCatchup "was the last scheduled occurrence missed" recovery path does NOT respect
+ * the day-of-week field -- confirmed live, a server restart fired catchup runs for
+ * stock-refresh/technical-scan/etnow-screener-sync/et-marketstats-sync/mc-screener-sync on a
+ * real Sunday, several of which re-wrote stale/duplicate data (stock_ohlcv rows dated that
+ * Sunday, byte-identical to the prior Friday's bar) because isTradingHolidayToday() itself
+ * deliberately treats a weekend as "not a holiday".
+ */
+describe('shouldSkipOnTradingHoliday — weekend catchup-bypass fix', () => {
+  const originalFetch = global.fetch;
+
+  afterEach(() => {
+    global.fetch = originalFetch;
+    vi.useRealTimers();
+  });
+
+  it('skips on a Saturday without ever calling the holiday-status fetch', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-08-08T12:00:00Z')); // Saturday
+    const fetchSpy = vi.fn();
+    global.fetch = fetchSpy as any;
+
+    const result = await shouldSkipOnTradingHoliday({ name: 'mc-sync' });
+
+    expect(result).toBe(true);
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  it('skips on a Sunday without ever calling the holiday-status fetch', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-08-09T12:00:00Z')); // Sunday
+    const fetchSpy = vi.fn();
+    global.fetch = fetchSpy as any;
+
+    const result = await shouldSkipOnTradingHoliday({ name: 'stock-refresh' });
+
+    expect(result).toBe(true);
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  it('still never skips a closed-day-early dispatch even on a weekend', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-08-09T12:00:00Z')); // Sunday
+    const fetchSpy = vi.fn();
+    global.fetch = fetchSpy as any;
+
+    const result = await shouldSkipOnTradingHoliday({ name: 'closed-day-early' });
+
+    expect(result).toBe(false);
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  it('correctly straddles the UTC/IST day boundary (late Friday UTC is already Saturday IST)', async () => {
+    // 2026-08-07 21:00 UTC = 2026-08-08 02:30 IST -- Saturday in IST, Friday in UTC. A naive
+    // UTC-only getDay() would wrongly treat this as a weekday.
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-08-07T21:00:00Z'));
+    const fetchSpy = vi.fn();
+    global.fetch = fetchSpy as any;
+
+    const result = await shouldSkipOnTradingHoliday({ name: 'mc-sync' });
+
+    expect(result).toBe(true);
+    expect(fetchSpy).not.toHaveBeenCalled();
   });
 });
 

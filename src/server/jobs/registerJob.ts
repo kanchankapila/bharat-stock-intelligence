@@ -101,8 +101,17 @@ export async function addJobWithCatchup(
       // that weekend (it has no dedicated timeout headroom for two full retrains competing for
       // the same 5-concurrent-Python-subprocess cap). Same risk for every other queue this
       // helper serves, not just ml-weekly-retrain, so the guard is generic.
+      // Must match on data.isCatchup, not just name -- a repeatable job's own perpetually-
+      // scheduled NEXT occurrence always sits in 'delayed' with this same jobName (that's how
+      // BullMQ repeatables work), so a bare name match makes `alreadyPending` true forever and
+      // this guard silently swallows every real catch-up permanently. Confirmed live 2026-08-09:
+      // trendlyne-ratios-monthly missed its whole Sunday run and three separate restarts each
+      // logged "already active/waiting/delayed -- skipping" against nothing but its own next-
+      // Sunday placeholder. Only a job actually queued via the catch-up path below carries
+      // isCatchup: true, so that's the correct signal for "a catch-up from an earlier restart
+      // is still in flight" -- the thing this guard was actually built to detect.
       const inFlight = await queue.getJobs(['active', 'waiting', 'delayed'], 0, -1, false);
-      const alreadyPending = inFlight.some(j => j.name === jobName);
+      const alreadyPending = inFlight.some(j => j.name === jobName && j.data?.isCatchup === true);
       if (alreadyPending) {
         console.log(
           `[QUEUE] Job ${jobName} in ${queue.name} missed its scheduled run, but an instance ` +

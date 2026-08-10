@@ -2,6 +2,7 @@ import { Semaphore } from './semaphore';
 import { findMcScreenersByStock } from './moneycontrolScreener';
 import { findScreenersByStock } from './trendlyneScreener';
 import { findEtScreenersByStock } from './etnow';
+import { dbRun } from './dbAsync';
 
 const mcSemaphore = new Semaphore(10); // Increased concurrency
 
@@ -676,11 +677,142 @@ export async function fetchMcShareholdingPattern(scId: string, symbol?: string):
   return mcFetchJson(widgetUrl, 3, symbol);
 }
 
+// The `sc_id` query param is silently ignored by this endpoint -- verified live: 11 different
+// scIds all returned identical currentCount/closedCount and the same unfiltered market-wide
+// list, so `res.list.data` for EVERY stock used to be the same ~50-row global feed rather than
+// that stock's own patterns. The real per-row stock key lives inside meta_data.price_key
+// (`stk_{scId}_N` for equities, `futstk_{scId}_<expiry>` for F&O) -- filter on that instead.
+function matchesScId(row: any, scId: string): boolean {
+  try {
+    const meta = JSON.parse(row?.meta_data || '{}');
+    const key: string = meta?.price_key || '';
+    const m = key.match(/^(?:stk|futstk)_([A-Z0-9]+)_/i);
+    return !!m && m[1].toUpperCase() === scId.toUpperCase();
+  } catch {
+    return false;
+  }
+}
+
 export async function fetchMcChartPatterns(scId: string, symbol?: string): Promise<any | null> {
-  const url = `https://api.moneycontrol.com/mcapi/technicalpicks/chart-patterns?deviceType=W&version=174&start=0&limit=12&pattern_type=all&sc_id=${scId}`;
+  const url = `https://api.moneycontrol.com/mcapi/technicalpicks/chart-patterns?deviceType=W&version=174&start=0&limit=200&pattern_type=all`;
   const res = await mcFetchJson<any>(url, 3, symbol);
-  if (res?.status === 'success' && res.list) return res.list;
-  return null;
+  if (res?.status !== 'success' || !res.list) return null;
+  const data = (res.list.data || []).filter((row: any) => matchesScId(row, scId));
+  if (data.length === 0) return null;
+  return { ...res.list, data };
+}
+
+// A handful of MoneyControl's own proprietary scores are fetched and rendered by
+// MCStockInfoPanel on every panel open but were never written anywhere — meaning nobody could
+// ever check (the way factor_edge.py already did for Trendlyne's m_score, and found it has zero
+// forward edge) whether MC's own analyst consensus/price-target/composite score actually predicts
+// anything. Piggybacks on the already-fetched response from this request-time call rather than a
+// new scheduled fetcher; `fetched_at` is day-grain (not a full timestamp) so repeated panel opens
+// within the same day upsert the same row instead of accumulating duplicates, while a new day
+// still gets its own row -- giving a real daily time series for a future factor_edge.py pass.
+//
+// Deliberately does NOT persist chart patterns: mc_chart_patterns_fetcher.py already does,
+// on its own schedule, into mc_chart_patterns/mc_pattern_signals (with a proper (mcsymbol,
+// pattern_id) key and downstream technical_signals.mc_cp_* columns already feeding the ML
+// pipeline) -- a second writer here would just duplicate an existing, more complete pipeline.
+//
+// Best-effort: never throws (all errors are caught and logged), so the caller below
+// deliberately does NOT `await` this -- it stays fire-and-forget in production. Returns its
+// Promise anyway (rather than `void`) purely so a test can await it deterministically.
+export async function persistMcConsolidatedMetrics(symbol: string, data: {
+  mcInsights?: { classification?: { stockScore?: number } } | null;
+  analystRating?: { finalRating?: string; analystCount?: string } | null;
+  priceForecast?: { high?: string; mean?: string; low?: string } | null;
+  hitsMisses?: { beats?: { total?: string }; misses?: { total?: string }; inline?: { total?: string } } | null;
+  swot?: { strengths?: string[]; weaknesses?: string[]; opportunities?: string[]; threats?: string[] } | null;
+  // MC's `data` here is `any` at the type level (see McHistoricalRating) because the response
+  // shape is only ever consumed positionally (`data[0]`) by the panel itself -- MC's own trend
+  // history beyond today is Pro-locked (see MCStockInfoPanel's displayLock check), so `data[0]`
+  // really is the whole usable payload, not an arbitrary slice of a larger series.
+  historicalRating?: { data?: Array<{ currSentiment?: string; closePrice?: number | string; currdate?: string }> } | null;
+}): Promise<void> {
+  try {
+    const today = new Date().toISOString().slice(0, 10);
+    const rows: [string, string, number | null, string | null, string][] = [];
+    const push = (group: string, name: string, num: number | null, text: string | null = null) => {
+      if (num == null && text == null) return;
+      rows.push([group, name, num, text, today]);
+    };
+    const stockScore = data.mcInsights?.classification?.stockScore;
+    if (typeof stockScore === 'number') push('score', 'mc_stock_score', stockScore);
+    if (data.analystRating?.finalRating) push('analyst', 'final_rating', null, data.analystRating.finalRating);
+    const analystCount = Number(data.analystRating?.analystCount);
+    if (Number.isFinite(analystCount) && analystCount > 0) push('analyst', 'analyst_count', analystCount);
+    const high = Number(data.priceForecast?.high), mean = Number(data.priceForecast?.mean), low = Number(data.priceForecast?.low);
+    if (Number.isFinite(high)) push('price_forecast', 'target_high', high);
+    if (Number.isFinite(mean)) push('price_forecast', 'target_mean', mean);
+    if (Number.isFinite(low)) push('price_forecast', 'target_low', low);
+    const beats = Number(data.hitsMisses?.beats?.total) || 0;
+    const misses = Number(data.hitsMisses?.misses?.total) || 0;
+    const inline = Number(data.hitsMisses?.inline?.total) || 0;
+    const totalCalls = beats + misses + inline;
+    if (totalCalls > 0) push('estimates', 'beat_ratio', beats / totalCalls);
+
+    // SWOT text is qualitative and free-form -- not itself a clean numeric factor -- but the
+    // counts are, and net_score gives factor_edge.py a single directional number to test
+    // ("does a rising strength/opportunity count vs. weakness/threat count predict forward
+    // returns") without needing to parse text. The full items themselves go to mc_swot_history
+    // below, not into this numeric-metrics table.
+    const swotRowsText: { category: string; item: string }[] = [];
+    if (data.swot) {
+      const s = data.swot.strengths?.length ?? 0;
+      const w = data.swot.weaknesses?.length ?? 0;
+      const o = data.swot.opportunities?.length ?? 0;
+      const t = data.swot.threats?.length ?? 0;
+      if (s + w + o + t > 0) {
+        push('swot', 'strengths_count', s);
+        push('swot', 'weaknesses_count', w);
+        push('swot', 'opportunities_count', o);
+        push('swot', 'threats_count', t);
+        push('swot', 'net_score', (s + o) - (w + t));
+      }
+      for (const item of data.swot.strengths ?? []) swotRowsText.push({ category: 'strength', item });
+      for (const item of data.swot.weaknesses ?? []) swotRowsText.push({ category: 'weakness', item });
+      for (const item of data.swot.opportunities ?? []) swotRowsText.push({ category: 'opportunity', item });
+      for (const item of data.swot.threats ?? []) swotRowsText.push({ category: 'threat', item });
+    }
+
+    // Only data[0] is ever public (see the type comment above) -- MCStockInfoPanel already
+    // reads it the same way. bull_flag turns the free-text sentiment into a signed number a
+    // future factor_edge.py pass can test directly, same rationale as swot's net_score.
+    const hrRow = data.historicalRating?.data?.[0];
+    if (hrRow?.currSentiment) {
+      push('historical_rating', 'sentiment_text', null, hrRow.currSentiment);
+      const isBull = /bullish/i.test(hrRow.currSentiment);
+      const isBear = /bearish/i.test(hrRow.currSentiment);
+      push('historical_rating', 'bull_flag', isBull ? 1 : isBear ? -1 : 0);
+      const closePrice = Number(hrRow.closePrice);
+      if (Number.isFinite(closePrice)) push('historical_rating', 'close_price_at_sentiment', closePrice);
+    }
+
+    const writes: Promise<unknown>[] = rows.map(([metric_group, metric_name, metric_value_num, metric_value_text, fetched_at]) =>
+      dbRun(
+        `INSERT INTO mc_general_metrics (symbol, source_api, metric_group, metric_name, metric_value_num, metric_value_text, fetched_at)
+         VALUES (?, 'mc_consolidated', ?, ?, ?, ?, ?)
+         ON CONFLICT(symbol, source_api, metric_group, metric_name, fetched_at) DO UPDATE SET
+           metric_value_num = excluded.metric_value_num, metric_value_text = excluded.metric_value_text`,
+        [symbol.toUpperCase(), metric_group, metric_name, metric_value_num, metric_value_text, fetched_at]
+      )
+    );
+    for (const { category, item } of swotRowsText) {
+      writes.push(dbRun(
+        `INSERT INTO mc_swot_history (symbol, category, item_text, fetched_at)
+         VALUES (?, ?, ?, ?)
+         ON CONFLICT(symbol, category, item_text, fetched_at) DO NOTHING`,
+        [symbol.toUpperCase(), category, item, today]
+      ));
+    }
+
+    if (writes.length === 0) return;
+    await Promise.all(writes);
+  } catch (e) {
+    console.warn('[mcApiService] persistMcConsolidatedMetrics failed (non-fatal):', (e as Error)?.message);
+  }
 }
 
 /**
@@ -756,6 +888,8 @@ export async function getMcConsolidatedData(scId: string, symbol: string, timefr
     fetchWithCache('shareholding_pattern', () => fetchMcShareholdingPattern(effectiveScId, symbol)),
     fetchWithCache('chart_patterns', () => fetchMcChartPatterns(effectiveScId, symbol)),
   ]);
+
+  persistMcConsolidatedMetrics(symbol, { mcInsights, analystRating, priceForecast, hitsMisses, swot, historicalRating });
 
   return {
     scId: effectiveScId,

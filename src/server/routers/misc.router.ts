@@ -200,6 +200,27 @@ export const miscRouter = router({
   getDeals: publicProcedure
     .query(async () => fetchDealsAll()),
 
+  // block_deals (tickertape_deals_fetcher.py + block_deal_fetcher.py) has no other reader —
+  // pct_transacted (% of float) is the field this source exists for, since raw qty/value alone
+  // isn't comparable across a microcap vs. a large-cap.
+  getBlockDeals: publicProcedure
+    .input(z.object({ symbol: z.string().optional(), limit: z.number().min(1).max(200).optional().default(100) }))
+    .query(async ({ input }) => {
+      try {
+        const rows = await dbAll<any>(
+          `SELECT symbol, date, qty, price, value_cr, pct_transacted, client_name, trade_type, category
+           FROM block_deals
+           ${input.symbol ? "WHERE symbol = ?" : ""}
+           ORDER BY date DESC
+           LIMIT ?`,
+          input.symbol ? [input.symbol.toUpperCase(), input.limit] : [input.limit]
+        );
+        return rows || [];
+      } catch {
+        return [];
+      }
+    }),
+
   // ── 2026-08-06 urls.txt data analysis: structured tables replacing raw-archived endpoints ──
   // (docs/url_explorer/DATA_CATEGORIZATION_AND_USAGE.md). These read persisted history from
   // sector_intel/institutional_deals/concall fetchers, complementing (not replacing) getDeals
@@ -276,6 +297,23 @@ export const miscRouter = router({
         `, params);
       }, 900);
     }),
+
+  // intraday_ranker.py's emission gate (both directions) -- app_settings row it writes on
+  // every run. Short TTL: the ranker re-runs every 15 min during market hours and the gate can
+  // in principle flip mid-session, so a stale cached read here would show a wrong state longer
+  // than necessary.
+  getIntradayEmissionGateStatus: publicProcedure
+    .query(async () => fetchWithCache('intraday_emission_gate_status', async () => {
+      const row = await dbGet<{ value: string }>(
+        `SELECT value FROM app_settings WHERE key = 'intraday_emission_gate_status'`
+      );
+      if (!row?.value) return null;
+      try {
+        return JSON.parse(row.value);
+      } catch {
+        return null;
+      }
+    }, 60)),
 
   getMarketMoodIndex: publicProcedure
     .query(async () => fetchWithCache('market_mood_index', async () => {

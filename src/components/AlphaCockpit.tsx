@@ -43,6 +43,60 @@ const formatAmount = (v: number | null | undefined) => {
   return `₹${v.toFixed(2)}`;
 };
 
+// Read side of the trade journal — saveSignalAction (below) could already log a trade, but
+// getSignalActions (the user's own history + win-rate) was never called anywhere.
+const TradeJournalPanel: React.FC = () => {
+  const { data, isLoading, isError } = trpc.getSignalActions.useQuery({ limit: 25 });
+  const actions = data?.actions ?? [];
+  const stats = data?.stats;
+
+  if (isError) return null; // not signed in, or a real failure — either way, nothing to show
+  return (
+    <div className="bg-slate-900/30 border border-slate-800/50 rounded-2xl p-4 backdrop-blur-md">
+      <div className="flex items-center justify-between mb-3">
+        <h3 className="text-xs font-black text-slate-300 uppercase tracking-widest">My Trade Journal</h3>
+        {stats && stats.totalCount > 0 && (
+          <span className="text-[10px] font-mono text-slate-400">
+            {stats.winRate}% win rate · ₹{stats.totalPnl.toFixed(0)} P&amp;L over {stats.totalCount} closed
+          </span>
+        )}
+      </div>
+      {isLoading ? (
+        <div className="text-xs text-slate-500 py-4">Loading…</div>
+      ) : actions.length === 0 ? (
+        <div className="text-xs text-slate-500 py-4">No logged trade actions yet — use "LOG EXECUTE BUY" above to start one.</div>
+      ) : (
+        <div className="overflow-x-auto">
+          <table className="w-full text-[11px]">
+            <thead>
+              <tr className="text-[9px] text-slate-500 uppercase tracking-wider">
+                <th className="text-left px-2 py-1.5 font-medium">Symbol</th>
+                <th className="text-left px-2 py-1.5 font-medium">Action</th>
+                <th className="text-right px-2 py-1.5 font-medium">Entry</th>
+                <th className="text-right px-2 py-1.5 font-medium">P&amp;L</th>
+                <th className="text-right px-2 py-1.5 font-medium">Date</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-800/30">
+              {actions.map((a: any) => (
+                <tr key={a.id}>
+                  <td className="px-2 py-1.5 font-bold text-slate-200">{a.symbol}</td>
+                  <td className={cn("px-2 py-1.5 font-medium", a.action_type === 'BUY' ? "text-emerald-400" : "text-slate-400")}>{a.action_type}</td>
+                  <td className="px-2 py-1.5 text-right font-mono text-slate-300">{a.entry_actual ?? a.entry_price_rec ?? '—'}</td>
+                  <td className={cn("px-2 py-1.5 text-right font-mono", (a.pnl ?? 0) > 0 ? "text-emerald-400" : (a.pnl ?? 0) < 0 ? "text-rose-400" : "text-slate-500")}>
+                    {a.pnl != null ? a.pnl.toFixed(2) : '—'}
+                  </td>
+                  <td className="px-2 py-1.5 text-right font-mono text-slate-500">{a.executed_at ? new Date(a.executed_at).toLocaleDateString('en-IN') : '—'}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+};
+
 export const AlphaCockpit: React.FC = () => {
   // Navigation & Filtering States
   const [conviction, setConviction] = useState<'ALL' | 'S_ELITE' | 'A_HIGH' | 'B_MEDIUM'>('ALL');
@@ -911,6 +965,8 @@ export const AlphaCockpit: React.FC = () => {
           )}
         </div>
       </div>
+
+      <TradeJournalPanel />
     </div>
   );
 };

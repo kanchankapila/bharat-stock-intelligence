@@ -95,11 +95,11 @@ const RankingList: React.FC<{
                     </span>
                     <span className={cn(
                       "px-1.5 py-0.5 rounded text-[7px] font-black uppercase tracking-widest leading-none",
-                      stock.classification.includes('Strong Buy') ? "bg-emerald-500/20 text-emerald-400" :
-                      stock.classification.includes('Buy') ? "bg-emerald-500/10 text-emerald-500/80" :
+                      stock.classification?.includes('Strong Buy') ? "bg-emerald-500/20 text-emerald-400" :
+                      stock.classification?.includes('Buy') ? "bg-emerald-500/10 text-emerald-500/80" :
                       "bg-slate-800 text-slate-400"
                     )}>
-                      {stock.classification}
+                      {stock.classification ?? '—'}
                     </span>
                   </div>
                   <div className="flex items-center gap-3 mt-1.5">

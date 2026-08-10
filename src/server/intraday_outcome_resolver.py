@@ -2,8 +2,8 @@
 """
 Intraday recommendation outcome tracker — same-day paper-trade backtest on 15-minute bars.
 
-For each intraday Buy/Strong-Buy recommendation, simulate a long paper trade using ONLY the
-bars that occurred AFTER the signal was generated:
+For each intraday Buy/Strong-Buy (LONG) and Sell/Strong-Sell (SHORT) recommendation, simulate a
+paper trade using ONLY the bars that occurred AFTER the signal was generated:
 
   entry              -> the OPEN of the first 15m bar strictly after the signal's cycle_at
   stop hit           -> LOSS (exit at stop)
@@ -11,8 +11,13 @@ bars that occurred AFTER the signal was generated:
   both in one bar    -> ambiguous within a 15m bar; conservatively assume the STOP filled first
   neither            -> exit at the session's last bar close (square-off)
 
-Writes intraday_recommendation_outcomes. Run after market close, once the day's 15m bars are in
-intraday_ohlcv. Feeds the accuracy metrics + the strategy learner.
+Both directions are resolved and gated independently (see intraday_ranker.py's
+EMISSION_GATE_SETTING_SHORT) -- a long-side edge existing says nothing about the short side,
+which is a structurally different bet (fading strength vs. riding a validated reversal).
+
+Writes intraday_recommendation_outcomes, keyed (symbol, computed_at, direction). Run after
+market close, once the day's 15m bars are in intraday_ohlcv. Feeds the accuracy metrics + the
+strategy learner.
 
 WHY THIS READS intraday_ohlcv AND NOT stock_ohlcv (2026-07-31 audit)
 --------------------------------------------------------------------
@@ -89,13 +94,18 @@ def _on_grid(dt: datetime) -> bool:
     return ist.second == 0 and ist.minute % BAR_MINUTES == 0
 
 
-def paper_trade(entry, tgt, stop, bars):
-    """Pure same-day long paper trade over the post-entry bar sequence.
+def paper_trade(entry, tgt, stop, bars, direction="LONG"):
+    """Pure same-day paper trade over the post-entry bar sequence, long or short.
 
     `bars` is a chronological list of (open, high, low, close) for every 15m bar from the
     entry bar onward; bars[0] is the entry bar, and stop/target are only tested from bars[1]
     (a level cannot be "hit" by the same bar whose open filled the order without knowing the
     intra-bar path).
+
+    direction='LONG': tgt is above entry, stop below -- profit when price rises.
+    direction='SHORT': tgt is below entry, stop above -- profit when price falls. Slippage
+    still fills WORSE than the bar open for whichever side you're entering (a lower price for
+    a short sell, not a higher one).
 
     Returns (exit_price, exit_reason, pnl_pct, outcome). exit_price/exit_reason reflect the
     raw price level touched (an objective fact about what happened); pnl_pct/outcome are net
@@ -104,17 +114,31 @@ def paper_trade(entry, tgt, stop, bars):
     if not entry or entry <= 0 or not bars:
         return None, None, None, None
 
-    fill = entry * (1 + INTRADAY_SLIPPAGE_BPS / 10_000)  # buy slightly worse than the bar open
+    if direction == "SHORT":
+        fill = entry * (1 - INTRADAY_SLIPPAGE_BPS / 10_000)  # sell slightly worse than the bar open
+    else:
+        fill = entry * (1 + INTRADAY_SLIPPAGE_BPS / 10_000)  # buy slightly worse than the bar open
     exit_p, reason = bars[-1][3], "CLOSE"
     for _o, hi, lo, _c in bars[1:]:
-        if lo is not None and lo <= stop:
-            exit_p, reason = stop, "STOP"      # stop wins ties: path within a 15m bar is unknown
-            break
-        if hi is not None and hi >= tgt:
-            exit_p, reason = tgt, "TARGET"
-            break
+        if direction == "SHORT":
+            if hi is not None and hi >= stop:
+                exit_p, reason = stop, "STOP"  # stop wins ties: path within a 15m bar is unknown
+                break
+            if lo is not None and lo <= tgt:
+                exit_p, reason = tgt, "TARGET"
+                break
+        else:
+            if lo is not None and lo <= stop:
+                exit_p, reason = stop, "STOP"
+                break
+            if hi is not None and hi >= tgt:
+                exit_p, reason = tgt, "TARGET"
+                break
 
-    gross_pnl_pct = (exit_p - fill) / fill * 100.0
+    if direction == "SHORT":
+        gross_pnl_pct = (fill - exit_p) / fill * 100.0  # profit when exit is BELOW the fill
+    else:
+        gross_pnl_pct = (exit_p - fill) / fill * 100.0
     cost_pct = 2 * INTRADAY_COMMISSION_BPS / 100.0  # entry leg + exit leg, in %
     pnl = gross_pnl_pct - cost_pct
 
@@ -129,8 +153,17 @@ def paper_trade(entry, tgt, stop, bars):
     return round(exit_p, 2), reason, round(pnl, 3), outcome
 
 
-def _load_recs(conn, d: str):
-    """First Buy/Strong-Buy cycle of the day per symbol, from the append-only history table.
+_DIRECTION_CLASSIFICATIONS = {
+    "LONG": ("Strong Buy", "Buy"),
+    "SHORT": ("Strong Sell", "Sell"),
+}
+
+
+def _load_recs(conn, d: str, direction: str):
+    """First Buy/Strong-Buy (direction='LONG') or Sell/Strong-Sell (direction='SHORT') cycle of
+    the day per symbol, from the append-only history table. A symbol can have both a first-LONG
+    and a first-SHORT cycle on the same day (e.g. it flips from bullish to bearish intraday) --
+    each direction is resolved independently.
 
     intraday_recommendations is overwrite-in-place per (symbol, day), so paper-trading "the
     latest recommendation" structurally biased the evaluated entry toward whatever the LAST
@@ -138,19 +171,21 @@ def _load_recs(conn, d: str):
     target. The history table carries cycle_at, which is also what makes an honest
     post-signal-only simulation possible at all.
     """
-    return conn.execute(
+    cls_a, cls_b = _DIRECTION_CLASSIFICATIONS[direction]
+    rows = conn.execute(
         """SELECT h.symbol, h.cycle_at, h.entry_price, h.target_1, h.stop_loss
            FROM intraday_recommendations_history h
-           WHERE h.computed_at = ? AND h.classification IN ('Strong Buy', 'Buy')
+           WHERE h.computed_at = ? AND h.classification IN (?, ?)
              AND h.entry_price IS NOT NULL AND h.target_1 IS NOT NULL AND h.stop_loss IS NOT NULL
              AND h.cycle_at = (
                  SELECT MIN(h2.cycle_at) FROM intraday_recommendations_history h2
                  WHERE h2.symbol = h.symbol AND h2.computed_at = h.computed_at
-                   AND h2.classification IN ('Strong Buy', 'Buy')
+                   AND h2.classification IN (?, ?)
                    AND h2.entry_price IS NOT NULL AND h2.target_1 IS NOT NULL
                    AND h2.stop_loss IS NOT NULL
-             )""", (d,)
+             )""", (d, cls_a, cls_b, cls_a, cls_b)
     ).fetchall()
+    return [dict(r) for r in rows]
 
 
 def _load_bars(conn, d: str, syms: list) -> dict:
@@ -183,18 +218,19 @@ def _load_bars(conn, d: str, syms: list) -> dict:
     return out
 
 
-def resolve(conn, d: str) -> dict:
-    recs = _load_recs(conn, d)
+def _resolve_direction(conn, d: str, direction: str) -> dict:
+    """Resolve one direction's ('LONG' or 'SHORT') recs for date d. Returns the same shape as
+    resolve() plus the list of symbols actually resolved, for that direction's purge step."""
+    recs = _load_recs(conn, d, direction)
     if not recs:
-        return {"date": d, "resolved": 0, "note": "no tradeable recs"}
+        return {"resolved": 0, "wins": 0, "losses": 0, "skipped_no_bars": 0,
+                "skipped_no_entry_bar": 0, "pnl_sum": 0.0, "resolved_syms": []}
 
     syms = sorted({r["symbol"] for r in recs})
     bars_by_sym = _load_bars(conn, d, syms)
     if not bars_by_sym:
-        # Deliberately NOT falling back to the daily bar -- that fallback is exactly the
-        # look-ahead this module was rewritten to remove. No intraday bars = no verdict.
-        return {"date": d, "resolved": 0,
-                "note": "no 15m bars for this date -- run intraday_fetcher.py first"}
+        return {"resolved": 0, "wins": 0, "losses": 0, "skipped_no_bars": len(recs),
+                "skipped_no_entry_bar": 0, "pnl_sum": 0.0, "resolved_syms": []}
 
     n = wins = losses = 0
     pnl_sum = 0.0
@@ -216,15 +252,24 @@ def resolve(conn, d: str) -> dict:
         signal_entry = float(r["entry_price"])
         if signal_entry <= 0:
             continue
-        # Preserve the signal's intended risk geometry against the price actually fillable.
-        tgt_pct = (float(r["target_1"]) - signal_entry) / signal_entry
-        stop_pct = (signal_entry - float(r["stop_loss"])) / signal_entry
         actual_entry = fwd[0][1]
-        tgt = actual_entry * (1 + tgt_pct)
-        stop = actual_entry * (1 - stop_pct)
+        # Preserve the signal's intended risk geometry against the price actually fillable.
+        # LONG: target above entry, stop below. SHORT: target below entry, stop above --
+        # tgt_pct/stop_pct are the SAME sign convention (both positive distances) either way,
+        # just applied on opposite sides of actual_entry.
+        if direction == "SHORT":
+            tgt_pct = (signal_entry - float(r["target_1"])) / signal_entry
+            stop_pct = (float(r["stop_loss"]) - signal_entry) / signal_entry
+            tgt = actual_entry * (1 - tgt_pct)
+            stop = actual_entry * (1 + stop_pct)
+        else:
+            tgt_pct = (float(r["target_1"]) - signal_entry) / signal_entry
+            stop_pct = (signal_entry - float(r["stop_loss"])) / signal_entry
+            tgt = actual_entry * (1 + tgt_pct)
+            stop = actual_entry * (1 - stop_pct)
 
         ohlc = [(b[1], b[2], b[3], b[4]) for b in fwd]
-        exit_p, reason, pnl, outcome = paper_trade(actual_entry, tgt, stop, ohlc)
+        exit_p, reason, pnl, outcome = paper_trade(actual_entry, tgt, stop, ohlc, direction)
         if exit_p is None:
             continue
 
@@ -235,16 +280,16 @@ def resolve(conn, d: str) -> dict:
         post_low = min((b[3] for b in fwd if b[3] is not None), default=actual_entry)
         conn.execute(
             """INSERT INTO intraday_recommendation_outcomes
-               (symbol, computed_at, entry_price, target_1, stop_loss, day_high, day_low,
+               (symbol, computed_at, direction, entry_price, target_1, stop_loss, day_high, day_low,
                 day_close, exit_price, exit_reason, pnl_pct, outcome, resolved_at)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,CURRENT_TIMESTAMP)
-               ON CONFLICT(symbol, computed_at) DO UPDATE SET
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,CURRENT_TIMESTAMP)
+               ON CONFLICT(symbol, computed_at, direction) DO UPDATE SET
                  entry_price=excluded.entry_price, target_1=excluded.target_1,
                  stop_loss=excluded.stop_loss,
                  day_high=excluded.day_high, day_low=excluded.day_low, day_close=excluded.day_close,
                  exit_price=excluded.exit_price, exit_reason=excluded.exit_reason,
                  pnl_pct=excluded.pnl_pct, outcome=excluded.outcome, resolved_at=CURRENT_TIMESTAMP""",
-            (r["symbol"], d, round(actual_entry, 2), round(tgt, 2), round(stop, 2),
+            (r["symbol"], d, direction, round(actual_entry, 2), round(tgt, 2), round(stop, 2),
              round(post_high, 2), round(post_low, 2), round(fwd[-1][4], 2),
              exit_p, reason, pnl, outcome))
         n += 1
@@ -253,21 +298,49 @@ def resolve(conn, d: str) -> dict:
         wins += outcome == "WIN"
         losses += outcome == "LOSS"
 
-    # Drop any outcome row for this date that this run did NOT produce. Without this, rows
-    # written by the pre-2026-07-31 daily-bar implementation survive re-resolution whenever a
-    # symbol can no longer be graded (e.g. its 15m bars are missing), leaving look-ahead-
+    return {"resolved": n, "wins": wins, "losses": losses, "skipped_no_bars": skipped_no_bars,
+            "skipped_no_entry_bar": skipped_no_entry, "pnl_sum": pnl_sum, "resolved_syms": resolved_syms}
+
+
+def resolve(conn, d: str) -> dict:
+    long_res = _resolve_direction(conn, d, "LONG")
+    short_res = _resolve_direction(conn, d, "SHORT")
+
+    n = long_res["resolved"] + short_res["resolved"]
+    if n == 0:
+        # Distinguish "nothing to grade" from "had recs but no bars to grade them against" --
+        # the latter needs intraday_fetcher.py to have run first, not a code fix.
+        no_bars = long_res["skipped_no_bars"] > 0 or short_res["skipped_no_bars"] > 0
+        note = "no 15m bars for this date -- run intraday_fetcher.py first" if no_bars else "no tradeable recs"
+        return {"date": d, "resolved": 0, "note": note}
+
+    # Drop any outcome row for this date+direction that this run did NOT produce. Without this,
+    # rows written by the pre-2026-07-31 daily-bar implementation survive re-resolution whenever
+    # a symbol can no longer be graded (e.g. its 15m bars are missing), leaving look-ahead-
     # contaminated records -- including several at pnl_pct = -100.04 from phantom STOP_GAP
-    # exits -- silently mixed in with honest ones for the strategy learner to consume.
+    # exits -- silently mixed in with honest ones for the strategy learner to consume. Purged
+    # independently per direction, same conservative rule as before: skip the purge entirely
+    # for a direction that resolved nothing this run, rather than risk wiping real prior rows.
     purged = 0
-    if resolved_syms:
+    for direction, res in (("LONG", long_res), ("SHORT", short_res)):
+        resolved_syms = res["resolved_syms"]
+        if not resolved_syms:
+            continue
         ph = ",".join("?" for _ in resolved_syms)
         cur = conn.execute(
             f"DELETE FROM intraday_recommendation_outcomes "
-            f"WHERE computed_at = ? AND symbol NOT IN ({ph})", (d, *resolved_syms))
-        purged = cur.rowcount if cur.rowcount and cur.rowcount > 0 else 0
+            f"WHERE computed_at = ? AND direction = ? AND symbol NOT IN ({ph})",
+            (d, direction, *resolved_syms))
+        purged += cur.rowcount if cur.rowcount and cur.rowcount > 0 else 0
     conn.commit()
-    return {"date": d, "resolved": n, "wins": wins, "losses": losses,
-            "skipped_no_bars": skipped_no_bars, "skipped_no_entry_bar": skipped_no_entry,
+
+    wins = long_res["wins"] + short_res["wins"]
+    losses = long_res["losses"] + short_res["losses"]
+    pnl_sum = long_res["pnl_sum"] + short_res["pnl_sum"]
+    return {"date": d, "resolved": n, "resolved_long": long_res["resolved"],
+            "resolved_short": short_res["resolved"], "wins": wins, "losses": losses,
+            "skipped_no_bars": long_res["skipped_no_bars"] + short_res["skipped_no_bars"],
+            "skipped_no_entry_bar": long_res["skipped_no_entry_bar"] + short_res["skipped_no_entry_bar"],
             "purged_stale": purged,
             "win_rate": round(wins / n * 100, 1) if n else 0.0,
             "avg_pnl_pct": round(pnl_sum / n, 3) if n else 0.0}

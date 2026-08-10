@@ -148,6 +148,58 @@ _INTERVAL_MINUTES = {"1m": 1, "5m": 5, "15m": 15, "30m": 30, "60m": 60}
 _SESSION_OPEN_IST = (9, 15)
 
 
+def _parse_db_dt(value) -> Optional[datetime.datetime]:
+    """Normalise an intraday_ohlcv.datetime value (a tz-aware datetime from Postgres, or an
+    ISO-ish string on the SQLite dev fallback) to an aware IST datetime. Mirrors parse_bars'
+    own epoch->IST conversion, applied to a value read back from the DB instead of a vendor
+    payload. Returns None rather than raising on anything unparseable."""
+    if value is None:
+        return None
+    if isinstance(value, datetime.datetime):
+        dt = value
+    else:
+        s = str(value).strip().replace(" ", "T")
+        if s.endswith("Z"):
+            s = s[:-1] + "+00:00"
+        try:
+            dt = datetime.datetime.fromisoformat(s)
+        except ValueError:
+            return None
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=datetime.timezone.utc)
+    return dt.astimezone(_IST)
+
+
+def _known_open_days(from_ts: int, symbols: Optional[list] = None) -> dict:
+    """{symbol: {date, ...}} for every symbol already carrying a real <=09:15 IST bar in
+    intraday_ohlcv within the current fetch window -- see parse_bars' known_open_days param
+    for why this matters. One batch query for the whole run rather than per-symbol.
+    `symbols` narrows the scan to a manual/scoped run, matching _SELECT_SYMBOLS_FILTER."""
+    lower = datetime.datetime.fromtimestamp(from_ts, tz=_IST).isoformat()
+    try:
+        if symbols:
+            ph = ",".join(["?"] * len(symbols))
+            rows = query_all(
+                f"SELECT symbol, datetime FROM intraday_ohlcv "
+                f"WHERE interval = '15m' AND datetime >= ? AND symbol IN ({ph})",
+                (lower, *symbols),
+            )
+        else:
+            rows = query_all(
+                "SELECT symbol, datetime FROM intraday_ohlcv "
+                "WHERE interval = '15m' AND datetime >= ?", (lower,)
+            )
+    except Exception:
+        return {}
+    out: dict = {}
+    for r in rows:
+        dt = _parse_db_dt(r["datetime"])
+        if dt is None or (dt.hour, dt.minute) > _SESSION_OPEN_IST:
+            continue
+        out.setdefault(r["symbol"], set()).add(dt.date())
+    return out
+
+
 def _is_on_grid(dt: datetime.datetime, interval: str) -> bool:
     """True if `dt` is a legitimate start-of-bar timestamp for `interval`.
 
@@ -169,7 +221,8 @@ def _is_on_grid(dt: datetime.datetime, interval: str) -> bool:
 
 # ── Pure parsing (no I/O) ──────────────────────────────────────────────────────
 
-def parse_bars(data: Optional[dict], symbol: str, interval: str = "15m") -> list:
+def parse_bars(data: Optional[dict], symbol: str, interval: str = "15m",
+               known_open_days: Optional[set] = None) -> list:
     """Convert a MC TechCharts / Yahoo chart JSON payload into a list of bar dicts.
 
     Drops off-grid synthetic quotes (see _is_on_grid) and stamps each bar with the running
@@ -178,6 +231,14 @@ def parse_bars(data: Optional[dict], symbol: str, interval: str = "15m") -> list
     column was previously written as a literal NULL for every row, which made
     intraday_features.py's vwap_deviation_pct a constant 0.0 for every symbol on every day
     while still looking populated to any coverage check.
+
+    known_open_days: dates (this symbol) already known to have a real 09:15 bar recorded in
+    intraday_ohlcv from an EARLIER fetch cycle, passed in by run(). Without this, a later
+    cycle whose own payload happens not to include the open bar for an illiquid name (found
+    live 2026-08-09: ~16% of a session's bars sat NULL despite the DB already holding a real
+    09:15 bar for those same symbols, written by an earlier cycle) would silently overwrite a
+    correctly-computed VWAP with NULL on ON CONFLICT DO UPDATE -- this only ever WIDENS which
+    days are trusted, never invents an open that was never actually observed.
 
     Returns [] for missing/empty data — never raises."""
     if not data or not data.get("t"):
@@ -222,6 +283,8 @@ def parse_bars(data: Optional[dict], symbol: str, interval: str = "15m") -> list
     # otherwise leave NULL. An honest NULL is recoverable, a wrong VWAP is not.
     days_with_open = {b["dt"].date() for b in raw
                       if (b["dt"].hour, b["dt"].minute) <= _SESSION_OPEN_IST}
+    if known_open_days:
+        days_with_open |= known_open_days
     cum_pv, cum_v, cur_day = 0.0, 0.0, None
     for b in raw:
         day = b["dt"].date()
@@ -316,13 +379,16 @@ def run(
     else:
         rows = query_all(_SELECT_SYMBOLS)
 
+    # Queried once up front, not per-symbol -- see parse_bars' known_open_days param.
+    known_open = _known_open_days(from_ts, symbols)
+
     total = 0
     failed = 0
     from_source = {"mc": 0, "yahoo": 0}
 
     def _write(symbol, data, source=None):
         nonlocal total, failed
-        bars = parse_bars(data, symbol)
+        bars = parse_bars(data, symbol, known_open_days=known_open.get(symbol))
         if bars:
             executemany(
                 _UPSERT,
@@ -402,7 +468,7 @@ def run(
                 data = _fetch_yahoo(internal, from_ts, to_ts, yahoo_symbol=yahoo_sym)
             except Exception:
                 data = None
-            bars = parse_bars(data, internal)
+            bars = parse_bars(data, internal, known_open_days=known_open.get(internal))
             if bars:
                 executemany(
                     _UPSERT,

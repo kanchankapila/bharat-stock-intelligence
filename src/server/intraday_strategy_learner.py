@@ -46,12 +46,19 @@ def _bucket_rows(rows):
 def run(conn=None, days: int = 60) -> dict:
     conn = conn or connect()
     cutoff = (date.today() - timedelta(days=days)).isoformat()
+    # LONG only (o.direction filter, added 2026-08 alongside the Sell-side emission gate): a
+    # symbol/day can now have both a LONG and a SHORT outcome row, and without this filter the
+    # join would return both against the SAME intraday_recommendations row, silently doubling
+    # that symbol/day's weight and conflating "this signal preceded a good long" with "this
+    # signal preceded a good short" under one bucket -- two different bets this codebase treats
+    # as unrelated (see intraday_ranker.py's EMISSION_GATE_SETTING_SHORT docstring). Learning
+    # short-side signal lifts separately is real future work, not silently folded in here.
     rows = conn.execute(
         """SELECT o.outcome, o.pnl_pct, r.breakout_score, r.news_sentiment, r.intraday_regime,
                   r.bullish_count, r.conviction_level
            FROM intraday_recommendation_outcomes o
            JOIN intraday_recommendations r ON r.symbol = o.symbol AND r.computed_at = o.computed_at
-           WHERE o.computed_at >= ?""", (cutoff,)
+           WHERE o.computed_at >= ? AND o.direction = 'LONG'""", (cutoff,)
     ).fetchall()
 
     total = len(rows)
