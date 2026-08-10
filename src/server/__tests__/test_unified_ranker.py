@@ -308,6 +308,59 @@ class TestUnifiedRankerRun:
         )
         os.unlink(csv_path)
 
+    def test_rl_gate_does_not_veto_on_an_insignificant_negative(self):
+        """2026-08-10 fix: MIN_RL_GATE_SAMPLES alone left `avg_r < 0` as a bare SIGN test, so a
+        symbol whose trailing average is negative-but-indistinguishable-from-zero was excluded
+        exactly as hard as one losing 8% a trade.
+
+        Modelled on the live case that motivated the fix: SBCL, 22 resolved outcomes averaging
+        -0.174% (t=-0.45), gated out of the ranked universe from 2026-07-10 -- then the top
+        liquid gainer on 2026-08-10 at +19.08%. Platform-wide this excluded 519 of 958 eligible
+        symbols, 359 (69%) of them on noise, while the excluded set did not underperform the
+        kept set at any horizon tested (37 dates, point-in-time: +0.098%, t=1.22)."""
+        import os
+        ranker, conn, csv_path = self._setup()
+        conn.execute("INSERT INTO trendlyne_screener_stocks VALUES ('bull1','NOISYLOSS','NOISYLOSS')")
+        conn.execute("INSERT INTO stock_scores VALUES ('NOISYLOSS','long_term',60)")
+        conn.execute("INSERT INTO technical_signals (symbol, date, win_probability, signal_score) VALUES ('NOISYLOSS', date('now'), 0.72, 68)")
+        # Mean is negative but tiny relative to the spread: mean -0.25%, sd ~2.4%, n=8 -> t~-0.3.
+        returns = [-3.0, 2.5, -2.0, 3.0, -2.5, 1.5, -1.5, 0.0]
+        assert sum(returns) / len(returns) < 0, "fixture must have a NEGATIVE mean to be a valid test"
+        assert len(returns) >= ranker.MIN_RL_GATE_SAMPLES, "fixture must clear the sample floor"
+        for i, r in enumerate(returns):
+            conn.execute(
+                "INSERT INTO recommendation_log (symbol, signal_date, actual_return_pct, generated_at) "
+                "VALUES ('NOISYLOSS', ?, ?, date('now','-10 days'))",
+                (f'2026-05-{i+1:02d}', r))
+        conn.commit()
+        results = ranker.run()
+        symbols = [r['symbol'] for r in results]
+        assert 'NOISYLOSS' in symbols, (
+            "a negative average that is statistical noise (t > RL_GATE_MAX_T) must not exclude "
+            "a symbol from the ranked universe"
+        )
+        os.unlink(csv_path)
+
+    def test_rl_gate_still_excludes_a_consistent_zero_variance_loser(self):
+        """Guards the significance test's own edge case: every resolved outcome identical and
+        negative gives stddev == 0. That is maximally significant (t -> -inf), NOT untestable,
+        and must still exclude -- reading a zero stddev as 'cannot establish significance'
+        would silently disable the gate for its most clear-cut case."""
+        import os
+        ranker, conn, csv_path = self._setup()
+        conn.execute("INSERT INTO trendlyne_screener_stocks VALUES ('bull1','FLATLOSER','FLATLOSER')")
+        conn.execute("INSERT INTO stock_scores VALUES ('FLATLOSER','long_term',60)")
+        conn.execute("INSERT INTO technical_signals (symbol, date, win_probability, signal_score) VALUES ('FLATLOSER', date('now'), 0.72, 68)")
+        for i in range(ranker.MIN_RL_GATE_SAMPLES):
+            conn.execute(
+                "INSERT INTO recommendation_log (symbol, signal_date, actual_return_pct, generated_at) "
+                "VALUES ('FLATLOSER', ?, -8.0, date('now','-10 days'))",
+                (f'2026-05-{i+1:02d}',))
+        conn.commit()
+        results = ranker.run()
+        assert 'FLATLOSER' not in [r['symbol'] for r in results]
+        os.unlink(csv_path)
+
     def test_quality_gate_demotes_weak_fundamentals(self):
         import os
         ranker, conn, csv_path = self._setup()

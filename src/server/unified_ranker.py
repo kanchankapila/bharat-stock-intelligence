@@ -1538,19 +1538,62 @@ class UnifiedRanker:
     # established thin-sample convention (screener_performance.py's MIN_SIGNALS_FOR_TIER=5).
     MIN_RL_GATE_SAMPLES = 5
 
+    # A sample count alone was never sufficient: `avg_r < 0` is a bare SIGN test, so a symbol
+    # averaging -0.17% over 22 outcomes (t=-0.45, i.e. indistinguishable from zero) was
+    # excluded from the ranked universe exactly as hard as one averaging -8%. Measured live
+    # 2026-08-10: 519 of 958 eligible symbols (54%) were gated out, 359 of them (69%) on a
+    # statistically insignificant negative -- and the excluded set does NOT underperform the
+    # kept set at any horizon tested (point-in-time, 37 dates, liquid universe, 5d forward:
+    # excluded-minus-kept +0.098%, t=1.22, excluded won on 51% of dates; splitting by evidence
+    # strength doesn't rescue it either -- t<=-2 exclusions +0.148%/t=1.23, noise exclusions
+    # +0.073%/t=0.77). So the gate's premise (a poor trailing record predicts poor forward
+    # returns) is unsupported by this platform's own data, while its cost is real and
+    # confirmed: SBCL sat outside the ranked universe from 2026-07-10 on a -0.174%/22-sample
+    # average, then gained +19.08% on 2026-08-10 as the day's top liquid gainer.
+    #
+    # Requiring significance is the minimum defensible change: it drops exclusions 519 -> 160
+    # and keeps the original intent for genuinely bad records. Note the surviving 160 are not
+    # positively justified by the data either (t=1.23 is not evidence the gate helps) -- but
+    # deleting a risk control outright on a non-significant result would be the same
+    # over-reach in the other direction. Revisit once more resolved history accumulates.
+    RL_GATE_MAX_T = -2.0
+
     def _get_rl_gate_map(self):
-        """Pre-load per-symbol (avg realized return, sample count) over the trailing 90d, once
-        for the whole universe (was one query per symbol inside the run() loop)."""
+        """Pre-load per-symbol (avg realized return, sample count, stddev) over the trailing
+        90d, once for the whole universe (was one query per symbol inside the run() loop).
+
+        A sample stddev is carried so _passes_rl_gate can require the negative average to be
+        statistically distinguishable from zero rather than merely negative -- see
+        RL_GATE_MAX_T. It is derived here from SUM/SUM-of-squares/COUNT rather than SQL's
+        STDDEV: STDDEV is Postgres-only and does not exist in the SQLite dev/test fallback,
+        where it fails the whole query and silently returns an empty map -- i.e. it would
+        disable the gate entirely instead of erroring. These three aggregates are portable.
+        sd is None for a single sample (no sample variance defined)."""
         cutoff = (date.today() - timedelta(days=90)).isoformat()
         try:
             rows = self.conn.execute(
-                "SELECT symbol, AVG(actual_return_pct) AS avg_r, COUNT(*) AS cnt "
+                "SELECT symbol, COUNT(*) AS cnt, SUM(actual_return_pct) AS s, "
+                "SUM(actual_return_pct * actual_return_pct) AS ss "
                 "FROM recommendation_log WHERE generated_at >= ? AND actual_return_pct IS NOT NULL "
                 "GROUP BY symbol",
                 (cutoff,),
             ).fetchall()
-            return {r['symbol']: (float(r['avg_r'] or 0), int(r['cnt']))
-                    for r in rows if r['cnt'] and r['cnt'] > 0}
+            out = {}
+            for r in rows:
+                cnt = int(r['cnt'] or 0)
+                if cnt <= 0:
+                    continue
+                s = float(r['s'] or 0.0)
+                mean = s / cnt
+                if cnt > 1:
+                    # Sample variance; clamp at 0 -- floating-point cancellation can make this
+                    # a tiny negative when every value is identical.
+                    var = max(0.0, (float(r['ss'] or 0.0) - cnt * mean * mean) / (cnt - 1))
+                    sd = math.sqrt(var)
+                else:
+                    sd = None
+                out[r['symbol']] = (mean, cnt, sd)
+            return out
         except Exception as e:
             print(f"[UnifiedRanker] _get_rl_gate_map failed: {e}")
             self.conn.rollback()
@@ -1568,14 +1611,28 @@ class UnifiedRanker:
         entry = rl_gate_map.get(symbol)
         if entry is None:
             return True
-        avg_r, cnt = entry
+        avg_r, cnt, sd = entry
         if cnt < self.MIN_RL_GATE_SAMPLES:
             return True
-        if avg_r < 0:
-            print(f"[UnifiedRanker] RL gate excluded {symbol}: "
-                  f"avg_return={avg_r:.2f}% over {cnt} resolved outcomes (90d)")
-            return False
-        return True
+        if avg_r >= 0:
+            return True
+        # Negative average -- but only exclude if it is distinguishable from zero.
+        # sd is None only when a single sample survived the COUNT filter, which
+        # MIN_RL_GATE_SAMPLES already precludes; there is nothing to test against, so pass.
+        # sd == 0 is the opposite case and must NOT be read as "untestable": a perfectly
+        # consistent negative (every resolved outcome identical and losing) is maximally
+        # significant, t -> -inf, so it excludes.
+        if sd is None:
+            return True
+        if sd > 0:
+            t_stat = avg_r / (sd / math.sqrt(cnt))
+            if t_stat > self.RL_GATE_MAX_T:
+                return True
+        else:
+            t_stat = float('-inf')
+        print(f"[UnifiedRanker] RL gate excluded {symbol}: "
+              f"avg_return={avg_r:.2f}% over {cnt} resolved outcomes (90d), t={t_stat:.2f}")
+        return False
 
     def _get_confluence_latest_map(self):
         # Same symbol-shape guard as _get_confluence_scores (see comment there) — this
