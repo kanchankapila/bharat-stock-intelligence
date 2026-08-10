@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { dbAll } from "../dbAsync";
 import { router, publicProcedure } from "../trpc";
+import { fetchWithCache } from "../cacheService";
 
 // Curated subset of macro_asset_prices.symbol — the table also carries ~40 internal/derived
 // feature columns (ADR spreads, GEX, breadth scores) used by the ML pipeline that aren't
@@ -60,6 +61,46 @@ export const macroRouter = router({
       return [];
     }
   }),
+
+  // preopen_stock_snapshot is written once/day at ~9:10 AM IST (preopen_fetcher.py, 5 min
+  // before the 9:15 open) but had no tRPC reader — this is the "who's gapping before the
+  // bell" list that data feeds, keyed on the latest snapshot_date it wrote.
+  getPreMarketMovers: publicProcedure
+    .input(z.object({ limit: z.number().min(1).max(50).optional().default(10) }))
+    .query(async ({ input }) => {
+      return fetchWithCache(`premarket_movers_${input.limit}`, async () => {
+        try {
+          const latest = await dbAll<any>(
+            `SELECT MAX(snapshot_date) AS d FROM preopen_stock_snapshot`, []
+          );
+          const asOfDate = latest[0]?.d ?? null;
+          if (!asOfDate) return { asOfDate: null, gapUp: [], gapDown: [] };
+
+          const rows = await dbAll<any>(
+            `SELECT symbol, iep, prev_close, iep_gap_pct, preopen_imbalance
+             FROM preopen_stock_snapshot
+             WHERE snapshot_date = ? AND iep_gap_pct IS NOT NULL
+             ORDER BY iep_gap_pct DESC`,
+            [asOfDate]
+          );
+          const shape = (r: any) => ({
+            symbol: r.symbol,
+            iep: Number(r.iep),
+            prevClose: Number(r.prev_close),
+            iepGapPct: Number(r.iep_gap_pct),
+            imbalance: r.preopen_imbalance != null ? Number(r.preopen_imbalance) : null,
+          });
+          return {
+            asOfDate,
+            gapUp: rows.slice(0, input.limit).map(shape),
+            gapDown: rows.slice(-input.limit).reverse().map(shape),
+          };
+        } catch (e: any) {
+          console.error("[Macro Router] Error fetching pre-market movers:", e);
+          return { asOfDate: null, gapUp: [], gapDown: [] };
+        }
+      }, 300);
+    }),
 
   getEcoCalendar: publicProcedure
     .input(z.object({
