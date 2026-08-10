@@ -91,12 +91,23 @@ class TestAsofReversalForDate:
         Live-caught 2026-08-07: --train worked (both sides come from read_df(), same dtype)
         but --score crashed against the real DB on exactly this. Reproduces the precise
         scalar-broadcast shape rather than a list-wrapped column, which pandas normalizes to
-        [ns] and does NOT reproduce the bug."""
+        [ns] and does NOT reproduce the bug.
+
+        UPDATED 2026-08-10: the mismatch is now constructed EXPLICITLY via .astype() instead
+        of relying on pandas producing it incidentally. Under pandas 3.0.3 both sides come
+        back as datetime64[us, UTC], so the scalar-broadcast trick no longer reproduces it and
+        this test's own setup assertion (correctly) started failing -- it was guarding nothing.
+        Pinning both dtypes keeps the production code under test across pandas versions;
+        whether a given pandas happens to produce the mismatch is not the point, surviving it
+        is.
+        """
         import datetime
         bars = _rising_price_bars()
+        bars = bars.assign(datetime=bars["datetime"].astype("datetime64[ns, UTC]"))
         raw_dt = datetime.datetime(2026, 6, 1, 4, 30, 0, tzinfo=datetime.timezone.utc)
         idx = pd.Index(["TESTCO"], name="symbol")
         as_of = pd.DataFrame({"run_id": 1, "symbol": idx, "ts": raw_dt})
+        as_of["ts"] = as_of["ts"].astype("datetime64[us, UTC]")
         assert as_of["ts"].dtype != bars["datetime"].dtype, (
             "test setup didn't reproduce the real dtype mismatch -- adjust the construction"
         )

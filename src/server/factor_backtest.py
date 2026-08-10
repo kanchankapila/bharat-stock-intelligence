@@ -141,7 +141,13 @@ RETURN_CLAMP_PCT = 50.0
 # the one measured, so --picks says so out loud rather than implying the backtest covers it.
 VALIDATED_MIN_TOP_K = 50
 THIN_LIQUIDITY_WARN = 50_000_000     # Rs 5cr ADT: below this, 25bps/side is optimistic
-FACTOR_PICKS_SETTING = 'factor_picks_momentum_12_1'
+FACTOR_PICKS_PREFIX = 'factor_picks_'
+# The two factors with positive, cost-adjusted, survivorship-free evidence (see RESULTS in the
+# module docstring). value_book_to_price is listed first because it is the STRONGER of the two
+# on every axis measured -- t 2.67 vs 2.08, Sharpe 1.47 vs 1.10, turnover 0.28 vs 0.35 (1.65%
+# vs 2.10% annual cost drag) and max drawdown -17.9% vs -19.5%. Both are DECAYING; that caveat
+# travels with the payload and must stay in front of anyone reading these picks.
+PERSISTED_PICK_FACTORS = ('value_book_to_price', 'momentum_12_1')
 
 
 # -- Factor definitions -----------------------------------------------------------
@@ -196,6 +202,29 @@ FACTORS = {
     'value_x_momentum':    lambda d: (
         _z(d['earnings_yield']) + _z(d['book_to_price']) + _z(d['r12_1'])
     ),
+
+    # -- The platform's own differentiated data (2026-08-10) ----------------------
+    # Everything above is computable by anyone with a price feed and a valuation vendor. These
+    # are the datasets this platform collects that most screens do not have, and that have
+    # enough history to actually test (insider 11y, bhavcopy delivery 5y). Until now they were
+    # only ever consumed by the 39-day ranker, where nothing is statistically measurable.
+    # Lakonishok/Lee (2001): insider trading predicts, concentrated in smaller firms.
+    'insider_net':      lambda d: d['insider_net'],
+
+    # -- Contested SCREENER families, reconstructed from price so their direction is
+    # MEASURED rather than read off the screener's wording. Each is signed so that a
+    # POSITIVE net excess means "this screener family is bullish".
+    # A: does being overbought predict up or down? (mean-reversion vs momentum)
+    'screener_overbought': lambda d: d['rsi14'],
+    'screener_oversold':   lambda d: -d['rsi14'],
+    # B: does sitting near the 52-week low predict up (cheap) or down (breaking down)?
+    'screener_near_52w_low': lambda d: d['prox_52w_low'],
+    # C: does trading below the lower Bollinger band predict up (snap-back) or down?
+    'screener_below_lower_bb': lambda d: -d['bb_pos'],
+    # The level of delivery % was already tested and failed. These are the CHANGE forms.
+    'delivery_spike':   lambda d: d['deliv_spike'],
+    'delivery_trend':   lambda d: d['deliv_trend'],
+    'ticket_size':      lambda d: d['ticket_ratio'],
 }
 
 
@@ -239,8 +268,13 @@ def load_price_panel(start: str = DEFAULT_START,
     # Official NSE delivery % -- a genuinely independent (non-price) factor that this platform
     # collects and has never tested. Left NaN where bhavcopy has no row; never zero-filled,
     # since 0% delivery is a real and very different statement from "unknown".
+    # num_trades/deliv_qty come along because the LEVEL of delivery % was already tested and
+    # was not significant -- but a level is a stock CHARACTERISTIC (some names always deliver
+    # 70%), not an event. The change against a name's own baseline is the part that could
+    # carry information, and it had never been built. Same query, three more columns.
     deliv = read_df(
-        "SELECT symbol, date, deliv_pct FROM nse_universe_history "
+        "SELECT symbol, date, deliv_pct, deliv_qty, num_trades, turnover_lacs "
+        "FROM nse_universe_history "
         "WHERE date >= ? AND date <= ? AND deliv_pct IS NOT NULL",
         (start, end),
     )
@@ -248,7 +282,8 @@ def load_price_panel(start: str = DEFAULT_START,
         deliv['date'] = pd.to_datetime(deliv['date']).dt.strftime('%Y-%m-%d')
         px = px.merge(deliv, on=['symbol', 'date'], how='left')
     else:
-        px['deliv_pct'] = np.nan
+        for c in ('deliv_pct', 'deliv_qty', 'num_trades', 'turnover_lacs'):
+            px[c] = np.nan
 
     px = px.sort_values(['symbol', 'date']).reset_index(drop=True)
     g = px.groupby('symbol', sort=False)
@@ -279,9 +314,46 @@ def load_price_panel(start: str = DEFAULT_START,
     px['_hi252'] = gs['close'].rolling(252, min_periods=120).max().reset_index(level=0, drop=True)
     px['pct_of_52w_high'] = px['close'] / px['_hi252']
 
+    # Reconstructions of the three contested SCREENER families, so their direction can be
+    # measured over 5 years of price history instead of argued from the screener's name.
+    # screener_appearances only has ~50 dates, which cannot settle a directional question;
+    # the underlying conditions are pure price and therefore testable over the full panel.
+    px['_lo252'] = gs['close'].rolling(252, min_periods=120).min().reset_index(level=0, drop=True)
+    # 1.0 = sitting exactly on the 52-week low. Used to test "near 52w low" screeners.
+    px['prox_52w_low'] = px['_lo252'] / px['close']
+    # Wilder RSI(14) via EWM, the standard smoothing. >70 overbought, <30 oversold.
+    _d = px['close'] - gs['close'].shift(1)
+    px['_up'] = _d.clip(lower=0)
+    px['_dn'] = (-_d).clip(lower=0)
+    gr = px.groupby('symbol', sort=False)
+    _au = gr['_up'].ewm(alpha=1 / 14, adjust=False).mean().reset_index(level=0, drop=True)
+    _ad = gr['_dn'].ewm(alpha=1 / 14, adjust=False).mean().reset_index(level=0, drop=True)
+    px['rsi14'] = 100.0 - 100.0 / (1.0 + _au / _ad.replace(0, np.nan))
+    # Position inside the 20d Bollinger band: -1 = on the lower band, +1 = on the upper.
+    _ma20 = gr['close'].rolling(20, min_periods=15).mean().reset_index(level=0, drop=True)
+    _sd20 = gr['close'].rolling(20, min_periods=15).std().reset_index(level=0, drop=True)
+    px['bb_pos'] = (px['close'] - _ma20) / (2.0 * _sd20.replace(0, np.nan))
+
+    # Delivery/participation CHANGE vs each name's own baseline. All three are differenced
+    # against the same symbol's trailing history, so a structurally high-delivery stock scores
+    # 0 unless something actually changed -- which is the whole point of differencing.
+    px['deliv_spike'] = px['deliv_pct'] - (
+        gs['deliv_pct'].rolling(60, min_periods=30).mean().reset_index(level=0, drop=True))
+    px['deliv_trend'] = (
+        gs['deliv_pct'].rolling(21, min_periods=10).mean().reset_index(level=0, drop=True)
+        - gs['deliv_pct'].rolling(63, min_periods=30).mean().reset_index(level=0, drop=True))
+    # Average ticket size: turnover per trade. A rise means fewer, larger orders -- the crude
+    # public-data proxy for institutional participation, since this platform has no order book
+    # (tick_data and order_book_snapshots are both empty).
+    px['_ticket'] = (px['turnover_lacs'] * 1e5) / px['num_trades'].replace(0, np.nan)
+    gt = px.groupby('symbol', sort=False)          # rebuilt: _ticket did not exist when gs was
+    px['ticket_ratio'] = px['_ticket'] / (
+        gt['_ticket'].rolling(60, min_periods=30).mean().reset_index(level=0, drop=True))
+
     px = _add_valuation(px, start, end)
+    px = _add_insider(px, start, end)
     px = _add_beta_and_idio_vol(px)
-    px = px.drop(columns=['_dr', '_hi252', '_mkt'], errors='ignore')
+    px = px.drop(columns=['_dr', '_hi252', '_mkt', '_ticket'], errors='ignore')
 
     px['eligible'] = (px['adt20'] >= min_adt) & px['next_open'].notna() & (px['next_open'] > 0)
     print(f"[FactorBacktest] eligible (>=Rs {min_adt/1e7:.0f}cr ADT & tradeable next open): "
@@ -332,6 +404,95 @@ def _add_valuation(px: pd.DataFrame, start: str, end: str) -> pd.DataFrame:
     n_ey = int(px["earnings_yield"].notna().sum())
     print(f"[FactorBacktest] valuation: earnings_yield on {n_ey:,} rows, "
           f"book_to_price on {int(px['book_to_price'].notna().sum()):,}")
+    return px
+
+
+# -- Insider ----------------------------------------------------------------------
+# SEBI PIT Reg 7(2): the insider discloses to the company within 2 trading days, the company
+# to the exchange within 2 more. So a transaction dated D is not public until ~D+4 trading
+# days, worst case. `insider_trades.date_iso` is the TRANSACTION date, not the disclosure
+# date, so using it directly would trade on information the market could not yet see. 7
+# calendar days is deliberately conservative: erring long makes the factor HARDER to work,
+# which is the correct direction to err when you are the one hoping it works.
+INSIDER_DISCLOSURE_LAG_DAYS = 7
+INSIDER_WINDOW_DAYS = 90
+# Only genuine open-market transactions. ESOP allotments, gifts, pledges and inter-se
+# promoter transfers are not discretionary buy/sell decisions and carry no directional view;
+# including them is the most common way this factor gets built wrong. Note the double space --
+# it is in the vendor data, not a typo here.
+INSIDER_BUY_TYPE = 'Acquisition -  Market Purchase'
+INSIDER_SELL_TYPE = 'Disposal -  Market Sale'
+
+
+def _add_insider(px: pd.DataFrame, start: str, end: str) -> pd.DataFrame:
+    """Net open-market insider buying over a trailing window, scaled by traded value.
+
+    COVERAGE IS THE MAIN CAVEAT and it is not small. Only 91-347 distinct symbols carry any
+    filing in a given year, and `insider_transactions_fetcher.py` has a documented history of
+    dying partway through the alphabet. So a zero could mean "no insider traded" (real, and
+    informative) or "this fetcher never reached this symbol" (fake, and not informative), and
+    the two are indistinguishable per-row. Handled by defining the factor ONLY on symbols that
+    have at least one filing somewhere in the sample -- within that set a zero is a real zero.
+    That makes this a test of "among covered names, does insider buying predict", which is the
+    honest question the data can answer, not "does it predict across the whole universe".
+
+    pct_transacted (% of float) would be the better scale but is populated on 261 of 50,658
+    rows -- 2026 only -- so it is unusable historically. Value/ADT is the fallback.
+    """
+    lag = pd.Timedelta(days=INSIDER_DISCLOSURE_LAG_DAYS)
+    try:
+        tr = read_df(
+            'SELECT symbol, date_iso, "typeOfTransaction" AS ttype, "valueInr" AS val '
+            'FROM insider_trades WHERE date_iso >= ? AND date_iso <= ? '
+            'AND date_iso IS NOT NULL AND "valueInr" IS NOT NULL',
+            # widen the read by the lag so a filing just before `start` still lands in-window
+            ((pd.Timestamp(start) - pd.Timedelta(days=INSIDER_WINDOW_DAYS + 30)).strftime('%Y-%m-%d'), end),
+        )
+    except Exception as e:                                      # noqa: BLE001
+        print(f"[FactorBacktest] WARNING: insider_trades unavailable ({str(e)[:80]}); skipped.")
+        px['insider_net'] = np.nan
+        return px
+
+    tr = tr[tr['ttype'].isin([INSIDER_BUY_TYPE, INSIDER_SELL_TYPE])].copy()
+    if tr.empty:
+        px['insider_net'] = np.nan
+        return px
+
+    tr['signed'] = np.where(tr['ttype'] == INSIDER_BUY_TYPE, tr['val'], -tr['val'])
+    # Shift to the date the market could first have SEEN it. A plain date+lag lands on a
+    # weekend or holiday ~2/7 of the time, and an exact-date merge would then silently DROP
+    # that filing -- so snap FORWARD to the first real trading day on or after visibility.
+    tr['vis'] = pd.to_datetime(tr['date_iso']) + lag
+    tdates = pd.DataFrame({'date': sorted(px['date'].unique())})
+    tdates['_d'] = pd.to_datetime(tdates['date'])
+    tr = pd.merge_asof(tr.sort_values('vis'), tdates.sort_values('_d'),
+                       left_on='vis', right_on='_d', direction='forward')
+    tr = tr[tr['date'].notna()]        # filings whose visibility falls past the panel end
+    if tr.empty:
+        px['insider_net'] = np.nan
+        return px
+    daily = tr.groupby(['symbol', 'date'], as_index=False)['signed'].sum()
+
+    covered = set(tr['symbol'].unique())
+    px = px.merge(daily, on=['symbol', 'date'], how='left')
+    # 0 for a covered symbol on a quiet day is a REAL zero; NaN for an uncovered symbol stays
+    # NaN so it is excluded from ranking rather than ranked as neutral-and-therefore-mediocre.
+    is_cov = px['symbol'].isin(covered)
+    px['signed'] = np.where(is_cov, px['signed'].fillna(0.0), np.nan)
+
+    gi = px.groupby('symbol', sort=False)
+    flow = gi['signed'].rolling(INSIDER_WINDOW_DAYS, min_periods=20).sum() \
+                       .reset_index(level=0, drop=True)
+    # Scale by the same window's median traded value so a Rs 5cr promoter buy in a smallcap
+    # outranks a Rs 5cr buy in Reliance, which is the entire economic content of the signal.
+    scale = gi['turnover'].rolling(INSIDER_WINDOW_DAYS, min_periods=20).median() \
+                          .reset_index(level=0, drop=True)
+    px['insider_net'] = np.where(is_cov & (scale > 0), flow / scale, np.nan)
+    px = px.drop(columns=['signed'])
+    n = int(pd.Series(px['insider_net']).notna().sum())
+    print(f"[FactorBacktest] insider: {len(tr):,} open-market filings, "
+          f"{len(covered)} covered symbols, insider_net on {n:,} rows "
+          f"(disclosure lag {INSIDER_DISCLOSURE_LAG_DAYS}d)")
     return px
 
 
@@ -652,13 +813,24 @@ def factor_picks_payload(picks: pd.DataFrame, factor: str) -> dict:
     }
 
 
+def factor_picks_setting(factor: str) -> str:
+    """app_settings key for a factor's persisted picks.
+
+    Was a single hardcoded constant, which meant persisting a SECOND factor silently
+    overwrote the first (2026-08-10). Keyed on the factor name instead. The formula
+    reproduces the original key exactly for momentum_12_1, so this is backward compatible
+    and no migration or re-seed is needed.
+    """
+    return f'{FACTOR_PICKS_PREFIX}{factor}'
+
+
 def persist_factor_picks(picks: pd.DataFrame, factor: str) -> dict:
     payload = factor_picks_payload(picks, factor)
     with transaction() as tx:
         tx.execute(
             'INSERT INTO app_settings (key, value) VALUES (?, ?) '
             'ON CONFLICT (key) DO UPDATE SET value = excluded.value',
-            (FACTOR_PICKS_SETTING, json.dumps(payload)),
+            (factor_picks_setting(factor), json.dumps(payload)),
         )
     return payload
 
@@ -691,7 +863,7 @@ def main() -> None:
         picks = todays_picks(panel, a.factor, a.top_k)
         if a.persist_picks:
             payload = persist_factor_picks(picks, a.factor)
-            print(json.dumps({'success': True, 'setting': FACTOR_PICKS_SETTING, 'count': len(payload['picks']), 'asOf': payload['asOf']}))
+            print(json.dumps({'success': True, 'setting': factor_picks_setting(a.factor), 'count': len(payload['picks']), 'asOf': payload['asOf']}))
             return
         print(f"\n=== top {len(picks)} by {a.factor} as of {picks['date'].iloc[0]} ===")
         print(picks.to_string(index=False))

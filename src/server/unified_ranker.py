@@ -629,19 +629,6 @@ DIRECTIONLESS_STRONG_SELL_CEIL  = 20.0
 DIRECTIONLESS_SELL_CEIL         = 30.0
 
 
-def is_directionless_fallback_enabled(conn) -> bool:
-    """Feature flag gating _classify's directionless-score fallback. Defaults to OFF (missing
-    row) -- see the DIRECTIONLESS_* block's own comment for why this shipped disabled."""
-    try:
-        row = conn.execute(
-            "SELECT value FROM app_settings WHERE key = 'directionless_score_fallback_enabled'"
-        ).fetchone()
-        return bool(row) and row['value'] == 'true'
-    except Exception as e:
-        print(f"[UnifiedRanker] is_directionless_fallback_enabled unavailable: {e}")
-        return False
-
-
 # ── Engine-level live edge (factor_edge.py measures unified_recommendations.*_score
 # columns weekly, see queues.ts) → optional weight shrinkage ──────────────────────────
 #
@@ -721,29 +708,41 @@ def edge_adjusted_weights(base_weights: dict, verdicts: dict) -> dict:
     return {e: w / total * sum(base_weights.values()) for e, w in adjusted.items()}
 
 
-def _classify(score, bull, bear, *, directionless_fallback: bool = False):
-    """Directional label (matches stock_scores taxonomy the Top Rated UI renders). Screeners
-    are the PRIMARY direction source: net screener bias (bull vs bear count) decides Buy vs
-    Sell whenever they express any opinion at all, with the 0-100 unified score only gating
-    the 'Strong' tier threshold. Only when screeners have NO net opinion (see
-    DIRECTIONLESS_* above) does the blended score itself get to set direction, and only past a
-    materially higher bar than the normal Strong-tier gate -- see that block's own comment.
+def _classify(score, bull, bear):
+    """Directional label (matches stock_scores taxonomy the Top Rated UI renders). Direction
+    comes from the blended 0-100 score. Screener counts are accepted and IGNORED here -- they
+    remain real, displayed, and still feed the score itself and is_red_flagged()'s hard veto;
+    they just no longer get a direct vote on direction.
 
-    directionless_fallback defaults to False (disabled) -- pass True only after reading
-    is_directionless_fallback_enabled()'s explanation of why this ships off by default."""
-    bull = bull or 0
-    bear = bear or 0
-    total = bull + bear
-    r = (bull - bear) / total if total else 0.0
-    if r > 0:
-        return 'Strong Buy' if (r >= 0.5 and score >= 66.0) else 'Buy'
-    if r < 0:
-        return 'Strong Sell' if (r <= -0.5 and score <= 34.0) else 'Sell'
-    # r == 0: either total==0 (silent) or bull==bear (a tied stand-off) -- both collapse to the
-    # same directionless fallback, since a tie is just as legitimately "no screener opinion" as
-    # outright silence. Disabled by default -- see DIRECTIONLESS_* comment above.
-    if not directionless_fallback:
-        return 'Hold'
+    WHY THIS CHANGED (2026-08-10). Net screener bias used to be the PRIMARY direction source,
+    with the score only gating the 'Strong' tier. Measured against realised forward returns on
+    live unified_recommendations (liquid names >=Rs 1cr ADT, winsorised, next-open entry,
+    excess computed PER DATE against that day's own universe then averaged -- pooling across
+    dates gives a different and wrong answer here, cf. the same artifact fixed in
+    cs_ranker._mean_daily_ic):
+
+        21d excess vs universe   Buy+Strong Buy under screener direction   -0.440%  t=-5.14
+        21d excess vs universe   Buy+Strong Buy under score thresholds     +0.758%  t=+2.39
+         5d excess vs universe   screener direction                        +0.008%  t=+0.14
+         5d excess vs universe   score thresholds                          +0.253%  t=+1.19
+
+    and the driver, net (bull-bear) screeners bucketed against forward 21d return, is monotone
+    in the WRONG direction (<=-3: +2.90% ... >+3: +2.24%; rank IC -0.0159). So the one input
+    that decided Buy vs Sell was the input with negative predictive value, while the score it
+    overrode was mildly positive (top-50 by score: +0.453% excess). That is why the label was
+    worse than the ordering it was derived from.
+
+    HONEST LIMIT on those numbers: only 7-14 ranker days carry a full 21d forward window, and
+    those windows overlap, so |t| is inflated and none of this is a clean significance test.
+    It is not close, it is consistent across every cut tried, and nothing measured points the
+    other way -- but the reason to prefer score direction is that screener direction is
+    measurably harmful, NOT that score direction is proven to work (t=+2.39 on 7 overlapping
+    days is a reason to keep measuring, not a validated edge).
+
+    Deliberately NOT done: inverting the screener signal to go long the bearish tail. IC
+    -0.0159 at t=-1.21 is not significant, and trading the inverse of a non-significant
+    negative is data-mining a coin flip.
+    """
     if score >= DIRECTIONLESS_STRONG_BUY_FLOOR:
         return 'Strong Buy'
     if score >= DIRECTIONLESS_BUY_FLOOR:
@@ -1017,6 +1016,25 @@ class UnifiedRanker:
             return 'BEAR'
         return regime
 
+    def _get_event_triggers(self, as_of):
+        """symbol -> trigger text from stock_event_triggers (event_triggers.py).
+
+        Advisory disclosure only: never touches unified_score. Degrades to {} if the table is
+        absent or the job has not run, because a missing advisory must not break the ranker."""
+        out = {}
+        try:
+            for r in self.conn.execute(
+                "SELECT symbol, triggers FROM stock_event_triggers "
+                "WHERE date = ? AND triggers IS NOT NULL AND triggers != ''", (as_of,)
+            ).fetchall():
+                out[r['symbol']] = r['triggers']
+        except Exception as e:                                   # noqa: BLE001
+            print(f"[UnifiedRanker] event triggers unavailable ({str(e)[:60]}); "
+                  "recommendations will carry no event disclosure today.")
+        if out:
+            print(f"[UnifiedRanker] event triggers on {len(out):,} symbols")
+        return out
+
     def _get_fundamental_scores(self):
         rows = self.conn.execute(
             "SELECT symbol, score FROM stock_scores WHERE timeframe = 'long_term'"
@@ -1080,9 +1098,26 @@ class UnifiedRanker:
     def _get_screener_membership(self):
         membership = {}
 
-        def _add(sym, bias, conf, cat, subcat, horizon, name=None):
+        # screener_master as a Python-side fallback map rather than a 4th SQL join. Joining
+        # it inline made all three previously-working source queries depend on that one table
+        # existing -- if it is missing they ALL fail and membership comes back completely
+        # empty, which is a far worse failure than the coverage gap being closed. Loaded once,
+        # degrades to {} on any error, and the sources stay independent of each other.
+        master_bias = {}
+        try:
+            for r in self.conn.execute(
+                "SELECT scan_id, source, inferred_sentiment FROM screener_master"
+            ).fetchall():
+                master_bias[(str(r['scan_id']), (r['source'] or '').lower())] = r['inferred_sentiment']
+        except Exception as e:                                   # noqa: BLE001
+            print(f"[UnifiedRanker] screener_master fallback unavailable ({str(e)[:60]}); "
+                  "uncatalogued screeners will contribute with a neutral bias.")
+
+        def _add(sym, bias, conf, cat, subcat, horizon, name=None, sid=None, src=None):
             if not sym:
                 return
+            if not bias and sid is not None:
+                bias = master_bias.get((str(sid), (src or '').lower()))
             membership.setdefault(sym, []).append({
                 'signal_bias': bias or 'neutral',
                 'confidence': float(conf or 0.74),
@@ -1092,16 +1127,28 @@ class UnifiedRanker:
                 'screener_name': name or '',
             })
 
-        for source_query in [
-            ("SELECT ss.symbol, sc.signal_bias, sc.confidence, sc.category, sc.subcategory, sc.investment_horizon, COALESCE(ts.screener_name, sc.screener_name, sc.screener_id) AS sname FROM trendlyne_screener_stocks ss JOIN screener_catalog sc ON sc.screener_id = ss.screener_id AND sc.source = 'trendlyne' LEFT JOIN trendlyne_screeners ts ON ts.screener_id = sc.screener_id", []),
-            ("SELECT ss.symbol, sc.signal_bias, sc.confidence, sc.category, sc.subcategory, sc.investment_horizon, COALESCE(sc.screener_name, sc.screener_id) AS sname FROM moneycontrol_screener_stocks ss JOIN screener_catalog sc ON sc.screener_id = ss.scan_id AND sc.source = 'moneycontrol'", []),
-            ("SELECT ss.symbol, sc.signal_bias, sc.confidence, sc.category, sc.subcategory, sc.investment_horizon, COALESCE(sc.screener_name, sc.screener_id) AS sname FROM etnow_screener_stocks ss JOIN screener_catalog sc ON sc.screener_id = ss.screener_id AND sc.source = 'etnow'", []),
+        # LEFT JOIN, not JOIN, and falling back to screener_master (2026-08-10). The INNER
+        # JOIN silently dropped every screener absent from screener_catalog -- measured live:
+        # 410 of 423 etnow screeners (97%), 109 of 133 moneycontrol (82%), 295 of 910
+        # trendlyne (32%). Those memberships never reached bull/bear counts or the screener
+        # score at all, and nothing anywhere reported a number missing. screener_master
+        # carries the same NLP-inferred sentiment for most of them, so it supplies the
+        # fallback; a screener in NEITHER catalogue still contributes its membership with a
+        # neutral bias (via _add's own default) rather than vanishing.
+        #
+        # et_marketstats was missing from this list entirely -- a whole 5th screener source
+        # (95 screeners) that syncs, populates screener_master, and was then never read here.
+        for source_query, _src, _idcol in [
+            ("SELECT ss.symbol, ss.screener_id AS sid, sc.signal_bias, sc.confidence, sc.category, sc.subcategory, sc.investment_horizon, COALESCE(ts.screener_name, sc.screener_name, sc.screener_id) AS sname FROM trendlyne_screener_stocks ss LEFT JOIN screener_catalog sc ON sc.screener_id = ss.screener_id AND LOWER(sc.source) = 'trendlyne' LEFT JOIN trendlyne_screeners ts ON ts.screener_id = ss.screener_id", 'trendlyne', 'sid'),
+            ("SELECT ss.symbol, ss.scan_id AS sid, sc.signal_bias, sc.confidence, sc.category, sc.subcategory, sc.investment_horizon, COALESCE(sc.screener_name, sc.screener_id) AS sname FROM moneycontrol_screener_stocks ss LEFT JOIN screener_catalog sc ON sc.screener_id = ss.scan_id AND LOWER(sc.source) = 'moneycontrol'", 'moneycontrol', 'sid'),
+            ("SELECT ss.symbol, ss.screener_id AS sid, sc.signal_bias, sc.confidence, sc.category, sc.subcategory, sc.investment_horizon, COALESCE(sc.screener_name, sc.screener_id) AS sname FROM etnow_screener_stocks ss LEFT JOIN screener_catalog sc ON sc.screener_id = ss.screener_id AND LOWER(sc.source) = 'etnow'", 'etnow', 'sid'),
+            ("SELECT ss.symbol, ss.screener_key AS sid, sc.signal_bias, sc.confidence, sc.category, sc.subcategory, sc.investment_horizon, COALESCE(sc.screener_name, ss.screener_key) AS sname FROM et_marketstats_screener_stocks ss LEFT JOIN screener_catalog sc ON sc.screener_id = ss.screener_key AND LOWER(sc.source) = 'et_marketstats'", 'et_marketstats', 'sid'),
         ]:
             try:
-                for r in self.conn.execute(source_query[0]).fetchall():
+                for r in self.conn.execute(source_query).fetchall():
                     _add(r['symbol'], r['signal_bias'], r['confidence'],
                          r['category'], r['subcategory'], r['investment_horizon'],
-                         name=r['sname'])
+                         name=r['sname'], sid=r['sid'], src=_src)
             except Exception as e:
                 # Do NOT swallow silently: a broken membership query means every symbol
                 # falls back to Hold/0-bull/0-bear with no error surfaced anywhere — the
@@ -1691,7 +1738,7 @@ class UnifiedRanker:
             verdicts = load_engine_edge_verdicts(self.conn, regime_for_weights)
             base_weights = edge_adjusted_weights(base_weights, verdicts)
             print(f"[UnifiedRanker] engine edge adjustment applied: {verdicts}")
-        directionless_fallback = is_directionless_fallback_enabled(self.conn)
+        event_triggers_map = self._get_event_triggers(today)
         fund_scores       = self._get_fundamental_scores()
         quality_metrics   = self._get_quality_metrics()
         win_probs         = self._get_win_probabilities()
@@ -1814,7 +1861,7 @@ class UnifiedRanker:
 
             bull = bull_counts.get(sym, 0)
             bear = bear_counts.get(sym, 0)
-            classification = _classify(unified, bull, bear, directionless_fallback=directionless_fallback)
+            classification = _classify(unified, bull, bear)
 
             # Red-flag hard veto: a bearish solvency/governance screener removes the name from
             # the buy pool no matter how strong its score is (then it also ranks low + unsized).
@@ -1889,6 +1936,17 @@ class UnifiedRanker:
             et = self._get_entry_targets(sym, confluence_map, rec_log_map, unified_map, sector_map)
             if not et.get('trade_reasoning'):
                 et['trade_reasoning'] = screener_summary
+
+            # Event-trigger disclosure. These are NOT in unified_score and deliberately do not
+            # change it -- see event_triggers.py for the measurements and for why 22-36
+            # overlapping windows in one regime is not enough to give them a weight. But a risk
+            # flag that lives only in a table nobody reads is not a risk flag, so it is
+            # surfaced on the row where the decision is actually made. A reader can act on it;
+            # the score stays honest about what it does and does not incorporate.
+            trig = event_triggers_map.get(sym)
+            if trig:
+                base = et.get('trade_reasoning') or ''
+                et['trade_reasoning'] = f"{base} | ⚠ {trig}".strip(' |')
 
             # Direction/geometry backstop: `_get_entry_targets`'s 3 fallback sources
             # (confluence_signals, recommendation_log, unified_signals) are looked up by

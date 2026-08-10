@@ -408,6 +408,109 @@ class NLPScreenerInference:
     def __init__(self):
         self.finbert = FinBERTInference()
 
+    # ── Domain overrides (2026-08-10) ────────────────────────────────────────────
+    # "high", "low", "increasing" INVERT their meaning depending on what they qualify, and
+    # both the generic keyword lists below and FinBERT read them literally. Measured damage
+    # on the live tables before this shipped: "High Leverage" -> neutral (no keyword hit at
+    # all), "Increasing Promoter Pledge" -> bullish (matched the generic r'increasing'),
+    # "Low Price to Book" -> neutral (the existing r'low\s*p[eb]\b' needs the literal "low pe"
+    # / "low pb" and does not match the spelled-out form), "Undervalued Stocks P/B ratio less
+    # than 1" -> bearish (bullish and bearish counts tied 1-1 and the tie-break fell through
+    # to a generic heuristic). All four are unambiguous to a human reading the name.
+    #
+    # These run BEFORE FinBERT and before the generic counting, because they are the cases
+    # where the generic layers are confidently wrong rather than merely silent. FinBERT is a
+    # financial NEWS model; a screener NAME is not a news sentence, so it does not get to
+    # overrule an explicit domain rule.
+    _RISK_SUBJECT = r'(?:pledge|leverage|debt|npa|default|dilution|insolven|bankrupt|encumbr)'
+    _RISK_UP = re.compile(
+        r'(?:high|rising|increas\w*|growing|surg\w*|more|heavy)\s+\w*\s*' + _RISK_SUBJECT
+        + r'|' + _RISK_SUBJECT + r'\s+(?:ris\w+|increas\w+|up)')
+    _RISK_DOWN = re.compile(
+        r'(?:low|falling|decreas\w*|declin\w*|reduc\w*|zero|no)\s*\w*\s*' + _RISK_SUBJECT
+        + r'|' + _RISK_SUBJECT[:-1] + r')\s*free')
+    # Cheap on a valuation MULTIPLE is bullish; the same word on a momentum/quality metric is
+    # not. Scoped to the multiples explicitly so "low delivery"/"low volume" never match.
+    _MULTIPLE = r'(?:p\s*/?\s*[ebs]\b|pe\b|pb\b|ps\b|price[ -]to[ -](?:book|sales|earning\w*|cash)' \
+                r'|ev\s*/\s*(?:ebitda|sales)|peg\b|valuation|price[ -]multiple)'
+    _VAL_CHEAP = re.compile(
+        r'undervalu\w*|bargain|\bcheap\w*|attractive\s+valuation|below\s+(?:its\s+)?intrinsic'
+        r'|discount(?:ed)?\s+to|(?:at|trading\s+at)\s+(?:a\s+)?discount|value\s+buy|reasonable\s+price'
+        r'|(?:low|less\s+than|below)\s+\w*\s*' + _MULTIPLE)
+    _VAL_RICH = re.compile(
+        r'overvalu\w*|expensive|rich\s+valuation|(?:high|premium|above)\s+\w*\s*' + _MULTIPLE)
+
+    # ── Contested families, settled by MEASUREMENT not by wording (2026-08-10) ──────
+    # These four were labelled inconsistently by both taxonomies (e.g. oversold: master 43
+    # bullish vs catalog 39 bearish). Rather than pick a reading, each condition was
+    # reconstructed from price and backtested over 5 years / 64 monthly rebalances, top-50,
+    # 25bps/side, survivorship-filled, next-open entry (factor_backtest.py --factor
+    # screener_oversold | screener_near_52w_low | screener_below_lower_bb | screener_overbought):
+    #
+    #   oversold (low RSI14)        -1.25%/mo  t=-4.26  negative in 6 of 6 years
+    #   near 52-week low            -1.21%/mo  t=-3.79  negative in 6 of 6 years
+    #   below lower Bollinger band  -1.10%/mo  t=-4.70  negative in 6 of 6 years
+    #   overbought (high RSI14)     -0.09%/mo  t=-0.18  no signal in either direction
+    #
+    # So the textbook "oversold = buy the dip" reading is WRONG on this universe, and the
+    # relationship is not symmetric: stretched-DOWN is reliably bearish while stretched-UP
+    # carries no information. Consistent with this repo's other measurements (reversal_21d
+    # t=-3.97, momentum_12_1 t=+2.08). Re-run those four factors before revising these.
+    _OVERSOLD = re.compile(r'\boversold\b|below\s+lower\s+b|lower\s+bollinger'
+                           r'|52[ -]?w(?:eek)?[ -]?low|all[ -]?time[ -]?low'
+                           r'|\d+[ -]?year[ -]?low|new\s+low')
+    _OVERBOUGHT = re.compile(r'\boverbought\b')
+    # Not measurable from this database: dividend yield exists only in an undated snapshot
+    # (stock_fundamentals) and corporate_actions carries 847 rows over 30 years, far too
+    # sparse for a cross-sectional factor. A bare yield is also mechanical -- it rises when
+    # price falls -- and internationally the yield premium is largely a value+quality proxy,
+    # which this platform already measures DIRECTLY and strongly (value_book_to_price
+    # +0.93%/mo t=2.67). Letting a bare yield vote bullish would double-count that exposure
+    # at best and pick up distress at worst, so it abstains and any qualifier in the name
+    # (quality / low debt / growth / low P/E) supplies direction through the normal path.
+    # REASONED, NOT MEASURED -- flagged as such deliberately.
+    _BARE_YIELD = re.compile(r'dividend')
+    _YIELD_QUALIFIER = re.compile(
+        r'quality|growth|low\s+debt|debt\s*free|zero\s*debt|low\s+p|consistent|increasing'
+        r'|strong|profit|margin|undervalu|cheap|discount')
+    # An announced-but-unresolved event is a date, not a direction. Also not measurable here:
+    # stock_earnings_beats carries fiscal PERIOD-END dates, not announcement dates, so
+    # pre-announcement drift cannot be tested (this is the same gap that forces
+    # earnings_beat_features.py to estimate with PERIOD_LAG_DAYS). REASONED, NOT MEASURED.
+    _EVENT = re.compile(r'upcoming\s+result|results?\s+(?:due|expected|calendar)|board\s+meeting')
+
+    @classmethod
+    def domain_override(cls, text: str):
+        """Return 'bullish'/'bearish'/'neutral' for families the generic layers get wrong,
+        else None to fall through to FinBERT + the generic keyword counts.
+
+        Pure and side-effect free so it can be tested without loading FinBERT.
+        Order matters and is deliberate:
+          1. risk before valuation -- "high debt at a low P/E" is a value trap, and the
+             leverage is the more load-bearing fact.
+          2. the MEASURED families before the generic lists, because the measurement
+             disagrees with the plain-English reading of the name.
+        """
+        t = (text or '').lower()
+        if cls._RISK_UP.search(t):
+            return 'bearish'
+        if cls._RISK_DOWN.search(t):
+            return 'bullish'
+        if cls._VAL_RICH.search(t):
+            return 'bearish'
+        if cls._VAL_CHEAP.search(t):
+            return 'bullish'
+        # Measured: stretched-down is bearish, stretched-up carries no signal.
+        if cls._OVERSOLD.search(t):
+            return 'bearish'
+        if cls._OVERBOUGHT.search(t):
+            return 'neutral'
+        if cls._EVENT.search(t):
+            return 'neutral'
+        if cls._BARE_YIELD.search(t) and not cls._YIELD_QUALIFIER.search(t):
+            return 'neutral'
+        return None
+
     def infer(self, name: str, description: str = "") -> Dict[str, Any]:
         name_str = str(name) if name is not None else ""
         desc_str = str(description) if description is not None else ""
@@ -415,7 +518,7 @@ class NLPScreenerInference:
 
         # 1. Sentiment (Hybrid approach: FinBERT + Regex fallback/boost)
         finbert_res = self.finbert.predict(text)
-        
+
         # We still use regex hits for "boosting" or fallback
         bullish_hits = [k for k in self.BULLISH_KEYWORDS if re.search(k, text)]
         bearish_hits = [k for k in self.BEARISH_KEYWORDS if re.search(k, text)]
@@ -423,7 +526,14 @@ class NLPScreenerInference:
         bearish_score = len(bearish_hits)
 
         # Decide final sentiment
-        if finbert_res["sentiment"] != "neutral":
+        override = self.domain_override(text)
+        if override is not None:
+            # See domain_override's own comment: these are the cases where FinBERT and the
+            # generic keyword counts are confidently WRONG (not merely silent), because
+            # high/low/increasing invert meaning by subject. Highest precedence by design.
+            sentiment = override
+            sentiment_score = 0.75
+        elif finbert_res["sentiment"] != "neutral":
             sentiment = finbert_res["sentiment"]
             sentiment_score = finbert_res["score"]
         else:

@@ -473,3 +473,99 @@ class TestPicksSafetyWarnings:
 
 if __name__ == '__main__':
     raise SystemExit(pytest.main([__file__, '-q']))
+
+
+class TestInsiderFactor:
+    """The insider factor's two failure modes are both silent, so both get pinned here:
+    trading on a filing before it was public, and scoring an unfetched symbol as a real zero."""
+
+    @staticmethod
+    def _px(symbols, dates):
+        rows = [{'symbol': s, 'date': d, 'close': 100.0, 'volume': 1000.0,
+                 'turnover': 100_000.0} for s in symbols for d in dates]
+        return pd.DataFrame(rows).sort_values(['symbol', 'date']).reset_index(drop=True)
+
+    def _run(self, monkeypatch, trades, symbols, dates):
+        monkeypatch.setattr(fb, 'read_df', lambda *a, **k: pd.DataFrame(trades))
+        return fb._add_insider(self._px(symbols, dates), dates[0], dates[-1])
+
+    def test_filing_is_not_visible_on_or_right_after_its_transaction_date(self, monkeypatch):
+        """A transaction dated D must contribute NOTHING on D. date_iso is the transaction
+        date, not the disclosure date -- trading it on D is trading tomorrow's newspaper.
+
+        The expectation here is deliberately NOT derived from INSIDER_DISCLOSURE_LAG_DAYS.
+        An earlier version of this test computed its cutoff from that constant, so setting
+        the constant to 0 left an empty set of dates to check and the test passed vacuously
+        against the exact bug it existed to catch. The bar asserted below is SEBI's, not
+        the code's: 2 trading days insider->company + 2 company->exchange.
+        """
+        # 60 bdays with the filing at index 30: well past the rolling min_periods, so a 0
+        # here is a real measured zero rather than an unwarmed window reading as NaN.
+        dates = [d.strftime('%Y-%m-%d')
+                 for d in pd.bdate_range('2024-03-01', periods=60)]
+        txn_i = 30
+        out = self._run(monkeypatch, [{'symbol': 'A', 'date_iso': dates[txn_i],
+                                       'ttype': fb.INSIDER_BUY_TYPE, 'val': 5_000_000.0}],
+                        ['A'], dates)
+        got = out.set_index('date')['insider_net']
+        for i in range(txn_i, txn_i + 4):        # D .. D+3 trading days
+            assert got[dates[i]] == 0.0, (
+                f'insider flow visible on {dates[i]}, {i - txn_i} trading days after the '
+                f'transaction -- earlier than SEBI disclosure could have made it public')
+        assert got[dates[-1]] > 0, 'flow never landed at all after the lag'
+
+    def test_disclosure_lag_constant_is_pinned(self):
+        """Behavioural test above proves D..D+3 are clean; this stops the constant being
+        quietly lowered to a value that only *looks* compliant on a longer holiday week."""
+        assert fb.INSIDER_DISCLOSURE_LAG_DAYS >= 4
+
+    def test_visibility_off_the_trading_calendar_snaps_forward_not_away(self, monkeypatch):
+        """An exact-date merge drops any filing whose visibility date is not itself a
+        trading day, silently. Transaction dates are NOT all trading days (the vendor
+        carries weekend/holiday-dated entries), and a holiday can push visibility off the
+        calendar even from a business day. Dropped filings are invisible in every summary."""
+        dates = [d.strftime('%Y-%m-%d')
+                 for d in pd.bdate_range('2024-03-04', periods=30)]     # Mon-start
+        txn = '2024-03-02'                                              # a Saturday
+        assert pd.Timestamp(txn).weekday() == 5
+        # +7d preserves weekday, so visibility is also a Saturday: not in the panel at all.
+        vis = pd.Timestamp(txn) + pd.Timedelta(days=fb.INSIDER_DISCLOSURE_LAG_DAYS)
+        assert vis.strftime('%Y-%m-%d') not in dates
+        out = self._run(monkeypatch, [{'symbol': 'A', 'date_iso': txn,
+                                       'ttype': fb.INSIDER_BUY_TYPE, 'val': 5_000_000.0}],
+                        ['A'], dates)
+        assert out['insider_net'].iloc[-1] > 0, \
+            'a filing whose visibility fell off the trading calendar was dropped'
+
+    def test_uncovered_symbol_is_nan_not_zero(self, monkeypatch):
+        """A symbol the fetcher never reached must be EXCLUDED from ranking, not ranked as
+        a neutral zero -- otherwise fetcher coverage gaps become fake factor scores."""
+        dates = [d.strftime('%Y-%m-%d')
+                 for d in pd.bdate_range('2024-03-01', periods=30)]
+        out = self._run(monkeypatch, [{'symbol': 'A', 'date_iso': dates[0],
+                                       'ttype': fb.INSIDER_BUY_TYPE, 'val': 5_000_000.0}],
+                        ['A', 'B'], dates)
+        b = out[out['symbol'] == 'B']['insider_net']
+        assert b.isna().all(), 'uncovered symbol B was scored instead of excluded'
+        assert out[out['symbol'] == 'A']['insider_net'].notna().any()
+
+    def test_non_market_transaction_types_are_excluded(self, monkeypatch):
+        """ESOP/gift/pledge are not discretionary views. If they counted, an ESOP allotment
+        would read as a conviction buy."""
+        dates = [d.strftime('%Y-%m-%d')
+                 for d in pd.bdate_range('2024-03-01', periods=30)]
+        out = self._run(monkeypatch, [{'symbol': 'A', 'date_iso': dates[0],
+                                       'ttype': 'Acquisition -  ESOP', 'val': 9e9}],
+                        ['A'], dates)
+        assert out['insider_net'].isna().all(), 'ESOP allotment counted as an insider buy'
+
+    def test_sells_are_negative_and_scaled_by_traded_value(self, monkeypatch):
+        """Sign, and the size normalisation that is the factor's whole economic content."""
+        dates = [d.strftime('%Y-%m-%d')
+                 for d in pd.bdate_range('2024-03-01', periods=30)]
+        out = self._run(monkeypatch, [{'symbol': 'A', 'date_iso': dates[0],
+                                       'ttype': fb.INSIDER_SELL_TYPE, 'val': 5_000_000.0}],
+                        ['A'], dates)
+        v = out['insider_net'].iloc[-1]
+        assert v < 0, 'an open-market sale did not read as negative'
+        assert math.isclose(v, -5_000_000.0 / 100_000.0, rel_tol=1e-6)

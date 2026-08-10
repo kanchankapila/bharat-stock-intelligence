@@ -595,11 +595,51 @@ function scoreSignals(
   // News Sentiment Modifier — highly bullish (>threshold) boosts score 15%, highly bearish
   // (<-threshold) penalizes 25%. Threshold shared with runTechnicalSignalScan's news-only
   // persistence gate below (2026-08-06) -- one source of truth for "meaningfully" bullish/bearish.
-  if (newsSentimentScore > NEWS_SENTIMENT_MEANINGFUL_THRESHOLD) {
-    total *= 1.15;
-  } else if (newsSentimentScore < -NEWS_SENTIMENT_MEANINGFUL_THRESHOLD) {
-    total *= 0.75;
-  }
+  //
+  // MEASURED 2026-08-10, AND THIS DIRECTION IS QUESTIONABLE. News sentiment vs return, per-date
+  // rank IC on the liquid universe (>=Rs 1cr ADT, winsorised):
+  //     SAME DAY   (D open -> D close)          IC +0.1302  t=+6.96   <- strong, but NOT tradeable
+  //     NEXT DAY   (D+1 open -> D+2 open)       IC -0.0318  t=-2.03   <- the first tradeable window
+  //     NEXT 5 DAY (D+1 open -> D+6 open)       IC -0.0063  t=-0.43
+  // Same-day buckets (per-date demeaned): negative -0.540%, neutral -0.143%, positive +0.291%.
+  // So positive-news names really do rise ON THE DAY -- that is the market REACTING, and it is
+  // not capturable, because an article printing at 2pm cannot be bought at that morning's open.
+  // By the first window you can actually trade, the move partially FADES and the sign flips.
+  // Both legs of this modifier therefore lean the wrong way for forward returns.
+  //
+  // Re-measured at the horizons these signals are actually GRADED at (signal_outcomes carries
+  // h1/h5/h15 for signal_source='technical'), point-in-time, entry at next open:
+  //     h1   IC -0.0434  t=-2.53      <- significantly NEGATIVE
+  //     h5   IC -0.0091  t=-0.52      <- nothing
+  //     h15  IC -0.0015  t=-0.10      <- nothing
+  // h5 buckets (per-date demeaned): bearish +0.062, neutral +0.062, bullish -0.088.
+  // So NO horizon this signal is graded at supports a bullish BOOST, and the strongest
+  // relationship is against it.
+  //
+  // Then swept the multiplier itself against realised returns rather than picking a value:
+  // back the live 1.15/0.75 out of the stored signal_score, re-apply each candidate, and rank
+  // (28,613 rows / 41 dates / 1,230 symbols, liquid, winsorised, next-open entry):
+  //
+  //     setting              h5 IC      h15 IC
+  //     1.30 / 0.60         -0.0068     +0.0128     <- strongest tilt, WORST at both horizons
+  //     1.15 / 0.75 (live)  -0.0059     +0.0137
+  //     1.075/ 0.875        -0.0050     +0.0146
+  //     1.00 / 1.00         -0.0050     +0.0145     <- neutral
+  //     0.875/ 1.075        -0.0050     +0.0146     <- inverted, NOT better than neutral
+  //
+  // IC degrades MONOTONICALLY with tilt strength at both horizons, and neutral / shrunk /
+  // inverted are indistinguishable from each other. So the gain comes entirely from REMOVING
+  // the tilt, not from reversing it -- news sentiment carries no usable directional
+  // information for this score at the horizons these signals are graded at. An intermediate
+  // shrink was tried first and measured identical to neutral, i.e. it was preserving a
+  // mechanism with no support at any magnitude. Removed.
+  //
+  // NOTE the threshold constant is deliberately NOT removed: it still gates the news-only
+  // PERSISTENCE path in runTechnicalSignalScan (whether a row is worth storing at all), which
+  // is a coverage decision, not a directional one, and was measured separately.
+  // What could still change this: splitting genuinely material news (M&A, results shocks)
+  // from routine coverage. The aggregate mixes them and would wash a real event effect out.
+  // Do not reinstate a blanket multiplier -- build the split and measure that instead.
 
   return Math.min(Math.round(total), 10);
 }

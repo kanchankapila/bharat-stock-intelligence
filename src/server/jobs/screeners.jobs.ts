@@ -145,16 +145,28 @@ async function processQuantScoring(job: Job): Promise<{ success: boolean }> {
   // from it would have badly overestimated. 5min budget is ample margin over the real number.
   await runPython('risk_metrics_engine.py', [], 5 * 60_000)
     .catch(e => console.warn('[QUEUE] risk_metrics_engine failed:', (e as Error).message));
-  // Persist the validated standalone 12-1 momentum paper screen for cheap API/UI reads.
-  // It remains outside unified_ranker: the factor's evidence supports paper trading, not
-  // dilution into the canonical multi-engine blend. A recent start date is sufficient to
-  // compute today's 12-month-minus-1-month rank and avoids rebuilding the 5-year research
-  // panel every night. This advisory snapshot must never fail canonical quant scoring.
-  await runPython(
-    'factor_backtest.py',
-    ['--factor', 'momentum_12_1', '--top-k', '50', '--start', '2024-01-01', '--persist-picks'],
-    15 * 60_000,
-  ).catch(e => console.warn('[QUEUE] factor picks snapshot failed:', (e as Error).message));
+  // Persist the two validated standalone paper screens for cheap API/UI reads. Both remain
+  // outside unified_ranker: their evidence supports paper trading, not dilution into the
+  // canonical multi-engine blend (and this repo has measured that COMBINING made things worse
+  // in every case tested). A recent start date is enough to compute today's ranks and avoids
+  // rebuilding the 5-year research panel every night.
+  //
+  // value_book_to_price is listed FIRST because it is the stronger of the two on every axis
+  // measured -- t 2.67 vs 2.08, Sharpe 1.47 vs 1.10, turnover 0.28 vs 0.35, max DD -17.9% vs
+  // -19.5%. It was validated 2026-08-10 but left unwired until then, so the weaker factor was
+  // the only one the UI could show.
+  //
+  // Run SEQUENTIALLY, not in parallel: each invocation loads the full price panel (~3M bars)
+  // and two at once would double peak memory for no wall-clock gain on a shared box. Each is
+  // independently .catch()'d so one factor failing still leaves the other's snapshot fresh,
+  // and neither may fail canonical quant scoring.
+  for (const factor of ['value_book_to_price', 'momentum_12_1']) {
+    await runPython(
+      'factor_backtest.py',
+      ['--factor', factor, '--top-k', '50', '--start', '2024-01-01', '--persist-picks'],
+      15 * 60_000,
+    ).catch(e => console.warn(`[QUEUE] factor picks snapshot (${factor}) failed:`, (e as Error).message));
+  }
   return { success: true };
 }
 
