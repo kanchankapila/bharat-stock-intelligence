@@ -136,6 +136,26 @@ DEFAULT_START = '2021-01-01'
 # trustworthy and must say so rather than silently absorbing it into the mean.
 RETURN_CLAMP_PCT = 50.0
 
+# Missing-exit convention (2026-08-10). A position whose next-rebalance price is absent used to
+# contribute exactly 0% to the strategy while being silently DROPPED from the benchmark two
+# lines later -- two different conventions for the same event, in adjacent statements, and the
+# one applied to the strategy was the optimistic one. Both legs now use this single figure.
+# -100 is the conservative bound (the name is written off, which is what a delisting is); a
+# data gap gets punished the same way on both sides, so the comparison stays honest either way.
+# Deliberately NOT subject to RETURN_CLAMP_PCT -- the clamp is a bad-bar guard for *observed*
+# prices, and clamping a write-off to -50% would quietly re-introduce the optimism. Sweep it
+# with --missing-exit-pct; every occurrence is counted and reported so the sensitivity is
+# visible rather than assumed.
+MISSING_EXIT_PCT = -100.0
+
+# Vendor value history is a recent backfill, not an observed point-in-time series (see
+# _add_valuation). A restated trailing EPS silently rewrites the past, so these are barred
+# from the persisted paper screen until that sensitivity is quantified. --allow-provisional
+# overrides, loudly.
+PROVISIONAL_FACTORS = frozenset({
+    'value_earnings_yield', 'value_book_to_price', 'value_composite', 'value_x_momentum',
+})
+
 # The configuration momentum_12_1 was actually validated at (t>2 only at K=50 and K=100).
 # Below this, momentum concentrates into speculative microcaps -- a different strategy from
 # the one measured, so --picks says so out loud rather than implying the backtest covers it.
@@ -283,9 +303,19 @@ def load_price_panel(start: str = DEFAULT_START,
     px = _add_beta_and_idio_vol(px)
     px = px.drop(columns=['_dr', '_hi252', '_mkt'], errors='ignore')
 
-    px['eligible'] = (px['adt20'] >= min_adt) & px['next_open'].notna() & (px['next_open'] > 0)
+    # TWO different eligibilities, and conflating them is what made the live screen stale:
+    #   signal_eligible -- the factor and the liquidity filter are known as of this close.
+    #                      True on the NEWEST bar. This is what "what do I buy" asks.
+    #   eligible        -- additionally the next session's open exists, i.e. the trade can be
+    #                      priced end to end. Never true on the newest bar, by construction.
+    #                      This is what the BACKTEST needs and must keep using.
+    # todays_picks used `eligible`, so post-close it could only ever return the PREVIOUS
+    # session -- whose entry open had already traded hours earlier.
+    px['signal_eligible'] = px['adt20'] >= min_adt
+    px['eligible'] = px['signal_eligible'] & px['next_open'].notna() & (px['next_open'] > 0)
     print(f"[FactorBacktest] eligible (>=Rs {min_adt/1e7:.0f}cr ADT & tradeable next open): "
-          f"{int(px['eligible'].sum()):,} symbol-days")
+          f"{int(px['eligible'].sum()):,} symbol-days "
+          f"({int(px['signal_eligible'].sum()):,} signal-eligible)")
     return px
 
 
@@ -428,7 +458,8 @@ def run_backtest(panel: pd.DataFrame,
                  top_k: int = 50,
                  cost_bps_per_side: float = DEFAULT_COST_BPS_PER_SIDE,
                  long_short: bool = False,
-                 by_date: dict | None = None) -> dict:
+                 by_date: dict | None = None,
+                 missing_exit_pct: float = MISSING_EXIT_PCT) -> dict:
     """Equal-weight top-K portfolio, rebalanced every `rebalance_days` SESSIONS.
 
     Rebalance cadence is counted in trading sessions, not calendar days, so holidays cannot
@@ -483,12 +514,18 @@ def run_backtest(panel: pd.DataFrame,
         exit_px = nxt.set_index('symbol')['next_open']
 
         gross = 0.0
+        missing = 0
         for s, wt in w.items():
             e, x = entry.get(s), exit_px.get(s)
-            if e is None or x is None or not (np.isfinite(e) and np.isfinite(x)) or e <= 0:
-                # Position could not be exited at the next rebalance (delisted mid-period).
-                # Treated as flat rather than dropped, so a name going dark is not silently
-                # excluded from the P&L -- that is precisely the survivorship hole.
+            if e is None or not np.isfinite(e) or e <= 0:
+                continue                      # never entered -- not a position, not a loss
+            if x is None or not np.isfinite(x):
+                # Could not be exited at the next rebalance (delisted / went dark mid-period).
+                # Written off at MISSING_EXIT_PCT rather than held flat: 0% was the survivorship
+                # hole wearing a different hat. The benchmark below applies the SAME figure to
+                # the SAME names, so neither leg gets a convention the other does not.
+                missing += 1
+                gross += wt * missing_exit_pct
                 continue
             r = (x / e - 1) * 100
             if abs(r) > RETURN_CLAMP_PCT:
@@ -496,8 +533,12 @@ def run_backtest(panel: pd.DataFrame,
                 r = math.copysign(RETURN_CLAMP_PCT, r)
             gross += wt * r
 
-        uni = ((exit_px / entry - 1) * 100).replace([np.inf, -np.inf], np.nan).dropna()
-        uni = uni.clip(-RETURN_CLAMP_PCT, RETURN_CLAMP_PCT)
+        # reindex(entry.index), not dropna(): a name present at entry and absent at exit must
+        # stay in the benchmark and take the same write-off, otherwise the comparison universe
+        # is quietly survivorship-filtered while the strategy is not. Clip first (bad-bar guard
+        # on observed prices), fill after, so the write-off is not clamped to -50%.
+        uni = ((exit_px.reindex(entry.index) / entry - 1) * 100).replace([np.inf, -np.inf], np.nan)
+        uni = uni.clip(-RETURN_CLAMP_PCT, RETURN_CLAMP_PCT).fillna(missing_exit_pct)
 
         periods.append({
             'date': d0,
@@ -507,17 +548,19 @@ def run_backtest(panel: pd.DataFrame,
             'universe_pct': float(uni.mean()) if len(uni) else np.nan,
             'turnover': traded / 2.0,        # one-way turnover, the conventional quote
             'n_names': len(w),
+            'missing_exits': missing,
         })
         prev_w = w
 
     if not periods:
         raise RuntimeError('no completed rebalance periods -- widen the window or lower --top-k')
     return _summarize(pd.DataFrame(periods), factor, rebalance_days, top_k,
-                      cost_bps_per_side, long_short, clamped)
+                      cost_bps_per_side, long_short, clamped, missing_exit_pct)
 
 
 def _summarize(df: pd.DataFrame, factor: str, rebalance_days: int, top_k: int,
-               cost_bps: float, long_short: bool, clamped: int) -> dict:
+               cost_bps: float, long_short: bool, clamped: int,
+               missing_exit_pct: float = MISSING_EXIT_PCT) -> dict:
     per_yr = 252.0 / rebalance_days
     net, uni = df['net_pct'], df['universe_pct']
     excess = (net - uni).dropna()
@@ -551,6 +594,11 @@ def _summarize(df: pd.DataFrame, factor: str, rebalance_days: int, top_k: int,
         'rebalance_days': rebalance_days,
         'top_k': top_k,
         'cost_bps_per_side': cost_bps,
+        # Sensitivity handle for the delisting convention: if this is 0 the assumption is
+        # irrelevant to the result; if it is large, re-run with --missing-exit-pct before
+        # quoting any number from this run.
+        'missing_exit_pct': missing_exit_pct,
+        'missing_exits': int(df['missing_exits'].sum()) if 'missing_exits' in df else 0,
         'periods': int(len(df)),
         'years': round(yrs, 2),
         'gross_per_period_pct': round(float(df['gross_pct'].mean()), 4),
@@ -592,20 +640,42 @@ def _print(r: dict) -> None:
         print("\n  VERDICT: positive and significant net of costs -- worth a live paper test.")
 
 
+def picks_entry_state(panel: pd.DataFrame, signal_date) -> tuple[str, str | None]:
+    """(entry_status, entry_session) for a list generated off `signal_date`.
+
+    'pending_next_open' -- the entry open has NOT traded yet; the list is actionable.
+    'entry_passed'      -- the session this list would have entered on is already history;
+                           the list is a record, not a trade. This is the state the old
+                           `eligible`-based selection produced on EVERY scheduled post-close
+                           run, silently, with only `asOf` shown in the UI.
+    """
+    later = [d for d in panel['date'].unique() if d > signal_date]
+    if not later:
+        return 'pending_next_open', None
+    return 'entry_passed', str(min(later))[:10]
+
+
 def todays_picks(panel: pd.DataFrame, factor: str, top_k: int = 50) -> pd.DataFrame:
-    """The top-K names by `factor` on the most recent eligible date.
+    """The top-K names by `factor` on the most recent SIGNAL-eligible date.
 
     Same scoring path the backtest uses, so what you see here is exactly what was measured --
-    no second implementation to drift. Entry price is the NEXT session's open, which is why
-    `next_open` may be blank on the newest bar: that name is not yet tradeable.
+    no second implementation to drift. Selection uses `signal_eligible` (factor + liquidity
+    known as of the close), NOT `eligible` (which also demands a known next open and is
+    therefore never true on the newest bar). Entry is still the next session's open; whether
+    that open has already traded is reported by picks_entry_state, not silently ignored.
     """
     if factor not in FACTORS:
         raise KeyError(f"unknown factor {factor!r}; known: {sorted(FACTORS)}")
-    eligible = panel[panel['eligible']]
-    if eligible.empty:
-        raise RuntimeError('no eligible rows in panel')
-    last = eligible['date'].max()
-    cur = eligible[eligible['date'] == last].copy()
+    if factor in PROVISIONAL_FACTORS:
+        print(f"[FactorBacktest] WARNING: {factor} is built on vendor value history that is a "
+              "recent BACKFILL, not an observed point-in-time series. A restated trailing EPS "
+              "rewrites its own past, so this ranking may embed information that did not exist "
+              "on the dates it claims. Research only.")
+    universe = panel[panel['signal_eligible']]
+    if universe.empty:
+        raise RuntimeError('no signal-eligible rows in panel')
+    last = universe['date'].max()
+    cur = universe[universe['date'] == last].copy()
     cur['score'] = FACTORS[factor](cur)
     cur = cur.dropna(subset=['score']).sort_values('score', ascending=False).head(top_k)
 
@@ -626,7 +696,9 @@ def todays_picks(panel: pd.DataFrame, factor: str, top_k: int = 50) -> pd.DataFr
     return cur[[c for c in cols if c in cur.columns]].reset_index(drop=True)
 
 
-def factor_picks_payload(picks: pd.DataFrame, factor: str) -> dict:
+def factor_picks_payload(picks: pd.DataFrame, factor: str,
+                         entry_status: str = 'pending_next_open',
+                         entry_session: str | None = None) -> dict:
     if picks.empty:
         raise RuntimeError('cannot persist an empty factor-picks snapshot')
     rows = []
@@ -644,6 +716,10 @@ def factor_picks_payload(picks: pd.DataFrame, factor: str) -> dict:
     return {
         'factor': factor,
         'asOf': str(picks['date'].iloc[0])[:10],
+        # Entry state travels WITH the list. Without it the UI can only show `asOf`, which
+        # looks equally fresh whether the entry open is still ahead or three days behind.
+        'entryStatus': entry_status,
+        'entrySession': entry_session,
         'generatedAt': datetime.datetime.now(datetime.timezone.utc).isoformat(),
         'validatedTopKMin': VALIDATED_MIN_TOP_K,
         'evidence': 'paper_trade_candidate',
@@ -652,8 +728,10 @@ def factor_picks_payload(picks: pd.DataFrame, factor: str) -> dict:
     }
 
 
-def persist_factor_picks(picks: pd.DataFrame, factor: str) -> dict:
-    payload = factor_picks_payload(picks, factor)
+def persist_factor_picks(picks: pd.DataFrame, factor: str,
+                         entry_status: str = 'pending_next_open',
+                         entry_session: str | None = None) -> dict:
+    payload = factor_picks_payload(picks, factor, entry_status, entry_session)
     with transaction() as tx:
         tx.execute(
             'INSERT INTO app_settings (key, value) VALUES (?, ?) '
@@ -681,7 +759,18 @@ def main() -> None:
                    help="print today's top-K names for --factor instead of backtesting")
     p.add_argument('--persist-picks', action='store_true',
                    help='persist --picks output for cheap API/UI reads')
+    p.add_argument('--missing-exit-pct', type=float, default=MISSING_EXIT_PCT,
+                   help='return booked when a position cannot be exited (delisting). '
+                        'Applied identically to strategy and benchmark; sweep it.')
+    p.add_argument('--allow-provisional', action='store_true',
+                   help=f'permit persisting a PROVISIONAL_FACTORS screen ({sorted(PROVISIONAL_FACTORS)}) '
+                        'whose vendor history is a backfill rather than point-in-time')
     a = p.parse_args()
+
+    if a.persist_picks and a.factor in PROVISIONAL_FACTORS and not a.allow_provisional:
+        p.error(f"{a.factor} is built on backfilled vendor value history, which may embed "
+                "restatements that did not exist on the dates it claims. Quantify that "
+                "sensitivity, or pass --allow-provisional to persist it anyway.")
 
     panel = load_price_panel(a.start, a.end, a.min_adt, not a.no_survivorship_fill)
 
@@ -689,14 +778,22 @@ def main() -> None:
         if a.factor == 'all':
             p.error("--picks/--persist-picks needs a specific --factor, not 'all'")
         picks = todays_picks(panel, a.factor, a.top_k)
+        entry_status, entry_session = picks_entry_state(panel, picks['date'].iloc[0])
         if a.persist_picks:
-            payload = persist_factor_picks(picks, a.factor)
-            print(json.dumps({'success': True, 'setting': FACTOR_PICKS_SETTING, 'count': len(payload['picks']), 'asOf': payload['asOf']}))
+            payload = persist_factor_picks(picks, a.factor, entry_status, entry_session)
+            print(json.dumps({'success': True, 'setting': FACTOR_PICKS_SETTING,
+                              'count': len(payload['picks']), 'asOf': payload['asOf'],
+                              'entryStatus': entry_status, 'entrySession': entry_session}))
             return
         print(f"\n=== top {len(picks)} by {a.factor} as of {picks['date'].iloc[0]} ===")
         print(picks.to_string(index=False))
-        print("\nEntry is the NEXT session's open. Single-factor, marginal evidence "
-              "(see this module's docstring) -- paper-trade before committing capital.")
+        if entry_status == 'entry_passed':
+            print(f"\nWARNING: the entry open for this list ({entry_session}) has ALREADY "
+                  "traded. This is a record of a past signal, not an actionable list.")
+        else:
+            print("\nEntry is the NEXT session's open (not yet traded).")
+        print("Single-factor, marginal evidence (see this module's docstring) -- paper-trade "
+              "before committing capital.")
         return
 
     by_date = index_by_date(panel)          # grouped once, reused by every factor
@@ -706,7 +803,7 @@ def main() -> None:
     for f in factors:
         try:
             r = run_backtest(panel, f, a.rebalance, a.top_k, a.cost_bps, a.long_short,
-                             by_date=by_date)
+                             by_date=by_date, missing_exit_pct=a.missing_exit_pct)
         except Exception as e:                              # noqa: BLE001
             print(f"[FactorBacktest] {f}: FAILED -- {e}")
             continue

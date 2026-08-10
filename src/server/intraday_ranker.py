@@ -640,7 +640,10 @@ class IntradayRanker:
                 sell_gated += 1
             rows.append({
                 "symbol": sym, "score": round(score, 2),
-                "conviction": _conviction(score), "classification": classification,
+                # Conviction is direction-aware and reads the DISPLAYED classification, so a
+                # gated row reports the conviction of the Hold it actually shows, not of the
+                # Buy/Sell it would have been.
+                "conviction": _conviction(score, classification), "classification": classification,
                 "raw_classification": raw_classification,
                 "screener_score": round(s_sc, 2) if s_sc is not None else None,
                 "breakout_score": round(b_sc, 2) if b_sc is not None else None,

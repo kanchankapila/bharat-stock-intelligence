@@ -33,12 +33,25 @@ const FactorPaperScreen: React.FC<{ onSelectStock?: (symbol: string) => void }> 
   const { data, isLoading } = trpc.getFactorPaperPicks.useQuery(undefined, { staleTime: 5 * 60_000 });
   if (isLoading) return <Card dense title="12-1 Momentum Paper Screen" icon={TrendingUp}><p className="text-xs text-slate-500 font-mono">Loading scheduled factor snapshot…</p></Card>;
   if (!data?.picks.length) return null;
+  // A list whose entry open has already traded is a record, not a trade. Say so instead of
+  // showing an `asOf` date that reads identically to a fresh one.
+  const expired = data.entryStatus === 'entry_passed';
   return (
-    <Card dense title="12-1 Momentum Paper Screen" icon={TrendingUp} action={<span className="text-[10px] font-mono text-amber-400">PAPER TRADE · AS OF {data.asOf}</span>}>
-      <p className="text-[11px] text-slate-500 mb-3">
-        Standalone literature factor, ranked across the validated top-{data.validatedTopKMin} universe. This is not the canonical Alpha score or a buy recommendation.
-      </p>
-      <div className="overflow-x-auto">
+    <Card dense title="12-1 Momentum Paper Screen" icon={TrendingUp} action={
+      <span className={`text-[10px] font-mono ${expired ? 'text-slate-500' : 'text-amber-400'}`}>
+        {expired ? 'EXPIRED' : 'PAPER TRADE'} · AS OF {data.asOf}
+      </span>
+    }>
+      {expired ? (
+        <p className="text-[11px] text-rose-300/90 mb-3">
+          Not actionable — the entry open for this list{data.entrySession ? ` (${data.entrySession})` : ''} has already traded. Shown as a record of the last generated signal; wait for the next refresh.
+        </p>
+      ) : (
+        <p className="text-[11px] text-slate-500 mb-3">
+          Standalone literature factor, ranked across the validated top-{data.validatedTopKMin} universe. Entry is the next session's open. This is not the canonical Alpha score or a buy recommendation.
+        </p>
+      )}
+      <div className={`overflow-x-auto ${expired ? 'opacity-50' : ''}`}>
         <table className="w-full text-xs">
           <thead><tr className="text-[10px] text-slate-500 uppercase border-b border-slate-800">
             <th className="text-left py-2">Rank</th><th className="text-left py-2">Symbol</th><th className="text-right py-2">12-1 Return</th><th className="text-right py-2">20D ADT</th><th className="text-right py-2">Close</th>

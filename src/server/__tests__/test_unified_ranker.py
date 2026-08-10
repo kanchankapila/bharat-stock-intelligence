@@ -376,16 +376,22 @@ class TestUnifiedRankerRun:
         os.unlink(csv_path)
 
     def test_conviction_tiers_assigned_correctly(self):
+        # Conviction is now direction-aware: the tier ladder is walked against the strength of
+        # THIS row's own direction, so a bullish row reads the score and a bearish row reads
+        # its mirror. See test_ranker_direction_invariants.py for the defect this fixed.
         from unified_ranker import _conviction
-        assert _conviction(90) == 'S_ELITE'
-        assert _conviction(80) == 'S_ELITE'
-        assert _conviction(70) == 'A_HIGH'
-        assert _conviction(65) == 'A_HIGH'
-        assert _conviction(50) == 'B_MEDIUM'
-        assert _conviction(45) == 'B_MEDIUM'
-        assert _conviction(30) == 'C_LOW'
-        assert _conviction(25) == 'C_LOW'
-        assert _conviction(10) == 'D_MARGINAL'
+        assert _conviction(90, 'Buy') == 'S_ELITE'
+        assert _conviction(80, 'Buy') == 'S_ELITE'
+        assert _conviction(70, 'Buy') == 'A_HIGH'
+        assert _conviction(65, 'Buy') == 'A_HIGH'
+        assert _conviction(50, 'Buy') == 'B_MEDIUM'
+        assert _conviction(45, 'Buy') == 'B_MEDIUM'
+        assert _conviction(30, 'Buy') == 'C_LOW'
+        assert _conviction(25, 'Buy') == 'C_LOW'
+        assert _conviction(10, 'Buy') == 'D_MARGINAL'
+        # Same ladder, mirrored, for the short side.
+        assert _conviction(10, 'Sell') == 'S_ELITE'
+        assert _conviction(75, 'Sell') == 'C_LOW'
 
     def test_regime_weights_sum_to_one(self):
         from unified_ranker import REGIME_WEIGHTS
@@ -906,16 +912,22 @@ class TestDirectionlessScoreFallbackWhenEnabled:
         assert _classify(DIRECTIONLESS_BUY_FLOOR, bull=4, bear=4, directionless_fallback=True) == 'Buy'
 
     def test_any_net_screener_tilt_overrides_the_fallback_even_at_extreme_scores(self):
-        """The instant screeners express ANY opinion (bull != bear), they take back full
-        authority -- an extreme blended score never overrides an actual (even weak) screener
-        signal in the opposite direction. True regardless of the flag, since this branch never
-        reaches the fallback at all."""
+        """The instant screeners express ANY opinion (bull != bear), the directionless
+        fallback is out of the picture entirely -- an extreme blended score can never produce a
+        fallback-driven call in the OPPOSITE direction to an actual screener signal. True
+        regardless of the flag, since this branch never reaches the fallback at all.
+
+        What it no longer does is emit the screener's direction at any magnitude: a score that
+        flatly contradicts the vote resolves to Hold (DIRECTIONAL_AGREEMENT_FLOOR, 2026-08-10)
+        rather than labelling a 90-score name Sell. The invariant under test is 'never the
+        opposite direction', and Hold satisfies it -- the old 'Sell'/'Buy' expectations
+        encoded the defect."""
         from unified_ranker import _classify, DIRECTIONLESS_STRONG_BUY_FLOOR, DIRECTIONLESS_STRONG_SELL_CEIL
-        # Extremely high score, but screeners lean (even slightly) bearish -> still Sell-side,
-        # never a fallback-driven Buy.
-        assert _classify(DIRECTIONLESS_STRONG_BUY_FLOOR, bull=1, bear=2, directionless_fallback=True) == 'Sell'
-        # Extremely low score, but screeners lean (even slightly) bullish -> still Buy-side.
-        assert _classify(DIRECTIONLESS_STRONG_SELL_CEIL, bull=2, bear=1, directionless_fallback=True) == 'Buy'
+        assert _classify(DIRECTIONLESS_STRONG_BUY_FLOOR, bull=1, bear=2, directionless_fallback=True) == 'Hold'
+        assert _classify(DIRECTIONLESS_STRONG_SELL_CEIL, bull=2, bear=1, directionless_fallback=True) == 'Hold'
+        # A screener direction that AGREES with the score still wins outright.
+        assert _classify(70.0, bull=2, bear=1, directionless_fallback=True) == 'Buy'
+        assert _classify(30.0, bull=1, bear=2, directionless_fallback=True) == 'Sell'
 
     def test_normalize_is_robust_to_a_single_outlier(self):
         # min-max collapses the cluster near 0 when one outlier sets the max; percentile rank does not.
