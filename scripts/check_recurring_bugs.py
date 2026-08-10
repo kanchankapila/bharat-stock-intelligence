@@ -192,6 +192,16 @@ def check_missing_live_datasource_test(fetcher_files: list[Path]) -> list[str]:
     for path in fetcher_files:
         if not path.name.endswith("_fetcher.py") or "tests" in path.parts:
             continue
+        # A *_fetcher.py that never makes an HTTP call is not an external data source, so the
+        # live_datasource mandate doesn't apply to it -- it's a derived-feature engine with a
+        # misleading filename (screener_features_fetcher.py reads screener_appearances out of
+        # the DB and computes features). Checking for the client import rather than keeping an
+        # allowlist means a genuine fetcher can never be silently exempted by being renamed.
+        src = path.read_text(encoding="utf-8", errors="ignore")
+        if not re.search(r"^\s*(?:import|from)\s+(requests|httpx|urllib|curl_cffi|aiohttp)\b",
+                         src, re.MULTILINE):
+            continue
+
         stem = path.stem  # e.g. "asm_gsm_fetcher"
         base = stem[:-len("_fetcher")]  # e.g. "asm_gsm"
         candidates = {f"test_live_datasource_{base}.py", f"test_live_datasource_{stem}.py"}

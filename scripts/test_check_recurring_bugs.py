@@ -127,11 +127,16 @@ class TestRawPercentS:
 
 
 class TestMissingLiveDatasourceTest:
+    # The mandate applies to fetchers that actually call an external endpoint, so every
+    # fixture here must carry an HTTP client import — without one the file is a derived-feature
+    # engine and is correctly exempt (see test_a_fetcher_with_no_http_client_is_exempt).
+    FETCHER_SRC = "import requests\n\ndef run(): pass\n"
+
     def test_flags_a_fetcher_with_no_matching_test(self, tmp_path, monkeypatch):
         server_dir = tmp_path / "src" / "server"
         (server_dir / "tests").mkdir(parents=True)
         fetcher = server_dir / "brand_new_fetcher.py"
-        fetcher.write_text("def run(): pass\n")
+        fetcher.write_text(self.FETCHER_SRC)
         monkeypatch.setattr(crb, "SERVER_DIR", server_dir)
         findings = crb.check_missing_live_datasource_test([fetcher])
         assert len(findings) == 1
@@ -141,8 +146,20 @@ class TestMissingLiveDatasourceTest:
         server_dir = tmp_path / "src" / "server"
         (server_dir / "tests").mkdir(parents=True)
         fetcher = server_dir / "covered_fetcher.py"
-        fetcher.write_text("def run(): pass\n")
+        fetcher.write_text(self.FETCHER_SRC)
         (server_dir / "tests" / "test_live_datasource_covered.py").write_text("def test_x(): pass\n")
+        monkeypatch.setattr(crb, "SERVER_DIR", server_dir)
+        assert crb.check_missing_live_datasource_test([fetcher]) == []
+
+    def test_a_fetcher_with_no_http_client_is_exempt(self, tmp_path, monkeypatch):
+        """screener_features_fetcher.py reads screener_appearances out of the DB and computes
+        features — it is a derived-feature engine with a misleading filename, not a data
+        source, so the live_datasource mandate does not apply. Checking for the client import
+        (rather than keeping an allowlist) means a genuine fetcher can't be exempted by rename."""
+        server_dir = tmp_path / "src" / "server"
+        (server_dir / "tests").mkdir(parents=True)
+        fetcher = server_dir / "derived_features_fetcher.py"
+        fetcher.write_text("from db_compat import connect\n\ndef run(): pass\n")
         monkeypatch.setattr(crb, "SERVER_DIR", server_dir)
         assert crb.check_missing_live_datasource_test([fetcher]) == []
 

@@ -58,6 +58,17 @@ jobs:
       - name: Run pytest
         run: python -m pytest src/server/tests/ -q
 
+      # Static checks for the bug classes that have each recurred 3-10+ times
+      # (date.today() write-anchors, raw %s placeholders, fetchers with no
+      # live_datasource test). --diff against the base ref so this blocks NEW
+      # occurrences without demanding the existing backlog be cleared first;
+      # run `python scripts/check_recurring_bugs.py` with no args for the full list.
+      - name: Recurring-bug checks (changed files only)
+        run: |
+          git fetch --no-tags --depth=1 origin "${{ github.base_ref || github.event.before || 'main' }}" || true
+          python scripts/check_recurring_bugs.py --diff FETCH_HEAD || \
+            python scripts/check_recurring_bugs.py --diff HEAD~1
+
   smoke-test:
     runs-on: ubuntu-latest
     # Boots the real tRPC router in-process (no Express/Redis/Ollama — see

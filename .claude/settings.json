@@ -18,5 +18,22 @@
     "additionalDirectories": [
       "D:\\Github\\bharat-stock-intelligence\\src\\server"
     ]
+  },
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          { "type": "command", "command": "node .claude/hooks/rules-pointer.mjs" }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          { "type": "command", "command": "node .claude/hooks/verify-gate.mjs" }
+        ]
+      }
+    ]
   }
 }

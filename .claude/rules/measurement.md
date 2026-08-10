@@ -1,0 +1,53 @@
+# Measurement Discipline
+
+Read before quoting, comparing, or acting on any accuracy, win-rate, IC, or backtest number.
+
+## Accuracy comes from realized returns, never a proxy
+
+- **Accuracy and win-rate must always be computed from actual realized returns vs. the actual system-generated signal — never from a proxy metric (a job's "success" status, a promotion gate's CV/AUC number, a model's self-reported test score).** This project's own incident history is full of proxies that looked fine while the real outcome was wrong — a leak-inflated CV score blocking honest retrains forever, a "success" heartbeat on a step that silently wrote nothing, `unified_recommendations` classifying `Sell` on a stock that then rallied 15%+. The only check that catches this class of bug is joining the signal table (`unified_recommendations`/`unified_signals`/`intraday_recommendations`) against what the underlying instrument actually did afterward (`stock_ohlcv`/`intraday_ohlcv`, or the already-graded `signal_outcomes`/`intraday_recommendation_outcomes` tables) and computing win rate as `WIN / (WIN + LOSS)` — decisive outcomes only, NEUTRAL/PENDING excluded — plus average realized return, not a single blended percentage. **Before trusting or comparing any win-rate number, check its `label_definition`** — this table has at least two structurally different label conventions in production right now (`signal_outcomes.label_definition`: `terminal_pct2`, a strict fixed ±2% terminal-return barrier, vs `path_barrier`, a path-based max-favorable-excursion rule) and they are NOT comparable: live-measured 2026-08-06, `technical`-sourced h5/h15 outcomes (path_barrier) showed an 88–91% win rate while `confluence`-sourced h7/h14 outcomes (terminal_pct2, the exact same calendar window) showed 41–44% — the gap is almost entirely the label definition, not real skill. See [[topgainers_reverse_engineering_practice]] for the full methodology this rule is extracted from.
+
+## Reverse-engineer against what actually happened
+
+- **Always take a reverse-engineering approach to validate the correctness of logic, models, and code — not a code-only review.** Trace the claim against what actually happened: pull real top gainers/losers from `stock_ohlcv` and check whether the system's own pre-move signal called it correctly (see [[topgainers_reverse_engineering_practice]]); for a model, grade its stored predictions against realized outcomes rather than trusting its own reported CV/test metric; for a fix, re-run the affected code path against live production data and query the result back, rather than stopping at `tsc --noEmit`/a green test suite. This project has repeatedly found real, currently-active bugs this way that a code-only review missed entirely — e.g. the 2026-08-06 session that found `unified_ranker`'s RL gate had silently excluded 825 symbols platform-wide (43% of them on fewer than 5 historical samples) purely by tracing one specific symbol's absence through the live pipeline step by step, something no amount of reading `unified_ranker.py` in isolation would have surfaced. A plausible-sounding lead from code-reading alone (e.g. "market_cap is NULL for this symbol, that's probably it") is a hypothesis, not a finding, until it's actually traced end to end against live data — the same session's own first-pass KECL lead turned out to be entirely wrong once traced properly.
+
+## The panel spec (use this exact recipe, every time)
+
+Any cross-sectional forward-return measurement on this data:
+
+- **Per-date, then average. Never pooled.** Pooling has flipped or inflated a conclusion three separate times here (`cs_ranker._mean_daily_ic`, the screener-direction measurement, the RL-gate counterfactual — a pooled +0.798% became a per-date +0.098%, t=1.22). If a dramatic pooled number disagrees with per-date numbers, the pooled number is wrong.
+- **Winsorise.** Raw means on `stock_ohlcv` are void: a +127,900% RELIANCE bar once produced an 850%-annualised phantom edge. Raw mean 5d return 6.49% vs 0.00% median vs 0.65% winsorised.
+- **Filter `is_suspect = 1`.** ~425 quarantined bars; `ohlcv_quality.py` owns the flag.
+- **Liquidity floor ≥ ₹1cr ADT.** Without it you are measuring microcaps you cannot trade.
+- **Next-day OPEN entry.** Signals computed off a close cannot be bought at that close.
+- **Check `label_definition` before comparing any two win rates.** `terminal_pct2` (fixed ±2% terminal) and `path_barrier` (path-based MFE) are not comparable — same calendar window, 41–44% vs 88–91%, and the gap is almost entirely the label.
+- **Check `signal_source` before joining `signal_outcomes`.** Three writers share that table.
+- **Decompose a "% of rows affected" figure by liquidity before believing it.** A defect reading 42% of rows read ~100% of the *tradeable* slice.
+
+## Known state of the edge (as measured, not assumed)
+
+`unified_score` 5d rank IC ≈ 0.0001 (t=0.02). Short-horizon momentum is negative at three horizons. Bullish screener consensus is significantly negative (t=−2.36). `insider_net`, `delivery_spike`, `ticket_size` are null-to-negative. `momentum_12_1` (+0.86%/mo, t=2.08) is the only positive factor and does not clear a multiple-testing bar across 18 factors tested.
+
+**Consequence: reweighting the existing engines is not a fix.** A new factor must beat `momentum_12_1` *alone* — combining reduced performance in every case tested (12-1 alone +0.86% vs +2 exclusions −1.25%; long-only +0.86% vs long/short +0.49%; the 8-engine blend at IC 0.0001).
+
+## Already tested — do not re-run without a reason
+
+Each of these was measured on the 5-year price panel with the spec above. Re-testing them costs days and returns the same answer. If you think one deserves another look, state what changed (more history, a different horizon, a different construction) before spending the time.
+
+| Factor | Result | Verdict |
+|---|---|---|
+| `momentum_12_1` | +0.86%/mo, t=2.08 | **only positive** — does not clear Bonferroni across 18 factors |
+| `value_book_to_price` | +0.93%/mo, t=2.67 | provisional — vendor history may be retrospectively restated |
+| `momentum_21d` / `63d` / `reversal_21d` | negative, t up to −3.96 | dead |
+| `high_vol` / `low_vol` | both negative (−1.21, −1.66) | **both tails lose**; the middle outperforms |
+| `insider_net` | −0.00%, t=−0.01 | clean null across 6 separate years |
+| `delivery_spike` / `delivery_trend` | t=−1.08 / −1.43 | dead |
+| `ticket_size` (institutional proxy) | −0.67%, t=−2.36 | significantly **inverted** |
+| screener bullish consensus | IC −0.027, t=−2.36 | significantly negative; cleaning the labels made it *more* negative |
+| news sentiment | same-day +0.13 IC, next-day −0.03 | real but not tradeable — the move is over by the first entry you can take |
+| `near_52w_high`, `low_beta`, `low_idio_vol` | insignificant | US-published factors that did not transfer |
+| `low_max_ret` (lottery demand) | t=−3.12 | significantly **inverted** vs the published result |
+| intraday (23 days, 256 configs) | best net at 15bps = −0.004% | edge exists in sign, smaller than costs |
+
+**Combining made it worse in every case tested.** 12-1 alone +0.86% vs the same factor with two exclusions −1.25%. Long-only +0.86% vs long/short +0.49%. The 8-engine blend at IC 0.0001. A new factor must beat `momentum_12_1` **alone**, not add to it.
+
+**Fundamentals, analyst, ownership and earnings factors cannot currently be tested at all** — every one of those tables has ~30 distinct dates, all starting 2026-06-30, i.e. 1–2 independent quarterly observations. This is a calendar constraint, not an engineering one. Do not "test" them; you will be fitting noise.
