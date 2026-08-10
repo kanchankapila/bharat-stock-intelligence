@@ -1779,8 +1779,17 @@ class UnifiedRanker:
         if hv_cut is None:
             print(f"[UnifiedRanker] high-vol veto INACTIVE (only {len(realized_vol)} symbols "
                   f"with hv_20d; need 50+). Buy pool is unfiltered for volatility today.")
+        # How often each filter/multiplier actually fires. This exists because "the ranker has
+        # too many layers" is an opinion until you can say which of them touch anything: a layer
+        # that never fires is removable at zero risk, and one that fires constantly deserves
+        # evidence it helps. Printed once per run; costs an integer increment per symbol.
+        fired = {k: 0 for k in ('rl_gate_skip', 'nonfinite_or_tiny_skip', 'quality_gate',
+                                'red_flag_veto', 'high_vol_veto', 'factor_crowding',
+                                'ml_bet_nonzero', 'breakout_computed',
+                                'breakout_ACTUALLY_BINDS')}
         for sym in all_symbols:
             if not self._passes_rl_gate(sym, rl_gate_map):
+                fired['rl_gate_skip'] += 1
                 continue
 
             # Reporting view: every engine, so the persisted *_score columns stay complete.
@@ -1793,10 +1802,14 @@ class UnifiedRanker:
             unified = _blend(engine_scores, present, base_weights)
             qm = quality_metrics.get(sym)
             if qm:
-                unified *= quality_gate(qm['piotroski'], qm['roe'])
+                _qg = quality_gate(qm['piotroski'], qm['roe'])
+                if _qg < 1.0:
+                    fired['quality_gate'] += 1
+                unified *= _qg
             # Explicit non-finite check: `unified < 1` is False for NaN, so without this a
             # NaN score is written out and mislabelled 'Buy' by _classify's fall-through.
             if not math.isfinite(unified) or unified < 1:
+                fired['nonfinite_or_tiny_skip'] += 1
                 continue
 
             bull = bull_counts.get(sym, 0)
@@ -1807,6 +1820,7 @@ class UnifiedRanker:
             # the buy pool no matter how strong its score is (then it also ranks low + unsized).
             red_flagged = is_red_flagged(membership.get(sym, []))
             if red_flagged:
+                fired['red_flag_veto'] += 1
                 unified *= RED_FLAG_VETO_MULT
                 classification = veto_classification(classification)
 
@@ -1816,6 +1830,7 @@ class UnifiedRanker:
             # missing hv_20d is NOT vetoed (fail open), same as every other missing-data path here.
             sym_vol = realized_vol.get(sym)
             if hv_cut is not None and sym_vol is not None and sym_vol >= hv_cut:
+                fired['high_vol_veto'] += 1
                 unified *= HIGH_VOL_VETO_MULT
                 classification = veto_classification(classification)
 
@@ -1824,6 +1839,7 @@ class UnifiedRanker:
             # really just one undiversified bet wearing a diversified-looking wrapper.
             crowd_mult, crowd_factor = factor_crowding_multiplier(mf_map.get(sym, {}))
             if crowd_mult < 1.0:
+                fired['factor_crowding'] += 1
                 unified *= crowd_mult
 
             # #6 position size: back the stronger of the two validated edges — the López de Prado
@@ -1835,6 +1851,15 @@ class UnifiedRanker:
             bo_bet = (BREAKOUT_SIZE_P90 if (bo_p90 and bo_score >= bo_p90)
                       else BREAKOUT_SIZE_P80 if (bo_p80 and bo_score >= bo_p80)
                       else 0.0)
+            if ml_bet > 0:
+                fired['ml_bet_nonzero'] += 1
+            # Count BINDING, not merely non-zero: bet = max(ml_bet, bo_bet), so a breakout tilt
+            # below the ML leg changes nothing. Counting bo_bet>0 measured that the branch ran,
+            # not that it mattered -- which is how this layer stayed silently inert.
+            if bo_bet > 0:
+                fired['breakout_computed'] += 1
+            if bo_bet > ml_bet:
+                fired['breakout_ACTUALLY_BINDS'] += 1
             bet = max(ml_bet, bo_bet)
             vol = max(VOL_FLOOR_PCT, (qm or {}).get('vol') or DEFAULT_VOL_PCT)
             raw_sizes[sym] = (bet / vol) if classification in ('Strong Buy', 'Buy') else 0.0
@@ -1925,6 +1950,17 @@ class UnifiedRanker:
 
         # Normalize conviction×inverse-vol into capped portfolio weights (# 6), then apply the
         # sector-concentration cap (#27/#30) using the same sector_map already loaded above.
+        _wp = [v for v in win_probs.values() if v is not None and math.isfinite(v)]
+        if _wp:
+            _lo, _hi = min(_wp), max(_wp)
+            _mlb = bet_size_from_probability(sum(_wp) / len(_wp))
+            print(f'[UnifiedRanker] win_probability spread {_lo:.4f}..{_hi:.4f} '
+                  f'({len(set(round(v, 4) for v in _wp))} distinct) -> mean ML bet {_mlb:.3f}; '
+                  f'breakout tilt caps at {BREAKOUT_SIZE_P90} so it can '
+                  f'{"BIND" if BREAKOUT_SIZE_P90 > _mlb else "NEVER BIND"} under max().')
+        _tot = len(all_symbols)
+        print('[UnifiedRanker] layer firing counts over %d candidates: %s' % (
+            _tot, ', '.join(f'{k}={v} ({v/max(1,_tot)*100:.1f}%)' for k, v in fired.items())))
         position_sizes = normalize_position_sizes(raw_sizes, sectors=sector_map)
 
         # Correlation-cluster cap (#27/#30 follow-up, 2026-08-05): the sector cap alone can miss

@@ -253,5 +253,51 @@ class TestDroppedEngineStillReports:
         assert 'ml' not in present              # but excluded from the blend
 
 
+
+class TestLayerFiringInstrumentation:
+    """Counters that turn "this ranker is over-engineered" from an opinion into a measurement.
+
+    Measured live on 2,362 candidates (2026-08-10): rl_gate_skip 21.9%, quality_gate 27.8%,
+    factor_crowding 77.9%, high_vol_veto 14.2%, ml_bet 72.1%, breakout_ACTUALLY_BINDS 7.5%,
+    nonfinite_skip 0.1%, red_flag_veto 0.0%.
+
+    The breakout counter must measure BINDING, not computation. bet = max(ml_bet, bo_bet), so a
+    bo_bet below the ML leg changes nothing -- counting bo_bet>0 reports 15.3% while the layer
+    actually affects 7.5%. That gap is precisely how a layer stays silently inert, and reading
+    the wrong counter is what led to a (wrong) claim that the breakout tilt could never bind.
+    """
+
+    @staticmethod
+    def _src():
+        p = os.path.join(os.path.dirname(__file__), '..', 'unified_ranker.py')
+        with open(p, encoding='utf-8') as fh:
+            return fh.read()
+
+    def test_every_scoring_layer_has_a_counter(self):
+        src = self._src()
+        for k in ('rl_gate_skip', 'nonfinite_or_tiny_skip', 'quality_gate', 'red_flag_veto',
+                  'high_vol_veto', 'factor_crowding', 'ml_bet_nonzero',
+                  'breakout_computed', 'breakout_ACTUALLY_BINDS'):
+            assert f"'{k}'" in src, f'layer counter {k} missing -- a layer with no counter is invisible'
+
+    def test_breakout_counter_measures_binding_not_computation(self):
+        src = self._src()
+        assert 'if bo_bet > ml_bet:' in src, (
+            'breakout_ACTUALLY_BINDS must compare against ml_bet. Counting bo_bet>0 reports a '
+            'layer as active when max(ml_bet, bo_bet) discards it.')
+
+    def test_win_probability_dispersion_is_reported(self):
+        """A collapsed sizing probability would make the breakout tilt unreachable; the run
+        must say so out loud rather than leaving it to be rediscovered."""
+        src = self._src()
+        assert 'win_probability spread' in src
+        assert 'NEVER BIND' in src
+
+    def test_counts_are_printed_with_a_denominator(self):
+        """A bare count is unreadable; 517 means nothing without the 2,362."""
+        src = self._src()
+        assert 'layer firing counts over %d candidates' in src
+
+
 if __name__ == '__main__':
     raise SystemExit(pytest.main([__file__, '-q']))
