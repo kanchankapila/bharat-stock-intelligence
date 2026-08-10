@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """
-Static checks for the three recurring bug classes documented across this project's
-architecture review and incident history (see CLAUDE.md's "Recent session notes" and
-docs/audit-2026-07-28/FULL_STACK_AUDIT.md):
+Static checks for recurring bug classes documented across this project's architecture
+review and incident history (see .claude/rules/recurring-bugs.md, which carries the
+recurrence count for each):
 
   1. A bare `date.today()`/`datetime.now()` used near a point-in-time write-guard
      (`UPDATE ... WHERE date >= ?` / `CASE WHEN date >= ... ELSE NULL`). This exact shape
@@ -22,6 +22,30 @@ docs/audit-2026-07-28/FULL_STACK_AUDIT.md):
      absence of exactly this test is what let the 2026-07-23 URL-as-symbol corruption run
      undetected for its entire life (nothing ever hit the real API and checked the shape of
      what came back).
+  4. `x != x` (or `x <> x`) used as a NaN test inside SQL. Postgres defines `NaN = NaN` as
+     TRUE so its btree ordering can be total, which makes the portable IEEE self-inequality
+     trick match nothing and cheerfully report a NaN-poisoned column "clean". The same
+     expression in plain Python is correct and is NOT flagged -- only occurrences in SQL
+     context are.
+  5. A multi-word Postgres cast (`::double precision`, `::timestamp with time zone`,
+     `::character varying`). sqlTranslate's stripPgCasts only matches single-token type
+     names, so on the SQLite fallback path it strips `::double` and leaves a dangling
+     ` precision`, and the whole query fails -- silently, because the caller gets `{}` back
+     rather than an error, which has disabled a gate entirely rather than raising. Use the
+     single-token spellings: `::float8`, `::timestamptz`, `::varchar`.
+
+Deliberately NOT checked: `float(x or 0)` / `int(x or 0)` on a possibly-NaN column. It is a
+real bug class (NaN is truthy, so `nan or 0` is `nan`), but measured against this repo it
+matches 50 sites and inspection showed most are legitimate None->0 coercions on DB
+aggregates. A check that is ~90% false positive gets ignored within a week and then protects
+nothing while looking like it does. Catching it needs type information this script does not
+have.
+
+Checks 4 and 5 both matched zero real occurrences when added, so they are regression guards:
+they exist to stop the class coming back, not to work through a backlog.
+
+File scope is `src/server/*.py`. The multi-word-cast class also occurs in `.ts` (sqlTranslate
+is TypeScript); this script does not cover that side.
 
 This is a standalone checker, not a git hook -- .git/hooks is shared across every worktree
 of this repository (confirmed: multiple concurrent Claude sessions each have their own
@@ -146,7 +170,13 @@ def check_raw_percent_s(path: Path, text: str) -> list[str]:
     # If a '%' operator (or .format()) is applied within the same statement span -- e.g.
     # `"...%s..." % (...)` -- the %s is plain Python string interpolation, already resolved
     # by the time execute() sees it, not a SQL placeholder bug.
-    percent_format_re = re.compile(r'^\s*%\s*[\("\']|\.format\(')
+    # Second alternative: a triple-quoted SQL block closed and immediately `%`-formatted on
+    # the same line (`""" % int(lookback_days)`), which the line-start form misses -- the one
+    # false positive this checker produced against the repo (feature_coverage_gate.py:64).
+    # Kept narrow to the triple-quote spelling on purpose: widening it to any closing quote
+    # would also swallow a genuine placeholder in a query containing a quoted '%s' LIKE
+    # pattern.
+    percent_format_re = re.compile(r'^\s*%\s*[\("\']|\.format\(|(?:"""|\'\'\')\s*%\s*[\w(\[]')
     i = 0
     while i < len(lines):
         line = lines[i]
@@ -182,6 +212,84 @@ def check_raw_percent_s(path: Path, text: str) -> list[str]:
                 f"Postgres syntax error at runtime."
             )
         i = j + 1
+    return findings
+
+
+_TRIPLE_RE = re.compile(r'"""|\'\'\'')
+
+
+def _code_lines(text: str):
+    """Yield (index, line) for lines that are actual code -- skipping `#` comments and
+    anything inside (or on the boundary line of) a triple-quoted string. Prose describing a
+    bug is not the bug; both checks below have their only repo-wide "matches" in exactly
+    such prose."""
+    in_docstring = False
+    for i, line in enumerate(text.splitlines()):
+        was_in = in_docstring
+        n_triples = len(_TRIPLE_RE.findall(line))
+        if n_triples % 2 == 1:
+            in_docstring = not in_docstring
+        if line.strip().startswith("#") or was_in or n_triples > 0:
+            continue
+        yield i, line
+
+
+# A self-inequality is only a bug in SQL; `f != f` in plain Python is a correct NaN test and
+# is used deliberately in ~10 fetchers here. Requiring a SQL keyword in the surrounding
+# window is what separates the two.
+_SELF_INEQ_RE = re.compile(r"\b([A-Za-z_][\w.]*)\s*(?:!=|<>)\s*\1\b")
+_SQL_CONTEXT_RE = re.compile(r"\b(SELECT|WHERE|CASE|HAVING|UPDATE|DELETE|JOIN)\b")
+
+
+def check_nan_self_inequality(path: Path, text: str) -> list[str]:
+    if "tests" in path.parts:
+        return []
+    findings = []
+    lines = text.splitlines()
+    for i, line in _code_lines(text):
+        if not _SELF_INEQ_RE.search(line):
+            continue
+        window = "\n".join(lines[max(0, i - 6):i + 4])
+        if not _SQL_CONTEXT_RE.search(window):
+            continue  # plain Python NaN check -- correct, and used on purpose here
+        findings.append(
+            f"{_display_path(path)}:{i + 1}: `x != x` used as a NaN test inside SQL -- "
+            f"Postgres defines NaN = NaN as TRUE (its btree ordering is total), so this "
+            f"matches nothing and reports a NaN-poisoned column clean. Compare on the text "
+            f"cast instead; see data_integrity_repair.py for the dialect-specific form."
+        )
+    return findings
+
+
+_MULTIWORD_CAST_RE = re.compile(
+    r"::\s*(double precision|timestamp with time zone|timestamp without time zone|character varying)",
+    re.IGNORECASE,
+)
+_CAST_FIX = {
+    "double precision": "::float8",
+    "timestamp with time zone": "::timestamptz",
+    "timestamp without time zone": "::timestamp",
+    "character varying": "::varchar",
+}
+
+
+def check_multiword_pg_cast(path: Path, text: str) -> list[str]:
+    if "tests" in path.parts:
+        return []
+    findings = []
+    for i, line in _code_lines(text):
+        m = _MULTIWORD_CAST_RE.search(line)
+        if not m:
+            continue
+        found = m.group(1).lower()
+        findings.append(
+            f"{_display_path(path)}:{i + 1}: multi-word Postgres cast `::{found}` -- "
+            f"sqlTranslate's stripPgCasts only matches single-token type names, so the "
+            f"SQLite fallback path strips `::{found.split()[0]}` and leaves a dangling "
+            f"` {found.split(' ', 1)[1]}`, failing the whole query silently (the caller gets "
+            f"{{}} back, which has disabled a gate rather than raised). Use "
+            f"`{_CAST_FIX[found]}`."
+        )
     return findings
 
 
@@ -250,6 +358,8 @@ def main() -> int:
         text = path.read_text(encoding="utf-8", errors="ignore")
         all_findings.extend(check_date_anchor(path, text))
         all_findings.extend(check_raw_percent_s(path, text))
+        all_findings.extend(check_nan_self_inequality(path, text))
+        all_findings.extend(check_multiword_pg_cast(path, text))
 
     if not args.skip_live_datasource_check:
         all_findings.extend(check_missing_live_datasource_test(files))
@@ -259,7 +369,7 @@ def main() -> int:
         for f in all_findings:
             print(f"  - {f}")
         print("\nThese are heuristic checks (a few hours of tooling, not a compiler) -- review "
-              "each one; a false positive is possible, but every one of these three patterns "
+              "each one; a false positive is possible, but every one of these patterns "
               "has, historically, been a real bug when it appeared.")
         return 1
 

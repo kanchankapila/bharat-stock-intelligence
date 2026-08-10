@@ -2,12 +2,16 @@
 
 Each of these has bitten this codebase **more than once**. Grep for the signature before you write, and again before you claim a fix is done.
 
+**🤖 = enforced by `scripts/check_recurring_bugs.py`** (runs in CI on changed files). Everything unmarked is enforced only by you remembering to read this file — and the recurrence counts below were all recorded *after* the class was documented here, so assume prose alone does not hold. If you fix a class that recurs again, the durable move is a check in that script, not another paragraph here.
+
+Currently automated: `date.today()` write-anchor, raw `%s` placeholder, missing `live_datasource` test, `x != x` NaN test in SQL, multi-word `::` cast. Deliberately not automated: `float(x or 0)` — measured at 50 matches repo-wide, mostly legitimate `None`→0 on DB aggregates; catching it needs type information the script doesn't have.
+
 ## Dates & scheduling
 
 | Signature | Why it breaks | Recurrences |
 |---|---|---|
 | `date.today()` / `datetime.now()` as an **exact-match write target** (`WHERE date = ?`) | Post-close jobs now finish after midnight IST, so "today" resolves to a day with no grid row → UPDATE matches 0 rows, silently. Use `as_of.logical_trading_date()`. | 11 files |
-| `date.today()` anchoring a `CASE WHEN date >= x ELSE NULL` guard | On any weekend/holiday the anchor matches nothing and the `ELSE` **nulls the column's entire history**. Anchor to `MAX(date) FROM stock_ohlcv`. | 10 |
+| 🤖 `date.today()` anchoring a `CASE WHEN date >= x ELSE NULL` guard | On any weekend/holiday the anchor matches nothing and the `ELSE` **nulls the column's entire history**. Anchor to `MAX(date) FROM stock_ohlcv`. | 10 |
 | Raw `daysStale()` on a freshness check | Monday morning reads Friday data as 3 days stale. Use `tradingDaysStale()`. | 4 |
 | Hand-rolled "step back N weekdays" | Skips no holidays, so `--days 90` covers 87 sessions. Use `as_of.trading_days_back()`. | 2 |
 | A `cronPattern` mirrored into `jobRegistry.ts` / `monitorScripts.ts` | Drifts from the real registration → phantom "late"/"stale" alerts forever. Guarded now by 5 mirror-consistency test suites — keep them passing. | 6 |
@@ -17,7 +21,7 @@ Each of these has bitten this codebase **more than once**. Grep for the signatur
 | Signature | Why it breaks |
 |---|---|
 | `float(x or 0)` / `int(x or 0)` on a model-output column | **NaN is truthy** — `nan or 0` is `nan`. Use `math.isfinite`, and **skip** rather than coerce to 0 (coercing fabricates the worst possible score). |
-| `x != x` to detect NaN in Postgres | Postgres defines `NaN = NaN` as TRUE for total btree ordering. The IEEE self-inequality matches nothing and reports "clean". |
+| 🤖 `x != x` to detect NaN in Postgres | Postgres defines `NaN = NaN` as TRUE for total btree ordering. The IEEE self-inequality matches nothing and reports "clean". (In plain Python `x != x` is correct and is used on purpose in ~10 fetchers — the checker only flags the SQL form.) |
 | A NaN-detection test on SQLite | SQLite coerces NaN to NULL on insert, so the test passes against unfixed code. Use a throwaway Postgres schema. |
 | `ORDER BY col DESC` with possible NaN | Postgres sorts NaN **highest** — NaN rows rank #1. Wrap in `NULLIF(col, 'NaN'::float8)`. |
 | Fixing NaN at the source | Does **not** clean rows the bug already wrote. `run()` purges only the `computed_at` it is currently writing; 13,505 poisoned rows survived a source fix for weeks. |
@@ -26,8 +30,8 @@ Each of these has bitten this codebase **more than once**. Grep for the signatur
 
 | Signature | Why it breaks |
 |---|---|
-| Raw `%s` placeholders in a Postgres branch | Bypasses `translate()`, which expects `?`. psycopg2 throws on the literal `%`. | 
-| Multi-word casts (`::double precision`) | `stripPgCasts` only matches single-token type names; leaves a dangling ` precision` on the SQLite path. Use `::float8`. |
+| 🤖 Raw `%s` placeholders in a Postgres branch | Bypasses `translate()`, which expects `?`. psycopg2 throws on the literal `%`. | 
+| 🤖 Multi-word casts (`::double precision`) | `stripPgCasts` only matches single-token type names; leaves a dangling ` precision` on the SQLite path. Use `::float8`. (Checker covers `.py` only — `sqlTranslate` itself is `.ts` and is not scanned.) |
 | `STDDEV`, `DISTINCT ON`, `NOW()`, `ANY(ARRAY[])` | Postgres-only. On the SQLite fallback the whole query fails and the caller silently gets `{}` — which can **disable a gate entirely** rather than error. |
 | `pd.read_sql(raw_string, conn)` containing a literal `%` | Different execution path from `db_compat`; the `%` is read as a param marker. Wrap in `sqlalchemy.text()`. |
 | `CREATE TABLE IF NOT EXISTS` after adding a column | No-ops on an existing table. Needs an explicit `safe_alter`. |
