@@ -1421,12 +1421,11 @@ export async function runTechnicalSignalScan(options: {
     // dead-column sweep -- see recLogUpsertSql below for the fuller writeup).
     const quantRows = symbolsInScan.length
       ? (await dbAll(
-          `SELECT symbol, rank_composite FROM (
-             SELECT symbol, rank_composite,
-                    ROW_NUMBER() OVER (PARTITION BY symbol ORDER BY date DESC) AS rn
-             FROM quant_scores
-             WHERE rank_composite IS NOT NULL AND symbol IN (${symbolsInScan.map(() => '?').join(',')})
-           ) t WHERE rn = 1`,
+          // quant_scores is keyed PRIMARY KEY (symbol) -- one row per symbol, no date column.
+          // The latest-per-symbol window this used to carry referenced a `date` that does not
+          // exist, throwing on every scan from 2026-08-10 and aborting the whole write.
+          `SELECT symbol, rank_composite FROM quant_scores
+           WHERE rank_composite IS NOT NULL AND symbol IN (${symbolsInScan.map(() => '?').join(',')})`,
           symbolsInScan
         ) as { symbol: string; rank_composite: number | null }[])
       : [];

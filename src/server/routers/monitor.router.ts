@@ -395,9 +395,25 @@ export async function getSystemStatus(now: Date = new Date()) {
       getLastRunAt(s.id as ScriptId),
       getScriptStats(s.id as ScriptId),
     ]);
-    // Fall back to stored timestamp for scripts that ran but produced no DB rows
+    // Take the LATEST of three independent pieces of evidence that the script ran, rather than
+    // `dbLastRunAt ?? storedRanAt`. Preferring the output-table probe is only correct when a
+    // healthy run always writes a row -- and for a GATED script it is not. strategy-optimizer's
+    // probe is MAX(snapshot_at) FROM screener_weight_history, but its promotion gate deliberately
+    // writes nothing when the optimised weights lose to baseline on held-out data (the gate
+    // working as designed: 2026-08-09 holdout 0.4139 vs baseline 0.4437, 2026-08-10 0.4317 vs
+    // 0.4640). Every correctly-rejected run therefore made the job look staler, and it was
+    // reported "stale, last Aug 03" while in fact running clean every week. A gated run is a
+    // successful run.
+    //
+    // job_heartbeat is the authoritative "this job ran" record -- updateMonitorState() writes it
+    // on every scheduled run, whereas `monitor_<id>_ran_at` is only stamped by the manual
+    // triggerScript path, so for a cron-driven script the heartbeat is the ONLY non-output-table
+    // evidence that exists.
     const storedRanAt = runStates[`monitor_${s.id}_ran_at`] ?? null;
-    const lastRunAt = dbLastRunAt ?? storedRanAt;
+    const hbRanAt = heartbeatByName.get(s.id)?.lastSuccessAt ?? null;
+    const lastRunAt = [dbLastRunAt, storedRanAt, hbRanAt]
+      .filter((t): t is string => t != null)
+      .sort((a, b) => toComparableMs(b) - toComparableMs(a))[0] ?? null;
     const stateKey = `monitor_${s.id}`;
     const rawState = runStates[stateKey];
     let runState: 'never' | 'running' | 'success' | 'failed' | 'stale' = 'never';

@@ -1475,10 +1475,14 @@ export async function initQueues(): Promise<boolean> {
       async (_job: Job) => {
         if (!(await isMarketOpen())) {
           console.log('[QUEUE] technical-signals skipped — outside NSE market hours (weekend/holiday)');
-          return;
+          // Skipped is not a success. The 16:00/19:00 post-close runs used to fall through to the
+          // 'completed' handler below and stamp 'success' over the day's real failures -- which is
+          // exactly how 13 consecutive failed scans on 2026-08-10/11 left a green heartbeat.
+          return { skipped: true };
         }
         const { runTechnicalSignalScan } = await import('./technicalSignalsService');
         await runTechnicalSignalScan();
+        return { skipped: false };
       },
       {
         connection,
@@ -1488,8 +1492,9 @@ export async function initQueues(): Promise<boolean> {
       },
     );
 
-    technicalSignalsWorker.on('completed', (_job) => {
+    technicalSignalsWorker.on('completed', (_job, result?: { skipped?: boolean }) => {
       console.log('[QUEUE] technical-signals completed');
+      if (result?.skipped) return;
       updateMonitorState('technical-scan', 'success');
     });
     technicalSignalsWorker.on('failed', (_job, err) => {

@@ -34,6 +34,8 @@ N_STATES   = 5
 # for at least a few days; this prior encodes that as a soft bias, not a hard constraint.
 MIN_SELF_TRANSITION = 0.5  # expected regime duration >= 2 days; below this, reject the model
 STICKY_PRIOR_WEIGHT = 15.0
+# EM restarts for train_hmm(). Fixed list, not random, so a retrain stays reproducible.
+RESTART_SEEDS = (42, 0, 1, 7, 123, 2024)
 
 
 class NoRegimeData(Exception):
@@ -199,12 +201,35 @@ def train_hmm(lookback_days: int = 1260, holdout_days: int = 60, force: bool = F
     X = scaler.fit_transform(train_df.fillna(0))
 
     transmat_prior = np.ones((N_STATES, N_STATES)) + np.eye(N_STATES) * STICKY_PRIOR_WEIGHT
-    model = hmm.GaussianHMM(
-        n_components=N_STATES, covariance_type="full",
-        transmat_prior=transmat_prior,
-        n_iter=200, random_state=42,
-    )
-    model.fit(X)
+
+    # Multiple random restarts, keeping the best fit by TRAINING log-likelihood.
+    #
+    # EM converges to a local optimum, and for this panel the choice of seed moves the holdout
+    # score by more than the champion/challenger gap the gate below is trying to measure.
+    # Measured 2026-08-11 on the live 832x8 panel, holdout per-sample ll by seed:
+    #   42 -> 9.95 | 0 -> 10.12 | 1 -> 9.98 | 7 -> 11.17 | 123 -> 10.87 | 2024 -> 10.75
+    # against an incumbent at 11.02. So the hardcoded random_state=42 was not "the" retrained
+    # model, it was one draw from a spread that straddles the champion -- the gate's verdict was
+    # decided by seed luck rather than by whether the new model is better. One seed also drew a
+    # non-converging fit ("Model is not converging", seed 0).
+    #
+    # Selection is on the TRAIN objective, never the holdout: picking restarts by holdout score
+    # would be choosing on the very metric the promotion gate then uses, which is how a gate
+    # gets gamed into promoting an overfit model. Best-of-N by training likelihood is just
+    # standard EM restart practice; the gate below stays an honest out-of-sample test.
+    best_model, best_train_ll = None, -np.inf
+    for seed in RESTART_SEEDS:
+        candidate = hmm.GaussianHMM(
+            n_components=N_STATES, covariance_type="full",
+            transmat_prior=transmat_prior,
+            n_iter=200, random_state=seed,
+        )
+        candidate.fit(X)
+        train_ll = candidate.score(X) / len(X)
+        if train_ll > best_train_ll:
+            best_model, best_train_ll = candidate, train_ll
+    model = best_model
+    print(f"[HMM] Best of {len(RESTART_SEEDS)} restarts by train ll/sample: {best_train_ll:.4f}")
 
     state_labels = _assign_state_labels(model)
 

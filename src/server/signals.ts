@@ -166,7 +166,7 @@ export async function createSignal(signal: Omit<Signal, "id" | "createdAt" | "up
   const target3 = signal.target + 3 * (signal.target - signal.entry);
   const extra = await dbGet<{ rank_composite: number | null; news_sentiment_score: number | null }>(`
     SELECT
-      (SELECT qs.rank_composite FROM quant_scores qs WHERE qs.symbol = ? AND qs.rank_composite IS NOT NULL ORDER BY qs.date DESC LIMIT 1) AS rank_composite,
+      (SELECT qs.rank_composite FROM quant_scores qs WHERE qs.symbol = ? AND qs.rank_composite IS NOT NULL LIMIT 1) AS rank_composite,
       (SELECT ts.news_sentiment_score FROM technical_signals ts WHERE ts.symbol = ? AND ts.news_sentiment_score IS NOT NULL ORDER BY ts.date DESC LIMIT 1) AS news_sentiment_score
   `, [signal.symbol, signal.symbol]).catch(() => null);
 

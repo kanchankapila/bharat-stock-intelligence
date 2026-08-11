@@ -285,6 +285,31 @@ describe('mc-consolidated-metrics-freshness (hand-rolled: needs a WHERE source_a
   });
 });
 
+describe('trendlyne-screener-constituent-coverage (hand-rolled: per-screener, aggregate check cannot express it)', () => {
+  const now = new Date('2026-08-03T12:00:00Z'); // a Monday
+  const byId = (id: string) => DATA_QUALITY_CHECKS.find(c => c.id === id)!;
+  const check = () => byId('trendlyne-screener-constituent-coverage');
+
+  it('passes at the live-measured 2026-08-11 baseline (96/1003 gated upstream) — must not cry wolf on correct data', () => {
+    const r = check().evaluate({ total: 1003, empty_count: 96 }, now);
+    expect(r.status).toBe('pass');
+    expect(r.detail).toContain('9.6%');
+  });
+
+  it('warns once the empty share grows clear of that baseline', () => {
+    expect(check().evaluate({ total: 1003, empty_count: 200 }, now).status).toBe('warn');
+  });
+
+  it('fails on the shape a real parser regression takes — nsecode header renamed, every screener empties at once', () => {
+    expect(check().evaluate({ total: 1003, empty_count: 1003 }, now).status).toBe('fail');
+  });
+
+  it('fails when discovery has never run, rather than dividing by zero into a false pass', () => {
+    expect(check().evaluate({ total: 0, empty_count: 0 }, now).status).toBe('fail');
+    expect(check().evaluate(undefined, now).status).toBe('fail');
+  });
+});
+
 describe('generated freshness checks (TABLE_FRESHNESS_CHECKS via makeFreshnessCheck)', () => {
   const now = new Date('2026-08-03T12:00:00Z'); // a Monday
   const byId = (id: string) => DATA_QUALITY_CHECKS.find(c => c.id === id)!;
@@ -309,7 +334,20 @@ describe('generated freshness checks (TABLE_FRESHNESS_CHECKS via makeFreshnessCh
   it('mf-sector-allocation-recency (found empty by this very sweep) reads as warn on a real empty table', () => {
     const r = byId('mf-sector-allocation-recency').evaluate(undefined, now);
     expect(r.status).toBe('warn');
-    expect(r.detail).toBe('mf_sector_allocation is empty');
+    // The reason this table is empty is known and upstream (AMFI's portfolio-disclosure
+    // endpoint now serves the scheme master list), so the daily report must SAY that rather
+    // than repeat a bare "is empty" every morning -- a re-stated, already-triaged alert is
+    // the kind that trains people to skim the report and miss a genuinely new failure.
+    expect(r.detail).toMatch(/^mf_sector_allocation is empty/);
+    expect(r.detail).toMatch(/AMFI/);
+  });
+
+  it('emptyDetail is opt-in -- a table without one still gets the bare default', () => {
+    // Negative control for the field added alongside the AMFI note above: if the factory ever
+    // starts applying one check's emptyDetail to another's, this catches it.
+    const r = byId('mf-stock-holdings-recency').evaluate(undefined, now);
+    expect(r.status).toBe('warn');
+    expect(r.detail).toBe('mf_stock_holdings is empty');
   });
 
   it('trading-day-aware checks absorb a weekend gap (Friday data on a Monday check)', () => {
@@ -426,9 +464,34 @@ describe('audit regression guards (2026-08-11)', () => {
 
   it('delivery-trades check fails when trades duplicates delivery_qty', () => {
     const c = find('stock-delivery-trades-not-duplicated');
-    expect(c.evaluate({ dupes: 664006 }, now).status).toBe('fail');
-    expect(c.evaluate({ dupes: 664006 }, now).detail).toContain('--delivery-trades');
-    expect(c.evaluate({ dupes: 0 }, now).status).toBe('pass');
+    // The original defect, verbatim: the positional read captured DELIV_QTY for every row.
+    expect(c.evaluate({ dupes: 664006, populated: 664006 }, now).status).toBe('fail');
+    expect(c.evaluate({ dupes: 664006, populated: 664006 }, now).detail).toContain('--delivery-trades');
+    expect(c.evaluate({ dupes: 0, populated: 664006 }, now).status).toBe('pass');
+  });
+
+  it('delivery-trades check tolerates a coincidental match on an illiquid name', () => {
+    // Live 2026-08-11: ASTAR traded 4 shares in 4 trades at 100% delivery, so trades = 4 =
+    // delivery_qty on correct data. Under the old bare `dupes > 0` rule that one row failed the
+    // whole check. A check that fails on correct data stops being read.
+    const c = find('stock-delivery-trades-not-duplicated');
+    const r = c.evaluate({ dupes: 1, populated: 4888 }, now);
+    expect(r.status).toBe('pass');
+    expect(r.detail).toContain('coincidental');
+  });
+
+  it('delivery-trades check still fires well below a full-table drift', () => {
+    // Guards the floor itself: partial drift (e.g. one exchange segment's columns moving) must
+    // not slip under it. 10% of rows is nothing like arithmetic coincidence.
+    const c = find('stock-delivery-trades-not-duplicated');
+    expect(c.evaluate({ dupes: 500, populated: 5000 }, now).status).toBe('fail');
+  });
+
+  it('delivery-trades check warns when the column is entirely unpopulated', () => {
+    const c = find('stock-delivery-trades-not-duplicated');
+    const r = c.evaluate({ dupes: 0, populated: 0 }, now);
+    expect(r.status).toBe('warn');
+    expect(r.detail).toContain('entirely NULL');
   });
 
   it('all four are registered and none duplicates an existing id', () => {

@@ -127,6 +127,11 @@ interface TableFreshnessConfig {
    *  existing style): only ever warns past warnDays, never fails, since the data itself is
    *  naturally episodic (insider filings, IPOs, bulk deals) rather than daily. */
   failDays?: number;
+  /** Replaces the bare "<table> is empty" text when the table has no rows at all. Use it when the
+   *  reason is already known and understood, so the daily report says what is actually blocked
+   *  instead of restating "empty" every morning -- an alert that repeats an already-triaged fact
+   *  is the kind people learn to skim past, which is how a real one gets missed. */
+  emptyDetail?: string;
 }
 
 function makeFreshnessCheck(cfg: TableFreshnessConfig): DataQualityCheck {
@@ -140,7 +145,7 @@ function makeFreshnessCheck(cfg: TableFreshnessConfig): DataQualityCheck {
     sql: `SELECT MAX(${col}) AS last_date FROM ${cfg.table}`,
     evaluate: (row, now) => {
       const stale = (useTradingDays ? tradingDaysStale : daysStale)(row?.last_date, now);
-      if (stale == null) return { status: cfg.critical ? 'fail' : 'warn', detail: `${cfg.table} is empty` };
+      if (stale == null) return { status: cfg.critical ? 'fail' : 'warn', detail: cfg.emptyDetail ?? `${cfg.table} is empty` };
       if (cfg.failDays == null) {
         if (stale > cfg.warnDays) {
           return { status: 'warn', detail: `Latest ${cfg.table} row is ${fmtDays(stale)} old (sparse by nature, so a soft warn)` };
@@ -189,8 +194,15 @@ const TABLE_FRESHNESS_CHECKS: TableFreshnessConfig[] = [
     category: 'flows', critical: false, table: 'stock_delivery_volume', dateColumn: 'date', warnDays: 3, failDays: 5 },
   { id: 'mf-stock-holdings-recency', label: 'mf_stock_holdings (per-stock MF ownership, monthly disclosure)',
     category: 'flows', critical: false, table: 'mf_stock_holdings', dateColumn: 'as_of_date', warnDays: 45 },
+  // Empty because the UPSTREAM SOURCE IS DEAD, not because the fetcher is broken. AMFI's
+  // DownloadSchemeData_Po.aspx?mf=0&tp=1 returns HTTP 200 with a 4MB CSV that is the scheme
+  // MASTER list (AMC, Code, Scheme Name, ...) -- no ISINs, no market values -- so
+  // mf_sector_flow_fetcher.py's _parse_amfi() correctly finds 0 holding rows and run() exits 1
+  // rather than writing a fabricated month. Re-confirmed live 2026-08-11. test_live_datasource_
+  // mf_sector_flow.py already asserts this exact shape and will notice if AMFI restores it.
   { id: 'mf-sector-allocation-recency', label: 'mf_sector_allocation (MF sector flow)',
-    category: 'flows', critical: false, table: 'mf_sector_allocation', dateColumn: 'month', warnDays: 45 },
+    category: 'flows', critical: false, table: 'mf_sector_allocation', dateColumn: 'month', warnDays: 45,
+    emptyDetail: 'mf_sector_allocation is empty — AMFI\'s portfolio-disclosure endpoint now returns the scheme master list instead of holdings (upstream, not a fetcher bug; see mf_sector_flow_fetcher.py). Blocked until AMFI restores it or a replacement source is chosen.' },
   // 2026-08-06 urls.txt data analysis (docs/url_explorer) -- see institutional_deals_fetcher.py.
   { id: 'institutional-deal-signals-recency', label: 'institutional_deal_signals (MC ranked topInvestor buy/sell)',
     category: 'flows', critical: false, table: 'institutional_deal_signals', dateColumn: 'deal_date', warnDays: 5, failDays: 10 },
@@ -631,17 +643,29 @@ export const DATA_QUALITY_CHECKS: DataQualityCheck[] = [
     // deliveryFetcher.ts read NO_OF_TRADES positionally as cols[len-2]; sec_bhavdata_full ends
     // ... NO_OF_TRADES, DELIV_QTY, DELIV_PER, so it captured DELIV_QTY in 100% of 664,006 rows.
     // Fixed to header.indexOf('NO_OF_TRADES'); this catches the column silently drifting again.
-    sql: `SELECT COUNT(*) AS dupes
+    // Compared as a SHARE of populated rows, not a raw count: `trades = delivery_qty` is
+    // legitimately true for a genuinely illiquid name, and firing on a bare count > 0 makes this
+    // check cry wolf on real data. Live example 2026-08-11: ASTAR on 2026-08-10 traded 4 shares
+    // in 4 trades with 100% delivery -- 4 = 4, correct on every column, and it alone flipped the
+    // whole check to 'fail'. The defect this guards is not subtle (it was 100% of 664,006 rows,
+    // because a positional read captured DELIV_QTY instead of NO_OF_TRADES), so a 5% floor
+    // catches any real recurrence with enormous margin while ignoring arithmetic coincidence.
+    sql: `SELECT COUNT(*) FILTER (WHERE trades = delivery_qty) AS dupes,
+                 COUNT(*) AS populated
           FROM stock_delivery_data
-          WHERE trades IS NOT NULL AND trades = delivery_qty`,
+          WHERE trades IS NOT NULL`,
     evaluate: (row) => {
       const dupes = Number(row?.dupes) || 0;
-      if (dupes > 0) return {
+      const populated = Number(row?.populated) || 0;
+      if (populated === 0) return { status: 'warn', detail: 'stock_delivery_data.trades is entirely NULL — the fetcher is not populating it' };
+      const pct = (100 * dupes) / populated;
+      if (pct >= 5) return {
         status: 'fail',
-        detail: `${dupes} rows have trades = delivery_qty — the NSE column index has drifted again; ` +
+        detail: `${dupes}/${populated} rows (${pct.toFixed(1)}%) have trades = delivery_qty — the NSE column index has drifted again; ` +
                 `then: python data_integrity_repair.py --delivery-trades`,
       };
-      return { status: 'pass', detail: 'trades is distinct from delivery_qty' };
+      const tail = dupes > 0 ? ` (${dupes}/${populated} coincidental matches on illiquid names, below the 5% drift floor)` : '';
+      return { status: 'pass', detail: `trades is distinct from delivery_qty${tail}` };
     },
   },
   {
@@ -940,6 +964,44 @@ export const DATA_QUALITY_CHECKS: DataQualityCheck[] = [
       if (stale == null) return { status: 'warn', detail: 'No mc_consolidated rows written yet — expected until a stock panel has been opened at least once.' };
       if (stale > 10) return { status: 'warn', detail: `Latest mc_consolidated metric row is ${fmtDays(stale)} old (sparse by nature, so a soft warn)` };
       return { status: 'pass', detail: `Latest mc_consolidated metric row ${fmtDays(stale)} old` };
+    },
+  },
+
+  // screener-appearances-freshness above probes the whole table, so it reads "fresh" off the
+  // ~900 healthy Trendlyne screeners while an individual screener is permanently dead. Measured
+  // live 2026-08-11: 96 of 1003 registered Trendlyne screeners (9.6%) have never held a single
+  // constituent, and they are the highest-signal ones -- Buys/Sells by Superstar Investors, all
+  // four Red Flag screeners, every business-group/thematic list, the pivot R1-R3/S1-S3 breakouts.
+  // Verified against the live API rather than assumed: those screenpks return head.status=0 with
+  // a correct NSEcode header and tableData=[], with and without groupName, i.e. gated upstream on
+  // the broker-webview endpoint -- not a parser bug and not fixable from this side.
+  //
+  // So 9.6% is the accepted baseline, not the alert. What this catches is that share GROWING,
+  // which is the shape a real regression takes: extract_screener_info() skips stock extraction
+  // outright when no header matches nsecode/symbol (the 2026-07-23 fix that replaced the blind
+  // "column 0" fallback), so if Trendlyne renames `unique_name` again every screener silently
+  // goes empty at once and this jumps toward 100%. Thresholds are a SHARE against a floor sized
+  // well clear of the real defect, per the "bare count > 0 fires on correct data" rule.
+  {
+    id: 'trendlyne-screener-constituent-coverage',
+    label: 'trendlyne_screeners with zero constituents (per-screener, not aggregate)',
+    category: 'signals',
+    critical: false,
+    sql: `SELECT COUNT(*) AS total,
+                 SUM(CASE WHEN NOT EXISTS (
+                       SELECT 1 FROM trendlyne_screener_stocks ss
+                       WHERE ss.screener_id = s.screener_id
+                     ) THEN 1 ELSE 0 END) AS empty_count
+          FROM trendlyne_screeners s`,
+    evaluate: (row) => {
+      const total = Number(row?.total ?? 0);
+      const empty = Number(row?.empty_count ?? 0);
+      if (total === 0) return { status: 'fail', detail: 'No Trendlyne screeners registered at all — discovery has never run.' };
+      const share = safeRatio(empty, total);
+      const pct = (share * 100).toFixed(1);
+      if (share > 0.25) return { status: 'fail', detail: `${empty}/${total} (${pct}%) Trendlyne screeners hold zero constituents — well above the ~10% gated-upstream baseline. Check that tableHeaders still expose a 'NSEcode' unique_name.` };
+      if (share > 0.15) return { status: 'warn', detail: `${empty}/${total} (${pct}%) Trendlyne screeners hold zero constituents, up from the ~10% gated-upstream baseline.` };
+      return { status: 'pass', detail: `${empty}/${total} (${pct}%) Trendlyne screeners hold zero constituents — consistent with the subscription-gated baseline.` };
     },
   },
 

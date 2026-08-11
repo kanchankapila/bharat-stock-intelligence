@@ -110,7 +110,13 @@ async function processDlInference(job: Job): Promise<{ success: boolean }> {
 async function processDlRegimeUpdate(_job: Job): Promise<{ success: boolean }> {
   // Same fix as processDlMacroFetch above: explicit timeout, not the 6h default, since this
   // worker's lockDuration is only 5 min.
-  return processDLPython('regime_detector.py', ['--mode', 'update'], 2 * 60_000);
+  //
+  // 2 min was too tight and was the source of this job's failure count: 2026-08-10 17:00:09
+  // died on "Timed out after 120000ms (killed by timeout)" and the retry 8 minutes later
+  // completed normally, same script, same data. Unpickling the HMM + StandardScaler and
+  // reading the full NIFTY history is variable under contention with the other DL jobs.
+  // 4 min keeps a full minute of headroom inside the 5-min lockDuration.
+  return processDLPython('regime_detector.py', ['--mode', 'update'], 4 * 60_000);
 }
 
 async function processDlRetrainWeekly(job: Job): Promise<{ success: boolean }> {

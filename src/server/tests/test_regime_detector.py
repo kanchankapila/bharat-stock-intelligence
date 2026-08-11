@@ -242,6 +242,74 @@ class TestTrainHmmPromotionGate:
         data = np.vstack(rows)
         return pd.DataFrame(data, index=idx, columns=cols)
 
+    class _SeedStub:
+        """Picklable per-restart double with a controllable training log-likelihood, and a
+        record of the row counts score() was called with (so the test can prove selection ran
+        on the train matrix, not the holdout)."""
+        scored_with: list = []
+
+        def __init__(self, ll, n_cols):
+            self.ll = ll
+            self.means_ = np.zeros((5, n_cols))
+            self.means_[:, 0] = [0.03, 0.01, 0.0055, 0.0051, -0.05]
+            self.transmat_ = np.eye(5) * 0.9 + 0.025
+
+        def fit(self, X):
+            return self
+
+        def score(self, X):
+            type(self).scored_with.append(len(X))
+            return self.ll * len(X)
+
+    def test_restarts_select_the_best_TRAIN_likelihood_not_the_holdout(self, tmp_path, monkeypatch):
+        """EM is seed-sensitive enough here that the seed, not the model, was deciding promotion:
+        measured 2026-08-11 on the live panel, holdout ll/sample by seed ran 9.95 / 10.12 / 9.98 /
+        11.17 / 10.87 / 10.75 against an incumbent at 11.02 -- straddling it, so the hardcoded
+        random_state=42 was one unlucky draw. train_hmm() now takes the best of RESTART_SEEDS.
+
+        The selection must use the TRAINING objective. Choosing restarts by holdout score would
+        be selecting on the very metric the promotion gate then applies, turning an out-of-sample
+        test into an in-sample one -- the gate-gaming class in recurring-bugs.md. This asserts the
+        winner is the highest score(X) among the restarts and that score() is called on the
+        TRAIN matrix (772 rows here), never on the 60-row holdout.
+        """
+        hmm_path = tmp_path / "hmm_regime.pkl"
+        monkeypatch.setattr(regime_detector, 'HMM_PATH', hmm_path)
+        df = self._synthetic_features()
+        monkeypatch.setattr(regime_detector, '_load_hmm_features', lambda lookback_days: df)
+
+        train_rows = len(df) - 60
+        built = []
+        self._SeedStub.scored_with = []
+
+        # Deliberately make the LAST restart the best, so a loop that keeps the first (or the
+        # hardcoded seed 42, which is first in RESTART_SEEDS) fails this test.
+        lls = [-9.0, -8.5, -8.9, -8.4, -8.6, -7.1]
+        assert len(lls) == len(regime_detector.RESTART_SEEDS)
+
+        def _factory(**kwargs):
+            m = self._SeedStub(lls[len(built)], len(df.columns))
+            built.append(m)
+            return m
+        monkeypatch.setattr(regime_detector.hmm, 'GaussianHMM', _factory)
+
+        regime_detector.train_hmm(holdout_days=60)
+
+        scored_with = self._SeedStub.scored_with
+        assert len(built) == len(regime_detector.RESTART_SEEDS), "every restart seed must be fitted"
+        assert scored_with, "restarts must be scored, or selection is not happening"
+        assert set(scored_with) == {train_rows}, (
+            f"score() must be called on the TRAIN matrix ({train_rows} rows), never the holdout; "
+            f"got {sorted(set(scored_with))}"
+        )
+        with open(hmm_path, 'rb') as f:
+            saved = pickle.load(f)
+        # Identity cannot survive the pickle round-trip, so compare the marker attribute.
+        assert saved['model'].ll == max(lls), (
+            f"the highest train-likelihood restart ({max(lls)}) must be the one kept, "
+            f"got {saved['model'].ll}"
+        )
+
     def test_first_ever_train_promotes_without_prior_model(self, tmp_path, monkeypatch):
         hmm_path = tmp_path / "hmm_regime.pkl"
         monkeypatch.setattr(regime_detector, 'HMM_PATH', hmm_path)
@@ -332,6 +400,13 @@ class TestDegenerateTransitionGate:
 
         def fit(self, X):
             return self
+
+        def score(self, X):
+            # train_hmm() picks the best of RESTART_SEEDS restarts by training log-likelihood,
+            # so the double needs the same method the real GaussianHMM exposes. Constant is
+            # fine: every restart returns this same stub, so the selection is a no-op here and
+            # these tests stay about the transition-matrix gate, which is what they exist for.
+            return -1.0 * len(X)
 
     def test_degenerate_self_transition_is_rejected(self, tmp_path, monkeypatch):
         hmm_path = tmp_path / "hmm_regime.pkl"
