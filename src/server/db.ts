@@ -3110,6 +3110,15 @@ runMigration('078_unified_recommendations_generated_at', `
   ALTER TABLE unified_recommendations ADD COLUMN generated_at TEXT;
 `);
 
+// appeared_date is date-only AND part of the PK (screener_id, symbol, appeared_date), so it
+// cannot carry a capture time without breaking same-day dedup. appeared_at is the wall-clock
+// instant the sync observed the symbol -- the one thing needed to measure an intraday screener
+// entry against intraday_ohlcv. All 720,824 pre-existing rows are stamped 00:00:00 and stay
+// NULL: their real capture time is unknown and inventing one would be worse than absent.
+runMigration('079_screener_appearances_appeared_at', `
+  ALTER TABLE screener_appearances ADD COLUMN appeared_at TEXT;
+`);
+
 // intraday_recommendation_outcomes gained a direction column (2026-08): Sell/Strong-Sell
 // classifications were never quality-gated on realised outcomes at all, unlike Buy/Strong-Buy
 // (gated since 2026-07-31) -- extending the emission gate to the short side needs its own

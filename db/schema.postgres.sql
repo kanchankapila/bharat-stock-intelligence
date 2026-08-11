@@ -2032,8 +2032,10 @@ CREATE TABLE IF NOT EXISTS "screener_appearances" (
   "return_120d" DOUBLE PRECISION,
   "nifty_ret_20d" DOUBLE PRECISION,
   "outcome_20d" TEXT,
+  "appeared_at" TIMESTAMPTZ,
   PRIMARY KEY ("screener_id", "symbol", "appeared_date")
 );
+CREATE INDEX IF NOT EXISTS idx_sa_appeared_at ON public.screener_appearances USING btree (appeared_at) WHERE appeared_at IS NOT NULL;
 CREATE INDEX idx_sa_date ON public.screener_appearances USING btree (appeared_date);
 CREATE INDEX idx_sa_screener ON public.screener_appearances USING btree (screener_id);
 CREATE INDEX idx_scap_symbol ON public.screener_appearances USING btree (symbol, appeared_date DESC);

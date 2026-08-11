@@ -166,8 +166,10 @@ export async function syncEtMarketstatsScreeners(timeframeFilter?: 'intraday' | 
         await dbTransaction(async (tx) => {
           for (const s of entered) {
             await tx.run(
-              `INSERT OR IGNORE INTO screener_appearances (screener_id, source, symbol, appeared_date) VALUES (?, 'et_marketstats', ?, ?)`,
-              [def.screenerKey, s, today]);
+              // appeared_at records WHEN the sync saw it -- appeared_date is date-only and is
+              // the dedup key, so it cannot carry a time. See the migration.
+              `INSERT OR IGNORE INTO screener_appearances (screener_id, source, symbol, appeared_date, appeared_at) VALUES (?, 'et_marketstats', ?, ?, ?)`,
+              [def.screenerKey, s, today, new Date().toISOString()]);
           }
         });
       }

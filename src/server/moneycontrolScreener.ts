@@ -321,11 +321,14 @@ export async function syncMoneyControlScreeners(timeframeFilter?: 'intraday' | '
       const exited  = Array.from(prevSymbols).filter(s => !currentSymbols.has(s));
 
       if (entered.length > 0) {
-        const insertAppSql = `INSERT OR IGNORE INTO screener_appearances (screener_id, source, symbol, appeared_date) VALUES (?, 'moneycontrol', ?, ?)`;
+        // appeared_at records WHEN the sync saw it -- appeared_date is date-only and is the
+        // dedup key, so it cannot carry a time. See the migration for why this is separate.
+        const appearedAt = new Date().toISOString();
+        const insertAppSql = `INSERT OR IGNORE INTO screener_appearances (screener_id, source, symbol, appeared_date, appeared_at) VALUES (?, 'moneycontrol', ?, ?, ?)`;
         const insertLogSql = `INSERT OR IGNORE INTO screener_history_log (symbol, screener_id, entry_date, source) VALUES (?, ?, ?, 'moneycontrol')`;
         await dbTransaction(async (tx) => {
           for (const s of entered) {
-            await tx.run(insertAppSql, [config.scanId, s, today]);
+            await tx.run(insertAppSql, [config.scanId, s, today, appearedAt]);
             await tx.run(insertLogSql, [s, config.scanId, today]);
           }
         });
