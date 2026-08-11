@@ -76,6 +76,20 @@ and never run in CI (no guaranteed network access to third-party financial sites
 transient upstream outage must never fail the build). Run them by hand before merging a new
 fetcher, or periodically as a manual canary.
 
+**This applies to TypeScript tests too, under the same env var** — not just pytest. Any
+`*.test.ts` that calls the real network must be gated:
+
+```ts
+const RUN_LIVE = process.env.RUN_LIVE_DATASOURCE_TESTS === '1';
+describe.runIf(RUN_LIVE)('… [live]', () => { … });
+```
+
+One switch runs every live check in the repo, in both languages. This is not hypothetical:
+`mcapiProxy.test.ts` (28 cases proxying to MoneyControl's real API) was ungated and failed
+`npm test` and CI on 2026-08-11 when `/mcapi/v1/premarket/get-global-marketdata` began
+returning 400/422 upstream, with nothing in this repo changed. **A suite that fails on someone
+else's outage stops being a signal** — the pressure becomes to ignore red CI rather than fix it.
+
 **Why this is mandatory, not optional:** on 2026-07-23, `trendlyne_screener_discovery.py` had
 a silent bug (a blind "column 0" fallback when no table header matched an expected field
 name) that wrote a raw Trendlyne profile URL into the `symbol` column instead of a ticker —

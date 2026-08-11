@@ -381,3 +381,64 @@ describe('runDataQualityChecks (orchestration)', () => {
     }
   });
 });
+
+// ── Regression guards for the four defects the 2026-08-11 audit found live ────────────
+// Each was invisible for weeks because the table was fresh and full the whole time -- just
+// full of the wrong rows. Freshness checks cannot catch any of them, which is why these
+// evaluate() bodies exist. The SQL was validated by running it against live Postgres; these
+// tests pin the decision logic, including that a clean table does NOT alarm.
+describe('audit regression guards (2026-08-11)', () => {
+  const find = (id: string) => {
+    const c = DATA_QUALITY_CHECKS.find(x => x.id === id);
+    expect(c, `check ${id} is not registered`).toBeDefined();
+    return c!;
+  };
+  const now = new Date('2026-08-11T12:00:00Z');
+
+  it('ghost-symbol check fails when a ranked symbol has no price history', () => {
+    const c = find('unified-recommendations-ghost-symbols');
+    expect(c.evaluate({ ghosts: 29014 }, now).status).toBe('fail');
+    expect(c.evaluate({ ghosts: 29014 }, now).detail).toContain('--ghost-recommendations');
+    expect(c.evaluate({ ghosts: 0 }, now).status).toBe('pass');
+    expect(c.critical).toBe(true);
+  });
+
+  it('trading-day check fails on a snapshot dated to a closed day', () => {
+    const c = find('unified-recommendations-trading-day');
+    expect(c.evaluate({ bad_days: 4 }, now).status).toBe('fail');
+    expect(c.evaluate({ bad_days: 4 }, now).detail).toContain('logical_session_date');
+    expect(c.evaluate({ bad_days: 0 }, now).status).toBe('pass');
+  });
+
+  it('liquid-coverage check fails when the ranker universe diverges from the tradeable one', () => {
+    const c = find('unified-recommendations-liquid-coverage');
+    // The real 2026-07-29 shape: 8 of 1,534 liquid names ranked while the table held 2,301 rows.
+    expect(c.evaluate({ liquid: 1534, covered: 8 }, now).status).toBe('fail');
+    expect(c.evaluate({ liquid: 1519, covered: 700 }, now).status).toBe('warn');
+    // The real post-fix shape.
+    expect(c.evaluate({ liquid: 1519, covered: 1387 }, now).status).toBe('pass');
+  });
+
+  it('liquid-coverage warns rather than dividing by zero on an empty universe', () => {
+    const c = find('unified-recommendations-liquid-coverage');
+    expect(c.evaluate({ liquid: 0, covered: 0 }, now).status).toBe('warn');
+  });
+
+  it('delivery-trades check fails when trades duplicates delivery_qty', () => {
+    const c = find('stock-delivery-trades-not-duplicated');
+    expect(c.evaluate({ dupes: 664006 }, now).status).toBe('fail');
+    expect(c.evaluate({ dupes: 664006 }, now).detail).toContain('--delivery-trades');
+    expect(c.evaluate({ dupes: 0 }, now).status).toBe('pass');
+  });
+
+  it('all four are registered and none duplicates an existing id', () => {
+    const ids = DATA_QUALITY_CHECKS.map(c => c.id);
+    expect(new Set(ids).size).toBe(ids.length);
+    for (const id of [
+      'unified-recommendations-ghost-symbols',
+      'unified-recommendations-trading-day',
+      'unified-recommendations-liquid-coverage',
+      'stock-delivery-trades-not-duplicated',
+    ]) expect(ids).toContain(id);
+  });
+});

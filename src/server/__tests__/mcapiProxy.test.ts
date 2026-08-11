@@ -2,7 +2,27 @@ import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import express from 'express';
 import { Server } from 'http';
 
-describe('MoneyControl API Proxy Integration Tests', () => {
+/**
+ * LIVE DATASOURCE TEST — skipped by default, opt in with RUN_LIVE_DATASOURCE_TESTS=1.
+ *
+ * All 28 cases below boot a local proxy and fetch MoneyControl's real API through it, so the
+ * suite's result depends on a third party being healthy. On 2026-08-11 this failed `npm test`
+ * and CI because /mcapi/v1/premarket/get-global-marketdata started returning 400/422 upstream
+ * — nothing in this repo had changed. A test suite that fails on someone else's outage stops
+ * being a signal, and the pressure is then to ignore red CI rather than fix it.
+ *
+ * Deliberately the SAME env var as the Python side's `@pytest.mark.live_datasource`
+ * (src/server/tests/conftest.py) rather than a second TypeScript-only flag: one switch runs
+ * every live-datasource check in the repo, in both languages.
+ *
+ *   RUN_LIVE_DATASOURCE_TESTS=1 npx vitest run src/server/__tests__/mcapiProxy.test.ts
+ *
+ * This is a gate, not a deletion — the test is the only thing that catches the proxy's path
+ * rewrites drifting from MoneyControl's real routes, so run it by hand before touching them.
+ */
+const RUN_LIVE = process.env.RUN_LIVE_DATASOURCE_TESTS === '1';
+
+describe.runIf(RUN_LIVE)('MoneyControl API Proxy Integration Tests [live]', () => {
   let app: express.Express;
   let server: Server;
   let baseUrl: string;
