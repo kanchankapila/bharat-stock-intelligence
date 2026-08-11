@@ -63,6 +63,16 @@ Read before quoting, comparing, or acting on any accuracy, win-rate, IC, or back
 
 - **Of 60 symbol+date tables, only 9 have enough history to test anything; 35 cannot be tested at all.** The calendar constraint this file already recorded for fundamentals/analyst/ownership is far wider than four categories — 35 tables start at ~2026-06-30 and have under 40 distinct dates. No amount of modelling fixes that; only elapsed time or a backfill does. Do not spend a day "testing" any of them.
 - **The deep data, ranked**: `trendlyne_pb_history` and `trendlyne_pe_history` (**3,028 dates, 12.6 years, ~4.1M rows each, ~2,420 symbols**) are by far the deepest factor data on the platform and they underpin the one provisional positive factor, `value_book_to_price`. Then `insider_trades` (1,635 dates / 11y, already measured null), `stock_ohlcv` (1,394 / 5.6y), `nse_universe_history` (1,387 / 5.6y), `macro_asset_prices` (1,242 / 4.7y, 81 assets, **never factor-tested**), `feature_store` (398 dates / 19 months, 2,424 symbols, a ready-made technical panel, **never factor-tested**), `stock_delivery_data` (286 dates / 14 months), `news_symbol_link` (188 dates but sparse over 15y).
+> **2026-08-12 follow-up: the "still not wired into anything" caveat below resolved to "and it should not be."**
+> The turnover-aware run this paragraph asks for was done. Long-only top-50, survivorship-free:
+> **21d/25bps net excess −1.04%/period (t=−1.48), 5d/15bps −0.15%/period (t=−1.48)**, 2/6 and 1/6
+> years positive. Not a cost story — **gross/period 0.77% is already below the universe's 1.43%**.
+> A quintile *spread* and a long-only *top slice* are different constructions: high delivery picks
+> the calm names (as the both-tails result below says outright), and a low-vol tilt lags a universe
+> compounding at 18–21%. **Anything consuming `delivery_pct` long-only — including the 9th ranker
+> engine drafted 2026-08-12 — is unsupported by this data.** The two-tail directional result below
+> still stands; it just is not harvestable this way.
+
 - **`stock_delivery_data` is the one that settled an open question.** The 2026-08-11 reverse audit flagged `delivery_pct` as a lead on 25 dates of `technical_signals`; this table carries **275 usable dates**. Result: direction AUC 0.541 at 1d (t=+8.85) and 0.546 at 5d (t=+10.99), top-minus-bottom quintile **+0.1917pp/day (t=+7.82)** and **+0.4812pp/5d (t=+9.94)**. It passes the both-tails test in the strongest possible form: AUC vs the winning tail 0.444 and vs the losing tail 0.403 are **both below 0.5** (high-delivery names avoid both tails — they are the calm ones) while the gainer-vs-loser AUC is above 0.5. That combination is a genuine directional signal, not a volatility proxy. The 1d figure uses non-overlapping windows so it needs no HAC correction. **Still not wired into anything**: +0.19pp/day gross against ~15bps round-trip costs makes a daily rebalance marginal, and the 5d construction has a fifth of the turnover — run it through `factor_backtest.py` (turnover-aware, survivorship-free) before acting. Caveat: 88% of the table was backfilled, so `updated_at` cannot prove point-in-time availability for historical rows; the live path writes trade-date D after the 15:30 IST close, which is tradeable at D+1's open.
 - **Two data defects found while auditing**: `stock_delivery_data.trades` is a byte-for-byte duplicate of `delivery_qty` in **100% of 664,006 rows** (the trade-count column is fed delivery quantity), and `mc_earnings_forecast`'s date column holds non-ISO values like `'Mar 2024'` so it will not cast to a date at all.
 
@@ -70,6 +80,37 @@ Read before quoting, comparing, or acting on any accuracy, win-rate, IC, or back
 
 - **An AUC computed only against winners cannot tell "predicts winners" from "predicts volatility", and this codebase has been fooled by that exact statistic twice.** `flyer_classifier` (AUC 0.81, IC −0.041) was the first. The second: measured 2026-08-11, ~40 features across all six factor groups, the apparent winners for next-session top-50 gainers *all* predicted the top-50 losers at least as well — `hv_20d` 0.679 gainers vs **0.704 losers**, `breakout_probability` 0.670 vs **0.705**, `bb_width` 0.632 vs **0.662**, `rs_vs_sector_21d` 0.573 vs **0.628**, `rsi` 0.556 vs **0.611**. Direction AUC (gainers vs losers, which isolates sign from magnitude) came out **below 0.5 for every one**, several significantly (t=−2.3 to −3.8). These features carry *magnitude, not sign* — re-weighting them cannot help, and a one-tailed AUC will keep saying they can. Always report three numbers: AUC vs the winning tail, AUC vs the losing tail, and AUC of one tail against the other.
 - **The common bullish setups are inverted at 1-day.** Next-day open→close excess vs universe, per-date: **Gap Up ≥2% −0.465pp (t=−8.80)** — the most significantly negative thing measured here — Breakout>20d-high −0.185pp (t=−2.69), volume shocker ≥3× −0.122pp (t=−1.67), while **Gap Down ≤−2% is +0.329pp (t=+3.70)**. Open=Low/Open=High are null. Before building anything on a continuation screen, check its sign on this data.
+
+## `factor_backtest.py`'s benchmark is WRONG at `--rebalance 1`. Do not use daily rebalance.
+
+Measured 2026-08-12. The `universe_annualised_pct` a run reports should be almost invariant to
+`--rebalance`: it is the same equal-weighted universe over the same window. It is not.
+
+| factor | universe @ `--rebalance 1` | universe @ `--rebalance 5` |
+|---|---|---|
+| `delivery_pct` | **−16.77%/yr** | +21.26%/yr |
+| `low_vol` | **−16.74%/yr** | +21.75%/yr |
+| `momentum_12_1` | **−28.01%/yr** | +13.35%/yr |
+
+The 1d figures are **factor-independent** (−16.77 vs −16.74 for two unrelated factors, as a
+universe number should be) — so this is the benchmark computation, not the factors. It is the
+same class as the exit-pricing bug in this file's banner: a small per-session phantom drag that
+is diluted at 21d, survives at 5d, and **dominates and flips the sign at 1d**.
+
+**The `benchmark_sane` guard does not catch it.** That guard is an absolute band,
+`-40.0 <= uni_annual <= 80.0` (`factor_backtest.py`), and −16.7%/−28.0% sit comfortably inside
+it, so a verdict is issued as though nothing were wrong. The band was sized against the old
+−99.9% failure and is far too wide for this one.
+
+**Consequences, until this is fixed:**
+- Treat any `factor_backtest.py` result at `--rebalance 1` as **void**, not as evidence. Every
+  net/excess/t-stat in such a run is measured against a benchmark that is wrong by ~35pp/yr.
+- The 5d and 21d results in this file are unaffected — their universe figures (+13% to +22%)
+  are plausible for the window and agree with each other.
+- The right fix is not a tighter band. Compare the rebalance-chained universe against a
+  **buy-and-hold** universe computed over the same window from the price panel: they should
+  agree to within costs, and that invariant holds at every rebalance frequency. An absolute
+  band can only ever catch the catastrophic case.
 
 ## The panel spec (use this exact recipe, every time)
 
@@ -102,7 +143,7 @@ Each of these was measured on the 5-year price panel with the spec above. Re-tes
 | `high_vol` / `low_vol` | both negative (−1.21, −1.66) | **both tails lose**; the middle outperforms |
 | `insider_net` | −0.00%, t=−0.01 | clean null across 6 separate years |
 | `delivery_spike` / `delivery_trend` | t=−1.08 / −1.43 | dead |
-| **`delivery_pct` (raw level, NOT the derived spike/trend above)** | **+0.19pp/day and +0.48pp/5d top-minus-bottom quintile, t=+7.82 / +9.94 over 275 dates** | **strongest directional factor measured here — verify net of costs before use** |
+| **`delivery_pct` (raw level, NOT the derived spike/trend above)** | quintile spread +0.19pp/day, t=+7.82 — but **long-only top-50 net excess −1.04%/period at 21d/25bps and −0.15%/period at 5d/15bps, t=−1.48 both** (measured 2026-08-12) | **dead as a long-only factor.** The cost-verification this row used to ask for was run and it failed |
 | `ticket_size` (institutional proxy) | −0.67%, t=−2.36 | significantly **inverted** |
 | screener bullish consensus | IC −0.027, t=−2.36 | significantly negative; cleaning the labels made it *more* negative |
 | **every individual screener** (1,563, one at a time) | **0 survive FDR or Bonferroni** | measured 2026-08-11 — see the screener block below before re-running this |
