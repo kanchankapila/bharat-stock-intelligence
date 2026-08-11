@@ -1,5 +1,38 @@
 # Measurement Discipline
 
+> ## ⚠ 2026-08-11: `factor_backtest.py` had a bug that invalidated the factor table below
+>
+> Exits were priced from the **eligible-only** slice, but `eligible` is `adt20 >= Rs 1cr AND
+> next_open exists` — a *liquidity screen, not a survival test*. Any name whose 20-day turnover
+> dipped under the floor for one session looked unexitable and took `MISSING_EXIT_PCT = -100%`,
+> a total write-off, in **both** the portfolio and the benchmark. **0.618% of the eligible
+> universe drops out per session**, so the benchmark carried a −0.618%/day phantom drag: the
+> harness reported the universe at **−4.66%/month (−99.9% over 5.5 years) for a market that
+> roughly tripled**. Arithmetic reconstruction: true universe +0.1072%/day − 0.618% = −0.511%/day
+> vs the −0.5177%/day reported.
+>
+> It did **not** cancel out of the excess figures, because the drag scales with how much a
+> factor tilts toward names that lose liquidity. Fixed (`index_exit_prices()`); universe now
+> reads **+1.29%/month**. Re-measured, 26 factors, monthly rebalance, top-50, 25bps:
+>
+> | factor | was (buggy) | now | verdict |
+> |---|---|---|---|
+> | `value_book_to_price` | +0.93%/mo, **t=2.67** | +0.78%/mo, **t=1.99** | **no longer significant** |
+> | `momentum_12_1` | +0.86%/mo, **t=2.08** | +0.53%/mo, **t=1.10** | **no longer significant** |
+> | `insider_net` | −0.00%, t=−0.01 (clean null) | +0.48%/mo, **t=+2.05** | only positive one, and it fails multiple testing |
+>
+> **Exactly 1 of 26 factors is positive and significant, and t=2.05 does not clear the ~t=3.0
+> a 26-factor Bonferroni needs.** The correct current statement is: *no factor in this harness
+> has a credible positive edge.* The negative results are broadly unchanged and remain the
+> reliable part (high_vol t=−6.09, reversal_21d −3.77, screener_oversold −3.50, oversold/
+> near-52w-low/below-lower-BB all significantly negative).
+>
+> Everything below this banner predates the fix. Treat any *positive* claim in it as void until
+> re-run; the negative ones held up. Residual caveat on the fix itself: exiting a name that fell
+> under the liquidity floor is now modelled at the normal 25bps, which understates real slippage
+> for those names — better than a −100% write-off, still not exact.
+
+
 Read before quoting, comparing, or acting on any accuracy, win-rate, IC, or backtest number.
 
 ## Accuracy comes from realized returns, never a proxy
@@ -47,7 +80,7 @@ Any cross-sectional forward-return measurement on this data:
 
 `unified_score` 5d rank IC ≈ 0.0001 (t=0.02). Short-horizon momentum is negative at three horizons. Bullish screener consensus is significantly negative (t=−2.36). `insider_net`, `delivery_spike`, `ticket_size` are null-to-negative. `momentum_12_1` (+0.86%/mo, t=2.08) is the only positive factor and does not clear a multiple-testing bar across 18 factors tested.
 
-**Consequence: reweighting the existing engines is not a fix.** A new factor must beat `momentum_12_1` *alone* — combining reduced performance in every case tested (12-1 alone +0.86% vs +2 exclusions −1.25%; long-only +0.86% vs long/short +0.49%; the 8-engine blend at IC 0.0001).
+**Consequence: reweighting the existing engines is not a fix.** ~~A new factor must beat `momentum_12_1` *alone*~~ (**void — see the banner: `momentum_12_1` is t=1.10 after the exit-pricing fix, so there is no incumbent to beat; the bar is now simply significance after multiple testing**) — combining reduced performance in every case tested (12-1 alone +0.86% vs +2 exclusions −1.25%; long-only +0.86% vs long/short +0.49%; the 8-engine blend at IC 0.0001).
 
 ## Already tested — do not re-run without a reason
 

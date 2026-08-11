@@ -609,8 +609,41 @@ def _fill_delisted(px: pd.DataFrame, start: str, end: str) -> pd.DataFrame:
 
 # -- Simulation -------------------------------------------------------------------
 def index_by_date(panel: pd.DataFrame) -> dict:
-    """Group the eligible panel by date once. Reuse across factors in a sweep."""
+    """Group the eligible panel by date once. Reuse across factors in a sweep.
+
+    SELECTION only. Exits must be priced from index_exit_prices() below, never from this --
+    see that function for why.
+    """
     return {d: g for d, g in panel[panel['eligible']].groupby('date', sort=False)}
+
+
+def index_exit_prices(panel: pd.DataFrame) -> dict:
+    """date -> Series(symbol -> next_open) over the FULL panel, not just eligible rows.
+
+    Exits have to be priced off every row that has a tradeable next open, because `eligible`
+    is `adt20 >= min_adt AND next_open exists` -- a LIQUIDITY screen, not a survival test. A
+    name whose 20-day turnover dips under the floor for one session is still quoted and still
+    sellable; it has simply stopped qualifying for NEW positions.
+
+    Pricing exits off the eligible-only slice made every such name look unexitable, so it took
+    MISSING_EXIT_PCT = -100%, a total write-off, in both the portfolio and the benchmark.
+    Measured 2026-08-11: **0.618% of the eligible universe drops out per session** (median
+    0.465%, p95 1.11%), so the benchmark carried a -0.618%/day phantom drag. That reconstructs
+    the bug exactly -- true equal-weighted universe +0.1072%/day, minus 0.618%, equals
+    -0.511%/day against the -0.5177%/day the harness reported. Over 1,391 sessions it printed
+    a -99.9% universe for a market that roughly tripled.
+
+    It does not cancel out of the excess figures either, which is the damaging part: the drag
+    scales with how much a factor tilts toward names that lose liquidity, so illiquidity-tilted
+    factors (delivery %, low-vol, deep value) were penalised against the benchmark and
+    large-cap-tilted ones flattered. Any factor verdict produced before this fix needs re-running.
+
+    MISSING_EXIT_PCT is now reserved for what it was documented to mean: a name with no price
+    anywhere in the panel at the exit date, i.e. genuinely delisted or gone dark.
+    """
+    return {d: g.set_index('symbol')['next_open']
+            for d, g in panel[panel['next_open'].notna() & (panel['next_open'] > 0)]
+                        .groupby('date', sort=False)}
 
 
 def run_backtest(panel: pd.DataFrame,
@@ -620,7 +653,8 @@ def run_backtest(panel: pd.DataFrame,
                  cost_bps_per_side: float = DEFAULT_COST_BPS_PER_SIDE,
                  long_short: bool = False,
                  by_date: dict | None = None,
-                 missing_exit_pct: float = MISSING_EXIT_PCT) -> dict:
+                 missing_exit_pct: float = MISSING_EXIT_PCT,
+                 exit_by_date: dict | None = None) -> dict:
     """Equal-weight top-K portfolio, rebalanced every `rebalance_days` SESSIONS.
 
     Rebalance cadence is counted in trading sessions, not calendar days, so holidays cannot
@@ -640,6 +674,8 @@ def run_backtest(panel: pd.DataFrame,
 
     if by_date is None:
         by_date = index_by_date(panel)
+    if exit_by_date is None:
+        exit_by_date = index_exit_prices(panel)
 
     prev_w: dict[str, float] = {}
     periods: list[dict] = []
@@ -669,10 +705,11 @@ def run_backtest(panel: pd.DataFrame,
         cost = traded * cost_bps_per_side / 10_000.0
 
         entry = cur.set_index('symbol')['next_open']
-        nxt = by_date.get(d1)
-        if nxt is None:
+        # Exit off the FULL panel, not by_date (eligible-only) -- a name that fell under the
+        # liquidity floor is still quoted and still sellable. See index_exit_prices().
+        exit_px = exit_by_date.get(d1)
+        if exit_px is None:
             continue
-        exit_px = nxt.set_index('symbol')['next_open']
 
         gross = 0.0
         missing = 0
@@ -969,13 +1006,15 @@ def main() -> None:
         return
 
     by_date = index_by_date(panel)          # grouped once, reused by every factor
+    exit_by_date = index_exit_prices(panel)  # full-panel exit prices, likewise
     factors = sorted(FACTORS) if a.factor == 'all' else [a.factor]
 
     out = []
     for f in factors:
         try:
             r = run_backtest(panel, f, a.rebalance, a.top_k, a.cost_bps, a.long_short,
-                             by_date=by_date, missing_exit_pct=a.missing_exit_pct)
+                             by_date=by_date, missing_exit_pct=a.missing_exit_pct,
+                             exit_by_date=exit_by_date)
         except Exception as e:                              # noqa: BLE001
             print(f"[FactorBacktest] {f}: FAILED -- {e}")
             continue
