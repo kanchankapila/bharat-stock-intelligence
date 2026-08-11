@@ -70,6 +70,19 @@ export default defineConfig(({mode}) => {
       // each run needing `--pool=forks --poolOptions.forks.singleFork` on the CLI.
       pool: 'forks',
       poolOptions: { forks: { singleFork: true } },
+      // .claude/worktrees/ holds other concurrent sessions' checkouts of this same repo, so
+      // vitest was collecting a stale duplicate of every test file in each of them -- 1,010
+      // test files instead of ~93, most of the run's wall-clock, and failures from other
+      // people's in-progress work. CI never saw this (the directory is gitignored, so a fresh
+      // checkout has none), which is worse, not better: the local suite disagreed with CI and
+      // the local red was easy to learn to ignore. Vitest's defaults are replaced wholesale
+      // when `exclude` is set, so node_modules/dist/build are restated here deliberately.
+      exclude: [
+        '**/node_modules/**',
+        '**/dist/**',
+        '**/build/**',
+        '**/.claude/worktrees/**',
+      ],
     },
   };
 });
