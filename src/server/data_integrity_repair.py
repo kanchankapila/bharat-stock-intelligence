@@ -12,6 +12,9 @@ Each repair is idempotent and can be run independently:
   --news-link       build an indexed news_symbol_link table from symbols_json
   --labels          add label_definition/producer to signal_outcomes + flag implausible returns
   --nan-recommendations  delete unified_recommendations rows with a non-finite unified_score
+  --ghost-recommendations delete unified_recommendations rows for symbols with no price history
+  --weekend-recommendations delete unified_recommendations snapshots dated to a closed day
+  --delivery-trades NULL stock_delivery_data.trades where it duplicates delivery_qty
   --all             run everything
 
 Run:  python data_integrity_repair.py --all [--dry-run]
@@ -409,6 +412,145 @@ def repair_nan_recommendations(conn: ConnWrapper, dry: bool) -> None:
     _log(f"nan-recommendations: deleted {total} non-finite rows.")
 
 
+def repair_ghost_recommendations(conn: ConnWrapper, dry: bool) -> None:
+    """Delete unified_recommendations rows for symbols with no price history at all.
+
+    Found by the 2026-08-11 reverse audit: 26,375 of 85,442 rows (31%) named 2,498 distinct
+    symbols that appear nowhere in stock_ohlcv on any date -- MORE ghost symbols than the
+    2,450 real ones -- and 3,774 of them carried an actionable Buy/Sell label rather than
+    Hold. They are genuine NSE microcaps (REXPRO, KONSTELEC, SWADPOL, 4THDIM) that the
+    screener feeds surface but the platform never prices, not the 2026-07-23 URL-as-symbol
+    corruption (checked: 0 url-shaped, 0 lowercase, all match ^[A-Z0-9&*-]+$).
+
+    Source is already fixed. _restrict_to_tradeable_universe() (unified_ranker.py, commit
+    b786b98, 2026-07-31) requires membership in both nse_stocks and recent stock_ohlcv, and
+    live rows have been clean since -- verified 0 ghost rows on every computed_at from
+    2026-07-31 onward. This is purely the residue the source fix could not reach, because
+    run() purges only the computed_at it is currently writing, so every historical date keeps
+    its ghosts forever. That is the same shape as --nan-recommendations above and as the
+    13,505-row NaN residue before it: **fixing a writer never cleans what it already wrote.**
+
+    Why it matters even though live consumers read only the latest snapshot: these rows
+    silently corrupt every measurement taken over the table's history. A ghost cannot be
+    graded (no forward return exists), so it is dropped by any join to prices -- meaning the
+    backtested population and the recommended population were different, which is exactly the
+    bias _restrict_to_tradeable_universe was written to stop at the source.
+
+    The predicate is deliberately narrower than the live filter: it removes a symbol only if
+    stock_ohlcv has NO bar for it on ANY date, not merely none in the trailing 30 days. A
+    symbol with any price history is left alone even if it is currently stale or illiquid, so
+    a delisting or a temporary feed gap can never be mistaken for a ghost.
+    """
+    rows = conn.execute(
+        "SELECT COUNT(*) AS c, COUNT(DISTINCT symbol) AS syms, "
+        "       SUM(CASE WHEN classification NOT LIKE 'Hold' THEN 1 ELSE 0 END) AS actionable, "
+        "       MIN(computed_at) AS lo, MAX(computed_at) AS hi "
+        "FROM unified_recommendations "
+        "WHERE symbol NOT IN (SELECT DISTINCT symbol FROM stock_ohlcv)"
+    ).fetchone()
+    total = int(rows['c'] or 0)
+    if total == 0:
+        _log("ghost-recommendations: none found -- clean.")
+        return
+    _log(f"  {total} rows across {int(rows['syms'] or 0)} unpriced symbols "
+         f"({rows['lo']} .. {rows['hi']}), {int(rows['actionable'] or 0)} carrying a Buy/Sell label")
+    if dry:
+        _log(f"ghost-recommendations: would delete {total} rows (dry run).")
+        return
+    conn.execute("DELETE FROM unified_recommendations "
+                 "WHERE symbol NOT IN (SELECT DISTINCT symbol FROM stock_ohlcv)")
+    conn.commit()
+    _log(f"ghost-recommendations: deleted {total} rows.")
+
+
+def repair_weekend_recommendations(conn: ConnWrapper, dry: bool) -> None:
+    """Delete unified_recommendations snapshots stamped to a Saturday or Sunday.
+
+    Residue of the same bug as_of.logical_session_date() now prevents at the source: the
+    pipeline deliberately runs early on closed days (queues.ts's closed-day-early-batch), and
+    run() took date.today() as the computed_at label, so a weekend run produced a snapshot
+    dated to a day the market never opened -- 2026-07-05, 07-12, 07-25 and 08-09.
+
+    Safe to delete rather than re-date, and re-dating is actively wrong: the upsert key is
+    (symbol, computed_at), so moving a Sunday snapshot onto its Monday would collide with
+    that Monday's own run. Verified before deleting that every one of the four is immediately
+    followed by a real trading-day snapshot with at least as many rows (07-06/1917,
+    07-13/1922, 07-27/1674, 08-10/2201), so the content is not lost -- Monday re-ranked from
+    scratch anyway.
+
+    Why they are worse than merely useless: any measurement that picks "the latest snapshot
+    strictly before date D" will select the Sunday row as Monday's pre-move signal. The
+    2026-08-11 reverse audit did exactly that before this was found.
+
+    Weekend membership is computed in Python, not SQL, on purpose: computed_at is TEXT and
+    EXTRACT(DOW FROM ...) is Postgres-only, so a dialect branch here would fail silently on
+    the SQLite fallback path rather than erroring (see .claude/rules/recurring-bugs.md).
+    """
+    dates = [r['computed_at'] for r in conn.execute(
+        "SELECT DISTINCT computed_at FROM unified_recommendations").fetchall()]
+    weekend = []
+    for d in dates:
+        try:
+            if datetime.date.fromisoformat(str(d)[:10]).weekday() >= 5:
+                weekend.append(d)
+        except ValueError:
+            continue                      # unparseable date -- not this repair's business
+    if not weekend:
+        _log("weekend-recommendations: none found -- clean.")
+        return
+
+    placeholders = ",".join("?" for _ in weekend)
+    total = int(conn.execute(
+        f"SELECT COUNT(*) AS c FROM unified_recommendations "
+        f"WHERE computed_at IN ({placeholders})", tuple(weekend)).fetchone()['c'] or 0)
+    _log(f"  {total} rows across {len(weekend)} non-trading-day snapshots: {sorted(weekend)}")
+    if dry:
+        _log(f"weekend-recommendations: would delete {total} rows (dry run).")
+        return
+    conn.execute(f"DELETE FROM unified_recommendations "
+                 f"WHERE computed_at IN ({placeholders})", tuple(weekend))
+    conn.commit()
+    _log(f"weekend-recommendations: deleted {total} rows.")
+
+
+def repair_delivery_trades(conn: ConnWrapper, dry: bool) -> None:
+    """NULL out stock_delivery_data.trades where it is a copy of delivery_qty.
+
+    deliveryFetcher.ts read the trade count as `cols[cols.length - 2]` with the comment
+    "Usually NO_OF_TRADES is second to last". NSE's sec_bhavdata_full actually ends
+    ... NO_OF_TRADES, DELIV_QTY, DELIV_PER -- so second-to-last is DELIV_QTY, and `trades`
+    held delivery quantity in **100% of 664,006 rows**. Same blind-positional-index class as
+    the 2026-07-23 URL-as-symbol corruption; the other four columns in that same function
+    were already resolved by header name.
+
+    Source fixed 2026-08-11 (header.indexOf('NO_OF_TRADES')). This clears the residue, because
+    a fixed writer never cleans what it already wrote -- the fourth time that has come up here.
+
+    NULLs rather than deletes: `delivery_pct`, `delivery_qty` and `traded_qty` on these rows
+    are correct and are what the delivery factor work actually reads. Only the one column is
+    wrong, and NULL is the honest value for "we never captured this".
+
+    The predicate is `trades = delivery_qty`, so a row where the real trade count coincidentally
+    equalled delivery quantity would also be nulled. Across 664,006 rows matching at 100% that
+    is systematic, not coincidence, and the cost of nulling a genuine coincidence is nil.
+    """
+    row = conn.execute(
+        "SELECT COUNT(*) AS c FROM stock_delivery_data "
+        "WHERE trades IS NOT NULL AND trades = delivery_qty").fetchone()
+    total = int(row['c'] or 0)
+    if total == 0:
+        _log("delivery-trades: none found -- clean.")
+        return
+    _log(f"  {total} rows where trades duplicates delivery_qty")
+    if dry:
+        _log(f"delivery-trades: would NULL {total} rows (dry run).")
+        return
+    conn.execute("UPDATE stock_delivery_data SET trades = NULL "
+                 "WHERE trades IS NOT NULL AND trades = delivery_qty")
+    conn.commit()
+    _log(f"delivery-trades: nulled {total} rows.")
+
+
 TASKS = {
     'bad_bars': repair_bad_bars,
     'adjustment': repair_adjustment_basis,
@@ -417,6 +559,9 @@ TASKS = {
     'news_link': repair_news_link,
     'labels': repair_labels,
     'nan_recommendations': repair_nan_recommendations,
+    'ghost_recommendations': repair_ghost_recommendations,
+    'weekend_recommendations': repair_weekend_recommendations,
+    'delivery_trades': repair_delivery_trades,
 }
 
 

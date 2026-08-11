@@ -10,6 +10,7 @@ from pathlib import Path
 from datetime import date, datetime, timedelta, timezone
 
 from db_compat import connect
+import as_of
 
 CSV_PATH         = Path(__file__).parent.parent.parent / 'screener_scoring_v2.csv'
 CORRECTIONS_PATH = Path(__file__).parent.parent.parent / 'screener_corrections.csv'
@@ -1892,7 +1893,13 @@ class UnifiedRanker:
         }
 
     def run(self):
-        today = date.today().isoformat()
+        # NOT date.today(): the pipeline deliberately runs early on closed days
+        # (queues.ts's closed-day-early-batch), so a Saturday/Sunday run was stamping
+        # computed_at with a day the market never opened -- 9,096 such rows across
+        # 2026-07-05/07-12/07-25/08-09, unreachable to any consumer joining on a trading
+        # date. logical_session_date() rolls a weekend forward to the session this ranking
+        # is actually for. See as_of.py for why weekends only and not holidays.
+        today = as_of.logical_session_date()
         # computed_at is a bare DATE and the upsert key is (symbol, computed_at), so a manual
         # same-day re-run silently replaces that morning's 07:30 IST cron row. Nothing recorded
         # WHEN a row was actually produced, which made this table ungradeable: a genuine

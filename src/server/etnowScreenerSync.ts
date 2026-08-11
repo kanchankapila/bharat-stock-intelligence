@@ -138,8 +138,12 @@ export async function syncETnowScreeners(timeframeFilter?: 'intraday' | 'long_te
       const exited  = Array.from(prevSymbols).filter(s => !currentSymbols.has(s));
 
       if (entered.length > 0) {
-        const insertAppSql = `INSERT OR IGNORE INTO screener_appearances (screener_id, source, symbol, appeared_date) VALUES (?, 'etnow', ?, ?)`;
-        await dbTransaction(async (tx) => { for (const s of entered) await tx.run(insertAppSql, [screener.screener_id, s, today]); });
+        // appeared_at records WHEN the sync saw it -- appeared_date is date-only and is the
+        // dedup key, so it cannot carry a time. Without this the intraday question ("enter at
+        // the moment of flagging, exit at the close") is unmeasurable; see the migration.
+        const appearedAt = new Date().toISOString();
+        const insertAppSql = `INSERT OR IGNORE INTO screener_appearances (screener_id, source, symbol, appeared_date, appeared_at) VALUES (?, 'etnow', ?, ?, ?)`;
+        await dbTransaction(async (tx) => { for (const s of entered) await tx.run(insertAppSql, [screener.screener_id, s, today, appearedAt]); });
       }
       if (exited.length > 0) {
         await dbRun(`UPDATE screener_appearances SET exited_date = ? WHERE screener_id = ? AND symbol IN (${exited.map(() => '?').join(',')}) AND exited_date IS NULL`,

@@ -55,8 +55,25 @@ jobs:
       # Verified this job's actual environment (no .env, no Postgres service) passes clean:
       # temporarily hid .env locally and ran the full suite with USE_POSTGRES/POSTGRES_*
       # unset and DATABASE_URL pointed at a nonexistent sqlite file — 391/391 passed.
+      # Both dirs, deliberately: src/server/__tests__/ holds 14 .py files (the whole
+      # unified_ranker / ml_ensemble / factor_backtest / direction-invariant suite) that
+      # this job silently never collected -- there is no pytest testpaths config and no
+      # root conftest.py, so `pytest src/server/tests/` excluded exactly the tests written
+      # to lock in the ranker fixes. Keep this string identical to CLAUDE.md's
+      # Definition of Done, or the two drift again.
       - name: Run pytest
-        run: python -m pytest src/server/tests/ -q
+        run: python -m pytest src/server/__tests__/ src/server/tests/ -q
+
+      # Static checks for the bug classes that have each recurred 3-10+ times
+      # (date.today() write-anchors, raw %s placeholders, fetchers with no
+      # live_datasource test). --diff against the base ref so this blocks NEW
+      # occurrences without demanding the existing backlog be cleared first;
+      # run `python scripts/check_recurring_bugs.py` with no args for the full list.
+      - name: Recurring-bug checks (changed files only)
+        run: |
+          git fetch --no-tags --depth=1 origin "${{ github.base_ref || github.event.before || 'main' }}" || true
+          python scripts/check_recurring_bugs.py --diff FETCH_HEAD || \
+            python scripts/check_recurring_bugs.py --diff HEAD~1
 
   smoke-test:
     runs-on: ubuntu-latest

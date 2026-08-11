@@ -94,6 +94,37 @@ def logical_trading_date(cutoff_hour: int = 4, now=None) -> str:
     return d.isoformat()
 
 
+def logical_session_date(cutoff_hour: int = 4, now=None) -> str:
+    """logical_trading_date(), rolled forward off a weekend to the session it is FOR.
+
+    A third bug class, distinct from both functions around it. The daily pipeline
+    deliberately runs early on closed days (queues.ts's closed-day-early-batch dispatches
+    outcome-resolver -> ml-daily-ops -> unified-ranker on holidays and weekends), so on a
+    Saturday or Sunday the ranker is producing a snapshot for the NEXT session -- not for the
+    closed day it happens to be executing on. Taking date.today() as the `computed_at` label
+    put 9,096 unified_recommendations rows on days the market never opened (2026-07-05,
+    07-12, 07-25 and 08-09, found by the 2026-08-11 reverse audit). Nothing errors: the rows
+    are written and are simply unreachable to any consumer that joins on a real trading date,
+    and they make the table look like it has snapshots it does not have.
+
+    Weekends only, deliberately. `market_holidays` is built from observed trading gaps and
+    currently stops at 2026-04-14, so it cannot answer whether a FUTURE weekday is a holiday
+    -- and guessing would be worse than not rolling. The asymmetry is what makes this safe:
+    a holiday-dated snapshot is superseded by that holiday's own early-batch run a few hours
+    later, whereas a weekend-dated one is never superseded by anything.
+
+    Deliberately NOT logical_write_floor(): that returns the last COMPLETED session
+    (MAX(date) FROM stock_ohlcv), so a Monday 07:30 pre-market run would label its output
+    with Friday's date and overwrite Friday's snapshot. This function answers "which session
+    is this ranking for", which is the next one, not the last one.
+    """
+    import datetime
+    d = datetime.date.fromisoformat(logical_trading_date(cutoff_hour, now))
+    while d.weekday() >= 5:          # 5 = Saturday, 6 = Sunday
+        d += datetime.timedelta(days=1)
+    return d.isoformat()
+
+
 def logical_write_floor(conn=None, *, fallback: str = None) -> str:
     """The reference date for a "CASE WHEN date >= floor THEN val ELSE NULL END" point-in-time
     write guard -- the ISO date of the most recent session actually present in stock_ohlcv.
