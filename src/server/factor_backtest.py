@@ -784,6 +784,17 @@ def _summarize(df: pd.DataFrame, factor: str, rebalance_days: int, top_k: int,
     by_year = {int(y): round(float(v), 3) for y, v in yr.mean().items()}
     years_positive = sum(1 for v in by_year.values() if v > 0)
 
+    # Is the BENCHMARK itself plausible? Every factor number here is an excess over `uni`, so a
+    # broken benchmark silently rescales every verdict -- and that is not hypothetical. Until
+    # 2026-08-11 exits were priced from the eligible-only slice, so any name dipping under the
+    # Rs 1cr ADT floor for one session took MISSING_EXIT_PCT = -100%. The harness reported the
+    # universe at -4.66%/month, i.e. **-99.9% over 5.5 years, for a market that roughly tripled**,
+    # and nothing objected: the number was printed next to authoritative-looking t-stats and was
+    # believed for a day. Indian equities have never compounded anywhere near this badly, so a
+    # universe outside these bounds means the harness is broken, not that the market collapsed.
+    uni_annual = float(((1 + uni.mean() / 100) ** per_yr - 1) * 100) if uni.notna().any() else float('nan')
+    benchmark_sane = bool(np.isfinite(uni_annual) and -40.0 <= uni_annual <= 80.0)
+
     return {
         'factor': factor,
         'long_short': long_short,
@@ -803,6 +814,8 @@ def _summarize(df: pd.DataFrame, factor: str, rebalance_days: int, top_k: int,
         'cost_per_period_pct': round(float(df['cost_pct'].mean()), 4),
         'net_per_period_pct': round(float(net.mean()), 4),
         'universe_per_period_pct': round(float(uni.mean()), 4),
+        'universe_annualised_pct': round(uni_annual, 2),
+        'benchmark_sane': benchmark_sane,
         'net_excess_vs_universe_pct': round(float(excess.mean()), 4),
         'excess_t_stat': round(t_stat(excess), 2),
         'pct_periods_beating_universe': round(float((excess > 0).mean() * 100), 1),
@@ -821,7 +834,8 @@ def _print(r: dict) -> None:
     print(f"\n{'='*78}\n{r['factor']}{ls}  |  rebalance {r['rebalance_days']}d  |  "
           f"top-{r['top_k']}  |  {r['cost_bps_per_side']:.0f}bps/side\n{'='*78}")
     for k in ('periods', 'years', 'gross_per_period_pct', 'cost_per_period_pct',
-              'net_per_period_pct', 'universe_per_period_pct', 'net_excess_vs_universe_pct',
+              'net_per_period_pct', 'universe_per_period_pct', 'universe_annualised_pct',
+              'net_excess_vs_universe_pct',
               'excess_t_stat', 'pct_periods_beating_universe', 'avg_oneway_turnover',
               'annual_cost_drag_pct', 'cagr_net_pct', 'sharpe_net', 'max_drawdown_pct',
               'years_positive'):
@@ -829,6 +843,20 @@ def _print(r: dict) -> None:
     print(f"  {'excess_by_year_pct':<32} {r['excess_by_year_pct']}")
     if r['clamped_returns']:
         print(f"  {'clamped_returns':<32} {r['clamped_returns']}  <-- data-quality guard fired")
+
+    # Every number above is an excess over the benchmark, so an implausible benchmark makes all
+    # of them meaningless -- print that FIRST and refuse to give a verdict, rather than letting
+    # a broken universe sit quietly beside an authoritative-looking t-stat. That is exactly how
+    # a -99.9%-over-5.5-years universe went unchallenged for a day on 2026-08-11.
+    if not r.get('benchmark_sane', True):
+        print(f"\n  !! BENCHMARK IMPLAUSIBLE: universe annualises to "
+              f"{r.get('universe_annualised_pct')}%. Indian equities have never done this.\n"
+              f"     The harness is broken, not the market -- every excess figure above is void.\n"
+              f"     Check exit pricing first (index_exit_prices): a name that merely fell under\n"
+              f"     the ADT floor must be sold at its price, not written off at "
+              f"{r['missing_exit_pct']}%.")
+        return
+
     t = r['excess_t_stat']
     if not (isinstance(t, float) and math.isnan(t)) and abs(t) < 2.0:
         print(f"\n  VERDICT: NOT significant (|t|={abs(t):.2f} < 2). Do not trade this.")

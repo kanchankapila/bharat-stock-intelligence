@@ -93,3 +93,51 @@ def test_zero_and_nan_next_open_are_excluded_from_exits():
     ex = fb.index_exit_prices(p)
     assert "LIQC" not in ex["2026-01-02"].index
     assert "LIQB" not in ex["2026-01-02"].index
+
+
+class TestBenchmarkSanityGuard:
+    """Every figure the harness reports is an excess over the benchmark, so an implausible
+    benchmark voids all of them. The exit-pricing bug printed a universe of -4.66%/month
+    (-99.9% over 5.5 years) next to authoritative-looking t-stats and went unchallenged for a
+    day. This guard is what makes that loud instead of quiet."""
+
+    def summarize(self, universe_pct_per_period, rebalance_days=21):
+        df = pd.DataFrame({
+            "date": pd.date_range("2024-01-01", periods=40, freq="ME").astype(str),
+            "gross_pct": [1.0] * 40,
+            "cost_pct": [0.1] * 40,
+            "net_pct": [0.9] * 40,
+            "universe_pct": [universe_pct_per_period] * 40,
+            "turnover": [0.3] * 40,
+            "n_names": [50] * 40,
+            "missing_exits": [0] * 40,
+        })
+        return fb._summarize(df, "delivery_pct", rebalance_days, 50, 25.0, False, 0)
+
+    def test_the_real_broken_value_is_flagged(self):
+        # -4.66%/month is what the harness actually printed before the fix.
+        r = self.summarize(-4.66)
+        assert r["benchmark_sane"] is False
+        assert r["universe_annualised_pct"] < -40
+
+    def test_the_real_fixed_value_passes(self):
+        # +1.29%/month is what it reports after the fix; ~16.6%/yr, entirely ordinary.
+        r = self.summarize(1.29)
+        assert r["benchmark_sane"] is True
+
+    def test_an_implausibly_good_benchmark_is_also_flagged(self):
+        """Symmetric on purpose: a benchmark that is too GOOD is equally a broken harness,
+        and would inflate nothing while hiding that the universe is wrong."""
+        assert self.summarize(6.0)["benchmark_sane"] is False
+
+    def test_print_refuses_a_verdict_on_an_insane_benchmark(self, capsys):
+        fb._print(self.summarize(-4.66))
+        out = capsys.readouterr().out
+        assert "BENCHMARK IMPLAUSIBLE" in out
+        assert "VERDICT" not in out, "a verdict on a void benchmark is worse than no verdict"
+
+    def test_print_still_gives_a_verdict_when_the_benchmark_is_fine(self, capsys):
+        fb._print(self.summarize(1.29))
+        out = capsys.readouterr().out
+        assert "BENCHMARK IMPLAUSIBLE" not in out
+        assert "VERDICT" in out

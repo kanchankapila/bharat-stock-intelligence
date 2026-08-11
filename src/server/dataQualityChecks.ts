@@ -539,6 +539,111 @@ export const DATA_QUALITY_CHECKS: DataQualityCheck[] = [
       return { status: 'pass', detail: 'All conviction_level values are within the known enum' };
     },
   },
+  // ── Regression guards for the four defects the 2026-08-11 audit found live ──────────
+  // Every one of these was invisible for weeks because nothing compared the canonical table
+  // against the price universe it is supposed to describe. Freshness checks cannot catch any
+  // of them: the table was fresh and full the whole time, just full of the wrong rows.
+  {
+    id: 'unified-recommendations-ghost-symbols',
+    label: 'unified_recommendations symbols with no price history anywhere',
+    category: 'scoring',
+    critical: true,
+    // 29,014 rows across 2,500 symbols absent from stock_ohlcv on EVERY date were found on
+    // 2026-08-11, 3,774 carrying an actionable Buy/Sell. Source was fixed 2026-07-31
+    // (_restrict_to_tradeable_universe) but the historical rows survived, because run() purges
+    // only the computed_at it is writing. A ghost can never be graded or traded, and it
+    // silently biases every measurement taken over the table.
+    sql: `SELECT COUNT(*) AS ghosts
+          FROM unified_recommendations u
+          WHERE NOT EXISTS (SELECT 1 FROM stock_ohlcv s WHERE s.symbol = u.symbol)`,
+    evaluate: (row) => {
+      const ghosts = Number(row?.ghosts) || 0;
+      if (ghosts > 0) return {
+        status: 'fail',
+        detail: `${ghosts} rows name a symbol with no stock_ohlcv history at all — ` +
+                `run: python data_integrity_repair.py --ghost-recommendations`,
+      };
+      return { status: 'pass', detail: 'Every ranked symbol has price history' };
+    },
+  },
+  {
+    id: 'unified-recommendations-trading-day',
+    label: 'unified_recommendations snapshots dated to a real trading day',
+    category: 'scoring',
+    critical: true,
+    // 9,096 rows sat on 2026-07-05/07-12/07-25/08-09 -- Saturdays and Sundays -- because run()
+    // took date.today() while the pipeline deliberately runs early on closed days. Such a
+    // snapshot is unreachable to any consumer joining on a trading date. Fixed at source by
+    // as_of.logical_session_date(); this catches a regression or a new writer repeating it.
+    sql: `SELECT COUNT(DISTINCT u.computed_at) AS bad_days
+          FROM unified_recommendations u
+          WHERE NOT EXISTS (
+            SELECT 1 FROM stock_ohlcv s WHERE s.date = u.computed_at::date
+          )`,
+    evaluate: (row) => {
+      const bad = Number(row?.bad_days) || 0;
+      if (bad > 0) return {
+        status: 'fail',
+        detail: `${bad} snapshot date(s) are not trading days — check as_of.logical_session_date(), ` +
+                `then: python data_integrity_repair.py --weekend-recommendations`,
+      };
+      return { status: 'pass', detail: 'All snapshots are dated to real sessions' };
+    },
+  },
+  {
+    id: 'unified-recommendations-liquid-coverage',
+    label: 'unified_recommendations coverage of the liquid (>=Rs 1cr ADT) universe',
+    category: 'scoring',
+    critical: true,
+    // Coverage ran 0.3%-0.5% on seven dates in July 2026 while the table still held 800-2,300
+    // rows -- it was ranking a universe almost disjoint from the tradeable one, and row count
+    // alone (the existing freshness check) read healthy throughout. Post-fix it runs 59%-92%.
+    sql: `WITH liq AS (
+            SELECT s.symbol
+            FROM stock_ohlcv s
+            WHERE s.date = (SELECT MAX(date) FROM stock_ohlcv)
+              AND COALESCE(s.is_suspect, 0) = 0
+              AND s.close * s.volume >= 10000000
+          )
+          SELECT (SELECT COUNT(*) FROM liq) AS liquid,
+                 (SELECT COUNT(*) FROM liq
+                  WHERE EXISTS (
+                    SELECT 1 FROM unified_recommendations u
+                    WHERE u.symbol = liq.symbol
+                      AND u.computed_at = (SELECT MAX(computed_at) FROM unified_recommendations)
+                  )) AS covered`,
+    evaluate: (row) => {
+      const liquid = Number(row?.liquid) || 0;
+      const covered = Number(row?.covered) || 0;
+      if (liquid === 0) return { status: 'warn', detail: 'No liquid universe on the latest session' };
+      const pct = (100 * covered) / liquid;
+      const d = `${covered}/${liquid} liquid names ranked (${pct.toFixed(1)}%)`;
+      if (pct < 25) return { status: 'fail', detail: `${d} — the ranker's universe has diverged from the tradeable one` };
+      if (pct < 50) return { status: 'warn', detail: d };
+      return { status: 'pass', detail: d };
+    },
+  },
+  {
+    id: 'stock-delivery-trades-not-duplicated',
+    label: 'stock_delivery_data.trades is a trade count, not a copy of delivery_qty',
+    category: 'ohlcv',   // bhavcopy-derived, same feed as the price bars
+    critical: false,
+    // deliveryFetcher.ts read NO_OF_TRADES positionally as cols[len-2]; sec_bhavdata_full ends
+    // ... NO_OF_TRADES, DELIV_QTY, DELIV_PER, so it captured DELIV_QTY in 100% of 664,006 rows.
+    // Fixed to header.indexOf('NO_OF_TRADES'); this catches the column silently drifting again.
+    sql: `SELECT COUNT(*) AS dupes
+          FROM stock_delivery_data
+          WHERE trades IS NOT NULL AND trades = delivery_qty`,
+    evaluate: (row) => {
+      const dupes = Number(row?.dupes) || 0;
+      if (dupes > 0) return {
+        status: 'fail',
+        detail: `${dupes} rows have trades = delivery_qty — the NSE column index has drifted again; ` +
+                `then: python data_integrity_repair.py --delivery-trades`,
+      };
+      return { status: 'pass', detail: 'trades is distinct from delivery_qty' };
+    },
+  },
   {
     id: 'quant-scores-freshness-coverage',
     label: 'quant_scores freshness & coverage',
