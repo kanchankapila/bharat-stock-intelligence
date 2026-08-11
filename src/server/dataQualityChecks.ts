@@ -209,6 +209,29 @@ const TABLE_FRESHNESS_CHECKS: TableFreshnessConfig[] = [
     category: 'fundamentals', critical: false, table: 'proprietary_scores_history', dateColumn: 'date', warnDays: 3, failDays: 5 },
   { id: 'working-capital-history-recency', label: 'working_capital_history (monthly cash-conversion-cycle)',
     category: 'fundamentals', critical: false, table: 'working_capital_history', dateColumn: 'fetched_at', warnDays: 45 },
+  // 2026-08-11: marketsmojo_financials_fetcher.py -- MarketsMojo's get-financials (qtype=qoq,
+  // paginated) returns ~34 quarters of consolidated+standalone P&L line items, confirmed live
+  // and backfilled. dateColumn is fetched_at (crawl recency), not a period column, matching
+  // working-capital-history-recency's own pattern right above -- the underlying quarterly
+  // figures themselves only change when a company reports, so this checks "is the crawl still
+  // running," same reasoning as mc-swot-history-freshness/working-capital-history-recency.
+  { id: 'marketsmojo-financials-history-recency', label: 'marketsmojo_financials_history (quarterly P&L line items, consolidated+standalone)',
+    category: 'fundamentals', critical: false, table: 'marketsmojo_financials_history', dateColumn: 'fetched_at', warnDays: 45 },
+  // 2026-08-11: marketsmojo_fintrend_fetcher.py -- MarketsMojo's finTrendGraph returns the
+  // HISTORY of the financial-trend score (previously only ever captured as a single latest
+  // value via marketsmojo_header_info's ext_mojo_financial_pts), confirmed live and
+  // backfilled. Same fetched_at-based crawl-recency check as the two entries above -- the
+  // score itself only moves on ~quarterly earnings cadence.
+  { id: 'marketsmojo-fintrend-history-recency', label: 'marketsmojo_fintrend_history (quarterly financial-trend score)',
+    category: 'fundamentals', critical: false, table: 'marketsmojo_fintrend_history', dateColumn: 'fetched_at', warnDays: 45 },
+  // 2026-08-11: marketsmojo_shareholding_fetcher.py -- MarketsMojo's shareholding_graphs gives
+  // real per-quarter ownership-% history (Promoter/FII/MF/Insurance/Other-DII/NII, plus
+  // Promoter pledged %), confirmed live and backfilled. This is the first source on the
+  // platform with real historical depth for ownership data -- measurement.md flags every
+  // existing ownership table as stuck at ~30 dates since 2026-06-30. Same fetched_at-based
+  // crawl-recency check as the other marketsmojo_* fundamentals tables above.
+  { id: 'marketsmojo-shareholding-history-recency', label: 'marketsmojo_shareholding_history (quarterly Promoter/FII/MF/Insurance/DII/NII holding %)',
+    category: 'fundamentals', critical: false, table: 'marketsmojo_shareholding_history', dateColumn: 'fetched_at', warnDays: 45 },
   { id: 'stock-earnings-beats-recency', label: 'stock_earnings_beats',
     category: 'fundamentals', critical: false, table: 'stock_earnings_beats', dateColumn: 'fetched_at', warnDays: 10 },
   { id: 'eps-surprise-history-recency', label: 'eps_surprise_history',
@@ -239,6 +262,12 @@ const TABLE_FRESHNESS_CHECKS: TableFreshnessConfig[] = [
   // macro
   { id: 'macro-asset-prices-freshness', label: 'macro_asset_prices (VIX/FII-DII/global indices/PCR-GEX/MMI)',
     category: 'macro', critical: true, table: 'macro_asset_prices', dateColumn: 'date', nativeDateColumn: true, warnDays: 3, failDays: 5 },
+  // 2026-08-11: marketsmojo_index_fetcher.py -- fills the gap macro_asset_prices leaves for
+  // Indian domestic indices (SENSEX, BSE-family, NSE sectoral indices beyond NIFTY50 itself),
+  // confirmed live and backfilled. Not critical (macro_asset_prices above already covers the
+  // one index -- NIFTY50 -- other engines depend on; this is supplementary breadth).
+  { id: 'marketsmojo-index-history-freshness', label: 'marketsmojo_index_history (SENSEX/BSE-family/NSE sectoral index daily prices)',
+    category: 'macro', critical: false, table: 'marketsmojo_index_history', dateColumn: 'date', nativeDateColumn: true, warnDays: 3, failDays: 5 },
   { id: 'eco-calendar-recency', label: 'eco_calendar (MC economic calendar)',
     category: 'macro', critical: false, table: 'eco_calendar', dateColumn: 'fetched_at', warnDays: 14 },
   { id: 'index-valuation-freshness', label: 'index_valuation (Nifty/Sensex PE-PB)',
@@ -286,6 +315,13 @@ const TABLE_FRESHNESS_CHECKS: TableFreshnessConfig[] = [
     category: 'signals', critical: false, table: 'screener_sector_rotation', dateColumn: 'date', warnDays: 3, failDays: 5 },
   { id: 'intraday-recommendations-freshness', label: 'intraday_recommendations',
     category: 'signals', critical: false, table: 'intraday_recommendations', dateColumn: 'computed_at', warnDays: 3, failDays: 5 },
+  // 2026-08-11: marketsmojo_technical_fetcher.py -- MarketsMojo's getCardInfo returns a full
+  // ~3-year dated series (not just the current value) for weekly/monthly MACD/RSI/BB/KST/MA/
+  // Dow/OBV + IndiGraph score, confirmed live and backfilled. dateColumn is the indicator's own
+  // `date`, not fetched_at, so this reads whether the series is actually being kept current --
+  // same cadence expectation as OHLCV since these are computed off daily bars.
+  { id: 'marketsmojo-technical-history-freshness', label: 'marketsmojo_technical_history (MACD/RSI/BB/KST/MA/Dow/OBV/IndiGraph series)',
+    category: 'signals', critical: false, table: 'marketsmojo_technical_history', dateColumn: 'date', warnDays: 3, failDays: 5 },
 
   // reference
   { id: 'mc-broker-reco-freshness', label: 'mc_broker_reco',

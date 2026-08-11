@@ -17,6 +17,9 @@ The **NSE symbol** (e.g., `HDFCBANK`, `INFY`, `BAJAJ-AUTO`) is the single source
 | ET / ETnow | `companyid` | Numeric string | `9195` |
 | ISIN (universal) | `isin` | 12-char alphanumeric | `INE040A01034` |
 | MoneyControl stockid | `stockid` | Numeric string | `592009` |
+| MarketsMojo | `stockid` _(shared)_ | Numeric string | `592009` |
+
+**MarketsMojo (onboarded 2026-08-11)** — 5 fetchers (`marketsmojo_{technical,financials,fintrend,index,shareholding}_fetcher.py`) writing 5 `marketsmojo_*_history` tables. It reuses the **MoneyControl `stockid`**, read from `scripts/stocklist.json` via each fetcher's `load_sid_map()`; there is no new opaque id, so nothing was added to `StockMapping`. Requires a `Referer: https://www.marketsmojo.com/` header. Note the shared id: a `stockid` alone does not identify the *provider*, so any future table keyed on it needs the provider in the PK per the composite-key rule below — the existing 5 are keyed on `symbol`, which sidesteps it.
 
 ### Resolution Files
 

@@ -1149,6 +1149,67 @@ CREATE TABLE IF NOT EXISTS "market_sentiment_snapshots" (
 );
 CREATE INDEX idx_mss_at ON public.market_sentiment_snapshots USING btree (snapshot_at DESC);
 
+-- ── marketsmojo_financials_history ─────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS "marketsmojo_financials_history" (
+  "symbol" TEXT NOT NULL,
+  "statement" TEXT NOT NULL,
+  "period_label" TEXT NOT NULL,
+  "line_item" TEXT NOT NULL,
+  "value" NUMERIC,
+  "fetched_at" TEXT NOT NULL,
+  PRIMARY KEY ("symbol", "statement", "period_label", "line_item")
+);
+CREATE INDEX idx_marketsmojo_financials_history_symbol ON public.marketsmojo_financials_history USING btree (symbol);
+
+-- ── marketsmojo_fintrend_history ─────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS "marketsmojo_fintrend_history" (
+  "symbol" TEXT NOT NULL,
+  "date" DATE NOT NULL,
+  "score" NUMERIC,
+  "fin_trend_dir" INTEGER,
+  "fin_txt" TEXT,
+  "fetched_at" TEXT NOT NULL,
+  PRIMARY KEY ("symbol", "date")
+);
+CREATE INDEX idx_marketsmojo_fintrend_history_symbol ON public.marketsmojo_fintrend_history USING btree (symbol);
+
+-- ── marketsmojo_index_history ─────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS "marketsmojo_index_history" (
+  "index_id" INTEGER NOT NULL,
+  "name" TEXT NOT NULL,
+  "date" DATE NOT NULL,
+  "price" NUMERIC,
+  "fetched_at" TEXT NOT NULL,
+  PRIMARY KEY ("index_id", "date")
+);
+CREATE INDEX idx_marketsmojo_index_history_index_id ON public.marketsmojo_index_history USING btree (index_id);
+
+-- ── marketsmojo_shareholding_history ─────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS "marketsmojo_shareholding_history" (
+  "symbol" TEXT NOT NULL,
+  "category" TEXT NOT NULL,
+  "period_date" DATE NOT NULL,
+  "value" NUMERIC,
+  "fetched_at" TEXT NOT NULL,
+  PRIMARY KEY ("symbol", "category", "period_date")
+);
+CREATE INDEX idx_marketsmojo_shareholding_history_symbol ON public.marketsmojo_shareholding_history USING btree (symbol);
+
+-- ── marketsmojo_technical_history ─────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS "marketsmojo_technical_history" (
+  "symbol" TEXT NOT NULL,
+  "indicator" TEXT NOT NULL,
+  "period" TEXT NOT NULL,
+  "date" DATE NOT NULL,
+  "price" NUMERIC,
+  "grade" TEXT,
+  "flag" INTEGER,
+  "details" TEXT,
+  "fetched_at" TEXT NOT NULL,
+  PRIMARY KEY ("symbol", "indicator", "period", "date")
+);
+CREATE INDEX idx_marketsmojo_technical_history_symbol ON public.marketsmojo_technical_history USING btree (symbol);
+
 -- ── mc_advance_decline ─────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS "mc_advance_decline" (
   "date" TEXT NOT NULL,
@@ -2035,7 +2096,7 @@ CREATE TABLE IF NOT EXISTS "screener_appearances" (
   "appeared_at" TIMESTAMPTZ,
   PRIMARY KEY ("screener_id", "symbol", "appeared_date")
 );
-CREATE INDEX IF NOT EXISTS idx_sa_appeared_at ON public.screener_appearances USING btree (appeared_at) WHERE appeared_at IS NOT NULL;
+CREATE INDEX idx_sa_appeared_at ON public.screener_appearances USING btree (appeared_at) WHERE (appeared_at IS NOT NULL);
 CREATE INDEX idx_sa_date ON public.screener_appearances USING btree (appeared_date);
 CREATE INDEX idx_sa_screener ON public.screener_appearances USING btree (screener_id);
 CREATE INDEX idx_scap_symbol ON public.screener_appearances USING btree (symbol, appeared_date DESC);
