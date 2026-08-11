@@ -22,6 +22,12 @@ export async function fetchDeliveryMap(scanDate: string): Promise<Map<string, nu
     const seriesIdx = header.indexOf('SERIES');
     const trdIdx    = header.indexOf('TTL_TRD_QNTY');
     const delIdx    = header.indexOf('DELIV_QTY');
+    // By NAME, like every other column here. This used to be cols[cols.length - 2] with the
+    // comment "Usually NO_OF_TRADES is second to last" -- but sec_bhavdata_full ends
+    // ... NO_OF_TRADES, DELIV_QTY, DELIV_PER, so second-to-last is DELIV_QTY. The result was
+    // that `trades` held delivery quantity in 100% of 664,006 rows (found 2026-08-11).
+    // Same blind-positional-index class as the 2026-07-23 URL-as-symbol corruption.
+    const tradesIdx = header.indexOf('NO_OF_TRADES');
 
     if (symIdx < 0 || trdIdx < 0 || delIdx < 0) return new Map();
 
@@ -33,7 +39,7 @@ export async function fetchDeliveryMap(scanDate: string): Promise<Map<string, nu
       if (cols[seriesIdx] !== 'EQ') continue;
       const sym    = cols[symIdx];
       const traded = parseFloat(cols[trdIdx]);
-      const tradesCount = parseFloat(cols[cols.length - 2]); // Usually NO_OF_TRADES is second to last
+      const tradesCount = tradesIdx >= 0 ? parseFloat(cols[tradesIdx]) : NaN;
       const deliv  = parseFloat(cols[delIdx]);
       
       if (traded > 0 && !isNaN(deliv)) {
@@ -45,7 +51,9 @@ export async function fetchDeliveryMap(scanDate: string): Promise<Map<string, nu
           pct,
           deliv,
           traded,
-          isNaN(tradesCount) ? 0 : tradesCount
+          // NULL, not 0: a missing trade count is unknown, and 0 is a real value that would
+          // be indistinguishable from "the column was absent".
+          isNaN(tradesCount) ? null : tradesCount
         ]);
       }
     }

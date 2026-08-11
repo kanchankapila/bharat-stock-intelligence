@@ -14,6 +14,7 @@ Each repair is idempotent and can be run independently:
   --nan-recommendations  delete unified_recommendations rows with a non-finite unified_score
   --ghost-recommendations delete unified_recommendations rows for symbols with no price history
   --weekend-recommendations delete unified_recommendations snapshots dated to a closed day
+  --delivery-trades NULL stock_delivery_data.trades where it duplicates delivery_qty
   --all             run everything
 
 Run:  python data_integrity_repair.py --all [--dry-run]
@@ -512,6 +513,44 @@ def repair_weekend_recommendations(conn: ConnWrapper, dry: bool) -> None:
     _log(f"weekend-recommendations: deleted {total} rows.")
 
 
+def repair_delivery_trades(conn: ConnWrapper, dry: bool) -> None:
+    """NULL out stock_delivery_data.trades where it is a copy of delivery_qty.
+
+    deliveryFetcher.ts read the trade count as `cols[cols.length - 2]` with the comment
+    "Usually NO_OF_TRADES is second to last". NSE's sec_bhavdata_full actually ends
+    ... NO_OF_TRADES, DELIV_QTY, DELIV_PER -- so second-to-last is DELIV_QTY, and `trades`
+    held delivery quantity in **100% of 664,006 rows**. Same blind-positional-index class as
+    the 2026-07-23 URL-as-symbol corruption; the other four columns in that same function
+    were already resolved by header name.
+
+    Source fixed 2026-08-11 (header.indexOf('NO_OF_TRADES')). This clears the residue, because
+    a fixed writer never cleans what it already wrote -- the fourth time that has come up here.
+
+    NULLs rather than deletes: `delivery_pct`, `delivery_qty` and `traded_qty` on these rows
+    are correct and are what the delivery factor work actually reads. Only the one column is
+    wrong, and NULL is the honest value for "we never captured this".
+
+    The predicate is `trades = delivery_qty`, so a row where the real trade count coincidentally
+    equalled delivery quantity would also be nulled. Across 664,006 rows matching at 100% that
+    is systematic, not coincidence, and the cost of nulling a genuine coincidence is nil.
+    """
+    row = conn.execute(
+        "SELECT COUNT(*) AS c FROM stock_delivery_data "
+        "WHERE trades IS NOT NULL AND trades = delivery_qty").fetchone()
+    total = int(row['c'] or 0)
+    if total == 0:
+        _log("delivery-trades: none found -- clean.")
+        return
+    _log(f"  {total} rows where trades duplicates delivery_qty")
+    if dry:
+        _log(f"delivery-trades: would NULL {total} rows (dry run).")
+        return
+    conn.execute("UPDATE stock_delivery_data SET trades = NULL "
+                 "WHERE trades IS NOT NULL AND trades = delivery_qty")
+    conn.commit()
+    _log(f"delivery-trades: nulled {total} rows.")
+
+
 TASKS = {
     'bad_bars': repair_bad_bars,
     'adjustment': repair_adjustment_basis,
@@ -522,6 +561,7 @@ TASKS = {
     'nan_recommendations': repair_nan_recommendations,
     'ghost_recommendations': repair_ghost_recommendations,
     'weekend_recommendations': repair_weekend_recommendations,
+    'delivery_trades': repair_delivery_trades,
 }
 
 

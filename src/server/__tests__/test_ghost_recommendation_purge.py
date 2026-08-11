@@ -148,3 +148,49 @@ class TestWeekendPurge:
 
     def test_registered_as_a_task(self):
         assert dir_.TASKS["weekend_recommendations"] is dir_.repair_weekend_recommendations
+
+
+class TestDeliveryTradesRepair:
+    """deliveryFetcher.ts read the trade count as cols[len-2] ("usually NO_OF_TRADES is second
+    to last"), but sec_bhavdata_full ends ... NO_OF_TRADES, DELIV_QTY, DELIV_PER -- so it
+    captured DELIV_QTY in 100% of 664,006 rows."""
+
+    @pytest.fixture
+    def dconn(self):
+        c = sqlite3.connect(":memory:")
+        c.execute("CREATE TABLE stock_delivery_data (symbol TEXT, date TEXT, delivery_pct REAL,"
+                  " delivery_qty REAL, traded_qty REAL, trades REAL)")
+        c.executemany("INSERT INTO stock_delivery_data VALUES (?,?,?,?,?,?)", [
+            ("RELIANCE", "2026-08-10", 53.2, 36394, 68386, 36394),   # corrupt: trades == deliv_qty
+            ("INFY",     "2026-08-10", 75.5,  7787, 10304,  7787),   # corrupt
+            ("TCS",      "2026-08-10", 49.9, 261562, 523929, 4812),  # genuine trade count -> keep
+            ("WIPRO",    "2026-08-10", 40.0,  1000,  2500,  None),   # already null -> untouched
+        ])
+        c.commit()
+        return Conn(c)
+
+    def test_nulls_only_the_duplicated_values(self, dconn):
+        dir_.repair_delivery_trades(dconn, dry=False)
+        got = {r["symbol"]: r["trades"] for r in dconn.execute(
+            "SELECT symbol, trades FROM stock_delivery_data").fetchall()}
+        assert got["RELIANCE"] is None and got["INFY"] is None
+        assert got["TCS"] == 4812, "a genuine trade count must survive"
+        assert got["WIPRO"] is None
+
+    def test_the_other_columns_are_untouched(self, dconn):
+        """delivery_pct/delivery_qty/traded_qty are correct on these rows and are what the
+        delivery factor work reads -- only the one column was wrong."""
+        dir_.repair_delivery_trades(dconn, dry=False)
+        r = dconn.execute("SELECT * FROM stock_delivery_data WHERE symbol='RELIANCE'").fetchone()
+        assert (r["delivery_pct"], r["delivery_qty"], r["traded_qty"]) == (53.2, 36394, 68386)
+
+    def test_dry_run_and_idempotence(self, dconn):
+        dir_.repair_delivery_trades(dconn, dry=True)
+        assert dconn.commits == 0
+        dir_.repair_delivery_trades(dconn, dry=False)
+        n = dconn.commits
+        dir_.repair_delivery_trades(dconn, dry=False)
+        assert dconn.commits == n          # second run returns before writing
+
+    def test_registered_as_a_task(self):
+        assert dir_.TASKS["delivery_trades"] is dir_.repair_delivery_trades
