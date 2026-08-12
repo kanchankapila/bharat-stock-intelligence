@@ -472,8 +472,19 @@ async function processMlDailyOps(job: Job): Promise<{ success: boolean }> {
     .catch(e => console.warn('[QUEUE] mc_techscanner failed:', (e as Error).message));
 
   // Fetch extra alt-data from Indiatimes, MarketsMojo, and Trading80.
-  await runPython('extra_endpoints_fetcher.py', [], 30 * 60_000)
+  // --scope daily: only the 5 endpoints extra_features_parser.py actually reads. It used to
+  // fetch all 20 per-stock endpoints (~40,000 requests) and get SIGKILLed at its 30-min budget
+  // having covered 55% of the universe -- while the parser, the table's ONLY production
+  // consumer, read 5 of them. The other 15 now run weekly (processMlWeeklyRetrain) so the raw
+  // corpus stays warm without costing the nightly window. ~10,000 requests, comfortably inside.
+  await runPython('extra_endpoints_fetcher.py', ['--scope', 'daily'], 30 * 60_000)
     .catch(e => console.warn('[QUEUE] extra_endpoints_fetcher failed:', (e as Error).message));
+  // Separate step ON PURPOSE — do not fold this back into the fetcher. It used to be that
+  // script's last statement, so the 30-min timeout kill (which happened every night, see the
+  // fetcher's own comment) meant the parse never ran and all 14 ext_* feature columns stayed
+  // at ~0%. Run as its own step, the parse still lands whatever the fetch managed to store.
+  await runPython('extra_features_parser.py', [], 5 * 60_000)
+    .catch(e => console.warn('[QUEUE] extra_features_parser failed:', (e as Error).message));
 
   // Superstar-investor conviction tracking (InvestSights) — per-stock entry/exit/increase/
   // decrease by named investors, closing the gap the 2026-08-03 urls.txt field analysis
@@ -485,14 +496,16 @@ async function processMlDailyOps(job: Job): Promise<{ success: boolean }> {
   // MarketsMojo daily-cadence series (onboarded 2026-08-11, backfilled once, never scheduled
   // until now — their dataQualityChecks entries were set at warnDays 3/failDays 5 with no job
   // to satisfy them, so the monitor would have gone red from ~2026-08-14 onward).
-  // ponytail: getCardInfo has no since-parameter, so each run re-fetches the stock's whole
-  // ~743-date series and re-upserts it (~16.7M rows universe-wide) to gain one new row per
-  // series. Tolerable at this cadence and the 0.5s rate limit makes the fetch the real
-  // bottleneck (~15 min), not the write. If it starts hurting, add a --since flag that skips
-  // rows <= max(date) already stored rather than moving this off a daily schedule — the
-  // indigraph/MACD/RSI series update every trading day and are the only historical record of
-  // these indicators anywhere on the platform.
-  await runPython('marketsmojo_technical_fetcher.py', [], 40 * 60_000)
+  //
+  // The "it starts hurting, add a --since" case the old comment here anticipated had already
+  // happened and nobody had looked: measured 2026-08-12, this step was SIGKILLed at its 40-min
+  // budget EVERY night having covered 214 of 1,792 symbols (12%), after writing 2,010,101 rows
+  // to gain 2,787 genuinely new ones. getCardInfo still has no since-parameter — the whole
+  // ~9,900-row series arrives regardless — so the fix is on the write side (skip dates already
+  // stored, live-measured 13 rows/symbol instead of 9,876) plus an 8-worker fetch (2.02s/symbol
+  // serial = 61.7 min, which no budget could have absorbed). Now ~9 min; 20 gives real headroom.
+  // --full forces a complete re-upsert if the vendor ever restates history.
+  await runPython('marketsmojo_technical_fetcher.py', [], 20 * 60_000)
     .catch(e => console.warn('[QUEUE] marketsmojo_technical_fetcher failed:', (e as Error).message));
   // 81 indices, one call each — the BSE-family/sectoral coverage macro_asset_prices lacks.
   await runPython('marketsmojo_index_fetcher.py', [], 10 * 60_000)
@@ -823,11 +836,13 @@ async function processMlDailyOps(job: Job): Promise<{ success: boolean }> {
   await runPython('delivery_trend_fetcher.py', [], 5 * 60_000)
     .catch(e => console.warn('[QUEUE] delivery_trend_fetcher failed:', (e as Error).message));
 
-  // Promoter insider transactions (90d rolling) from NSE → insider_transactions + technical_signals.
-  // Doubled from 10→20 min: NSE HTTP pool times out mid-alphabet when the connection is
-  // congested (observed 2026-07-13: EL* batch all timed out at read_timeout=12 causing SIGTERM).
-  await runPython('insider_transactions_fetcher.py', [], 30 * 60_000)
-    .catch(e => console.warn('[QUEUE] insider_transactions_fetcher failed:', (e as Error).message));
+  // insider_transactions_fetcher.py moved to the weekly retrain (processMlWeeklyRetrain).
+  // It cost 14m47 of the nightly critical path (measured 2026-08-12, the single largest step
+  // after the two timeout-kills) to refresh a feed whose own data-quality check reports
+  // "Latest insider_transactions row is 73.7d old". SEBI PIT filings are event-driven and
+  // sparse, not daily -- a nightly re-scrape of the same 90-day window cannot make them
+  // fresher. insider_features.py (the 90d rolling ratio that actually feeds technical_signals)
+  // still runs nightly and simply reads whatever the weekly fetch last landed.
 
   // Credit rating events (upgrades/downgrades) from BSE → credit_rating_events + technical_signals.
   await runPython('credit_rating_fetcher.py', [], 3 * 60_000)
@@ -1142,6 +1157,17 @@ async function processMlWeeklyRetrain(_job: Job): Promise<{ success: boolean }> 
   // Analyst consensus + price targets — 2328 stocks × 3 calls × 0.4s = ~47 min (quarterly data)
   await runPython('analyst_estimates_snapshot.py', [], 70 * 60_000)
     .catch(e => console.warn('[QUEUE] analyst_estimates_snapshot failed:', (e as Error).message));
+  // The 15 per-stock endpoints extra_features_parser.py does NOT read (ml-daily-ops fetches the
+  // 5 it does, nightly). No feature consumes these today — they are kept warm for future
+  // feature work, which is a weekly-cadence need, not a reason to spend the nightly window on
+  // them. Drop this step rather than let it grow if nothing has parsed them by the next audit.
+  await runPython('extra_endpoints_fetcher.py', ['--scope', 'weekly'], 90 * 60_000)
+    .catch(e => console.warn('[QUEUE] extra_endpoints_fetcher (weekly scope) failed:', (e as Error).message));
+  // Moved off the nightly chain (2026-08-13): 14m47 of ml-daily-ops every night to refresh a
+  // feed measured 73.7 days stale. SEBI PIT filings are sparse and event-driven; weekly is the
+  // cadence the data actually has. 30 min matches the budget it had on the daily chain.
+  await runPython('insider_transactions_fetcher.py', [], 30 * 60_000)
+    .catch(e => console.warn('[QUEUE] insider_transactions_fetcher failed:', (e as Error).message));
   // trendlyne_adv_tech_fetcher.py + trendlyne_price_analysis_fetcher.py moved to the
   // trendlyne-midweek queue (Tuesday) to de-conflict from this Sunday batch.
   // trendlyne_overview_fetcher.py moved into company-profiles-sync (dedupes the
@@ -1824,11 +1850,24 @@ export async function initQueues(): Promise<boolean> {
     for (const r of mlRepeatables) {
       await mlDailyOpsQueue.removeRepeatableByKey(r.key);
     }
-    await addJobWithCatchup(mlDailyOpsQueue, 
+    // Schedule: 6:50 PM IST (13:20 UTC), Mon-Fri. Moved 40 min earlier 2026-08-13 — the NSE
+    // bhavcopy and MTO files land ~18:00 IST, so 19:30 left most of the post-close window
+    // unused while the chain ran to 22:36 and the evening tail to 23:35, i.e. 5 minutes PAST
+    // the 23:30 target with no margin for a slow night (this job has failed 38 of 80 runs).
+    //
+    // NOT earlier than 13:20: etnow-screener-sync fires at 13:10 UTC and this chain's
+    // screener_features_fetcher.py reads what it writes. An 18:30 start was tried and
+    // correctly rejected by jobPipelineOrdering.test.ts ("expected 790 to be less than 780")
+    // — that ordering contract is the binding constraint here, not the bhavcopy.
+    //
+    // Keep this comment OUTSIDE the options object: jobRegistryCronMirror.test.ts locates the
+    // real pattern by character distance from the nearest 'ml-daily-ops' marker, so a long
+    // comment wedged between the two makes a DIFFERENT queue's cron the closer match.
+    await addJobWithCatchup(mlDailyOpsQueue,
       'ml-daily-ops',
       {},
       {
-        repeat: { pattern: '0 14 * * 1-5' }, // 7:30 PM IST (14:00 UTC), Mon-Fri after EOD files are published
+        repeat: { pattern: '20 13 * * 1-5' },
         jobId: 'ml-daily-ops',
         removeOnComplete: 3,
         removeOnFail: 3,

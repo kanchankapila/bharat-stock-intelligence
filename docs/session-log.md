@@ -6,6 +6,67 @@ Historical record, split out of CLAUDE.md on 2026-08-11 (it was 64% of that file
 
 ## Recent session notes
 
+### 2026-08-13 — Nightly ingest audit: two unbounded fetchers, a dead parser, 412 broken provider ids
+
+Traced where the ~3h ml-daily-ops chain actually goes and whether the ingested data reaches the
+model. Measured against live Postgres + `logs/app-2026-08-12.log`, not read off the code.
+
+**What the night looked like (measured):** ml-daily-ops 19:30 -> 22:36 (3h06); evening tail ended
+23:35, i.e. 5 min PAST the 23:30 target with zero margin, on a job that has failed 38 of 80 runs.
+58% of the chain (108 of 186 min) ran before any per-stock feature was written.
+
+**Root causes, all confirmed live:**
+
+1. `marketsmojo_technical_fetcher.py` — SIGKILLed at its 40-min budget EVERY night having covered
+   214 of 1,792 symbols (12%), after writing 2,010,101 rows to gain 2,787 new ones (721:1
+   amplification, 3.4 GB table). getCardInfo has no since-parameter so the whole ~9,900-row series
+   arrives per call; fixed on the WRITE side (skip dates already stored — live-measured 13 rows/
+   symbol instead of 9,876, a 760x cut) plus an 8-worker fetch (2.02s/symbol serial = 61.7 min,
+   which no budget could absorb). Budget 40 -> 20 min. `--full` forces a complete re-upsert.
+2. `extra_endpoints_fetcher.py` — killed at its 30-min budget every night, and the parse step was
+   the LAST STATEMENT of the killed function, so `extra_features_parser` never ran and all 14
+   `ext_*` columns sat at ~0% while 419 MB of responses accumulated. The runtime overrun and the
+   dead columns were the same bug. Parser now runs as its own queues.ts step; one run took the 14
+   columns 0% -> 36-47% live. Separately: the parser reads 5 of the 34 endpoints fetched and is
+   the table's ONLY production consumer, so ~74% of ~40,000 nightly requests fed nothing —
+   `--scope daily` (5 endpoints, ~10,000 requests) nightly, `--scope weekly` for the rest.
+   13 of 14 `ext_*` columns refresh at most quarterly (t80/mojo quality ranks: 0 changes in
+   10,324 consecutive-date pairs), and `ext_t80_*` == `ext_mojo_*` on all 11,338 rows — the same
+   vendor payload under two names, which ml_ensemble reads as two features.
+3. `nse_stocks.tlid` held the TICKER for 412 of 2,234 rows, a permanent 404 on every Trendlyne
+   fetcher (18.4% of the universe, forever). The 2026-08-12 94.9% failure rate was this PLUS a
+   transient outage that has since healed — verified by probing numeric ids at 1 and 15 workers
+   (200 both). Repaired from `tlid_mapping.csv` via migration `1786970000000` after cross-
+   validating it (resolves all 412; agrees with 1,811 of 1,816 already-working tlids; a random
+   12 returned 200 with a tlname matching the ticker's real company). Deliberately did NOT touch
+   the 5 rows where the CSV disagrees with a working id — both resolve, that is ticker reuse.
+   `filter_numeric_tlids()` in `fetch_utils.py` now stops the 3 fetchers burning 412x3 retries.
+4. `insider_transactions_fetcher` — 14m47 of the nightly path to refresh a feed its own DQ check
+   calls 73.7 days stale. Moved to the weekly retrain.
+5. `dvm_durability/valuation/momentum` — read by ml_ensemble.py as a hardcoded 50.0 for every
+   stock, with NO writer anywhere, while `trendlyne_dvm_scores` held the data all along. Stamped
+   across on a point-in-time-safe (symbol, date) join: 0 -> 14,667 rows.
+6. Six `screener_cat_*` columns: no writer, no reader, 0% populated. Dropped (migration
+   `1786980000000`) rather than built — measurement.md has already graded that whole family
+   negative. `screener_cat_breadth` is a DIFFERENT, live column and was kept.
+
+**Schedule:** ml-daily-ops 19:30 -> 18:50 IST. An 18:30 start was tried and correctly rejected by
+`jobPipelineOrdering.test.ts` — etnow-screener-sync fires 13:10 UTC and this chain's
+screener_features_fetcher reads what it writes. That ordering contract, not the bhavcopy, is the
+binding constraint. All 18 mirrored cronPatterns in jobRegistry.ts/monitorScripts.ts updated.
+
+**Deliberately NOT done:** raising `MAX_PYTHON_CONCURRENT` (5 -> 10). The measured bottleneck was
+two unbounded scripts, not slot exhaustion — the 13-member parallel batch completed in 2 min under
+the existing cap. Raising it without evidence trades a fixed problem for the Postgres contention
+this file's own comments repeatedly blame for timeouts.
+
+**New monitoring:** `technical-signals-feature-coverage` in dataQualityChecks.ts. Every one of the
+other ~90 checks asks "did this TABLE get fresh rows?"; none asked "did the FEATURE land?" — which
+is exactly why extra_endpoint_responses could pass its freshness check nightly while the columns it
+exists to produce were 0%. Generic (jsonb_each over the row, no enumerated column list) and
+baselined at 53/302 dead columns, alarming on growth rather than on the known backlog.
+
+
 - Fixed a tRPC router merge conflict by renaming `agentsRouter.getStrategyPicks` to `agentsRouter.getAgentStrategyPicks` and updating `src/components/AgentStrategistPage.tsx`.
 - Enhanced custom screener filtering in `src/server/routers/screeners.router.ts` to honor `minMktCap`, `sector`, and normalized market cap parsing.
 - Verified the dev server starts successfully on `http://localhost:3000` after freeing a stale `node.exe` process using port 3000.

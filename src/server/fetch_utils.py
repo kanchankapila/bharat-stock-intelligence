@@ -90,3 +90,37 @@ class FetchTracker:
                   f"{self.fail_threshold * 100:.0f}% threshold — exiting non-zero so this run "
                   f"is flagged instead of silently reported as a success.")
             sys.exit(1)
+
+
+def filter_numeric_tlids(rows, label: str = "trendlyne"):
+    """Drop (symbol, tlid) pairs whose tlid is not Trendlyne's numeric stock id.
+
+    Trendlyne's `tlid` is an opaque numeric id (`533`), never the ticker -- see
+    .claude/rules/data-sources.md, which is explicit that provider ids are resolved, never
+    constructed by convention. nse_stocks.tlid nonetheless holds the TICKER for 412 of 2,234
+    rows (legacy seed data: 'AARTECH', 'MOSCHIP', 'MWL', ...), and every one of those builds
+    .../adv-technical-analysis/AARTECH/24/ which is a permanent 404.
+
+    Live-verified 2026-08-13: numeric ids return HTTP 200 at 1 AND 15 concurrent workers, the
+    ticker-shaped ones 404 -- so this is a resolution defect, not the upstream outage the
+    2026-08-12 run's 94.9% failure rate looked like (that part was transient and has healed).
+
+    Filtering in Python, not SQL: `tlid ~ '^[0-9]+$'` is a Postgres-only operator and would
+    fail closed on the SQLite fallback (.claude/rules/recurring-bugs.md, SQL dialect).
+
+    Returns (kept, dropped_symbols). Callers should log the dropped count rather than swallow
+    it -- these symbols have NO Trendlyne coverage until resolve_trendlyne_tlids.py backfills
+    a real id for them, and a silent filter would hide that gap the way the old blind retries did.
+    """
+    kept, dropped = [], []
+    for symbol, tlid in rows:
+        if str(tlid).strip().isdigit():
+            kept.append((symbol, str(tlid).strip()))
+        else:
+            dropped.append(symbol)
+    if dropped:
+        print(f"[{label}] Skipping {len(dropped)} stock(s) whose nse_stocks.tlid is not a "
+              f"numeric Trendlyne id (would 404): {', '.join(sorted(dropped)[:10])}"
+              f"{' ...' if len(dropped) > 10 else ''}. "
+              f"Run resolve_trendlyne_tlids.py to recover them.")
+    return kept, dropped

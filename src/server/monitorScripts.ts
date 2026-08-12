@@ -43,11 +43,11 @@ export const MONITOR_SCRIPTS = [
     queueName: 'outcome-resolver',
     staleLimitHours: 26,
     // Actually touched twice a day: the 9:30am outcome-resolver queue AND again inside the
-    // 7:30pm ml-daily-ops batch (queues.ts processMlDailyOps). Cron-aware lateness takes the
+    // 6:50pm ml-daily-ops batch (queues.ts processMlDailyOps). Cron-aware lateness takes the
     // more recent of the two expected fire times instead of a flat hours threshold, so a
     // mid-day check (before either run) doesn't false-flag "stale" off Friday's success.
     // graceMinutes 60 -> 280: this entry is a step inside the ml-daily-ops chain (the
-    // '0 14 * * 1-5' pattern above), whose Worker lockDuration is 4h (240min) --
+    // '20 13 * * 1-5' pattern above), whose Worker lockDuration is 4h (240min) --
     // jobRegistryGraceMinutesConsistency.test.ts already found and fixed the equivalent
     // JOB_REGISTRY entry for this same underlying job, but this is a SEPARATE, independently
     // tracked registry (DB-freshness via monitor.router.ts, not job_heartbeat), so fixing one
@@ -55,7 +55,7 @@ export const MONITOR_SCRIPTS = [
     // hour into the chain, which per ml-daily-ops's own declared budget is normal. Bumped to
     // match the corresponding JOB_REGISTRY sub-step fix (270min parent + 10min). Found
     // 2026-08-03 while building the graceMinutes mirror-consistency test.
-    cronPatterns: ['0 4 * * 1-5', '0 14 * * 1-5'],
+    cronPatterns: ['0 4 * * 1-5', '20 13 * * 1-5'],
     graceMinutes: 280,
   },
   {
@@ -69,7 +69,7 @@ export const MONITOR_SCRIPTS = [
     queueName: 'outcome-resolver',
     staleLimitHours: 26,
     // graceMinutes 60 -> 280: this entry is a step inside the ml-daily-ops chain (the
-    // '0 14 * * 1-5' pattern above), whose Worker lockDuration is 4h (240min) --
+    // '20 13 * * 1-5' pattern above), whose Worker lockDuration is 4h (240min) --
     // jobRegistryGraceMinutesConsistency.test.ts already found and fixed the equivalent
     // JOB_REGISTRY entry for this same underlying job, but this is a SEPARATE, independently
     // tracked registry (DB-freshness via monitor.router.ts, not job_heartbeat), so fixing one
@@ -77,7 +77,7 @@ export const MONITOR_SCRIPTS = [
     // hour into the chain, which per ml-daily-ops's own declared budget is normal. Bumped to
     // match the corresponding JOB_REGISTRY sub-step fix (270min parent + 10min). Found
     // 2026-08-03 while building the graceMinutes mirror-consistency test.
-    cronPatterns: ['0 4 * * 1-5', '0 14 * * 1-5'],
+    cronPatterns: ['0 4 * * 1-5', '20 13 * * 1-5'],
     graceMinutes: 280,
   },
   {
@@ -86,18 +86,18 @@ export const MONITOR_SCRIPTS = [
     category: 'ML',
     critical: true,
     description: 'Computes win rate, alpha vs Nifty, Sharpe — segmented by signal type / regime / sector',
-    schedule: 'Daily 7:30 PM IST (inside ml-daily-ops)',
+    schedule: 'Daily 6:50 PM IST (inside ml-daily-ops)',
     pyScript: 'performance_tracker.py --horizon 5',
     queueName: null,
     staleLimitHours: 26,
-    // Runs as a step inside ml-daily-ops (0 14 * * 1-5), same as sibling entries below
+    // Runs as a step inside ml-daily-ops (20 13 * * 1-5), same as sibling entries below
     // (fii-dii-fetcher, finbert-scorer, ml-ensemble-score, reward-engine, rl-agent-update,
     // signal-type-stats) -- but unlike them had NO cronPatterns, so the flat 26h
     // staleLimitHours false-flagged 'stale' (critical: true, real Telegram alert) every
     // Saturday off Friday's success (it also runs inside ml-weekly-retrain on Sunday, but
     // that doesn't help Saturday). Found 2026-08-03 while auditing job/Telegram health.
     // graceMinutes 60 -> 280: this entry is a step inside the ml-daily-ops chain (the
-    // '0 14 * * 1-5' pattern above), whose Worker lockDuration is 4h (240min) --
+    // '20 13 * * 1-5' pattern above), whose Worker lockDuration is 4h (240min) --
     // jobRegistryGraceMinutesConsistency.test.ts already found and fixed the equivalent
     // JOB_REGISTRY entry for this same underlying job, but this is a SEPARATE, independently
     // tracked registry (DB-freshness via monitor.router.ts, not job_heartbeat), so fixing one
@@ -105,7 +105,7 @@ export const MONITOR_SCRIPTS = [
     // hour into the chain, which per ml-daily-ops's own declared budget is normal. Bumped to
     // match the corresponding JOB_REGISTRY sub-step fix (270min parent + 10min). Found
     // 2026-08-03 while building the graceMinutes mirror-consistency test.
-    cronPatterns: ['0 14 * * 1-5'],
+    cronPatterns: ['20 13 * * 1-5'],
     graceMinutes: 280,
   },
   {
@@ -114,14 +114,14 @@ export const MONITOR_SCRIPTS = [
     category: 'Data',
     critical: true,
     description: 'Fetches institutional flow data from NSE API',
-    schedule: 'Daily 7:30 PM IST (inside ml-daily-ops)',
+    schedule: 'Daily 6:50 PM IST (inside ml-daily-ops)',
     pyScript: 'fii_dii_fetcher.py',
     queueName: null,
     staleLimitHours: 30,
-    // Runs as a step inside ml-daily-ops (0 14 * * 1-5 = 7:30pm IST); checked before that
+    // Runs as a step inside ml-daily-ops (20 13 * * 1-5 = 6:50pm IST); checked before that
     // hasn't run yet today, not actually stale off Friday's run.
     // graceMinutes 60 -> 280: this entry is a step inside the ml-daily-ops chain (the
-    // '0 14 * * 1-5' pattern above), whose Worker lockDuration is 4h (240min) --
+    // '20 13 * * 1-5' pattern above), whose Worker lockDuration is 4h (240min) --
     // jobRegistryGraceMinutesConsistency.test.ts already found and fixed the equivalent
     // JOB_REGISTRY entry for this same underlying job, but this is a SEPARATE, independently
     // tracked registry (DB-freshness via monitor.router.ts, not job_heartbeat), so fixing one
@@ -129,7 +129,7 @@ export const MONITOR_SCRIPTS = [
     // hour into the chain, which per ml-daily-ops's own declared budget is normal. Bumped to
     // match the corresponding JOB_REGISTRY sub-step fix (270min parent + 10min). Found
     // 2026-08-03 while building the graceMinutes mirror-consistency test.
-    cronPatterns: ['0 14 * * 1-5'],
+    cronPatterns: ['20 13 * * 1-5'],
     graceMinutes: 280,
   },
   {
@@ -138,12 +138,12 @@ export const MONITOR_SCRIPTS = [
     category: 'Data',
     critical: false,
     description: 'Scores news sentiment onto technical_signals rows',
-    schedule: 'Daily 7:30 PM IST (inside ml-daily-ops)',
+    schedule: 'Daily 6:50 PM IST (inside ml-daily-ops)',
     pyScript: 'finbert_scorer.py --days 1',
     queueName: null,
     staleLimitHours: 30,
     // graceMinutes 60 -> 280: this entry is a step inside the ml-daily-ops chain (the
-    // '0 14 * * 1-5' pattern above), whose Worker lockDuration is 4h (240min) --
+    // '20 13 * * 1-5' pattern above), whose Worker lockDuration is 4h (240min) --
     // jobRegistryGraceMinutesConsistency.test.ts already found and fixed the equivalent
     // JOB_REGISTRY entry for this same underlying job, but this is a SEPARATE, independently
     // tracked registry (DB-freshness via monitor.router.ts, not job_heartbeat), so fixing one
@@ -151,7 +151,7 @@ export const MONITOR_SCRIPTS = [
     // hour into the chain, which per ml-daily-ops's own declared budget is normal. Bumped to
     // match the corresponding JOB_REGISTRY sub-step fix (270min parent + 10min). Found
     // 2026-08-03 while building the graceMinutes mirror-consistency test.
-    cronPatterns: ['0 14 * * 1-5'],
+    cronPatterns: ['20 13 * * 1-5'],
     graceMinutes: 280,
   },
   {
@@ -160,12 +160,12 @@ export const MONITOR_SCRIPTS = [
     category: 'ML',
     critical: true,
     description: 'Scores pending signals with stacking ensemble win probability',
-    schedule: 'Daily 7:30 PM IST (inside ml-daily-ops)',
+    schedule: 'Daily 6:50 PM IST (inside ml-daily-ops)',
     pyScript: 'ml_ensemble.py --score',
     queueName: 'ml-daily-ops',
     staleLimitHours: 26,
     // graceMinutes 60 -> 280: this entry is a step inside the ml-daily-ops chain (the
-    // '0 14 * * 1-5' pattern above), whose Worker lockDuration is 4h (240min) --
+    // '20 13 * * 1-5' pattern above), whose Worker lockDuration is 4h (240min) --
     // jobRegistryGraceMinutesConsistency.test.ts already found and fixed the equivalent
     // JOB_REGISTRY entry for this same underlying job, but this is a SEPARATE, independently
     // tracked registry (DB-freshness via monitor.router.ts, not job_heartbeat), so fixing one
@@ -173,7 +173,7 @@ export const MONITOR_SCRIPTS = [
     // hour into the chain, which per ml-daily-ops's own declared budget is normal. Bumped to
     // match the corresponding JOB_REGISTRY sub-step fix (270min parent + 10min). Found
     // 2026-08-03 while building the graceMinutes mirror-consistency test.
-    cronPatterns: ['0 14 * * 1-5'],
+    cronPatterns: ['20 13 * * 1-5'],
     graceMinutes: 280,
   },
   {
@@ -254,12 +254,12 @@ export const MONITOR_SCRIPTS = [
     category: 'ML',
     critical: false,
     description: 'EMA-smoothed reward propagation — updates signal_type_weights from resolved outcomes.',
-    schedule: 'Daily 7:30 PM IST (inside ml-daily-ops)',
+    schedule: 'Daily 6:50 PM IST (inside ml-daily-ops)',
     pyScript: 'reward_engine.py',
     queueName: null,
     staleLimitHours: 26,
     // graceMinutes 60 -> 280: this entry is a step inside the ml-daily-ops chain (the
-    // '0 14 * * 1-5' pattern above), whose Worker lockDuration is 4h (240min) --
+    // '20 13 * * 1-5' pattern above), whose Worker lockDuration is 4h (240min) --
     // jobRegistryGraceMinutesConsistency.test.ts already found and fixed the equivalent
     // JOB_REGISTRY entry for this same underlying job, but this is a SEPARATE, independently
     // tracked registry (DB-freshness via monitor.router.ts, not job_heartbeat), so fixing one
@@ -267,7 +267,7 @@ export const MONITOR_SCRIPTS = [
     // hour into the chain, which per ml-daily-ops's own declared budget is normal. Bumped to
     // match the corresponding JOB_REGISTRY sub-step fix (270min parent + 10min). Found
     // 2026-08-03 while building the graceMinutes mirror-consistency test.
-    cronPatterns: ['0 14 * * 1-5'],
+    cronPatterns: ['20 13 * * 1-5'],
     graceMinutes: 280,
   },
   {
@@ -276,12 +276,12 @@ export const MONITOR_SCRIPTS = [
     category: 'ML',
     critical: false,
     description: 'Q-learning meta-controller update — writes Q-values to rl_q_table from recent episodes.',
-    schedule: 'Daily 7:30 PM IST (inside ml-daily-ops)',
+    schedule: 'Daily 6:50 PM IST (inside ml-daily-ops)',
     pyScript: 'rl_agent.py --update',
     queueName: null,
     staleLimitHours: 26,
     // graceMinutes 60 -> 280: this entry is a step inside the ml-daily-ops chain (the
-    // '0 14 * * 1-5' pattern above), whose Worker lockDuration is 4h (240min) --
+    // '20 13 * * 1-5' pattern above), whose Worker lockDuration is 4h (240min) --
     // jobRegistryGraceMinutesConsistency.test.ts already found and fixed the equivalent
     // JOB_REGISTRY entry for this same underlying job, but this is a SEPARATE, independently
     // tracked registry (DB-freshness via monitor.router.ts, not job_heartbeat), so fixing one
@@ -289,7 +289,7 @@ export const MONITOR_SCRIPTS = [
     // hour into the chain, which per ml-daily-ops's own declared budget is normal. Bumped to
     // match the corresponding JOB_REGISTRY sub-step fix (270min parent + 10min). Found
     // 2026-08-03 while building the graceMinutes mirror-consistency test.
-    cronPatterns: ['0 14 * * 1-5'],
+    cronPatterns: ['20 13 * * 1-5'],
     graceMinutes: 280,
   },
   {
@@ -328,13 +328,13 @@ export const MONITOR_SCRIPTS = [
     category: 'Signals',
     critical: false,
     description: 'Computes win rate / avg return per signal type × regime from resolved signal outcomes.',
-    schedule: 'Daily 7:30 PM IST (inside ml-daily-ops)',
+    schedule: 'Daily 6:50 PM IST (inside ml-daily-ops)',
     pyScript: null,
     queueName: null,
     tsFunction: 'computeSignalTypeStats',
     staleLimitHours: 26,
     // graceMinutes 60 -> 280: this entry is a step inside the ml-daily-ops chain (the
-    // '0 14 * * 1-5' pattern above), whose Worker lockDuration is 4h (240min) --
+    // '20 13 * * 1-5' pattern above), whose Worker lockDuration is 4h (240min) --
     // jobRegistryGraceMinutesConsistency.test.ts already found and fixed the equivalent
     // JOB_REGISTRY entry for this same underlying job, but this is a SEPARATE, independently
     // tracked registry (DB-freshness via monitor.router.ts, not job_heartbeat), so fixing one
@@ -342,7 +342,7 @@ export const MONITOR_SCRIPTS = [
     // hour into the chain, which per ml-daily-ops's own declared budget is normal. Bumped to
     // match the corresponding JOB_REGISTRY sub-step fix (270min parent + 10min). Found
     // 2026-08-03 while building the graceMinutes mirror-consistency test.
-    cronPatterns: ['0 14 * * 1-5'],
+    cronPatterns: ['20 13 * * 1-5'],
     graceMinutes: 280,
   },
   {
