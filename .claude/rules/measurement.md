@@ -65,6 +65,7 @@ Each of these was measured on the 5-year price panel with the spec above. Re-tes
 | `delivery_spike` / `delivery_trend` | t=−1.08 / −1.43 | dead |
 | **`delivery_pct` (raw level, NOT the derived spike/trend above)** | quintile spread +0.19pp/day, t=+7.82 — but **long-only top-50 net excess −1.04%/period at 21d/25bps and −0.15%/period at 5d/15bps, t=−1.48 both** | **dead as a long-only factor** despite a real directional signal in the spread |
 | `ticket_size` (institutional proxy) | −0.67%, t=−2.36 | significantly **inverted** |
+| `smart_money` (`unified_ranker.py`'s live insider+block-deal input, flat 0.05 weight) | **never backtested for edge magnitude** — its own code comment says so | **unmeasured, not proven** — the closest measured analogue, `ticket_size`, is significantly inverted (row above); a 2026-08-12 incoming commit fabricated a "Sharpe 1.38 / 64.5% win rate" backtest for a "Smart Money Veto" concept that does not exist in the live ranker and was deleted, not evidence of anything |
 | screener bullish consensus | IC −0.027, t=−2.36 | significantly negative; cleaning the labels made it *more* negative |
 | **every individual screener** (1,563, one at a time) | **0 survive FDR or Bonferroni** | population direction is negative, sentiment labels inverted |
 | news sentiment | same-day +0.13 IC, next-day −0.03 | real but not tradeable — the move is over by the first entry you can take |

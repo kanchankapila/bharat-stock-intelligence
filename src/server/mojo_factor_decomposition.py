@@ -3,6 +3,18 @@
 MarketsMojo Factor Decomposition Engine
 Decomposes raw MarketsMojo scores (Quality, Valuation, Financial Trend, Technical)
 into orthogonal alpha factors to prevent collinear noise in the unified ranker.
+
+UNWIRED, UNMEASURED (2026-08-12): not imported by unified_ranker.py or called from anywhere,
+despite this module's own log line claiming "Orthogonalized features ready for unified
+ranker." Orthogonalizing a factor against another is not free here -- see
+.claude/rules/measurement.md's "Sector-neutralising a factor DESTROYS it here": residualizing
+value against sector on this same data cost ~45% of the raw factor's edge rather than
+purifying it, the opposite of the published US result this kind of decomposition usually
+relies on. Also note the raw `ext_mojo_*` inputs are 88% one-shot-backfilled MarketsMojo data
+(measurement.md, "A one-shot vendor backfill is not an observed history") -- run this through
+factor_backtest.py against the raw (non-orthogonalized) MarketsMojo scores before wiring in,
+not just assume decomposition helps. verify-gate.mjs blocks a diff wiring this into
+unified_ranker.py without backtest evidence in the same session.
 """
 
 import logging

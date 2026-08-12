@@ -3,6 +3,17 @@
 Screener Optimization Engine: Persistence Streaks & Regime-Aware Weighting
 Computes multi-screener streak scores and adjusts screener category weights
 based on prevailing market volatility (VIX) and institutional flow regimes.
+
+UNWIRED, UNMEASURED (2026-08-12): not imported by unified_ranker.py or called from anywhere.
+Before wiring this in, run it through factor_backtest.py -- the risk-on branch upweights
+momentum/breakout screener categories, which directly contradicts the measured result in
+.claude/rules/measurement.md ("No individual screener gives clear direction"): the
+technical_momentum screener category is the single most negative category found
+(-0.136pp/t=-3.21 at 1d, -0.673pp/t=-3.29 at 5d), and that is not itself proof this
+construction (multi-screener persistence + regime conditioning) fails the same way -- it is
+a different construction and a real reason for skepticism, not a verdict. verify-gate.mjs
+will block a diff wiring this into unified_ranker.py without backtest evidence in the same
+session (see .claude/rules/recurring-bugs.md, "unmeasured signal/scoring change" class).
 """
 
 import logging
