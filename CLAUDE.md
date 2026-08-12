@@ -48,6 +48,18 @@ $PY = Get-Content "graphify-out/.graphify_python"
 
 ~13.2k nodes / 21.3k edges over ~1029 files. Check `graphify-out/GRAPH_REPORT.md`'s freshness hash against `git rev-parse HEAD` before trusting it.
 
+## Services
+
+Four processes run concurrently (`npm start`, or pm2 in production). A change to one is not live
+in the others — and `.ts` is not hot-reloaded, so the Node server needs `pm2 restart bharat-server`.
+
+| pm2 name | Entry point | Port (env var) | Purpose |
+|---|---|---|---|
+| `bharat-server` | `server.ts` | 3000 (`PORT`) | tRPC API, React frontend, WebSocket at `/signals` |
+| `ml-api` | `src/server/python_api.py` | 8000 (`PYTHON_API_PORT`) | DL training/inference, outcome resolution |
+| `chatbot` | `src/server/chatbot/app.py` | 8001 (`CHATBOT_PORT`) | LangGraph RAG agent, ChromaDB |
+| `alphaquant-api` | `backend-python/main.py` | 8002 (`PYTHON_PORT`) | Backtesting, scoring, TV bridge, optimisation |
+
 ## Layout
 
 ```
