@@ -277,3 +277,17 @@ class TestMissingLiveDatasourceTest:
         test_file.write_text("def test_x(): pass\n")
         monkeypatch.setattr(crb, "SERVER_DIR", server_dir)
         assert crb.check_missing_live_datasource_test([test_file]) == []
+
+
+class TestDiffRefResolution:
+    """CI died with a raw CalledProcessError traceback (exit 128) when its base ref was the
+    all-zero SHA of a new-branch push and the HEAD~1 fallback hit a shallow clone."""
+
+    def test_unresolvable_ref_exits_with_a_message_not_a_traceback(self):
+        import pytest
+        with pytest.raises(SystemExit) as e:
+            crb._diff_python_files("0000000000000000000000000000000000000000", staged=False)
+        assert "cannot diff against" in str(e.value)
+
+    def test_a_real_ref_still_returns_file_paths(self):
+        assert isinstance(crb._diff_python_files("HEAD", staged=False), list)

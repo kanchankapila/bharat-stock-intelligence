@@ -99,7 +99,14 @@ def _diff_python_files(ref: str | None, staged: bool) -> list[Path]:
         args = ["git", "diff", "--name-only", "--cached", "--diff-filter=ACM", "--", "src/server/*.py"]
     else:
         args = ["git", "diff", "--name-only", ref or "HEAD", "--diff-filter=ACM", "--", "src/server/*.py"]
-    out = subprocess.run(args, cwd=REPO_ROOT, capture_output=True, text=True, check=True)
+    out = subprocess.run(args, cwd=REPO_ROOT, capture_output=True, text=True)
+    if out.returncode != 0:
+        # An unresolvable base ref (all-zero SHA on a new-branch push, or HEAD~1 under a
+        # shallow CI clone) used to surface as a raw CalledProcessError traceback.
+        raise SystemExit(
+            f"cannot diff against {'--cached' if staged else ref or 'HEAD'}: "
+            f"{out.stderr.strip()}\nFix the ref, or run with no --diff to scan every tracked file."
+        )
     return [REPO_ROOT / line for line in out.stdout.splitlines() if line]
 
 

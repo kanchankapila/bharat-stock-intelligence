@@ -69,11 +69,13 @@ jobs:
       # live_datasource test). --diff against the base ref so this blocks NEW
       # occurrences without demanding the existing backlog be cleared first;
       # run `python scripts/check_recurring_bugs.py` with no args for the full list.
+      # Base ref is always a BRANCH NAME, never github.event.before: on a new-branch push
+      # that is the all-zero SHA, the fetch fails, FETCH_HEAD is unset, and the old HEAD~1
+      # fallback can't work either because actions/checkout clones with depth 1.
       - name: Recurring-bug checks (changed files only)
         run: |
-          git fetch --no-tags --depth=1 origin "${{ github.base_ref || github.event.before || 'main' }}" || true
-          python scripts/check_recurring_bugs.py --diff FETCH_HEAD || \
-            python scripts/check_recurring_bugs.py --diff HEAD~1
+          git fetch --no-tags --depth=1 origin "${{ github.base_ref || 'main' }}"
+          python scripts/check_recurring_bugs.py --diff FETCH_HEAD
 
   smoke-test:
     runs-on: ubuntu-latest
