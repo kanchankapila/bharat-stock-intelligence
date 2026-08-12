@@ -287,6 +287,12 @@ FACTORS = {
     'value_composite_sn':      lambda d: (_z_within(d['earnings_yield'], d['sector'])
                                           + _z_within(d['book_to_price'], d['sector'])),
     'momentum_12_1_sn':        lambda d: _z_within(d['r12_1'], d['sector']),
+
+    # -- Multi-screener persistence breadth (2026-08-12) --------------------------
+    # See _add_screener_breadth's docstring for the full pre-registration and coverage caveat
+    # (only ~2.5 months of screener_appearances history -- treat 21d-rebalance results here as
+    # low-power; 5d is the primary read).
+    'screener_breadth': lambda d: d['screener_breadth'],
 }
 
 
@@ -450,6 +456,7 @@ def load_price_panel(start: str = DEFAULT_START,
     px = _add_mojo_indigraph(px, start, end)
     px = _add_sector(px)
     px = _add_beta_and_idio_vol(px)
+    px = _add_screener_breadth(px)
     px = px.drop(columns=['_dr', '_hi252', '_mkt', '_ticket'], errors='ignore')
 
     # TWO different eligibilities, and conflating them is what made the live screen stale:
@@ -712,6 +719,86 @@ def _add_insider(px: pd.DataFrame, start: str, end: str) -> pd.DataFrame:
     print(f"[FactorBacktest] insider: {len(tr):,} open-market filings, "
           f"{len(covered)} covered symbols, insider_net on {n:,} rows "
           f"(disclosure lag {INSIDER_DISCLOSURE_LAG_DAYS}d)")
+    return px
+
+
+def _add_screener_breadth(px: pd.DataFrame) -> pd.DataFrame:
+    """Multi-screener persistence/breadth: how many INDEPENDENT screeners (any of the 4
+    providers, any sentiment label) currently have this symbol in an active membership span.
+
+    Pre-registered 2026-08-12, before looking at any result: does a stock confirmed by many
+    screeners at once carry more signal than membership on any single one? This is a genuinely
+    different construction from the two adjacent things measurement.md already tested and
+    rejected -- "every individual screener" (one screener at a time, 0/552 survive FDR) and
+    "screener bullish consensus" (same-day agreement among BULLISH-LABELED screeners only,
+    IC -0.027 t=-2.36, and the labels themselves are known-inverted). This factor ignores the
+    keyword-derived sentiment label entirely and counts raw independent-source confirmation.
+
+    screener_appearances stores MEMBERSHIP SPANS, not daily re-insertions: one row per
+    (screener_id, symbol) continuous membership, with appeared_date/exited_date marking when
+    it started/ended (exited_date IS NULL means still active as of the last sync). Breadth as
+    of date D is the count of spans with appeared_date <= D <= COALESCE(exited_date, D),
+    computed via a difference array (a +1 event on appeared_date, a -1 event the day after
+    exited_date) rather than a per-row date-range join, then asof-merged onto the price panel
+    per symbol.
+
+    COVERAGE CAVEAT, and it matters here more than in most factors: the table only has 52
+    distinct capture dates spanning 2026-05-30 to today (~2.5 months) -- span-filling gives
+    daily-resolution breadth within that window, but the window itself is short. At 21d
+    rebalance this yields only ~3-5 independent periods; treat any 21d result here as
+    low-power. 5d rebalance (~10-15 periods) is the more honest primary read. Absence from
+    every screener is treated as a real 0 (not NaN) for any symbol once its first screener
+    event has occurred anywhere in the table -- these 4 providers run thousand-screener
+    catalogs against the full liquid universe, unlike insider_trades' documented per-fetcher
+    coverage gaps above, so a true absence is informative, not a missing-data artifact.
+    """
+    try:
+        ev = read_df(
+            'SELECT symbol, appeared_date, exited_date FROM screener_appearances '
+            'WHERE appeared_date IS NOT NULL'
+        )
+    except Exception as e:                                      # noqa: BLE001
+        print(f"[FactorBacktest] WARNING: screener_appearances unavailable ({str(e)[:80]}); skipped.")
+        px['screener_breadth'] = np.nan
+        return px
+    if ev.empty:
+        px['screener_breadth'] = np.nan
+        return px
+
+    ev['appeared_date'] = pd.to_datetime(ev['appeared_date']).dt.tz_localize(None).dt.normalize()
+    starts = ev[['symbol', 'appeared_date']].rename(columns={'appeared_date': 'date'})
+    starts['delta'] = 1
+
+    ended = ev[ev['exited_date'].notna()].copy()
+    ended['exited_date'] = pd.to_datetime(ended['exited_date']).dt.tz_localize(None).dt.normalize()
+    ends = ended[['symbol', 'exited_date']].rename(columns={'exited_date': 'date'})
+    ends['date'] = ends['date'] + pd.Timedelta(days=1)   # still active ON exited_date itself
+    ends['delta'] = -1
+
+    events = pd.concat([starts, ends], ignore_index=True)
+    daily = events.groupby(['symbol', 'date'], as_index=False)['delta'].sum()
+    # cumsum needs symbol-then-date order, but merge_asof needs the frame sorted purely by
+    # 'on' (date) -- do the cumsum on a symbol-sorted copy, then re-sort by date alone for
+    # the merge itself. Both frames must satisfy merge_asof's global-by-'on' sort requirement;
+    # 'by=symbol' handles the grouping, it does not relax that requirement.
+    daily = daily.sort_values(['symbol', 'date'])
+    daily['breadth'] = daily.groupby('symbol', sort=False)['delta'].cumsum()
+    daily = daily.sort_values('date')
+
+    px['_pxdate'] = pd.to_datetime(px['date'])
+    left = px[['symbol', '_pxdate']].reset_index().rename(columns={'index': '_orig_idx'})
+    left = left.sort_values('_pxdate')
+    merged = pd.merge_asof(
+        left, daily.rename(columns={'date': '_pxdate'}),
+        on='_pxdate', by='symbol', direction='backward',
+    )
+    px['screener_breadth'] = merged.set_index('_orig_idx')['breadth'].reindex(px.index)
+    px = px.drop(columns=['_pxdate'])
+
+    n = int(px['screener_breadth'].notna().sum())
+    n_dates = ev['appeared_date'].nunique()
+    print(f"[FactorBacktest] screener_breadth: {len(ev):,} membership spans, "
+          f"{n_dates} distinct capture dates, breadth defined on {n:,} panel rows")
     return px
 
 

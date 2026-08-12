@@ -387,6 +387,91 @@ class TestBetaAndIdioVol:
         assert 'WARNING' in capsys.readouterr().out
 
 
+class TestScreenerBreadth:
+    """_add_screener_breadth reconstructs a point-in-time membership COUNT from span rows
+    (appeared_date/exited_date), not from daily re-insertions -- the difference-array +
+    asof-merge logic is the part most likely to be off by one."""
+
+    @staticmethod
+    def _px(symbols, dates):
+        return pd.DataFrame(
+            {'symbol': s, 'date': d} for s in symbols for d in dates
+        ).sort_values(['symbol', 'date']).reset_index(drop=True)
+
+    DATES = [d.strftime('%Y-%m-%d') for d in pd.bdate_range('2026-06-01', periods=8)]
+
+    def _run(self, monkeypatch, spans):
+        monkeypatch.setattr(fb, 'read_df', lambda *a, **k: pd.DataFrame(spans))
+        return fb._add_screener_breadth(self._px(['A', 'B'], self.DATES))
+
+    def test_before_any_span_starts_is_nan_not_zero(self, monkeypatch):
+        """Absence-of-data and a real zero-screener-membership day must not be conflated."""
+        dates = self.DATES
+        out = self._run(monkeypatch, [
+            {'symbol': 'A', 'appeared_date': pd.Timestamp(dates[3], tz='UTC'), 'exited_date': None},
+        ])
+        got = out.set_index(['symbol', 'date'])['screener_breadth']
+        for d in dates[:3]:
+            assert pd.isna(got[('A', d)]), f'{d} predates the first span and must be NaN'
+        assert got[('A', dates[3])] == 1.0
+
+    def test_still_active_span_stays_active_through_the_end_of_the_panel(self, monkeypatch):
+        dates = self.DATES
+        out = self._run(monkeypatch, [
+            {'symbol': 'A', 'appeared_date': pd.Timestamp(dates[0], tz='UTC'), 'exited_date': None},
+        ])
+        got = out.set_index(['symbol', 'date'])['screener_breadth']
+        assert (got.loc['A'] == 1.0).all()
+
+    def test_exited_date_is_the_last_active_day_inclusive(self, monkeypatch):
+        """A span exiting on day D is still counted as active ON day D -- the drop must be
+        visible starting D+1, not D itself."""
+        dates = self.DATES
+        out = self._run(monkeypatch, [
+            {'symbol': 'A', 'appeared_date': pd.Timestamp(dates[0], tz='UTC'),
+             'exited_date': pd.Timestamp(dates[3], tz='UTC')},
+        ])
+        got = out.set_index(['symbol', 'date'])['screener_breadth']
+        assert got[('A', dates[3])] == 1.0, 'exited_date itself must still count as active'
+        assert got[('A', dates[4])] == 0.0, 'the day after exited_date must show the drop'
+
+    def test_overlapping_spans_on_the_same_symbol_sum(self, monkeypatch):
+        dates = self.DATES
+        out = self._run(monkeypatch, [
+            {'symbol': 'A', 'appeared_date': pd.Timestamp(dates[0], tz='UTC'), 'exited_date': None},
+            {'symbol': 'A', 'appeared_date': pd.Timestamp(dates[2], tz='UTC'), 'exited_date': None},
+            {'symbol': 'A', 'appeared_date': pd.Timestamp(dates[4], tz='UTC'), 'exited_date': None},
+        ])
+        got = out.set_index(['symbol', 'date'])['screener_breadth']
+        assert got[('A', dates[1])] == 1.0
+        assert got[('A', dates[3])] == 2.0
+        assert got[('A', dates[5])] == 3.0
+
+    def test_symbols_are_independent(self, monkeypatch):
+        """A's spans must never leak into B's count -- the classic groupby-vs-global bug."""
+        dates = self.DATES
+        out = self._run(monkeypatch, [
+            {'symbol': 'A', 'appeared_date': pd.Timestamp(dates[0], tz='UTC'), 'exited_date': None},
+            {'symbol': 'A', 'appeared_date': pd.Timestamp(dates[0], tz='UTC'), 'exited_date': None},
+            {'symbol': 'A', 'appeared_date': pd.Timestamp(dates[0], tz='UTC'), 'exited_date': None},
+        ])
+        got = out.set_index(['symbol', 'date'])['screener_breadth']
+        assert got[('A', dates[-1])] == 3.0
+        assert pd.isna(got[('B', dates[-1])]), "B has no spans of its own and must stay NaN"
+
+    def test_missing_table_degrades_loudly_without_crashing(self, monkeypatch, capsys):
+        def boom(*a, **k):
+            raise RuntimeError("relation screener_appearances does not exist")
+        monkeypatch.setattr(fb, 'read_df', boom)
+        dates = [d.strftime('%Y-%m-%d') for d in pd.bdate_range('2026-06-01', periods=3)]
+        out = fb._add_screener_breadth(self._px(['A'], dates))
+        assert out['screener_breadth'].isna().all()
+        assert 'WARNING' in capsys.readouterr().out
+
+    def test_is_registered_in_factors(self):
+        assert 'screener_breadth' in fb.FACTORS
+
+
 class TestLiteratureFactorSigns:
     """Each factor must point the direction its source paper predicts."""
 
