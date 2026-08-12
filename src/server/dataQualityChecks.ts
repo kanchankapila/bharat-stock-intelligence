@@ -522,11 +522,21 @@ export const DATA_QUALITY_CHECKS: DataQualityCheck[] = [
     // 'technical' vs 'TECHNICAL' were two different producers for months. Any consumer filtering
     // one silently dropped the other, and reward_engine.py's exclusion list fell straight
     // through the gap. Renamed to 'technical_scan' 2026-08-12 (migration 1786930000000).
+    //
+    // ALL FIVE tables carrying a signal_source column. The first version of this check listed
+    // only unified_signals and unified_signal_outcomes and therefore reported PASS while
+    // signal_source_weights still held both spellings — the same hand-enumerated-allowlist
+    // failure as screenerAppearedAt.test.ts in recurring-bugs.md. The companion
+    // signal-source-table-coverage check below fails if a sixth table ever appears, so this
+    // list cannot silently go stale again.
     sql: `SELECT COUNT(*) AS collisions FROM (
             SELECT LOWER(signal_source) AS lowered
             FROM (SELECT signal_source FROM unified_signals
-                  UNION ALL
-                  SELECT signal_source FROM unified_signal_outcomes) s
+                  UNION ALL SELECT signal_source FROM unified_signal_outcomes
+                  UNION ALL SELECT signal_source FROM signal_outcomes
+                  UNION ALL SELECT signal_source FROM signal_source_weights
+                  UNION ALL SELECT signal_source FROM signal_actions) s
+            WHERE signal_source IS NOT NULL
             GROUP BY LOWER(signal_source)
             HAVING COUNT(DISTINCT signal_source) > 1) x`,
     evaluate: (row) => {
@@ -534,7 +544,27 @@ export const DATA_QUALITY_CHECKS: DataQualityCheck[] = [
       if (collisions > 0) {
         return { status: 'fail', detail: `${collisions} signal_source value(s) exist in more than one casing — any consumer filtering on one spelling silently drops the other` };
       }
-      return { status: 'pass', detail: 'All signal_source values are unique case-insensitively' };
+      return { status: 'pass', detail: 'All signal_source values are unique case-insensitively across all 5 tables' };
+    },
+  },
+  {
+    id: 'signal-source-table-coverage',
+    label: 'signal-source-case-collision covers every table with a signal_source column',
+    category: 'signals',
+    critical: false,
+    // Derives the table list from the schema instead of trusting the hand-written UNION above.
+    // Without this, adding a sixth signal_source table leaves the collision check silently
+    // partial — which is exactly how the first version of it passed while a real collision sat
+    // in signal_source_weights.
+    sql: `SELECT COUNT(*) AS n FROM information_schema.columns
+          WHERE table_schema = 'public' AND column_name = 'signal_source'`,
+    evaluate: (row) => {
+      const n = Number(row?.n) || 0;
+      const covered = 5;
+      if (n !== covered) {
+        return { status: 'fail', detail: `${n} tables carry a signal_source column but signal-source-case-collision only UNIONs ${covered} — add the new table(s) to that check, then update this count` };
+      }
+      return { status: 'pass', detail: `All ${covered} signal_source tables are covered by the collision check` };
     },
   },
   {

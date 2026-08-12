@@ -33,6 +33,10 @@ A local-first quantitative intelligence platform for NSE/BSE equities. Synthesiz
 └─────────────────────────────────────────────────────────────────────┘
 ```
 
+See [Data Source Integration Guide](docs/DATA_SOURCE_INTEGRATION_GUIDE.md) for the reusable
+provider catalog, endpoint families, identifier mappings, authentication, output ownership,
+testing requirements, and known broken sources.
+
 ---
 
 ## Features

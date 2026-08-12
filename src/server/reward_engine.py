@@ -126,7 +126,20 @@ def update_weights(
     window = DEFAULT_WINDOW_DAYS if days is None else days
     cutoff = (datetime.datetime.now() - datetime.timedelta(days=window)).strftime('%Y-%m-%d')
 
-    # Union technical signal outcomes with unified signal outcomes (AI, QUANT)
+    # signal_outcomes ONLY. This function learns a weight per technical PATTERN TYPE
+    # (RSI_DIVERGENCE, GOLDEN_CROSS, BB_COMPRESSION, ...) parsed out of signals_json, and
+    # signal_outcomes is the only table that carries those patterns.
+    #
+    # This used to UNION in unified_signal_outcomes "for AI/QUANT", selecting NULL AS
+    # signals_json. Those rows could never contribute: _parse_signal_types(None) -> [], so every
+    # one was counted in `processed` and then discarded at the accumulate step below. It was not
+    # a fixable gap but a category error -- an AI or screener signal has no RSI_DIVERGENCE-style
+    # type to weight, and unified_signal_outcomes has no column that could supply one. Removed
+    # 2026-08-12 after confirming per-source learning already has its own correct home:
+    # update_source_weights() below reads unified_signal_outcomes, groups by
+    # (signal_source, regime, sector) and writes signal_source_weights -- live and populated
+    # (218 rows across 6 sources). Nothing stopped being learned from; `processed` merely stopped
+    # overstating what this function had actually used.
     query = """
         SELECT symbol, signal_date, horizon_days, return_pct, outcome, signals_json
         FROM signal_outcomes
@@ -134,22 +147,8 @@ def update_weights(
           AND return_pct IS NOT NULL
           AND signal_date >= ?
           AND signal_source = 'technical'
-        UNION ALL
-        SELECT uso.symbol, uso.signal_date, uso.horizon_days, uso.return_pct, uso.outcome,
-               NULL AS signals_json
-        FROM unified_signal_outcomes uso
-        WHERE uso.outcome IN ('WIN','LOSS','NEUTRAL','STOP_LOSS')
-          AND uso.return_pct IS NOT NULL
-          -- Both spellings, not just 'TECHNICAL' (2026-08-12). The first half of this UNION
-          -- already supplies every technical-sourced outcome from signal_outcomes; this half is
-          -- meant to add only the non-technical ones. When Cluster B-lite folded
-          -- technical_analysis_engine.py into unified_signals under the lowercase spelling, the
-          -- exclusion below silently stopped covering it and 25,740 technical outcomes started
-          -- leaking into the AI/QUANT half. 'technical_scan' is the renamed 'TECHNICAL'.
-          AND uso.signal_source NOT IN ('technical', 'technical_scan')
-          AND uso.signal_date >= ?
     """
-    rows = conn.execute(query, (cutoff, cutoff)).fetchall()
+    rows = conn.execute(query, (cutoff,)).fetchall()
     if not rows:
         print("[RewardEngine] No resolved outcomes found.")
         return {'processed': 0, 'updated': 0}

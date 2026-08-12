@@ -49,6 +49,21 @@ def make_db():
             symbol TEXT, signal_date TEXT, signal_source TEXT,
             horizon_days INTEGER, return_pct REAL, outcome TEXT
         );
+        -- update_source_weights JOINs outcomes back to their signal row, and writes per-source
+        -- weights here. This is where AI/screener outcomes are learned from; update_weights
+        -- deliberately reads signal_outcomes only (technical pattern types).
+        CREATE TABLE unified_signals (
+            id INTEGER PRIMARY KEY, symbol TEXT, signal_date TEXT,
+            signal_source TEXT, signal_type TEXT
+        );
+        CREATE TABLE signal_source_weights (
+            signal_source TEXT NOT NULL, regime TEXT NOT NULL,
+            sector TEXT NOT NULL DEFAULT 'ALL',
+            win_rate REAL, avg_return_pct REAL, total_signals INTEGER,
+            total_wins INTEGER, total_losses INTEGER, avg_sharpe_ratio REAL,
+            weight_multiplier REAL NOT NULL DEFAULT 1.0, last_updated TEXT,
+            PRIMARY KEY (signal_source, regime, sector)
+        );
         CREATE TABLE signal_type_weights_history (
             snapshot_date TEXT NOT NULL, signal_type TEXT NOT NULL,
             regime TEXT NOT NULL, sector TEXT NOT NULL DEFAULT 'ALL',
@@ -112,52 +127,50 @@ def test_technical_sourced_unified_outcomes_are_not_double_counted():
         conn.commit()
         return update_weights(conn, dry_run=False)['processed']
 
-    # 'processed' is the row count the UNION actually returned, which is what the exclusion
-    # controls. Asserting on it -- not on the weight -- because of the inertness below.
+    # update_weights reads signal_outcomes ONLY, so NO unified_signal_outcomes row of any source
+    # reaches it -- and `processed` no longer overstates what was actually used. Asserting on
+    # every source, including AI, is the point: the old query admitted AI rows and then silently
+    # discarded them, which is what made `processed` a lie.
     baseline = run([])
     assert baseline == 3
-    assert run(['technical']) == 3, "lowercase 'technical' leaked past the exclusion"
-    assert run(['technical_scan']) == 3, "'technical_scan' leaked past the exclusion"
-    # Control: a non-technical source must still get through, or the assertions above would
-    # pass vacuously against a filter that simply drops everything.
-    assert run(['AI']) == 4, "non-technical source was wrongly excluded too"
+    for src in ('technical', 'technical_scan', 'AI', 'screener', 'SCREENER_SURFACING'):
+        assert run([src]) == 3, f"unified_signal_outcomes source {src!r} reached update_weights"
 
 
-def test_unified_signal_outcomes_half_cannot_affect_weights():
-    """Pins a defect, not a feature: the unified_signal_outcomes half of update_weights' UNION
-    selects `NULL AS signals_json`, and weights are only ever accumulated per signal TYPE parsed
-    out of that column (_parse_signal_types(None) -> []). So every row it contributes is counted
-    in `processed` and then discarded -- the reward engine cannot learn from AI/QUANT outcomes
-    at all, for any source, however many rows accumulate.
+def test_per_source_learning_lives_in_update_source_weights():
+    """The counterpart to the test above: removing the dead UNION half must not mean AI/screener
+    outcomes stop being learned from. They were never learned from THERE -- update_weights keys
+    on technical pattern types (RSI_DIVERGENCE, GOLDEN_CROSS, ...) parsed from signals_json, and
+    unified_signal_outcomes has no column that could supply one.
 
-    Change this test only alongside a deliberate decision to make that half functional, which is
-    a change to RL weighting and needs backtest evidence per .claude/rules/measurement.md.
+    update_source_weights() is the correct home: it groups unified_signal_outcomes by
+    (signal_source, regime, sector) and writes signal_source_weights. This asserts the AI row
+    that update_weights correctly ignores IS picked up here, so the deletion moved nothing into
+    a blind spot.
     """
-    from reward_engine import update_weights
+    from reward_engine import update_source_weights, MIN_SAMPLES as _MIN_SAMPLES
 
-    def weight(extra_sources):
-        conn = make_db()
-        insert_outcome(conn, 'INFY', _d(3), 5.0, 'WIN')
-        insert_outcome(conn, 'INFY', _d(2), 5.0, 'WIN')
-        insert_outcome(conn, 'INFY', _d(1), 5.0, 'WIN')
-        for src in extra_sources:
-            # a large LOSS: it would visibly drag the weight down if it counted at all
-            conn.execute(
-                "INSERT INTO unified_signal_outcomes "
-                "(symbol, signal_date, signal_source, horizon_days, return_pct, outcome) "
-                "VALUES (?,?,?,15,-9.0,'LOSS')", ('INFY', _d(1), src))
-        conn.commit()
-        update_weights(conn, dry_run=False)
-        row = conn.execute(
-            "SELECT weight FROM signal_type_weights "
-            "WHERE signal_type='RSI_DIVERGENCE' AND regime='BULL' AND sector='IT'").fetchone()
-        return row[0] if row else None
+    conn = make_db()
+    # update_source_weights JOINs unified_signal_outcomes -> unified_signals on id, so the
+    # signal row has to exist for the outcome to be visible.
+    for i in range(_MIN_SAMPLES):
+        conn.execute(
+            "INSERT INTO unified_signals (id, symbol, signal_date, signal_source, signal_type) "
+            "VALUES (?,?,?,?,?)", (i + 1, 'INFY', _d(1), 'AI', 'BUY'))
+        conn.execute(
+            "INSERT INTO unified_signal_outcomes "
+            "(unified_signal_id, symbol, signal_date, signal_source, horizon_days, return_pct, outcome) "
+            "VALUES (?,?,?,?,15,4.0,'WIN')", (i + 1, 'INFY', _d(1), 'AI'))
+    conn.execute("INSERT OR IGNORE INTO nse_stocks VALUES ('INFY','IT')")
+    conn.commit()
 
-    baseline = weight([])
-    assert baseline is not None and baseline > 1.0
-    # Included by the query (see the test above) and still without effect.
-    assert weight(['AI']) == baseline, \
-        "unified_signal_outcomes now affects weights -- see this test's docstring"
+    res = update_source_weights(conn, dry_run=False)
+    assert res['processed'] == _MIN_SAMPLES, res
+    row = conn.execute(
+        "SELECT signal_source, win_rate FROM signal_source_weights "
+        "WHERE signal_source='AI'").fetchone()
+    assert row is not None, 'AI outcomes were not learned from anywhere'
+    assert row[1] == 1.0, f'expected a 1.0 win_rate from all-WIN rows, got {row[1]}'
 
 
 def test_stop_loss_decreases_weight_more_than_loss():

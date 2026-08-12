@@ -997,6 +997,7 @@ Historical record, split out of CLAUDE.md on 2026-08-11 (it was 64% of that file
   - Both recorded in `measurement.md`'s `smart_money` row. Neither regression was caught by CI — `tsc --noEmit` clean and the targeted + full pytest suites (1737 passed/208 skipped) were green *before and after* both fixes, same "green suite protects nothing" pattern documented elsewhere in this file.
   - **Verification**: `check_recurring_bugs.py` clean on both files; full `pytest` 1737 passed/208 skipped, 0 failures.
 
+<<<<<<< HEAD
 ## 2026-08-12 — Scheduled the measurement layer; graded the live signals directly
 
 **Why:** every audit/measurement check in this repo ran only when a human session invoked it.
@@ -1156,3 +1157,59 @@ catch-up runs, that session gets NO ranking rather than a mislabelled one. There
 pre-market signal to give it, and consumers already cold-start-fall-back to stock_scores.
 
 tsc clean, pytest 1741 passed, check_recurring_bugs clean.
+=======
+- **Documented the complete external data-source surface for reuse in a new project (2026-08-12).** Added `docs/DATA_SOURCE_INTEGRATION_GUIDE.md`: canonical NSE-symbol and provider-ID contracts; exchange, price, fundamental, screener, F&O, alternative-data, news, AI, and operational integrations; endpoint families; auth and headers; principal outputs; scheduling ownership; live-test/freshness requirements; migration order; broken/excluded sources; and Python/TypeScript implementation inventories. Reconciled three inventories (network-owning code, scheduled jobs, and tests/monitoring), then extracted URL hosts from non-test `src/server` Python/TypeScript files. The first check found 18 uncategorized host literals, including real omissions for Sensibull and Investing.com; patched those and distinguished Indiatimes SAS discovery probes from production ingestion. Final executable check: **63 production HTTP hosts, 0 uncategorized**, 16 guide sections. Linked the guide from `README.md`. No runtime code changed.
+
+- **Closed the screener/POST-method gap in the data-source guide (2026-08-12).** A host-complete catalog was not method-complete: it omitted NiftyTrader's live and EOD screener POST routes, its three stock-analysis POST routes, and exact MarketsMojo POST bodies. Added canonical matrices for **13 screener endpoint families**, **10 external provider-data POST endpoints**, and **2 authentication POSTs**, while explicitly excluding AI, notifications, internal bridges, inbound APIs, and frontend-to-backend calls. Also captured ET trending and Trendlyne read-through screener variants. Source-measured inventories: MoneyControl 143 configured rows; Trendlyne 1,052 unique discovery PKs; ETNow 438 captured requests with one failed source-index capture; ET Marketstats 91 captured bodies plus four code-defined extras (95). Repository-wide scan classified 27 direct POST call sites. Executable validation found **0 missing matrix endpoints** and all four counts matched source. Documentation only; no runtime code changed.
+
+- **Corrected the data-source guide from route-family completeness to concrete request-corpus completeness (2026-08-12).** The earlier 13-family screener matrix did not explain the user's 1,800+ concrete screener requests. Added an artifact-level reconciliation to `docs/DATA_SOURCE_INTEGRATION_GUIDE.md`: **1,983 unique raw GET URLs**, **1,983 normalized rows / 1,980 unique**, the historical **250-template** field profile (**212 returned data / 38 failed**), and the three supplemental 919-row metadata subsets. Reconciled screener instances as **1,388 broad-heuristic rows in `urls.txt` + 438 ETNow POST definitions + 95 ET Marketstats definitions = 1,921 non-overlapping concrete request records**; distinguished this from the prior narrower keyword audit's 1,382 and from production-enabled counts. Documented why the original malformed corpus yields 250 structural templates while canonicalizing first yields 248: malformed variants and three duplicates converge, not disappear. Executable source check matched all expected values exactly: `(1983, 1983, 1983, 1980, 250, 248, 1388, 438, 95, 1921, 919)`.
+
+- **Added whole-universe and taxonomy URL-mapping instructions to the data-source guide (2026-08-12).** Documented how `endpoint_registry.py` maps all 15 recognized URL parameter aliases to `scripts/stocklist.json` fields, how path/derived IDs must be declared, and how `extra_endpoints_fetcher.py` expands stock × endpoint tasks while reporting missing IDs instead of guessing. Measured the current map rather than repeating the stale 180-stock description: **2,005 rows / 2,001 unique symbols**, four duplicate symbols, and field coverage from 1,787 `scripcode` rows to 2,004 `tlid`/`tlname` rows. Added separate all-index expansion through `indexMapping.ts`/`index_provider_map`, including provider sync jobs and ID-vs-bridge-symbol use. Added both sector/industry modes: provider-native aggregate/constituent endpoints using explicit taxonomy values (12 live-verified MoneyControl slugs), and internal constituent selection from active `nse_stocks` followed by the same provider-ID renderer. Source-derived validation passed for all counts, duplicate names, 15 aliases, 12 slugs, index example, and required taxonomy queries. Documentation only; no runtime code changed.
+>>>>>>> 83693f4d3cd6644a9e15a69a7677016acf4f645d
+
+## 2026-08-12 (cont.) — Reward engine dead UNION half: deleted, not resurrected
+
+Investigated what the `unified_signal_outcomes` half of `update_weights()` could contribute if
+made functional. Answer: **nothing, by construction.** `signal_type_weights` keys on technical
+PATTERN names (`HIDDEN_DIVERGENCE`, `EMA_BULL_STACK`, `RSI_DIVERGENCE`, `GOLDEN_CROSS`, ...)
+parsed out of `signals_json`, and `unified_signal_outcomes` has no column that could supply one —
+an AI or screener signal simply has no RSI_DIVERGENCE-style type. It was a category error, not a
+fixable gap, which is why it selected `NULL AS signals_json` in the first place.
+
+And nothing was being lost: **`update_source_weights()` is the correct home and is already
+wired up and working** — called from `run()` immediately after `update_weights()`, it groups
+`unified_signal_outcomes` by `(signal_source, regime, sector)` and writes `signal_source_weights`,
+live with 218 rows across 6 sources, last updated 04:54 UTC today.
+
+So the fix was deletion. `processed` stopped overstating what the function had actually used;
+no weight changes, so no backtest evidence was required. Tests replaced accordingly: one pins
+that NO `unified_signal_outcomes` source (technical, technical_scan, AI, screener,
+SCREENER_SURFACING) reaches `update_weights`, the other pins that an AI outcome IS picked up by
+`update_source_weights` — so the deletion provably moved nothing into a blind spot.
+Negative-controlled: restoring the UNION half fails the first with "source 'AI' reached
+update_weights".
+
+**Two defects in MY OWN work from earlier today, found by this investigation:**
+
+1. Migration `1786930000000` renamed `TECHNICAL` -> `technical_scan` in `unified_signals` and
+   `unified_signal_outcomes` but **missed `signal_source_weights`**, which kept both `technical`
+   (45) and `TECHNICAL` (44) — in the one table whose entire purpose is per-source learning.
+   Fixed by migration `1786950000000`, applied and verified.
+2. The `signal-source-case-collision` check I added alongside it **reported PASS while that
+   collision existed**, because its UNION hand-listed the same two tables. Five tables carry a
+   `signal_source` column (`signal_actions`, `signal_outcomes`, `signal_source_weights`,
+   `unified_signal_outcomes`, `unified_signals`).
+
+Both are the same failure as `screenerAppearedAt.test.ts` in `recurring-bugs.md`: a guard built
+on a hand-enumerated allowlist only guards what someone remembered to list — and I wrote the
+fix for that class this morning and then committed a fresh instance of it hours later. The
+collision check now covers all five tables, and a companion `signal-source-table-coverage` check
+derives the count from `information_schema` and fails if a sixth ever appears, so the list cannot
+silently go stale again.
+
+Negative-controlled against production inside a rolled-back transaction: injecting a colliding
+row into `signal_source_weights` makes the collision check return 1, and creating a 6th
+signal_source table makes coverage return 6. Verified production untouched after rollback.
+End-to-end through `runDataQualityChecks()`: 88 checks, 0 errors, all four signal checks PASS.
+
+tsc clean, vitest 875, pytest 1741, schema:drift clean, check_recurring_bugs clean.
