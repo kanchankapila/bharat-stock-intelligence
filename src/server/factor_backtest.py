@@ -154,6 +154,10 @@ MISSING_EXIT_PCT = -100.0
 # overrides, loudly.
 PROVISIONAL_FACTORS = frozenset({
     'value_earnings_yield', 'value_book_to_price', 'value_composite', 'value_x_momentum',
+    # Whole 5-year series backfilled in one 2026-08-11 call, so every historical score is a
+    # present-day recomputation. Strictly worse than the valuation case above, which at least
+    # accumulates forward. See _add_mojo_indigraph.
+    'mojo_indigraph',
 })
 
 # The configuration momentum_12_1 was actually validated at (t>2 only at K=50 and K=100).
@@ -245,6 +249,44 @@ FACTORS = {
     'delivery_spike':   lambda d: d['deliv_spike'],
     'delivery_trend':   lambda d: d['deliv_trend'],
     'ticket_size':      lambda d: d['ticket_ratio'],
+
+    # -- Vendor composite (2026-08-12) --------------------------------------------
+    # MarketsMojo's own standing bullish/bearish call, graded against what actually happened.
+    # See _add_mojo_indigraph for the restatement caveat -- a POSITIVE result here is
+    # provisional, a NEGATIVE one is trustworthy. Signed so positive excess means "the vendor's
+    # bullish call is right"; a significantly negative t means the vendor is inverted, which is
+    # the answer this repo already has for its own short-horizon technical signals.
+    'mojo_indigraph':   lambda d: d['mojo_indigraph'],
+
+    # -- Industry-relative (sector-neutral) forms, 2026-08-12 ---------------------
+    # PRE-REGISTERED: these four, at 21d rebalance / top-50 / 25bps, decided before looking at
+    # any result. Written down because "I tried 4" and "I tried 40 and show you 4" need
+    # different multiple-testing bars and only the first is defensible.
+    #
+    # Hypothesis (Asness/Porter/Stevens 2000, "Predicting Stock Returns Using Industry-Relative
+    # Firm Characteristics"; Asness 1997 for the momentum form): a raw cross-sectional value
+    # sort is substantially a SECTOR bet -- banks and metals screen cheap on B/P structurally,
+    # software never does -- so it can win or lose for reasons that have nothing to do with
+    # picking the better firm. Demeaning within sector isolates the stock-selection question.
+    #
+    # This is a genuinely different CONSTRUCTION of an already-tested input, which is the bar
+    # measurement.md sets for re-testing ("state what changed... a different construction").
+    # It is not a re-run of value_book_to_price, and it is not a reweighting of the existing
+    # engines, which that file rules out separately.
+    # `value_book_to_price_secmapped` is not a fifth hypothesis, it is the UNIVERSE
+    # CONTROL, and the comparison is invalid without it. The _sn factors score NaN wherever
+    # sector is unmapped, so they pick top-50 from ~69% of the panel while their raw parents
+    # pick from 100%. A smaller pool alone changes the result, so "raw beat sector-neutral"
+    # could just mean "bigger pool beat smaller pool". This is the raw factor restricted to
+    # exactly the _sn universe: raw-vs-this isolates the universe effect, this-vs-_sn isolates
+    # neutralisation. Keep it registered -- re-deriving why the naive comparison is wrong is
+    # exactly the wasted day this repo keeps paying for.
+    'value_book_to_price_secmapped': lambda d: d['book_to_price'].where(d['sector'].notna()),
+    'value_book_to_price_sn':  lambda d: _z_within(d['book_to_price'], d['sector']),
+    'value_earnings_yield_sn': lambda d: _z_within(d['earnings_yield'], d['sector']),
+    'value_composite_sn':      lambda d: (_z_within(d['earnings_yield'], d['sector'])
+                                          + _z_within(d['book_to_price'], d['sector'])),
+    'momentum_12_1_sn':        lambda d: _z_within(d['r12_1'], d['sector']),
 }
 
 
@@ -254,6 +296,39 @@ def _z(s: pd.Series) -> pd.Series:
     if not sd or not np.isfinite(sd) or sd == 0:
         return pd.Series(0.0, index=s.index)
     return (s - s.mean()) / sd
+
+
+# A sector needs this many scorable names on a date before its within-sector z-score means
+# anything. With 2 names the z-scores are +-0.707 by construction whatever the inputs, so a
+# thin sector would inject pure noise into the top-K sort at full weight. Such groups score
+# NaN (dropped from selection), never 0 -- 0 is a real, middle-of-the-pack score here, and
+# coercing to it is the same "fabricate the worst/most-average value" mistake recurring-bugs.md
+# flags for float(x or 0) on model output.
+MIN_SECTOR_MEMBERS = 5
+
+
+def _z_within(s: pd.Series, groups: pd.Series) -> pd.Series:
+    """Z-score computed WITHIN each group (sector) rather than across the whole date.
+
+    This is the industry-relative construction of Asness/Porter/Stevens (2000): a raw value
+    sort largely re-expresses "which sectors are structurally cheap" (banks and metals always
+    screen cheap on B/P; software never does), so the cross-sectional winner may be a sector
+    bet wearing a stock-selection label. Demeaning inside the sector asks the different and
+    narrower question this repo has not tested: among comparable firms, does the cheaper one
+    outperform?
+    """
+    out = pd.Series(np.nan, index=s.index, dtype=float)
+    vals = pd.to_numeric(s, errors='coerce')
+    for _, idx in groups.groupby(groups, dropna=True).groups.items():
+        g = vals.loc[idx]
+        ok = g[np.isfinite(g)]
+        if len(ok) < MIN_SECTOR_MEMBERS:
+            continue
+        sd = ok.std()
+        if not sd or not np.isfinite(sd) or sd == 0:
+            continue
+        out.loc[idx] = (g - ok.mean()) / sd
+    return out
 
 
 # -- Panel construction -----------------------------------------------------------
@@ -372,6 +447,8 @@ def load_price_panel(start: str = DEFAULT_START,
 
     px = _add_valuation(px, start, end)
     px = _add_insider(px, start, end)
+    px = _add_mojo_indigraph(px, start, end)
+    px = _add_sector(px)
     px = _add_beta_and_idio_vol(px)
     px = px.drop(columns=['_dr', '_hi252', '_mkt', '_ticket'], errors='ignore')
 
@@ -434,6 +511,118 @@ def _add_valuation(px: pd.DataFrame, start: str, end: str) -> pd.DataFrame:
     n_ey = int(px["earnings_yield"].notna().sum())
     print(f"[FactorBacktest] valuation: earnings_yield on {n_ey:,} rows, "
           f"book_to_price on {int(px['book_to_price'].notna().sum()):,}")
+    return px
+
+
+def _mojo_score(blob):
+    """`details` JSON blob -> float score, or NaN.
+
+    Never coerces a bad value to 0.0. A 0 is a legitimate NEUTRAL indigraph reading, so
+    fabricating one on a parse failure would plant a real signal value where there is no data --
+    the `float(x or 0)` class in recurring-bugs.md, made worse here because the fabricated value
+    is not an obvious sentinel. NaN also has to be caught explicitly rather than via truthiness,
+    since `nan or 0` evaluates to `nan`, and `json.loads` happily returns `float('nan')` for a
+    bare NaN token.
+    """
+    try:
+        v = float(json.loads(blob).get('score'))
+    except (TypeError, ValueError, AttributeError, json.JSONDecodeError):
+        return np.nan
+    return v if math.isfinite(v) else np.nan
+
+
+def _add_mojo_indigraph(px: pd.DataFrame, start: str, end: str) -> pd.DataFrame:
+    """MarketsMojo's own composite technical call (`indigraph`), as a continuous score.
+
+    This is the ONE genuinely deep thing the 2026-08-11 MarketsMojo onboarding added: median 742
+    dated observations PER SYMBOL over 1,792 symbols (the other four tables are 5-35 per symbol
+    and cannot support a factor test). Nothing else on this platform stores a historical series
+    for these indicators -- technical_signals/unified_signals hold only the latest value,
+    overwritten each run -- so this is the first time a vendor's standing directional call can be
+    graded against what actually happened.
+
+    THE CAVEAT THAT MUST TRAVEL WITH ANY RESULT FROM THIS COLUMN, and it is bigger than
+    _add_valuation's: the entire 5-year series arrived in a SINGLE call on 2026-08-11
+    (count(distinct fetched_at) = 1). A score dated 2021 is the vendor's TODAY computation of
+    2021, not what it published then. If MarketsMojo ever revised its formula, the whole history
+    silently reflects the new one. Two rows in the sibling fintrend table are dated in the FUTURE
+    (2026-08-14), which is direct evidence the series is generated rather than observed. So a
+    POSITIVE result here is provisional and must not be traded on until a forward, point-in-time
+    capture confirms it; a NEGATIVE result is trustworthy, since restatement bias would if
+    anything flatter the factor. It is in PROVISIONAL_FACTORS for exactly this reason.
+
+    The score lives in the `details` JSON blob. It is parsed in pandas rather than with a `->>`
+    operator so this stays dialect-neutral (see recurring-bugs.md: Postgres-only SQL in a
+    db_compat query fails silently to {} on the SQLite path rather than erroring).
+    """
+    try:
+        df = read_df(
+            "SELECT symbol, date, details FROM marketsmojo_technical_history "
+            "WHERE indicator = 'indigraph' AND date >= ? AND date <= ? AND details IS NOT NULL",
+            (start, end),
+        )
+    except Exception as e:                                          # noqa: BLE001
+        print(f"[FactorBacktest] WARNING: marketsmojo_technical_history unavailable "
+              f"({str(e)[:80]}); mojo factors will be skipped.")
+        px['mojo_indigraph'] = np.nan
+        return px
+    if df.empty:
+        print("[FactorBacktest] WARNING: marketsmojo indigraph returned 0 rows; "
+              "mojo factors will be skipped.")
+        px['mojo_indigraph'] = np.nan
+        return px
+
+    df['mojo_indigraph'] = df['details'].map(_mojo_score)
+    df = df.drop(columns=['details'])
+    df = df[df['mojo_indigraph'].notna()]
+    df['date'] = pd.to_datetime(df['date']).dt.strftime('%Y-%m-%d')
+    # One row per (symbol, date) is the table's own PK, but a defensive dedupe keeps a vendor
+    # re-issue from silently fanning out the panel on merge.
+    df = df.drop_duplicates(['symbol', 'date'])
+    px = px.merge(df, on=['symbol', 'date'], how='left')
+    n = int(px['mojo_indigraph'].notna().sum())
+    print(f"[FactorBacktest] mojo indigraph: {n:,} panel rows scored across "
+          f"{px.loc[px['mojo_indigraph'].notna(), 'symbol'].nunique()} symbols")
+    return px
+
+
+def _add_sector(px: pd.DataFrame) -> pd.DataFrame:
+    """Attach GICS-style sector from nse_stocks for the industry-relative factors.
+
+    TWO caveats that must travel with any result computed off this column:
+
+    1. It is a CURRENT snapshot, not point-in-time. nse_stocks has one sector per symbol with
+       no effective-dated history, so a firm that reclassified is labelled by where it sits
+       today, over its whole 12.6-year history. Sector membership is far more stable than
+       price or fundamentals, so this is mild -- but it is a look-ahead, not zero.
+    2. It is a SURVIVING-universe snapshot. Delisted names that _fill_delisted correctly keeps
+       in the panel are mostly absent from nse_stocks, so they score NaN and drop out of
+       selection. That does NOT reintroduce survivorship bias into the returns (the benchmark
+       is computed over the eligible universe independently, and a held name that later
+       delists is still exited at MISSING_EXIT_PCT), but it does mean the sector-neutral
+       factors pick from a slightly more-surviving subset than the raw ones. Coverage is
+       printed below so the size of that gap is visible rather than assumed.
+
+    Industry (240 values) is deliberately NOT used: median industry has ~10 symbols across the
+    whole panel and only 84 of 235 reach 8, so per-date industry groups fall under
+    MIN_SECTOR_MEMBERS constantly. 14 sectors (24-454 symbols each) is the granularity this
+    data actually supports.
+    """
+    try:
+        sec = read_df("SELECT symbol, sector FROM nse_stocks WHERE sector IS NOT NULL")
+    except Exception as e:                                      # noqa: BLE001
+        print(f"[FactorBacktest] WARNING: nse_stocks unavailable ({str(e)[:80]}); "
+              "sector-neutral factors will be skipped.")
+        px['sector'] = np.nan
+        return px
+    if sec.empty:
+        px['sector'] = np.nan
+        return px
+    px = px.merge(sec.drop_duplicates('symbol'), on='symbol', how='left')
+    n_sym = px['symbol'].nunique()
+    n_cov = px.loc[px['sector'].notna(), 'symbol'].nunique()
+    print(f"[FactorBacktest] sector: {n_cov}/{n_sym} symbols mapped "
+          f"({n_cov/max(n_sym,1)*100:.1f}%), {px['sector'].nunique()} sectors")
     return px
 
 
@@ -646,6 +835,36 @@ def index_exit_prices(panel: pd.DataFrame) -> dict:
                         .groupby('date', sort=False)}
 
 
+def index_last_alive(panel: pd.DataFrame) -> dict:
+    """Last date each symbol has a usable price anywhere in the panel.
+
+    Exists to tell the TWO reasons an exit price can be missing apart, which the harness
+    previously conflated into a -100% write-off:
+
+      * the symbol is genuinely gone (delisted / went dark)          -> MISSING_EXIT_PCT is right
+      * the symbol simply has no bar on that ONE date and trades on  -> a write-off is fabricated
+
+    Measured 2026-08-12 over 473,672 eligible name-periods: **0.039% per session are unpriced at
+    the exit date but demonstrably alive afterwards, and ZERO are genuinely gone** -- i.e. the
+    write-off was firing on 100% false positives. That is ~9.9pp/yr of phantom drag, applied to
+    the benchmark every period. It is diluted at a 21-session rebalance (12 hits/yr) and dominates
+    at 1 (252 hits/yr), which is why `universe_annualised_pct` read -16.77%/yr at `--rebalance 1`
+    against +21.26%/yr at 5 -- factor-independent (-16.77 vs -16.74 for two unrelated factors),
+    the signature of a benchmark bug rather than a factor result.
+
+    Same family as the 2026-08-11 `index_exit_prices()` fix in measurement.md's banner: a
+    liquidity/observation gap being read as a survival event.
+
+    Keyed on `next_open`, NOT `close`, and the difference is the whole test: a delisted name's
+    FINAL bar still has a close, so a close-based map would report it alive on the very date it
+    can no longer be sold and would suppress the write-off that genuinely belongs there. The
+    exit price is always a next_open, so survival has to be measured in the same currency --
+    "is there any date from here on at which this name could be sold".
+    """
+    ok = panel[panel['next_open'].notna() & (panel['next_open'] > 0)]
+    return ok.groupby('symbol')['date'].max().to_dict()
+
+
 def run_backtest(panel: pd.DataFrame,
                  factor: str,
                  rebalance_days: int = 21,
@@ -654,7 +873,8 @@ def run_backtest(panel: pd.DataFrame,
                  long_short: bool = False,
                  by_date: dict | None = None,
                  missing_exit_pct: float = MISSING_EXIT_PCT,
-                 exit_by_date: dict | None = None) -> dict:
+                 exit_by_date: dict | None = None,
+                 last_alive: dict | None = None) -> dict:
     """Equal-weight top-K portfolio, rebalanced every `rebalance_days` SESSIONS.
 
     Rebalance cadence is counted in trading sessions, not calendar days, so holidays cannot
@@ -676,6 +896,8 @@ def run_backtest(panel: pd.DataFrame,
         by_date = index_by_date(panel)
     if exit_by_date is None:
         exit_by_date = index_exit_prices(panel)
+    if last_alive is None:
+        last_alive = index_last_alive(panel)
 
     prev_w: dict[str, float] = {}
     periods: list[dict] = []
@@ -713,30 +935,51 @@ def run_backtest(panel: pd.DataFrame,
 
         gross = 0.0
         missing = 0
+        unpriced_alive = 0
+        wt_total = sum(abs(v) for v in w.values())
+        wt_used = 0.0
         for s, wt in w.items():
             e, x = entry.get(s), exit_px.get(s)
             if e is None or not np.isfinite(e) or e <= 0:
                 continue                      # never entered -- not a position, not a loss
             if x is None or not np.isfinite(x):
-                # Could not be exited at the next rebalance (delisted / went dark mid-period).
-                # Written off at MISSING_EXIT_PCT rather than held flat: 0% was the survivorship
-                # hole wearing a different hat. The benchmark below applies the SAME figure to
-                # the SAME names, so neither leg gets a convention the other does not.
+                if last_alive.get(s, '') >= d1:
+                    # Alive, just unobserved on THIS date -- no bar, not a delisting. Writing it
+                    # off at -100% here is what put ~9.9pp/yr of phantom drag into the benchmark
+                    # (see index_last_alive). Drop it from the period instead and renormalise, so
+                    # it is neither a fabricated loss nor a silent 0% that flatters the result.
+                    unpriced_alive += 1
+                    continue
+                # Genuinely gone (no price anywhere in the panel from here on): delisted or dark.
+                # Written off at MISSING_EXIT_PCT rather than held flat -- 0% was the survivorship
+                # hole wearing a different hat. The benchmark below applies the SAME rule to the
+                # SAME names, so neither leg gets a convention the other does not.
                 missing += 1
                 gross += wt * missing_exit_pct
+                wt_used += abs(wt)
                 continue
             r = (x / e - 1) * 100
             if abs(r) > RETURN_CLAMP_PCT:
                 clamped += 1
                 r = math.copysign(RETURN_CLAMP_PCT, r)
             gross += wt * r
+            wt_used += abs(wt)
+        # Renormalise over the weight actually priced. Without this, dropping an unpriced-but-alive
+        # name would implicitly park its weight in cash at 0%, which is a return assumption, not an
+        # abstention.
+        if wt_used > 0 and wt_used < wt_total:
+            gross *= wt_total / wt_used
 
-        # reindex(entry.index), not dropna(): a name present at entry and absent at exit must
-        # stay in the benchmark and take the same write-off, otherwise the comparison universe
-        # is quietly survivorship-filtered while the strategy is not. Clip first (bad-bar guard
-        # on observed prices), fill after, so the write-off is not clamped to -50%.
+        # reindex(entry.index), not dropna(): a name present at entry and absent at exit must stay
+        # in the benchmark and take the same write-off, otherwise the comparison universe is
+        # quietly survivorship-filtered while the strategy is not. Clip first (bad-bar guard on
+        # observed prices), fill after, so the write-off is not clamped to -50%.
         uni = ((exit_px.reindex(entry.index) / entry - 1) * 100).replace([np.inf, -np.inf], np.nan)
-        uni = uni.clip(-RETURN_CLAMP_PCT, RETURN_CLAMP_PCT).fillna(missing_exit_pct)
+        uni = uni.clip(-RETURN_CLAMP_PCT, RETURN_CLAMP_PCT)
+        # Fill ONLY the genuinely-gone names. The rest stay NaN and drop out of .mean() -- the same
+        # alive-but-unpriced rule the strategy leg above applies, so the two remain symmetric.
+        gone = pd.Series({s: last_alive.get(s, '') < d1 for s in entry.index}, dtype=bool)
+        uni = uni.mask(uni.isna() & gone.reindex(uni.index).fillna(True), missing_exit_pct)
 
         periods.append({
             'date': d0,
@@ -1035,6 +1278,7 @@ def main() -> None:
 
     by_date = index_by_date(panel)          # grouped once, reused by every factor
     exit_by_date = index_exit_prices(panel)  # full-panel exit prices, likewise
+    last_alive = index_last_alive(panel)     # survival map, likewise
     factors = sorted(FACTORS) if a.factor == 'all' else [a.factor]
 
     out = []
@@ -1042,7 +1286,7 @@ def main() -> None:
         try:
             r = run_backtest(panel, f, a.rebalance, a.top_k, a.cost_bps, a.long_short,
                              by_date=by_date, missing_exit_pct=a.missing_exit_pct,
-                             exit_by_date=exit_by_date)
+                             exit_by_date=exit_by_date, last_alive=last_alive)
         except Exception as e:                              # noqa: BLE001
             print(f"[FactorBacktest] {f}: FAILED -- {e}")
             continue
