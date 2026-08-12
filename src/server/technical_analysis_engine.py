@@ -203,8 +203,11 @@ class TechnicalAnalysisEngine:
                     ON CONFLICT(symbol, signal_source, signal_type, signal_date) DO UPDATE SET
                         entry_price=excluded.entry_price, target_price=excluded.target_price,
                         stop_loss=excluded.stop_loss, reasoning=excluded.reasoning,
-                        technical_score=excluded.technical_score, ai_reasoning=excluded.ai_reasoning,
-                        signal_generated_at=excluded.signal_generated_at
+                        technical_score=excluded.technical_score, ai_reasoning=excluded.ai_reasoning
+                        -- signal_generated_at deliberately NOT refreshed (2026-08-12): it must
+                        -- record when the signal was FIRST generated, or it cannot establish
+                        -- that the signal predates the bar it is graded against. Every one of
+                        -- this source's 19,480 rows had drifted later than its own created_at.
                 """), unified_rows)
             print(f"Analysis complete. {len(results)} signals saved to unified_signals.")
 

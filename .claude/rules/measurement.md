@@ -63,6 +63,42 @@ Any cross-sectional forward-return measurement on this data:
 
 **Consequence: reweighting the existing engines is not a fix.** There is no incumbent factor to beat — see the banner above. Combining reduced performance in every case tested (12-1 alone +0.86% vs +2 exclusions −1.25%; long-only +0.86% vs long/short +0.49%; the 8-engine blend at IC 0.0001).
 
+### Grading the live signals directly (2026-08-12) — no significant directional edge either way
+
+Everything above grades *factors*. This grades what the platform actually emitted: entry at the
+`signal_date` open, restricted to signals provably written before that open, `is_suspect`
+filtered, ≥₹1cr ADT, **per-date then averaged**. Signed return = realized return × direction, so
+negative means the call was backwards.
+
+**Anchor the provenance filter on `created_at`, NOT `signal_generated_at`.** Until the fix in
+migration `1786920000000`, `signal_generated_at` was refreshed on every re-run and is a
+last-seen time, not a generation time (see `recurring-bugs.md`).
+
+| Horizon | Signals | Dates | Per-date signed return | t | Win rate |
+|---|---|---|---|---|---|
+| 1d | 1,569 | 17 | −0.64% | −1.28 | 42.8% |
+| 5d | 961 | 14 | −0.63% | −1.25 | 46.7% |
+| 21d | 882 | 9 | −3.05% | −2.40 | 40.0% |
+
+**Only the 21d row is significant, and it does not survive a 3-horizon correction.** By source at
+21d the sign is not shared: `AI` −4.67% (34% win) against `TECHNICAL` **+0.94%** (50% win) — the
+negative aggregate is the AI path, not the technical scanner.
+
+⚠ **A previous version of this section reported h=1 at −0.84%, t=−3.44, and called the live
+signals "significantly wrong-way". That was wrong and is retracted.** It anchored on
+`signal_generated_at`, which admitted only the 2.4% of rows that had never been re-run — a
+biased slice, not a random one. Re-anchored on `created_at` the sample grows 7.5× (1,320 → 9,931
+rows; 356 → 1,569 tradeable at h=1) and the t-stat collapses from −3.44 to −1.28. This is the
+"dramatic number from a small filtered subsample" failure the panel spec exists to prevent, and
+it was produced by this repo's own review process on the first run — check what your provenance
+filter is actually selecting before believing the result it gives you.
+
+Recall, same method: **1 of 110 top-10 daily gainers flagged bullish pre-market, against ~5.2
+expected by chance** (Σ top_n × signals/universe). At or below chance, and far too thin to
+separate skill from noise.
+
+Re-measured weekly by the `signal-accuracy-review-weekly` scheduled task.
+
 ## Already tested — do not re-run without a reason
 
 Each of these was measured on the 5-year price panel with the spec above. Re-testing them costs days and returns the same answer. If you think one deserves another look, state what changed (more history, a different horizon, a different construction) before spending the time. Full derivation for any row: `docs/measurement-history.md`.

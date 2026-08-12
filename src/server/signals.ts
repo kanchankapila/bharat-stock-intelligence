@@ -241,8 +241,13 @@ export async function upsertUnifiedSignal(source: string, s: UnifiedSignalInput)
       entry_price=excluded.entry_price, target_price=excluded.target_price,
       stop_loss=excluded.stop_loss, confidence_score=excluded.confidence_score,
       reasoning=excluded.reasoning, technical_score=excluded.technical_score,
-      quant_score=excluded.quant_score, ai_reasoning=excluded.ai_reasoning,
-      signal_generated_at=excluded.signal_generated_at
+      quant_score=excluded.quant_score, ai_reasoning=excluded.ai_reasoning
+      -- signal_generated_at is deliberately NOT updated (2026-08-12). It answers "when was
+      -- this signal first generated", which is the only thing that can decide whether the
+      -- signal predates the bar it is graded against. Refreshing it on every re-run turned it
+      -- into a last-seen timestamp drifting up to 24h later than the row's own created_at,
+      -- which made 82% of the platform's signals look un-gradeable. Same first-write-wins
+      -- shape as screener_appearances.appeared_at.
   `, [s.symbol, s.signalDate, source, s.signalType,
       s.entryPrice ?? null, s.targetPrice ?? null, s.stopLoss ?? null, s.confidenceScore ?? null,
       s.reasoning ?? null, s.technicalScore ?? null, s.quantScore ?? null, s.aiReasoning ?? null,

@@ -1513,8 +1513,11 @@ export async function runTechnicalSignalScan(options: {
       ON CONFLICT(symbol, signal_source, signal_type, signal_date) DO UPDATE SET
         entry_price=excluded.entry_price,
         technical_score=excluded.technical_score,
-        confidence_score=excluded.confidence_score,
-        signal_generated_at=excluded.signal_generated_at
+        confidence_score=excluded.confidence_score
+        -- signal_generated_at deliberately NOT refreshed (2026-08-12). This scan re-runs every
+        -- 30 min from 03:00 UTC, so refreshing it walked the 03:00 pre-market stamp forward to
+        -- the last intraday run: only 6 of 5,922 rows still looked pre-market, and 57% ended up
+        -- with a signal_generated_at LATER than their own created_at. First write wins.
     `;
 
     // Resolve per-symbol pcr/sector momentum BEFORE the write transaction so the tx body

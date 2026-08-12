@@ -996,3 +996,69 @@ Historical record, split out of CLAUDE.md on 2026-08-11 (it was 64% of that file
   - **Reverted `ml_ensemble.py`'s training-window widening 30d→7d** ([ml_ensemble.py:1204](src/server/ml_ensemble.py)): the 7-day window it replaced carried an explicit comment warning against exactly this change ("widening this window is not a substitute for [`densify_feature_matrix.py`'s forward-fill]"). The widening was done anyway, with no test/measurement, and wouldn't even have solved the stated problem (30 days doesn't reach quarterly fundamentals' true cadence) while reintroducing the stale-feature-match risk this repo already diagnosed once (the 71%-empty/55-day feature matrix incident).
   - Both recorded in `measurement.md`'s `smart_money` row. Neither regression was caught by CI — `tsc --noEmit` clean and the targeted + full pytest suites (1737 passed/208 skipped) were green *before and after* both fixes, same "green suite protects nothing" pattern documented elsewhere in this file.
   - **Verification**: `check_recurring_bugs.py` clean on both files; full `pytest` 1737 passed/208 skipped, 0 failures.
+
+## 2026-08-12 — Scheduled the measurement layer; graded the live signals directly
+
+**Why:** every audit/measurement check in this repo ran only when a human session invoked it.
+`CronList` and the scheduled-task store both held zero jobs. The production BullMQ jobs run fine;
+the *review* layer had no schedule at all, which is the mechanism behind rules that are correct
+and still not applied.
+
+**Added `scripts/factor_drift_check.py`** — re-runs the canonical panel
+(`--factor all --rebalance 21 --top-k 50 --cost-bps 25`), diffs each factor's significance verdict
+against `docs/factor-drift/baseline.json`, exits 1 when one moves. This is the check that would
+have caught `insider_net` drifting 2.05 → 1.73 unnoticed. Has a `--self-check`; three real bugs
+were found by writing it:
+- `factor_backtest.py` interleaves loader logs with its `--json` payload on stdout, so a bare
+  `json.loads(stdout)` never parses. Payload starts at the line that is exactly `[`.
+- A NaN t-stat (`screener_breadth` yields one period at rebalance 21) silently read as
+  NOT_SIGNIFICANT, since every comparison against NaN is False. Now `NO_VERDICT` + an alert.
+- Flagging clamps/missing-exits on a bare count > 0 fired on all 56 factors of a clean run.
+  Now a share against a floor (8%); the clean panel peaks at 3.00%.
+
+**Panel re-run, 56 factors, Bonferroni |t| ≥ 3.32.** Reproduces the documented numbers
+(`insider_net` t=+1.73 / +0.292%/period — exact match; `high_vol` −6.17 vs −6.09; `delivery_pct`
+−1.05 exact), so the harness is trustworthy post-fix. **Zero factors positive and
+Bonferroni-significant**, confirming measurement.md's current statement. No verdict changed.
+
+**Graded the live signals, not just the factors** (see measurement.md) — and got it wrong the
+first time, which turned out to be the most useful part of the session. Anchoring the
+"was this signal generated before the open?" filter on `signal_generated_at` gave a decisive
+h=1 result of -0.84%, t=-3.44. That number is **retracted**. `signal_generated_at` was listed in
+the `ON CONFLICT DO UPDATE SET` of all three writers of `unified_signals`, so every re-run walked
+it forward — it recorded last-refresh, not first-generation. Live check: **29,433 of 55,736 rows
+carried a signal_generated_at LATER than their own created_at**, which is impossible if the
+column meant what it says (100% of `technical`, drift up to 24h; 57% of `TECHNICAL`; 23% of `AI`).
+Filtering on it admitted only the 2.4% of rows never re-run — a biased slice, not a random one.
+
+Re-anchored on `created_at` (which no writer touches, so it is the true first write) the sample
+grows 7.5x and the conclusion changes:
+
+| Horizon | Signals | Dates | Signed return | t |
+|---|---|---|---|---|
+| 1d | 1,569 | 17 | -0.64% | **-1.28** (was -3.44) |
+| 5d | 961 | 14 | -0.63% | -1.25 |
+| 21d | 882 | 9 | -3.05% | -2.40 |
+
+So: **no significant directional edge either way**, except a weak 21d negative that does not
+survive a 3-horizon correction — and at 21d the sign is not even shared across sources
+(`AI` -4.67% vs `TECHNICAL` **+0.94%**). Recall 1/110 top-10 gainers vs ~5.2 expected by chance.
+
+**Fixed the cause, not just the reading.** Removed `signal_generated_at` from the update list in
+`signals.ts`, `technicalSignalsService.ts` and `technical_analysis_engine.py` (first write wins,
+same shape as `screener_appearances.appeared_at`); added a negative-controlled regression test to
+`upsertUnifiedSignal.test.ts` (reverting the fix fails it with the expected assertion); wrote
+migration `1786920000000` to repair the 29,433 historical rows from `created_at`.
+`unified_signals` is not a hypertable, so the wide UPDATE is safe. **Migration written, NOT yet
+applied to production.**
+
+Also noted, not fixed: `signal_source` carries both `technical` (19,482) and `TECHNICAL` (5,922)
+from two different producers. No consumer is currently mis-filtering, but it is a live trap.
+
+`unified_recommendations` separately still has **zero** gradeable pre-market dates: `generated_at`
+was only populated from 2026-08-10, and the 08-10 (18:23 UTC) and 08-11 (20:02 UTC) batches were
+both generated post-close. Only the 08-12 batch is genuinely pre-market, and its outcome is not
+in `stock_ohlcv` yet.
+
+**Scheduled** (persistent, `~/.claude/scheduled-tasks/`): `factor-drift-weekly` (Sun 07:16) and
+`signal-accuracy-review-weekly` (Sat 08:29).
