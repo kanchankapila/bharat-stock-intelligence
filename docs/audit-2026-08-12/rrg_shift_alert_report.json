@@ -1,0 +1,28 @@
+{
+  "timestamp": "2026-08-12 06:53:02 UTC",
+  "total_sectors_tracked": 3,
+  "alerts_triggered_count": 2,
+  "shifts": [
+    {
+      "sector": "Nifty IT",
+      "previous_quadrant": "Improving",
+      "current_quadrant": "Leading",
+      "alert_level": "INFO",
+      "message": "Sector transitioned into Leading quadrant; scale up momentum longs."
+    },
+    {
+      "sector": "Nifty Bank",
+      "previous_quadrant": "Lagging",
+      "current_quadrant": "Improving",
+      "alert_level": "OPPORTUNITY",
+      "message": "Inflection detected in banking momentum; watch for institutional block accumulation."
+    },
+    {
+      "sector": "Nifty Metal",
+      "previous_quadrant": "Weakening",
+      "current_quadrant": "Lagging",
+      "alert_level": "WARNING",
+      "message": "Severe momentum deterioration; execute sector exit rules."
+    }
+  ]
+}

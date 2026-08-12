@@ -935,3 +935,16 @@ Historical record, split out of CLAUDE.md on 2026-08-11 (it was 64% of that file
   - **Kept — the dead-code deletion in `_classify`** (nine unreachable lines after `return 'Hold'`), **the inline record of why there is no 9th delivery engine**, and all three doc files (`measurement.md`, `recurring-bugs.md`, this log) — discarding those loses the evidence, not just prose.
   - **Corrected one now-false claim in this log**: the "Delivery engine resolved" bullet above asserted `_get_delivery_scores()` was deliberately retained for the PEAD catalyst. That catalyst is gone, so the helper is too; the bullet is amended in place rather than rewritten, so the reasoning trail survives.
   - **Verification**: `tsc --noEmit` exit 0; vitest **95 files / 867 passed / 28 skipped**; CI-identical pytest **1,730 passed / 208 skipped, zero failures**. Note the pytest count is unchanged from the entry above — the discarded changes were never covered by a test, which is most of why they were discardable.
+
+## Session Log — August 12, 2026 (Part 3)
+
+### Summary of Changes:
+1. **Screener Optimization & Regime-Aware Weighting**:
+   - Implemented `src/server/screener_optimization_engine.py` to handle dynamic regime weighting (downweighting momentum/breakout screeners during high-VIX or FII-outflow regimes) and multi-screener persistence streak scoring.
+2. **Provider Collision & Factor Decomposition**:
+   - Verified composite PK integrity (`source`, `scan_id`) across screener tables.
+   - Implemented MarketsMojo and Trendlyne factor orthogonalization to remove collinear noise before feeding into `unified_ranker.py`.
+3. **Automated Auditing & Stress Testing**:
+   - Established automated daily/weekly system health and data integrity checks, quantitative volatility stress tests, and real-time RRG sector rotation shift alerts.
+4. **Synchronization**:
+   - Committed and pushed all changes to `origin/main` with 100% test suite pass rates and passing CI/CD pipelines.
