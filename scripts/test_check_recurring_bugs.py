@@ -279,6 +279,145 @@ class TestMissingLiveDatasourceTest:
         assert crb.check_missing_live_datasource_test([test_file]) == []
 
 
+def _ts(name: str = "queues.ts") -> Path:
+    return crb.REPO_ROOT / "src" / "server" / name
+
+
+class TestSkipNotSuccess:
+    """check_skip_not_success -- class 6. Fixtures below are synthetic, not lifted from the
+    live repo (per this file's header), but the positive fixture reproduces the exact shape
+    technical-signals/intraday-fetcher/live-screener-collect/trendlyne-intraday-scan/
+    trendlyne-checklist-cycle all had before their 2026-08-12 fix: a market-hours guard that
+    returns bare, paired with a completed handler that stamps 'success' unconditionally."""
+
+    def test_fires_on_the_real_bug_shape_named_processor(self):
+        text = (
+            "async function processFoo(_job) {\n"
+            "  if (!(await isMarketOpen())) {\n"
+            "    console.log('[QUEUE] foo skipped — outside NSE market hours');\n"
+            "    return;\n"
+            "  }\n"
+            "  await doWork();\n"
+            "}\n"
+            "\n"
+            "fooWorker = new Worker(\n"
+            "  QUEUE_FOO,\n"
+            "  processFoo,\n"
+            "  { connection, concurrency: 1 },\n"
+            ");\n"
+            "\n"
+            "fooWorker.on('completed', () => {\n"
+            "  recordHeartbeat('foo', 'success');\n"
+            "});\n"
+        )
+        findings = crb.check_skip_not_success(_ts(), text)
+        assert len(findings) == 1
+        assert "fooWorker" in findings[0]
+
+    def test_fires_on_the_real_bug_shape_inline_processor(self):
+        text = (
+            "barWorker = new Worker(\n"
+            "  QUEUE_BAR,\n"
+            "  async (_job) => {\n"
+            "    if (!(await isMarketOpen())) {\n"
+            "      return;\n"
+            "    }\n"
+            "    await doWork();\n"
+            "  },\n"
+            "  { connection },\n"
+            ");\n"
+            "barWorker.on('completed', (_job) => {\n"
+            "  updateMonitorState('bar', 'success');\n"
+            "});\n"
+        )
+        findings = crb.check_skip_not_success(_ts(), text)
+        assert len(findings) == 1
+        assert "barWorker" in findings[0]
+
+    def test_NEGATIVE_CONTROL_does_not_fire_once_skip_returns_a_marker_object(self):
+        """The actual 2026-08-12 fix shape: skip returns { skipped: true } instead of bare."""
+        text = (
+            "bazWorker = new Worker(\n"
+            "  QUEUE_BAZ,\n"
+            "  async (_job) => {\n"
+            "    if (!(await isMarketOpen())) {\n"
+            "      return { skipped: true };\n"
+            "    }\n"
+            "    await doWork();\n"
+            "    return { skipped: false };\n"
+            "  },\n"
+            "  { connection },\n"
+            ");\n"
+            "bazWorker.on('completed', () => {\n"
+            "  recordHeartbeat('baz', 'success');\n"
+            "});\n"
+        )
+        assert crb.check_skip_not_success(_ts(), text) == []
+
+    def test_NEGATIVE_CONTROL_does_not_fire_when_completed_handler_checks_result(self):
+        """The other half of the actual fix: the handler declines a skipped result."""
+        text = (
+            "quxWorker = new Worker(\n"
+            "  QUEUE_QUX,\n"
+            "  async (_job) => {\n"
+            "    if (!(await isMarketOpen())) {\n"
+            "      return;\n"
+            "    }\n"
+            "    await doWork();\n"
+            "  },\n"
+            "  { connection },\n"
+            ");\n"
+            "quxWorker.on('completed', (_job, result) => {\n"
+            "  if (result?.skipped) return;\n"
+            "  recordHeartbeat('qux', 'success');\n"
+            "});\n"
+        )
+        assert crb.check_skip_not_success(_ts(), text) == []
+
+    def test_does_not_fire_when_completed_handler_stamps_nothing(self):
+        """ml-daily-ops style: per-step monitor state is written elsewhere (StepTracker), so
+        the completed handler intentionally has no blanket success stamp to guard."""
+        text = (
+            "quuxWorker = new Worker(\n"
+            "  QUEUE_QUUX,\n"
+            "  async (_job) => {\n"
+            "    if (!(await isMarketOpen())) {\n"
+            "      return;\n"
+            "    }\n"
+            "    await doWork();\n"
+            "  },\n"
+            "  { connection },\n"
+            ");\n"
+            "quuxWorker.on('completed', () => {\n"
+            "  console.log('[QUEUE] quux completed');\n"
+            "});\n"
+        )
+        assert crb.check_skip_not_success(_ts(), text) == []
+
+    def test_does_not_fire_when_processor_has_no_skip_guard(self):
+        """Nothing to mask if the processor never skips."""
+        text = (
+            "quuzWorker = new Worker(\n"
+            "  QUEUE_QUUZ,\n"
+            "  async (_job) => {\n"
+            "    await doWork();\n"
+            "  },\n"
+            "  { connection },\n"
+            ");\n"
+            "quuzWorker.on('completed', () => {\n"
+            "  recordHeartbeat('quuz', 'success');\n"
+            "});\n"
+        )
+        assert crb.check_skip_not_success(_ts(), text) == []
+
+    def test_the_real_fixed_file_has_zero_matches(self):
+        """Regression guard, same style as checks 4/5: the 4 real 2026-08-12 instances
+        (technical-signals, intraday-fetcher, live-screener-collect, trendlyne-intraday-scan,
+        trendlyne-checklist-cycle) are fixed in the live file; this must stay at zero."""
+        path = _ts("queues.ts")
+        assert crb.check_skip_not_success(path, path.read_text(encoding="utf-8")) == []
+
+
 class TestDiffRefResolution:
     """CI died with a raw CalledProcessError traceback (exit 128) when its base ref was the
     all-zero SHA of a new-branch push and the HEAD~1 fallback hit a shallow clone."""

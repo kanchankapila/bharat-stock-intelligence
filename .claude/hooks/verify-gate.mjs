@@ -14,8 +14,29 @@ export function classify(cmd) {
   if (/\bpytest\b/.test(cmd) && !/--collect-only|--co\b/.test(cmd)) return 'pytest';
   if (/\bvitest\b|\bnpm (run )?test\b/.test(cmd)) return 'vitest';
   if (/tsc\s+--noEmit|\bnpm run lint\b/.test(cmd)) return 'tsc';
+  if (/factor_backtest\.py\b/.test(cmd)) return 'backtest';
   return null;
 }
+
+// Files whose logic feeds unified_recommendations/quant_scores directly (see
+// .claude/rules/scoring-authority.md). A diff here passing tsc/pytest proves the code
+// runs, not that its output is any good -- two separate factor_backtest.py benchmark
+// bugs (exit-pricing, --rebalance-1) made dead factors look alive for weeks until a
+// manual audit caught them (docs/measurement-history.md). recurring-bugs.md class:
+// "unmeasured signal/scoring change merged, caught later by a salvage session".
+const SIGNAL_SCORING_SURFACE = [
+  /(^|[\\/])unified_ranker\.py$/,
+  /(^|[\\/])scoring_engine\.py$/,
+  /(^|[\\/])factor_backtest\.py$/,
+  /(^|[\\/])multi_factor_scorer\.py$/,
+  /(^|[\\/])institutional_quant_engine\.py$/,
+  /quantScoringService\.ts$/,
+];
+
+const MEASUREMENT_DOCS = [
+  /\.claude[\\/]rules[\\/]measurement\.md$/,
+  /docs[\\/]measurement-history\.md$/,
+];
 
 /**
  * Verifications that ran to a zero exit in this transcript.
@@ -53,8 +74,13 @@ export function verificationsPassed(transcript) {
   return passed;
 }
 
-/** null = allow completion; string = the reason to block on. */
-export function decide(changed, transcript) {
+/**
+ * null = allow completion; string = the reason to block on.
+ * `allChanged` defaults to `changed` for callers that don't distinguish (existing
+ * tests); pass the unfiltered git diff separately when checking whether a doc-only
+ * file (measurement.md) was also touched, since `changed` excludes non-code files.
+ */
+export function decide(changed, transcript, allChanged = changed) {
   if (!changed.length) return null;
   const passed = verificationsPassed(transcript);
   const py = changed.some(f => f.endsWith('.py'));
@@ -64,6 +90,16 @@ export function decide(changed, transcript) {
   if (py && !passed.has('pytest')) missing.push('python -m pytest src/server/__tests__/ src/server/tests/');
   if (ts && !passed.has('tsc')) missing.push('npx tsc --noEmit');
   if (ts && !passed.has('vitest')) missing.push('npx vitest run');
+
+  const touchesSignalSurface = changed.some(f => SIGNAL_SCORING_SURFACE.some(re => re.test(f)));
+  if (touchesSignalSurface && !passed.has('backtest')) {
+    const docsUpdated = allChanged.some(f => MEASUREMENT_DOCS.some(re => re.test(f)));
+    if (!docsUpdated) {
+      missing.push(
+        'python src/server/factor_backtest.py (or update .claude/rules/measurement.md / docs/measurement-history.md with the measured result)'
+      );
+    }
+  }
   if (!missing.length) return null;
 
   return (
@@ -86,10 +122,12 @@ function main() {
     if (inp.stop_hook_active) process.exit(0); // already blocked once; don't loop
 
     let changed = [];
+    let allChanged = [];
     try {
-      changed = execSync('git diff --name-only HEAD', { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] })
+      allChanged = execSync('git diff --name-only HEAD', { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] })
         .split('\n')
-        .filter(f => /\.(py|ts|tsx)$/.test(f) && !/(test|spec|__tests__)/i.test(f));
+        .filter(Boolean);
+      changed = allChanged.filter(f => /\.(py|ts|tsx)$/.test(f) && !/(test|spec|__tests__)/i.test(f));
     } catch { process.exit(0); } // not a repo / git unavailable — don't block
     if (!changed.length) process.exit(0);
 
@@ -109,7 +147,7 @@ function main() {
       process.exit(0);
     }
 
-    const reason = decide(changed, transcript);
+    const reason = decide(changed, transcript, allChanged);
     if (!reason) process.exit(0);
     process.stdout.write(JSON.stringify({ decision: 'block', reason }));
   });

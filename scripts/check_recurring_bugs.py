@@ -33,6 +33,14 @@ recurrence count for each):
      ` precision`, and the whole query fails -- silently, because the caller gets `{}` back
      rather than an error, which has disabled a gate entirely rather than raising. Use the
      single-token spellings: `::float8`, `::timestamptz`, `::varchar`.
+  6. A BullMQ worker whose processor can skip early (market-hours/weekend/holiday guard)
+     via a bare `return;`, paired with a `.on('completed', ...)` handler that stamps
+     'success' without looking at what the job returned. Recurred independently in 4
+     queues (technical-signals, intraday-fetcher, live-screener-collect, trendlyne-
+     intraday-scan) -- the first was found and fixed 2026-08-12 after it hid 13 real
+     failures behind a green heartbeat for two sessions; the other 3 were found live, in
+     the same shape, while building this check. `.ts` only (BullMQ workers are all
+     TypeScript); see check_skip_not_success.
 
 Deliberately NOT checked: `float(x or 0)` / `int(x or 0)` on a possibly-NaN column. It is a
 real bug class (NaN is truthy, so `nan or 0` is `nan`), but measured against this repo it
@@ -41,11 +49,22 @@ aggregates. A check that is ~90% false positive gets ignored within a week and t
 nothing while looking like it does. Catching it needs type information this script does not
 have.
 
-Checks 4 and 5 both matched zero real occurrences when added, so they are regression guards:
-they exist to stop the class coming back, not to work through a backlog.
+Also deliberately NOT checked: a market-hours/skip guard that returns early with no
+follow-on 'success' stamp anywhere nearby (most of them -- see confluence.jobs.ts's
+`isConfluenceComputeWindow`, which returns a zero-value result object on purpose and is
+correctly not flagged by check 6). Flagging every bare early return near such a guard,
+without also confirming a completed-handler stamps success unconditionally, produced a wall
+of false positives against this repo's own job files during development -- most jobs here
+skip constantly and correctly. Check 6 only fires when both halves of the actual bug shape
+are present in the same file.
 
-File scope is `src/server/*.py`. The multi-word-cast class also occurs in `.ts` (sqlTranslate
-is TypeScript); this script does not cover that side.
+Checks 4, 5 and 6 all matched zero real occurrences once the known instances were fixed, so
+they are regression guards: they exist to stop the class coming back, not to work through a
+backlog.
+
+File scope is `src/server/*.py` for checks 1-5, plus `src/server/**/*.ts` (excluding tests)
+for check 6 only. The multi-word-cast class (check 5) also occurs in `.ts` (sqlTranslate is
+TypeScript); this script does not cover that side.
 
 This is a standalone checker, not a git hook -- .git/hooks is shared across every worktree
 of this repository (confirmed: multiple concurrent Claude sessions each have their own
@@ -95,10 +114,14 @@ def _tracked_python_files() -> list[Path]:
 
 
 def _diff_python_files(ref: str | None, staged: bool) -> list[Path]:
+    return _diff_files(ref, staged, "src/server/*.py")
+
+
+def _diff_files(ref: str | None, staged: bool, pathspec: str) -> list[Path]:
     if staged:
-        args = ["git", "diff", "--name-only", "--cached", "--diff-filter=ACM", "--", "src/server/*.py"]
+        args = ["git", "diff", "--name-only", "--cached", "--diff-filter=ACM", "--", pathspec]
     else:
-        args = ["git", "diff", "--name-only", ref or "HEAD", "--diff-filter=ACM", "--", "src/server/*.py"]
+        args = ["git", "diff", "--name-only", ref or "HEAD", "--diff-filter=ACM", "--", pathspec]
     out = subprocess.run(args, cwd=REPO_ROOT, capture_output=True, text=True)
     if out.returncode != 0:
         # An unresolvable base ref (all-zero SHA on a new-branch push, or HEAD~1 under a
@@ -108,6 +131,22 @@ def _diff_python_files(ref: str | None, staged: bool) -> list[Path]:
             f"{out.stderr.strip()}\nFix the ref, or run with no --diff to scan every tracked file."
         )
     return [REPO_ROOT / line for line in out.stdout.splitlines() if line]
+
+
+def _tracked_ts_files() -> list[Path]:
+    # `:(glob)` pathspec magic turns on `**` (git's default fnmatch doesn't cross `/`),
+    # needed since job/router .ts files live in subdirectories, unlike the flat *.py engines.
+    out = subprocess.run(
+        ["git", "ls-files", ":(glob)src/server/**/*.ts"], cwd=REPO_ROOT,
+        capture_output=True, text=True, check=True,
+    )
+    return [REPO_ROOT / line for line in out.stdout.splitlines()
+            if line and "test" not in Path(line).name.lower()]
+
+
+def _diff_ts_files(ref: str | None, staged: bool) -> list[Path]:
+    files = _diff_files(ref, staged, ":(glob)src/server/**/*.ts")
+    return [f for f in files if "test" not in f.name.lower()]
 
 
 def check_date_anchor(path: Path, text: str) -> list[str]:
@@ -300,6 +339,105 @@ def check_multiword_pg_cast(path: Path, text: str) -> list[str]:
     return findings
 
 
+def _extract_braced_body(text: str, open_idx: int) -> str | None:
+    """Given the index of an opening '{' in text, return the substring up to and including
+    its matching '}'. A brace-depth walk, not a real parser -- good enough for this repo's
+    style of Worker/`.on('completed', ...)` callbacks, same tradeoff as the paren-depth walk
+    in check_raw_percent_s above."""
+    depth = 0
+    for i in range(open_idx, len(text)):
+        if text[i] == "{":
+            depth += 1
+        elif text[i] == "}":
+            depth -= 1
+            if depth == 0:
+                return text[open_idx:i + 1]
+    return None
+
+
+_WORKER_CTOR_RE = re.compile(r"(\w+)\s*=\s*new\s+Worker\s*\(\s*[\w.]+\s*,\s*")
+_INLINE_PROCESSOR_RE = re.compile(r"\s*(?:async\s*)?\([^)]*\)\s*(?::[^{=]*)?=>\s*\{")
+_NAMED_PROCESSOR_REF_RE = re.compile(r"\s*(\w+)\s*,")
+_SKIP_GUARD_RE = re.compile(
+    r"if\s*\([^)]*\b(isMarketOpen|marketHours|tradingHours|isWeekend|isHoliday)\b", re.IGNORECASE
+)
+_BARE_RETURN_RE = re.compile(r"\breturn\s*(undefined\s*)?;")
+_OBJECT_RETURN_RE = re.compile(r"\breturn\s*\{")
+_STAMP_SUCCESS_RE = re.compile(r"(?:recordHeartbeat|updateMonitorState)\s*\([^)]*['\"]success['\"]")
+_RESULT_SKIP_CHECK_RE = re.compile(r"\bresult\b.*\bskip", re.IGNORECASE | re.DOTALL)
+
+
+def _processor_has_bare_skip_return(body: str) -> bool:
+    """True if `body` has a market-hours/weekend/holiday guard whose branch returns bare
+    (`return;`) rather than a distinguishable object. An object-literal return -- even one
+    that isn't literally `{ skipped: true }` -- is treated as already distinguishable and
+    not flagged: several legitimate jobs in this repo (e.g. confluence.jobs.ts's
+    isConfluenceComputeWindow skip) return a zero-value result object on purpose."""
+    for m in _SKIP_GUARD_RE.finditer(body):
+        brace_idx = body.find("{", m.end())
+        if brace_idx == -1:
+            continue
+        block = _extract_braced_body(body, brace_idx)
+        if block is None or _OBJECT_RETURN_RE.search(block):
+            continue  # no guard body found, or it already returns a marker -- not the bug
+        if _BARE_RETURN_RE.search(block):
+            return True
+    return False
+
+
+def check_skip_not_success(path: Path, text: str) -> list[str]:
+    """See class 6 in the module docstring. Deliberately narrow: fires only when a worker's
+    processor has the bare-return skip shape AND that worker's own completed handler stamps
+    'success' without checking the result -- both halves have to be present in the same
+    file. A processor that skips via a distinguishable object return, or a completed handler
+    that already checks `result`, is not flagged."""
+    findings = []
+    for m in _WORKER_CTOR_RE.finditer(text):
+        worker_var = m.group(1)
+        after_ctor = text[m.end():]
+
+        proc_body = None
+        inline_m = _INLINE_PROCESSOR_RE.match(after_ctor)
+        if inline_m:
+            proc_body = _extract_braced_body(after_ctor, inline_m.end() - 1)
+        else:
+            name_m = _NAMED_PROCESSOR_REF_RE.match(after_ctor)
+            if name_m:
+                fn_re = re.compile(
+                    rf"\basync\s+function\s+{re.escape(name_m.group(1))}\s*\([^)]*\)[^{{]*\{{"
+                )
+                fn_m = fn_re.search(text)
+                if fn_m:
+                    proc_body = _extract_braced_body(text, fn_m.end() - 1)
+
+        if not proc_body or not _processor_has_bare_skip_return(proc_body):
+            continue
+
+        handler_re = re.compile(
+            rf"\b{re.escape(worker_var)}\.on\(\s*['\"]completed['\"]\s*,\s*"
+            rf"(?:async\s*)?\([^)]*\)\s*(?::[^{{=]*)?=>\s*\{{"
+        )
+        handler_m = handler_re.search(text)
+        if not handler_m:
+            continue
+        handler_body = _extract_braced_body(text, handler_m.end() - 1)
+        if handler_body is None or not _STAMP_SUCCESS_RE.search(handler_body):
+            continue
+        if _RESULT_SKIP_CHECK_RE.search(handler_body):
+            continue  # already guards on the result -- fixed
+
+        findings.append(
+            f"{_display_path(path)}: worker '{worker_var}' processor can skip via a bare "
+            f"`return;` on a market-hours/weekend/holiday guard, but its .on('completed', ...) "
+            f"handler stamps 'success' unconditionally -- the skip overwrites that queue's "
+            f"real last outcome. Return a marker (`{{ skipped: true }}`) from the processor "
+            f"and check it in the completed handler before stamping, same fix as technical-"
+            f"signals/intraday-fetcher/live-screener-collect/trendlyne-intraday-scan "
+            f"(2026-08-12)."
+        )
+    return findings
+
+
 def check_missing_live_datasource_test(fetcher_files: list[Path]) -> list[str]:
     tests_dir = SERVER_DIR / "tests"
     existing = {p.name for p in tests_dir.glob("test_live_datasource_*.py")} if tests_dir.exists() else set()
@@ -352,24 +490,29 @@ def main() -> int:
     args = parser.parse_args()
 
     if args.paths:
-        files = [Path(p).resolve() for p in args.paths]
+        resolved = [Path(p).resolve() for p in args.paths]
+        py_files = [f for f in resolved if f.suffix == ".py" and f.exists()]
+        ts_files = [f for f in resolved if f.suffix == ".ts" and f.exists() and "test" not in f.name.lower()]
     elif args.diff is not None or args.staged:
-        files = _diff_python_files(args.diff, args.staged)
+        py_files = [f for f in _diff_python_files(args.diff, args.staged) if f.exists()]
+        ts_files = [f for f in _diff_ts_files(args.diff, args.staged) if f.exists()]
     else:
-        files = _tracked_python_files()
-
-    files = [f for f in files if f.suffix == ".py" and f.exists()]
+        py_files = [f for f in _tracked_python_files() if f.exists()]
+        ts_files = [f for f in _tracked_ts_files() if f.exists()]
 
     all_findings: list[str] = []
-    for path in files:
+    for path in py_files:
         text = path.read_text(encoding="utf-8", errors="ignore")
         all_findings.extend(check_date_anchor(path, text))
         all_findings.extend(check_raw_percent_s(path, text))
         all_findings.extend(check_nan_self_inequality(path, text))
         all_findings.extend(check_multiword_pg_cast(path, text))
 
+    for path in ts_files:
+        all_findings.extend(check_skip_not_success(path, path.read_text(encoding="utf-8", errors="ignore")))
+
     if not args.skip_live_datasource_check:
-        all_findings.extend(check_missing_live_datasource_test(files))
+        all_findings.extend(check_missing_live_datasource_test(py_files))
 
     if all_findings:
         print(f"Found {len(all_findings)} potential issue(s) from the recurring-bug checklist:\n")
@@ -380,7 +523,8 @@ def main() -> int:
               "has, historically, been a real bug when it appeared.")
         return 1
 
-    print(f"Checked {len(files)} file(s); no matches for the recurring-bug patterns.")
+    print(f"Checked {len(py_files)} python + {len(ts_files)} ts file(s); no matches for the "
+          f"recurring-bug patterns.")
     return 0
 
 

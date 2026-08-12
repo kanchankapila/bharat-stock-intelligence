@@ -386,10 +386,13 @@ async function processWalkForwardOptimize(job: Job): Promise<any> {
 
 // ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ ML daily ops worker processor ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬
 
-async function processLiveScreenerCollect(_job: Job): Promise<void> {
+async function processLiveScreenerCollect(_job: Job): Promise<{ skipped: boolean }> {
   if (!(await isMarketOpen())) {
     console.log('[QUEUE] live-screener-collect skipped — outside NSE market hours');
-    return;
+    // Skipped is not a success -- same bug class as technical-signals (2026-08-12): an
+    // unconditional 'success' stamp in the completed handler below used to overwrite
+    // whatever this queue's LAST REAL run actually reported.
+    return { skipped: true };
   }
   const { runLiveScreenerCollection } = await import('./liveScreenerCollector');
   await runLiveScreenerCollection();
@@ -400,18 +403,22 @@ async function processLiveScreenerCollect(_job: Job): Promise<void> {
   // produced a first model.
   await runPython('live_screener_ml_ranker.py', ['--score'], 3 * 60_000)
     .catch(e => console.warn('[QUEUE] live_screener_ml_ranker --score failed:', (e as Error).message));
+  return { skipped: false };
 }
 
-async function processIntradayFetcher(_job: Job): Promise<void> {
+async function processIntradayFetcher(_job: Job): Promise<{ skipped: boolean }> {
   // Cron is weekday+time only, so it still fires on a trading holiday — guard on the
   // holiday-aware live status so intraday fetches no-op on holidays/off-hours.
   if (!(await isMarketOpen())) {
     console.log('[QUEUE] intraday-fetcher skipped — outside NSE market hours (weekend/holiday)');
-    return;
+    // Same fix as live-screener-collect above and technical-signals (2026-08-12): the
+    // completed handler used to stamp 'success' on this bare return too.
+    return { skipped: true };
   }
   // Fetches 15m bars for all 2328 NSE stocks (last 24h) — ~4 min per run.
   await runPython('intraday_fetcher.py', ['--lookback-days', '1'], 600_000)
     .catch(e => console.warn('[QUEUE] intraday_fetcher failed:', (e as Error).message));
+  return { skipped: false };
 }
 
 /**
@@ -1037,7 +1044,7 @@ async function processMlDailyOps(job: Job): Promise<{ success: boolean }> {
 
 // ── Trendlyne checklist cycle processor (self-rescheduling, random interval) ──
 
-async function processTrendlyneChecklistCycle(_job: Job): Promise<void> {
+async function processTrendlyneChecklistCycle(_job: Job): Promise<{ skipped: boolean }> {
   const queue = trendlyneChecklistCycleQueue!;
   let nextDelayMs = randomDelayMs(15, 45);
   try {
@@ -1048,14 +1055,17 @@ async function processTrendlyneChecklistCycle(_job: Job): Promise<void> {
     // audit). Skip-and-reschedule during market hours, same pattern as every other gated job.
     if (await isMarketOpen()) {
       console.log('[TRENDLYNE-CHECKLIST] Skipped — market hours (checklist data has no intraday sensitivity)');
-      return;
+      // Skipped is not a success -- same bug class fixed for technical-signals, intraday-
+      // fetcher, live-screener-collect and trendlyne-intraday-scan (2026-08-12): the
+      // completed handler below used to stamp 'success' over this queue's real last outcome.
+      return { skipped: true };
     }
     const now = Date.now();
     let { cycleStartedAt, cycleCompletedAt } = await getCycleState();
 
     if (isDormant(now, cycleCompletedAt)) {
       nextDelayMs = DORMANT_RECHECK_MS;
-      return;
+      return { skipped: false };
     }
 
     if (shouldStartNewCycle(cycleStartedAt, cycleCompletedAt, now)) {
@@ -1068,7 +1078,7 @@ async function processTrendlyneChecklistCycle(_job: Job): Promise<void> {
     if (pending.length === 0) {
       await completeCycle(now);
       nextDelayMs = DORMANT_RECHECK_MS;
-      return;
+      return { skipped: false };
     }
 
     const batch = pickRandomBatch(pending, 10, 15);
@@ -1088,6 +1098,7 @@ async function processTrendlyneChecklistCycle(_job: Job): Promise<void> {
     }
 
     console.log(`[TRENDLYNE-CHECKLIST] Processed ${batch.length} stocks this run.`);
+    return { skipped: false };
   } finally {
     await queue.add('checklist-cycle-tick', {}, { delay: nextDelayMs, removeOnComplete: 3, removeOnFail: 3 });
   }
@@ -1770,11 +1781,15 @@ export async function initQueues(): Promise<boolean> {
       async (_job: Job) => {
         if (!(await isMarketOpen())) {
           console.log('[QUEUE] intraday-scan skipped — outside NSE market hours');
-          return;
+          // Skipped is not a success -- same bug class fixed for technical-signals,
+          // intraday-fetcher and live-screener-collect (2026-08-12): the completed
+          // handler below used to stamp 'success' over this queue's real last outcome.
+          return { skipped: true };
         }
         console.log('[QUEUE] Starting scheduled 15-min intraday screener scan...');
         const { runIntradayScreenerScan } = await import('./trendlyneScreener');
         await runIntradayScreenerScan();
+        return { skipped: false };
       },
       {
         connection,
@@ -1783,8 +1798,9 @@ export async function initQueues(): Promise<boolean> {
       },
     );
 
-    trendlyneIntradayWorker.on('completed', (_job) => {
+    trendlyneIntradayWorker.on('completed', (_job, result?: { skipped?: boolean }) => {
       console.log('[QUEUE] trendlyne-intraday completed');
+      if (result?.skipped) return;
       recordHeartbeat('trendlyne-intraday', 'success');
     });
     trendlyneIntradayWorker.on('failed', (_job, err) => {
@@ -1895,8 +1911,9 @@ export async function initQueues(): Promise<boolean> {
       processIntradayFetcher,
       { connection, concurrency: 1, lockDuration: 10 * 60 * 1000, lockRenewTime: 2 * 60 * 1000 },
     );
-    intradayFetcherWorker.on('completed', () => {
+    intradayFetcherWorker.on('completed', (_job, result?: { skipped?: boolean }) => {
       console.log('[QUEUE] intraday-fetcher completed');
+      if (result?.skipped) return;
       recordHeartbeat('intraday-fetcher', 'success');
     });
     intradayFetcherWorker.on('failed', (_, err) => {
@@ -1919,8 +1936,9 @@ export async function initQueues(): Promise<boolean> {
       processLiveScreenerCollect,
       { connection, concurrency: 1, lockDuration: 8 * 60 * 1000 }
     );
-    liveScreenerCollectWorker.on('completed', () => {
+    liveScreenerCollectWorker.on('completed', (_job, result?: { skipped?: boolean }) => {
       console.log('[QUEUE] live-screener-collect completed');
+      if (result?.skipped) return;
       recordHeartbeat('live-screener-collect', 'success');
     });
     liveScreenerCollectWorker.on('failed', (_, err) => {
@@ -2441,7 +2459,8 @@ export async function initQueues(): Promise<boolean> {
       processTrendlyneChecklistCycle,
       { connection, concurrency: 1, lockDuration: 20 * 60 * 1000, lockRenewTime: 3 * 60 * 1000 },
     );
-    trendlyneChecklistCycleWorker.on('completed', () => {
+    trendlyneChecklistCycleWorker.on('completed', (_job, result?: { skipped?: boolean }) => {
+      if (result?.skipped) return;
       recordHeartbeat('trendlyne-checklist-cycle', 'success');
     });
     trendlyneChecklistCycleWorker.on('failed', (_job, err) => {
