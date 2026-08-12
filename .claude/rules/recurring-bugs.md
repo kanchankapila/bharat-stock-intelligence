@@ -15,6 +15,7 @@ Currently automated: `date.today()` write-anchor, raw `%s` placeholder, missing 
 | Raw `daysStale()` on a freshness check | Monday morning reads Friday data as 3 days stale. Use `tradingDaysStale()`. | 4 |
 | Hand-rolled "step back N weekdays" | Skips no holidays, so `--days 90` covers 87 sessions. Use `as_of.trading_days_back()`. | 2 |
 | A `cronPattern` mirrored into `jobRegistry.ts` / `monitorScripts.ts` | Drifts from the real registration → phantom "late"/"stale" alerts forever. Guarded now by 5 mirror-consistency test suites — keep them passing. | 6 |
+| A coverage/completeness **ratio** (not just a staleness gap) computed over a window that includes **today** | Same root cause as `daysStale()` above, different shape: if today's rows are written by one job (e.g. a morning scan) and enriched by a later one (e.g. an evening ML-scoring pass), a same-day denominator reads as a false collapse for the whole gap between the two — every weekday, not just Mondays. `technical-signals-freshness-coverage`'s win_probability ratio had exactly this bug even after its *staleness* half was already fixed for the Monday case (2026-08-10) — fixed 2026-08-11 by measuring the ratio over the most recently **completed** day (`date = MAX(date) WHERE date < today`), not "last N days" inclusive of today. | 2 |
 
 ## NaN & null
 

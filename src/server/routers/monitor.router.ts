@@ -359,6 +359,7 @@ async function getScriptStats(scriptId: ScriptId): Promise<Record<string, number
 export async function getSystemStatus(now: Date = new Date()) {
   const runStates: Record<string, string> = {};
   const heartbeatByName = new Map<string, {
+    lastStatus: string | null;
     lastRunAt: string | null;
     lastSuccessAt: string | null;
     lastError: string | null;
@@ -370,10 +371,11 @@ export async function getSystemStatus(now: Date = new Date()) {
     for (const r of rows) runStates[r.key] = r.value;
 
     const hbRows = await dbAll<any>(
-      'SELECT job_name, last_run_at, last_success_at, last_error, run_count, fail_count FROM job_heartbeat'
+      'SELECT job_name, last_status, last_run_at, last_success_at, last_error, run_count, fail_count FROM job_heartbeat'
     );
     for (const row of hbRows) {
       heartbeatByName.set(String(row.job_name), {
+        lastStatus: row.last_status ?? null,
         lastRunAt: asIso(row.last_run_at),
         lastSuccessAt: asIso(row.last_success_at),
         lastError: row.last_error ?? null,
@@ -400,6 +402,7 @@ export async function getSystemStatus(now: Date = new Date()) {
     const lastRunAt = dbLastRunAt ?? storedRanAt;
     const stateKey = `monitor_${s.id}`;
     const rawState = runStates[stateKey];
+    const hb = heartbeatByName.get(s.id);
     let runState: 'never' | 'running' | 'success' | 'failed' | 'stale' = 'never';
 
     // Fresh DB-freshness evidence (dbLastRunAt/storedRanAt) wins over the app_settings
@@ -407,6 +410,21 @@ export async function getSystemStatus(now: Date = new Date()) {
     // that flag back via triggerScript's upsertState, so a single stray 'running' write
     // (manual trigger, crash mid-run) stuck it forever — masking weeks of otherwise-healthy
     // runs behind a permanent "⏳ running" even though fresh output kept landing.
+    //
+    // rawState (app_settings.monitor_<id>) is written ONLY by triggerScript's manual "run
+    // now" path below -- a script driven purely by its normal BullMQ schedule (the large
+    // majority: regime-detector, strategy-optimizer, reward-engine, ...) never touches it.
+    // Its real failures land in job_heartbeat via recordHeartbeat()/updateMonitorState()
+    // instead, a completely different store this block used to never consult -- so runState
+    // could never surface 'failed' for those scripts, only ever degrading to a bare 'stale'
+    // even when job_heartbeat.last_error held the real, captured exception. Only trust the
+    // heartbeat's failure when it's at least as recent as lastRunAt (the DB-freshness
+    // signal), i.e. it's the reason nothing fresher landed, not some older failure a later
+    // success has since superseded.
+    const heartbeatFailed = hb?.lastStatus === 'failed'
+      && hb.lastRunAt != null
+      && (!lastRunAt || toComparableMs(hb.lastRunAt) >= toComparableMs(lastRunAt));
+
     if (lastRunAt) {
       const cronPatterns = (s as any).cronPatterns as string[] | undefined;
       let isLate: boolean;
@@ -425,12 +443,11 @@ export async function getSystemStatus(now: Date = new Date()) {
         const ageHours = (now.getTime() - toComparableMs(lastRunAt)) / 3600000;
         isLate = ageHours > s.staleLimitHours;
       }
-      runState = !isLate ? 'success' : (rawState === 'running' ? 'running' : (rawState === 'failed' ? 'failed' : 'stale'));
+      runState = !isLate ? 'success' : (rawState === 'running' ? 'running' : (rawState === 'failed' || heartbeatFailed ? 'failed' : 'stale'));
     } else {
-      runState = rawState === 'running' ? 'running' : (rawState === 'failed' ? 'failed' : 'never');
+      runState = rawState === 'running' ? 'running' : (rawState === 'failed' || heartbeatFailed ? 'failed' : 'never');
     }
 
-    const hb = heartbeatByName.get(s.id);
     const nextScheduledAt = nextCronTimeIso((s as any).cronPatterns, now);
     return {
       ...s,
