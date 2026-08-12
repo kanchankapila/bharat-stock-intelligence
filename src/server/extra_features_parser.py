@@ -13,8 +13,28 @@ Usage:
 import argparse
 import json
 import sys
-from datetime import date
+from as_of import logical_trading_date
 from db_compat import connect, query_all
+
+# The ONLY endpoints extract_features() below actually reads. extra_endpoints_fetcher.py
+# imports this to decide what its nightly (--scope daily) pass fetches.
+#
+# Measured 2026-08-12: the fetcher was pulling all 34 registry endpoints for ~1,994 symbols
+# (~38,000 requests) and being SIGKILLed at 55% of the universe, while this parser -- the
+# table's only production consumer -- read 5 of those 34. ~74% of the nightly request budget
+# was collecting responses nothing ever parsed.
+#
+# Do NOT hand-edit this to add an endpoint without adding the matching branch below:
+# test_extra_features_parser.py derives the branch literals from extract_features()'s own
+# source and asserts they equal this set, so the two cannot drift (the hand-enumerated
+# allowlist trap in .claude/rules/recurring-bugs.md, Testing).
+PARSED_ENDPOINTS = frozenset({
+    "marketservices_shareholding",
+    "trading80_header_info",
+    "marketsmojo_header_info",
+    "investsights_score",
+    "tapetide_score",
+})
 
 def parse_json(json_str: str) -> dict:
     if not json_str:
@@ -257,5 +277,11 @@ if __name__ == "__main__":
     parser.add_argument("--date", type=str, help="Update features for a specific date (defaults to today)")
     args = parser.parse_args()
 
-    target_dt = args.date or date.today().isoformat()
+    # NOT date.today(): this feeds a `WHERE symbol = ? AND date = ?` write target, and
+    # ml-daily-ops routinely finishes after midnight IST, at which point "today" is a day with
+    # no technical_signals grid row -- 0 rows matched, silently (.claude/rules/recurring-bugs.md).
+    # It also breaks the run()'s own fetched_date == target_date guard, which compares against
+    # extra_endpoint_responses.updated_at: past midnight those two disagree and every symbol is
+    # skipped as stale. logical_trading_date() keeps both on the same session.
+    target_dt = args.date or logical_trading_date()
     run(target_dt)

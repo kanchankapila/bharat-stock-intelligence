@@ -43,7 +43,7 @@ import requests
 
 from db_compat import connect
 from as_of import logical_write_floor
-from fetch_utils import retry_get, FetchTracker
+from fetch_utils import retry_get, FetchTracker, filter_numeric_tlids
 
 BASE_URL = (
     "https://trendlyne.com/equity/api/stock/adv-technical-analysis/{tlid}/24/"
@@ -481,6 +481,11 @@ def _load_stocks(symbol_filter: str | None, con) -> list[tuple[str, str]]:
     rows = [(r[0], str(r[1])) for r in cur.fetchall() if r[0] is not None]
     if symbol_filter:
         rows = [(s, t) for s, t in rows if s.upper() == symbol_filter.upper()]
+    # Ticker-shaped tlids are a permanent 404; without this each one burned 3 retry_get
+    # attempts with exponential backoff every run and inflated the failure rate the
+    # FetchTracker reports, which is what made a real transient outage indistinguishable
+    # from routine noise on 2026-08-12.
+    rows, _ = filter_numeric_tlids(rows, "TLAdvTech")
     return rows
 
 

@@ -20,6 +20,7 @@ import argparse
 import json
 import sys
 import time
+from concurrent.futures import ThreadPoolExecutor
 from datetime import date
 from pathlib import Path
 
@@ -38,6 +39,12 @@ HEADERS = {
     "Referer": "https://www.marketsmojo.com/",
 }
 RATE_LIMIT_SEC = 0.5
+# getCardInfo has no since-parameter: every call returns the stock's whole ~9,900-row series
+# regardless. Live-measured 2026-08-12: 2.02s/symbol serial = 61.7 min for 1,831 symbols, which
+# is why the 40-min job budget SIGKILLed this fetcher every night after only 214 symbols (12%
+# of the universe). 8 workers measured at 6.7s/24 symbols with zero throttling -> ~8.5 min.
+MAX_WORKERS = 8
+BATCH_GAP_SEC = 0.5
 
 CARDS = [
     "sectIndigraph_graph",
@@ -113,14 +120,46 @@ def fetch_technical_history(sid: str, session: requests.Session, exchange: str =
     return out or None
 
 
-def write_technical_history(conn, symbol: str, series: dict, fetched_at: str) -> int:
+def load_known_max_dates(conn) -> dict[tuple[str, str, str], str]:
+    """(symbol, indicator, period) -> max stored date, as ISO text.
+
+    The API cannot be asked for a date range, so the whole series arrives every call; this is
+    what lets us discard the ~99.9% of it we already hold instead of re-upserting it. Measured
+    2026-08-12 before this existed: 2,010,101 rows written in one night to gain 2,787 genuinely
+    new ones -- a 721:1 amplification against a 3.4 GB table, and the reason a single symbol
+    cost ~11s of DB time.
+    """
+    rows = conn.execute(
+        "SELECT symbol, indicator, period, MAX(date) "
+        "FROM marketsmojo_technical_history GROUP BY symbol, indicator, period"
+    ).fetchall()
+    # No ::text cast: that is Postgres-only and dies on the SQLite fallback (see
+    # .claude/rules/recurring-bugs.md, SQL dialect). Postgres hands back a datetime.date here
+    # and SQLite a string, so normalise in Python -- both end up ISO, which is what the
+    # lexicographic comparison in write_technical_history() needs.
+    return {
+        (r[0], r[1], r[2]): (r[3].isoformat() if hasattr(r[3], "isoformat") else str(r[3]))
+        for r in rows if r[3] is not None
+    }
+
+
+def write_technical_history(conn, symbol: str, series: dict, fetched_at: str,
+                            known: dict[tuple[str, str, str], str] | None = None) -> int:
     """series: {(indicator, period): [row, ...]}. Upserts one row per
-    (symbol, indicator, period, date). Returns rows written."""
+    (symbol, indicator, period, date). Returns rows written.
+
+    `known` skips dates already stored. Pass None (or --full) to force a complete re-upsert,
+    which is what a backfill or a vendor restatement needs.
+    """
     written = 0
     for (indicator, period), rows in series.items():
+        since = (known or {}).get((symbol, indicator, period))
         for row in rows:
             row_date = row.get("date")
             if not row_date:
+                continue
+            # ISO dates, so lexicographic == chronological.
+            if since and row_date <= since:
                 continue
             details = {k: v for k, v in row.items() if k not in _COMMON_KEYS}
             conn.execute(
@@ -146,36 +185,54 @@ def write_technical_history(conn, symbol: str, series: dict, fetched_at: str) ->
     return written
 
 
-def run(symbols: list[str] | None = None) -> None:
+def run(symbols: list[str] | None = None, full: bool = False) -> None:
     sid_map = load_sid_map()
     symbols = [s.upper() for s in symbols] if symbols else sorted(sid_map.keys())
-    session = requests.Session()
-    session.headers.update(HEADERS)
     conn = connect()
     fetched_at = date.today().isoformat()
+    known = None if full else load_known_max_dates(conn)
+    if known is not None:
+        print(f"[marketsmojo technical] {len(known)} existing series known -- fetching new dates only")
+
+    def _fetch(symbol: str):
+        """Runs on a worker thread: HTTP only. The DB connection stays on the main
+        thread -- db_compat connections are not thread-safe."""
+        sid = sid_map.get(symbol)
+        if not sid:
+            return symbol, None
+        session = requests.Session()
+        session.headers.update(HEADERS)
+        return symbol, fetch_technical_history(sid, session)
 
     total_rows = 0
     ok = 0
-    for symbol in symbols:
-        sid = sid_map.get(symbol)
-        if not sid:
-            print(f"  [marketsmojo technical] {symbol}: no stockid mapping, skipped")
-            continue
-        series = fetch_technical_history(sid, session)
-        if not series:
-            print(f"  [marketsmojo technical] {symbol}: empty response")
-            continue
-        n = write_technical_history(conn, symbol, series, fetched_at)
-        total_rows += n
-        ok += 1
-        print(f"  [marketsmojo technical] {symbol}: {n} rows across {len(series)} series")
+    unmapped = 0
+    for start in range(0, len(symbols), MAX_WORKERS):
+        batch = symbols[start:start + MAX_WORKERS]
+        with ThreadPoolExecutor(max_workers=len(batch)) as pool:
+            results = list(pool.map(_fetch, batch))
+        for symbol, series in results:
+            if symbol not in sid_map:
+                unmapped += 1
+                continue
+            if not series:
+                print(f"  [marketsmojo technical] {symbol}: empty response")
+                continue
+            n = write_technical_history(conn, symbol, series, fetched_at, known)
+            total_rows += n
+            ok += 1
+            print(f"  [marketsmojo technical] {symbol}: {n} new rows across {len(series)} series")
+        time.sleep(BATCH_GAP_SEC)
 
     conn.close()
-    print(f"[marketsmojo technical] done -- {total_rows} rows, {ok}/{len(symbols)} symbols succeeded")
+    print(f"[marketsmojo technical] done -- {total_rows} rows written, "
+          f"{ok}/{len(symbols)} symbols succeeded ({unmapped} unmapped)")
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--symbols", nargs="*", help="restrict to these NSE symbols (default: full universe)")
+    parser.add_argument("--full", action="store_true",
+                        help="re-upsert every date instead of only dates newer than what is stored")
     args = parser.parse_args()
-    run(args.symbols)
+    run(args.symbols, full=args.full)

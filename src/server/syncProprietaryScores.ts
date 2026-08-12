@@ -138,4 +138,52 @@ export async function syncTrendlyneScores() {
   }
 
   console.log(`[TRENDLYNE SCORES] Synced ${count} stocks.`);
+  await stampDvmOntoTechnicalSignals();
+}
+
+/**
+ * Copy trendlyne_dvm_scores onto technical_signals.dvm_durability/dvm_valuation/dvm_momentum.
+ *
+ * These three columns had NO writer anywhere in the repo -- yet ml_ensemble.py reads all three
+ * (`num('dvm_momentum', 50.0)`) and exit_policy.py joins them. With nothing populating them the
+ * model was being handed a fabricated constant 50.0 for every stock on every date, which is the
+ * "coercing fabricates a value" failure in .claude/rules/recurring-bugs.md: a hardcoded default
+ * is not a neutral no-op, it is a wrong number the model cannot distinguish from a real one.
+ * The data existed in trendlyne_dvm_scores (24,748 rows / 2,007 symbols) the whole time and was
+ * simply never joined across.
+ *
+ * Point-in-time safe: joins on (symbol, date), so a score lands only on the grid row for the
+ * date it was actually observed -- never smeared backwards, unlike the snapshot-table leak
+ * extra_features_parser.py guards against. trendlyne_dvm_scores has a real date dimension
+ * (median 12 distinct dates per symbol), which is what makes that join meaningful rather than
+ * cosmetic. Trendlyne publishes DVM roughly weekly, so this fills ~1,660 rows per fetch date
+ * and leaves the rest NULL by design -- densify_feature_matrix.py forward-fills the gaps under
+ * its own age cap, the standard path for every sparse column on this grid.
+ *
+ * Set-based on purpose: the loop above is per-symbol, and adding an UPDATE inside it would make
+ * this N+1 across ~2,000 symbols.
+ *
+ * NOT yet gradeable for edge: 17 distinct dates starting 2026-06-30 puts DVM squarely in the
+ * "Not testable -- calendar constraint" bucket in .claude/rules/measurement.md. This is a
+ * correctness fix (stop feeding the model a fabricated constant), NOT a claim that DVM predicts
+ * anything. Re-check once the panel is deep enough for factor_backtest.py to say.
+ */
+async function stampDvmOntoTechnicalSignals(): Promise<void> {
+  try {
+    const res = await dbTransaction(async (tx) => tx.run(`
+      UPDATE technical_signals AS ts SET
+        dvm_durability = d.d_score,
+        dvm_valuation  = d.v_score,
+        dvm_momentum   = d.m_score
+      FROM trendlyne_dvm_scores AS d
+      WHERE d.symbol = ts.symbol
+        AND d.date = ts.date::text
+        AND (ts.dvm_durability IS NULL OR ts.dvm_valuation IS NULL OR ts.dvm_momentum IS NULL)
+    `));
+    console.log(`[TRENDLYNE SCORES] Stamped DVM onto technical_signals (${(res as any)?.changes ?? '?'} rows).`);
+  } catch (e: any) {
+    // Best-effort, exactly like every other enrichment step in this pipeline: a DVM stamping
+    // failure must not fail the whole quant-scoring job.
+    console.warn('[TRENDLYNE SCORES] DVM stamping failed:', e.message);
+  }
 }

@@ -121,7 +121,7 @@ describe('evening batch pipeline ordering', () => {
     }
     // ml-daily-ops sub-steps deliberately share the parent's cron (they are StepTracker rows
     // for one chain, not independently-scheduled jobs), so exclude same-cron sibling groups.
-    const parentCrons = new Set(['0 14 * * 1-5', '0 5 * * 0']);
+    const parentCrons = new Set(['20 13 * * 1-5', '0 5 * * 0']);
     const real = clashes.filter(c => ![...parentCrons].some(p => c.endsWith(p)));
     expect(real).toEqual([]);
   });

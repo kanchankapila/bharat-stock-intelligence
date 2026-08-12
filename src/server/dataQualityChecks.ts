@@ -1181,6 +1181,64 @@ export const DATA_QUALITY_CHECKS: DataQualityCheck[] = [
     },
   },
 
+  // The gap every other check in this file structurally cannot see.
+  //
+  // All ~90 checks above ask "did this TABLE get fresh rows?". None asks "did the FEATURE that
+  // table exists to produce actually land on the grid?" -- and those are different questions.
+  // Measured 2026-08-12: extra_endpoint_responses was receiving 21,461 fresh rows a night, so
+  // its freshness check passed, while all 14 ext_* columns it feeds sat at 0% because the
+  // parser was being SIGKILLed before it ever ran. The monitor read 86 pass / 1 fail while 21
+  // of ml_ensemble.py's declared inputs were constants for every stock on every date.
+  //
+  // Deliberately generic (jsonb_each over the row, not a hand-written column list): an
+  // enumerated allowlist only ever guards the columns someone remembered to list, which is the
+  // failure in .claude/rules/recurring-bugs.md (Testing) that left appeared_at populated on 10
+  // rows platform-wide behind a green suite. This counts every column the table actually has,
+  // so a NEW feature column that never gets written is caught without anyone updating a list.
+  //
+  // Thresholds are a REGRESSION guard, not a target. 53 of 302 columns were 100% NULL on the
+  // last completed day when this was written (2026-08-13) -- some genuinely broken, many just
+  // sparse-by-nature on a single date (DVM is weekly, the mc_* block writes on its own cadence,
+  // and densify_feature_matrix.py forward-fills both under an age cap). Failing on all 53 would
+  // be the "check that cries wolf on correct data" anti-pattern, so this alarms on the count
+  // GROWING instead. Ratchet the numbers down as the backlog is fixed; do not raise them to
+  // silence a real regression.
+  //
+  // Anchored to MAX(date) < today, not today: today's grid is still being written when this
+  // runs, and a same-day denominator reads as a false collapse -- the same bug already fixed
+  // once in technical-signals-freshness-coverage.
+  {
+    id: 'technical-signals-feature-coverage',
+    label: 'technical_signals feature columns that are 100% NULL on the last completed day',
+    category: 'ml',
+    critical: false,
+    sql: `WITH latest AS (
+            SELECT * FROM technical_signals
+            WHERE date = (SELECT MAX(date) FROM technical_signals WHERE date < CURRENT_DATE::text)
+          ), kv AS (
+            SELECT key, COUNT(*) FILTER (WHERE value <> 'null'::jsonb) AS non_null
+            FROM latest t, LATERAL jsonb_each(to_jsonb(t))
+            GROUP BY key
+          )
+          SELECT (SELECT COUNT(*) FROM latest) AS grid_rows,
+                 COUNT(*) AS total_cols,
+                 COUNT(*) FILTER (WHERE non_null = 0) AS dead_cols
+          FROM kv`,
+    evaluate: (row) => {
+      const gridRows = Number(row?.grid_rows ?? 0);
+      const total = Number(row?.total_cols ?? 0);
+      const dead = Number(row?.dead_cols ?? 0);
+      if (gridRows === 0 || total === 0) {
+        return { status: 'fail', detail: 'No technical_signals rows on the last completed trading day — the grid-ensurer did not run.' };
+      }
+      const pct = ((dead / total) * 100).toFixed(1);
+      const detail = `${dead}/${total} feature columns (${pct}%) are 100% NULL across all ${gridRows} rows of the last completed day (baseline 53 on 2026-08-13).`;
+      if (dead > 65) return { status: 'fail', detail: `${detail} That is well above the baseline — a feature writer has stopped landing on the grid.` };
+      if (dead > 55) return { status: 'warn', detail: `${detail} Up from the baseline — check which writer regressed.` };
+      return { status: 'pass', detail };
+    },
+  },
+
   // ── Generated from TABLE_FRESHNESS_CHECKS (see the factory + mandate comment above) ──────
   ...TABLE_FRESHNESS_CHECKS.map(makeFreshnessCheck),
 ];

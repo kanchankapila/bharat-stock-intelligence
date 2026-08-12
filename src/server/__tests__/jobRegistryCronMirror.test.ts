@@ -247,7 +247,7 @@ describe('JOB_REGISTRY cronPattern/everyMs mirror consistency', () => {
   it('outcome-resolver-5d/-15d (JOB_REGISTRY) are single-pattern, tracking only ml-daily-ops', () => {
     const fiveD = JOB_REGISTRY.find(j => j.jobName === 'outcome-resolver-5d');
     const fifteenD = JOB_REGISTRY.find(j => j.jobName === 'outcome-resolver-15d');
-    expect(fiveD?.cronPattern).toBe('0 14 * * 1-5');
-    expect(fifteenD?.cronPattern).toBe('0 14 * * 1-5');
+    expect(fiveD?.cronPattern).toBe('20 13 * * 1-5');
+    expect(fifteenD?.cronPattern).toBe('20 13 * * 1-5');
   });
 });

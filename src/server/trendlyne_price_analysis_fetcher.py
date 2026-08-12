@@ -35,7 +35,7 @@ import requests
 
 from db_compat import connect
 from as_of import logical_write_floor
-from fetch_utils import retry_get, FetchTracker
+from fetch_utils import retry_get, FetchTracker, filter_numeric_tlids
 
 ANALYSIS_URL = "https://trendlyne.com/share-price/price-performance-analysis/{tlid}/"
 
@@ -312,6 +312,8 @@ def _load_stocks(symbol_filter: str | None, con) -> list[tuple[str, str]]:
     rows = [(r[0], str(r[1])) for r in cur.fetchall() if r[0] is not None]
     if symbol_filter:
         rows = [(s, t) for s, t in rows if s.upper() == symbol_filter.upper()]
+    # Same permanent-404 filter as trendlyne_adv_tech_fetcher.py's sibling loader.
+    rows, _ = filter_numeric_tlids(rows, "TLPriceAnalysis")
     return rows
 
 

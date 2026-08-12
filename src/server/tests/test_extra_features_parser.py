@@ -198,3 +198,26 @@ class TestInvestSightsAndTapetideScores:
         assert feat["ext_is_overall_score"] is None
         assert feat["ext_is_percentile_rank"] is None
         assert feat["ext_tt_score"] is None
+
+
+# ── PARSED_ENDPOINTS drift guard ────────────────────────────────────────────────
+# extra_endpoints_fetcher.py --scope daily fetches exactly PARSED_ENDPOINTS. If someone adds
+# an `elif endpoint == "new_thing"` branch to extract_features() and forgets the constant, the
+# nightly job silently never fetches it and the new feature is NULL forever -- the same shape
+# as the hand-enumerated allowlist in .claude/rules/recurring-bugs.md (Testing) that left
+# appeared_at populated on 10 rows platform-wide while its suite stayed green. So derive the
+# expected set from the function's own source instead of restating it.
+
+def test_parsed_endpoints_matches_the_branches_in_extract_features():
+    import inspect
+    import re
+    src = inspect.getsource(efp.extract_features)
+    branches = set(re.findall(r'endpoint\s*==\s*"([^"]+)"', src))
+    assert branches, "no `endpoint == \"...\"` branches found -- did extract_features change shape?"
+    assert branches == set(efp.PARSED_ENDPOINTS), (
+        "PARSED_ENDPOINTS is out of sync with extract_features().\n"
+        f"  only in extract_features: {sorted(branches - set(efp.PARSED_ENDPOINTS))}\n"
+        f"  only in PARSED_ENDPOINTS: {sorted(set(efp.PARSED_ENDPOINTS) - branches)}\n"
+        "extra_endpoints_fetcher.py --scope daily fetches PARSED_ENDPOINTS, so a branch that "
+        "is not listed there will never receive data."
+    )

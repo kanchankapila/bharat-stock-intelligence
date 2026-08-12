@@ -78,6 +78,12 @@ def main():
     parser.add_argument("--symbol", type=str, help="Fetch a single stock by Symbol (e.g. BEL)")
     parser.add_argument("--limit", type=int, help="Limit number of stocks fetched")
     parser.add_argument("--registry-only", action="store_true", help="Validate/sync endpoint registry without fetching")
+    parser.add_argument(
+        "--scope", choices=("daily", "weekly", "all"), default="all",
+        help="daily: only endpoints extra_features_parser reads (5 of 34 -- the nightly path). "
+             "weekly: everything else, to keep the raw corpus warm for future feature work. "
+             "all: both (default, for ad-hoc runs).",
+    )
     args = parser.parse_args()
 
     # Load stocks
@@ -117,6 +123,21 @@ def main():
     if args.registry_only:
         con.close()
         return
+
+    # Split the per-stock fan-out by whether anything actually consumes the response. The
+    # nightly chain only needs the 5 the parser reads; the other 29 are collected weekly so
+    # the corpus stays available without costing the 11:30 PM window. See PARSED_ENDPOINTS.
+    if args.scope != "all":
+        from extra_features_parser import PARSED_ENDPOINTS
+        before = len(stock_endpoints)
+        wanted = (lambda n: n in PARSED_ENDPOINTS) if args.scope == "daily" \
+            else (lambda n: n not in PARSED_ENDPOINTS)
+        stock_endpoints = [e for e in stock_endpoints if wanted(e.name)]
+        # Market-wide endpoints are 2 sequential calls, not part of the fan-out -- leave them
+        # on the daily path and skip them on the weekly one so they aren't fetched twice.
+        if args.scope == "weekly":
+            market_endpoints = []
+        print(f"[SCOPE] {args.scope}: {len(stock_endpoints)}/{before} stock endpoints selected")
 
     # Fetch market-wide endpoints first (only 2 — keep sequential)
     print("Fetching market-wide endpoints...")
@@ -170,13 +191,14 @@ def main():
     con.close()
     print("Fetching completed successfully.")
 
-    # Parse and update features in technical_signals
-    print("Parsing features and updating technical_signals...")
-    try:
-        import extra_features_parser
-        extra_features_parser.run(datetime.today().strftime("%Y-%m-%d"))
-    except Exception as e:
-        print(f"Error parsing features: {e}")
+    # The parse step deliberately does NOT run here any more. It used to, as the last statement
+    # of this function -- which meant it was only ever reached if the fetch finished, and the
+    # fetch never did: measured 2026-08-12, this script was SIGKILLed at its 30-min job budget
+    # every single night ("Timed out after 1800000ms"), so extra_features_parser never ran and
+    # all 14 ext_* columns on technical_signals sat at ~0% coverage while ml_ensemble.py read
+    # them as constants. The 419 MB of responses this writes were being collected and then
+    # thrown away. queues.ts now invokes extra_features_parser.py as its own step, so a slow or
+    # failed fetch degrades to "parse whatever landed" instead of "parse nothing".
 
 if __name__ == "__main__":
     main()

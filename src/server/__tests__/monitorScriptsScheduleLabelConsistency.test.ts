@@ -4,7 +4,7 @@ import { MONITOR_SCRIPTS } from '../monitorScripts';
 /**
  * 2026-08-06: 8 MONITOR_SCRIPTS entries (fii-dii-fetcher, finbert-scorer, ml-ensemble-score,
  * regime-detector, feature-engineering, reward-engine, rl-agent-update, signal-type-stats) all
- * declared cronPatterns: ['0 14 * * 1-5'] (correctly matching ml-daily-ops's real 7:30 PM IST
+ * declared cronPatterns: ['20 13 * * 1-5'] (correctly matching ml-daily-ops's real 7:30 PM IST
  * schedule -- the staleness MATH was fine) while their human-readable `schedule` label -- what
  * SystemMonitorPage.tsx actually displays -- still said 'Daily 5 PM', ml-daily-ops's schedule
  * from long before it moved to 7:30 PM. None of monitorScriptsCronMirror.test.ts /
@@ -16,17 +16,17 @@ import { MONITOR_SCRIPTS } from '../monitorScripts';
  */
 describe('MONITOR_SCRIPTS schedule labels agree with their own cronPatterns', () => {
   // Exact single-pattern match, not .includes(): outcome-resolver-5d/-15d/performance-tracker
-  // ALSO carry '0 14 * * 1-5' in a two-pattern cronPatterns array (they're graded a second time
+  // ALSO carry '20 13 * * 1-5' in a two-pattern cronPatterns array (they're graded a second time
   // inside ml-daily-ops as a safety net), but their PRIMARY home is the 9:30 AM outcome-resolver
   // job -- correctly labeled 'Daily 9:30 AM'. Only entries whose ONLY schedule is ml-daily-ops
   // itself are in scope for this check.
   const mlDailyOpsSteps = (MONITOR_SCRIPTS as readonly any[]).filter(
-    s => s.cronPatterns?.length === 1 && s.cronPatterns[0] === '0 14 * * 1-5',
+    s => s.cronPatterns?.length === 1 && s.cronPatterns[0] === '20 13 * * 1-5',
   );
 
   it('found exactly the 7 known ml-daily-ops step entries (sanity check the filter itself)', () => {
     // performance-tracker joined this list mid-fix: its cronPatterns already correctly said
-    // '0 14 * * 1-5' (fixed 2026-08-03) but its schedule label still said the pre-refactor
+    // '20 13 * * 1-5' (fixed 2026-08-03) but its schedule label still said the pre-refactor
     // 'Daily 9:30 AM' -- same drift as the other 6, just missed in that earlier pass.
     //
     // regime-detector and feature-engineering are DELIBERATELY excluded despite once sharing
@@ -48,9 +48,9 @@ describe('MONITOR_SCRIPTS schedule labels agree with their own cronPatterns', ()
     expect(byId('feature-engineering').schedule).toBe('Daily 5:00 PM IST');
   });
 
-  it('every ml-daily-ops step\'s label says 7:30 PM, not the stale 5 PM', () => {
+  it('every ml-daily-ops step\'s label says 6:50 PM, not the stale 5 PM', () => {
     for (const s of mlDailyOpsSteps) {
-      expect(s.schedule, `${s.id}'s schedule label`).toContain('7:30 PM');
+      expect(s.schedule, `${s.id}'s schedule label`).toContain('6:50 PM');
       expect(s.schedule, `${s.id}'s schedule label`).not.toMatch(/\b5 PM\b/);
     }
   });

@@ -22,7 +22,7 @@ import { MONITOR_SCRIPTS } from '../monitorScripts';
  * two independent jobs via two cronPatterns, and must cover whichever one actually runs longer.
  *
  * Building this test found a large, systematic drift: 9 of the 16 cronPatterns-bearing entries
- * are steps inside the ml-daily-ops chain (cronPatterns: ['0 14 * * 1-5'], the same pattern
+ * are steps inside the ml-daily-ops chain (cronPatterns: ['20 13 * * 1-5'], the same pattern
  * jobRegistryGraceMinutesConsistency.test.ts already found needed 270min of real headroom, not
  * 60) -- but every one of these 9 MONITOR_SCRIPTS entries was ALSO still set to graceMinutes: 60,
  * completely independently of the JOB_REGISTRY fix (these are two separate registries tracking

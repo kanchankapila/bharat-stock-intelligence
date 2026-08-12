@@ -42,6 +42,7 @@ from datetime import date, datetime, timedelta
 import requests
 
 from db_compat import connect
+from fetch_utils import filter_numeric_tlids
 from as_of import logical_write_floor
 
 OVERVIEW_URL = "https://trendlyne.com/equity/overview-second-part/{tlid}/"
@@ -587,6 +588,10 @@ def _load_stocks(symbol_filter: str | None, con, only_unsynced: bool = True) -> 
     rows = [(r[0], str(r[1])) for r in cur.fetchall() if r[0]]
     if symbol_filter:
         rows = [(s, t) for s, t in rows if s.upper() == symbol_filter.upper()]
+    # Same permanent-404 filter as the adv_tech/price_analysis sibling loaders. Matters more
+    # here: only_unsynced means a ticker-shaped tlid never gets a trendlyne_stock_profile row,
+    # so it stays "unsynced" and is retried on every single run, forever.
+    rows, _ = filter_numeric_tlids(rows, "TLOverview")
     return rows
 
 
