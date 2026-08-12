@@ -184,7 +184,12 @@ def update_weights(
 
         if dry_run:
             print(f"  [DRY] {signal_type}|{regime}|{sector}: "
-                  f"{old_weight:.4f} → {new_weight:.4f} (n={len(rewards)})")
+                  # ASCII '->' deliberately: this is the only non-ASCII char that reaches
+                  # stdout, and on Windows a redirected stdout defaults to cp1252, so U+2192
+                  # raised UnicodeEncodeError and killed the whole run. --dry-run was therefore
+                  # unusable anywhere its output was piped or logged, which is every scheduled
+                  # context. The comments in this file keep their arrows; only printed text matters.
+                  f"{old_weight:.4f} -> {new_weight:.4f} (n={len(rewards)})")
             continue
 
         _upsert_weight(conn, signal_type, regime, sector, new_weight, new_count)

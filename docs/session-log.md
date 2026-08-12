@@ -1213,3 +1213,15 @@ signal_source table makes coverage return 6. Verified production untouched after
 End-to-end through `runDataQualityChecks()`: 88 checks, 0 errors, all four signal checks PASS.
 
 tsc clean, vitest 875, pytest 1741, schema:drift clean, check_recurring_bugs clean.
+
+**Also fixed, found while live-verifying the above:** `reward_engine.py --dry-run` crashed with
+`UnicodeEncodeError` before printing a single weight. The `[DRY]` line used `→` (U+2192), and on
+Windows a *redirected* stdout defaults to cp1252 — so the dry-run worked in an interactive
+terminal and died the moment its output was piped or logged, which is every scheduled context.
+Pre-existing, not introduced today. Replaced with ASCII `->`; comments keep their arrows since
+only printed text is affected. Verified: exit 1 -> exit 0 with no `PYTHONIOENCODING` set.
+
+That dry-run is also the live confirmation the deletion was safe: `update_weights` now processes
+185,611 technical outcomes while `update_source_weights` still processes **119,962 unified
+outcomes** into `signal_source_weights`. AI/screener learning is intact; it was simply never
+happening in the function the UNION half was bolted onto.
