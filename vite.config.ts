@@ -15,6 +15,25 @@ export default defineConfig(({mode}) => {
         '@': path.resolve(__dirname, '.'),
       },
     },
+    optimizeDeps: {
+      // App.tsx lazy-loads all six dashboard shells (React.lazy(() => import(...))), and
+      // which one actually runs depends on a localStorage value the dep scanner can't
+      // evaluate at cold start. The first time a browser session picks a non-default shell
+      // (v1/v2/v3/v4/v5 -- v6 is the default fallback), Vite discovers that route's
+      // dependencies for the first time and re-optimizes mid-session; a component already
+      // mounted before that point keeps its old React module instance while the newly
+      // discovered chunk gets a second one, crashing with "Invalid hook call" / "Cannot read
+      // properties of null (reading 'useState')". Force every shell into the initial scan so
+      // there's never a mid-session re-optimization to race against.
+      entries: [
+        'src/App.tsx',
+        'src/v2/**/*.{ts,tsx}',
+        'src/v3/**/*.{ts,tsx}',
+        'src/v4/**/*.{ts,tsx}',
+        'src/v5/**/*.{ts,tsx}',
+        'src/v6/**/*.{ts,tsx}',
+      ],
+    },
     server: {
       // HMR is disabled in AI Studio via DISABLE_HMR env var.
       // Do not modify—file watching is disabled to prevent flickering during agent edits.
