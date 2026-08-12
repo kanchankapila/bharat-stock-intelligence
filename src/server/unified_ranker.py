@@ -97,6 +97,16 @@ HORIZON_MULT = {
 # ml/confluence/technical/dl were each scaled down proportionally (factor = (pool-0.05)/pool,
 # where pool is their own pre-existing sum in that regime) to absorb the 5pp, same mechanism as
 # the cs/breakout addition documented above — screener/cs/breakout stay pinned.
+#
+# A 9th `delivery` engine was drafted 2026-08-12 at 0.068-0.084 across all five regimes and is
+# deliberately NOT here. `delivery_pct` was measured the same day through factor_backtest.py and
+# FAILED as a long-only factor: net excess -1.04%/period at 21d/25bps and -0.15% at 5d/15bps,
+# t=-1.48 both, 2/6 and 1/6 years positive. It is not a cost story -- gross 0.77%/period is
+# already BELOW the universe's 1.43%, because high delivery selects the calm names and a low-vol
+# tilt lags a universe compounding at 18-21%. The +0.19pp/day top-minus-bottom quintile spread is
+# real but is a DIFFERENT construction; a blend engine consumes the long-only top slice, which is
+# the one that loses. See measurement.md, which names this engine explicitly. The draft also left
+# BEAR and SIDEWAYS summing to 0.995 rather than 1.0.
 REGIME_WEIGHTS = {
     'BULL':     {'screener': 0.30, 'ml': 0.135,  'cs': 0.05, 'confluence': 0.135,  'technical': 0.108, 'dl': 0.072,  'breakout': 0.15, 'smart_money': 0.05},
     'BEAR':     {'screener': 0.35, 'ml': 0.166,  'cs': 0.05, 'confluence': 0.166,  'technical': 0.084, 'dl': 0.084,  'breakout': 0.05, 'smart_money': 0.05},
@@ -810,15 +820,6 @@ def _classify(score, bull, bear):
     if total == 0:
         # No screener has surfaced this name: the score does not rank this population.
         return 'Hold'
-    if score >= DIRECTIONLESS_STRONG_BUY_FLOOR:
-        return 'Strong Buy'
-    if score >= DIRECTIONLESS_BUY_FLOOR:
-        return 'Buy'
-    if score <= DIRECTIONLESS_STRONG_SELL_CEIL:
-        return 'Strong Sell'
-    if score <= DIRECTIONLESS_SELL_CEIL:
-        return 'Sell'
-    return 'Hold'
     if score >= DIRECTIONLESS_STRONG_BUY_FLOOR:
         return 'Strong Buy'
     if score >= DIRECTIONLESS_BUY_FLOOR:

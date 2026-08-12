@@ -219,10 +219,16 @@ export async function saveScreenerStocksToDB(
     const entered = Array.from(currentSymbols).filter(s => !prevSymbols.has(s));
     const exited  = Array.from(prevSymbols).filter(s => !currentSymbols.has(s));
 
+    // One instant for the whole batch: these rows are all observations from a single sync pass,
+    // so stamping each with its own `new Date()` would imply a precision the capture does not
+    // have. appeared_date stays date-only because it is part of the primary key -- see the
+    // 079_screener_appearances_appeared_at migration.
+    const appearedAt = new Date().toISOString();
+
     if (entered.length > 0) {
       await dbTransaction(async (tx) => {
         for (const sym of entered) {
-          await tx.run(`INSERT OR IGNORE INTO screener_appearances (screener_id, source, symbol, appeared_date) VALUES (?, 'trendlyne', ?, ?)`, [screenerId, sym, today]);
+          await tx.run(`INSERT OR IGNORE INTO screener_appearances (screener_id, source, symbol, appeared_date, appeared_at) VALUES (?, 'trendlyne', ?, ?, ?)`, [screenerId, sym, today, appearedAt]);
           await tx.run(`INSERT OR IGNORE INTO screener_history_log (symbol, screener_id, entry_date, source) VALUES (?, ?, ?, 'trendlyne')`, [sym, screenerId, today]);
         }
       });

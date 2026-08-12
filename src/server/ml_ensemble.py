@@ -2165,7 +2165,7 @@ def _xgboost_device() -> str:
     return 'cuda' if _torch_cuda_available() else 'cpu'
 
 
-def _base_models(scale_pos_weight: float = 1.0, tuned_params: dict | None = None):
+def _base_models(scale_pos_weight: float = 1.0, tuned_params: dict | None = None, cv=3):
     from sklearn.ensemble import RandomForestClassifier, ExtraTreesClassifier
     from sklearn.linear_model import LogisticRegression
     from sklearn.calibration import CalibratedClassifierCV
@@ -2185,7 +2185,7 @@ def _base_models(scale_pos_weight: float = 1.0, tuned_params: dict | None = None
     lgbm_params['device'] = _lightgbm_device(str(lgbm_params.get('device', 'cpu')))
     lgbm = CalibratedClassifierCV(
         LGBMClassifier(**lgbm_params),
-        method='isotonic', cv=3,
+        method='isotonic', cv=cv,
     )
 
     xgb_params = {
@@ -2200,7 +2200,7 @@ def _base_models(scale_pos_weight: float = 1.0, tuned_params: dict | None = None
         xgb_params['device'] = 'cpu'
     xgb_model = CalibratedClassifierCV(
         XGBClassifier(**xgb_params),
-        method='isotonic', cv=3,
+        method='isotonic', cv=cv,
     )
 
     rf = CalibratedClassifierCV(
@@ -2208,18 +2208,18 @@ def _base_models(scale_pos_weight: float = 1.0, tuned_params: dict | None = None
             n_estimators=300, max_depth=6, min_samples_leaf=5,
             n_jobs=-1, random_state=42, class_weight='balanced',
         ),
-        method='isotonic', cv=3,
+        method='isotonic', cv=cv,
     )
     et = CalibratedClassifierCV(
         ExtraTreesClassifier(
             n_estimators=300, max_depth=6, min_samples_leaf=5,
             n_jobs=-1, random_state=42, class_weight='balanced',
         ),
-        method='isotonic', cv=3,
+        method='isotonic', cv=cv,
     )
     lr = CalibratedClassifierCV(
         LogisticRegression(C=1.0, max_iter=1000, random_state=42),
-        method='sigmoid', cv=3,
+        method='sigmoid', cv=cv,
     )
 
     models = [('lgbm', lgbm), ('xgb', xgb_model), ('rf', rf), ('et', et), ('lr', lr)]
@@ -2234,7 +2234,7 @@ def _base_models(scale_pos_weight: float = 1.0, tuned_params: dict | None = None
         cb_params.update(tp.get('catboost', {}))
         cb = CalibratedClassifierCV(
             CatBoostClassifier(**cb_params),
-            method='isotonic', cv=3,
+            method='isotonic', cv=cv,
         )
         models.append(('catboost', cb))
         print("[Ensemble] CatBoostClassifier successfully integrated into base model stack.")
@@ -2361,13 +2361,13 @@ def _fit_stack(X: pd.DataFrame, y: pd.Series, spw: float, embargo: int, n_splits
     from sklearn.pipeline import Pipeline
     from sklearn.metrics import roc_auc_score
 
-    base = _base_models(scale_pos_weight=spw, tuned_params=tuned_params)
     sw = np.asarray(sample_weight, dtype=float) if sample_weight is not None else None
     effective_embargo = min(embargo, len(X) // 10)
     n_eff = n_splits
     if effective_embargo > 0:
         n_eff = max(2, min(n_splits, len(X) // max(1, effective_embargo + 1) - 1))
     skf = TimeSeriesSplit(n_splits=n_eff, gap=effective_embargo)
+    base = _base_models(scale_pos_weight=spw, tuned_params=tuned_params, cv=skf)
 
     oof     = np.zeros((len(X), len(base)))
     covered = np.zeros(len(X), dtype=bool)
