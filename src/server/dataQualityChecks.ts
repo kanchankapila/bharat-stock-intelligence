@@ -410,8 +410,25 @@ export const DATA_QUALITY_CHECKS: DataQualityCheck[] = [
     label: 'technical_signals freshness & win_probability coverage',
     category: 'signals',
     critical: true,
-    sql: `SELECT COUNT(*) AS total, COUNT(win_probability) AS scored, MAX(date) AS last_date
-          FROM technical_signals WHERE date >= date('now','-3 days')`,
+    // win_probability is written by ml-ensemble-score (pythonApi.scorePending(), inside
+    // ml-daily-ops), which runs once in the evening -- AFTER technical-scan has already
+    // written that day's rows earlier (8:30am-4pm IST). This check runs on a 15-min cycle
+    // all day (jobWatchdog.ts), so a naive `date >= date('now','-3 days')` window includes
+    // TODAY's not-yet-scored rows in the denominator every single weekday between the
+    // morning scan and the evening scoring run -- coverage reads ~50% (today unscored,
+    // averaged against 1-2 already-scored prior days) with nothing actually broken. Same
+    // "checking before the day's pipeline finished" shape as the tradingDaysStale fix just
+    // below (2026-08-10, for the staleness half of this same check) -- that fix anchored
+    // `stale` correctly but never touched this ratio's window. total/scored now come from
+    // the most recently COMPLETED trading day (date < today), which has had a full day+
+    // evening cycle to be scored; last_date stays unbounded so a genuine outage (today's
+    // scan never running at all) still fails via the staleness branch below.
+    sql: `SELECT
+            (SELECT MAX(date) FROM technical_signals) AS last_date,
+            (SELECT COUNT(*) FROM technical_signals
+               WHERE date = (SELECT MAX(date) FROM technical_signals WHERE date < date('now'))) AS total,
+            (SELECT COUNT(win_probability) FROM technical_signals
+               WHERE date = (SELECT MAX(date) FROM technical_signals WHERE date < date('now'))) AS scored`,
     evaluate: (row, now) => {
       // technical-signals-daily only runs 8:30am-4pm IST on NSE trading days (queues.ts), so a
       // plain calendar-day gap false-fails every Monday morning purely from the Sat/Sun gap --
@@ -420,12 +437,12 @@ export const DATA_QUALITY_CHECKS: DataQualityCheck[] = [
       const stale = tradingDaysStale(row?.last_date, now);
       const total = Number(row?.total) || 0;
       const coverage = safeRatio(row?.scored, row?.total);
-      if (stale == null || total === 0) return { status: 'fail', detail: 'No technical_signals rows in the last 3 days' };
+      if (stale == null || total === 0) return { status: 'fail', detail: 'No completed technical_signals trading day to measure coverage against' };
       if (stale > 3) return { status: 'fail', detail: `Latest scan is ${fmtDays(stale)} old` };
       // The exact regression class noted in CLAUDE.md: a filter bug silently collapsed
       // win_probability coverage to ~1-3% for weeks while the job kept exiting 0.
-      if (coverage < 0.5) return { status: 'fail', detail: `win_probability coverage only ${(coverage * 100).toFixed(1)}% of ${total} rows (last 3d)` };
-      if (coverage < 0.8) return { status: 'warn', detail: `win_probability coverage ${(coverage * 100).toFixed(1)}% of ${total} rows (last 3d)` };
+      if (coverage < 0.5) return { status: 'fail', detail: `win_probability coverage only ${(coverage * 100).toFixed(1)}% of ${total} rows (last completed trading day)` };
+      if (coverage < 0.8) return { status: 'warn', detail: `win_probability coverage ${(coverage * 100).toFixed(1)}% of ${total} rows (last completed trading day)` };
       return { status: 'pass', detail: `${(coverage * 100).toFixed(1)}% coverage, ${total} rows, latest ${fmtDays(stale)} old` };
     },
   },
