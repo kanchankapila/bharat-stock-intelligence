@@ -1,0 +1,25 @@
+{
+  "name": "@greenfield/db",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "main": "./src/index.ts",
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "migrate:up": "node-pg-migrate -m src/migrations -j sql up",
+    "migrate:down": "node-pg-migrate -m src/migrations -j sql down",
+    "schema:verify": "tsx src/schema-verify.ts"
+  },
+  "dependencies": {
+    "@greenfield/contracts": "workspace:*",
+    "pg": "^8.13.1"
+  },
+  "devDependencies": {
+    "@types/pg": "^8.11.10",
+    "node-pg-migrate": "^7.9.1",
+    "tsx": "^4.19.2",
+    "typescript": "^5.8.2",
+    "vitest": "^2.1.8"
+  }
+}

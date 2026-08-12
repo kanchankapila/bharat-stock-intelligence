@@ -1,0 +1,59 @@
+name: greenfield
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: greenfield_postgres
+    environment:
+      POSTGRES_USER: greenfield
+      POSTGRES_PASSWORD: greenfield
+      POSTGRES_DB: greenfield
+    ports:
+      - "5434:5432"
+    volumes:
+      - greenfield_pg_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U greenfield -d greenfield"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    container_name: greenfield_redis
+    command: ["redis-server", "--requirepass", "greenfield"]
+    ports:
+      - "6380:6379"
+    volumes:
+      - greenfield_redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "greenfield", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+  minio:
+    image: minio/minio:latest
+    container_name: greenfield_minio
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: greenfield
+      MINIO_ROOT_PASSWORD: greenfield123
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - greenfield_minio_data:/data
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+volumes:
+  greenfield_pg_data:
+  greenfield_redis_data:
+  greenfield_minio_data:
