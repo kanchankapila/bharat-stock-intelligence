@@ -1305,3 +1305,165 @@ to this session**: no tsc error names any file changed here, and every added lin
 files (`db.ts`, `pgClient.ts`, `dataQualityChecks.ts`, `schema.postgres.sql`) is a
 quant_scores_history addition. Committed by explicit path only. Do not judge this commit by a
 whole-repo suite run taken from this window — see `concurrent_session_hazards_2026_08_12`.
+
+## 2026-08-12 (cont.) — greenfield architecture from full-history review
+
+Reviewed the complete Git-history boundary at the metadata/theme level: **1,029 commits from
+2026-05-08 through 2026-08-12** (187 May, 339 June, 230 July, 273 August-to-date), plus the
+authoritative rule files, measurement history, session log, dated audits, current service/job/schema
+surfaces, and the datasource integration guide. This is explicitly not a line-by-line replay of all
+1,029 patches; the document states that limit so future readers do not mistake thematic coverage for
+patch-level attestation.
+
+Added `docs/GREENFIELD_STOCK_ANALYSIS_ARCHITECTURE.md`: a greenfield plan for a free, scalable
+stock-research site. The central decision is a Postgres-native modular monolith with separately
+scalable ingestion workers, immutable raw/canonical history, universal `available_at` point-in-time
+semantics, one declarative job catalog, one recommendation authority, precomputed serving models,
+and a strict no-provider/no-Python/no-whole-universe-compute request path. It includes the historical
+failure taxonomy, canonical schema, all documented provider families, compliance gates, reliability/
+security/testing contracts, cost-aware scaling, and a six-phase delivery plan.
+
+The product boundary is deliberate: launch trustworthy market/company research, deterministic
+screeners, events, portfolios, alerts, and provenance first. Keep Buy/Sell recommendations in shadow
+until point-in-time, cost-aware research plus an independent live period clears preregistered gates;
+the latest measurement rules do not support treating the incumbent ranker/factors as proven edge.
+
+Validation: a focused Node check found 647 lines / 61 sections, all 13 local evidence links resolve,
+and no mandatory provider family, history boundary, or core architecture invariant was missing.
+
+## 2026-08-12 (cont.) — greenfield build spec: DDL, best practices, build prompt
+
+Added `docs/GREENFIELD_BUILD_SPEC.md` (1,218 lines) as the buildable companion to
+`docs/GREENFIELD_STOCK_ANALYSIS_ARCHITECTURE.md`; both are now cross-linked. Contents: expanded
+architecture (3 deployables, enforced module import boundaries, response provenance envelope);
+a best-practice catalog covering time/calendar, numbers and nullability, provider adapters, the
+job result contract, write rules, point-in-time access, measurement, testing, security, deploy;
+full PostgreSQL DDL for 47 tables across reference/registry/canonical/feature/decision/serving/
+quality/user zones; a provider-to-table mapping for every family in `DATA_SOURCE_INTEGRATION_GUIDE.md`
+sections 2-9; and a self-contained from-scratch build prompt with 16 invariants and phase gates.
+
+Schema decisions worth remembering: every provider-issued id is keyed `(provider, provider_id)`;
+every fact carries `available_at` + `run_id`; `recommendation` is append-only keyed on
+`generated_at` so the ranker is gradeable; `label_definition` is a table so win rates cannot be
+compared across incompatible labels by accident; serving projections use generation-flip rather
+than delete-and-reinsert; the ~1,983-row URL corpus, 438 ETNow bodies, 91 ET Marketstats bodies,
+1,052 Trendlyne screenpks and 143 MoneyControl scans are imported as registry rows with
+`enabled = false`, promoted only behind a live shape test plus a data-quality check.
+
+Three DDL defects were caught and fixed during self-review, one of them a repeat of a documented
+recurring bug: `CHECK (score = score)` does NOT reject NaN in Postgres (NaN = NaN is TRUE for
+total btree ordering), so it was replaced with a finite-range check; a `COALESCE(strike,0)`
+expression in a primary key is illegal, replaced by a NOT NULL sentinel column; and a bare
+`bigserial` used as a self-reference target was given an identity + UNIQUE constraint.
+
+Validation: 47 CREATE TABLE statements with no duplicates, all 4 local links resolve, code fences
+balanced, and all 33 required provider/architecture terms present. Markdown-only change, so no
+tsc/vitest/pytest run applies. Repeat note for future sessions: `\!` inside a zsh heredoc triggers
+history expansion and breaks inline Node validators — write the script to a file instead.
+
+## 2026-08-12 (cont.) — migration approach: parallel rebuild chosen over in-place mutation
+
+Added `docs/MIGRATION_AND_CUTOVER_PLAN.md` (256 lines). Decision: stand up a NEW Postgres instance
+and a NEW Redis, build the target schema from migration 001, and rebuild/quarantine/recompute
+rather than bulk-copying. The old database is never mutated and is retained read-only after
+cutover, so rollback stays possible throughout.
+
+Two facts were verified before choosing, and both shaped the plan:
+- Raw provider payload capture is ZERO tables (only `extra_endpoint_responses` for the
+  TapeTide/Trading80 family). Nothing can be re-parsed offline, so re-derivation means re-fetching
+  from the provider. This is what makes the R/Q/N classification below necessary.
+- Redis holds no durable state (cache + BullMQ only), so a fresh instance is safe. Only cost is
+  repeatable-schedule re-registration on first cycle.
+
+Core correction recorded: a new database gives a clean SCHEMA, not clean HISTORY. Copying rows
+carries their defects into the new container. So every table is classified exactly once:
+- Class R (rebuild by re-fetching provider archives — NSE bhavcopy, delivery MTO, corporate
+  actions, index history) gets genuinely TRUE provenance, not inferred.
+- Class Q (vendor point-in-time, unrecoverable if not captured then — screener appearances, DVM
+  scores, MarketsMojo, fundamentals snapshots) is copied with `provenance_quality='inferred'` and
+  a single recorded boundary date.
+- Class N (every derived/decision table — scores, features, signals, outcomes, recommendations,
+  model artifacts) is NEVER migrated; it is recomputed/retrained from the rebuilt inputs. Copying
+  these is exactly how the old bias would walk into the new system wearing a clean schema.
+
+Parallel rebuild eliminates four in-place risks outright: chunked backfill across compressed
+hypertables, deleting the SQLite path from 131 files, reverse-engineering a baseline migration for
+~200 tables, and rename-and-wait table retirement. It does NOT save the 105 runtime-DDL fetcher
+rewrites, job-catalog unification (queues.ts 48 cronPattern vs jobRegistry.ts 57 entries),
+the JobResult contract, PIT enforcement, or DQ coverage — those are code changes either way.
+
+Known-corrupt data is explicitly left behind rather than carried: the ~2.1M-row Trendlyne
+positional-parse corruption, the 29,433 rows with `signal_generated_at` later than `created_at`,
+and the `technical`/`TECHNICAL` case collision all fall in Class N and are recomputed.
+
+Permanently lost and recorded as such so no future session mistakes inference for measurement:
+historical `available_at` (never captured, 0 of ~200 tables), 34 of 37 overwritten ranker
+`computed_at` dates, pre-fix `signal_generated_at`, and vendor point-in-time state before capture
+began. Correct public statement post-rebuild is "provenance recorded from the boundary date
+forward; earlier history reconstructed and labelled inferred" — not "the data is clean."
+
+Reconciliation gates require per-symbol DENSE-span coverage rather than min(date)/count(DISTINCT
+date), numeric checksums, adversarial sampling, and balanced reject accounting. The reconciliation
+harness itself must be negative-controlled before its green results are believed, given this
+repo's five previously-shipped fabricated verification scripts.
+
+Validation: 256 lines, all 4 local links resolve, all 13 required terms present, diff clean.
+Markdown-only, so no tsc/vitest/pytest run applies.
+
+## 2026-08-12 (cont.) — Stage 0-2 build spec for AI agent execution
+
+Added `docs/BUILD_STAGE_0_2_SPEC.md` (482 lines). This is an agent-executable directive for
+stages 0 (monorepo scaffold, Postgres migration chain, ephemeral test harness), 1 (market
+calendar, provider SDK with raw capture, job result contract, run ledger) and 2 (NSE bhavcopy
+backfill, security master derivation, data quality checks, coverage report).
+
+Every fact cited in the spec was verified against the working `src/server/nse_bhavcopy_fetcher.py`
+rather than assumed. Key verified facts: `sec_bhavdata_full` serves consistent schema from
+2021-01-04 (not earlier — UDiFF files 404 before ~2024-04); DELIV_QTY/DELIV_PER are present in
+bhavcopy so no separate MTO fetcher is needed; NSE pads both headers and values with spaces, so
+strip before matching; equity series allowlist is {EQ, BE, BZ, SM, ST}; 404 from the archive
+URL means non-trading day, not a failure, and must not be retried. These 13 facts are all
+validated by the spec validator (factsMissing: []).
+
+Design decisions documented in the spec: security is built from the union of all observed
+symbols across the backfill rather than from EQUITY_L.csv (which contains only currently-listed
+names and would reintroduce survivorship bias); trading_session table is populated as a byproduct
+of the backfill by observing which dates return data; available_at is session close + publication
+lag (not fetch time); every task has exactly one Verify step (13 tasks, 13 verify steps confirmed).
+
+All acceptance gates are mechanical command checks, not judgment calls. Spec validator confirms
+0 missing facts, 0 broken links, all structural terms present.
+
+## 2026-08-12 (cont.) — Stage 3-4 build spec for AI agent execution
+
+Added `docs/BUILD_STAGE_3_4_SPEC.md` (493 lines). Covers Stage 3 (Class Q transfer: corporate
+actions from InvestSights, Trendlyne screener membership from kayal, FII/DII from NSE,
+fundamental facts from ET Stats + MarketsMojo, screener catalog from old DB) and Stage 4
+(feature set spec, feature snapshot computation with PIT enforcement, research harness negative
+controls, measurement baseline, DQ checks for derived tables).
+
+Every provider fact verified from working fetchers before being written:
+- InvestSights corporate-actions: `https://investsights.in/api/v2/market/corporate-actions`,
+  live-verified 2026-08-07, `source_url` is the dedup key, `ex_date` frequently NULL is normal.
+- Trendlyne kayal: `https://kayal.trendlyne.com/broker-webview/kayal/all-in-one-screener-data-get/`
+  with `screenpk`, unauthenticated, 1,052 known PKs, parse `unique_name` not `field`/`key`.
+- Trendlyne chart-data: `?format=json` required; 12 params confirmed DEAD 2026-07-04 (return
+  HTTP 200 with empty eodData — not a rate limit, Trendlyne retired them).
+- ET Stats: `https://etmarketsapis.indiatimes.com/ET_Stats/mobile`, `publication_lag_days = 90`,
+  available_at = yearEnding + 90d (not fetch time, not date.today() — the exact bug the existing
+  et_stats_client.py as_of_floor function already fixed).
+- MarketsMojo financials: `https://frapi.marketsmojo.com/apiv1/financials/get-financials`,
+  `qtype=qoq` (qtype=yoy verified sparse, rejected), card=1 only, pages 1-8, stockid must be
+  stored as (provider='marketsmojo', stockid) — never bare.
+
+Mandatory exclusions in the feature set: pcr_oi, pcr_vol, rev_growth, eps_growth (100% NULL in
+predecessor), and all 14 Bonferroni-significant-negative feature_store technical metrics
+(stoch_d, williams_r, etc. from the measurement.md table). Spec prohibits them explicitly.
+
+Research harness must pass 4 negative controls before any factor is declared significant:
+leakage control (inject future feature, expect AUC >> 0.5), exit-pricing control, benchmark
+control (rebalance-1 vs rebalance-21 within 5pp), known-null control. These directly address
+the two benchmark bugs (exit-pricing, --rebalance 1) documented in measurement-history.md.
+
+Validation: 493 lines, 13 tasks, 13 verify steps (1:1 ratio), 0 missing local links,
+0 missing verified facts, diff clean.
