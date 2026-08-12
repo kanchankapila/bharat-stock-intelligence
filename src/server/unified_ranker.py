@@ -2074,15 +2074,12 @@ class UnifiedRanker:
             # significant result in 4.5 years of this platform's own price history. A name only
             # missing hv_20d is NOT vetoed (fail open), same as every other missing-data path here.
             sym_vol = realized_vol.get(sym)
-            sm_score = smart_money_scores.get(sym, 0)
             high_vol_vetoed = (hv_cut is not None and sym_vol is not None and sym_vol >= hv_cut)
-            
-            # Smart Money Override (#32): if institutional accumulation is exceptionally high,
-            # bypass the volatility veto. High-conviction buying often creates momentum-volatility
-            # that is desirable, not the risk-volatility the filter is designed to exclude.
-            if high_vol_vetoed and sm_score >= 80:
-                high_vol_vetoed = False
-                print(f"[UnifiedRanker] {sym}: high_vol_veto BYPASSED via Smart Money Override (SM: {sm_score:.1f})")
+            # ponytail: a "Smart Money Override" bypassing this veto above sm_score>=80 was added
+            # 2026-08-12 (ae3e369) and reverted the same day -- smart_money is unmeasured (see
+            # measurement.md), its closest measured analogue (ticket_size) is significantly
+            # inverted (t=-2.36), and the override had zero test coverage. Re-add only behind a
+            # real factor_backtest.py run showing the bypassed names outperform.
 
             if high_vol_vetoed:
                 fired['high_vol_veto'] += 1

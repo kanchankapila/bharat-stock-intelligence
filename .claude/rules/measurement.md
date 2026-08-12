@@ -21,6 +21,18 @@ current verdicts you need before acting; that one is the derivation, read on dem
 > edge.** The negative results were unaffected by either bug and remain the reliable part
 > (high_vol t=−6.09, reversal_21d −3.77, screener_oversold −3.50, and the oversold/near-52w-low/
 > below-lower-BB family all significantly negative).
+>
+> **`insider_net`'s t=+2.05 does not reproduce — re-run live 2026-08-12, same command
+> (`--rebalance 21 --top-k 50 --cost-bps 25`), gives net excess +0.29%/period, t=1.73.** Not
+> significant either way. This line had also drifted internally inconsistent with itself: the
+> "Known state of the edge" section below independently called `insider_net` "null-to-negative"
+> while this banner called it the one significant survivor — both were wrong, and neither had been
+> re-run since the harness fix that this very banner announced. **So: zero of 26 factors are
+> positive and significant, not one.** Filing coverage grew (23,360 filings / 717 symbols at
+> re-run vs. whatever it was when t=2.05 was recorded), which is consistent with the original
+> reading being a false positive that diluted toward null as more data arrived — the expected
+> behaviour of noise, not of a real factor. Re-run any load-bearing number here before trusting it;
+> this harness's own numbers go stale as the panel grows.
 
 ## Accuracy comes from realized returns, never a proxy
 
@@ -47,7 +59,7 @@ Any cross-sectional forward-return measurement on this data:
 
 ## Known state of the edge (as measured, not assumed)
 
-`unified_score` 5d rank IC ≈ 0.0001 (t=0.02). Short-horizon momentum is negative at three horizons. Bullish screener consensus is significantly negative (t=−2.36), and screener sentiment labels are themselves inverted (bullish minus bearish = −0.11pp, t=−4.61) because they're keyword-classified off the screener name, never validated against an outcome. `insider_net`, `delivery_spike`, `ticket_size` are null-to-negative. No individual screener (0 of 552 tested) survives FDR or Bonferroni. The common bullish setups (Gap Up ≥2%, breakout>20d-high, volume shocker) are inverted at 1-day; Gap Down ≤−2% is the one significantly positive setup. Sector-neutralising a factor destroys its edge here (opposite of the published US result) — see the "already tested" table. FnO/positioning factors (long/short buildup) cannot be reconstructed at all — no fetcher on this platform captures per-stock futures OI.
+`unified_score` 5d rank IC ≈ 0.0001 (t=0.02). Short-horizon momentum is negative at three horizons. Bullish screener consensus is significantly negative (t=−2.36), and screener sentiment labels are themselves inverted (bullish minus bearish = −0.11pp, t=−4.61) because they're keyword-classified off the screener name, never validated against an outcome. `insider_net` re-runs mildly positive but not significant (t=1.73, see banner); `delivery_spike`, `ticket_size` are null-to-negative. No individual screener (0 of 552 tested) survives FDR or Bonferroni. The common bullish setups (Gap Up ≥2%, breakout>20d-high, volume shocker) are inverted at 1-day; Gap Down ≤−2% is the one significantly positive setup. Sector-neutralising a factor destroys its edge here (opposite of the published US result) — see the "already tested" table. FnO/positioning factors (long/short buildup) cannot be reconstructed at all — no fetcher on this platform captures per-stock futures OI.
 
 **Consequence: reweighting the existing engines is not a fix.** There is no incumbent factor to beat — see the banner above. Combining reduced performance in every case tested (12-1 alone +0.86% vs +2 exclusions −1.25%; long-only +0.86% vs long/short +0.49%; the 8-engine blend at IC 0.0001).
 
@@ -59,16 +71,17 @@ Each of these was measured on the 5-year price panel with the spec above. Re-tes
 |---|---|---|
 | `momentum_12_1` | +0.53%/mo, t=1.10 (post-fix) | not significant |
 | `value_book_to_price` | +0.78%/mo, t=1.99 (post-fix) | not significant; vendor history may be retrospectively restated |
-| `insider_net` | +0.48%/mo, t=+2.05 | only positive & significant factor; fails 26-factor Bonferroni |
+| `insider_net` | net excess +0.29%/period, t=1.73 (re-run 2026-08-12, superseding the earlier +0.48%/t=2.05 which did not reproduce) | not significant |
 | `momentum_21d` / `63d` / `reversal_21d` | negative, t up to −3.96 | dead |
 | `high_vol` / `low_vol` | both negative (−1.21, −1.66) | **both tails lose**; the middle outperforms |
 | `delivery_spike` / `delivery_trend` | t=−1.08 / −1.43 | dead |
 | **`delivery_pct` (raw level, NOT the derived spike/trend above)** | quintile spread +0.19pp/day, t=+7.82 — but **long-only top-50 net excess −1.04%/period at 21d/25bps and −0.15%/period at 5d/15bps, t=−1.48 both** | **dead as a long-only factor** despite a real directional signal in the spread |
 | `ticket_size` (institutional proxy) | −0.67%, t=−2.36 | significantly **inverted** |
-| `smart_money` (`unified_ranker.py`'s live insider+block-deal input, flat 0.05 weight) | **never backtested for edge magnitude** — its own code comment says so | **unmeasured, not proven** — the closest measured analogue, `ticket_size`, is significantly inverted (row above); a 2026-08-12 incoming commit fabricated a "Sharpe 1.38 / 64.5% win rate" backtest for a "Smart Money Veto" concept that does not exist in the live ranker and was deleted, not evidence of anything |
+| `smart_money` (`unified_ranker.py`'s live insider+block-deal+institutional-deal composite input, flat 0.05 weight) | **never backtested for edge magnitude** — its own code comment says so | **unmeasured, not proven** — the closest measured analogue, `ticket_size`, is significantly inverted (row above); a 2026-08-12 incoming commit fabricated a "Sharpe 1.38 / 64.5% win rate" backtest for a "Smart Money Veto" concept that does not exist in the live ranker and was deleted, not evidence of anything. **Separately, a real (non-fabricated) "Smart Money Override" DID land in the live ranker the same day (`ae3e369`)** — bypassed the significantly-negative `high_vol` veto (t=−6.09, see banner) for any symbol scoring `sm_score>=80` on this same unmeasured input, zero test coverage, zero backtest. Live exposure quantified 2026-08-12: 21 real symbols cleared the threshold via the institutional-deal-signals channel alone in the trailing 14 days. Reverted same day (`unified_ranker.py:2077`) — re-add only behind a real `factor_backtest.py` run on the bypassed cohort. |
 | screener bullish consensus | IC −0.027, t=−2.36 | significantly negative; cleaning the labels made it *more* negative |
 | `screener_breadth` (multi-screener persistence — count of independent screeners currently flagging a name, sentiment-agnostic) | 5d/15bps top-50: −0.11%/period, t=−0.45; top-25/0bps: −0.23%, t=−0.73. Both **negative point estimates**, both far from significant. 21d gives 1 period (uninterpretable, disregarded). | **not significant, and low-power** (only 9 periods — `screener_appearances` spans just ~2.5 months). No evidence of edge; also no evidence it's dead the way the negative-and-significant rows above are. Re-test only once the table has enough history for a real 21d-rebalance read (needs ~12+ months). See `_add_screener_breadth` in `factor_backtest.py` for the construction. |
 | **every individual screener** (1,563, one at a time) | **0 survive FDR or Bonferroni** | population direction is negative, sentiment labels inverted |
+| **`feature_store`** (23 candidate technical/fundamental/news columns not already in `FACTORS`, wired into `factor_backtest.py` via `_add_feature_store`/`FEATURE_STORE_FACTORS`, 5d/15bps top-50, live re-run 2026-08-12 against Postgres) | **14 of 23 clear a 23-factor Bonferroni (\|t\|≳3.15) — all 14 negative.** Worst: `stoch_d` t=−9.28, `williams_r` t=−9.02, `stoch_k` t=−9.00, `cci` t=−7.57, `di_plus` t=−7.34, `dist_sma20_pct` t=−6.40, `vwap_dist_pct` t=−5.78, `volume_ratio_20d` t=−5.75, `obv_slope` t=−4.98, `atr_pct` t=−4.81, `volume_ratio_5d` t=−4.71, `macd_hist` t=−3.92, `mtf_alignment_score` t=−3.38, `bb_width` t=−3.15. Not significant either way: `di_minus` (+1.34 — does **not** reproduce the 2026-08-11 ad hoc IC test's t=+7.70), `adx`, `dist_sma200_pct`, `debt_to_equity`, `roe`, `op_margins`, `piotroski_f`, `news_sentiment_score`, `news_impact_count`. **`rev_growth`/`eps_growth` are 100% NULL** (never written by `feature_engineering.py`) — dead schema, same shape as the known `pcr_oi`/`pcr_vol` NULL pair. | **no new factor; every clean-trend/overbought/high-volume reading is inverted — reconfirms the platform's dominant 5d mean-reversion finding, this time via the full turnover/cost-aware portfolio harness rather than a raw IC.** `feature_store` no longer belongs on any "untested" list. |
 | news sentiment | same-day +0.13 IC, next-day −0.03 | real but not tradeable — the move is over by the first entry you can take |
 | `near_52w_high`, `low_beta`, `low_idio_vol` | insignificant | US-published factors that did not transfer |
 | `low_max_ret` (lottery demand) | t=−3.12 | significantly **inverted** vs the published result |

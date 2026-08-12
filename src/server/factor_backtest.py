@@ -177,6 +177,27 @@ PERSISTED_PICK_FACTORS = ('value_book_to_price', 'momentum_12_1')
 # -- Factor definitions -----------------------------------------------------------
 # Each takes the panel and returns a score where HIGHER = more attractive to go long.
 # Keep these pure and vectorized; anything needing a DB read belongs in load_price_panel.
+# feature_store columns tested as candidate factors (2026-08-12). Pre-registered before running
+# -- see the exclusions below, decided by inspection of the schema, not by which ones looked good.
+# Excluded and why: ret_*/ret_12m_ex1m/sma*/ema*/vwap/obv/atr_14/bb_upper/bb_lower/macd/
+# macd_signal (raw un-normalised levels or already-covered by momentum_*/reversal_* factors
+# above); rsi_14/rsi_28/bb_pct (near-duplicates of the panel's OWN rsi14/bb_pos, already tested
+# as screener_overbought/oversold/below_lower_bb); above_sma200 (binary, dominated by the
+# continuous dist_sma200_pct below); pcr_oi/pcr_vol (100% NULL, see measurement-history.md);
+# delivery_pct (duplicate of the already-tested raw factor); trend_1d/1w/1m/vol_regime (text,
+# not numeric); nifty_vix/nifty_pe/advance_decline_ratio/nifty_ret_*/us_10y_yield/dxy/
+# crude_ret_5d/gold_ret_5d/sp500_ret_5d (market-level -- identical value for every symbol on a
+# date, zero cross-sectional variance, a category error as a stock-selection factor, same
+# finding as macro_asset_prices in measurement-history.md); target_ret_*/target_dir_* (these ARE
+# the forward-return labels, not features -- testing them would be pure look-ahead).
+FEATURE_STORE_FACTORS = [
+    'dist_sma20_pct', 'dist_sma200_pct', 'macd_hist', 'adx', 'di_plus', 'di_minus',
+    'stoch_k', 'stoch_d', 'cci', 'williams_r', 'atr_pct', 'bb_width',
+    'volume_ratio_20d', 'volume_ratio_5d', 'obv_slope', 'vwap_dist_pct', 'mtf_alignment_score',
+    'debt_to_equity', 'roe', 'op_margins', 'rev_growth', 'eps_growth', 'piotroski_f',
+    'news_sentiment_score', 'news_impact_count',
+]
+
 FACTORS = {
     'momentum_21d':  lambda d: d['r21'],
     'momentum_63d':  lambda d: d['r63'],
@@ -234,6 +255,11 @@ FACTORS = {
     # only ever consumed by the 39-day ranker, where nothing is statistically measurable.
     # Lakonishok/Lee (2001): insider trading predicts, concentrated in smaller firms.
     'insider_net':      lambda d: d['insider_net'],
+
+    # -- feature_store technical/fundamental/news columns (2026-08-12), pre-registered as raw
+    # values (no assumed sign -- these are exploratory, not literature-backed like the block
+    # above). See FEATURE_STORE_FACTORS / _add_feature_store for the exclusion rationale.
+    **{f'fs_{c}': (lambda d, c=c: d[c]) for c in FEATURE_STORE_FACTORS},
 
     # -- Contested SCREENER families, reconstructed from price so their direction is
     # MEASURED rather than read off the screener's wording. Each is signed so that a
@@ -457,6 +483,7 @@ def load_price_panel(start: str = DEFAULT_START,
     px = _add_sector(px)
     px = _add_beta_and_idio_vol(px)
     px = _add_screener_breadth(px)
+    px = _add_feature_store(px, start, end)
     px = px.drop(columns=['_dr', '_hi252', '_mkt', '_ticket'], errors='ignore')
 
     # TWO different eligibilities, and conflating them is what made the live screen stale:
@@ -804,6 +831,35 @@ def _add_screener_breadth(px: pd.DataFrame) -> pd.DataFrame:
 
 BETA_WINDOW = 252
 BETA_MIN_OBS = 120
+
+
+def _add_feature_store(px: pd.DataFrame, start: str, end: str) -> pd.DataFrame:
+    """Merge the candidate `feature_store` technical/fundamental/news columns onto the panel.
+
+    feature_store.date is the trading day the row's close-of-day features describe, same
+    point-in-time convention as every other same-day column already on `px` (r21, vol21, ...),
+    so a plain (symbol, date) merge is correct -- portfolio formation on date D still enters at
+    D's next_open, same as everything else in this harness.
+    """
+    cols = ', '.join(FEATURE_STORE_FACTORS)
+    try:
+        fs = read_df(
+            f"SELECT symbol, date, {cols} FROM feature_store "
+            "WHERE timeframe = 'D' AND date >= ? AND date <= ?",
+            (start, end),
+        )
+    except Exception as e:                                      # noqa: BLE001
+        print(f"[FactorBacktest] WARNING: feature_store unavailable ({str(e)[:80]}); skipped.")
+        for c in FEATURE_STORE_FACTORS:
+            px[c] = np.nan
+        return px
+
+    fs['date'] = pd.to_datetime(fs['date']).dt.strftime('%Y-%m-%d')
+    px = px.merge(fs, on=['symbol', 'date'], how='left')
+    coverage = ', '.join(f"{c}={int(px[c].notna().sum()):,}" for c in FEATURE_STORE_FACTORS)
+    print(f"[FactorBacktest] feature_store: {len(fs):,} rows merged, {fs['date'].nunique()} "
+          f"distinct dates. Coverage -- {coverage}")
+    return px
 
 
 def _add_beta_and_idio_vol(px: pd.DataFrame) -> pd.DataFrame:
