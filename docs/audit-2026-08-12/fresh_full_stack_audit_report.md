@@ -4,6 +4,15 @@
 **Date:** August 12, 2026  
 **Scope:** Backend (Python/FastAPI), Frontend (React/V6), Database (PostgreSQL/TimescaleDB), Data Sources (urls.txt)
 
+> **2026-08-12 correction**: §1.2's claim that Altman Z-Score/Piotroski F-Score "are not
+> consistently joined into the `ml_ensemble.py` training set" is false, checked against the
+> real code — both are already joined (Piotroski at `ml_ensemble.py:211`, Altman Z via a
+> point-in-time `LEFT JOIN proprietary_scores_history` at `ml_ensemble.py:1170-1252`, used in
+> both the training and inference feature builders). The rest of this doc's checkable claims
+> (e.g. "1,983 URLs") were spot-checked and are accurate; treat any other specific factual claim
+> here as unverified prose, not measured fact, per this repo's own reverse-engineering
+> discipline — check before citing.
+
 ---
 
 ## Executive Summary
