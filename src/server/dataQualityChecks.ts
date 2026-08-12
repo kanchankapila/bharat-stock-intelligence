@@ -478,6 +478,91 @@ export const DATA_QUALITY_CHECKS: DataQualityCheck[] = [
       return { status: 'pass', detail: `${distinct} distinct signal_score values across ${total} rows` };
     },
   },
+  // ── Provenance invariants ─────────────────────────────────────────────
+  // These three exist because the 2026-08-12 defects were invisible to every check above:
+  // none was a NULL, a staleness gap, or a coverage collapse. A corrupted provenance column is
+  // 100% populated and perfectly fresh — the only thing wrong with it is that it disagrees with
+  // another column it can never legitimately disagree with. Assert the relationship, not the
+  // presence.
+  //
+  // These use Postgres interval arithmetic deliberately. The live DB is Postgres; on a dev
+  // SQLite fallback they surface as status:'error' (the runner catches and reports), which is
+  // loud rather than a silent false pass.
+  {
+    id: 'signal-provenance-monotonic',
+    label: 'unified_signals.signal_generated_at is never later than created_at',
+    category: 'signals',
+    critical: false,
+    // A row cannot be generated after it was created. When signal_generated_at sat in all three
+    // writers' ON CONFLICT DO UPDATE SET, every re-run walked it forward and 29,433 of 55,736
+    // rows violated this — which silently made 82% of the platform's signals un-gradeable and
+    // handed the accuracy review a confident wrong answer (measurement.md retracts it).
+    // 5-minute tolerance: app-built timestamps vs the DB's own now() default differ by up to
+    // 57s in practice, while the real defect drifted up to 24h. Sized to the defect, not to zero.
+    sql: `SELECT SUM(CASE WHEN created_at < signal_generated_at - interval '5 minutes'
+                          THEN 1 ELSE 0 END) AS bad,
+                 COUNT(*) AS total
+          FROM unified_signals
+          WHERE created_at IS NOT NULL AND signal_generated_at IS NOT NULL`,
+    evaluate: (row) => {
+      const bad = Number(row?.bad) || 0;
+      const total = Number(row?.total) || 0;
+      if (total === 0) return { status: 'warn', detail: 'No unified_signals rows with both timestamps' };
+      if (bad > 0) {
+        return { status: 'fail', detail: `${bad} of ${total} rows have signal_generated_at LATER than created_at — a writer is refreshing the provenance stamp on re-run (see recurring-bugs.md)` };
+      }
+      return { status: 'pass', detail: `All ${total} rows have a generation stamp at or before creation` };
+    },
+  },
+  {
+    id: 'signal-source-case-collision',
+    label: 'No two signal_source values differ only by case',
+    category: 'signals',
+    critical: false,
+    // 'technical' vs 'TECHNICAL' were two different producers for months. Any consumer filtering
+    // one silently dropped the other, and reward_engine.py's exclusion list fell straight
+    // through the gap. Renamed to 'technical_scan' 2026-08-12 (migration 1786930000000).
+    sql: `SELECT COUNT(*) AS collisions FROM (
+            SELECT LOWER(signal_source) AS lowered
+            FROM (SELECT signal_source FROM unified_signals
+                  UNION ALL
+                  SELECT signal_source FROM unified_signal_outcomes) s
+            GROUP BY LOWER(signal_source)
+            HAVING COUNT(DISTINCT signal_source) > 1) x`,
+    evaluate: (row) => {
+      const collisions = Number(row?.collisions) || 0;
+      if (collisions > 0) {
+        return { status: 'fail', detail: `${collisions} signal_source value(s) exist in more than one casing — any consumer filtering on one spelling silently drops the other` };
+      }
+      return { status: 'pass', detail: 'All signal_source values are unique case-insensitively' };
+    },
+  },
+  {
+    id: 'signal-outcomes-label-definition-consistent',
+    label: 'Each signal_outcomes source uses exactly one label_definition',
+    category: 'signals',
+    critical: false,
+    // terminal_pct2 (fixed ±2% terminal) and path_barrier (path-based MFE) are NOT comparable:
+    // measured live, the same calendar window gave 88–91% vs 41–44% win rates purely from the
+    // label convention. A source carrying both would make its own win rate meaningless, and
+    // nothing else in this file would notice. NULLs are reported but do not fail on their own —
+    // 1,610 legacy 'technical' rows predate the column, and a permanently-warning check stops
+    // being read.
+    sql: `SELECT COUNT(*) AS mixed_sources, COALESCE(SUM(nulls), 0) AS null_rows FROM (
+            SELECT signal_source,
+                   COUNT(DISTINCT label_definition) AS labels,
+                   SUM(CASE WHEN label_definition IS NULL THEN 1 ELSE 0 END) AS nulls
+            FROM signal_outcomes GROUP BY signal_source
+            HAVING COUNT(DISTINCT label_definition) > 1) x`,
+    evaluate: (row) => {
+      const mixed = Number(row?.mixed_sources) || 0;
+      if (mixed > 0) {
+        return { status: 'fail', detail: `${mixed} signal_source(s) carry more than one label_definition — win rates across them are not comparable (see measurement.md)` };
+      }
+      return { status: 'pass', detail: 'Every signal_source uses a single label_definition' };
+    },
+  },
+
   {
     id: 'model-registry-active-ensemble',
     label: 'Active ensemble model exists and was retrained recently',

@@ -1366,6 +1366,37 @@ db.exec(`
   );
   CREATE INDEX IF NOT EXISTS idx_irh_symbol_date ON intraday_recommendations_history(symbol, computed_at, cycle_at);
 
+  -- Append-only point-in-time snapshot of unified_recommendations, same shape and rationale as
+  -- intraday_recommendations_history above. unified_recommendations is keyed (symbol,
+  -- computed_at) on a bare DATE, so a same-day re-run replaces that morning's row -- the live
+  -- table is meant to hold the latest ranking, but that destroys the evidence of what was said
+  -- before the open. Keyed on generated_at so every run is preserved.
+  CREATE TABLE IF NOT EXISTS unified_recommendations_history (
+    symbol                TEXT NOT NULL,
+    computed_at           TEXT NOT NULL,   -- session date, matches unified_recommendations
+    generated_at          TEXT NOT NULL,   -- when THIS run produced the row
+    regime                TEXT,
+    unified_score         REAL,
+    conviction_level      TEXT,
+    classification        TEXT,
+    screener_stock_score  REAL,
+    ml_score              REAL,
+    confluence_score      REAL,
+    technical_score       REAL,
+    cs_score              REAL,
+    breakout_score        REAL,
+    smart_money_score     REAL,
+    fundamental_score     REAL,
+    engine_coverage_count INTEGER,
+    entry_zone_low        REAL,
+    stop_loss             REAL,
+    target_1              REAL,
+    position_size_pct     REAL,
+    sector                TEXT,
+    PRIMARY KEY (symbol, generated_at)
+  );
+  CREATE INDEX IF NOT EXISTS idx_urh_computed_generated ON unified_recommendations_history(computed_at, generated_at);
+
   -- Intraday paper-trade outcomes: entry/target/stop simulated against the day's OHLC by
   -- intraday_outcome_resolver.py (post-close). Feeds accuracy metrics + the strategy learner.
   CREATE TABLE IF NOT EXISTS intraday_recommendation_outcomes (

@@ -236,6 +236,23 @@ export async function pgEnsureColumns(): Promise<void> {
        PRIMARY KEY (symbol, cycle_at)
      )`,
     `CREATE INDEX IF NOT EXISTS idx_irh_symbol_date ON intraday_recommendations_history(symbol, computed_at, cycle_at)`,
+    // Append-only point-in-time snapshot of unified_recommendations. That table is keyed
+    // (symbol, computed_at) on a bare DATE, so a same-day re-run replaces the morning's row and
+    // destroys the only evidence of what was said before the open. See migration
+    // 1786940000000 for the measured consequence (37 dates, 1 gradeable).
+    `CREATE TABLE IF NOT EXISTS unified_recommendations_history (
+       symbol TEXT NOT NULL, computed_at TEXT NOT NULL, generated_at TIMESTAMPTZ NOT NULL,
+       regime TEXT, unified_score DOUBLE PRECISION, conviction_level TEXT, classification TEXT,
+       screener_stock_score DOUBLE PRECISION, ml_score DOUBLE PRECISION,
+       confluence_score DOUBLE PRECISION, technical_score DOUBLE PRECISION,
+       cs_score DOUBLE PRECISION, breakout_score DOUBLE PRECISION,
+       smart_money_score DOUBLE PRECISION, fundamental_score DOUBLE PRECISION,
+       engine_coverage_count INTEGER, entry_zone_low DOUBLE PRECISION,
+       stop_loss DOUBLE PRECISION, target_1 DOUBLE PRECISION,
+       position_size_pct DOUBLE PRECISION, sector TEXT,
+       PRIMARY KEY (symbol, generated_at)
+     )`,
+    `CREATE INDEX IF NOT EXISTS idx_urh_computed_generated ON unified_recommendations_history(computed_at, generated_at)`,
     `CREATE TABLE IF NOT EXISTS intraday_recommendation_outcomes (
        symbol TEXT, computed_at TEXT, direction TEXT NOT NULL DEFAULT 'LONG',
        entry_price DOUBLE PRECISION, target_1 DOUBLE PRECISION, stop_loss DOUBLE PRECISION,

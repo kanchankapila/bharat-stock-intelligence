@@ -99,6 +99,24 @@ separate skill from noise.
 
 Re-measured weekly by the `signal-accuracy-review-weekly` scheduled task.
 
+### The canonical ranker is not gradeable yet — and the clock started 2026-08-12
+
+`unified_recommendations` holds 37 distinct `computed_at` dates and **exactly one** is provably
+pre-market (2026-08-12, generated 03:00 UTC). `generated_at` was only populated from 2026-08-10,
+and the 08-10 (18:23 UTC) and 08-11 (20:02 UTC) batches were both generated *after* that day's
+close. The cause was not missing data: the table is keyed `(symbol, computed_at)` on a bare DATE,
+so **every re-run overwrote the previous run's ranking**.
+
+Fixed 2026-08-12 by `unified_recommendations_history` (migration `1786940000000`), an append-only
+snapshot keyed `(symbol, generated_at)` written by `unified_ranker.py` alongside its upsert. Every
+run is now preserved; the 3 runs that had a `generated_at` were seeded into it (6,591 rows).
+
+**Consequence for anyone reading this: do not quote a ranker accuracy number yet.** Grade against
+`unified_recommendations_history` filtered to `generated_at < computed_at 03:45 UTC`, and expect
+~30 pre-market dates to be needed before a t-stat means anything. That is a calendar constraint —
+roughly six trading weeks from 2026-08-12 — not an engineering one. Anything computed from the
+live `unified_recommendations` table alone is grading a post-close re-run against its own day.
+
 ## Already tested — do not re-run without a reason
 
 Each of these was measured on the 5-year price panel with the spec above. Re-testing them costs days and returns the same answer. If you think one deserves another look, state what changed (more history, a different horizon, a different construction) before spending the time. Full derivation for any row: `docs/measurement-history.md`.

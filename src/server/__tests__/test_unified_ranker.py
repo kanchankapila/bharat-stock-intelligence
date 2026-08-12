@@ -80,6 +80,17 @@ def make_db():
             risk_reward REAL, timeframe TEXT, sector TEXT,
             trade_reasoning TEXT, position_size_pct REAL, UNIQUE(symbol, computed_at)
         );
+        -- Append-only point-in-time snapshot: keyed on generated_at, so a re-run adds a row
+        -- rather than replacing the previous run's ranking (which the table above does).
+        CREATE TABLE unified_recommendations_history (
+            symbol TEXT NOT NULL, computed_at TEXT NOT NULL, generated_at TEXT NOT NULL,
+            regime TEXT, unified_score REAL, conviction_level TEXT, classification TEXT,
+            screener_stock_score REAL, ml_score REAL, confluence_score REAL,
+            technical_score REAL, cs_score REAL, breakout_score REAL, smart_money_score REAL,
+            fundamental_score REAL, engine_coverage_count INTEGER, entry_zone_low REAL,
+            stop_loss REAL, target_1 REAL, position_size_pct REAL, sector TEXT,
+            PRIMARY KEY (symbol, generated_at)
+        );
         CREATE TABLE unified_signals (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             symbol TEXT, signal_date TEXT, signal_source TEXT, signal_type TEXT,
@@ -260,6 +271,44 @@ class TestUnifiedRankerRun:
         rows = conn.execute('SELECT * FROM unified_recommendations').fetchall()
         assert len(rows) > 0
         os.unlink(csv_path)
+
+    def test_history_snapshot_is_append_only_across_reruns(self):
+        """A re-run must ADD a snapshot, never replace the previous run's.
+
+        unified_recommendations is keyed (symbol, computed_at) on a bare DATE, so the second run
+        below correctly overwrites the first in that table. That is what destroyed the evidence:
+        measured 2026-08-12, 37 computed_at dates existed and exactly ONE was provably
+        pre-market, leaving the canonical ranker ungradeable against forward returns.
+        unified_recommendations_history is keyed on generated_at so both runs survive.
+        """
+        import os
+        ranker, conn, csv_path = self._setup()
+        try:
+            ranker.run()
+            live_after_first = conn.execute(
+                'SELECT COUNT(*) FROM unified_recommendations').fetchone()[0]
+            hist_after_first = conn.execute(
+                'SELECT COUNT(*) FROM unified_recommendations_history').fetchone()[0]
+            assert live_after_first > 0
+            assert hist_after_first == live_after_first
+
+            ranker.run()   # same session date, a second generation event
+
+            live_after_second = conn.execute(
+                'SELECT COUNT(*) FROM unified_recommendations').fetchone()[0]
+            runs = conn.execute(
+                'SELECT COUNT(DISTINCT generated_at) FROM unified_recommendations_history'
+            ).fetchone()[0]
+            hist_after_second = conn.execute(
+                'SELECT COUNT(*) FROM unified_recommendations_history').fetchone()[0]
+
+            # the live table still holds exactly one row per symbol for the session...
+            assert live_after_second == live_after_first
+            # ...while history now records BOTH runs
+            assert runs == 2, f'expected 2 distinct generated_at, got {runs}'
+            assert hist_after_second == 2 * live_after_first
+        finally:
+            os.unlink(csv_path)
 
     def test_infy_scores_higher_than_weak(self):
         import os

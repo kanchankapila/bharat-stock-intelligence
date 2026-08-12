@@ -1062,3 +1062,54 @@ in `stock_ohlcv` yet.
 
 **Scheduled** (persistent, `~/.claude/scheduled-tasks/`): `factor-drift-weekly` (Sun 07:16) and
 `signal-accuracy-review-weekly` (Sat 08:29).
+
+## 2026-08-12 (cont.) — Rename TECHNICAL, and close the two measurement gaps it exposed
+
+**Rename `TECHNICAL` -> `technical_scan`** (migration `1786930000000`, applied). Not cosmetic:
+`reward_engine.py` excluded `NOT IN ('TECHNICAL')`, so when Cluster B-lite folded
+`technical_analysis_engine.py` in under the LOWERCASE spelling, 25,740 rows began passing a filter
+written to stop them. Now `NOT IN ('technical','technical_scan')`. `ml.router.ts`'s `'TECHNICAL'`
+literals are left alone deliberately -- they synthesise a display label over the separate
+`technical_signals` table.
+
+**The control assertion found a bigger bug than the one it was controlling for.** The new
+exclusion test asserted that a NON-technical source *should* still change the weight -- and it
+didn't. Cause: the `unified_signal_outcomes` half of `update_weights()`'s UNION selects
+`NULL AS signals_json`, while weights only accumulate per signal TYPE parsed from that column. So
+every row that half contributes is counted in `processed` and then discarded. **The reward engine
+cannot learn from AI/QUANT outcomes at all.** Pinned with a test rather than "fixed" -- making it
+functional changes RL weighting and needs backtest evidence. Both classes added to
+`recurring-bugs.md`.
+
+**Tier 0 item 2 -- point-in-time ranker snapshots.** `unified_recommendations` is keyed
+`(symbol, computed_at)` on a bare DATE, so every re-run destroyed the previous ranking: 37 dates
+existed, exactly ONE provably pre-market (08-12 03:00 UTC; the 08-10 and 08-11 batches were
+generated post-close). Added `unified_recommendations_history` (migration `1786940000000`),
+append-only on `(symbol, generated_at)`, written by `unified_ranker.py` beside its upsert,
+mirroring the existing `intraday_recommendations_history` pattern. Seeded the 3 stamped runs
+(6,591 rows). Negative-controlled test: removing the history write fails
+`test_history_snapshot_is_append_only_across_reruns`. Declared in `db.ts`, `pgClient.ts` and
+`db/schema.postgres.sql` -- `npm run schema:drift` caught the omission and now reports clean.
+
+**Tier 0 item 3 -- provenance invariants in `dataQualityChecks.ts`.** The 2026-08-12 defects were
+invisible to all 84 existing checks because none was a NULL, a staleness gap, or a coverage
+collapse: a corrupted provenance column is 100% populated and perfectly fresh, and wrong only in
+that it disagrees with a column it can never legitimately disagree with. Three checks added, all
+asserting a RELATIONSHIP rather than a presence:
+
+- `signal-provenance-monotonic` -- `created_at <= signal_generated_at` (5-min tolerance; real
+  app-vs-DB jitter measured at up to 57s, the actual bug drifted 24h)
+- `signal-source-case-collision` -- no two `signal_source` values differing only by case
+- `signal-outcomes-label-definition-consistent` -- one `label_definition` per source
+  (`terminal_pct2` vs `path_barrier` gave 88-91% vs 41-44% win rates on the same window)
+
+All three negative-controlled against a throwaway Postgres schema (SQLite coerces timestamps and
+would have given a false pass), including confirming the 30s-jitter row does NOT trip the
+tolerance. Verified end-to-end through `runDataQualityChecks()` against production: 87 checks,
+0 errors, all three PASS.
+
+**Not yet proven live:** the `signal_generated_at` fix could not be exercised by a real scan --
+the market closed (10:00 UTC) during the watch window. `signal-provenance-monotonic` will catch a
+regression automatically from Monday's first scan, which is the better guarantee anyway.
+
+tsc clean, vitest 875, pytest 1740, schema:drift clean, check_recurring_bugs clean.

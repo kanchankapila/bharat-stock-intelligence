@@ -2316,6 +2316,31 @@ class UnifiedRanker:
                     trade_reasoning=excluded.trade_reasoning, sector=excluded.sector,
                     position_size_pct=excluded.position_size_pct
             ''', r)
+
+            # Append-only point-in-time snapshot. The upsert above deliberately overwrites the
+            # row for (symbol, computed_at) -- correct for a table meant to hold the CURRENT
+            # ranking, but it destroys what the previous run said. Measured 2026-08-12: 37
+            # computed_at dates existed and exactly ONE was provably pre-market, so the canonical
+            # ranker could not be graded against forward returns at all.
+            #
+            # Keyed on generated_at (one timestamp per run, set once in run()), so a re-run adds
+            # a row instead of replacing one. DO NOTHING, not DO UPDATE: within a single run this
+            # key cannot legitimately repeat, and silently rewriting a snapshot is the exact
+            # failure this table exists to prevent.
+            cur.execute('''
+                INSERT INTO unified_recommendations_history
+                (symbol, computed_at, generated_at, regime, unified_score, conviction_level,
+                 classification, screener_stock_score, ml_score, confluence_score,
+                 technical_score, cs_score, breakout_score, smart_money_score,
+                 fundamental_score, engine_coverage_count, entry_zone_low, stop_loss,
+                 target_1, position_size_pct, sector)
+                VALUES (:symbol, :computed_at, :generated_at, :regime, :unified_score,
+                        :conviction_level, :classification, :screener_stock_score, :ml_score,
+                        :confluence_score, :technical_score, :cs_score, :breakout_score,
+                        :smart_money_score, :fundamental_score, :engine_coverage_count,
+                        :entry_zone_low, :stop_loss, :target_1, :position_size_pct, :sector)
+                ON CONFLICT(symbol, generated_at) DO NOTHING
+            ''', r)
         self.conn.commit()
 
         # Purge rows this run did not produce. The upsert key is (symbol, computed_at), so a

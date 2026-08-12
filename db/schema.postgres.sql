@@ -988,6 +988,35 @@ CREATE TABLE IF NOT EXISTS "intraday_recommendations_history" (
 );
 CREATE INDEX idx_irh_symbol_date ON public.intraday_recommendations_history USING btree (symbol, computed_at, cycle_at);
 
+-- Append-only point-in-time snapshot of unified_recommendations (migration 1786940000000).
+-- The live table is keyed (symbol, computed_at) on a bare DATE, so a same-day re-run replaces
+-- that morning's ranking; this preserves every run, keyed on generated_at.
+CREATE TABLE IF NOT EXISTS "unified_recommendations_history" (
+  "symbol" TEXT NOT NULL,
+  "computed_at" TEXT NOT NULL,
+  "generated_at" TIMESTAMPTZ NOT NULL,
+  "regime" TEXT,
+  "unified_score" DOUBLE PRECISION,
+  "conviction_level" TEXT,
+  "classification" TEXT,
+  "screener_stock_score" DOUBLE PRECISION,
+  "ml_score" DOUBLE PRECISION,
+  "confluence_score" DOUBLE PRECISION,
+  "technical_score" DOUBLE PRECISION,
+  "cs_score" DOUBLE PRECISION,
+  "breakout_score" DOUBLE PRECISION,
+  "smart_money_score" DOUBLE PRECISION,
+  "fundamental_score" DOUBLE PRECISION,
+  "engine_coverage_count" INTEGER,
+  "entry_zone_low" DOUBLE PRECISION,
+  "stop_loss" DOUBLE PRECISION,
+  "target_1" DOUBLE PRECISION,
+  "position_size_pct" DOUBLE PRECISION,
+  "sector" TEXT,
+  PRIMARY KEY ("symbol", "generated_at")
+);
+CREATE INDEX idx_urh_computed_generated ON public.unified_recommendations_history USING btree (computed_at, generated_at);
+
 -- ── intraday_regime_history ─────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS "intraday_regime_history" (
   "computed_at" TEXT NOT NULL PRIMARY KEY,
