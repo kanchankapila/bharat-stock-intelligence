@@ -1,40 +1,46 @@
-import sqlite3
 import json
 import pandas as pd
 import yfinance as yf
 from datetime import datetime, timedelta
 import pytz
 import os
+import sys
+from pathlib import Path
+
+# Add src/server to import path for db_compat
+ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(ROOT / "src" / "server"))
+from db_compat import connect as db_connect
 
 # 1. Load the symbol mapping
-with open(r'd:\Github\bharat-stock-intelligence\scripts\stocklist.json', 'r', encoding='utf-8') as f:
+stocklist_path = ROOT / 'scripts' / 'stocklist.json'
+if not stocklist_path.exists():
+    print(f"Error: {stocklist_path} not found.")
+    sys.exit(1)
+
+with open(stocklist_path, 'r', encoding='utf-8') as f:
     stock_list = json.load(f)
 
-# Create a mapping from mcsymbol to NSE symbol
 mc_to_nse = {}
 for stock in stock_list:
     if 'mcsymbol' in stock and 'symbol' in stock:
         mc_to_nse[stock['mcsymbol'].upper()] = stock['symbol']
 
-# Also add some known index mappings
 mc_to_nse['IN;SEN'] = '^BSESN'
 mc_to_nse['IN;NSX'] = '^NSEI'
 mc_to_nse['IN;NBX'] = '^NSEBANK'
 
 def get_yf_symbol(price_key):
     if not price_key: return None
-    
     parts = price_key.split('_')
     if len(parts) >= 2 and parts[0] == 'stk':
         mcsymbol = parts[1].upper()
         if mcsymbol in mc_to_nse:
             return mc_to_nse[mcsymbol] + '.NS'
-            
     if 'in;' in price_key.lower():
         idx = price_key.split(';')[-1].upper()
         if 'IN;' + idx in mc_to_nse:
             return mc_to_nse['IN;' + idx]
-            
     return None
 
 def parse_timeframe(tf_str):
@@ -54,26 +60,34 @@ def parse_timeframe(tf_str):
     else:
         return timedelta(days=7), '1d' 
 
-# 2. Connect to DB
-conn = sqlite3.connect(r'd:\Github\bharat-stock-intelligence\database.sqlite')
-conn.row_factory = sqlite3.Row
-cursor = conn.cursor()
-
-cursor.execute('''
+# 2. Connect to DB via db_compat
+conn = db_connect()
+rows = conn.execute('''
     SELECT 
         pattern_id, pattern_name, time_frame, created_at, 
         meta_data_price_key, meta_data_entry_price, 
         meta_data_target_price, meta_data_stoploss_price, meta_data_pattern_type 
     FROM chart_patterns
-''')
-rows = cursor.fetchall()
+''').fetchall()
 
 results = []
 missing_data = []
-
 symbol_groups = {}
+
 for row in rows:
-    d = dict(row)
+    # Access by index as db_compat returns tuple-like rows
+    d = {
+        'pattern_id': row[0],
+        'pattern_name': row[1],
+        'time_frame': row[2],
+        'created_at': row[3],
+        'meta_data_price_key': row[4],
+        'meta_data_entry_price': row[5],
+        'meta_data_target_price': row[6],
+        'meta_data_stoploss_price': row[7],
+        'meta_data_pattern_type': row[8]
+    }
+    
     yf_symbol = get_yf_symbol(d['meta_data_price_key'])
     if not yf_symbol:
         missing_data.append(d)
@@ -105,7 +119,6 @@ for sym, items in symbol_groups.items():
     min_date = min([datetime.strptime(i['created_at'], '%Y-%m-%d %H:%M:%S') for i in items])
     
     try:
-        # download 1h data (fails if older than 730 days, but we assume it's recent)
         df_1h = yf.download(sym, start=min_date.strftime('%Y-%m-%d'), interval='1h', progress=False)
         df_1d = yf.download(sym, start=min_date.strftime('%Y-%m-%d'), interval='1d', progress=False)
     except Exception as e:
@@ -117,13 +130,11 @@ for sym, items in symbol_groups.items():
         for i in items: missing_data.append(i)
         continue
 
-    # Flatten multi-index column if any
     if isinstance(df_1h.columns, pd.MultiIndex):
         df_1h.columns = df_1h.columns.get_level_values(0)
     if isinstance(df_1d.columns, pd.MultiIndex):
         df_1d.columns = df_1d.columns.get_level_values(0)
 
-    # ensure timezone aware for comparison
     if not df_1h.empty and df_1h.index.tz is None:
         df_1h.index = df_1h.index.tz_localize('Asia/Kolkata')
     if not df_1d.empty and df_1d.index.tz is None:
@@ -136,7 +147,6 @@ for sym, items in symbol_groups.items():
         end_dt = dt + delta
         
         df = df_1h if interval == '1h' and not df_1h.empty else df_1d
-        
         period_df = df[(df.index >= dt) & (df.index <= end_dt)]
         
         if period_df.empty:
@@ -190,41 +200,34 @@ for sym, items in symbol_groups.items():
         results.append(item)
         total_processed += 1
 
-# Export report
-artifact_path = r'C:\Users\amitk\.gemini\antigravity-ide\brain\5393392f-08ba-4527-9de6-8fadb6d54347\chart_pattern_accuracy_report.md'
+# Export report to local workspace
+artifact_path = ROOT / 'chart_pattern_accuracy_report.md'
 with open(artifact_path, 'w', encoding='utf-8') as f:
     f.write("# Chart Pattern Accuracy Report\n\n")
-    
     if total_processed > 0:
         win_rate = (success_hits / total_processed) * 100
         f.write("## Summary Metrics\n")
         f.write(f"- **Total Analyzed:** {total_processed}\n")
         f.write(f"- **Target Achieved:** {success_hits} ({win_rate:.2f}%)\n")
         f.write(f"- **Stoploss Hit:** {sl_hits}\n")
-        
         avg_ret = sum(r['max_return'] for r in results) / len(results)
         f.write(f"- **Average Max Return:** {avg_ret:.2f}%\n\n")
-        
         f.write("## Performance by Timeframe\n")
         f.write("| Timeframe | Analyzed | Target Hit | Win Rate |\n")
         f.write("|-----------|----------|------------|----------|\n")
-        
         tfs = set([r['time_frame'] for r in results])
         for tf in sorted(list(tfs)):
             tf_items = [r for r in results if r['time_frame'] == tf]
             tf_hits = len([r for r in tf_items if r['status'] == 'Target Hit'])
             tf_rate = (tf_hits / len(tf_items)) * 100 if len(tf_items) > 0 else 0
             f.write(f"| {tf} | {len(tf_items)} | {tf_hits} | {tf_rate:.2f}% |\n")
-            
         f.write("\n## Detailed Log (All Analysed Items)\n")
         f.write("| Symbol | Pattern | Timeframe | Entry | Target | SL | Status | Max Return |\n")
         f.write("|--------|---------|-----------|-------|--------|----|--------|------------|\n")
-        
         sorted_res = sorted(results, key=lambda x: x['max_return'], reverse=True)
         for r in sorted_res:
             sym = get_yf_symbol(r['meta_data_price_key'])
             f.write(f"| {sym} | {r['pattern_name']} | {r['time_frame']} | {r['entry_price']} | {r['target_price']} | {r['stoploss_price']} | {r['status']} | {r['max_return']:.2f}% |\n")
-            
     f.write("\n## Data Unavailable\n")
     f.write(f"Total rows with unmapped symbols or missing API data: {len(missing_data)}\n")
     if missing_data:
@@ -233,4 +236,5 @@ with open(artifact_path, 'w', encoding='utf-8') as f:
         for s in samples:
             f.write(f"- `{s}`\n")
 
+conn.close()
 print(f"Report successfully generated at: {artifact_path}")

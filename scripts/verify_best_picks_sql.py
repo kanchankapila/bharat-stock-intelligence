@@ -1,44 +1,28 @@
-import sqlite3, json, os, sys
+import sys
+import os
+from pathlib import Path
 
-# Try the main DB paths
-DB_CANDIDATES = [
-    os.path.join(os.path.dirname(__file__), "..", "database.sqlite"),
-    os.path.join(os.path.dirname(__file__), "..", "src", "server", "bharat_intelligence.db"),
-]
-
-conn = None
-for db_path in DB_CANDIDATES:
-    db_path = os.path.normpath(db_path)
-    try:
-        c = sqlite3.connect(db_path)
-        cur = c.cursor()
-        cur.execute("SELECT name FROM sqlite_master WHERE type='table'")
-        tables = [r[0] for r in cur.fetchall()]
-        if tables:
-            print(f"Using DB: {db_path}")
-            print(f"Tables: {tables}")
-            conn = c
-            break
-        c.close()
-    except Exception as e:
-        print(f"Could not open {db_path}: {e}")
-
-if conn is None:
-    print("No populated DB found. Tables are created at server startup.")
-    print("Run 'npm run dev' first, then re-run this script.")
-    sys.exit(0)
-
-cur = conn.cursor()
+# Add src/server to import path for db_compat
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src" / "server"))
+from db_compat import connect
 
 try:
-    cur.execute("SELECT regime FROM market_regimes ORDER BY date DESC LIMIT 1")
-    row = cur.fetchone()
+    conn = connect()
+    print("Successfully connected to the database via db_compat.")
+except Exception as e:
+    print(f"Could not connect to database: {e}")
+    print("Run 'npm run dev' first, then re-run this script.")
+    sys.exit(1)
+
+try:
+    row = conn.execute("SELECT regime FROM market_regimes ORDER BY date DESC LIMIT 1").fetchone()
     print("Regime:", row)
 except Exception as e:
     print("Regime table error:", e)
 
 try:
-    cur.execute("""
+    # Note: Using ? placeholders which db_compat will translate if on Postgres
+    rows = conn.execute("""
       WITH ranked AS (
         SELECT *,
           ROW_NUMBER() OVER (
@@ -70,10 +54,11 @@ try:
         AND (ns.sector IN ('Financials','Healthcare','Industrials','Materials','Energy') OR ns.sector = 'Unknown' OR ns.sector IS NULL OR ns.sector = '')
       ORDER BY COALESCE(ur.avg_engine_track_record, 1.0) DESC, qs.rank_composite DESC
       LIMIT 20
-    """)
-    rows = cur.fetchall()
+    """).fetchall()
+    
     print(f"Rows returned: {len(rows)}")
     for r in rows[:5]:
+        # Access by index since it mimics sqlite3.Row or tuple
         print(r[0], r[2], "P:", r[6], "Sharpe:", round(r[7], 2) if r[7] else None)
 except Exception as e:
     print("Query error:", e)

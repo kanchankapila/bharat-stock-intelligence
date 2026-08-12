@@ -3,12 +3,16 @@ import os
 import sys
 import json
 import time
-import sqlite3
 import requests
 import argparse
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from pathlib import Path
 
-DB_PATH = "mc_tlz_explore.db"
+# Add src/server to import path for db_compat
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src" / "server"))
+from db_compat import connect as db_connect
+from sql_translate import use_postgres
+
 CONCURRENCY = 15
 TIMEOUT = 15
 
@@ -21,38 +25,56 @@ HEADERS = {
     "Accept": "application/json, text/plain, */*",
 }
 
-def init_db(path):
-    conn = sqlite3.connect(path)
-    cursor = conn.cursor()
+def init_db():
+    conn = db_connect()
     
     # Drop tables to recreate fresh exploring schema
-    cursor.execute("DROP TABLE IF EXISTS screeners")
-    cursor.execute("DROP TABLE IF EXISTS stocks")
-    cursor.execute("DROP TABLE IF EXISTS screener_results")
-    cursor.execute("DROP TABLE IF EXISTS stock_metrics")
+    conn.execute("DROP TABLE IF EXISTS screeners")
+    conn.execute("DROP TABLE IF EXISTS stocks")
+    conn.execute("DROP TABLE IF EXISTS screener_results")
+    conn.execute("DROP TABLE IF EXISTS stock_metrics")
     
-    # Create Tables
-    cursor.execute("""
-    CREATE TABLE screeners (
-        screenpk INTEGER PRIMARY KEY,
-        title TEXT,
-        query TEXT,
-        description TEXT,
-        last_fetched TEXT
-    )
-    """)
+    # Create Tables - Use dialect-aware DDL
+    if use_postgres():
+        conn.execute("""
+        CREATE TABLE screeners (
+            screenpk INTEGER PRIMARY KEY,
+            title TEXT,
+            query TEXT,
+            description TEXT,
+            last_fetched TEXT
+        )
+        """)
+        conn.execute("""
+        CREATE TABLE stocks (
+            symbol TEXT PRIMARY KEY,
+            name TEXT,
+            isin TEXT,
+            sector TEXT,
+            last_fetched TEXT
+        )
+        """)
+    else:
+        conn.execute("""
+        CREATE TABLE screeners (
+            screenpk INTEGER PRIMARY KEY,
+            title TEXT,
+            query TEXT,
+            description TEXT,
+            last_fetched TEXT
+        )
+        """)
+        conn.execute("""
+        CREATE TABLE stocks (
+            symbol TEXT PRIMARY KEY,
+            name TEXT,
+            isin TEXT,
+            sector TEXT,
+            last_fetched TEXT
+        )
+        """)
 
-    cursor.execute("""
-    CREATE TABLE stocks (
-        symbol TEXT PRIMARY KEY,
-        name TEXT,
-        isin TEXT,
-        sector TEXT,
-        last_fetched TEXT
-    )
-    """)
-
-    cursor.execute("""
+    conn.execute("""
     CREATE TABLE screener_results (
         screenpk INTEGER,
         symbol TEXT,
@@ -61,7 +83,7 @@ def init_db(path):
     )
     """)
 
-    cursor.execute("""
+    conn.execute("""
     CREATE TABLE stock_metrics (
         symbol TEXT,
         date TEXT,
@@ -96,7 +118,6 @@ def parse_row_value(val):
         return None, None
     if isinstance(val, (int, float)):
         return float(val), None
-    # Check if numeric string
     try:
         f_val = float(str(val).strip('%').replace(',', ''))
         return f_val, str(val)
@@ -104,8 +125,6 @@ def parse_row_value(val):
         return None, str(val)
 
 def process_results(fetched_data, conn):
-    cursor = conn.cursor()
-    now_str = time.time()
     date_today = time.strftime("%Y-%m-%d")
     
     screeners_to_insert = []
@@ -130,7 +149,6 @@ def process_results(fetched_data, conn):
         headers = body.get("tableHeaders", [])
         data_rows = body.get("tableData", [])
         
-        # Identify special column indices dynamically
         sym_idx = -1
         name_idx = -1
         isin_idx = -1
@@ -152,21 +170,17 @@ def process_results(fetched_data, conn):
             elif uname in ("sholding_date", "shareholding date", "date"):
                 date_idx = idx
                 
-        # Fallbacks for symbol and name if indices not set
         if sym_idx == -1:
-            # Let's guess based on unique names containing code
             for idx, h in enumerate(headers):
                 uname = (h.get("unique_name") or "").lower()
                 if "code" in uname or "sym" in uname:
                     sym_idx = idx
                     break
         
-        # Process each stock row
         for row in data_rows:
             if not isinstance(row, list) or len(row) < len(headers):
                 continue
                 
-            # Must have a valid symbol
             symbol = row[sym_idx] if sym_idx != -1 else None
             if not symbol or not isinstance(symbol, str) or symbol.strip() == "":
                 continue
@@ -176,7 +190,6 @@ def process_results(fetched_data, conn):
             isin = row[isin_idx] if isin_idx != -1 else None
             sector = row[sector_idx] if sector_idx != -1 else None
             
-            # Record/Update Stock
             if symbol not in stocks_to_insert:
                 stocks_to_insert[symbol] = {
                     "name": name,
@@ -185,7 +198,6 @@ def process_results(fetched_data, conn):
                     "last_fetched": date_today
                 }
             else:
-                # Fill missing details if we find them in another screener
                 if name and not stocks_to_insert[symbol]["name"]:
                     stocks_to_insert[symbol]["name"] = name
                 if isin and not stocks_to_insert[symbol]["isin"]:
@@ -193,16 +205,13 @@ def process_results(fetched_data, conn):
                 if sector and not stocks_to_insert[symbol]["sector"]:
                     stocks_to_insert[symbol]["sector"] = sector
             
-            # Resolve shareholding/metrics date
             row_date = date_today
             if date_idx != -1 and row[date_idx]:
                 row_date = str(row[date_idx]).strip()
                 
             results_to_insert.append((screenpk, symbol, row_date))
             
-            # Process metrics columns
             for col_idx, h in enumerate(headers):
-                # Skip core metadata columns
                 if col_idx in (sym_idx, name_idx, isin_idx, sector_idx, date_idx):
                     continue
                     
@@ -213,53 +222,58 @@ def process_results(fetched_data, conn):
                 raw_val = row[col_idx]
                 m_val, m_label = parse_row_value(raw_val)
                 
-                # Combine unique key to overwrite duplicates within the batch
                 metric_key = (symbol, row_date, metric_name)
                 metrics_to_insert[metric_key] = (m_val, m_label)
 
+    # Use ON CONFLICT for Postgres/SQLite compatibility
+    # INSERT OR REPLACE -> ON CONFLICT (...) DO UPDATE SET ...
+    
     # Insert into screeners
-    cursor.executemany(
-        """INSERT OR REPLACE INTO screeners (screenpk, title, query, description, last_fetched)
-           VALUES (?, ?, ?, ?, ?)""",
+    conn.executemany(
+        """INSERT INTO screeners (screenpk, title, query, description, last_fetched)
+           VALUES (?, ?, ?, ?, ?)
+           ON CONFLICT (screenpk) DO UPDATE SET
+             title=EXCLUDED.title, query=EXCLUDED.query,
+             description=EXCLUDED.description, last_fetched=EXCLUDED.last_fetched""",
         screeners_to_insert
     )
     
     # Insert into stocks
     stocks_rows = [(sym, d["name"], d["isin"], d["sector"], d["last_fetched"]) for sym, d in stocks_to_insert.items()]
-    cursor.executemany(
-        """INSERT OR REPLACE INTO stocks (symbol, name, isin, sector, last_fetched)
-           VALUES (?, ?, ?, ?, ?)""",
+    conn.executemany(
+        """INSERT INTO stocks (symbol, name, isin, sector, last_fetched)
+           VALUES (?, ?, ?, ?, ?)
+           ON CONFLICT (symbol) DO UPDATE SET
+             name=EXCLUDED.name, isin=EXCLUDED.isin,
+             sector=EXCLUDED.sector, last_fetched=EXCLUDED.last_fetched""",
         stocks_rows
     )
     
     # Insert into screener_results
-    cursor.executemany(
-        """INSERT OR IGNORE INTO screener_results (screenpk, symbol, fetched_date)
-           VALUES (?, ?, ?)""",
+    # INSERT OR IGNORE -> ON CONFLICT DO NOTHING
+    conn.executemany(
+        """INSERT INTO screener_results (screenpk, symbol, fetched_date)
+           VALUES (?, ?, ?)
+           ON CONFLICT DO NOTHING""",
         results_to_insert
     )
     
     # Insert into stock_metrics
     metrics_rows = [(k[0], k[1], k[2], v[0], v[1]) for k, v in metrics_to_insert.items()]
-    cursor.executemany(
-        """INSERT OR REPLACE INTO stock_metrics (symbol, date, metric_name, metric_value, metric_label)
-           VALUES (?, ?, ?, ?, ?)""",
+    conn.executemany(
+        """INSERT INTO stock_metrics (symbol, date, metric_name, metric_value, metric_label)
+           VALUES (?, ?, ?, ?, ?)
+           ON CONFLICT (symbol, date, metric_name) DO UPDATE SET
+             metric_value=EXCLUDED.metric_value, metric_label=EXCLUDED.metric_label""",
         metrics_rows
     )
     
     conn.commit()
     return len(screeners_to_insert), len(stocks_rows), len(results_to_insert), len(metrics_rows)
 
-
 def analyze_data_gaps(conn):
-    """Scan headers and queries to identify which screeners fill specific missing data gaps."""
-    cursor = conn.cursor()
+    screeners = conn.execute("SELECT screenpk, title, query, description FROM screeners").fetchall()
     
-    # Retrieve all screeners
-    cursor.execute("SELECT screenpk, title, query, description FROM screeners")
-    screeners = cursor.fetchall()
-    
-    # Define mapping of keywords to missing data gaps
     gap_keywords = {
         "Promoter Pledge": ["pledge", "pledged"],
         "Bulk & Block Deals": ["deal", "block", "bulk", "insider_trades"],
@@ -287,19 +301,17 @@ def analyze_data_gaps(conn):
         if not matches:
             print("   - No matching screeners found")
         else:
-            for pk, title in matches[:6]: # Show top 6 matches
+            for pk, title in matches[:6]:
                 print(f"   • [screenpk={pk}] {title}")
             if len(matches) > 6:
                 print(f"   • ... and {len(matches) - 6} more screeners")
     print("="*80 + "\n")
-
 
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--limit", type=int, default=None, help="Limit the number of URLs to crawl for testing")
     args = parser.parse_args()
     
-    # Read URLs from urls.txt
     if not os.path.exists("urls.txt"):
         print("[ERROR] urls.txt not found in workspace root.")
         sys.exit(1)
@@ -319,11 +331,9 @@ def main():
         
     print(f"Loaded {len(urls)} unique screeners from urls.txt.")
     
-    # Initialize DB
-    conn = init_db(DB_PATH)
-    print(f"Database {DB_PATH} initialized successfully.")
+    conn = init_db()
+    print("Database initialized successfully via db_compat.")
     
-    # Fetch screeners in parallel
     print(f"Fetching screeners concurrently (concurrency={CONCURRENCY})...")
     fetched_results = []
     
@@ -348,7 +358,6 @@ def main():
                 
     print(f"\nCrawling complete. {success_count}/{len(urls)} URLs returned 200 OK.")
     
-    # Parse and store
     print("Processing and storing data in normalized schema...")
     num_scr, num_stk, num_res, num_met = process_results(fetched_results, conn)
     print(f"Stored:")
@@ -357,7 +366,6 @@ def main():
     print(f"  • {num_res} Screener Results associations")
     print(f"  • {num_met} Stock-date metrics")
     
-    # Run gap analysis
     analyze_data_gaps(conn)
     
     conn.close()
