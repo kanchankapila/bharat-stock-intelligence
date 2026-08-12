@@ -53,21 +53,36 @@ class TestWeekdaysAreUnchanged:
 
 
 class TestMidnightCrossingStillWorks:
-    """logical_session_date must not lose the midnight-crossing behaviour it wraps -- the
-    post-close chain regularly finishes after 00:00 IST."""
+    """The cutoff_hour behaviour of the WRAPPED logical_trading_date is unchanged; what this
+    class pins is that logical_session_date then answers its own question -- which session is
+    this ranking FOR -- rather than inheriting "which trading day is being processed".
 
-    def test_before_cutoff_hour_is_still_yesterday(self):
-        # Tue 02:00 -> the Monday session whose EOD processing is still running.
-        assert as_of.logical_session_date(now=at(2026, 8, 11, 2, 0)) == "2026-08-10"
+    Both expectations below were changed 2026-08-12 (previously 2026-08-10 and 2026-08-07).
+    The old values labelled a ranking with a session whose 09:15 open had already passed, which
+    nobody could act on and which made the row ungradeable: entry has to be an open that is
+    still ahead of the signal. See the open-passed roll-forward in as_of.logical_session_date.
+    """
 
-    def test_after_cutoff_hour_is_today(self):
+    def test_small_hours_run_targets_the_session_that_has_not_opened_yet(self):
+        # Tue 02:00: Monday's session closed 17h ago, so this ranking is for TUESDAY -- and
+        # 02:00 IST is genuinely pre-market for it. This is the exact shape of the real
+        # 2026-08-11 batch (20:02 UTC = 01:32 IST Wed), which was stamped with the closed
+        # Tuesday session instead of the Wednesday it was actually actionable for.
+        assert as_of.logical_session_date(now=at(2026, 8, 11, 2, 0)) == "2026-08-11"
+
+    def test_after_cutoff_hour_but_before_the_open_is_today(self):
+        # 04:00 IST, well inside the pre-market window -> today, unchanged.
         assert as_of.logical_session_date(now=at(2026, 8, 11, 4, 0)) == "2026-08-11"
 
-    def test_saturday_small_hours_resolve_back_to_friday_not_forward_to_monday(self):
-        """Sat 02:00 is the tail of Friday's post-close chain, so it belongs to Friday --
-        a real trading day, so there is nothing to roll. Rolling forward here would skip
-        Friday's snapshot entirely."""
-        assert as_of.logical_session_date(now=at(2026, 8, 8, 2, 0)) == "2026-08-07"
+    def test_a_run_after_the_open_rolls_to_the_next_session(self):
+        # 23:53 IST Monday -- the real 2026-08-10 batch (18:23 UTC). Monday has closed, so the
+        # next session this can be acted on is Tuesday.
+        assert as_of.logical_session_date(now=at(2026, 8, 10, 23, 53)) == "2026-08-11"
+
+    def test_saturday_small_hours_roll_to_monday_not_back_to_friday(self):
+        """Sat 02:00 is the tail of Friday's post-close chain, but Friday's open is long gone.
+        A ranking produced then is actionable at Monday's open, not Friday's."""
+        assert as_of.logical_session_date(now=at(2026, 8, 8, 2, 0)) == "2026-08-10"
 
 
 def test_return_type_is_an_iso_date_string():

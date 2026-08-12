@@ -1113,3 +1113,46 @@ the market closed (10:00 UTC) during the watch window. `signal-provenance-monoto
 regression automatically from Monday's first scan, which is the better guarantee anyway.
 
 tsc clean, vitest 875, pytest 1740, schema:drift clean, check_recurring_bugs clean.
+
+## 2026-08-12 (cont.) — unified-ranker cron: already pre-market; the catch-up path was not
+
+Checked `QUEUE_UNIFIED_RANKER`'s schedule. **The cron is already correct and needed no change**:
+`0 2 * * 1-5` = 02:00 UTC = 07:30 IST, well before the 03:45 UTC / 09:15 IST open, moved there
+deliberately by an earlier session (it was 15:45 IST, which ran the ranker BEFORE its own inputs
+refreshed). The closed-day-early-batch path (07:10 IST + 20 min delay) is pre-open too.
+
+The gap was elsewhere: **`addJobWithCatchup` fires a missed run immediately at server boot, at
+whatever hour that is**, and `logical_session_date()` then labelled it with a session whose open
+had already passed. That is the real cause of the two ungradeable batches -- 08-10 ran 18:23 UTC
+(23:53 IST) and 08-11 ran 20:02 UTC (01:32 IST the next day), both stamped with a closed session.
+Not a manual re-run, and not the schedule.
+
+Fixed in `as_of.logical_session_date()` (its ONLY production caller is `unified_ranker.py`): roll
+forward past a session whose 09:15 open has already passed, alongside the existing weekend roll.
+This does not merely relabel those runs -- it makes them useful. A ranking generated 01:32 IST is
+genuinely pre-market for THAT day's open, so the 08-11 batch would have become a gradeable
+Wednesday signal instead of a discarded Tuesday artefact. Verified across every real run time:
+
+  scheduled 07:30 IST Wed   -> Wed  (unchanged)
+  closed-day 07:10 IST Wed  -> Wed  (unchanged)
+  catch-up   23:53 IST Mon  -> Tue  (was Mon, closed)
+  catch-up   01:32 IST Wed  -> Wed  (was Tue, closed)
+  mid-session 12:00 IST Wed -> Thu
+  Fri 22:00 IST             -> Mon
+
+all pre-market=True. The normal 07:30 IST path is untouched, so every weekday still gets a
+ranking; only missed/catch-up runs change.
+
+**Two pinned tests in `test_logical_session_date.py` were deliberately changed** (Tue 02:00 now
+-> Tue not Mon; Sat 02:00 now -> Mon not Fri). Those cases were inheriting the wrapped
+`logical_trading_date`'s "which trading day is being PROCESSED" semantics, which is right for a
+post-close enrichment `UPDATE ... WHERE date = ?` but wrong for a ranking label -- the function's
+own docstring says it answers "which session is this ranking FOR". The old values labelled a
+signal with a session nobody could act on. 13 of the 16 tests were unaffected because they use
+09:00 IST, before the open. Negative-controlled: reverting the roll-forward fails 3.
+
+Accepted cost, stated explicitly: if the pre-market slot is missed entirely and only a late
+catch-up runs, that session gets NO ranking rather than a mislabelled one. There is no honest
+pre-market signal to give it, and consumers already cold-start-fall-back to stock_scores.
+
+tsc clean, pytest 1741 passed, check_recurring_bugs clean.

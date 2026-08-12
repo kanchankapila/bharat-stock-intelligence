@@ -94,7 +94,8 @@ def logical_trading_date(cutoff_hour: int = 4, now=None) -> str:
     return d.isoformat()
 
 
-def logical_session_date(cutoff_hour: int = 4, now=None) -> str:
+def logical_session_date(cutoff_hour: int = 4, now=None,
+                         open_hour: int = 9, open_minute: int = 15) -> str:
     """logical_trading_date(), rolled forward off a weekend to the session it is FOR.
 
     A third bug class, distinct from both functions around it. The daily pipeline
@@ -117,10 +118,33 @@ def logical_session_date(cutoff_hour: int = 4, now=None) -> str:
     (MAX(date) FROM stock_ohlcv), so a Monday 07:30 pre-market run would label its output
     with Friday's date and overwrite Friday's snapshot. This function answers "which session
     is this ranking for", which is the next one, not the last one.
+
+    A session whose OPEN has already passed is also rolled forward (2026-08-12). Same question,
+    second way of getting it wrong: a ranking produced after 09:15 IST cannot be a signal for
+    that day, because nobody could have acted on it. The scheduled run is 02:00 UTC / 07:30 IST
+    and is unaffected -- but addJobWithCatchup fires a MISSED run immediately at server boot,
+    at whatever hour that happens, and those runs were labelling a closed session. Measured
+    2026-08-12: of 37 computed_at dates in unified_recommendations only ONE was provably
+    pre-market; the 08-10 batch ran 18:23 UTC (23:53 IST) and the 08-11 batch 20:02 UTC
+    (01:32 IST the next day), both stamped with a session that had already closed.
+
+    This does not merely relabel those runs, it makes them useful: a ranking generated at
+    01:32 IST is genuinely pre-market for THAT day's 09:15 open, so rolling it forward turns a
+    discarded post-close artefact into a gradeable pre-market signal.
+
+    The cost, accepted deliberately: if the pre-market slot is missed entirely and only a late
+    catch-up runs, that session gets no ranking at all rather than a mislabelled one. There is
+    no honest pre-market signal to give it, and consumers already cold-start-fall-back to
+    stock_scores (see scoring-authority.md).
     """
     import datetime
+    if now is None:
+        now = datetime.datetime.now()
     d = datetime.date.fromisoformat(logical_trading_date(cutoff_hour, now))
-    while d.weekday() >= 5:          # 5 = Saturday, 6 = Sunday
+    # 5 = Saturday, 6 = Sunday. The open-passed test terminates on its own: once d moves to a
+    # future date its open is by definition still ahead of `now`.
+    while (d.weekday() >= 5
+           or now >= datetime.datetime.combine(d, datetime.time(open_hour, open_minute))):
         d += datetime.timedelta(days=1)
     return d.isoformat()
 
