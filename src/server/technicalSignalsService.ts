@@ -1509,7 +1509,12 @@ export async function runTechnicalSignalScan(options: {
         (symbol, signal_date, signal_source, signal_type,
          entry_price, target_price, stop_loss, confidence_score,
          reasoning, technical_score, status, signal_generated_at)
-      VALUES (?, current_date, 'TECHNICAL', 'BUY', ?, ?, ?, ?, ?, ?, 'ACTIVE', ?)
+      -- 'technical_scan', not 'TECHNICAL' (2026-08-12): technical_analysis_engine.py writes
+      -- 'technical' to this same column, and two sources differing only by case is a trap --
+      -- reward_engine.py's exclusion list had already fallen through it. Matches the 'source'
+      -- this same function writes to recommendation_log. Renamed in history by migration
+      -- 1786930000000; grep BOTH spellings before adding a consumer.
+      VALUES (?, current_date, 'technical_scan', 'BUY', ?, ?, ?, ?, ?, ?, 'ACTIVE', ?)
       ON CONFLICT(symbol, signal_source, signal_type, signal_date) DO UPDATE SET
         entry_price=excluded.entry_price,
         technical_score=excluded.technical_score,
@@ -1590,7 +1595,7 @@ export async function runTechnicalSignalScan(options: {
               symbol: r.symbol,
               timestamp: signalTs,
               price: r.cmp ?? undefined,
-              source: 'TECHNICAL',
+              source: 'technical_scan',
               generatedAt: signalTs,
             });
           } catch {

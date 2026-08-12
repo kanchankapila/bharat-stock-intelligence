@@ -3,7 +3,7 @@ import { sortSignals, defaultSortDir } from './useSignalLedgerSort';
 
 const rows = [
   { id: 'a', symbol: 'ZOMATO', signal_type: 'SELL', signal_source: 'AI', entry_price: 300, current_price: 280, growth_pct: -6.7, signal_generated_at: '2026-08-01T10:00:00Z' },
-  { id: 'b', symbol: 'ADANIENT', signal_type: 'BUY', signal_source: 'TECHNICAL', entry_price: 2500, current_price: 2700, growth_pct: 8.0, signal_generated_at: '2026-08-03T10:00:00Z' },
+  { id: 'b', symbol: 'ADANIENT', signal_type: 'BUY', signal_source: 'technical_scan', entry_price: 2500, current_price: 2700, growth_pct: 8.0, signal_generated_at: '2026-08-03T10:00:00Z' },
   { id: 'c', symbol: 'INFY', signal_type: 'BUY', signal_source: 'AI', entry_price: 1500, current_price: null, growth_pct: null, signal_generated_at: '2026-08-02T10:00:00Z' },
 ];
 

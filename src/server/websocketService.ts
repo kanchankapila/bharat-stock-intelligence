@@ -22,7 +22,7 @@ export interface SignalAlert {
   level?: string;  // support/resistance/indicator level
   indicator?: string;  // RSI, MACD, etc.
   value?: number;  // RSI value, MACD value, etc.
-  source?: string;  // 'AI', 'TECHNICAL', 'QUANT'
+  source?: string;  // 'AI', 'technical_scan', 'UNIFIED', 'QUANT' — only 'AI' is branched on below
   generatedAt?: string;  // ISO timestamp when signal was generated
   signal?: {
     signalType: string;

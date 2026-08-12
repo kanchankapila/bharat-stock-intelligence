@@ -24,7 +24,7 @@ const {
   resetAITelegramCapForTests,
 } = await import('../websocketService');
 
-function buyAlert(symbol: string, source: 'AI' | 'TECHNICAL' | 'UNIFIED' = 'AI') {
+function buyAlert(symbol: string, source: 'AI' | 'technical_scan' | 'UNIFIED' = 'AI') {
   return {
     type: 'new_signal' as const,
     symbol,
@@ -71,7 +71,7 @@ describe('AI-signal Telegram daily cap (defense-in-depth, 2026-08-06)', () => {
   });
 
   it('does not consume budget or send for non-AI sources (TECHNICAL, UNIFIED)', () => {
-    wsSignalService.broadcastNewSignal(buyAlert('INFY', 'TECHNICAL'));
+    wsSignalService.broadcastNewSignal(buyAlert('INFY', 'technical_scan'));
     wsSignalService.broadcastNewSignal(buyAlert('TCS', 'UNIFIED'));
     expect(mockSendSignalNotification).not.toHaveBeenCalled();
 

@@ -19,8 +19,9 @@ def make_db():
             return_pct REAL, outcome TEXT, signal_score INTEGER,
             signals_json TEXT, computed_at TEXT,
             -- update_weights() filters signal_outcomes to signal_source='technical' (2026-08
-            -- fix, complementing its own unified_signal_outcomes NOT IN ('TECHNICAL') half of
-            -- the same UNION); default so insert_outcome()'s positional INSERT below still works.
+            -- fix, complementing its own unified_signal_outcomes NOT IN ('technical',
+            -- 'technical_scan') half of the same UNION); default so insert_outcome()'s
+            -- positional INSERT below still works.
             signal_source TEXT NOT NULL DEFAULT 'technical',
             PRIMARY KEY (symbol, signal_date, horizon_days, signal_source)
         );
@@ -86,6 +87,78 @@ def test_win_increases_weight():
     """).fetchone()
     assert row is not None
     assert row[0] > 1.0, f"Expected weight > 1.0, got {row[0]}"
+
+def test_technical_sourced_unified_outcomes_are_not_double_counted():
+    """Every technical-sourced outcome reaches update_weights via the signal_outcomes half of
+    its UNION. The unified_signal_outcomes half must contribute only NON-technical sources.
+
+    The exclusion listed 'TECHNICAL' alone, so when Cluster B-lite folded
+    technical_analysis_engine.py into unified_signals under the lowercase 'technical' spelling,
+    25,740 technical outcomes started leaking into the AI/QUANT half and were counted twice.
+    Two spellings differing only by case is what made the bug invisible.
+    """
+    from reward_engine import update_weights
+
+    def run(extra_sources):
+        conn = make_db()
+        insert_outcome(conn, 'INFY', _d(3), 5.0, 'WIN')
+        insert_outcome(conn, 'INFY', _d(2), 5.0, 'WIN')
+        insert_outcome(conn, 'INFY', _d(1), 5.0, 'WIN')
+        for src in extra_sources:
+            conn.execute(
+                "INSERT INTO unified_signal_outcomes "
+                "(symbol, signal_date, signal_source, horizon_days, return_pct, outcome) "
+                "VALUES (?,?,?,15,-9.0,'LOSS')", ('INFY', _d(1), src))
+        conn.commit()
+        return update_weights(conn, dry_run=False)['processed']
+
+    # 'processed' is the row count the UNION actually returned, which is what the exclusion
+    # controls. Asserting on it -- not on the weight -- because of the inertness below.
+    baseline = run([])
+    assert baseline == 3
+    assert run(['technical']) == 3, "lowercase 'technical' leaked past the exclusion"
+    assert run(['technical_scan']) == 3, "'technical_scan' leaked past the exclusion"
+    # Control: a non-technical source must still get through, or the assertions above would
+    # pass vacuously against a filter that simply drops everything.
+    assert run(['AI']) == 4, "non-technical source was wrongly excluded too"
+
+
+def test_unified_signal_outcomes_half_cannot_affect_weights():
+    """Pins a defect, not a feature: the unified_signal_outcomes half of update_weights' UNION
+    selects `NULL AS signals_json`, and weights are only ever accumulated per signal TYPE parsed
+    out of that column (_parse_signal_types(None) -> []). So every row it contributes is counted
+    in `processed` and then discarded -- the reward engine cannot learn from AI/QUANT outcomes
+    at all, for any source, however many rows accumulate.
+
+    Change this test only alongside a deliberate decision to make that half functional, which is
+    a change to RL weighting and needs backtest evidence per .claude/rules/measurement.md.
+    """
+    from reward_engine import update_weights
+
+    def weight(extra_sources):
+        conn = make_db()
+        insert_outcome(conn, 'INFY', _d(3), 5.0, 'WIN')
+        insert_outcome(conn, 'INFY', _d(2), 5.0, 'WIN')
+        insert_outcome(conn, 'INFY', _d(1), 5.0, 'WIN')
+        for src in extra_sources:
+            # a large LOSS: it would visibly drag the weight down if it counted at all
+            conn.execute(
+                "INSERT INTO unified_signal_outcomes "
+                "(symbol, signal_date, signal_source, horizon_days, return_pct, outcome) "
+                "VALUES (?,?,?,15,-9.0,'LOSS')", ('INFY', _d(1), src))
+        conn.commit()
+        update_weights(conn, dry_run=False)
+        row = conn.execute(
+            "SELECT weight FROM signal_type_weights "
+            "WHERE signal_type='RSI_DIVERGENCE' AND regime='BULL' AND sector='IT'").fetchone()
+        return row[0] if row else None
+
+    baseline = weight([])
+    assert baseline is not None and baseline > 1.0
+    # Included by the query (see the test above) and still without effect.
+    assert weight(['AI']) == baseline, \
+        "unified_signal_outcomes now affects weights -- see this test's docstring"
+
 
 def test_stop_loss_decreases_weight_more_than_loss():
     conn = make_db()

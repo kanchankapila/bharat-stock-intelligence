@@ -140,7 +140,13 @@ def update_weights(
         FROM unified_signal_outcomes uso
         WHERE uso.outcome IN ('WIN','LOSS','NEUTRAL','STOP_LOSS')
           AND uso.return_pct IS NOT NULL
-          AND uso.signal_source NOT IN ('TECHNICAL')
+          -- Both spellings, not just 'TECHNICAL' (2026-08-12). The first half of this UNION
+          -- already supplies every technical-sourced outcome from signal_outcomes; this half is
+          -- meant to add only the non-technical ones. When Cluster B-lite folded
+          -- technical_analysis_engine.py into unified_signals under the lowercase spelling, the
+          -- exclusion below silently stopped covering it and 25,740 technical outcomes started
+          -- leaking into the AI/QUANT half. 'technical_scan' is the renamed 'TECHNICAL'.
+          AND uso.signal_source NOT IN ('technical', 'technical_scan')
           AND uso.signal_date >= ?
     """
     rows = conn.execute(query, (cutoff, cutoff)).fetchall()

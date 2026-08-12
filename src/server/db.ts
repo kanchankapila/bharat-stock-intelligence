@@ -1081,7 +1081,11 @@ db.exec(`
     id                 INTEGER PRIMARY KEY AUTOINCREMENT,
     symbol             TEXT NOT NULL,
     signal_date        DATETIME DEFAULT CURRENT_TIMESTAMP,
-    signal_source      TEXT NOT NULL,  -- 'AI', 'TECHNICAL', 'QUANT', 'ENSEMBLE'
+    -- Live values: 'AI', 'technical' (technical_analysis_engine.py), 'technical_scan'
+    -- (technicalSignalsService.ts), 'screener', 'SCREENER_SURFACING', 'platform'.
+    -- Case-sensitive: do NOT reintroduce a spelling that differs from an existing one only by
+    -- case -- 'TECHNICAL' vs 'technical' silently broke reward_engine.py's exclusion list.
+    signal_source      TEXT NOT NULL,
     signal_type        TEXT NOT NULL,  -- 'BUY', 'SELL', 'HOLD'
     entry_price        REAL,
     target_price       REAL,
