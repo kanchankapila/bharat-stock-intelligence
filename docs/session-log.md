@@ -1259,3 +1259,49 @@ running `pnpm install` would have got a different and vulnerable dependency tree
 lockfile has a whole dependency tree that the local audit command cannot see, and the only thing
 that reported it was GitHub's own scanner on push. Same shape as the coverage gaps elsewhere in
 `recurring-bugs.md` — the check was real, its scope silently wasn't the whole thing.
+
+## 2026-08-12 (cont.) — quant_scores point-in-time snapshots
+
+Answering "can't the ranker history be backfilled?": **no, and this is why.** `quant_scores` is
+`PRIMARY KEY (symbol)` with **no date column of any kind** — one row per symbol, overwritten by
+every run — and `unified_ranker.py` reads it with no date filter (`:1158`, `:1773`). So
+reconstructing a past ranking would have to substitute TODAY's values, which is a look-ahead leak
+straight into the `high_vol` veto via `annualized_vol`. `stock_scores` is the same shape;
+`stock_factor_breakdown_history` gives only its components, and only 22 dates from 2026-07-17.
+What HAS point-in-time history: `confluence_signals`, `technical_signals`, `screener_appearances`.
+
+Added `quant_scores_history` (migration `1786960000000`): append-only, PK `(symbol, snapshot_date)`,
+mirroring **all 44** columns rather than a chosen subset — picking a subset is how you discover in
+six weeks that the one column you needed was the one nobody listed. Written by
+`snapshotQuantScores()` at the end of `processQuantScoring`, i.e. only once all three writers have
+settled (`runQuantScoring` -> `multi_factor_scorer` -> `risk_metrics_engine`). Seeded today's
+state: 2,424 rows. This recovers nothing; it stops the answer being "no" next time.
+
+`snapshot_date` is `MAX(date) FROM stock_ohlcv`, deliberately not a wall clock — `quant_scores` is
+derived from OHLCV so that is definitionally the session it describes, and it stays correct if the
+17:30 UTC job runs late or as a boot catch-up. `new Date()` there would be the
+date.today()-as-write-anchor class.
+
+**Bug caught by running it rather than by tsc:** the first version omitted `::text` on
+`MAX(date)`, and Postgres threw `operator does not exist: text = date`. `stock_ohlcv.date` is a
+NATIVE Postgres DATE while `db.ts` declares it TEXT — the "column type assumed from db.ts" class
+in `recurring-bugs.md`, hit despite having read that file this session. The migration had the cast;
+the TypeScript did not. Idempotency verified live: two consecutive calls leave 2,424 rows / 2,424
+symbols.
+
+Two checks added, both negative-controlled inside rolled-back transactions:
+`quant-scores-history-column-parity` (derives from `information_schema`; adding an unmirrored
+column to `quant_scores` makes it return 1) and `quant-scores-history-freshness` (the snapshot
+silently stopping is invisible otherwise, since live `quant_scores` stays perfectly fresh either
+way). End-to-end: 90 checks, 0 errors.
+
+⚠ **A concurrent session is mid-work in this tree** — ~40 files modified/deleted that this session
+never touched (`src/services/aiService.ts`, `geminiService.ts`, `bedrockService.ts`,
+`ollamaManager.ts` deleted; `server.ts`, CI workflow, routers, Python agents modified;
+`QUEUE_AI_SIGNALS` removed from `queues.ts`). Repo-wide `tsc` and `vitest` are therefore red on
+THEIR in-flight work — 3 tRPC procedures no longer on the router, `jobsMonitor.test.ts`'s
+"all 35 queues" now finding 34, `companyProfileSyncService.test.ts`. **None of it is attributable
+to this session**: no tsc error names any file changed here, and every added line in the shared
+files (`db.ts`, `pgClient.ts`, `dataQualityChecks.ts`, `schema.postgres.sql`) is a
+quant_scores_history addition. Committed by explicit path only. Do not judge this commit by a
+whole-repo suite run taken from this window — see `concurrent_session_hazards_2026_08_12`.

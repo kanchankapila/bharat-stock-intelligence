@@ -1017,6 +1017,59 @@ CREATE TABLE IF NOT EXISTS "unified_recommendations_history" (
 );
 CREATE INDEX idx_urh_computed_generated ON public.unified_recommendations_history USING btree (computed_at, generated_at);
 
+-- Point-in-time snapshot of quant_scores (migration 1786960000000). quant_scores is
+-- PRIMARY KEY (symbol) with no date column, so every run overwrites it; without this table
+-- its history is unrecoverable, which is what makes the canonical ranker un-backfillable.
+CREATE TABLE IF NOT EXISTS "quant_scores_history" (
+  "symbol" TEXT NOT NULL,
+  "snapshot_date" TEXT NOT NULL,
+  "return_1m" DOUBLE PRECISION,
+  "return_3m" DOUBLE PRECISION,
+  "return_6m" DOUBLE PRECISION,
+  "return_12m" DOUBLE PRECISION,
+  "above_sma200" BIGINT,
+  "sma200_distance_pct" DOUBLE PRECISION,
+  "momentum_score" DOUBLE PRECISION,
+  "annualized_vol" DOUBLE PRECISION,
+  "sharpe_ratio" DOUBLE PRECISION,
+  "max_drawdown_1y" DOUBLE PRECISION,
+  "vol_rank" DOUBLE PRECISION,
+  "sharpe_rank" DOUBLE PRECISION,
+  "trailing_pe" DOUBLE PRECISION,
+  "forward_pe" DOUBLE PRECISION,
+  "debt_to_equity" DOUBLE PRECISION,
+  "return_on_equity" DOUBLE PRECISION,
+  "operating_margins" DOUBLE PRECISION,
+  "revenue_growth" DOUBLE PRECISION,
+  "piotroski_f_score" BIGINT,
+  "valuation_score" DOUBLE PRECISION,
+  "bullish_screener_count" BIGINT,
+  "bearish_screener_count" BIGINT,
+  "screener_category_breadth" BIGINT,
+  "screener_net_score" DOUBLE PRECISION,
+  "confluence_rank" DOUBLE PRECISION,
+  "rank_momentum" DOUBLE PRECISION,
+  "rank_quality" DOUBLE PRECISION,
+  "rank_value" DOUBLE PRECISION,
+  "rank_composite" DOUBLE PRECISION,
+  "composite_class" TEXT,
+  "ohlcv_days" BIGINT,
+  "last_computed" TIMESTAMPTZ,
+  "return_1w" DOUBLE PRECISION,
+  "beta_1y" DOUBLE PRECISION,
+  "beta_6m" DOUBLE PRECISION,
+  "sortino_ratio" DOUBLE PRECISION,
+  "var_95" DOUBLE PRECISION,
+  "mf_quality_score" DOUBLE PRECISION,
+  "mf_momentum_score" DOUBLE PRECISION,
+  "mf_value_score" DOUBLE PRECISION,
+  "mf_risk_adj_score" DOUBLE PRECISION,
+  "mf_macro_score" DOUBLE PRECISION,
+  "mf_composite_score" DOUBLE PRECISION,
+  PRIMARY KEY ("symbol", "snapshot_date")
+);
+CREATE INDEX idx_qsh_snapshot_symbol ON public.quant_scores_history USING btree (snapshot_date, symbol);
+
 -- ── intraday_regime_history ─────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS "intraday_regime_history" (
   "computed_at" TEXT NOT NULL PRIMARY KEY,

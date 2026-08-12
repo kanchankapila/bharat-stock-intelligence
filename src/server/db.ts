@@ -1094,7 +1094,7 @@ db.exec(`
     reasoning          TEXT,
     technical_score    REAL,           -- Technical analysis component score
     quant_score        REAL,           -- Quantitative analysis component score
-    ai_reasoning       TEXT,           -- AI model reasoning (Ollama/Gemini)
+    ai_reasoning       TEXT,           -- AI model reasoning (Gemini/Bedrock)
     status             TEXT DEFAULT 'ACTIVE',  -- 'ACTIVE', 'COMPLETED', 'EXPIRED', 'FAILED'
     signal_generated_at DATETIME NOT NULL,  -- Exact time signal was generated (critical for outcome matching)
     created_at         DATETIME DEFAULT CURRENT_TIMESTAMP,
@@ -1396,6 +1396,60 @@ db.exec(`
     PRIMARY KEY (symbol, generated_at)
   );
   CREATE INDEX IF NOT EXISTS idx_urh_computed_generated ON unified_recommendations_history(computed_at, generated_at);
+
+  -- Point-in-time snapshot of quant_scores. quant_scores is PRIMARY KEY (symbol) with no date
+  -- column, so every run overwrites it -- without this, its history is unrecoverable and the
+  -- canonical ranker cannot be backfilled. Written by snapshotQuantScores() at the end of the
+  -- quant-scoring job; snapshot_date is MAX(date) FROM stock_ohlcv, not a wall clock.
+  CREATE TABLE IF NOT EXISTS quant_scores_history (
+    symbol                      TEXT NOT NULL,
+    snapshot_date               TEXT NOT NULL,
+    return_1m                   REAL,
+    return_3m                   REAL,
+    return_6m                   REAL,
+    return_12m                  REAL,
+    above_sma200                INTEGER,
+    sma200_distance_pct         REAL,
+    momentum_score              REAL,
+    annualized_vol              REAL,
+    sharpe_ratio                REAL,
+    max_drawdown_1y             REAL,
+    vol_rank                    REAL,
+    sharpe_rank                 REAL,
+    trailing_pe                 REAL,
+    forward_pe                  REAL,
+    debt_to_equity              REAL,
+    return_on_equity            REAL,
+    operating_margins           REAL,
+    revenue_growth              REAL,
+    piotroski_f_score           INTEGER,
+    valuation_score             REAL,
+    bullish_screener_count      INTEGER,
+    bearish_screener_count      INTEGER,
+    screener_category_breadth   INTEGER,
+    screener_net_score          REAL,
+    confluence_rank             REAL,
+    rank_momentum               REAL,
+    rank_quality                REAL,
+    rank_value                  REAL,
+    rank_composite              REAL,
+    composite_class             TEXT,
+    ohlcv_days                  INTEGER,
+    last_computed               TEXT,
+    return_1w                   REAL,
+    beta_1y                     REAL,
+    beta_6m                     REAL,
+    sortino_ratio               REAL,
+    var_95                      REAL,
+    mf_quality_score            REAL,
+    mf_momentum_score           REAL,
+    mf_value_score              REAL,
+    mf_risk_adj_score           REAL,
+    mf_macro_score              REAL,
+    mf_composite_score          REAL,
+    PRIMARY KEY (symbol, snapshot_date)
+  );
+  CREATE INDEX IF NOT EXISTS idx_qsh_snapshot_symbol ON quant_scores_history(snapshot_date, symbol);
 
   -- Intraday paper-trade outcomes: entry/target/stop simulated against the day's OHLC by
   -- intraday_outcome_resolver.py (post-close). Feeds accuracy metrics + the strategy learner.

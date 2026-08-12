@@ -145,6 +145,26 @@ async function processQuantScoring(job: Job): Promise<{ success: boolean }> {
   // from it would have badly overestimated. 5min budget is ample margin over the real number.
   await runPython('risk_metrics_engine.py', [], 5 * 60_000)
     .catch(e => console.warn('[QUEUE] risk_metrics_engine failed:', (e as Error).message));
+
+  // Point-in-time snapshot, taken HERE because quant_scores is only settled once all three
+  // writers above have run (runQuantScoring -> multi_factor_scorer -> risk_metrics_engine).
+  //
+  // quant_scores is PRIMARY KEY (symbol) with no date column, so every run overwrites it and
+  // its history is otherwise unrecoverable. That is what makes backfilling the canonical
+  // ranker impossible: unified_ranker.py reads this table with no date filter, so
+  // reconstructing a past ranking would have to substitute today's values -- a look-ahead leak
+  // straight into the high_vol veto via annualized_vol. See migration 1786960000000.
+  //
+  // snapshot_date is MAX(date) FROM stock_ohlcv, not a wall clock: quant_scores is derived from
+  // OHLCV so that is definitionally the session it describes, and it stays correct when this
+  // 17:30 UTC job runs late or as a boot catch-up. new Date() here would be the
+  // date.today()-as-write-anchor class in recurring-bugs.md.
+  //
+  // Column list mirrors all 44 of quant_scores; the quant-scores-history-column-parity
+  // data-quality check fails if that table gains one this misses.
+  const { snapshotQuantScores } = await import('../quantScoringService');
+  await snapshotQuantScores()
+    .catch(e => console.warn('[QUEUE] quant_scores snapshot failed:', (e as Error).message));
   // Persist the two validated standalone paper screens for cheap API/UI reads. Both remain
   // outside unified_ranker: their evidence supports paper trading, not dilution into the
   // canonical multi-engine blend (and this repo has measured that COMBINING made things worse

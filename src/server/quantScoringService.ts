@@ -201,6 +201,61 @@ async function loadTechnicalCompositeScores(): Promise<Map<string, any>> {
 
 // ─── Main scorer ─────────────────────────────────────────────────────────────
 
+/** All 44 columns of quant_scores, mirrored by quant_scores_history. */
+const QUANT_SCORE_COLUMNS = [
+  'symbol', 'return_1m', 'return_3m', 'return_6m', 'return_12m', 'above_sma200',
+  'sma200_distance_pct', 'momentum_score', 'annualized_vol', 'sharpe_ratio', 'max_drawdown_1y',
+  'vol_rank', 'sharpe_rank', 'trailing_pe', 'forward_pe', 'debt_to_equity', 'return_on_equity',
+  'operating_margins', 'revenue_growth', 'piotroski_f_score', 'valuation_score',
+  'bullish_screener_count', 'bearish_screener_count', 'screener_category_breadth',
+  'screener_net_score', 'confluence_rank', 'rank_momentum', 'rank_quality', 'rank_value',
+  'rank_composite', 'composite_class', 'ohlcv_days', 'last_computed', 'return_1w', 'beta_1y',
+  'beta_6m', 'sortino_ratio', 'var_95', 'mf_quality_score', 'mf_momentum_score',
+  'mf_value_score', 'mf_risk_adj_score', 'mf_macro_score', 'mf_composite_score',
+] as const;
+
+/**
+ * Append today's quant_scores into quant_scores_history.
+ *
+ * quant_scores is PRIMARY KEY (symbol) with no date column, so each run overwrites it and its
+ * history is otherwise unrecoverable. unified_ranker.py reads it with NO date filter, which is
+ * why the canonical ranker's own history cannot be backfilled: any reconstruction of a past
+ * ranking would have to substitute today's values, leaking future information straight into the
+ * high_vol veto through annualized_vol. This does not recover the past — it stops the same
+ * answer being "no" next time. Full rationale in migration 1786960000000.
+ *
+ * snapshot_date is MAX(date) FROM stock_ohlcv, deliberately NOT a wall clock: quant_scores is
+ * derived from OHLCV, so that is definitionally the session these scores describe, and it stays
+ * correct if the job runs late or as a boot catch-up. Using new Date() would be the
+ * date.today()-as-write-anchor class in recurring-bugs.md.
+ *
+ * ON CONFLICT DO NOTHING: re-running the job on the same session must not rewrite a snapshot
+ * already taken — silently replacing a point-in-time record is the defect this table exists to
+ * prevent, and it is exactly what unified_recommendations did before migration 1786940000000.
+ */
+export async function snapshotQuantScores(): Promise<number> {
+  // symbol and snapshot_date are written explicitly; the rest mirror quant_scores in order.
+  const selectCols = QUANT_SCORE_COLUMNS.slice(1).join(', ');
+  // MAX(date)::text, not MAX(date): stock_ohlcv.date is a NATIVE Postgres DATE (db.ts declares
+  // it TEXT, but db.ts is the SQLite schema-of-record -- see recurring-bugs.md's "a column type
+  // assumed from db.ts"). Without the cast the comparison below is `text = date` and Postgres
+  // throws "operator does not exist". `::text` is a single-token cast, which sqlTranslate's
+  // stripPgCasts handles on the SQLite path; a multi-word cast would not be.
+  await dbRun(
+    `INSERT INTO quant_scores_history (symbol, snapshot_date, ${selectCols})
+     SELECT symbol, (SELECT MAX(date)::text FROM stock_ohlcv), ${selectCols}
+     FROM quant_scores
+     ON CONFLICT (symbol, snapshot_date) DO NOTHING`,
+  );
+  const row = await dbGet<{ n: number }>(
+    `SELECT COUNT(*) AS n FROM quant_scores_history
+     WHERE snapshot_date = (SELECT MAX(date)::text FROM stock_ohlcv)`,
+  );
+  const n = Number(row?.n) || 0;
+  console.log(`[QUANT] quant_scores snapshot: ${n} rows x ${QUANT_SCORE_COLUMNS.length} columns for the latest session`);
+  return n;
+}
+
 export async function runQuantScoring(): Promise<void> {
   if (scoringProgress.isRunning) {
     console.warn('[QUANT] Already running — skipping');

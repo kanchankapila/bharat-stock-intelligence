@@ -594,6 +594,50 @@ export const DATA_QUALITY_CHECKS: DataQualityCheck[] = [
   },
 
   {
+    id: 'quant-scores-history-column-parity',
+    label: 'quant_scores_history mirrors every quant_scores column',
+    category: 'scoring',
+    critical: false,
+    // quant_scores has no date column, so quant_scores_history is the ONLY record of what a
+    // symbol's momentum/quality/value/vol inputs were on any past date. A column added to
+    // quant_scores and not to the history table is silently unrecorded forever — and you find
+    // out weeks later, when the history you needed turns out to have a hole in exactly the
+    // column you wanted. Derived from information_schema rather than a hand-written list, for
+    // the same reason as signal-source-table-coverage.
+    sql: `SELECT COUNT(*) AS missing FROM (
+            SELECT column_name FROM information_schema.columns
+             WHERE table_schema = 'public' AND table_name = 'quant_scores'
+            EXCEPT
+            SELECT column_name FROM information_schema.columns
+             WHERE table_schema = 'public' AND table_name = 'quant_scores_history') x`,
+    evaluate: (row) => {
+      const missing = Number(row?.missing) || 0;
+      if (missing > 0) {
+        return { status: 'fail', detail: `${missing} quant_scores column(s) are not mirrored in quant_scores_history — they are being permanently lost every run (see migration 1786960000000)` };
+      }
+      return { status: 'pass', detail: 'quant_scores_history mirrors all quant_scores columns' };
+    },
+  },
+  {
+    id: 'quant-scores-history-freshness',
+    label: 'quant_scores_history is accumulating snapshots',
+    category: 'scoring',
+    critical: false,
+    // The snapshot runs at the end of processQuantScoring (17:30 UTC weekdays). If it silently
+    // stops, quant_scores history quietly stops accumulating and nothing else notices — the
+    // live quant_scores table stays perfectly fresh either way, which is precisely why the
+    // absence is invisible without this check.
+    sql: `SELECT MAX(snapshot_date) AS last_date, COUNT(DISTINCT snapshot_date) AS dates
+          FROM quant_scores_history`,
+    evaluate: (row, now) => {
+      if (!row?.last_date) return { status: 'fail', detail: 'quant_scores_history is empty — the snapshot step is not running' };
+      const stale = tradingDaysStale(row.last_date, now);
+      const dates = Number(row.dates) || 0;
+      if (stale != null && stale > 3) return { status: 'fail', detail: `Latest quant_scores snapshot is ${fmtDays(stale)} old (${dates} sessions recorded)` };
+      return { status: 'pass', detail: `${dates} session(s) recorded, latest ${fmtDays(stale)} old` };
+    },
+  },
+  {
     id: 'model-registry-active-ensemble',
     label: 'Active ensemble model exists and was retrained recently',
     category: 'ml',
