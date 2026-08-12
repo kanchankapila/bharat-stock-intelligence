@@ -1,0 +1,32 @@
+[
+  {
+    "scenario_id": 1,
+    "scenario_name": "Black Swan Crash (VIX 42, FII Net -\u20b98,500 Cr)",
+    "input_vix": 42.5,
+    "input_fii_flow": -8500.0,
+    "safety_gate_passed": false,
+    "smart_money_override_triggered": true,
+    "system_action": "REJECT / VETO",
+    "audit_timestamp": "2026-08-12T06:45:51.217936"
+  },
+  {
+    "scenario_id": 2,
+    "scenario_name": "Sector Rotation Reversal (IT Crash, Banking Rally)",
+    "input_vix": 22.0,
+    "input_fii_flow": 1200.0,
+    "safety_gate_passed": true,
+    "smart_money_override_triggered": false,
+    "system_action": "APPROVE",
+    "audit_timestamp": "2026-08-12T06:45:51.218049"
+  },
+  {
+    "scenario_id": 3,
+    "scenario_name": "Liquidity Squeeze (Broad Market Distribution)",
+    "input_vix": 31.0,
+    "input_fii_flow": -3500.0,
+    "safety_gate_passed": true,
+    "smart_money_override_triggered": true,
+    "system_action": "REJECT / VETO",
+    "audit_timestamp": "2026-08-12T06:45:51.218122"
+  }
+]

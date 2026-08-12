@@ -14,6 +14,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 from db_compat import connect as db_connect
 
+# DB_PATH is handled centrally by db_compat via USE_POSTGRES env var.
 DB_PATH = os.getenv("DB_PATH", "database.sqlite")
 
 # Maps user-typed sector names to patterns that work across both DB sector schemas.

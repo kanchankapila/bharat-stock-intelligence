@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import {
-  TrendingUp, Menu, X,
+  TrendingUp, Menu, X, ShieldCheck, ShieldAlert,
 } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { NAV_GROUPS } from '../lib/navGroups';
@@ -60,6 +60,45 @@ const LiveClock: React.FC<{ marketOpen: boolean }> = ({ marketOpen }) => {
       />
       {currentTimeInZone('Asia/Kolkata')} IST
     </span>
+  );
+};
+
+/**
+ * Small, always-visible operational guardrail for analysts. A green market status is not
+ * sufficient if the feature/scoring pipelines are stale, so this surfaces the existing
+ * monitor-router result in the same chrome as regime and market state. It is intentionally
+ * read-only and cached server-side; it must never block a research page from rendering.
+ */
+const DataHealthChip: React.FC<{ onClick: () => void }> = ({ onClick }) => {
+  const { data, isLoading } = trpc.getSystemStatus.useQuery(undefined, {
+    refetchInterval: 60_000,
+    refetchOnWindowFocus: false,
+  });
+  const rows = Array.isArray(data) ? data as Array<{ runState?: string; critical?: boolean }> : [];
+  const criticalIssues = rows.filter((r) => r.critical && ['failed', 'stale', 'never'].includes(String(r.runState))).length;
+  const degraded = rows.filter((r) => ['failed', 'stale', 'never'].includes(String(r.runState))).length;
+  const failed = criticalIssues > 0;
+  const warn = !failed && degraded > 0;
+  const Icon = failed ? ShieldAlert : ShieldCheck;
+  const label = isLoading ? 'Health …' : failed ? `Health ${criticalIssues} critical` : warn ? `Health ${degraded} degraded` : 'Health nominal';
+  const colors = failed
+    ? { bg: 'var(--v6-negative-soft)', fg: 'var(--v6-negative)', border: 'rgba(244,63,94,0.24)' }
+    : warn
+      ? { bg: 'var(--v6-warning-soft)', fg: 'var(--v6-warning)', border: 'rgba(245,158,11,0.24)' }
+      : { bg: 'var(--v6-positive-soft)', fg: 'var(--v6-positive)', border: 'rgba(16,185,129,0.2)' };
+
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className="v6-chip hidden md:inline-flex items-center gap-1.5 text-[10px] font-bold"
+      style={{ background: colors.bg, color: colors.fg, border: `1px solid ${colors.border}` }}
+      title="Open System Monitor for pipeline freshness and job failures"
+      aria-label={`${label}. Open System Monitor`}
+    >
+      <Icon className="w-3 h-3" aria-hidden="true" />
+      {label}
+    </button>
   );
 };
 
@@ -149,6 +188,8 @@ export const V6Shell: React.FC<V6ShellProps> = ({
                     key={item.id}
                     onClick={() => handleNav(item.id)}
                     className="w-full flex items-center gap-2 px-2.5 py-1 rounded-lg text-left text-[12px] font-medium transition-colors"
+                    aria-current={active ? 'page' : undefined}
+                    title={item.label}
                     style={active ? {
                       background: 'var(--v6-accent-soft)',
                       color: 'var(--v6-accent-ink)',
@@ -277,6 +318,7 @@ export const V6Shell: React.FC<V6ShellProps> = ({
                 P&amp;L {portfolio.totals.unrealizedPnl >= 0 ? '+' : ''}₹{Math.abs(portfolio.totals.unrealizedPnl).toLocaleString('en-IN', { maximumFractionDigits: 0 })}
               </button>
             )}
+            <DataHealthChip onClick={() => handleNav('monitor')} />
             <RegimeChip />
             <span
               className="v6-chip hidden sm:inline-flex"

@@ -1,0 +1,29 @@
+graph TD
+    subgraph Data Sources [External Data Providers]
+        DS1[NSE/BSE API - OHLCV] --> Ingest
+        DS2[MoneyControl - Fundamentals & Deals] --> Ingest
+        DS3[Trendlyne - Consensus & Ratios] --> Ingest
+        DS4[GDELT / News Feeds] --> Ingest
+    end
+
+    subgraph Ingestion Layer [Data Ingestion & Pipeline]
+        Ingest[Python Fetchers & Scrapers] --> PiT[PiT Alignment & Session Rolling]
+        PiT --> DB[(PostgreSQL + TimescaleDB)]
+    end
+
+    subgraph Analytics & Modeling [ML Ensemble & Scoring]
+        DB --> FE[Feature Store & PiT As-Of Joins]
+        FE --> ME[Purged Walk-Forward ML Ensemble]
+        ME --> UR[Unified Ranker & Smart Money Override]
+    end
+
+    subgraph Delivery & Frontend [Client Interface]
+        UR --> API[FastAPI / Backend REST Service]
+        API --> UI[React Frontend & Smart Money Desk]
+    end
+
+    subgraph Telemetry & Monitoring [Observability Stack]
+        DB --> Health[Pipeline Health Checks & Freshness SLAs]
+        Health --> Alert[Prometheus / Alertmanager / PagerDuty]
+        Alert --> Slack[Slack / Telegram Webhook Ops]
+    end
