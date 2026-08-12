@@ -475,6 +475,22 @@ async function processMlDailyOps(job: Job): Promise<{ success: boolean }> {
   await runPython('investsights_investor_activity_fetcher.py', [], 5 * 60_000)
     .catch(e => console.warn('[QUEUE] investsights_investor_activity_fetcher failed:', (e as Error).message));
 
+  // MarketsMojo daily-cadence series (onboarded 2026-08-11, backfilled once, never scheduled
+  // until now — their dataQualityChecks entries were set at warnDays 3/failDays 5 with no job
+  // to satisfy them, so the monitor would have gone red from ~2026-08-14 onward).
+  // ponytail: getCardInfo has no since-parameter, so each run re-fetches the stock's whole
+  // ~743-date series and re-upserts it (~16.7M rows universe-wide) to gain one new row per
+  // series. Tolerable at this cadence and the 0.5s rate limit makes the fetch the real
+  // bottleneck (~15 min), not the write. If it starts hurting, add a --since flag that skips
+  // rows <= max(date) already stored rather than moving this off a daily schedule — the
+  // indigraph/MACD/RSI series update every trading day and are the only historical record of
+  // these indicators anywhere on the platform.
+  await runPython('marketsmojo_technical_fetcher.py', [], 40 * 60_000)
+    .catch(e => console.warn('[QUEUE] marketsmojo_technical_fetcher failed:', (e as Error).message));
+  // 81 indices, one call each — the BSE-family/sectoral coverage macro_asset_prices lacks.
+  await runPython('marketsmojo_index_fetcher.py', [], 10 * 60_000)
+    .catch(e => console.warn('[QUEUE] marketsmojo_index_fetcher failed:', (e as Error).message));
+
   // Point-in-time fundamentals snapshot — builds the as-of trail load_training_data joins.
   // Runs in ~2s solo but its DELETE+INSERT…SELECT on fundamentals_history can block far longer on
   // Postgres lock/CPU contention during the startup catch-up burst (was tripping the old 90s budget
@@ -1097,6 +1113,15 @@ async function processMlWeeklyRetrain(_job: Job): Promise<{ success: boolean }> 
   // MF holdings: AMFI monthly disclosures — weekly fetch is sufficient.
   await runPython('mf_holdings_fetcher.py', [], 10 * 60_000)
     .catch(e => console.warn('[QUEUE] mf_holdings_fetcher failed:', (e as Error).message));
+  // MarketsMojo quarterly-cadence series (onboarded 2026-08-11, backfilled once, never
+  // scheduled). Weekly, not daily: the vendor only restates these on results/filing days, and
+  // their dataQualityChecks entries are warnDays 45 to match. ~1,824 stocks x 0.5s ≈ 15 min each.
+  await runPython('marketsmojo_financials_fetcher.py', [], 40 * 60_000)
+    .catch(e => console.warn('[QUEUE] marketsmojo_financials_fetcher failed:', (e as Error).message));
+  await runPython('marketsmojo_shareholding_fetcher.py', [], 40 * 60_000)
+    .catch(e => console.warn('[QUEUE] marketsmojo_shareholding_fetcher failed:', (e as Error).message));
+  await runPython('marketsmojo_fintrend_fetcher.py', [], 40 * 60_000)
+    .catch(e => console.warn('[QUEUE] marketsmojo_fintrend_fetcher failed:', (e as Error).message));
   // Trendlyne EPS/DivYield series + DVM scores — 2 calls/stock (PE/PB dropped: MC's daily
   // fetch already covers them, fed into the same history tables — see mc_pricefeed_fetcher.py).
   // Scoped to scripts/stocklist.json (~2005 stocks), not the full tlid universe: 2005 stocks
