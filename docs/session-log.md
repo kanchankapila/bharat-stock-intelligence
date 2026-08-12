@@ -1225,3 +1225,37 @@ That dry-run is also the live confirmation the deletion was safe: `update_weight
 185,611 technical outcomes while `update_source_weights` still processes **119,962 unified
 outcomes** into `signal_source_weights`. AI/screener learning is intact; it was simply never
 happening in the function the UNION half was bolted onto.
+
+## 2026-08-12 (cont.) — Incoming-branch review; removed a stray pnpm-lock.yaml
+
+Reviewed the two unmerged remote branches. **Neither was merged, and neither should have been:**
+
+- `claude/claude-md-docs-0hh33u` (2026-06-27) — a 319-line CLAUDE.md rewrite with **zero**
+  references to `.claude/rules/`, asserting "DB: SQLite (`src/server/db.ts`), 50+ tables". That is
+  the exact misconception `recurring-bugs.md` warns about; the live DB is Postgres/TimescaleDB and
+  `db.ts` is the SQLite schema-of-record/dev fallback. Merging would have reverted six weeks of
+  governance structure. Branch deleted. Salvaged the one genuinely missing piece — the four
+  services and their ports — after verifying each against source rather than trusting the stale
+  doc (`server.ts` 3000, `python_api.py` 8000, `chatbot/app.py` 8001, `backend-python/main.py`
+  8002), plus the pm2 names and the not-hot-reloaded note the source branch lacked.
+- `dependabot/npm_and_yarn/...` — advertised as an esbuild security bump, actually **vite 6→8 and
+  vitest 3→4**. Already closed upstream; local ref pruned. Its apparent removal of `ws`/`@types/ws`
+  was branch staleness (main added them after the branch point), not a real removal.
+
+**The push surfaced what the review had missed.** GitHub reported 2 open Dependabot alerts
+(1 high, 1 moderate) immediately after `git push`, contradicting the `npm audit` = 0 that the
+dependabot recommendation had partly rested on. Both alerts were against **`pnpm-lock.yaml`**,
+which `npm audit` does not read — js-yaml 4.3.0 (high, fixed 4.3.1) and uuid 9.0.1 (moderate,
+fixed 11.1.1).
+
+Root cause: `pnpm-lock.yaml` was added by `65fbf8a` (already noted in this log as a
+concurrent-session merge) as 9,329 lines, touching no `package-lock.json`. **Nothing in the repo
+uses pnpm** — no reference in `package.json` or any workflow. The npm tree resolves the *patched*
+versions (js-yaml 4.3.1, uuid 11.1.1); the stray lockfile pinned the vulnerable ones, so anyone
+running `pnpm install` would have got a different and vulnerable dependency tree from
+`npm install`. Deleted. `npm audit` still 0, npm tree unchanged.
+
+**Lesson worth keeping: `npm audit` covers `package-lock.json` only.** A repo carrying a second
+lockfile has a whole dependency tree that the local audit command cannot see, and the only thing
+that reported it was GitHub's own scanner on push. Same shape as the coverage gaps elsewhere in
+`recurring-bugs.md` — the check was real, its scope silently wasn't the whole thing.
