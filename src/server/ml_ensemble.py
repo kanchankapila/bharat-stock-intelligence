@@ -1193,10 +1193,15 @@ def load_training_data(label: str = 'horizon') -> pd.DataFrame:
                   AND ts2.date <= so.signal_date
                   -- 7 days, not 3: the window only has to tolerate market closures (a long
                   -- weekend plus an adjacent holiday exceeds 3 days and used to return NO
-                  -- feature row at all). Widened to 30 days to ensure fundamental/ownership
-                  -- features (which update quarterly/monthly) are captured even if the
-                  -- daily grid forward-fill has gaps.
-                  AND ts2.date >= (so.signal_date::date - interval '30 days')::text
+                  -- feature row at all). Column sparsity is handled upstream by
+                  -- densify_feature_matrix.py, which forward-fills the enrichment columns
+                  -- across the grid -- widening this window is not a substitute for that.
+                  -- (Widened to 30 days on 2026-08-12 (ae3e369) against this exact warning,
+                  -- with no test/measurement; reverted same day -- it would let a training
+                  -- label match a technical-indicator snapshot up to a month stale, and 30
+                  -- days doesn't even reach quarterly fundamentals' true cadence anyway. If
+                  -- fundamentals staleness is a real problem, fix densify_feature_matrix.py.)
+                  AND ts2.date >= (so.signal_date::date - interval '7 days')::text
                 ORDER BY ts2.date DESC
                 LIMIT 1
             ) ts ON TRUE
