@@ -75,7 +75,7 @@ class TestComputeAndWritePledgeTrend:
         update_calls = [(sql, params) for sql, params in fake_conn.cur.executed if "pledge_chg_90d" in sql]
         assert len(update_calls) == 1
         sql, params = update_calls[0]
-        assert params[0] == "2026-07-29", "guard threshold must be the passed-in trading-session floor"
+        assert params[2] == "2026-07-29", "guard threshold must be the passed-in trading-session floor"
         assert fake_conn.committed is True
         assert fake_conn.closed is True
 

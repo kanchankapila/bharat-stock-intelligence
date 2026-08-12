@@ -490,7 +490,10 @@ def run(dry_run: bool = False) -> dict:
 
     if len(records) == 0:
         print("\n[GlobalMacro] ERROR: 0 records parsed from all endpoints. Treating as failure.", file=sys.stderr)
-        sys.exit(1)
+        if __name__ == "__main__":
+            sys.exit(1)
+        else:
+            raise RuntimeError("Zero records parsed from GlobalMacro endpoints")
 
     print(f"\n[GlobalMacro] Done. {len(records)} records written to mc_global_snapshot + macro_asset_prices.")
     return {"records": len(records), "asia_sentiment": by_sym.get("ASIA_SENTIMENT", {}).get("price"),

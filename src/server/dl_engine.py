@@ -36,7 +36,12 @@ except (ImportError, OSError) as _torch_err:
     # WinError 1455 (paging file too small) or missing CUDA DLLs — skip gracefully.
     # Exit 0 so BullMQ marks the job completed, not failed.
     print(f"[DL] PyTorch unavailable ({_torch_err}). Rescheduled for next low-load window.", flush=True)
-    sys.exit(0)
+    if __name__ == "__main__":
+        sys.exit(0)
+    else:
+        # If imported (e.g. by pytest or other services), don't kill the process.
+        # But we must ensure downstream code doesn't crash on missing torch.
+        torch = None
 
 from sklearn.metrics import roc_auc_score, accuracy_score
 
