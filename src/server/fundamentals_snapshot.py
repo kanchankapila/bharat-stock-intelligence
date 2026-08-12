@@ -111,8 +111,8 @@ WHERE {cur_filter}
 # historical row for a symbol on every run -- same bug class as mc_pricefeed_fetcher.py etc.
 _UPDATE_TS_SQL = """
 UPDATE technical_signals
-SET    pledge_chg_90d = CASE WHEN date >= ? THEN ? ELSE NULL END
-WHERE  symbol = ?
+SET    pledge_chg_90d = ?
+WHERE  symbol = ? AND date >= ?
 """
 
 
@@ -152,7 +152,7 @@ def _compute_and_write_pledge_trend(pg: bool, ts_floor: str) -> int:
     try:
         cur = con.cursor()
         for row in rows:
-            cur.execute(_UPDATE_TS_SQL, (ts_floor, row["pledge_chg_90d"], row["symbol"]))
+            cur.execute(_UPDATE_TS_SQL, (row["pledge_chg_90d"], row["symbol"], ts_floor))
         con.commit()
     finally:
         con.close()

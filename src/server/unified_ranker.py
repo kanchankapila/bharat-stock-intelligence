@@ -1515,21 +1515,21 @@ class UnifiedRanker:
             return {}
 
     def _get_smart_money_scores(self):
-        """Insider buying (technical_signals.insider_buy_pct_90d, from insider_features.py) +
-        institutional block/bulk buy accumulation (block_deals.pct_transacted, the % of
-        float actually transacted -- cross-sectionally comparable, unlike raw qty/value_cr;
-        tickertape_deals_fetcher.py) -- a genuinely orthogonal signal previously only surfaced
-        on the standalone /smart-money page, never blended into the canonical score. Component
-        score is the average of whichever of the two are present for a symbol, not requiring
-        both -- most symbols will only ever have one.
+        """Insider buying (technical_signals.insider_buy_pct_90d) +
+        institutional block/bulk buy accumulation (block_deals.pct_transacted) +
+        ranked institutional insights (institutional_deal_signals.deal_value_cr_1w)
+        -- a genuinely orthogonal signal previously only surfaced on the standalone
+        /smart-money page, now fully blended into the canonical score. Component
+        score is the average of whichever of the three are present for a symbol.
         """
-        cutoff = (date.today() - timedelta(days=5)).isoformat()
+        # 1. Insider buying (30-day window to handle sparse updates)
+        insider_cutoff = (date.today() - timedelta(days=30)).isoformat()
         insider_scores = {}
         try:
             rows = self.conn.execute(
-                "SELECT symbol, insider_buy_pct_90d, date FROM technical_signals "
+                "SELECT symbol, insider_buy_pct_90d FROM technical_signals "
                 "WHERE date >= ? AND insider_buy_pct_90d IS NOT NULL ORDER BY date DESC",
-                (cutoff,),
+                (insider_cutoff,),
             ).fetchall()
             for r in rows:
                 sym = r['symbol']
@@ -1539,6 +1539,7 @@ class UnifiedRanker:
             print(f"[UnifiedRanker] _get_smart_money_scores (insider) failed: {e}")
             self.conn.rollback()
 
+        # 2. Block/Bulk deal accumulation (90-day window)
         block_scores = {}
         try:
             deal_cutoff = (date.today() - timedelta(days=90)).isoformat()
@@ -1549,17 +1550,32 @@ class UnifiedRanker:
                 (deal_cutoff,),
             ).fetchall()
             for r in rows:
-                # 10% of float bought over 90d -> 100; scaled linearly, capped at 100. Most
-                # single block deals are 1-3% of float, so this rewards genuine accumulation
-                # (several deals or one large one) without saturating on a single normal-sized deal.
+                # 10% of float bought over 90d -> 100; scaled linearly, capped at 100.
                 block_scores[r['symbol']] = min(100.0, float(r['total_pct'] or 0) * 10.0)
         except Exception as e:
             print(f"[UnifiedRanker] _get_smart_money_scores (block deals) failed: {e}")
             self.conn.rollback()
 
+        # 3. Ranked Institutional Insights (MoneyControl ranked feed)
+        inst_scores = {}
+        try:
+            inst_cutoff = (date.today() - timedelta(days=14)).isoformat()
+            rows = self.conn.execute(
+                "SELECT symbol, SUM(deal_value_cr_1w) AS total_value FROM institutional_deal_signals "
+                "WHERE deal_date >= ? AND action = 'buy' AND deal_value_cr_1w IS NOT NULL "
+                "GROUP BY symbol",
+                (inst_cutoff,),
+            ).fetchall()
+            for r in rows:
+                # 500Cr+ in 2 weeks -> 100; scaled linearly, capped at 100.
+                inst_scores[r['symbol']] = min(100.0, float(r['total_value'] or 0) / 5.0)
+        except Exception as e:
+            print(f"[UnifiedRanker] _get_smart_money_scores (inst insights) failed: {e}")
+            self.conn.rollback()
+
         result = {}
-        for sym in set(insider_scores) | set(block_scores):
-            parts = [v for v in (insider_scores.get(sym), block_scores.get(sym)) if v is not None]
+        for sym in set(insider_scores) | set(block_scores) | set(inst_scores):
+            parts = [v for v in (insider_scores.get(sym), block_scores.get(sym), inst_scores.get(sym)) if v is not None]
             if parts:
                 result[sym] = sum(parts) / len(parts)
         return result
@@ -2058,7 +2074,16 @@ class UnifiedRanker:
             # significant result in 4.5 years of this platform's own price history. A name only
             # missing hv_20d is NOT vetoed (fail open), same as every other missing-data path here.
             sym_vol = realized_vol.get(sym)
+            sm_score = smart_money_scores.get(sym, 0)
             high_vol_vetoed = (hv_cut is not None and sym_vol is not None and sym_vol >= hv_cut)
+            
+            # Smart Money Override (#32): if institutional accumulation is exceptionally high,
+            # bypass the volatility veto. High-conviction buying often creates momentum-volatility
+            # that is desirable, not the risk-volatility the filter is designed to exclude.
+            if high_vol_vetoed and sm_score >= 80:
+                high_vol_vetoed = False
+                print(f"[UnifiedRanker] {sym}: high_vol_veto BYPASSED via Smart Money Override (SM: {sm_score:.1f})")
+
             if high_vol_vetoed:
                 fired['high_vol_veto'] += 1
                 unified *= HIGH_VOL_VETO_MULT
