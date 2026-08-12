@@ -59,6 +59,28 @@ Read before quoting, comparing, or acting on any accuracy, win-rate, IC, or back
 - **Two categories survive Bonferroni across the 10 tested, both negative**: `technical` (−0.042/t=−3.38 at 1d) and `technical_momentum` (−0.136/t=−3.21 at 1d, **−0.673/t=−3.29 at 5d** — the most negative category found). This is the same short-horizon-momentum-is-negative result the factor panel and the Gap-Up/breakout setups both give. Nothing with a positive sign reached significance.
 - **`screener_master.tier` is degenerate and cannot prioritise anything**: 1,527 of 1,669 rows are `D`, 112 `Unranked`, 29 `C`, **1 `B`, and no `A` at all**. Every screener that met the sample bar was tier D.
 
+## Judge a datasource by dates PER SYMBOL, and by its DENSE span (2026-08-12)
+
+- **`count(DISTINCT date)` over a whole table is close to useless, and `min(date)` is worse.** Both
+  misled this repo on the same dataset in one session. `marketsmojo_shareholding_history` reports 44
+  distinct `period_date`s spanning 2018–2026 — it is **exactly 5 per symbol** (min = median = max = 5;
+  9,120 rows = 1,824 × 5), the 44 being the union across symbols whose fiscal periods don't align.
+  Four QoQ changes per name is not testable. Then `marketsmojo_technical_history` reports
+  2021-07-26 → 2026-08-11, apparently 5 years — **2021 is ONE row for ONE symbol**; dense coverage
+  starts 2023-08 (100/249/249/151 dates for 2023/24/25/26), so the real panel is ~3 years, which is
+  what the backtest reported back as 2.83–2.94.
+- **Always run both before calling a table testable**:
+  `SELECT min(n), median(n), max(n) FROM (SELECT symbol, count(DISTINCT date) n FROM t GROUP BY 1)`
+  **and** `SELECT extract(year FROM date), count(DISTINCT date) FROM t GROUP BY 1 ORDER BY 1`.
+- Measured per-symbol depth of the 5 MarketsMojo tables: `technical` **742** (the only deep one),
+  `index` 2,474/index, `financials` 35 quarters, `fintrend` 20, `shareholding` 5.
+- **A one-shot vendor backfill is not an observed history.** All five arrived in a single
+  2026-08-11 call (`count(DISTINCT fetched_at) = 1`), so a 2023 score is today's recomputation of
+  2023. Two `fintrend` rows are dated 2026-08-14 and shareholding's max period is 2026-08-31 —
+  in the future, which is proof the series is generated rather than recorded. Consequence for
+  grading: a **positive** result on such data is provisional, a **negative** one is trustworthy,
+  since restatement bias would if anything flatter the factor.
+
 ## What data is actually testable (audited 2026-08-11)
 
 - **Of 60 symbol+date tables, only 9 have enough history to test anything; 35 cannot be tested at all.** The calendar constraint this file already recorded for fundamentals/analyst/ownership is far wider than four categories — 35 tables start at ~2026-06-30 and have under 40 distinct dates. No amount of modelling fixes that; only elapsed time or a backfill does. Do not spend a day "testing" any of them.
@@ -76,12 +98,68 @@ Read before quoting, comparing, or acting on any accuracy, win-rate, IC, or back
 - **`stock_delivery_data` is the one that settled an open question.** The 2026-08-11 reverse audit flagged `delivery_pct` as a lead on 25 dates of `technical_signals`; this table carries **275 usable dates**. Result: direction AUC 0.541 at 1d (t=+8.85) and 0.546 at 5d (t=+10.99), top-minus-bottom quintile **+0.1917pp/day (t=+7.82)** and **+0.4812pp/5d (t=+9.94)**. It passes the both-tails test in the strongest possible form: AUC vs the winning tail 0.444 and vs the losing tail 0.403 are **both below 0.5** (high-delivery names avoid both tails — they are the calm ones) while the gainer-vs-loser AUC is above 0.5. That combination is a genuine directional signal, not a volatility proxy. The 1d figure uses non-overlapping windows so it needs no HAC correction. **Still not wired into anything**: +0.19pp/day gross against ~15bps round-trip costs makes a daily rebalance marginal, and the 5d construction has a fifth of the turnover — run it through `factor_backtest.py` (turnover-aware, survivorship-free) before acting. Caveat: 88% of the table was backfilled, so `updated_at` cannot prove point-in-time availability for historical rows; the live path writes trade-date D after the 15:30 IST close, which is tradeable at D+1's open.
 - **Two data defects found while auditing**: `stock_delivery_data.trades` is a byte-for-byte duplicate of `delivery_qty` in **100% of 664,006 rows** (the trade-count column is fed delivery quantity), and `mc_earnings_forecast`'s date column holds non-ISO values like `'Mar 2024'` so it will not cast to a date at all.
 
+## The FnO / positioning family is NOT testable — checked 2026-08-12, do not re-scope it
+
+- **Long buildup / short buildup / short covering cannot be reconstructed at all.** That family is
+  defined by (price change × *futures* OI change), and **no fetcher on this platform captures
+  per-stock futures OI**. `so_stock_oi_summary.fut_oi` / `fut_oi_chg` / `fut_price` are **100% NULL
+  across all 4,650 rows** — already root-caused and deliberately left NULL in
+  `so_option_chain_fetcher.py` (see its comment block): Trendlyne's `body["futureData"]` is genuinely
+  `{}` for real stocks, `fno_rollover_fetcher.py` is rollover%/cost-of-carry from bhavcopy (a
+  different metric), and `nt_dashboard_fetcher.py` is options OI, not futures. This needs a **new
+  data source**, not a code fix.
+- **PCR is too shallow.** Deepest stock-level source is `stock_options_oi`: **40 distinct dates, 212
+  symbols** (~2 monthly rebalance periods). `technical_signals.pcr_oi`/`pcr_vol` are populated
+  (62,977 of 66,992 rows) but only **65 dates**, starting 2026-05-16.
+- **`feature_store.pcr_oi` / `pcr_vol` are 100% NULL across 810,775 rows** — declared in the schema,
+  never written by `feature_engineering.py` (its only writer), and read by nobody
+  (`cs_ranker.py`/`ml_ensemble.py` read `technical_signals.pcr_oi`, which is fine). Dead schema, no
+  consumer impact — but do **not** mistake `feature_store`'s 19-month depth for PCR depth.
+- **The mistake that led here is worth more than the result: screener constituent counts are
+  BREADTH, not depth.** The FnO screeners look healthy (`208631` 198 names, `208626` 92, `208625`
+  50) because that is *today's* membership. Membership says nothing about history. Run the
+  per-symbol depth query from [[breadth_is_not_depth_2026_08_12]] **before** nominating any
+  datasource as testable.
+
 ## Grade every candidate factor against BOTH tails
 
 - **An AUC computed only against winners cannot tell "predicts winners" from "predicts volatility", and this codebase has been fooled by that exact statistic twice.** `flyer_classifier` (AUC 0.81, IC −0.041) was the first. The second: measured 2026-08-11, ~40 features across all six factor groups, the apparent winners for next-session top-50 gainers *all* predicted the top-50 losers at least as well — `hv_20d` 0.679 gainers vs **0.704 losers**, `breakout_probability` 0.670 vs **0.705**, `bb_width` 0.632 vs **0.662**, `rs_vs_sector_21d` 0.573 vs **0.628**, `rsi` 0.556 vs **0.611**. Direction AUC (gainers vs losers, which isolates sign from magnitude) came out **below 0.5 for every one**, several significantly (t=−2.3 to −3.8). These features carry *magnitude, not sign* — re-weighting them cannot help, and a one-tailed AUC will keep saying they can. Always report three numbers: AUC vs the winning tail, AUC vs the losing tail, and AUC of one tail against the other.
 - **The common bullish setups are inverted at 1-day.** Next-day open→close excess vs universe, per-date: **Gap Up ≥2% −0.465pp (t=−8.80)** — the most significantly negative thing measured here — Breakout>20d-high −0.185pp (t=−2.69), volume shocker ≥3× −0.122pp (t=−1.67), while **Gap Down ≤−2% is +0.329pp (t=+3.70)**. Open=Low/Open=High are null. Before building anything on a continuation screen, check its sign on this data.
 
-## `factor_backtest.py`'s benchmark is WRONG at `--rebalance 1`. Do not use daily rebalance.
+## ~~`factor_backtest.py`'s benchmark is WRONG at `--rebalance 1`~~ — FIXED 2026-08-12
+
+> **RESOLVED the same day. Daily rebalance is usable again.** Root cause was in `run_backtest`'s
+> exit accounting, not the `benchmark_sane` band: `uni = (...).fillna(missing_exit_pct)` wrote off
+> at **−100%** any eligible name lacking an exit bar on that exact date, conflating "no bar on this
+> one date" with "delisted". `index_exit_prices()`'s docstring already declared the intended
+> semantics ("reserved for a name with no price *anywhere* in the panel"); the code could not tell
+> the two apart.
+>
+> **Measured over 1,943,089 eligible name-periods: 0.1763%/session were alive-but-unpriced
+> (written off at −100%) against 0.0094%/session genuinely delisted — ~95% false positives.**
+> 0.176pp/day reconstructs the ~38pp/yr gap below almost exactly. Diluted at 21d (12 hits/yr),
+> dominant at 1d (252 hits/yr), which is why the broken figure was factor-independent.
+>
+> Fixed with `index_last_alive()`, keyed on **`next_open`, not `close`** — a delisted name's final
+> bar still has a close, so a close-based survival map suppresses the write-off on exactly the
+> names that genuinely delisted (this was caught by the regression test, not by inspection).
+> Alive-but-unpriced names are now dropped from the period in **both** legs, with the strategy leg
+> renormalised so the dropped weight is not silently parked in cash at 0%. Genuine delistings still
+> take `MISSING_EXIT_PCT`.
+>
+> **Universe is now near-invariant to rebalance, the invariant this section asked for:**
+> `--rebalance 1` **+26.13%/yr**, `5` **+23.30%/yr**, `21` **+20.31%/yr**. The residual monotone
+> decline is real equal-weight rebalancing premium, not a bug.
+>
+> **No prior conclusion changed.** `value_book_to_price` at 21d moved +0.778→+0.792%/mo
+> (t 1.99→2.04). `delivery_pct` stays negative and insignificant — 21d/25bps **−0.464%/period
+> t=−1.05** (was −1.04/−1.48), 5d/15bps **−0.112%/period t=−1.11** (was −0.15/−1.48) — so the
+> decision to keep it out of `unified_ranker` stands. **One sub-claim did change**: at 5d, gross
+> **+0.500** now *beats* the universe **+0.402**, so at that horizon it genuinely IS a cost story;
+> the "not a cost story" note held only at 21d (gross +1.505 vs universe +1.592).
+>
+> Regression test: `__tests__/test_factor_backtest_missing_exit.py`, negative-controlled (reverting
+> the guard fails 3 of 9). The historical diagnosis below is kept for the reasoning trail.
 
 Measured 2026-08-12. The `universe_annualised_pct` a run reports should be almost invariant to
 `--rebalance`: it is the same equal-weighted universe over the same window. It is not.
@@ -151,7 +229,31 @@ Each of these was measured on the 5-year price panel with the spec above. Re-tes
 | `near_52w_high`, `low_beta`, `low_idio_vol` | insignificant | US-published factors that did not transfer |
 | `low_max_ret` (lottery demand) | t=−3.12 | significantly **inverted** vs the published result |
 | intraday (23 days, 256 configs) | best net at 15bps = −0.004% | edge exists in sign, smaller than costs |
+| **`mojo_indigraph`** (MarketsMojo's own composite bullish/bearish call, 1.25M panel rows / 1,776 symbols) | **−0.08%/period at 21d/25bps (t=−0.15); −0.14%/period at 5d/15bps (t=−1.26)**; 1/4 years positive in both | measured 2026-08-12 — **no edge.** A vendor's standing directional call is not better than this platform's own |
+| **sector-neutral (industry-relative) value & momentum** | **every one worse than its raw parent; B/P +0.82→+0.46%/mo, t 2.08→1.12** | **rejected, and the confound was ruled out — see below** |
 
 **Combining made it worse in every case tested.** 12-1 alone +0.86% vs the same factor with two exclusions −1.25%. Long-only +0.86% vs long/short +0.49%. The 8-engine blend at IC 0.0001. A new factor must beat `momentum_12_1` **alone**, not add to it.
+
+## Sector-neutralising a factor DESTROYS it here — the opposite of the US result (measured 2026-08-12)
+
+- **Pre-registered** (4 factors, 21d/top-50/25bps, written down before looking): Asness/Porter/Stevens
+  (2000) find industry-relative firm characteristics predict better than raw ones, because a raw
+  value sort is substantially a sector bet. **On this panel every sector-neutral form was worse than
+  its raw parent**: `value_book_to_price` +0.78→**+0.46**%/mo (t 1.99→**1.12**), `value_earnings_yield`
+  +0.52→+0.24 (t 1.36→0.69), `value_composite` +0.77→+0.57 (t 1.94→1.48). Only `momentum_12_1`
+  improved (+0.53→+0.71, t 1.10→1.60) and it is still nowhere near significant.
+- **The obvious confound was ruled out, and this is the part worth keeping.** The `_sn` factors score
+  NaN where `nse_stocks.sector` is unmapped, so they pick top-50 from **69%** of the panel while their
+  raw parents pick from 100% — "raw beat sector-neutral" could just have meant "bigger pool beat
+  smaller pool". The control (`value_book_to_price_secmapped`, raw scoring on exactly the `_sn`
+  universe) came in at **+0.82%/mo, t=2.08** — restricting the universe slightly *helped*. So the
+  full drop from **+0.82 → +0.46 on an identical universe is neutralisation itself**, not selection.
+  The control factor is left registered so nobody re-derives why the naive comparison is invalid.
+- **Interpretation: on Indian equities a large part of the value premium IS the sector bet.** Removing
+  it removes the signal rather than purifying it. Do not re-run this without a genuinely different
+  angle (a point-in-time sector history would be one — `nse_stocks.sector` is a current, surviving-
+  universe snapshot, which is the one real weakness in the above).
+- **Nothing was promoted.** `secmapped` at t=2.08 vs raw at t=1.99 is noise on the same factor, not an
+  improvement, and neither clears a multiple-testing bar that is now ~30 factors wide (needs ~t=3.0).
 
 **Fundamentals, analyst, ownership and earnings factors cannot currently be tested at all** — every one of those tables has ~30 distinct dates, all starting 2026-06-30, i.e. 1–2 independent quarterly observations. This is a calendar constraint, not an engineering one. Do not "test" them; you will be fitting noise.
