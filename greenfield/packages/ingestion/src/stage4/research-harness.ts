@@ -212,3 +212,100 @@ export function computeAnnualizedExcessReturn(
   const periodsPerYear = 252 / rebalanceDays;
   return { meanExcessReturnPerPeriod: mean, annualizedExcessReturnPct: mean * periodsPerYear * 100, nPeriods: n };
 }
+
+export interface NetAnnualizedResult extends AnnualizedResult {
+  meanTurnover: number | null;
+  meanNetExcessReturnPerPeriod: number | null;
+  annualizedNetExcessReturnPct: number | null;
+  /** t-stat of the net-of-cost per-period excess return series (mean / stderr
+   * across periods) -- this, not the IC t-stat, is what Task 5.0.2's
+   * Bonferroni bar is applied to: it reflects whether the actual tradeable
+   * edge survives costs, not just whether the ranking correlates. */
+  netTStat: number | null;
+}
+
+/** Task 5.0.1: same top-K long-only construction as computeAnnualizedExcessReturn,
+ * but deducts real round-trip transaction cost from measured turnover (the
+ * fraction of the top-K set that changed since the PREVIOUS rebalance),
+ * never an assumed constant. Gross-only measurement is exactly how the
+ * predecessor system read `delivery_pct` as a strong factor (t=+7.82) before
+ * discovering it was dead as a long-only factor once cost-adjusted
+ * (net excess -1.04%/period at 21d/25bps) -- see BUILD_STAGE_5_SPEC.md §0. */
+export function computeNetAnnualizedExcessReturn(
+  factorPoints: FactorPoint[], returns: ForwardReturn[], rebalanceDays: number,
+  topK = 20, costBps = 25, liquidityFloor = LIQUIDITY_FLOOR_ADT,
+): NetAnnualizedResult {
+  const winsorizedReturns = winsorizePerDate(
+    returns.filter((r) => r.forwardReturn !== null).map((r) => ({ symbol: r.symbol, sessionDate: r.sessionDate, value: r.forwardReturn! })),
+  );
+  const adtByKey = new Map(returns.map((r) => [`${r.symbol}|${r.sessionDate}`, r.adt252d]));
+  const byDate = new Map<string, Array<{ symbol: string; value: number; ret: number }>>();
+
+  for (const f of factorPoints) {
+    if (f.value === null) continue;
+    const key = `${f.symbol}|${f.sessionDate}`;
+    const ret = winsorizedReturns.get(key);
+    if (ret === undefined) continue;
+    const adt = adtByKey.get(key);
+    if (adt === undefined || adt === null || adt < liquidityFloor) continue;
+    const bucket = byDate.get(f.sessionDate) ?? [];
+    bucket.push({ symbol: f.symbol, value: f.value, ret });
+    byDate.set(f.sessionDate, bucket);
+  }
+
+  const grossExcessPerDate: number[] = [];
+  const netExcessPerDate: number[] = [];
+  const turnoverPerDate: number[] = [];
+  const sortedDates = Array.from(byDate.keys()).sort();
+  let prevTopSet: Set<string> | null = null;
+
+  for (let i = 0; i < sortedDates.length; i += rebalanceDays) {
+    const date = sortedDates[i]!;
+    const cohort = byDate.get(date)!;
+    if (cohort.length < topK) continue;
+    const universeReturn = cohort.reduce((s, c) => s + c.ret, 0) / cohort.length;
+    const top = [...cohort].sort((a, b) => b.value - a.value).slice(0, topK);
+    const portfolioReturn = top.reduce((s, c) => s + c.ret, 0) / top.length;
+    const grossExcess = portfolioReturn - universeReturn;
+
+    const topSet = new Set(top.map((t) => t.symbol));
+    // One-way turnover: fraction of the new top-K that wasn't in the
+    // previous top-K. The first rebalance has no prior portfolio to compare
+    // against, so it isn't counted (buying from cash isn't a "trade cost"
+    // in the same sense a rebalance is).
+    if (prevTopSet !== null) {
+      const entered = [...topSet].filter((s) => !prevTopSet!.has(s)).length;
+      const turnover = entered / topK;
+      const netExcess = grossExcess - (costBps / 10_000) * turnover;
+      grossExcessPerDate.push(grossExcess);
+      netExcessPerDate.push(netExcess);
+      turnoverPerDate.push(turnover);
+    }
+    prevTopSet = topSet;
+  }
+
+  const n = netExcessPerDate.length;
+  if (n === 0) {
+    return {
+      meanExcessReturnPerPeriod: null, annualizedExcessReturnPct: null, nPeriods: 0,
+      meanTurnover: null, meanNetExcessReturnPerPeriod: null, annualizedNetExcessReturnPct: null, netTStat: null,
+    };
+  }
+  const meanGross = grossExcessPerDate.reduce((a, b) => a + b, 0) / n;
+  const meanNet = netExcessPerDate.reduce((a, b) => a + b, 0) / n;
+  const meanTurnover = turnoverPerDate.reduce((a, b) => a + b, 0) / n;
+  const periodsPerYear = 252 / rebalanceDays;
+
+  let netTStat: number | null = null;
+  if (n >= 2) {
+    const variance = netExcessPerDate.reduce((sum, v) => sum + (v - meanNet) ** 2, 0) / (n - 1);
+    const stderr = Math.sqrt(variance / n);
+    netTStat = stderr > 0 ? meanNet / stderr : null;
+  }
+
+  return {
+    meanExcessReturnPerPeriod: meanGross, annualizedExcessReturnPct: meanGross * periodsPerYear * 100, nPeriods: n,
+    meanTurnover, meanNetExcessReturnPerPeriod: meanNet, annualizedNetExcessReturnPct: meanNet * periodsPerYear * 100,
+    netTStat,
+  };
+}

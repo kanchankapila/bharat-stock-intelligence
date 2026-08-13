@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
-  computeAnnualizedExcessReturn, computeForwardReturns, computeIC, winsorizePerDate,
+  computeAnnualizedExcessReturn, computeForwardReturns, computeIC, computeNetAnnualizedExcessReturn, winsorizePerDate,
   type FactorPoint,
 } from './research-harness.js';
 import type { OpenPriceRow } from '@greenfield/db';
@@ -175,5 +175,76 @@ describe('computeAnnualizedExcessReturn -- benchmark negative control', () => {
     expect(r21.annualizedExcessReturnPct).not.toBeNull();
     const diff = Math.abs(r1.annualizedExcessReturnPct! - r21.annualizedExcessReturnPct!);
     expect(diff).toBeLessThan(5);
+  });
+});
+
+describe('computeNetAnnualizedExcessReturn -- Task 5.0.1 cost/turnover negative control', () => {
+  const K = 10;
+  const N_SYMBOLS = 2 * K;
+  const N_SESSIONS = 100;
+  const REBALANCE = 5;
+  const COST_BPS = 25;
+
+  // Every rebalance period, factor value flips WHICH half of the universe
+  // scores highest -- guarantees the top-K set has zero overlap with the
+  // previous period's top-K, i.e. exactly 100% one-way turnover.
+  function build100PctTurnoverUniverse(): { bars: OpenPriceRow[]; factors: FactorPoint[] } {
+    const bars: OpenPriceRow[] = [];
+    const factors: FactorPoint[] = [];
+    for (let d = 0; d < N_SESSIONS; d++) {
+      const sessionDate = `D${String(d + 1).padStart(5, '0')}`;
+      const periodIndex = Math.floor(d / REBALANCE);
+      for (let s = 0; s < N_SYMBOLS; s++) {
+        const symbol = `SYM${s}`;
+        bars.push(bar(symbol, sessionDate, 100)); // flat price -> ~0 gross return always
+        const highHalf = (s + periodIndex) % 2 === 0;
+        factors.push({ symbol, sessionDate, value: highHalf ? 1 : 0 });
+      }
+    }
+    return { bars, factors };
+  }
+
+  // Factor value is a fixed, never-changing symbol index -- same top-K
+  // every single rebalance, i.e. 0% turnover after the first period.
+  function build0PctTurnoverUniverse(): { bars: OpenPriceRow[]; factors: FactorPoint[] } {
+    const bars: OpenPriceRow[] = [];
+    const factors: FactorPoint[] = [];
+    for (let d = 0; d < N_SESSIONS; d++) {
+      const sessionDate = `D${String(d + 1).padStart(5, '0')}`;
+      for (let s = 0; s < N_SYMBOLS; s++) {
+        const symbol = `SYM${s}`;
+        bars.push(bar(symbol, sessionDate, 100));
+        factors.push({ symbol, sessionDate, value: s }); // fixed rank, forever
+      }
+    }
+    return { bars, factors };
+  }
+
+  it('100% turnover: net excess collapses toward gross - costBps/10000 every period', () => {
+    const { bars, factors } = build100PctTurnoverUniverse();
+    const returns = computeForwardReturns(bars, REBALANCE);
+    const result = computeNetAnnualizedExcessReturn(factors, returns, REBALANCE, K, COST_BPS);
+    expect(result.meanTurnover).not.toBeNull();
+    expect(result.meanTurnover!).toBeCloseTo(1.0, 5);
+    expect(result.meanExcessReturnPerPeriod).not.toBeNull();
+    expect(result.meanNetExcessReturnPerPeriod).not.toBeNull();
+    const expectedNet = result.meanExcessReturnPerPeriod! - (COST_BPS / 10_000) * 1.0;
+    expect(result.meanNetExcessReturnPerPeriod!).toBeCloseTo(expectedNet, 6);
+  });
+
+  it('0% turnover: net excess is (almost) unchanged from gross -- no cost is deducted for a portfolio that never trades', () => {
+    const { bars, factors } = build0PctTurnoverUniverse();
+    const returns = computeForwardReturns(bars, REBALANCE);
+    const result = computeNetAnnualizedExcessReturn(factors, returns, REBALANCE, K, COST_BPS);
+    expect(result.meanTurnover).not.toBeNull();
+    expect(result.meanTurnover!).toBeCloseTo(0, 5);
+    expect(result.meanNetExcessReturnPerPeriod!).toBeCloseTo(result.meanExcessReturnPerPeriod!, 6);
+  });
+
+  it('negative control: the cost model is actually subtracted, not silently ignored -- net must be strictly worse than gross whenever turnover > 0', () => {
+    const { bars, factors } = build100PctTurnoverUniverse();
+    const returns = computeForwardReturns(bars, REBALANCE);
+    const result = computeNetAnnualizedExcessReturn(factors, returns, REBALANCE, K, COST_BPS);
+    expect(result.meanNetExcessReturnPerPeriod!).toBeLessThan(result.meanExcessReturnPerPeriod!);
   });
 });
