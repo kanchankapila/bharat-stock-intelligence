@@ -11,6 +11,9 @@ dist/
 coverage/
 *.tsbuildinfo
 
+# run-skill driver output (live-data screenshots, not fixtures)
+.claude/skills/*/screenshots/
+
 # Local environment
 .env*
 !.env.example
