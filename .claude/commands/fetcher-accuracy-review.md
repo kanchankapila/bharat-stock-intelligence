@@ -47,11 +47,30 @@ Find `test_live_datasource_*` (or the `.test.ts` equivalent under `RUN_LIVE_DATA
 
 If there's no such test, this fetcher fails the review outright — this is the exact gap that let the 2026-07-23 Trendlyne bug corrupt ~2.1M rows across 7 tables undetected.
 
-## 4. Freshness check
+## 4. Freshness check — and confirm which table is actually THE table
 
-Is there a `TABLE_FRESHNESS_CHECKS` entry in `dataQualityChecks.ts` for this fetcher's target table? If not, the review fails — a fetcher can pass every test above and still go silently empty in production (`mf_sector_allocation` did, for its entire life, indistinguishable from healthy). Check `tradingDayAware` is set correctly for the cadence (default `true`; `false` only for genuinely 24/7 tables).
+Before writing the check, confirm you know the real write target: grep the fetcher for `INSERT INTO`/`UPDATE`/`ON CONFLICT`, not just `CREATE TABLE IF NOT EXISTS` — a defensive `CREATE TABLE` doesn't mean this file writes there. Caught live 2026-08-13: a table named `trendlyne_pe_history` looked like a two-writer collision (both `mc_pricefeed_fetcher.py` and `trendlyne_fundamentals_fetcher.py` had a matching `CREATE TABLE IF NOT EXISTS`) until actually reading `trendlyne_fundamentals_fetcher.py` line by line showed it only `SELECT`s from that table — `mc_pricefeed_fetcher.py` is the sole writer, and a comment in `queues.ts` already said so. A `CREATE TABLE IF NOT EXISTS` count is a hypothesis, not a finding, until you've checked which files actually mutate the table.
 
-**A fresh table is not a delivered feature.** If this fetcher's whole purpose is to populate specific columns consumed elsewhere (an `ext_*` feature, a score input), check those columns aren't 100%-NULL on the last completed trading day — a freshness check on the table can pass while the column it exists to deliver never populated (`extra_endpoint_responses` took fresh rows nightly for weeks while all 14 `ext_*` columns stayed at 0%).
+Is there a `TABLE_FRESHNESS_CHECKS` entry in `dataQualityChecks.ts` for the confirmed target table? If not, the review fails — a fetcher can pass every test above and still go silently empty in production (`mf_sector_allocation` did, for its entire life, indistinguishable from healthy — and so did `mf_holdings_fetcher.py`'s `stock_mf_holdings`, found 2026-08-13: the table didn't even exist, because a dead upstream endpoint had 404'd on every symbol since the fetcher was added). Check `tradingDayAware` is set correctly for the cadence (default `true`; `false` only for genuinely 24/7 tables). **Actually run the check** (`npx tsx scripts/run_data_quality_checks.ts`, filtered to the new `id`) against live Postgres before calling this done — a check that compiles but was never executed against real data is the same unverified claim as an un-run test.
+
+If the table has no timestamp/date column at all (checked `information_schema.columns`, not assumed), it can't take the standard factory — flag it as "schema doesn't support freshness measurement" rather than force-fitting a check onto the wrong column or silently skipping it. `screener_catalog` and `mc_estimates_hits_misses`/`mc_stock_vitals`/`mc_stock_scans`/`mc_seasonality_best_stocks` are in exactly this state as of 2026-08-13 — needs a migration, not a check.
+
+**If the table you're about to check has an `ON CONFLICT DO UPDATE SET`, verify the freshness column is actually IN that SET clause before trusting it.** `screener_master.last_updated` looked like a valid freshness signal but was excluded from the upsert's SET clause — frozen at first-insert forever while the row's real content refreshed daily. A check wired up against it would have been permanently, silently wrong. Same root class as `recurring-bugs.md`'s "`generated_at` in `ON CONFLICT`" bug, inverse form (wrongly excluded here, vs. wrongly included there).
+
+**A fresh table is not a delivered feature — and a fresh SOURCE table doesn't prove the DERIVED column is fresh either.** If this fetcher's whole purpose is to populate specific columns consumed elsewhere (an `ext_*` feature, a score input, a `technical_signals` column via `UPDATE`), check those columns aren't 100%-NULL on the last completed trading day — a freshness check on the table can pass while the column it exists to deliver never populated (`extra_endpoint_responses` took fresh rows nightly for weeks while all 14 `ext_*` columns stayed at 0%). Run the same query `technical-signals-feature-coverage`'s check uses, but list the actual dead column names instead of just the count:
+
+```sql
+WITH latest AS (
+  SELECT * FROM technical_signals
+  WHERE date = (SELECT MAX(date) FROM technical_signals WHERE date < CURRENT_DATE::text)
+), kv AS (
+  SELECT key, COUNT(*) FILTER (WHERE value <> 'null'::jsonb) AS non_null
+  FROM latest t, LATERAL jsonb_each(to_jsonb(t)) GROUP BY key
+)
+SELECT key FROM kv WHERE non_null = 0 ORDER BY key;
+```
+
+Check whether this fetcher's declared output columns are in that list. If they are, don't stop at "the source table is fresh" — trace *why* the derived column is dead: a genuine bug (write path broken), or a structural lag that's already accounted for (e.g. a weekly fetcher's blanket `UPDATE ... WHERE symbol = ?` only touches rows that already existed at run time — a daily grid row inserted *after* the weekly run stays NULL until the next weekly pass, which can look like 100% failure on any day that isn't the day after the weekly job ran). Distinguish the two before reporting either as a finding.
 
 ## 5. Recurring bug signatures specific to fetchers
 

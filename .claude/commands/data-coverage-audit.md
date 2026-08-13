@@ -16,11 +16,26 @@ Derive these lists from the source tree — grep for the actual call sites (`run
 
 ## 2. Match them up
 
+**Grep the whole file text for the table name, not just the `table:` field.** A pattern like `table: '<name>'` misses every hand-rolled check (which most of the highest-stakes tables use — `stock_ohlcv`, `technical_signals`, `fii_dii_flow` are all hand-rolled, not factory entries) and produces false "gap" reports. Confirmed 2026-08-13: a first pass using the narrow pattern flagged ~24 false positives that a whole-file `grep -w` immediately resolved.
+
 Three gaps to report, each separately:
 
 - **Fetcher with no `live_datasource` test.** Silent-wrong-on-day-one risk.
-- **Table with no freshness check.** Silent-dead-on-day-200 risk — `mf_sector_allocation` was completely empty and indistinguishable from healthy in every dashboard.
-- **Table WITH a freshness check that only measures row recency, not the columns the fetcher exists to populate.** Check a sample of freshness-check-covered tables: pick the columns downstream consumers (`ml_ensemble.py`, `unified_ranker.py`, scoring engines) actually read from each, and check what fraction is 100%-NULL on the most recently completed trading day. A fresh table is not a delivered feature.
+- **Table with no freshness check.** Silent-dead-on-day-200 risk — `mf_sector_allocation` was completely empty and indistinguishable from healthy in every dashboard; so was `mf_holdings_fetcher.py`'s `stock_mf_holdings`, found 2026-08-13 (the table didn't exist at all — traced to a dead upstream endpoint, 404ing on every symbol, silently swallowed by the queue's own `.catch()`).
+- **Table WITH a freshness check that only measures row recency, not the columns the fetcher exists to populate.** Pick the columns downstream consumers (`ml_ensemble.py`, `unified_ranker.py`, scoring engines) actually read from each, and check what fraction is 100%-NULL on the most recently completed trading day:
+
+  ```sql
+  WITH latest AS (
+    SELECT * FROM technical_signals
+    WHERE date = (SELECT MAX(date) FROM technical_signals WHERE date < CURRENT_DATE::text)
+  ), kv AS (
+    SELECT key, COUNT(*) FILTER (WHERE value <> 'null'::jsonb) AS non_null
+    FROM latest t, LATERAL jsonb_each(to_jsonb(t)) GROUP BY key
+  )
+  SELECT key FROM kv WHERE non_null = 0 ORDER BY key;
+  ```
+
+  Cross-reference the dead-column list against each fetcher's declared output columns — a hit corroborates a freshness finding from a second, independent angle (2026-08-13: `mf_holding_pct`/`mf_chg_vs_prev` showed up here too, confirming the dead-endpoint finding above from the consumption side, not just the source side). A fresh table is not a delivered feature, and don't stop at "the column is dead" — trace whether it's a genuine break or an accounted-for structural lag (e.g. a weekly fetcher's blanket `UPDATE` only reaches rows that existed at run time; a daily grid row inserted after can look 100% dead until the next weekly pass) before reporting it as a defect.
 
 ## 3. Check for the promotion-gate false positive
 
