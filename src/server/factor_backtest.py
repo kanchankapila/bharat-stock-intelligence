@@ -261,6 +261,19 @@ FACTORS = {
     # above). See FEATURE_STORE_FACTORS / _add_feature_store for the exclusion rationale.
     **{f'fs_{c}': (lambda d, c=c: d[c]) for c in FEATURE_STORE_FACTORS},
 
+    # -- PEAD (post-earnings-announcement drift), pre-registered (2026-08-13). Bernard/Thomas
+    # (1989): stocks whose most recent result beat estimates continue drifting UP for weeks;
+    # misses continue drifting down. pead_model.py's own compute_pead_score() is NOT usable --
+    # its two required inputs (eps_growth_yoy/eps_growth_qoq) are effectively 100% NULL across
+    # the entire panel (measured live: 0 populated on all but the 2 most recent dates, out of
+    # ~2,150-2,200 symbols/day) -- dead schema, same shape as feature_store's rev_growth/
+    # eps_growth pair. earnings_category_yoy/_qoq (mc_earnings_fetcher.py's
+    # _backfill_rapid_features, BP=+2/PT=+1/LR=0/WP=-1/NT=-2) are the only genuinely populated
+    # (~88-90% of symbols daily, 60+ days deep) earnings-surprise signal on this panel, so that
+    # is what gets tested here, not pead_score.
+    'earnings_beat_yoy': lambda d: d['earnings_category_yoy'],
+    'earnings_beat_qoq': lambda d: d['earnings_category_qoq'],
+
     # -- Contested SCREENER families, reconstructed from price so their direction is
     # MEASURED rather than read off the screener's wording. Each is signed so that a
     # POSITIVE net excess means "this screener family is bullish".
@@ -500,6 +513,7 @@ def load_price_panel(start: str = DEFAULT_START,
     px = _add_beta_and_idio_vol(px)
     px = _add_screener_breadth(px)
     px = _add_feature_store(px, start, end)
+    px = _add_earnings_category(px, start, end)
     px = px.drop(columns=['_dr', '_hi252', '_mkt', '_ticket'], errors='ignore')
 
     # TWO different eligibilities, and conflating them is what made the live screen stale:
@@ -875,6 +889,35 @@ def _add_feature_store(px: pd.DataFrame, start: str, end: str) -> pd.DataFrame:
     coverage = ', '.join(f"{c}={int(px[c].notna().sum()):,}" for c in FEATURE_STORE_FACTORS)
     print(f"[FactorBacktest] feature_store: {len(fs):,} rows merged, {fs['date'].nunique()} "
           f"distinct dates. Coverage -- {coverage}")
+    return px
+
+
+def _add_earnings_category(px: pd.DataFrame, start: str, end: str) -> pd.DataFrame:
+    """Merge earnings_category_yoy/_qoq from technical_signals onto the panel.
+
+    Same point-in-time convention as _add_feature_store: technical_signals.date is the trading
+    day the row's close-of-day features describe (mc_earnings_fetcher.py's
+    _backfill_rapid_features writes same-day), so a plain (symbol, date) merge is correct --
+    portfolio formation on date D still enters at D's next_open like everything else in this
+    harness. technical_signals.date is TEXT, not a native date column.
+    """
+    try:
+        ec = read_df(
+            "SELECT symbol, date, earnings_category_yoy, earnings_category_qoq "
+            "FROM technical_signals WHERE date >= ? AND date <= ?",
+            (start, end),
+        )
+    except Exception as e:                                      # noqa: BLE001
+        print(f"[FactorBacktest] WARNING: earnings_category unavailable ({str(e)[:80]}); skipped.")
+        px['earnings_category_yoy'] = np.nan
+        px['earnings_category_qoq'] = np.nan
+        return px
+
+    ec['date'] = pd.to_datetime(ec['date']).dt.strftime('%Y-%m-%d')
+    px = px.merge(ec, on=['symbol', 'date'], how='left')
+    print(f"[FactorBacktest] earnings_category: {len(ec):,} rows merged, {ec['date'].nunique()} "
+          f"distinct dates. Coverage -- yoy={int(px['earnings_category_yoy'].notna().sum()):,}, "
+          f"qoq={int(px['earnings_category_qoq'].notna().sum()):,}")
     return px
 
 

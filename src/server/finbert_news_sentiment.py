@@ -35,6 +35,18 @@ def score_batch(items: list[dict]) -> list[dict]:
     for item in items:
         text = f"{item.get('title', '')}. {item.get('summary', '') or ''}"[:1500]
         result = finbert.predict(text)
+        # 2026-08-13 fix: predict()'s `available` flag distinguishes a genuine FinBERT-neutral
+        # verdict from the model never having run (not loaded, or this call threw) -- both
+        # collapse to the identical {"sentiment": "neutral", "score": 0.0} payload otherwise.
+        # This caller was dropping that distinction on the floor: every unavailable call still
+        # got appended here, so enrichWithFinBERT() marked it ai_scored=1 with a confident-
+        # looking fake neutral, permanently overwriting the keyword baseline and never retrying.
+        # Measured live: 4,644 rows (33.8% of all ai_scored=1 rows) sitting at exactly
+        # NEUTRAL/0.0 -- a real FinBERT call is decisive (96-97% confidence on the two worst
+        # offenders, re-run live), not a coin-flip that lands on exactly 0 a third of the time.
+        # Skipping here means the row stays ai_scored=0 and gets retried next cycle instead.
+        if not result.get("available"):
+            continue
         sentiment = SENTIMENT_MAP.get(result["sentiment"], "NEUTRAL")
         # Signed score matching scoreSentiment()'s existing convention (-1..1): FinBERT's
         # `score` is an unsigned confidence in the predicted label, sign it by direction.

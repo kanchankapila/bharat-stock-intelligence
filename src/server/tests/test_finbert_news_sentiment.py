@@ -53,3 +53,31 @@ class TestScoreBatch:
             ])
         assert [r["id"] for r in out] == ["x", "y"]
         assert out[0]["sentiment"] == "BULLISH" and out[1]["sentiment"] == "BEARISH"
+
+    def test_unavailable_prediction_is_dropped_not_faked_as_neutral(self):
+        """2026-08-13 regression: predict()'s `available=False` (model never loaded, or the
+        call threw) was being appended here identically to a genuine neutral verdict, so
+        enrichWithFinBERT() marked the row ai_scored=1 with a confident-looking fake NEUTRAL/0.0
+        that permanently overwrote the keyword baseline and never retried. Measured live:
+        4,644 of 13,755 ai_scored=1 rows (33.8%) sat at exactly NEUTRAL/0.0 -- a real FinBERT
+        call is decisive (96-97% confidence re-run live on two of the worst offenders), not a
+        coin-flip landing on exactly 0 a third of the time. The item must be dropped from the
+        output so it stays ai_scored=0 and is retried, not silently poisoned."""
+        with patch("finbert_news_sentiment.FinBERTInference") as MockCls:
+            MockCls.return_value.predict.return_value = _fake_predict("neutral", 0.0, available=False)
+            out = score_batch([{"id": "e", "title": "TCS shares tumble 4% after CEO resigns", "summary": ""}])
+        assert out == []
+
+    def test_unavailable_item_does_not_block_a_later_available_one_in_the_same_batch(self):
+        predictions = [
+            _fake_predict("neutral", 0.0, available=False),
+            _fake_predict("bearish", 0.96, available=True),
+        ]
+        with patch("finbert_news_sentiment.FinBERTInference") as MockCls:
+            MockCls.return_value.predict.side_effect = predictions
+            out = score_batch([
+                {"id": "down", "title": "model unavailable for this one"},
+                {"id": "up", "title": "Kirloskar Industries Q1 profit falls 69%"},
+            ])
+        assert [r["id"] for r in out] == ["up"]
+        assert out[0]["sentiment"] == "BEARISH"
