@@ -453,6 +453,12 @@ const TABLE_FRESHNESS_CHECKS: TableFreshnessConfig[] = [
     category: 'signals', critical: false, table: 'stock_event_triggers', dateColumn: 'date', warnDays: 3, failDays: 5 },
   { id: 'screener-sector-rotation-freshness', label: 'screener_sector_rotation',
     category: 'signals', critical: false, table: 'screener_sector_rotation', dateColumn: 'date', warnDays: 3, failDays: 5 },
+  // Found 2026-08-13 (data-coverage-audit): screener_features_fetcher.py's own output table.
+  // Also has no live_datasource test (test_screener_features_fetcher.py exists but only
+  // covers the date-anchor regression, never calls the real API) -- flagged separately, not
+  // fixed here (a test needs a real API call this session hasn't verified against).
+  { id: 'screener-membership-snapshot-freshness', label: 'screener_membership_snapshot (point-in-time screener membership, currently unconsumed)',
+    category: 'signals', critical: false, table: 'screener_membership_snapshot', dateColumn: 'as_of_date', warnDays: 3, failDays: 5 },
   { id: 'intraday-recommendations-freshness', label: 'intraday_recommendations',
     category: 'signals', critical: false, table: 'intraday_recommendations', dateColumn: 'computed_at', warnDays: 3, failDays: 5 },
   // Found 2026-08-13: live_screener_appearances/live_screener_runs (42 NiftyTrader filters +
@@ -492,6 +498,12 @@ const TABLE_FRESHNESS_CHECKS: TableFreshnessConfig[] = [
     category: 'reference', critical: false, table: 'nse_stocks', dateColumn: 'index_flags_updated_at', warnDays: 5, failDays: 10 },
   { id: 'mc-broker-reco-freshness', label: 'mc_broker_reco',
     category: 'reference', critical: false, table: 'mc_broker_reco', dateColumn: 'fetched_at', warnDays: 5, failDays: 10 },
+  // Found 2026-08-13 (data-coverage-audit): moneycontrol_fetcher.py writes this (analyst
+  // high/mean/low price targets) but no consumer reads it anywhere in the codebase --
+  // low-priority per this file's own "orphaned table nothing reads" prioritisation, but the
+  // freshness-check mandate is unconditional per live datasource, orphaned or not.
+  { id: 'mc-price-forecast-freshness', label: 'mc_price_forecast (analyst target high/mean/low -- currently unconsumed)',
+    category: 'reference', critical: false, table: 'mc_price_forecast', dateColumn: 'fetched_at', warnDays: 5, failDays: 10 },
   { id: 'mc-chart-patterns-freshness', label: 'mc_chart_patterns',
     category: 'reference', critical: false, table: 'mc_chart_patterns', dateColumn: 'fetched_at', warnDays: 3, failDays: 5 },
   // Found 2026-08-13 (fetcher-accuracy-review sweep, batch 2): mc_chart_patterns_fetcher.py's
@@ -1401,6 +1413,64 @@ export const DATA_QUALITY_CHECKS: DataQualityCheck[] = [
       if (dead > 65) return { status: 'fail', detail: `${detail} That is well above the baseline — a feature writer has stopped landing on the grid.` };
       if (dead > 55) return { status: 'warn', detail: `${detail} Up from the baseline — check which writer regressed.` };
       return { status: 'pass', detail };
+    },
+  },
+
+  // ── News sources added 2026-08-13, source-scoped (hand-rolled, not the TABLE_FRESHNESS_CHECKS
+  // factory) -- all four write into the same shared news_sentiment_items table the existing
+  // 'news-sentiment-freshness' check already covers, so a bare MAX(fetched_at) over the whole
+  // table would stay green even if one of these four sources went silently dead while the other
+  // ~15 kept writing. Per data-sources.md's freshness-check mandate: "a hand-rolled bespoke
+  // check is still fine for anything needing custom logic beyond simple freshness" -- a
+  // WHERE source = ? filter is exactly that, which the factory doesn't support.
+  {
+    id: 'nse-announcements-freshness', label: 'news_sentiment_items — NSE Announcements source',
+    category: 'reference', critical: false,
+    sql: `SELECT MAX(fetched_at) AS last_date FROM news_sentiment_items WHERE source = 'NSE Announcements'`,
+    evaluate: (row, now) => {
+      const stale = daysStale(row?.last_date, now);
+      if (stale == null) return { status: 'warn', detail: 'No NSE Announcements rows yet' };
+      if (stale > 3) return { status: 'fail', detail: `Latest NSE Announcements row is ${fmtDays(stale)} old` };
+      if (stale > 1) return { status: 'warn', detail: `Latest NSE Announcements row is ${fmtDays(stale)} old` };
+      return { status: 'pass', detail: `Latest NSE Announcements row ${fmtDays(stale)} old` };
+    },
+  },
+  {
+    id: 'nse-financial-results-freshness', label: 'news_sentiment_items — NSE Financial Results source',
+    category: 'reference', critical: false,
+    sql: `SELECT MAX(fetched_at) AS last_date FROM news_sentiment_items WHERE source = 'NSE Financial Results'`,
+    evaluate: (row, now) => {
+      // Sparse by nature (few filings/day outside results season) -- warn-only, matching
+      // insider-trades-recency's existing style for episodic datasources.
+      const stale = daysStale(row?.last_date, now);
+      if (stale == null) return { status: 'warn', detail: 'No NSE Financial Results rows yet' };
+      if (stale > 7) return { status: 'warn', detail: `Latest NSE Financial Results row is ${fmtDays(stale)} old (sparse by nature, so a soft warn)` };
+      return { status: 'pass', detail: `Latest NSE Financial Results row ${fmtDays(stale)} old` };
+    },
+  },
+  {
+    id: 'mc-earnings-news-freshness', label: 'news_sentiment_items — MoneyControl Earnings source',
+    category: 'reference', critical: false,
+    sql: `SELECT MAX(fetched_at) AS last_date FROM news_sentiment_items WHERE source = 'MoneyControl Earnings'`,
+    evaluate: (row, now) => {
+      // Sparse by nature -- only fires when a symbol is actually within the results window
+      // (technical_signals.days_to_next_results), which can legitimately be zero on a quiet day.
+      const stale = daysStale(row?.last_date, now);
+      if (stale == null) return { status: 'warn', detail: 'No MoneyControl Earnings rows yet' };
+      if (stale > 7) return { status: 'warn', detail: `Latest MoneyControl Earnings row is ${fmtDays(stale)} old (sparse by nature, so a soft warn)` };
+      return { status: 'pass', detail: `Latest MoneyControl Earnings row ${fmtDays(stale)} old` };
+    },
+  },
+  {
+    id: 'mc-deals-news-freshness', label: 'news_sentiment_items — MoneyControl Deals source',
+    category: 'reference', critical: false,
+    sql: `SELECT MAX(fetched_at) AS last_date FROM news_sentiment_items WHERE source = 'MoneyControl Deals'`,
+    evaluate: (row, now) => {
+      const stale = daysStale(row?.last_date, now);
+      if (stale == null) return { status: 'warn', detail: 'No MoneyControl Deals rows yet' };
+      if (stale > 3) return { status: 'fail', detail: `Latest MoneyControl Deals row is ${fmtDays(stale)} old` };
+      if (stale > 1) return { status: 'warn', detail: `Latest MoneyControl Deals row is ${fmtDays(stale)} old` };
+      return { status: 'pass', detail: `Latest MoneyControl Deals row ${fmtDays(stale)} old` };
     },
   },
 
