@@ -44,6 +44,10 @@ const EXPECTED_TABLES = [
   'screener_definition',
   'screener_membership',
   'transfer_reject',
+  // 008 features
+  'feature_set',
+  'feature_snapshot',
+  'model_version',
   // node-pg-migrate's own bookkeeping table
   'pgmigrations',
 ].sort();

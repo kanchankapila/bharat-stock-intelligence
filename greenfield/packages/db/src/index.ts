@@ -4,6 +4,8 @@ export * from './run-ledger.js';
 export * from './nse-bhavcopy-repo.js';
 export * from './stage3-repo.js';
 export * from './legacy-repo.js';
+export * from './pit-repo.js';
+export * from './stage4-repo.js';
 
 // node-postgres returns BIGINT (OID 20) and NUMERIC/DECIMAL (OID 1700) as raw
 // JS strings by default, to avoid silent precision loss on values beyond
