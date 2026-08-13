@@ -164,7 +164,21 @@ def _run(con, cur, days: int):
 
     con.commit()
 
-    today = date.today().isoformat()
+    # 2026-08-13: was raw date.today(), the exact bug class fixed 2026-07-25 in 6 sibling
+    # fetchers -- except here it's not even a midnight-crossing edge case, it's guaranteed-
+    # never-matches by construction: `rows` above is built from `combined.index`, real trading
+    # dates already present in stock_ohlcv/macro_asset_prices, so sgc.date is always <= the
+    # last completed session -- date.today() is >= that by definition, so this WHERE
+    # sgc.date = today AND ts.date = today essentially never matched (confirmed live:
+    # sector_benchmark had only 68 non-null rows total, last non-null 13 days ago).
+    #
+    # NOT logical_write_floor() either -- tried it first, but that anchors to stock_ohlcv,
+    # which can already be a session ahead of THIS table mid-day (confirmed live: it returned
+    # 2026-08-13 while sector_global_corr's own just-committed rows above still topped out at
+    # 2026-08-12 -- same "borrowed anchor races ahead of this fetcher's own data" issue fixed
+    # the same way in delivery_trend_fetcher.py). Anchor to the newest date actually just
+    # written above instead -- always exists (checked via the `if not rows` guard earlier).
+    today = max(r["date"] for r in rows)
     if use_postgres():
         cur.execute("""
             UPDATE technical_signals ts

@@ -115,9 +115,23 @@ def compute_delivery_trend(con) -> int:
     Writes delivery_trend_30d to technical_signals for today's date.
     Returns number of rows updated.
     """
-    today = date.today().isoformat()
-    cutoff = (date.today() - timedelta(days=30)).isoformat()
+    # 2026-08-13: was raw date.today() for both the write target (ts.date = :today) AND the
+    # source-table lookup (cur.date = :today) -- exact-match WHERE, not a destructive CASE-
+    # WHEN, so this failed silently (0 rows) rather than nulling history, but it failed EVERY
+    # time date.today() didn't match a real grid row -- confirmed live: delivery_trend_30d had
+    # 0 non-null rows across the table's entire history.
+    #
+    # NOT logical_write_floor() either -- that anchors to stock_ohlcv, which can be a session
+    # AHEAD of stock_delivery_volume mid-day (delivery %, an EOD-settled figure, genuinely
+    # lags intraday price prints; confirmed live: logical_write_floor()==2026-08-13 while
+    # stock_delivery_volume's own latest row was still 2026-08-12, so borrowing that anchor
+    # just moved the same "today doesn't match a real row" failure onto a different table).
+    # The correct floor is this fetcher's OWN source table's actual latest date.
     cur = con.cursor()
+    cur.execute(translate("SELECT MAX(date) FROM stock_delivery_volume"))
+    row = cur.fetchone()
+    today = (row[0] if row else None) or date.today().isoformat()
+    cutoff = (date.fromisoformat(today) - timedelta(days=30)).isoformat()
 
     if use_postgres():
         cur.execute("""
