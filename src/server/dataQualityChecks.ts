@@ -194,6 +194,22 @@ const TABLE_FRESHNESS_CHECKS: TableFreshnessConfig[] = [
   // 2026-08-07 urls.txt follow-up (docs/url_explorer) -- see ndtv_fno_basis_fetcher.py.
   { id: 'ndtv-fno-basis-freshness', label: 'ndtv_fno_basis (NDTV futures basis/roll-spread cross-check)',
     category: 'options', critical: false, table: 'ndtv_fno_basis', dateColumn: 'date', warnDays: 3, failDays: 5 },
+  // Found 2026-08-13 (fetcher-accuracy-review full-project sweep, batch 2). All five below run
+  // daily inside the same ml-daily-ops/queues.ts chain as the checked entries above, so matched
+  // to the same 3/5-day daily thresholds rather than re-deriving one per fetcher.
+  { id: 'fno-rollover-freshness', label: 'fno_rollover (near/next-expiry OI rollover %)',
+    category: 'options', critical: false, table: 'fno_rollover', dateColumn: 'date', warnDays: 3, failDays: 5 },
+  // Written by BOTH mc_index_oi_fetcher.py and nt_oi_snapshot_fetcher.py -- one check per
+  // table, not one per writer, matching this file's own stated convention (see the comment
+  // above TABLE_FRESHNESS_CHECKS).
+  { id: 'index-max-pain-freshness', label: 'index_max_pain (MC + NiftyTrader index max-pain/PCR)',
+    category: 'options', critical: false, table: 'index_max_pain', dateColumn: 'date', warnDays: 3, failDays: 5 },
+  { id: 'nt-index-oi-eod-freshness', label: 'nt_index_oi_eod (NiftyTrader EOD strike-wise index OI)',
+    category: 'options', critical: false, table: 'nt_index_oi_eod', dateColumn: 'date', warnDays: 3, failDays: 5 },
+  { id: 'nt-index-change-oi-freshness', label: 'nt_index_change_oi (NiftyTrader index OI buildup/unwinding)',
+    category: 'options', critical: false, table: 'nt_index_change_oi', dateColumn: 'date', warnDays: 3, failDays: 5 },
+  { id: 'so-stock-oi-summary-freshness', label: 'so_stock_oi_summary (Trendlyne per-stock max-pain/MWPL/PCR)',
+    category: 'options', critical: false, table: 'so_stock_oi_summary', dateColumn: 'date', warnDays: 3, failDays: 5 },
 
   // flows
   { id: 'insider-transactions-recency', label: 'insider_transactions (NSE PIT filings)',
@@ -216,6 +232,23 @@ const TABLE_FRESHNESS_CHECKS: TableFreshnessConfig[] = [
   // 2026-08-06 urls.txt data analysis (docs/url_explorer) -- see institutional_deals_fetcher.py.
   { id: 'institutional-deal-signals-recency', label: 'institutional_deal_signals (MC ranked topInvestor buy/sell)',
     category: 'flows', critical: false, table: 'institutional_deal_signals', dateColumn: 'deal_date', warnDays: 5, failDays: 10 },
+  // Found 2026-08-13 (fetcher-accuracy-review sweep, batch 2).
+  { id: 'stock-block-deal-daily-recency', label: 'stock_block_deal_daily (per-symbol daily block-deal roll-up)',
+    category: 'flows', critical: false, table: 'stock_block_deal_daily', dateColumn: 'date', warnDays: 14 },
+  { id: 'superstar-investor-activity-recency', label: 'superstar_investor_activity (InvestSights notable-investor stake changes)',
+    category: 'flows', critical: false, table: 'superstar_investor_activity', dateColumn: 'fetched_at', warnDays: 14 },
+  // Live-confirmed 2026-08-13 while wiring this check up: the table didn't exist in production
+  // at all (mf_holdings_fetcher.py's ensure_schema() had apparently never persisted, or nothing
+  // had ever gotten far enough to call it under a real scheduled run -- .catch()-swallowed in
+  // queues.ts, invisible). Root cause traced further: fetch_mf_holding()'s sole endpoint,
+  // mfapps.indiatimes.com/ET_Mutual_Funds/pages/mftools/MFPortfolioHolding.cms, returns a clean
+  // nginx 404 for every symbol (confirmed with the fetcher's own real headers, not a bot-block
+  // page) -- upstream retired, not a parsing bug. Same shape as mf-sector-allocation-recency's
+  // AMFI incident above. Table now created (schema-only, still empty) so this check can at
+  // least surface the gap instead of erroring "relation does not exist" forever.
+  { id: 'stock-mf-holdings-recency', label: 'stock_mf_holdings (per-stock MF ownership %, monthly disclosure)',
+    category: 'flows', critical: false, table: 'stock_mf_holdings', dateColumn: 'date', warnDays: 45,
+    emptyDetail: 'stock_mf_holdings is empty — mfapps.indiatimes.com\'s MFPortfolioHolding.cms endpoint now 404s for every symbol (upstream, not a fetcher bug; see mf_holdings_fetcher.py). Blocked until ET restores it or a replacement source is chosen; note mf_stock_holdings (a different table, different fetcher) is healthy and may already cover this need.' },
 
   // fundamentals
   { id: 'tl-financial-quality-freshness', label: 'tl_financial_quality (weekly ET ratios)',
@@ -288,6 +321,49 @@ const TABLE_FRESHNESS_CHECKS: TableFreshnessConfig[] = [
     category: 'fundamentals', critical: false, table: 'stock_corporate_action_history', dateColumn: 'fetched_at', warnDays: 10, failDays: 16 },
   { id: 'nse-filed-corporate-actions-freshness', label: 'nse_filed_corporate_actions (InvestSights, sourced from real NSE filings)',
     category: 'fundamentals', critical: false, table: 'nse_filed_corporate_actions', dateColumn: 'fetched_at', warnDays: 3, failDays: 5 },
+  // Found 2026-08-13 (fetcher-accuracy-review sweep, batch 2): 3 more mc_earnings_fetcher.py
+  // tables (siblings of stock-earnings-dates-freshness above, same daily fetcher/schedule).
+  { id: 'mc-earnings-rapid-freshness', label: 'mc_earnings_rapid (MC results-calendar rapid categories)',
+    category: 'fundamentals', critical: false, table: 'mc_earnings_rapid', dateColumn: 'fetched_at', warnDays: 3, failDays: 5 },
+  { id: 'mc-price-shockers-freshness', label: 'mc_price_shockers (post-results price reaction)',
+    category: 'fundamentals', critical: false, table: 'mc_price_shockers', dateColumn: 'fetched_at', warnDays: 3, failDays: 5 },
+  { id: 'mc-sector-earnings-freshness', label: 'mc_sector_earnings (sector-level results aggregation)',
+    category: 'fundamentals', critical: false, table: 'mc_sector_earnings', dateColumn: 'fetched_at', warnDays: 3, failDays: 5 },
+  // mc_pricefeed_fetcher.py is the SOLE writer (confirmed live 2026-08-13: trendlyne_
+  // fundamentals_fetcher.py only ever SELECTs from these two tables to compute percentile-rank
+  // features -- see its own comment above ensure_schema, "PE/PB dropped: MC's daily fetch
+  // already covers them" -- no dual-writer collision despite the table name). Feeds
+  // factor_backtest.py's value_book_to_price factor (measurement.md) directly, so a silent
+  // gap here would degrade an already-measured result without anyone noticing.
+  { id: 'trendlyne-pe-history-freshness', label: 'trendlyne_pe_history (daily PE, feeds value_book_to_price factor)',
+    category: 'fundamentals', critical: false, table: 'trendlyne_pe_history', dateColumn: 'fetched_at', warnDays: 3, failDays: 5 },
+  { id: 'trendlyne-pb-history-freshness', label: 'trendlyne_pb_history (daily PB, feeds value_book_to_price factor)',
+    category: 'fundamentals', critical: false, table: 'trendlyne_pb_history', dateColumn: 'fetched_at', warnDays: 3, failDays: 5 },
+  // moneycontrol_fetcher.py runs daily (queues.ts) -- daily thresholds, matching its sibling
+  // mc_* tables throughout this section, not the weekly Trendlyne-family pattern below.
+  { id: 'mc-analyst-ratings-freshness', label: 'mc_analyst_ratings (MC consensus buy/hold/sell counts)',
+    category: 'fundamentals', critical: false, table: 'mc_analyst_ratings', dateColumn: 'fetched_at', warnDays: 3, failDays: 5 },
+  { id: 'mc-earnings-forecast-freshness', label: 'mc_earnings_forecast (MC forward estimates)',
+    category: 'fundamentals', critical: false, table: 'mc_earnings_forecast', dateColumn: 'date', warnDays: 3, failDays: 5 },
+  // trendlyne_adv_tech_fetcher.py / trendlyne_fundamentals_fetcher.py both run weekly inside
+  // trendlyneWeekly.jobs.ts -- matched to tl-financial-quality-freshness's own 10/16-day
+  // thresholds right above, the existing pattern for this exact job's cadence.
+  { id: 'trendlyne-adv-tech-daily-freshness', label: 'trendlyne_adv_tech_daily (Trendlyne MA/oscillator/RSI/MACD bull-bear counts)',
+    category: 'fundamentals', critical: false, table: 'trendlyne_adv_tech_daily', dateColumn: 'date', warnDays: 10, failDays: 16 },
+  { id: 'trendlyne-eps-history-freshness', label: 'trendlyne_eps_history',
+    category: 'fundamentals', critical: false, table: 'trendlyne_eps_history', dateColumn: 'fetched_at', warnDays: 10, failDays: 16 },
+  { id: 'trendlyne-div-yield-history-freshness', label: 'trendlyne_div_yield_history',
+    category: 'fundamentals', critical: false, table: 'trendlyne_div_yield_history', dateColumn: 'fetched_at', warnDays: 10, failDays: 16 },
+  // trendlyne_overview_fetcher.py runs via companyProfileSyncService.ts's slow incremental
+  // per-stock drip (near-static company profile data, not a daily full-crawl -- see that
+  // file's own comment), so warnDays is looser than the weekly Trendlyne pattern above,
+  // matching mf-stock-holdings-recency's "genuinely slow-moving data" reasoning instead.
+  { id: 'trendlyne-analyst-targets-freshness', label: 'trendlyne_analyst_targets (broker target price/rating history)',
+    category: 'fundamentals', critical: false, table: 'trendlyne_analyst_targets', dateColumn: 'fetched_at', warnDays: 30 },
+  { id: 'trendlyne-stock-profile-freshness', label: 'trendlyne_stock_profile (company description/margins/annual financials)',
+    category: 'fundamentals', critical: false, table: 'trendlyne_stock_profile', dateColumn: 'date', warnDays: 30 },
+  { id: 'trendlyne-price-analysis-freshness', label: 'trendlyne_price_analysis (return/alpha vs Nifty+industry, multi-horizon)',
+    category: 'fundamentals', critical: false, table: 'trendlyne_price_analysis', dateColumn: 'date', warnDays: 10, failDays: 16 },
 
   // macro
   { id: 'macro-asset-prices-freshness', label: 'macro_asset_prices (VIX/FII-DII/global indices/PCR-GEX/MMI)',
@@ -311,6 +387,12 @@ const TABLE_FRESHNESS_CHECKS: TableFreshnessConfig[] = [
     category: 'macro', critical: false, table: 'sector_rrg_history', dateColumn: 'week_date', warnDays: 3, failDays: 5 },
   { id: 'sector-correlation-summary-freshness', label: 'sector_correlation_summary (InvestSights sector x sector matrix)',
     category: 'macro', critical: false, table: 'sector_correlation_summary', dateColumn: 'data_date', warnDays: 3, failDays: 5 },
+  // Found 2026-08-13 (fetcher-accuracy-review sweep, batch 2): same investsights_sector_intel_
+  // fetcher.py run, same table family as sector_correlation_summary right above.
+  { id: 'sector-correlation-pairs-freshness', label: 'sector_correlation_pairs (InvestSights pairwise sector correlation)',
+    category: 'macro', critical: false, table: 'sector_correlation_pairs', dateColumn: 'data_date', warnDays: 3, failDays: 5 },
+  { id: 'sector-correlation-stats-freshness', label: 'sector_correlation_stats (InvestSights per-sector return/vol stats)',
+    category: 'macro', critical: false, table: 'sector_correlation_stats', dateColumn: 'data_date', warnDays: 3, failDays: 5 },
   { id: 'historical-fno-sentiment-freshness', label: 'historical_fno_sentiment (index-level PCR/GEX)',
     category: 'macro', critical: false, table: 'historical_fno_sentiment', dateColumn: 'date', warnDays: 3, failDays: 5 },
   { id: 'sector-fo-sentiment-freshness', label: 'sector_fo_sentiment',
@@ -396,10 +478,21 @@ const TABLE_FRESHNESS_CHECKS: TableFreshnessConfig[] = [
     category: 'reference', critical: false, table: 'mc_broker_reco', dateColumn: 'fetched_at', warnDays: 5, failDays: 10 },
   { id: 'mc-chart-patterns-freshness', label: 'mc_chart_patterns',
     category: 'reference', critical: false, table: 'mc_chart_patterns', dateColumn: 'fetched_at', warnDays: 3, failDays: 5 },
+  // Found 2026-08-13 (fetcher-accuracy-review sweep, batch 2): mc_chart_patterns_fetcher.py's
+  // sibling table, same fetcher/schedule as the entry right above.
+  { id: 'mc-pattern-signals-freshness', label: 'mc_pattern_signals (per-stock bull/bear pattern-signal counts)',
+    category: 'reference', critical: false, table: 'mc_pattern_signals', dateColumn: 'date', warnDays: 3, failDays: 5 },
   { id: 'market-breadth-freshness', label: 'market_breadth (advance/decline)',
     category: 'reference', critical: false, table: 'market_breadth', dateColumn: 'date', warnDays: 3, failDays: 5 },
+  // mc_advance_decline_fetcher.py's own dedicated table (market_breadth above is its second,
+  // shared write target) -- same fetcher/schedule.
+  { id: 'mc-advance-decline-freshness', label: 'mc_advance_decline (MC NSE advance/decline ratio)',
+    category: 'reference', critical: false, table: 'mc_advance_decline', dateColumn: 'date', warnDays: 3, failDays: 5 },
   { id: 'preopen-snapshot-freshness', label: 'preopen_snapshot',
     category: 'reference', critical: false, table: 'preopen_snapshot', dateColumn: 'snapshot_date', warnDays: 3, failDays: 5 },
+  // preopen_fetcher.py's per-stock sibling table to preopen_snapshot right above.
+  { id: 'preopen-stock-snapshot-freshness', label: 'preopen_stock_snapshot (per-stock pre-open IEP/imbalance)',
+    category: 'reference', critical: false, table: 'preopen_stock_snapshot', dateColumn: 'snapshot_date', warnDays: 3, failDays: 5 },
   { id: 'nt-fno-dashboard-freshness', label: 'nt_fno_dashboard (NiftyTrader F&O dashboard)',
     category: 'reference', critical: false, table: 'nt_fno_dashboard', dateColumn: 'date', warnDays: 3, failDays: 5 },
   { id: 'trendlyne-fno-activity-freshness', label: 'trendlyne_fno_activity',
