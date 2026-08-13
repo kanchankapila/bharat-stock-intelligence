@@ -171,6 +171,16 @@ const TABLE_FRESHNESS_CHECKS: TableFreshnessConfig[] = [
   // ohlcv
   { id: 'nse-universe-history-freshness', label: 'nse_universe_history (survivorship-free PIT universe)',
     category: 'ohlcv', critical: true, table: 'nse_universe_history', dateColumn: 'date', warnDays: 3, failDays: 5 },
+  // Found 2026-08-13 (fetcher-accuracy-review full-project sweep): intraday_ohlcv had ZERO
+  // freshness coverage despite feeding the Intraday Edge tab and live_capitulation_screener.py
+  // (the tier-1 'todayCapitulation' combo above) -- a dead intraday_fetcher.py would be
+  // invisible to every monitor. datetime is TIMESTAMPTZ in Postgres (confirmed via
+  // information_schema.columns, not assumed from db.ts's SQLite schema-of-record --
+  // recurring-bugs.md's "column type assumed from db.ts" trap). Matched to
+  // live-screener-runs-freshness's 1/2-day thresholds: same market-hours-gated cadence.
+  { id: 'intraday-ohlcv-freshness', label: 'intraday_ohlcv (15m bars, feeds Intraday Edge + todayCapitulation)',
+    category: 'ohlcv', critical: true, table: 'intraday_ohlcv', dateColumn: 'datetime',
+    nativeDateColumn: true, warnDays: 1, failDays: 2 },
 
   // options
   { id: 'so-option-chain-freshness', label: 'so_option_chain (Trendlyne live options chain)',
@@ -246,6 +256,14 @@ const TABLE_FRESHNESS_CHECKS: TableFreshnessConfig[] = [
     category: 'fundamentals', critical: false, table: 'marketsmojo_shareholding_history', dateColumn: 'fetched_at', warnDays: 45 },
   { id: 'stock-earnings-beats-recency', label: 'stock_earnings_beats',
     category: 'fundamentals', critical: false, table: 'stock_earnings_beats', dateColumn: 'fetched_at', warnDays: 10 },
+  // Found 2026-08-13 (fetcher-accuracy-review sweep): stock_earnings_dates had ZERO freshness
+  // coverage -- the exact table behind the days_to_next_results anchor bug fixed earlier this
+  // session (84.6% of symbol-days wrong for a full day whenever the nightly chain crossed
+  // midnight IST). mc_earnings_fetcher.py runs daily inside ml-daily-ops, so daily thresholds
+  // match its sibling fetchers in this section rather than stock-earnings-beats-recency's
+  // sparse-style 10-day warn-only.
+  { id: 'stock-earnings-dates-freshness', label: 'stock_earnings_dates (feeds days_to_next_results)',
+    category: 'fundamentals', critical: false, table: 'stock_earnings_dates', dateColumn: 'fetched_at', warnDays: 3, failDays: 5 },
   { id: 'eps-surprise-history-recency', label: 'eps_surprise_history',
     category: 'fundamentals', critical: false, table: 'eps_surprise_history', dateColumn: 'fetched_at', warnDays: 10 },
   // Written at request time (MCStockInfoPanel opens, see persistMcConsolidatedMetrics() in
@@ -321,12 +339,38 @@ const TABLE_FRESHNESS_CHECKS: TableFreshnessConfig[] = [
     category: 'signals', critical: false, table: 'unified_signals', dateColumn: 'signal_date', warnDays: 3, failDays: 5 },
   { id: 'screener-appearances-freshness', label: 'screener_appearances (feeds screener_momentum_score)',
     category: 'signals', critical: true, table: 'screener_appearances', dateColumn: 'appeared_date', warnDays: 3, failDays: 5 },
+  // Found 2026-08-13 (fetcher-accuracy-review sweep): screener_master/screener_catalog -- the
+  // EXACT tables corrupted by the 2026-07-23 Trendlyne-id incident (2.1M rows, 7 tables) --
+  // had ZERO freshness coverage, still, a full audit cycle later. screener_catalog has no
+  // timestamp column of its own at all (checked information_schema.columns; not assumed), so
+  // it can't be targeted directly. screener_master.last_updated looked usable but was excluded
+  // from trendlyne_screener_discovery.py's ON CONFLICT DO UPDATE SET -- frozen at first-insert
+  // forever, would have reported "stale since first backfill" regardless of whether the daily
+  // sync ran. Fixed in the same commit (see upsert_screener's own comment) before wiring this
+  // check up against it, or the check would have been evidence-shaped, not evidence.
+  { id: 'screener-catalog-freshness', label: 'screener_master (proxies screener_catalog, same writer/run, no timestamp of its own)',
+    category: 'signals', critical: true, table: 'screener_master', dateColumn: 'last_updated',
+    nativeDateColumn: true, warnDays: 3, failDays: 5 },
   { id: 'stock-event-triggers-freshness', label: 'stock_event_triggers (screener exit/tenure + news attention)',
     category: 'signals', critical: false, table: 'stock_event_triggers', dateColumn: 'date', warnDays: 3, failDays: 5 },
   { id: 'screener-sector-rotation-freshness', label: 'screener_sector_rotation',
     category: 'signals', critical: false, table: 'screener_sector_rotation', dateColumn: 'date', warnDays: 3, failDays: 5 },
   { id: 'intraday-recommendations-freshness', label: 'intraday_recommendations',
     category: 'signals', critical: false, table: 'intraday_recommendations', dateColumn: 'computed_at', warnDays: 3, failDays: 5 },
+  // Found 2026-08-13: live_screener_appearances/live_screener_runs (42 NiftyTrader filters +
+  // the new local 'todayCapitulation' combo, both written by processLiveScreenerCollect every
+  // 15 min during market hours) had ZERO freshness coverage -- the exact "found empty by this
+  // very audit" failure mode this file's own mandate exists to catch, just never actioned for
+  // this table. Checks live_screener_runs.timestamp, NOT live_screener_appearances -- the runs
+  // table gets a row every cycle regardless of whether any filter matched (a quiet market with
+  // genuinely 0 matches must not read as "stale", same reasoning as the promotion-gated/
+  // output-table class of false-stale documented in recurring-bugs.md). tradingDayAware stays
+  // default (true): unlike confluence_signals this job has no extra intra-day skip window
+  // beyond isMarketOpen() itself, so tradingDaysStale()'s plain weekend-discount is sufficient
+  // and a Monday-morning check against Friday's last run should not need a special-cased
+  // fraction-of-a-day threshold the way that one did.
+  { id: 'live-screener-runs-freshness', label: 'live_screener_runs (NiftyTrader filters + todayCapitulation combo)',
+    category: 'signals', critical: true, table: 'live_screener_runs', dateColumn: 'timestamp', warnDays: 1, failDays: 2 },
   // 2026-08-11: marketsmojo_technical_fetcher.py -- MarketsMojo's getCardInfo returns a full
   // ~3-year dated series (not just the current value) for weekly/monthly MACD/RSI/BB/KST/MA/
   // Dow/OBV + IndiGraph score, confirmed live and backfilled. dateColumn is the indicator's own
@@ -336,6 +380,18 @@ const TABLE_FRESHNESS_CHECKS: TableFreshnessConfig[] = [
     category: 'signals', critical: false, table: 'marketsmojo_technical_history', dateColumn: 'date', warnDays: 3, failDays: 5 },
 
   // reference
+  // Found 2026-08-13 (fetcher-accuracy-review sweep): asm_gsm_fetcher.py and
+  // index_membership_fetcher.py both UPDATE nse_stocks in place (surveillance flags /
+  // Nifty50-200-Midcap150-Smallcap250 membership) rather than writing a dedicated dated table,
+  // so neither had ever gotten a freshness check -- the standard factory still applies since
+  // both fetchers stamp their own *_updated_at column on every write. warnDays/failDays looser
+  // than the daily 3/5 pattern: both run inside the same daily ml-daily-ops chain as
+  // asm-gsm/mc-earnings but a few days' staleness on surveillance/index-membership status is a
+  // real-world non-event (ASM/GSM/index reconstitution changes are rare), unlike a stale price.
+  { id: 'nse-stocks-surveillance-freshness', label: 'nse_stocks.is_asm/gsm_stage (ASM/GSM surveillance flags)',
+    category: 'reference', critical: false, table: 'nse_stocks', dateColumn: 'surveillance_updated_at', warnDays: 5, failDays: 10 },
+  { id: 'nse-stocks-index-flags-freshness', label: 'nse_stocks index membership flags (Nifty50/100/200/Midcap150/Smallcap250)',
+    category: 'reference', critical: false, table: 'nse_stocks', dateColumn: 'index_flags_updated_at', warnDays: 5, failDays: 10 },
   { id: 'mc-broker-reco-freshness', label: 'mc_broker_reco',
     category: 'reference', critical: false, table: 'mc_broker_reco', dateColumn: 'fetched_at', warnDays: 5, failDays: 10 },
   { id: 'mc-chart-patterns-freshness', label: 'mc_chart_patterns',

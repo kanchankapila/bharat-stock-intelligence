@@ -417,16 +417,27 @@ def upsert_screener(con, info: dict):
     # screener_master (sync). ON CONFLICT target is (source, scan_id) -- screener_master's real
     # PK, not scan_id alone; scan_id collides across providers (2026-08-04 memory) and, after
     # that PK migration, ON CONFLICT(scan_id) no longer matches any unique constraint.
+    #
+    # 2026-08-13: `last_updated` was NOT in this SET clause, so it froze at first-INSERT time
+    # forever -- the row's real content (name/sentiment/category) was being refreshed on every
+    # sync, but the one column that looks like a freshness signal stayed stuck at whenever this
+    # screener was first discovered. Same bug class as recurring-bugs.md's "a generated_at
+    # column left OUT of ON CONFLICT DO UPDATE becomes a last-seen time", inverse form: there it
+    # was wrongly INCLUDED and kept walking forward; here it's wrongly EXCLUDED and never moves
+    # at all. Found wiring up screener-catalog-freshness below -- a check against the unfixed
+    # column would have reported "stale since first backfill" forever, regardless of whether the
+    # daily sync was actually running.
     con.execute("""
         INSERT INTO screener_master
             (scan_id, name, source, inferred_sentiment, inferred_category,
-             inferred_timeframe, confidence)
-        VALUES (?,?,'Trendlyne',?,?,?,0.75)
+             inferred_timeframe, confidence, last_updated)
+        VALUES (?,?,'Trendlyne',?,?,?,0.75,CURRENT_TIMESTAMP)
         ON CONFLICT(source, scan_id) DO UPDATE SET
             name               = excluded.name,
             inferred_sentiment = excluded.inferred_sentiment,
             inferred_category  = excluded.inferred_category,
-            inferred_timeframe = excluded.inferred_timeframe
+            inferred_timeframe = excluded.inferred_timeframe,
+            last_updated       = CURRENT_TIMESTAMP
     """, (
         info["screener_id"], info["name"],
         info["sentiment"], info["category"], info["timeframe"],

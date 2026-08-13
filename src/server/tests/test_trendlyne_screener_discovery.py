@@ -1,8 +1,9 @@
+import sqlite3
 import sys
 import os
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
-from trendlyne_screener_discovery import extract_screener_info
+from trendlyne_screener_discovery import extract_screener_info, upsert_screener
 
 
 def _kayal_response(headers, rows, title="Test Screener"):
@@ -114,3 +115,75 @@ class TestNoBlindColumnZeroFallback:
         )
         info = extract_screener_info(1, data)
         assert info["stocks"] == ["BAJAJ-AUTO", "M&M"]
+
+
+def _throwaway_db():
+    conn = sqlite3.connect(':memory:')
+    conn.row_factory = sqlite3.Row
+    conn.executescript("""
+        CREATE TABLE trendlyne_screeners (
+            screener_id TEXT PRIMARY KEY, screener_name TEXT, screenpk INTEGER,
+            description TEXT, sentiment TEXT, category TEXT, timeframe TEXT,
+            last_updated TEXT, screener_url TEXT, query_text TEXT, stock_count INTEGER
+        );
+        CREATE TABLE screener_master (
+            scan_id TEXT, name TEXT, source TEXT, inferred_sentiment TEXT,
+            inferred_category TEXT, inferred_timeframe TEXT, confidence REAL,
+            last_updated TEXT, PRIMARY KEY (source, scan_id)
+        );
+        CREATE TABLE screener_catalog (
+            screener_id TEXT, source TEXT, screener_name TEXT, category TEXT,
+            subcategory TEXT, signal_bias TEXT, investment_horizon TEXT,
+            confidence REAL, signal_keywords TEXT, screener_url TEXT,
+            PRIMARY KEY (screener_id, source)
+        );
+        CREATE TABLE trendlyne_screener_stocks (
+            screener_id TEXT, stock_id TEXT, symbol TEXT, first_seen TEXT, last_seen TEXT,
+            PRIMARY KEY (screener_id, stock_id)
+        );
+    """)
+    return conn
+
+
+def _info(**overrides):
+    base = dict(screener_id="42", pk=42, name="Test Screener", description="desc",
+                sentiment="bullish", category="technical", timeframe="long_term",
+                screener_url="https://example.com/42", query_text="q", stocks=["RELIANCE"])
+    base.update(overrides)
+    return base
+
+
+class TestScreenerMasterLastUpdatedTracksRealSyncs:
+    """2026-08-13 regression: screener_master.last_updated was excluded from the ON CONFLICT
+    DO UPDATE SET clause, so it froze at first-INSERT time forever even though the row's real
+    content (name/sentiment/category) was refreshed on every daily sync. Found wiring up a
+    freshness check against this column -- it would have reported 'stale since first backfill'
+    permanently. Negative control: reverting last_updated out of the SET clause makes this fail."""
+
+    def test_last_updated_advances_on_a_real_resync_not_just_first_insert(self):
+        conn = _throwaway_db()
+        upsert_screener(conn, _info())
+        conn.commit()
+
+        # Simulate "this screener was discovered a long time ago" by backdating the row
+        # directly, the way it would look after weeks of re-syncs under the unfixed code.
+        conn.execute(
+            "UPDATE screener_master SET last_updated = '2020-01-01 00:00:00' "
+            "WHERE source='Trendlyne' AND scan_id='42'"
+        )
+        conn.commit()
+
+        # A real re-sync: same screener, sentiment flipped (the kind of content change the
+        # daily crawl actually produces).
+        upsert_screener(conn, _info(sentiment="bearish"))
+        conn.commit()
+
+        row = conn.execute(
+            "SELECT inferred_sentiment, last_updated FROM screener_master "
+            "WHERE source='Trendlyne' AND scan_id='42'"
+        ).fetchone()
+        assert row["inferred_sentiment"] == "bearish", "content should have refreshed"
+        assert row["last_updated"] != '2020-01-01 00:00:00', (
+            "last_updated must advance on every real re-sync, not freeze at first insert -- "
+            "a freshness check reads this column as evidence the crawl is still alive"
+        )
