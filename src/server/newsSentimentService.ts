@@ -1034,11 +1034,16 @@ export async function runNewsSentimentCycle(): Promise<{
 
   await persistNewsRows(sentRows, legacyRows);
 
-  // AI enrichment for HIGH-impact items not yet AI-scored
+  // AI enrichment for HIGH-impact items not yet AI-scored. 10 -> 25 (2026-08-13): at 10/cycle
+  // (15-min cadence -> 960/day) the 12,137-item backlog left after resetting the
+  // available=False fallback-poisoning bug (see finbert_news_sentiment.py) would take ~12.6
+  // days to clear even with zero new HIGH-impact arrivals. 25/cycle -> ~2,400/day, ~5 days --
+  // still conservative against the 60s runPython timeout (model load dominates cost, not
+  // per-item inference; this is a batch-size tuning knob, not a guaranteed-safe ceiling).
   const highImpact = await dbAll(`
     SELECT id, title, summary, category FROM news_sentiment_items
     WHERE impact = 'HIGH' AND ai_scored = 0
-    ORDER BY fetched_at DESC LIMIT 10
+    ORDER BY fetched_at DESC LIMIT 25
   `) as { id: string; title: string; summary: string; category: string }[];
 
   if (highImpact.length > 0) {
