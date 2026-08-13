@@ -140,6 +140,23 @@ class TestDvmTierNames:
         assert ov('Strong Performer, Getting Expensive (DVM)') == 'bearish'
 
 
+class TestExplicitParentheticalLabel:
+    """The vendor's own '(Bullish)'/'(Bearish)' suffix outranks everything else -- it's a
+    direct statement, not a wording heuristic. Live bug 2026-08-13: 'White Marubozu Candlestick
+    (Bullish)' had a duplicate row shipping 'bearish' -- domain_override had no opinion on
+    candlestick patterns at all before this rule existed."""
+
+    def test_explicit_bullish_suffix(self):
+        assert ov('White Marubozu Candlestick (Bullish)') == 'bullish'
+
+    def test_explicit_bearish_suffix(self):
+        assert ov('Black Marubozu (Bearish)') == 'bearish'
+
+    def test_outranks_risk_and_valuation(self):
+        """Even a name that would otherwise hit an earlier rule defers to the explicit label."""
+        assert ov('Overvalued Turnaround Candle (Bullish)') == 'bullish'
+
+
 class TestFallsThroughWhenItHasNoOpinion:
     """The override must stay NARROW. Anything outside its families returns None so the
     existing FinBERT + keyword path still runs -- this is a targeted patch, not a rewrite."""

@@ -492,6 +492,14 @@ class NLPScreenerInference:
     _DVM_STRONG = re.compile(r'\btop\s+performer|\bstrong\s+performers?\b')
     _DVM_WEAK = re.compile(r'\bweak\s+(?:stocks?|performers?)\b|\bunderperformers?\b')
 
+    # An explicit "(Bullish)"/"(Bearish)" parenthetical suffix on a candlestick/pattern name is
+    # the vendor stating its own direction outright -- e.g. 'White Marubozu Candlestick
+    # (Bullish)'. Found live 2026-08-13 with a duplicate 'bearish' variant of that exact name
+    # (see fix_screener_catalog_source_casing.py) -- domain_override had no opinion on
+    # candlestick patterns at all, so this is the highest-confidence signal available for them.
+    _EXPLICIT_BULLISH = re.compile(r'\(bullish\)')
+    _EXPLICIT_BEARISH = re.compile(r'\(bearish\)')
+
     @classmethod
     def domain_override(cls, text: str):
         """Return 'bullish'/'bearish'/'neutral' for families the generic layers get wrong,
@@ -512,6 +520,12 @@ class NLPScreenerInference:
              outrank a family with an actual t-stat.
         """
         t = (text or '').lower()
+        # The vendor's own explicit "(Bullish)"/"(Bearish)" label outranks everything else --
+        # it isn't a wording heuristic, it's the source stating its answer directly.
+        if cls._EXPLICIT_BULLISH.search(t):
+            return 'bullish'
+        if cls._EXPLICIT_BEARISH.search(t):
+            return 'bearish'
         if cls._RISK_UP.search(t):
             return 'bearish'
         if cls._RISK_DOWN.search(t):

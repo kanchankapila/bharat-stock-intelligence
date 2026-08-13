@@ -207,19 +207,19 @@ class IntradayRanker:
             ("SELECT ss.symbol, sc.signal_bias, sc.confidence, sc.category, sc.subcategory, "
              "COALESCE(ts.screener_name, sc.screener_name, sc.screener_id) sname "
              "FROM trendlyne_screener_stocks ss "
-             "JOIN screener_catalog sc ON sc.screener_id=ss.screener_id AND sc.source='trendlyne' "
+             "JOIN screener_catalog sc ON sc.screener_id=ss.screener_id AND LOWER(sc.source)='trendlyne' "
              "LEFT JOIN trendlyne_screeners ts ON ts.screener_id=sc.screener_id "
              "WHERE sc.investment_horizon IN ('intraday', 'short_term') "
              "AND (ss.symbol IS NULL OR ss.symbol NOT LIKE '%://%')"),
             ("SELECT ss.symbol, sc.signal_bias, sc.confidence, sc.category, sc.subcategory, "
              "COALESCE(sc.screener_name, sc.screener_id) sname "
              "FROM moneycontrol_screener_stocks ss "
-             "JOIN screener_catalog sc ON sc.screener_id=ss.scan_id AND sc.source='moneycontrol' "
+             "JOIN screener_catalog sc ON sc.screener_id=ss.scan_id AND LOWER(sc.source)='moneycontrol' "
              "WHERE sc.investment_horizon IN ('intraday', 'short_term')"),
             ("SELECT ss.symbol, sc.signal_bias, sc.confidence, sc.category, sc.subcategory, "
              "COALESCE(sc.screener_name, sc.screener_id) sname "
              "FROM etnow_screener_stocks ss "
-             "JOIN screener_catalog sc ON sc.screener_id=ss.screener_id AND sc.source='etnow' "
+             "JOIN screener_catalog sc ON sc.screener_id=ss.screener_id AND LOWER(sc.source)='etnow' "
              "WHERE sc.investment_horizon IN ('intraday', 'short_term')"),
         ]
         for sql in queries:

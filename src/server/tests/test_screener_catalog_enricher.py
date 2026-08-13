@@ -80,3 +80,73 @@ def test_tl_screener_url_builds_a_real_trendlyne_url():
     assert url is not None
     assert "trendlyne.com" in url
     assert "9999" in url
+
+
+class TestCategoryNotCollapsedToOther:
+    """Live bug, 2026-08-13: cat_norm was re-validated against CATEGORY_DEFAULTS (a coarser,
+    unrelated vocabulary -- momentum/breakout/valuation/...) instead of trusted as-is, which
+    silently collapsed every real category (technical_trend, fundamental_quality, ...) not in
+    that small dict down to 'other' -- weight 0.0 in unified_ranker.py's CAT_BASE_WT. Hit 100%
+    of et_marketstats' 95 screeners (all correctly classified 'technical_trend' etc. in
+    screener_master, all written 'other' into screener_catalog) since they all go through the
+    Step 5 INSERT path.
+
+    Calls the REAL resolve_screener_defaults() (extracted from Step 5, not a hand-copied
+    mirror) so a source-level regression actually fails these tests -- a mirror wouldn't."""
+
+    def test_real_technical_category_survives(self):
+        """'technical_trend' is a real CAT_BASE_WT category with no entry in the coarser
+        CATEGORY_DEFAULTS dict -- must NOT collapse to 'other'."""
+        _, cat_norm, horizon, confidence = sce.resolve_screener_defaults(
+            'technical_trend', None, 'Above EMA-20')
+        assert cat_norm == 'technical_trend'
+        # horizon/confidence still fall back safely since this dict has no exact entry
+        assert horizon == 'medium_term' and confidence == 0.65
+
+    def test_real_fundamental_quality_category_survives(self):
+        _, cat_norm, _, _ = sce.resolve_screener_defaults(
+            'fundamental_quality', None, 'High ROE')
+        assert cat_norm == 'fundamental_quality'
+
+    def test_category_present_in_both_vocabularies_still_uses_its_own_defaults(self):
+        """'momentum' happens to be a CATEGORY_DEFAULTS key too -- confirms the fix didn't
+        break the horizon/confidence lookup for the cases that DO overlap."""
+        _, cat_norm, horizon, confidence = sce.resolve_screener_defaults(
+            'momentum', None, 'Momentum Gainers')
+        assert cat_norm == 'momentum'
+        assert horizon == 'short_term' and confidence == 0.72
+
+    def test_missing_category_still_defaults_to_other(self):
+        _, cat_norm, _, _ = sce.resolve_screener_defaults('other', None, 'Misc Screen')
+        assert cat_norm == 'other'
+
+
+class TestExistingCorruptedRowsBackfilled:
+    """Step 5b: rows the bug ALREADY wrote as 'other' must be repaired from screener_master,
+    not just prevented going forward."""
+
+    def _make_db(self):
+        import sqlite3
+        conn = sqlite3.connect(":memory:")
+        conn.executescript("""
+            CREATE TABLE screener_master (scan_id TEXT, source TEXT, inferred_category TEXT);
+            CREATE TABLE screener_catalog (screener_id TEXT, source TEXT, category TEXT);
+        """)
+        return conn
+
+    def test_drift_query_finds_and_would_fix_corrupted_rows(self):
+        conn = self._make_db()
+        conn.execute("INSERT INTO screener_master VALUES ('above-ema-20', 'et_marketstats', 'technical_trend')")
+        conn.execute("INSERT INTO screener_catalog VALUES ('above-ema-20', 'et_marketstats', 'other')")
+        # A genuinely-'other' row must NOT be touched (screener_master agrees it's 'other').
+        conn.execute("INSERT INTO screener_master VALUES ('misc-screen', 'et_marketstats', 'other')")
+        conn.execute("INSERT INTO screener_catalog VALUES ('misc-screen', 'et_marketstats', 'other')")
+        conn.commit()
+
+        drift = conn.execute("""
+            SELECT sc.screener_id, sc.source, sm.inferred_category
+            FROM screener_catalog sc
+            JOIN screener_master sm ON sm.scan_id = sc.screener_id AND LOWER(sm.source) = LOWER(sc.source)
+            WHERE sc.category = 'other' AND sm.inferred_category IS NOT NULL AND sm.inferred_category != 'other'
+        """).fetchall()
+        assert drift == [('above-ema-20', 'et_marketstats', 'technical_trend')]

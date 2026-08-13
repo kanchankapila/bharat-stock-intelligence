@@ -77,6 +77,65 @@ def tl_screener_url(screenpk) -> str:
     return None
 
 
+# Category → (signal_bias, investment_horizon, confidence) fallback defaults ONLY -- this is
+# a coarser, unrelated vocabulary (momentum/breakout/valuation/...) from screener_master's real
+# category taxonomy (technical_trend, fundamental_quality, ... -- unified_ranker.py's
+# CAT_BASE_WT keys). Never use this dict to validate/normalize a category value itself -- see
+# resolve_screener_defaults's own docstring for why that collapsed real categories to 'other'.
+CATEGORY_DEFAULTS = {
+    'momentum':          ('bullish',  'short_term',  0.72),
+    'breakout':          ('bullish',  'short_term',  0.72),
+    'breakdown':         ('bearish',  'short_term',  0.72),
+    'valuation':         ('bullish',  'long_term',   0.72),
+    'fundamental':       ('bullish',  'long_term',   0.72),
+    'quality':           ('bullish',  'long_term',   0.72),
+    'dividend':          ('bullish',  'long_term',   0.70),
+    'technical':         ('bullish',  'short_term',  0.70),
+    'sector_theme':      ('neutral',  'medium_term', 0.65),
+    'fno':               ('neutral',  'short_term',  0.68),
+    'institutional':     ('bullish',  'medium_term', 0.72),
+    'insider':           ('bullish',  'medium_term', 0.70),
+    'earnings':          ('bullish',  'short_term',  0.70),
+    'other':             ('neutral',  'medium_term', 0.65),
+}
+
+BEARISH_KEYWORDS = r"breakdown|sell|short|fall|decline|bearish|overbought|death.cross"
+
+
+def resolve_screener_defaults(category: str, sentiment: str | None, name: str) -> tuple[str, str, str, float]:
+    """Pure: (signal_bias, cat_norm, investment_horizon, confidence) for a screener_master
+    row being inserted into screener_catalog (Step 5).
+
+    `category` is already the real, correctly-classified value from screener_master.
+    inferred_category (screenerClassifier.ts's RULES / NLPScreenerInference), which uses the
+    SAME taxonomy as unified_ranker.py's CAT_BASE_WT ('technical_trend', 'fundamental_quality',
+    'ownership_institutional', ...). Bug found live 2026-08-13: cat_norm used to be
+    re-validated against CATEGORY_DEFAULTS -- a different, coarser vocabulary meant only to
+    supply horizon/confidence fallbacks -- which shares almost no keys with the real taxonomy
+    ('sector_theme'/'other' being the only overlap) and silently collapsed every other real
+    category to 'other' (CAT_BASE_WT weight 0.0). Hit 95/95 (100%) of et_marketstats'
+    screeners and up to 35% of moneycontrol's, all inserted via this exact path -- e.g.
+    'Above EMA-20' correctly classified 'technical_trend' in screener_master, silently written
+    as 'other' here, contributing ZERO to every stock's score. `category` is now trusted as-is;
+    CATEGORY_DEFAULTS is consulted only for its own stated purpose (horizon/confidence)."""
+    if sentiment and sentiment in ('bullish', 'bearish', 'neutral'):
+        bias = sentiment
+    elif re.search(_safe_pattern(BEARISH_KEYWORDS), name.lower()):
+        bias = 'bearish'
+    elif category == 'sector_theme':
+        bias = 'neutral'
+    else:
+        # Was 'bullish' (2026-08-10). A catch-all that defaults to BULLISH makes every
+        # screener nobody classified into a buy vote, which systematically tilts
+        # bullish_screener_count and every score derived from it. "We could not tell"
+        # is neutral, not bullish -- abstain instead of guessing a direction.
+        bias = 'neutral'
+
+    cat_norm = category
+    _, horizon, confidence = CATEGORY_DEFAULTS.get(category, ('neutral', 'medium_term', 0.65))
+    return bias, cat_norm, horizon, confidence
+
+
 def run():
     con = connect()
 
@@ -209,26 +268,6 @@ def run():
 
     print(f"[CatalogEnricher] {len(missing)} screener_master entries to INSERT into screener_catalog")
 
-    # Category → (signal_bias, investment_horizon, confidence)
-    CATEGORY_DEFAULTS = {
-        'momentum':          ('bullish',  'short_term',  0.72),
-        'breakout':          ('bullish',  'short_term',  0.72),
-        'breakdown':         ('bearish',  'short_term',  0.72),
-        'valuation':         ('bullish',  'long_term',   0.72),
-        'fundamental':       ('bullish',  'long_term',   0.72),
-        'quality':           ('bullish',  'long_term',   0.72),
-        'dividend':          ('bullish',  'long_term',   0.70),
-        'technical':         ('bullish',  'short_term',  0.70),
-        'sector_theme':      ('neutral',  'medium_term', 0.65),
-        'fno':               ('neutral',  'short_term',  0.68),
-        'institutional':     ('bullish',  'medium_term', 0.72),
-        'insider':           ('bullish',  'medium_term', 0.70),
-        'earnings':          ('bullish',  'short_term',  0.70),
-        'other':             ('neutral',  'medium_term', 0.65),
-    }
-
-    BEARISH_KEYWORDS = r"breakdown|sell|short|fall|decline|bearish|overbought|death.cross"
-
     inserted = 0
     for row in missing:
         scan_id  = row[0]
@@ -246,23 +285,7 @@ def run():
         ts_url    = row[6]
 
         kw = extract_signal_keywords(name)
-
-        # Derive signal_bias: use existing sentiment if set, else NLP
-        if sentiment and sentiment in ('bullish', 'bearish', 'neutral'):
-            bias = sentiment
-        elif re.search(_safe_pattern(BEARISH_KEYWORDS), name.lower()):
-            bias = 'bearish'
-        elif category == 'sector_theme':
-            bias = 'neutral'
-        else:
-            # Was 'bullish' (2026-08-10). A catch-all that defaults to BULLISH makes every
-            # screener nobody classified into a buy vote, which systematically tilts
-            # bullish_screener_count and every score derived from it. "We could not tell"
-            # is neutral, not bullish -- abstain instead of guessing a direction.
-            bias = 'neutral'
-
-        cat_norm = category if category in CATEGORY_DEFAULTS else 'other'
-        _, horizon, confidence = CATEGORY_DEFAULTS.get(cat_norm, ('neutral', 'medium_term', 0.65))
+        bias, cat_norm, horizon, confidence = resolve_screener_defaults(category, sentiment, name)
 
         url = ts_url or (tl_screener_url(screenpk) if source == 'trendlyne' and screenpk else None)
 
@@ -283,6 +306,26 @@ def run():
 
     con.commit()
     print(f"[CatalogEnricher] screener_catalog: {inserted} new rows inserted from screener_master")
+
+    # ── Step 5b: Backfill category for EXISTING rows the CATEGORY_DEFAULTS bug already hit ──
+    # The Step 5 fix above only stops NEW rows losing their category -- it does nothing for the
+    # screener_catalog rows this already corrupted (they already exist, so Step 5's `missing`
+    # query's NOT EXISTS clause skips them entirely). Repair by pulling the real category back
+    # from screener_master wherever they've diverged and screener_master actually has a better
+    # answer (not 'other' or NULL itself).
+    drift = con.execute("""
+        SELECT sc.screener_id, sc.source, sm.inferred_category
+        FROM screener_catalog sc
+        JOIN screener_master sm ON sm.scan_id = sc.screener_id AND LOWER(sm.source) = LOWER(sc.source)
+        WHERE sc.category = 'other' AND sm.inferred_category IS NOT NULL AND sm.inferred_category != 'other'
+    """).fetchall()
+    for sid, src, real_cat in drift:
+        con.execute(
+            "UPDATE screener_catalog SET category = ? WHERE screener_id = ? AND source = ?",
+            (real_cat, sid, src),
+        )
+    con.commit()
+    print(f"[CatalogEnricher] screener_catalog: {len(drift)} existing rows' category backfilled from screener_master")
 
     # ── Step 6: Fix sector_theme signal_bias — force neutral unless directional ─
     # Screeners in the sector_theme category that have generic universe names

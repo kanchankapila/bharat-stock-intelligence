@@ -161,7 +161,7 @@ def load_screener_precursors(cutoff: str) -> pd.DataFrame:
     q = f"""
         SELECT tss.symbol, tss.first_seen, tss.last_seen, sc.signal_bias
         FROM trendlyne_screener_stocks tss
-        JOIN screener_catalog sc ON sc.screener_id = tss.screener_id AND sc.source = 'trendlyne'
+        JOIN screener_catalog sc ON sc.screener_id = tss.screener_id AND LOWER(sc.source) = 'trendlyne'
         WHERE sc.category IN ({cats}) AND tss.first_seen IS NOT NULL AND tss.first_seen >= ?
     """
     rows = read_df(q, (cutoff,))
