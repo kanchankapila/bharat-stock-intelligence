@@ -57,6 +57,27 @@ async function readCapped(response: Response, maxBytes: number): Promise<string>
   return Buffer.concat(chunks.map((c) => Buffer.from(c))).toString('utf8');
 }
 
+/** Some providers (NSE's own site API, not the archive) reject a bare
+ * request without a prior session cookie. This primes one with a single GET
+ * and returns the raw Set-Cookie value(s) joined for reuse as a Cookie
+ * header on the real request -- no retry policy, no raw_object capture; the
+ * priming request itself is not the data being fetched. Returns '' if the
+ * priming request fails or sets no cookie (caller decides whether that's
+ * fatal -- some endpoints tolerate a missing cookie). */
+export async function primeSessionCookie(url: string, headers: Record<string, string>, timeoutMs = 10_000): Promise<string> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const response = await fetch(url, { headers, signal: controller.signal });
+    const setCookie = typeof response.headers.getSetCookie === 'function' ? response.headers.getSetCookie() : [];
+    return setCookie.map((c) => c.split(';')[0]).join('; ');
+  } catch {
+    return '';
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 /** One HTTP request with timeout, bounded retry+jitter (never on 404), and a
  * response size cap. Returns a raw capture -- caller persists it as
  * raw_object BEFORE parsing (BUILD_STAGE_0_2_SPEC.md §1: "raw before parse").

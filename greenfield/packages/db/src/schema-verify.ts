@@ -35,6 +35,15 @@ const EXPECTED_TABLES = [
   'dq_check',
   'dq_result',
   'audit_metric',
+  // 007 fundamentals_events_screeners
+  'fundamental_fact',
+  'ownership_fact',
+  'analyst_estimate',
+  'market_flow',
+  'event_fact',
+  'screener_definition',
+  'screener_membership',
+  'transfer_reject',
   // node-pg-migrate's own bookkeeping table
   'pgmigrations',
 ].sort();
