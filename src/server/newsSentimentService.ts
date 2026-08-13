@@ -22,6 +22,7 @@ import { dbGet, dbAll, dbRun, dbTransaction } from './dbAsync';
 import { rowGroups, bulkUpsert } from './dbBulk';
 import crypto from 'crypto';
 import { fetchGlobalMarketData } from './globalMarketService';
+import { runPython } from './pythonRunner';
 import {
   buildAliasIndex, extractSymbolsByName, companyAliases, NEWS_ALIAS_OVERRIDES, type AliasEntry,
 } from './newsEntityTagger';
@@ -885,8 +886,8 @@ export async function runNewsSentimentCycle(): Promise<{
     ORDER BY fetched_at DESC LIMIT 10
   `) as { id: string; title: string; summary: string; category: string }[];
 
-  if (highImpact.length > 0 && process.env.ANTHROPIC_API_KEY) {
-    await enrichWithAI(highImpact);
+  if (highImpact.length > 0) {
+    await enrichWithFinBERT(highImpact);
   }
 
   // Build and store market sentiment snapshot
@@ -896,43 +897,30 @@ export async function runNewsSentimentCycle(): Promise<{
   return { fetched, inserted, updated: 0 };
 }
 
-// ─── AI Enrichment for High-Impact News ──────────────────────────────────────
+// ─── FinBERT Enrichment for High-Impact News ──────────────────────────────────
+// REPLACED 2026-08-13 (was enrichWithAI, Anthropic): ANTHROPIC_API_KEY has been empty since
+// inception, so that path silently never ran -- 11,384 HIGH-impact items stuck at
+// ai_scored=0 and growing, found via a fetcher-accuracy-review sweep. Uses
+// finbert_news_sentiment.py (ProsusAI/finbert, ~440MB, already used elsewhere in this
+// codebase for screener sentiment) instead of a paid key or a local LLM too large for this
+// box's free RAM. impact is NOT re-derived here -- FinBERT is a sentiment classifier with no
+// basis for judging news impact, and every item arrives already filtered to impact='HIGH' by
+// the keyword baseline (scoreSentiment above), so it's passed through unchanged.
 
-async function enrichWithAI(items: { id: string; title: string; summary: string; category: string }[]) {
-  const apiKey = process.env.ANTHROPIC_API_KEY;
-  if (!apiKey) return;
+export async function enrichWithFinBERT(items: { id: string; title: string; summary: string; category: string }[]) {
+  const markDoneSql = `UPDATE news_sentiment_items SET ai_scored=1, sentiment=?, sentiment_score=? WHERE id=?`;
+  const payload = items.map(i => ({ id: i.id, title: i.title, summary: i.summary?.slice(0, 300) ?? '' }));
+  const b64 = Buffer.from(JSON.stringify(payload), 'utf-8').toString('base64');
 
-  const markDoneSql = `UPDATE news_sentiment_items SET ai_scored=1, sentiment=?, sentiment_score=?, impact=? WHERE id=?`;
-
-  for (const item of items) {
-    try {
-      const resp = await fetch('https://api.anthropic.com/v1/messages', {
-        method: 'POST',
-        headers: {
-          'x-api-key': apiKey,
-          'anthropic-version': '2023-06-01',
-          'content-type': 'application/json',
-        },
-        body: JSON.stringify({
-          model: process.env.ANTHROPIC_MODEL ?? 'claude-haiku-4-5-20251001',
-          max_tokens: 100,
-          messages: [{
-            role: 'user',
-            content: `Rate this Indian stock market news. Reply ONLY with JSON: {"sentiment":"BULLISH|BEARISH|NEUTRAL","score":-1.0_to_1.0,"impact":"HIGH|MEDIUM|LOW"}\n\nTitle: ${item.title}\nSummary: ${item.summary?.slice(0, 300) ?? ''}`,
-          }],
-        }),
-      });
-      const data = await resp.json() as { content?: { text?: string }[] };
-      const text = data?.content?.[0]?.text?.trim() ?? '';
-      const parsed = JSON.parse(text);
-      await dbRun(markDoneSql, [
-        parsed.sentiment ?? 'NEUTRAL',
-        parsed.score     ?? 0,
-        parsed.impact    ?? 'MEDIUM',
-        item.id,
-      ]);
-      await new Promise(r => setTimeout(r, 200));
-    } catch { /* skip on error */ }
+  try {
+    const { stdout } = await runPython('finbert_news_sentiment.py', [b64], 60_000);
+    const jsonLine = stdout.trim().split('\n').pop() ?? '[]'; // model-load progress noise precedes it on some runs
+    const results = JSON.parse(jsonLine) as { id: string; sentiment: string; score: number }[];
+    for (const r of results) {
+      await dbRun(markDoneSql, [r.sentiment, r.score, r.id]);
+    }
+  } catch (e) {
+    console.error('[SENTIMENT] FinBERT enrichment failed:', (e as Error).message);
   }
 }
 

@@ -19,6 +19,7 @@
 import { dbGet, dbAll, dbRun, dbTransaction } from './dbAsync';
 import { wsSignalService } from './websocketService';
 import { fetchDeliveryMap } from './deliveryFetcher';
+import { getAtrBarriers } from './atrBarriers';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -1018,65 +1019,80 @@ function detectSignals(rows: OHLCVRow[], symbol = '', latestPcr?: number | null)
   };
 }
 
-// ─── AI Insights (Anthropic API) ──────────────────────────────────────────────
+// ─── Trading Setup (deterministic, no LLM) ────────────────────────────────────
+// REPLACED 2026-08-13: this used to call Anthropic to have an LLM invent entry_zone/
+// stop_loss/targets from a text prompt. ANTHROPIC_API_KEY has been empty since inception, so
+// it silently never ran (0/69,459 technical_signals rows ever got these columns populated) --
+// found via a fetcher-accuracy-review sweep. Investigated the fix: this codebase already has
+// a MEASURED reason not to bring an LLM back for this at all -- atrBarriers.ts's own comment:
+// "The AI path previously stored the LLM's hallucinated price levels, which had no relation
+// to a stock's realized range -- so ~76% of AI signals expired NEUTRAL (target unreachable
+// in-horizon) while stops still fired, i.e. structurally negative expectancy despite a
+// 55%-accurate model." getAtrBarriers() is the fix that was already built for that exact
+// failure, elsewhere in this codebase -- reused here rather than re-adding the same bug.
+// A local Ollama option was considered and rejected: this box has 23GB RAM at 95%+ used
+// (1.1GB free measured live), and the configured models (mistral ~4-5GB resident, qwen3:30b
+// ~18-20GB) would push it into swap. The narrative text (`insight`) has no deterministic
+// equivalent and is dropped -- its only consumer was one conditional UI block that has never
+// rendered anyway (aiInsight has been empty since inception), so nothing user-visible changes
+// beyond entry_zone/stop_loss/targets/setup_quality/time_horizon going from always-blank to
+// always-populated.
+const TREND_SIGNAL_TYPES = new Set<SignalType>([
+  'GOLDEN_CROSS', 'WEEK_52_BREAKOUT', 'EMA_BULL_STACK', 'CONSECUTIVE_STRENGTH', 'NEAR_52W_HIGH',
+]);
+// BEARISH_SIGNAL_TYPES is defined once, below, near sendTelegramSignals (its other consumer).
 
-async function getAIInsight(r: SignalResult): Promise<{
+// Pure helpers, exported for direct unit testing (no DB) -- getTradingSetup below is a thin
+// I/O wrapper (getAtrBarriers hits stock_ohlcv) around these.
+
+/** This scanner's signal set is overwhelmingly bullish-oriented (breakouts, golden cross,
+ *  oversold recovery, ...), but DEATH_CROSS/RSI_BEARISH_DIVERGENCE/DISTRIBUTION_DAY exist too
+ *  -- majority-vote among what actually fired, defaulting long on a tie or no signals. */
+export function inferSetupDirection(signals: TechSignal[]): 'long' | 'short' {
+  const bearishCount = signals.filter(s => BEARISH_SIGNAL_TYPES.has(s.type)).length;
+  return bearishCount > signals.length / 2 ? 'short' : 'long';
+}
+
+/** Strongest signal that actually fired -- reuses the strength classification detectSignals()
+ *  already computed, rather than re-deriving thresholds on signalScore (whose scale is
+ *  regime/win-rate/news-adjusted and not a stable 0-100 range). */
+export function deriveSetupQuality(signals: TechSignal[]): 'High' | 'Medium' | 'Low' {
+  if (signals.some(s => s.strength === 'HIGH')) return 'High';
+  if (signals.some(s => s.strength === 'MEDIUM')) return 'Medium';
+  return 'Low';
+}
+
+/** Trend/structural signals (golden cross, 52w breakout, EMA stack) play out over weeks;
+ *  everything else (momentum/volatility triggers) is a shorter swing. A simple heuristic, not
+ *  a measured one -- tighten if this is ever backtested against real holding periods. */
+export function deriveTimeHorizon(signals: TechSignal[]): 'Positional (2-4W)' | 'Swing (3-7D)' {
+  return signals.some(s => TREND_SIGNAL_TYPES.has(s.type)) ? 'Positional (2-4W)' : 'Swing (3-7D)';
+}
+
+export async function getTradingSetup(r: SignalResult): Promise<{
   aiInsight: string; entryZone: string; stopLoss: string;
   targets: string; setupQuality: string; timeHorizon: string;
 }> {
   const empty = { aiInsight: '', entryZone: '', stopLoss: '', targets: '', setupQuality: '', timeHorizon: '' };
-  const apiKey = process.env.ANTHROPIC_API_KEY;
-  if (!apiKey) return empty;
+  if (r.signals.length === 0) return empty;
 
-  const sma200gap = r.sma200 > 0 ? ((r.cmp - r.sma200) / r.sma200 * 100).toFixed(1) : '0';
-  const sma50gap  = r.sma50  > 0 ? ((r.cmp - r.sma50)  / r.sma50  * 100).toFixed(1) : '0';
-  const sigDetail = r.signals.map(s => `• ${s.type} (${s.strength}): ${s.detail}`).join('\n');
+  const direction = inferSetupDirection(r.signals);
+  const barriers = await getAtrBarriers(r.symbol, r.cmp, direction);
+  if (!barriers) return empty;
 
-  const prompt = `You are a SEBI-registered technical analyst covering Indian equities (NSE).
-Analyse this stock and give a CONCISE trading setup.
+  const money = (n: number) => `₹${n.toFixed(2)}`;
+  const bandFrac = 0.01; // ±1% around entry, same rough magnitude the old prompt asked for
+  const entryLow = barriers.entryPrice * (1 - bandFrac);
+  const entryHigh = barriers.entryPrice * (1 + bandFrac);
 
-Stock: ${r.name ?? r.symbol} (${r.symbol})
-CMP: ₹${r.cmp.toFixed(2)}  |  Day Change: ${r.changePct.toFixed(2)}%
-RSI(14): ${r.rsi.toFixed(1)}  |  SMA50: ₹${r.sma50.toFixed(2)}  |  SMA200: ₹${r.sma200.toFixed(2)}
-vs SMA50: ${sma50gap}%  |  vs SMA200: ${sma200gap}%
-Volume ratio: ${r.volumeRatio.toFixed(2)}x 10-day average
-
-Signals detected:
-${sigDetail}
-
-Respond in EXACTLY this JSON format (no markdown, no preamble):
-{"insight":"2-sentence plain English summary of why this is a setup worth watching","entry_zone":"₹X – ₹Y","stop_loss":"₹Z (below key level)","targets":"T1: ₹A | T2: ₹B | T3: ₹C","setup_quality":"High / Medium / Low","time_horizon":"Swing (3-7D) / Positional (2-4W)"}`;
-
-  try {
-    const resp = await fetch('https://api.anthropic.com/v1/messages', {
-      method: 'POST',
-      headers: {
-        'x-api-key': apiKey,
-        'anthropic-version': '2023-06-01',
-        'content-type': 'application/json',
-      },
-      body: JSON.stringify({
-        model: process.env.ANTHROPIC_MODEL ?? 'claude-haiku-4-5-20251001',
-        max_tokens: 400,
-        messages: [{ role: 'user', content: prompt }],
-      }),
-      signal: AbortSignal.timeout(10000),
-    });
-    const data = await resp.json() as { content?: { text?: string }[] };
-    const text = data?.content?.[0]?.text?.trim() ?? '';
-    const parsed = JSON.parse(text);
-    return {
-      aiInsight:    parsed.insight        ?? '',
-      entryZone:    parsed.entry_zone     ?? '',
-      stopLoss:     parsed.stop_loss      ?? '',
-      targets:      parsed.targets        ?? '',
-      setupQuality: parsed.setup_quality  ?? '',
-      timeHorizon:  parsed.time_horizon   ?? '',
-    };
-  } catch (e) {
-    console.error('[SIGNALS] AI insight failed for', r.symbol, ':', (e as Error).message);
-    return empty;
-  }
+  return {
+    aiInsight: '',
+    entryZone: `${money(entryLow)} – ${money(entryHigh)}`,
+    stopLoss: money(barriers.stopLoss),
+    targets: money(barriers.targetPrice),
+    setupQuality: deriveSetupQuality(r.signals),
+    timeHorizon: deriveTimeHorizon(r.signals),
+  };
 }
 
 // ─── Telegram Delivery ────────────────────────────────────────────────────────
@@ -1305,15 +1321,15 @@ export async function runTechnicalSignalScan(options: {
     console.log(`[SIGNALS] Found ${realSetups} setups (score ≥ ${minScore})`
       + (newsOnlyRows > 0 ? `, +${newsOnlyRows} news-only rows persisted (no technical signal)` : ''));
 
-    // AI insights for top N -- bounded by realSetups, not results.length, so a quiet day
-    // with few real setups doesn't spend AI-insight budget on score=0 news-only rows.
+    // Trading setup (entry/stop/target/quality/horizon) for top N -- bounded by realSetups,
+    // not results.length, so a quiet day with few real setups doesn't compute it for score=0
+    // news-only rows. Deterministic (getTradingSetup, see its own comment) -- no rate limit
+    // to respect, so no artificial delay between rows either.
     const aiLimit = Math.min(aiInsightsLimit, realSetups);
-    if (aiLimit > 0 && process.env.ANTHROPIC_API_KEY) {
-      console.log(`[SIGNALS] Fetching AI insights for top ${aiLimit} stocks...`);
+    if (aiLimit > 0) {
       for (let i = 0; i < aiLimit; i++) {
-        const insight = await getAIInsight(results[i]);
-        Object.assign(results[i], insight);
-        if (i < aiLimit - 1) await new Promise(r => setTimeout(r, 350));
+        const setup = await getTradingSetup(results[i]);
+        Object.assign(results[i], setup);
       }
     }
 
