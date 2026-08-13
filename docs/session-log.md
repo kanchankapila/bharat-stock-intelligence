@@ -2209,9 +2209,16 @@ Full `pytest`: 1,722 passed, 5 failed, 224 skipped — all 5 failures are `Modul
 bare cloud container, pre-existing and unrelated; every change this session is additive
 (3 new paths + a 2-line `.gitignore` append), touching no existing source file.
 
-**Not done, and deliberately:** no memory-index update — `MEMORY.md` lives at a Windows path
-unavailable from this container. Worth adding an entry for the trade-desk skill from a local
-session.
+**Memory entry staged in-repo, not filed.** `MEMORY.md` lives at a Windows path unavailable
+from this container, and `~/.claude/projects/` here holds only the session transcript and is
+reclaimed with the container — so an entry written there would not survive. Written instead to
+`docs/memory/trade_desk_skill.md`, in the store's own format, with the `MEMORY.md` index line
+to add quoted at the top of the file. **Copy it into the real memory store from a local session
+and delete the repo copy** — left in-repo it will rot, since nothing else reads that path.
+Beyond the skill itself it records two things worth not rediscovering: the
+quantile-winsorization interpolation trap, and that exercising any `db_compat` path against a
+throwaway SQLite fixture needs **both** `USE_POSTGRES=false` *and* `DATABASE_URL=sqlite:///…`
+— setting only the latter still connects to Postgres and refuses on :5433.
 
 ---
 
