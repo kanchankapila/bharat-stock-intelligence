@@ -6,6 +6,56 @@ Historical record, split out of CLAUDE.md on 2026-08-11 (it was 64% of that file
 
 ## Recent session notes
 
+### 2026-08-13 — New skill: `screener-combo-predictor` (name→concept-tag decomposition + daily predict/grade/learn loop)
+
+Built `.claude/skills/screener-combo-predictor/SKILL.md` plus its one non-prose component,
+`src/server/screener_name_concepts.py` (pure stdlib, no DB/network, 22 tests in
+`src/server/tests/test_screener_name_concepts.py`).
+
+**The idea, and why it isn't a rerun of an already-dead measurement.** `measurement.md` records
+that all 1,563 screeners tested one-at-a-time survive neither FDR nor Bonferroni. That is partly
+a *power* problem: one screener contributes a handful of (symbol, date) rows, so nothing can
+clear a 1,563-way correction even if real. Decomposing the 1,534-name catalog by NAME onto 46
+orthogonal concept tags across 8 facets (timeframe / mechanism / participation / fundamental /
+event / descriptive) pools every screener expressing a concept across all three providers, which
+is what gives `screener_combo_finder.py`'s day-level t-test enough observations per cell. The tag
+is the testable unit; the individual screener is not. Measured coverage: **82.1% of names carry
+≥1 signal tag, 50.8% same-day relevant, all 46 tags fire.**
+
+**Deliberately reused rather than rebuilt**: `screener_combo_finder.py`'s `_day_level_backtest()`
+/ `search_combinations()` for validation, and — for the learning loop —
+`live_capitulation_screener.py`'s pattern of writing picks into the existing
+`live_screener_appearances` under a new `filter_key`. That last choice means
+`live_screener_resolver.py` grades the picks automatically and `backtest_live_screener.py` /
+`live_screener_optimizer.py` / combo-finder tier 2 all consume them, with **zero schema change
+and no migration**. No new predictions table was added.
+
+**Two bugs found in my own parser by the discipline, not by reading it:**
+1. `mech_ma_stack` matched only Trendlyne's `SMA100` ordering and silently dropped ETnow/
+   MoneyControl's `100Day EMA` family (11 names) from combination search. Found by the
+   `--coverage` self-audit's uncovered-names list, not by inspecting the regex.
+2. The ETnow de-glue heuristic (split at lowercase→uppercase to strip a run-on description)
+   split *inside* domain camelCase tokens — `Strong QoQ EPS Growth in recent results` became
+   `Strong Qo`, losing the quarterly/growth/results tags entirely. Fixed by skipping boundaries
+   inside an `[A-Z][a-z][A-Z]` run (YoY/QoQ/MoM/FnO) plus a short-head guard for lowercase-initial
+   company names (eClerx/iGate).
+
+**Negative-controlling the tests is what caught bug 2.** Two tests passed against deliberately
+broken code on the first attempt: the de-glue test asserted on a name whose guard never fired,
+and the same-day-veto test used a pure-fundamental name that returns False via the fallback
+regardless of the veto. Both were rewritten against real catalog names that actually exercise the
+branch (`Increasing public shareholding in the past quarter (QoQ)` for the veto). Every
+behavioral guard in the module now has a control that fails when it is removed — verified by
+patching the source six ways and re-running.
+
+**Not done here (no production access in this session):** the container has no Postgres and no
+pandas/numpy, so nothing was run against live data. Loop A's tier-2 wiring, the daily pick
+emission, and all grading are specified in the skill but **unmeasured** — the skill states this
+and requires a live run + backtest evidence before any combination is promoted. The skill also
+carries `measurement.md`'s priors (screener sentiment inverted; gap_up/gap_down both negative
+net of costs; the capitulation triple as incumbent at t=+3.61) so a future session argues against
+them instead of rediscovering them.
+
 ### 2026-08-13 — Daily Data-Integrity Report triage: a deploy-race straggler and a false-positive check
 
 Two `🚨 critical` failures in the nightly Telegram report, both traced live against production
