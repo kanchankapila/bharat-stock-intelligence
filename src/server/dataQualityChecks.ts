@@ -237,18 +237,15 @@ const TABLE_FRESHNESS_CHECKS: TableFreshnessConfig[] = [
     category: 'flows', critical: false, table: 'stock_block_deal_daily', dateColumn: 'date', warnDays: 14 },
   { id: 'superstar-investor-activity-recency', label: 'superstar_investor_activity (InvestSights notable-investor stake changes)',
     category: 'flows', critical: false, table: 'superstar_investor_activity', dateColumn: 'fetched_at', warnDays: 14 },
-  // Live-confirmed 2026-08-13 while wiring this check up: the table didn't exist in production
-  // at all (mf_holdings_fetcher.py's ensure_schema() had apparently never persisted, or nothing
-  // had ever gotten far enough to call it under a real scheduled run -- .catch()-swallowed in
-  // queues.ts, invisible). Root cause traced further: fetch_mf_holding()'s sole endpoint,
-  // mfapps.indiatimes.com/ET_Mutual_Funds/pages/mftools/MFPortfolioHolding.cms, returns a clean
-  // nginx 404 for every symbol (confirmed with the fetcher's own real headers, not a bot-block
-  // page) -- upstream retired, not a parsing bug. Same shape as mf-sector-allocation-recency's
-  // AMFI incident above. Table now created (schema-only, still empty) so this check can at
-  // least surface the gap instead of erroring "relation does not exist" forever.
-  { id: 'stock-mf-holdings-recency', label: 'stock_mf_holdings (per-stock MF ownership %, monthly disclosure)',
-    category: 'flows', critical: false, table: 'stock_mf_holdings', dateColumn: 'date', warnDays: 45,
-    emptyDetail: 'stock_mf_holdings is empty — mfapps.indiatimes.com\'s MFPortfolioHolding.cms endpoint now 404s for every symbol (upstream, not a fetcher bug; see mf_holdings_fetcher.py). Blocked until ET restores it or a replacement source is chosen; note mf_stock_holdings (a different table, different fetcher) is healthy and may already cover this need.' },
+  // Found 2026-08-13 while wiring this check up: the table didn't exist in production at all --
+  // mf_holdings_fetcher.py's sole endpoint (mfapps.indiatimes.com's MFPortfolioHolding.cms) was
+  // dead (clean nginx 404 for every symbol, upstream retired, confirmed with the fetcher's own
+  // real headers). Fixed same day: repointed at ET's shareholding-pattern endpoint
+  // (marketservices.indiatimes.com/marketservices/shareholding?companyid=), keyed by the
+  // standard ET companyid -- also fixed a hard LIMIT 200 in the old bse/nse-code ID resolution.
+  // Live-verified against RELIANCE/HDFCBANK/BEL/360ONE/3MINDIA before landing.
+  { id: 'stock-mf-holdings-recency', label: 'stock_mf_holdings (per-stock MF ownership %, quarterly disclosure)',
+    category: 'flows', critical: false, table: 'stock_mf_holdings', dateColumn: 'date', warnDays: 10, failDays: 16 },
 
   // fundamentals
   { id: 'tl-financial-quality-freshness', label: 'tl_financial_quality (weekly ET ratios)',
@@ -345,6 +342,19 @@ const TABLE_FRESHNESS_CHECKS: TableFreshnessConfig[] = [
     category: 'fundamentals', critical: false, table: 'mc_analyst_ratings', dateColumn: 'fetched_at', warnDays: 3, failDays: 5 },
   { id: 'mc-earnings-forecast-freshness', label: 'mc_earnings_forecast (MC forward estimates)',
     category: 'fundamentals', critical: false, table: 'mc_earnings_forecast', dateColumn: 'date', warnDays: 3, failDays: 5 },
+  // 2026-08-13: 3 more moneycontrol_fetcher.py siblings, same daily crawl -- gained fetched_at
+  // this session (migration 1786990000000) after fetcher-accuracy-review found they had no
+  // timestamp column at all.
+  { id: 'mc-estimates-hits-misses-freshness', label: 'mc_estimates_hits_misses (actual vs analyst-estimate surprise)',
+    category: 'fundamentals', critical: false, table: 'mc_estimates_hits_misses', dateColumn: 'fetched_at', warnDays: 3, failDays: 5 },
+  { id: 'mc-stock-vitals-freshness', label: 'mc_stock_vitals (MC per-stock vitals scorecard)',
+    category: 'fundamentals', critical: false, table: 'mc_stock_vitals', dateColumn: 'fetched_at', warnDays: 3, failDays: 5 },
+  { id: 'mc-stock-scans-freshness', label: 'mc_stock_scans (MC technical/fundamental scan membership)',
+    category: 'fundamentals', critical: false, table: 'mc_stock_scans', dateColumn: 'fetched_at', warnDays: 3, failDays: 5 },
+  // mc_seasonality_best_stocks is market-wide (--seasonality flag), run weekly inside
+  // trendlyneWeekly.jobs.ts, not the daily crawl above -- matched to that job's cadence.
+  { id: 'mc-seasonality-best-stocks-freshness', label: 'mc_seasonality_best_stocks (monthly seasonality patterns)',
+    category: 'fundamentals', critical: false, table: 'mc_seasonality_best_stocks', dateColumn: 'fetched_at', warnDays: 10, failDays: 16 },
   // trendlyne_adv_tech_fetcher.py / trendlyne_fundamentals_fetcher.py both run weekly inside
   // trendlyneWeekly.jobs.ts -- matched to tl-financial-quality-freshness's own 10/16-day
   // thresholds right above, the existing pattern for this exact job's cadence.
@@ -433,6 +443,12 @@ const TABLE_FRESHNESS_CHECKS: TableFreshnessConfig[] = [
   { id: 'screener-catalog-freshness', label: 'screener_master (proxies screener_catalog, same writer/run, no timestamp of its own)',
     category: 'signals', critical: true, table: 'screener_master', dateColumn: 'last_updated',
     nativeDateColumn: true, warnDays: 3, failDays: 5 },
+  // screener_catalog gained its own fetched_at 2026-08-13 (migration 1786990000000) -- checked
+  // directly now instead of relying solely on the screener_master proxy above, since the two
+  // tables can genuinely diverge (see fix_screener_catalog_source_casing.py's concurrent
+  // investigation into screener_id/source identity mismatches between them).
+  { id: 'screener-catalog-own-freshness', label: 'screener_catalog (direct, not proxied)',
+    category: 'signals', critical: false, table: 'screener_catalog', dateColumn: 'fetched_at', warnDays: 3, failDays: 5 },
   { id: 'stock-event-triggers-freshness', label: 'stock_event_triggers (screener exit/tenure + news attention)',
     category: 'signals', critical: false, table: 'stock_event_triggers', dateColumn: 'date', warnDays: 3, failDays: 5 },
   { id: 'screener-sector-rotation-freshness', label: 'screener_sector_rotation',

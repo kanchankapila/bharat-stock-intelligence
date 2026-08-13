@@ -135,6 +135,7 @@ def _throwaway_db():
             screener_id TEXT, source TEXT, screener_name TEXT, category TEXT,
             subcategory TEXT, signal_bias TEXT, investment_horizon TEXT,
             confidence REAL, signal_keywords TEXT, screener_url TEXT,
+            fetched_at TEXT,
             PRIMARY KEY (screener_id, source)
         );
         CREATE TABLE trendlyne_screener_stocks (

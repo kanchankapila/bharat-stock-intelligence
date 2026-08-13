@@ -1,118 +1,74 @@
 #!/usr/bin/env python3
 """Fetch mutual fund holding % per stock and store for ML features.
 
-MF holding data is from ET Markets (mfapps.indiatimes.com) which aggregates
-AMFI monthly disclosures. Fetches for all 180 mapped stocks.
+REWRITTEN 2026-08-13: the previous source (mfapps.indiatimes.com's MFPortfolioHolding.cms,
+keyed by bse/nse code) is dead -- confirmed live, returns a clean nginx 404 for every symbol,
+upstream retired. It had produced zero rows since the fetcher was added; every scheduled run
+was ~200 requests that all 404'd. Replaced with ET's shareholding-pattern endpoint
+(marketservices.indiatimes.com), keyed by the same ET `companyid` the ET_Stats fetchers already
+use (scripts/stocklist.json via load_companyid_map()) -- confirmed live against RELIANCE/
+HDFCBANK/BEL, real quarterly promoter/FII/DII/MF/pledge shareholding data.
 
-Writes to stock_mf_holdings (symbol, date, mf_holding_pct, num_funds, chg_vs_prev).
-Joins into technical_signals (mf_holding_pct, mf_fund_count).
+  Source: https://marketservices.indiatimes.com/marketservices/shareholding?companyid={cid}
+  summary.mf.percentage = MF holding % of the stock (as of the latest disclosed quarter)
+  summary.mf.changeQoQ  = change vs the prior quarter
 
-Run weekly (not daily — AMFI disclosures are monthly, ETMarkets lags 2-3 days).
+This endpoint has no per-fund count (no_of_funds) -- that metric is NOT reconstructed here.
+mf_stock_holdings_fetcher.py (a separate, healthy fetcher/table) already covers fund-count and
+share-level MF flow via technical_signals.mf_fund_count; duplicating it here would just be two
+writers racing on the same column for no benefit. This fetcher's sole job is the ownership
+LEVEL (mf_holding_pct) and its QoQ change (chg_vs_prev) -- the one metric nothing else on the
+platform captures.
+
+Writes to stock_mf_holdings (symbol, date, mf_holding_pct, chg_vs_prev).
+Joins into technical_signals (mf_holding_pct, mf_chg_vs_prev), point-in-time gated: shareholding
+disclosures are quarterly SEBI filings that lag the quarter-end by SHAREHOLDING_DISCLOSURE_LAG_DAYS
+(30 = SEBI's 21-day mandatory filing deadline + ~9 days of ET aggregation lag; live-checked
+2026-08-13 that the Jun-30 quarter's data was already available 44 days out, so 30 is
+conservative without being needlessly so -- not independently verified against a real per-
+company filing-date table the way MF_DISCLOSURE_LAG_DAYS=14 is in mf_stock_holdings_fetcher.py;
+tighten if a real lag is ever measured).
+
+Run weekly (shareholding patterns only change once a quarter; weekly is a generous crawl cadence).
+
+Usage:
+    python mf_holdings_fetcher.py
+    python mf_holdings_fetcher.py --symbol RELIANCE
+    python mf_holdings_fetcher.py --limit 50
 """
-import sys
+import argparse
 import time
 from datetime import date, timedelta
 
 import requests
-import pandas as pd
 
-from db_compat import connect, use_postgres
-from as_of import logical_write_floor
+from db_compat import connect
+from et_stats_client import HEADERS, load_companyid_map
 
 RATE_LIMIT_SEC = 0.3
-
-HEADERS = {
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-    "Accept": "application/json",
-    "Referer": "https://economictimes.indiatimes.com/",
-}
+SHAREHOLDING_URL = "https://marketservices.indiatimes.com/marketservices/shareholding?companyid={cid}"
+SHAREHOLDING_DISCLOSURE_LAG_DAYS = 30
 
 
-def _load_stock_map() -> list[dict]:
-    """Return [{symbol, bse_code, nse_code}] for all mapped stocks."""
-    con = connect()
-    ph = "%s" if use_postgres() else "?"
-    # nse_stocks has symbol; stocklist.ts has companyid (ET company ID).
-    # Fall back to using stocklist bse/nse codes via nse_stocks join.
-    rows = []
+def fetch_mf_holding(symbol: str, company_id: str, session: requests.Session) -> dict | None:
     try:
-        cur = con.cursor()
-        cur.execute("""
-            SELECT symbol, bse_code, nse_code
-            FROM stock_mf_map
-            WHERE bse_code IS NOT NULL OR nse_code IS NOT NULL
-        """)
-        rows = [{"symbol": r[0], "bse_code": r[1], "nse_code": r[2]} for r in cur.fetchall()]
-    except Exception:
-        # Clear aborted Postgres transaction state before executing fallback query
-        try:
-            con.rollback()
-        except Exception:
-            pass
-        # stock_mf_map doesn't exist yet — use nse_stocks symbol as nse_code
-        cur = con.cursor()
-        cur.execute("SELECT symbol FROM nse_stocks LIMIT 200")
-        rows = [{"symbol": r[0], "bse_code": None, "nse_code": r[0]} for r in cur.fetchall()]
-    con.close()
-    return rows
-
-
-def fetch_mf_holding(symbol: str, bse_code: str | None, nse_code: str | None,
-                     session: requests.Session) -> dict | None:
-    bse = bse_code or ""
-    nse = nse_code or symbol
-    url = (
-        f"https://mfapps.indiatimes.com/ET_Mutual_Funds/pages/mftools/MFPortfolioHolding.cms"
-        f"?bsecode={bse}&nsecode={nse}&prime=N&flag=1"
-    )
-    try:
-        r = session.get(url, timeout=10)
+        r = session.get(SHAREHOLDING_URL.format(cid=company_id), timeout=10)
         if r.status_code != 200:
             return None
         data = r.json()
-        # Response shape: {"data": {"holdingPct": "3.45", "noOfFunds": 12, ...}}
-        # or {"portfolioHolding": {"holdingPercent": "3.45", "schemeCount": 12}}
-        inner = (
-            data.get("data") or
-            data.get("portfolioHolding") or
-            data.get("mfHolding") or
-            {}
-        )
-        if not inner:
+        mf = (data.get("summary") or {}).get("mf") or {}
+        if not mf or mf.get("percentage") is None:
             return None
-
-        holding_pct_raw = (
-            inner.get("holdingPct") or
-            inner.get("holdingPercent") or
-            inner.get("mfHoldingPct") or
-            inner.get("holdingPercentage") or
-            None
-        )
-        num_funds_raw = (
-            inner.get("noOfFunds") or
-            inner.get("schemeCount") or
-            inner.get("numberOfSchemes") or
-            None
-        )
-        prev_pct_raw = (
-            inner.get("prevHoldingPct") or
-            inner.get("previousHoldingPercent") or
-            None
-        )
-
-        if holding_pct_raw is None:
-            return None
-
-        holding_pct = float(str(holding_pct_raw).replace(",", "").replace("%", "") or 0)
-        num_funds = int(num_funds_raw) if num_funds_raw is not None else None
-        prev_pct = float(str(prev_pct_raw).replace(",", "").replace("%", "")) if prev_pct_raw else None
-        chg = round(holding_pct - prev_pct, 4) if prev_pct is not None else None
-
+        # quarterDates[0] is {"date": <epoch-ms>, "dateStr": "30 Jun 2026"}, most-recent-first --
+        # confirmed live 2026-08-13. Use the epoch field, not dateStr (locale-dependent format).
+        quarter_dates = data.get("quarterDates") or []
+        epoch_ms = quarter_dates[0].get("date") if quarter_dates else None
+        as_of_date = date.fromtimestamp(epoch_ms / 1000).isoformat() if epoch_ms else None
         return {
             "symbol": symbol,
-            "mf_holding_pct": round(holding_pct, 4),
-            "num_funds": num_funds,
-            "chg_vs_prev": chg,
+            "mf_holding_pct": round(float(mf["percentage"]), 4),
+            "chg_vs_prev": round(float(mf["changeQoQ"]), 4) if mf.get("changeQoQ") is not None else None,
+            "as_of_date": as_of_date,
         }
     except Exception as e:
         print(f"[MF] {symbol}: {e}")
@@ -145,36 +101,58 @@ def ensure_schema(con) -> None:
     con.commit()
 
 
+def _floor(as_of_date: str | None, fallback: str) -> str:
+    """Point-in-time floor: don't leak a shareholding figure onto rows dated before the
+    disclosure was public. Same shape as mf_stock_holdings_fetcher.py's own _floor()."""
+    try:
+        d = date.fromisoformat(as_of_date[:10]) if as_of_date else None
+    except (ValueError, TypeError):
+        d = None
+    if d:
+        return (d + timedelta(days=SHAREHOLDING_DISCLOSURE_LAG_DAYS)).isoformat()
+    return fallback
+
+
 def upsert_holdings(rows: list[dict], today: str, con) -> None:
     cur = con.cursor()
     for r in rows:
         cur.execute("""
-            INSERT INTO stock_mf_holdings (symbol, date, mf_holding_pct, num_funds, chg_vs_prev)
-            VALUES (?,?,?,?,?)
+            INSERT INTO stock_mf_holdings (symbol, date, mf_holding_pct, chg_vs_prev)
+            VALUES (?,?,?,?)
             ON CONFLICT(symbol, date) DO UPDATE SET
                 mf_holding_pct = excluded.mf_holding_pct,
-                num_funds      = excluded.num_funds,
                 chg_vs_prev    = excluded.chg_vs_prev,
                 fetched_at     = CURRENT_TIMESTAMP
-        """, (r["symbol"], today, r["mf_holding_pct"], r.get("num_funds"), r.get("chg_vs_prev")))
+        """, (r["symbol"], today, r["mf_holding_pct"], r.get("chg_vs_prev")))
 
-    # Back-fill today's technical_signals rows using the date column used by the
-    # feature joiners in ml_ensemble/exit_policy. This keeps the write compatible with
-    # both SQLite and Postgres through db_compat.
-    for r in rows:
+        # Point-in-time: apply only to rows on/after the disclosure was public, NULL on older
+        # rows -- across the symbol's whole history, not a single-date match (a bare
+        # WHERE date = today silently touches 0 rows whenever this job runs on a non-trading
+        # day with no matching technical_signals grid row yet; same bug class already fixed in
+        # mf_stock_holdings_fetcher.py / financial_ratios_fetcher.py).
+        floor = _floor(r.get("as_of_date"), fallback=today)
         cur.execute("""
-            UPDATE technical_signals
-            SET mf_holding_pct = ?,
-                mf_fund_count  = ?,
-                mf_chg_vs_prev = ?
-            WHERE symbol = ? AND date = ?
-        """, (r["mf_holding_pct"], r.get("num_funds"), r.get("chg_vs_prev"), r["symbol"], today))
+            UPDATE technical_signals SET
+                mf_holding_pct = CASE WHEN date >= ? THEN COALESCE(?, mf_holding_pct) ELSE NULL END,
+                mf_chg_vs_prev = CASE WHEN date >= ? THEN COALESCE(?, mf_chg_vs_prev) ELSE NULL END
+            WHERE symbol = ?
+        """, (floor, r["mf_holding_pct"], floor, r.get("chg_vs_prev"), r["symbol"]))
 
     con.commit()
 
 
 def main():
-    stocks = _load_stock_map()
+    ap = argparse.ArgumentParser(description=__doc__)
+    ap.add_argument("--symbol", default=None, help="Single stock NSE symbol")
+    ap.add_argument("--limit", type=int, default=None, help="Process first N stocks")
+    args = ap.parse_args()
+
+    company_map = load_companyid_map()
+    stocks = sorted(company_map.items())
+    if args.symbol:
+        stocks = [(s, c) for s, c in stocks if s == args.symbol.upper()]
+    if args.limit:
+        stocks = stocks[:args.limit]
     if not stocks:
         print("[MF] No stocks to fetch")
         return
@@ -184,24 +162,17 @@ def main():
 
     session = requests.Session()
     session.headers.update(HEADERS)
-    # Align to the last completed trading session (same date the grid-ensurer builds), NOT
-    # date.today() -- this job runs in the Sunday ml-weekly-retrain batch, a non-trading day
-    # with no technical_signals row yet. The UPDATE below is a plain "WHERE date = today" (no
-    # ELSE-NULL branch), so on a day with no matching row it silently affects 0 rows -- no
-    # error, no rows touched, mf_holding_pct/mf_chg_vs_prev permanently null. Same fix pattern
-    # as mc_techscanner_fetcher.py / trendlyne_fundamentals_fetcher.py.
-    today = logical_write_floor(con, fallback=date.today().isoformat())
+    today = date.today().isoformat()
 
     results = []
-    for i, stock in enumerate(stocks, 1):
-        sym = stock["symbol"]
-        result = fetch_mf_holding(sym, stock.get("bse_code"), stock.get("nse_code"), session)
+    for i, (sym, company_id) in enumerate(stocks, 1):
+        result = fetch_mf_holding(sym, company_id, session)
         if result:
             results.append(result)
-            print(f"[MF] {sym}: {result['mf_holding_pct']:.2f}% ({result.get('num_funds', '?')} funds)")
+            print(f"[MF] {sym}: {result['mf_holding_pct']:.2f}% (chg {result.get('chg_vs_prev')})")
         else:
             print(f"[MF] {sym}: no data")
-        if i % 10 == 0:
+        if i % 100 == 0:
             print(f"[MF] Progress: {i}/{len(stocks)}")
         time.sleep(RATE_LIMIT_SEC)
 

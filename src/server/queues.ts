@@ -1136,8 +1136,13 @@ async function processMlWeeklyRetrain(_job: Job): Promise<{ success: boolean }> 
   // Refresh earnings beat/miss history (quarterly data, no need to run daily).
   await runPython('earnings_surprise_fetcher.py', [], 20 * 60_000)
     .catch(e => console.warn('[QUEUE] earnings_surprise_fetcher failed:', (e as Error).message));
-  // MF holdings: AMFI monthly disclosures — weekly fetch is sufficient.
-  await runPython('mf_holdings_fetcher.py', [], 10 * 60_000)
+  // MF holdings: mf_holdings_fetcher.py REWRITTEN 2026-08-13 -- its old source
+  // (mfapps.indiatimes.com's MFPortfolioHolding.cms) was dead (confirmed live, 404 for every
+  // symbol, upstream retired). Repointed at ET's shareholding-pattern endpoint
+  // (marketservices.indiatimes.com), keyed by the standard ET companyid instead of bse/nse
+  // codes -- also fixes a hard LIMIT 200 in the old ID-resolution path. Quarterly disclosure
+  // data, weekly crawl is generous.
+  await runPython('mf_holdings_fetcher.py', [], 20 * 60_000)
     .catch(e => console.warn('[QUEUE] mf_holdings_fetcher failed:', (e as Error).message));
   // MarketsMojo quarterly-cadence series (onboarded 2026-08-11, backfilled once, never
   // scheduled). Weekly, not daily: the vendor only restates these on results/filing days, and

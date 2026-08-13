@@ -444,11 +444,15 @@ def upsert_screener(con, info: dict):
     ))
 
     # screener_catalog (rich enrichment) — UPDATE first, INSERT if missing
+    # fetched_at added 2026-08-13 (migration 1786990000000) -- this table had no timestamp
+    # column at all, so it was structurally unmeasurable by any freshness check. See
+    # screener-catalog-freshness's comment in dataQualityChecks.ts (that check proxies via
+    # screener_master.last_updated; this stamp is a direct signal on screener_catalog itself).
     horizon = "intraday" if info["timeframe"] == "intraday" else "swing"
     updated = con.execute("""
         UPDATE screener_catalog
         SET screener_name=?, category=?, subcategory=?, signal_bias=?,
-            investment_horizon=?, signal_keywords=?, screener_url=?
+            investment_horizon=?, signal_keywords=?, screener_url=?, fetched_at=CURRENT_TIMESTAMP
         WHERE screener_id=?
     """, (info["name"], info["category"], info["category"], info["sentiment"],
           horizon, keywords, info["screener_url"], info["screener_id"])).rowcount
@@ -456,8 +460,8 @@ def upsert_screener(con, info: dict):
         con.execute("""
             INSERT INTO screener_catalog
                 (screener_id, source, screener_name, category, subcategory,
-                 signal_bias, investment_horizon, confidence, signal_keywords, screener_url)
-            VALUES (?,?,?,?,?,?,?,0.75,?,?)
+                 signal_bias, investment_horizon, confidence, signal_keywords, screener_url, fetched_at)
+            VALUES (?,?,?,?,?,?,?,0.75,?,?,CURRENT_TIMESTAMP)
         """, (info["screener_id"], "Trendlyne", info["name"], info["category"],
               info["category"], info["sentiment"], horizon, keywords, info["screener_url"]))
 

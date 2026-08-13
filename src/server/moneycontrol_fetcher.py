@@ -107,6 +107,8 @@ def ensure_tables_exist(engine):
             PRIMARY KEY (symbol, date, metric_type)
         )""",
         # 4. mc_estimates_hits_misses
+        # fetched_at added 2026-08-13 (migration 1786990000000) -- had no timestamp column at
+        # all, so it was structurally unmeasurable by any freshness check. See dataQualityChecks.ts.
         f"""CREATE TABLE IF NOT EXISTS mc_estimates_hits_misses (
             symbol TEXT NOT NULL,
             quarter TEXT NOT NULL,
@@ -114,9 +116,10 @@ def ensure_tables_exist(engine):
             estimates {float_type},
             surprise {float_type},
             type TEXT,
+            fetched_at TEXT DEFAULT CURRENT_TIMESTAMP,
             PRIMARY KEY (symbol, quarter)
         )""",
-        # 5. mc_seasonality_best_stocks
+        # 5. mc_seasonality_best_stocks (fetched_at added 2026-08-13, see note above)
         f"""CREATE TABLE IF NOT EXISTS mc_seasonality_best_stocks (
             tab_type TEXT NOT NULL,
             sc_id TEXT NOT NULL,
@@ -128,21 +131,24 @@ def ensure_tables_exist(engine):
             min_pct {float_type},
             total_yr {float_type},
             tot_yr {float_type},
+            fetched_at TEXT DEFAULT CURRENT_TIMESTAMP,
             PRIMARY KEY (tab_type, sc_id, year, month)
         )""",
-        # 6. mc_stock_vitals
+        # 6. mc_stock_vitals (fetched_at added 2026-08-13, see note above)
         f"""CREATE TABLE IF NOT EXISTS mc_stock_vitals (
             symbol TEXT NOT NULL,
             metric_name TEXT NOT NULL,
             score TEXT,
             description TEXT,
+            fetched_at TEXT DEFAULT CURRENT_TIMESTAMP,
             PRIMARY KEY (symbol, metric_name)
         )""",
-        # 7. mc_stock_scans
+        # 7. mc_stock_scans (fetched_at added 2026-08-13, see note above)
         f"""CREATE TABLE IF NOT EXISTS mc_stock_scans (
             symbol TEXT NOT NULL,
             scan_name TEXT NOT NULL,
             description TEXT,
+            fetched_at TEXT DEFAULT CURRENT_TIMESTAMP,
             PRIMARY KEY (symbol, scan_name)
         )""",
         # 8. mc_general_metrics
@@ -584,11 +590,12 @@ class MoneyControlFetcher:
             with self.engine.begin() as conn:
                 for vr in vitals_rows:
                     conn.execute(text("""
-                        INSERT INTO mc_stock_vitals (symbol, metric_name, score, description)
-                        VALUES (:symbol, :metric_name, :score, :description)
+                        INSERT INTO mc_stock_vitals (symbol, metric_name, score, description, fetched_at)
+                        VALUES (:symbol, :metric_name, :score, :description, CURRENT_TIMESTAMP)
                         ON CONFLICT(symbol, metric_name) DO UPDATE SET
                             score       = excluded.score,
-                            description = excluded.description
+                            description = excluded.description,
+                            fetched_at  = CURRENT_TIMESTAMP
                     """), vr)
                 for sr in scores_rows:
                     conn.execute(text("""
@@ -625,10 +632,11 @@ class MoneyControlFetcher:
             with self.engine.begin() as conn:
                 for r in rows:
                     conn.execute(text("""
-                        INSERT INTO mc_stock_scans (symbol, scan_name, description)
-                        VALUES (:symbol, :scan_name, :description)
+                        INSERT INTO mc_stock_scans (symbol, scan_name, description, fetched_at)
+                        VALUES (:symbol, :scan_name, :description, CURRENT_TIMESTAMP)
                         ON CONFLICT(symbol, scan_name) DO UPDATE SET
-                            description = excluded.description
+                            description = excluded.description,
+                            fetched_at  = CURRENT_TIMESTAMP
                     """), r)
             print(f"[MC Fetcher] Ingested {len(rows)} scans for {symbol}")
 
@@ -741,13 +749,14 @@ class MoneyControlFetcher:
             with self.engine.begin() as conn:
                 for r in rows:
                     conn.execute(text("""
-                        INSERT INTO mc_estimates_hits_misses (symbol, quarter, actual, estimates, surprise, type)
-                        VALUES (:symbol, :quarter, :actual, :estimates, :surprise, :type)
+                        INSERT INTO mc_estimates_hits_misses (symbol, quarter, actual, estimates, surprise, type, fetched_at)
+                        VALUES (:symbol, :quarter, :actual, :estimates, :surprise, :type, CURRENT_TIMESTAMP)
                         ON CONFLICT(symbol, quarter) DO UPDATE SET
-                            actual    = excluded.actual,
-                            estimates = excluded.estimates,
-                            surprise  = excluded.surprise,
-                            type      = excluded.type
+                            actual     = excluded.actual,
+                            estimates  = excluded.estimates,
+                            surprise   = excluded.surprise,
+                            type       = excluded.type,
+                            fetched_at = CURRENT_TIMESTAMP
                     """), r)
 
     def _parse_general_technicals(self, symbol: str, data: dict):
@@ -900,15 +909,16 @@ class MoneyControlFetcher:
             for r in rows:
                 conn.execute(text("""
                     INSERT INTO mc_seasonality_best_stocks
-                        (tab_type, sc_id, sc_fullname, year, month, avg_pct, max_pct, min_pct, total_yr, tot_yr)
-                    VALUES (:tab_type, :sc_id, :sc_fullname, :year, :month, :avg_pct, :max_pct, :min_pct, :total_yr, :tot_yr)
+                        (tab_type, sc_id, sc_fullname, year, month, avg_pct, max_pct, min_pct, total_yr, tot_yr, fetched_at)
+                    VALUES (:tab_type, :sc_id, :sc_fullname, :year, :month, :avg_pct, :max_pct, :min_pct, :total_yr, :tot_yr, CURRENT_TIMESTAMP)
                     ON CONFLICT(tab_type, sc_id, year, month) DO UPDATE SET
                         sc_fullname = excluded.sc_fullname,
                         avg_pct     = excluded.avg_pct,
                         max_pct     = excluded.max_pct,
                         min_pct     = excluded.min_pct,
                         total_yr    = excluded.total_yr,
-                        tot_yr      = excluded.tot_yr
+                        tot_yr      = excluded.tot_yr,
+                        fetched_at  = CURRENT_TIMESTAMP
                 """), r)
 
     def run_seasonality(self) -> int:
