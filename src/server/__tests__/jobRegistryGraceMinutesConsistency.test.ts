@@ -133,6 +133,7 @@ describe('JOB_REGISTRY.graceMinutes consistency', () => {
     // blocks / a separately-constructed Worker) that it fell outside MAX_LOOKAHEAD from the
     // positional marker -- found while building this test, verified each is a unique string.
     'intraday-fetcher': 'intradayFetcherWorker = new Worker',
+    'gdelt-sentiment': 'gdeltSentimentWorker = new Worker',
     // news-sentiment moved into this group 2026-08-04 -- adding the GNews (3 cycles) + MC
     // stock-news jobs between the 'news-sentiment-refresh' marker and the Worker's
     // lockDuration pushed the distance to 5378 chars, over MAX_LOOKAHEAD (4000).

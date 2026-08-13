@@ -83,6 +83,11 @@ export const JOB_REGISTRY: JobScheduleEntry[] = [
   { jobName: 'trendlyne-intraday', label: 'Trendlyne Intraday Scan', everyMs: 15 * 60 * 1000, graceMinutes: 45, critical: false },
   { jobName: 'intraday-fetcher', label: 'Intraday Bar Fetcher', cronPattern: '*/15 3-10 * * 1-5', graceMinutes: 45, critical: false,
     lateDeadlineCronPatterns: ['45 3 * * 1-5', '*/15 4-9 * * 1-5', '0 10 * * 1-5'] },
+  // 2026-08-13: gdeltService.ts existed with a working fetcher/parser but was never scheduled
+  // anywhere -- wired into queues.ts (QUEUE_GDELT_SENTIMENT) the same day. Daily, no weekday
+  // restriction (GDELT indexes news on weekends/holidays too), 90min grace for the ~13min
+  // rate-limited run plus headroom.
+  { jobName: 'gdelt-sentiment', label: 'GDELT News Sentiment Backfill', cronPattern: '0 19 * * *', graceMinutes: 90, critical: false },
   { jobName: 'research-premarket', label: 'Premarket Research', cronPattern: '0 3 * * 1-5', graceMinutes: 60, critical: false },
   { jobName: 'research-postclose', label: 'Postclose Research', cronPattern: '45 10 * * 1-5', graceMinutes: 60, critical: false },
   { jobName: 'dl-macro-fetch', label: 'DL Macro Fetcher', cronPattern: '30 2 * * 1-5', graceMinutes: 60, critical: false },

@@ -171,6 +171,7 @@ describe('JOB_REGISTRY cronPattern/everyMs mirror consistency', () => {
     { jobName: 'news-sentiment', marker: "'news-sentiment-refresh'", label: 'newsSentimentQueue (15-min cadence)' },
     { jobName: 'trendlyne-intraday', marker: "'trendlyne-intraday-scan'", label: 'trendlyneIntradayQueue' },
     { jobName: 'intraday-fetcher', marker: "'intraday-fetcher'", label: 'intradayFetcherQueue' },
+    { jobName: 'gdelt-sentiment', marker: "'gdelt-sentiment'", label: 'gdeltSentimentQueue' },
     { jobName: 'preopen-snapshot', marker: "'preopen-daily'", label: 'preopenQueue' },
     { jobName: 'market-regime-refresh', marker: "'regime-intraday'", label: 'regimeQueue' },
     { jobName: 'intraday-ranker', marker: "'regime-intraday'", label: 'regimeQueue (shared with market-regime-refresh)' },
