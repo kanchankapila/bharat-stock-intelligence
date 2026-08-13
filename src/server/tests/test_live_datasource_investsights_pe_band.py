@@ -3,15 +3,12 @@
 
 Skipped by default; opt in with RUN_LIVE_DATASOURCE_TESTS=1. Never runs in CI.
 
-**Known state, 2026-08-13**: the `/fundamentals/{symbol}/pe-band` endpoint returned this
-fetcher's full documented schema (`pe_bands`/`chart` back to 2023-08-14) earlier in the same
-session it was onboarded, then started 404ing for every symbol and every path variant tried
-(with/without trailing slash, `/pe-bands`, `/peband`, `/pe_band`, `/valuation/.../pe-band`,
-`v1` prefix) while every sibling `/fundamentals/{symbol}/*` endpoint on the same host kept
-working normally. This looks like a real, external endpoint removal/rename, not a fetcher bug
--- flagged per `feedback_failing_urls.md` rather than guessed around. This test pins that
-state explicitly (expects 404) so a future run flipping back to 200 is a visible, welcome
-surprise instead of a silent assumption either way.
+**History note**: this fetcher was originally built against the wrong base path
+(`/fundamentals/{symbol}/pe-band`), which 404s -- confused for a dead/removed endpoint until
+the user supplied the real, working path (`/market/pe-band/{symbol}?days=N`) on 2026-08-14.
+See the fetcher's own module docstring for the full correction. Lesson pinned there, not
+repeated here: a 404 on every guessed path variant means "the guesses are wrong," not "the
+endpoint is dead" -- the two look identical from the client side.
 """
 import os
 import sqlite3
@@ -24,6 +21,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 sys.path.insert(0, os.path.dirname(__file__))
 
 import investsights_pe_band_fetcher as pb
+from live_datasource_helpers import assert_non_empty_response, assert_stored_row_ml_usable
 
 
 def _session():
@@ -34,22 +32,34 @@ def _session():
 
 @pytest.mark.live_datasource
 class TestInvestsightsPeBandLiveDataSource:
-    def test_endpoint_currently_404s_or_recovers(self):
-        """Documents current reality rather than assuming either state. If this starts
-        failing because the endpoint is back (raises instead of returning None), that's
-        good news -- update this test to assert real chart data via parse_chart_rows()."""
+    def test_real_fetch_has_dense_chart_history(self):
+        data = pb.fetch_pe_band(_session(), "RELIANCE")
+        assert_non_empty_response(data, "fetch_pe_band(RELIANCE)")
+        chart = data.get("chart")
+        assert_non_empty_response(chart, "pe-band.chart")
+        assert len(chart) > 100, f"expected dense multi-year history, got {len(chart)} points"
+        assert chart[0]["date"] < chart[-1]["date"], "chart must be chronologically ordered"
+
+    def test_stored_row_is_ml_usable(self):
         session = _session()
-        try:
-            data = pb.fetch_pe_band(session, "RELIANCE")
-        except requests.HTTPError as e:
-            assert e.response.status_code == 404, (
-                f"expected the known 404, got {e.response.status_code} -- investigate"
-            )
-            return
-        # Endpoint recovered -- verify the real, previously-documented shape end to end.
-        assert data is not None
+        data = pb.fetch_pe_band(session, "RELIANCE")
         rows = pb.parse_chart_rows("RELIANCE", data)
-        assert rows, "pe-band endpoint returned data but parse_chart_rows() produced no rows"
+        assert rows
+
         con = sqlite3.connect(":memory:")
         pb.ensure_schema(con)
         assert pb.store_rows(con, rows) == len(rows)
+
+        cur = con.execute(
+            "SELECT symbol, date, price, pe, band_median FROM investsights_pe_band_history "
+            "ORDER BY date DESC LIMIT 1"
+        )
+        cols = [d[0] for d in cur.description]
+        stored = dict(zip(cols, cur.fetchone()))
+        assert_stored_row_ml_usable(
+            stored, numeric_cols=["price", "pe", "band_median"],
+            ticker_cols=["symbol"], context="investsights_pe_band_history",
+        )
+        assert len(stored["date"]) == 10 and stored["date"][4] == "-", (
+            f"date not ISO: {stored['date']}"
+        )

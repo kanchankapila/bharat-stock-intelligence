@@ -9,19 +9,31 @@ a rolling PE-band series today -- `mc_stockvitals_history_fetcher.py` has point-
 Graham/Altman/etc., but nothing tracks "is this stock's PE cheap or rich relative to its OWN
 recent history," which is what `pe_bands`/`chart` actually encode.
 
-    https://investsights.in/api/v2/fundamentals/{symbol}/pe-band
+    https://investsights.in/api/v2/market/pe-band/{symbol}?days=1095
+
+**Path correction, 2026-08-14**: the endpoint originally captured lived under `/market/`, not
+`/fundamentals/{symbol}/pe-band` as this fetcher was first (wrongly) built against -- a
+different base path on the same host, not the same endpoint moved/removed. The onboarding
+session tested only the `/fundamentals/` guess (never the real path) after the capture had
+scrolled out of context, saw 404 across every symbol and several other guessed variants, and
+concluded the endpoint had gone dark -- wrong conclusion, right symptom (a 404 IS what a wrong
+path returns). Corrected after the user supplied the real, working URL directly. Lesson: a
+404 on every guessed path variant means "none of the guesses are right," not "the endpoint is
+dead" -- the two are indistinguishable from the client side, so don't conflate them in the
+write-up. `days` bounds the chart's lookback in days; 1095 (~3 years) comfortably covers the
+full available history (~2 years back to 2023-08-14, confirmed below).
 
 Ticker resolution: bare NSE symbol, confirmed trivial (see investsights_fundamentals_fetcher.py's
 docstring -- same provider, same finding, not re-derived here).
 
-SHAPE -- verified live, WEBELSOLAR, 2026-08-13
-------------------------------------------------
+SHAPE -- verified live, WEBELSOLAR + RELIANCE, 2026-08-14
+------------------------------------------------------------
 `{eps, current_pe, pe_bands: {low, mid_low, median, mid_high, high}, chart: [{date, price, pe,
 band_low, band_mid_low, band_median, band_mid_high, band_high}, ...]}`. `chart` is a genuine
-daily series back to 2023-08-14 (~2 years) -- this is the rare InvestSights endpoint that
-arrives with real history already, not a 1-row snapshot. `pe_bands` (singular, top-level) is
-just `chart[-1]`'s five band values restated -- NOT stored separately, `chart`'s last row
-already has it.
+daily series back to 2023-08-14 (~2 years, 246 rows for RELIANCE at days=1095) -- this is the
+rare InvestSights endpoint that arrives with real history already, not a 1-row snapshot.
+`pe_bands` (singular, top-level) is just `chart[-1]`'s five band values restated -- NOT stored
+separately, `chart`'s last row already has it.
 
 Full re-upsert every run (not incremental): the provider has no since-param and the vendor can
 restate its own rolling-window band calc for historical dates as new data arrives (same
@@ -45,9 +57,10 @@ import requests
 from db_compat import connect, ConnWrapper
 from fetch_utils import retry_get, FetchTracker
 
-BASE = "https://investsights.in/api/v2/fundamentals"
+BASE = "https://investsights.in/api/v2/market/pe-band"
 SOURCE = "investsights"
 RATE_LIMIT_SEC = 0.3
+DAYS_LOOKBACK = 1095  # ~3yr, comfortably covers the full available history (~2yr)
 
 HEADERS = {
     "User-Agent": (
@@ -74,7 +87,7 @@ def _num(raw, k):
 
 
 def fetch_pe_band(session: requests.Session, symbol: str) -> dict | None:
-    resp = retry_get(session, f"{BASE}/{symbol}/pe-band", timeout=20)
+    resp = retry_get(session, f"{BASE}/{symbol}", params={"days": DAYS_LOOKBACK}, timeout=20)
     payload = resp.json()
     if not isinstance(payload, dict) or not payload.get("success"):
         return None

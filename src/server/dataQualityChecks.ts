@@ -327,13 +327,12 @@ const TABLE_FRESHNESS_CHECKS: TableFreshnessConfig[] = [
     category: 'fundamentals', critical: false, table: 'investsights_factor_scores', dateColumn: 'fetched_date', warnDays: 3, failDays: 5 },
   { id: 'investsights-announcement-intel-freshness', label: 'investsights_announcement_intel (per-stock filings/announcements/concall/rating docs)',
     category: 'fundamentals', critical: false, table: 'investsights_announcement_intel', dateColumn: 'fetched_at', warnDays: 3, failDays: 5 },
-  // investsights_pe_band_history's source endpoint (/fundamentals/{symbol}/pe-band) started
-  // 404ing for every symbol shortly after this fetcher was onboarded (see
-  // investsights_pe_band_fetcher.py's docstring + its live_datasource test) -- no failDays,
-  // matching the "sparse by nature" convention, so this only ever warns rather than paging
-  // on a provider-side outage this fetcher can't fix. Remove the omission once confirmed live.
+  // investsights_pe_band_history: initially built against the wrong base path
+  // (/fundamentals/{symbol}/pe-band, which 404s), corrected 2026-08-14 to the real
+  // /market/pe-band/{symbol}?days=N -- confirmed live, so this gets the same failDays
+  // treatment as its investsights siblings above, not a warn-only "sparse by nature" one.
   { id: 'investsights-pe-band-freshness', label: 'investsights_pe_band_history (rolling PE-band chart)',
-    category: 'fundamentals', critical: false, table: 'investsights_pe_band_history', dateColumn: 'date', warnDays: 3 },
+    category: 'fundamentals', critical: false, table: 'investsights_pe_band_history', dateColumn: 'date', warnDays: 3, failDays: 5 },
   // Found 2026-08-13 (fetcher-accuracy-review sweep, batch 2): 3 more mc_earnings_fetcher.py
   // tables (siblings of stock-earnings-dates-freshness above, same daily fetcher/schedule).
   { id: 'mc-earnings-rapid-freshness', label: 'mc_earnings_rapid (MC results-calendar rapid categories)',

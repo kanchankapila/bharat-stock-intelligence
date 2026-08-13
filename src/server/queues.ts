@@ -542,11 +542,10 @@ async function processMlDailyOps(job: Job): Promise<{ success: boolean }> {
   await runPython('investsights_announcement_intel_fetcher.py', ['--limit', '200'], 15 * 60_000)
     .catch(e => console.warn('[QUEUE] investsights_announcement_intel_fetcher failed:', (e as Error).message));
 
-  // InvestSights rolling PE-band chart (same batch). Its source endpoint 404s for every
-  // symbol as of 2026-08-13 onboarding (see the fetcher's own docstring + live_datasource
-  // test) -- scheduled anyway so a future recovery is picked up automatically; cheap even
-  // while broken thanks to FetchTracker's abort_after_consecutive_fails fail-fast (~30s/night,
-  // not a full --limit grind). 20 min budget covers the "endpoint is back" case.
+  // InvestSights rolling PE-band chart (same batch) → investsights_pe_band_history. Corrected
+  // 2026-08-14 to the real /market/pe-band/{symbol} path (the initial /fundamentals/{symbol}/
+  // pe-band guess 404s -- see the fetcher's own docstring). 20 min budget: ~500 rows/symbol,
+  // full re-upsert every run (no since-param on this endpoint).
   await runPython('investsights_pe_band_fetcher.py', ['--limit', '300'], 20 * 60_000)
     .catch(e => console.warn('[QUEUE] investsights_pe_band_fetcher failed:', (e as Error).message));
 

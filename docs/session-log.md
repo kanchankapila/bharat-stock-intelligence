@@ -2042,3 +2042,30 @@ session never touched `unified_ranker.py` or its test file (confirmed via `git d
 test passes cleanly in isolation (`pytest test_unified_ranker.py::... -v` → 1 passed); it's a
 pre-existing order/state-dependent flake that only surfaces inside the full-suite run, not a
 regression introduced here.
+
+## 2026-08-14 (cont.) — investsights_pe_band_fetcher.py: wrong base path, not a dead endpoint
+
+The prior entry's conclusion that `investsights_pe_band`'s source had gone dark was **wrong**.
+User supplied the real, working URL directly: `https://investsights.in/api/v2/market/pe-band/
+{symbol}?days=N` — a different base path (`/market/`, not `/fundamentals/{symbol}/`) on the
+same host, confirmed live for both RELIANCE (246 rows, ~3yr) and WEBELSOLAR (245 rows), exact
+schema match to what this fetcher already parsed. The onboarding session had tested only the
+`/fundamentals/` guess (the original endpoint capture had scrolled out of context by the time
+the fetcher was built) plus five other guessed variants, all 404 — and concluded the endpoint
+was dead rather than the guesses being wrong. **A 404 on every guessed path is indistinguishable
+from a dead endpoint at the client, but they are not the same claim** — worth remembering before
+declaring a source dead next time a plausible-looking path 404s everywhere tried.
+
+Fixed: `BASE` corrected, `fetch_pe_band()` now sends `days=1095`, module docstring rewritten
+with the correction + the lesson above. Live-verified end to end against production Postgres
+(RELIANCE + WEBELSOLAR, real dense multi-year rows, finite numerics). Rewrote the
+`live_datasource` test from a "document the 404" test into a real fetch/parse/store test
+(2 tests, both passing for real). `investsights-pe-band-freshness` upgraded from warn-only
+("sparse by nature") to `failDays: 5`, matching its InvestSights siblings, since the source is
+confirmed live and daily-cadence.
+
+Verification: `npx tsc --noEmit` clean. `npx vitest run`: 912 passed, 0 failed, 40 skipped
+(includes news-source tests picked up from `origin/main` since the prior entry). Full
+`python -m pytest`: 1790 passed, 0 failed, 221 skipped — the prior entry's 1 failure
+(`test_unified_ranker.py`'s append-only-snapshot test) did not recur on this run, confirming
+it was the flake it was diagnosed as, not a real regression.
