@@ -1,10 +1,29 @@
 ---
-description: Audit a new or changed fetcher against the mandatory data-sources.md checklist and the fetcher-shaped bug classes in recurring-bugs.md
+description: Audit a fetcher against the mandatory data-sources.md checklist and the fetcher-shaped bug classes in recurring-bugs.md — one fetcher from a diff, or the full project sweep across every fetcher hitting an external URL
 ---
 
 # Fetcher Accuracy Review
 
 Read `.claude/rules/data-sources.md` and the "Writes & keys" / "Environment & deploy" sections of `.claude/rules/recurring-bugs.md` first. This review exists because `check_recurring_bugs.py` (CI) only catches the mechanical signatures — `date.today()` write-anchors, raw `%s`, a missing `live_datasource` test file. Everything below needs judgment, not a regex, which is why it's a review and not another CI check.
+
+## Scope
+
+**Default scope is every fetcher in the project that reads from an external URL/API** — not just a diff. Derive the list from the source tree, don't work from memory of a prior pass:
+
+```bash
+ls src/server/*fetcher*.py
+grep -rlE "requests\.(get|post)|curl_cffi|httpx\.(get|post|Client)" src/server --include="*.py" | grep -iv test
+```
+
+Cross-reference against `TABLE_FRESHNESS_CHECKS` (`dataQualityChecks.ts`) and `test_live_datasource_*`/`*.test.ts` files the same way — union the two lists, don't just walk one.
+
+This is ~80 fetchers as of 2026-08-13, and the checklist below (especially §1's "run the live check yourself" and §3's "actually run it") does not compress to a one-line-per-file skim without losing the thing that makes it worth running — that's what `/data-coverage-audit` is for (fast, mechanical, artifact-presence only: does a test/check exist at all, not whether the fetcher is *correct*). Given the size, **before running the full sweep, tell the user the fetcher count and ask how to execute it** — depth-per-fetcher and parallelism are both real tradeoffs here, not a default to assume silently:
+
+- **Triage first, deep-dive second**: run `/data-coverage-audit`'s artifact-presence check across all of them (cheap), then apply this skill's full 6-point review only to the ones that are missing an artifact or look structurally unusual — not to the ones that already have both a passing live test and a freshness check.
+- **Full depth on all of them**: every fetcher gets the complete checklist, run inline, sequentially. Slow and expensive but genuinely thorough — pick this only if the user says so, or if they've explicitly authorized parallel/background agents to split the work.
+- **A named subset**: one provider's fetchers (all `mc_*`, all `trendlyne_*`, all `marketsmojo_*`), or whatever slice the user actually asked about.
+
+When reviewing a single fetcher from a diff (the common case — a PR touches one), the sections below apply exactly as written, scoped to that one file.
 
 ## 1. Identifier resolution
 
