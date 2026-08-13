@@ -29,12 +29,17 @@ export interface CoverageReport {
   listedSymbolCount: number;
 }
 
-export async function buildCoverageReport(pool: pg.Pool): Promise<CoverageReport> {
+export async function buildCoverageReport(
+  pool: pg.Pool,
+  scope: { source?: string; jobId?: string } = {},
+): Promise<CoverageReport> {
+  const source = scope.source ?? 'nse';
+  const jobId = scope.jobId ?? 'nse.bhavcopy';
   const [perYear, perSymbolSessionCounts, rejectedByReason, statusCounts] = await Promise.all([
-    queryPerYearCoverage(pool),
-    queryPerSymbolSessionSpan(pool),
-    queryRejectedByReason(pool, 'nse.bhavcopy'),
-    querySecurityStatusCounts(pool, 'nse'),
+    queryPerYearCoverage(pool, source),
+    queryPerSymbolSessionSpan(pool, source),
+    queryRejectedByReason(pool, jobId),
+    querySecurityStatusCounts(pool, source),
   ]);
 
   return {

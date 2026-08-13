@@ -4,6 +4,16 @@
 // are negative-controlled by adjusting dq_check.spec directly -- the
 // registry IS the threshold, so this is a real test of the same code path a
 // production threshold change would take, not a workaround.
+//
+// Isolation, post-incident (2026-08-13): these checks read ACROSS THE WHOLE
+// TABLE by design (freshness/symbol-count/calendar-continuity all compute
+// MAX/aggregate over source='nse'/exchange='NSE'), so once real backfilled
+// data existed, this file's tests started reading (and its old unscoped
+// afterEach started DELETING) that real data -- the incident that wiped the
+// 2021-present backfill. Every check function now takes an optional
+// {source, exchange, jobId} scope; this file passes a distinct test-only
+// scope so it can never interact with real data again, regardless of what
+// coexists in the same database.
 import { afterEach, beforeEach, expect, test } from 'vitest';
 import pg from 'pg';
 import { createPool, closeRun, openRun } from '@greenfield/db';
@@ -21,6 +31,18 @@ try {
 } catch {
   // rely on process.env
 }
+
+const TEST_SOURCE = 'zzzdq';
+// trading_session.exchange is a closed ENUM ('NSE'|'BSE' only, migration
+// 001) -- can't invent a fake value. Real backfilled data is always 'NSE',
+// so 'BSE' (a real, valid, but never-written-by-this-adapter value) is the
+// correct test-isolation choice: guaranteed never to collide, no schema
+// change needed.
+const TEST_EXCHANGE = 'BSE';
+const TEST_JOB_ID = 'zzzdq.bhavcopy';
+const TEST_ENDPOINT_KEY = 'zzzdq.bhavcopy';
+const TEST_PROVIDER = 'zzzdq';
+const SCOPE = { source: TEST_SOURCE, exchange: TEST_EXCHANGE, jobId: TEST_JOB_ID };
 
 let pool: pg.Pool;
 
@@ -43,28 +65,33 @@ beforeEach(async () => {
   pool = createPool();
   await pool.query(
     `INSERT INTO provider (provider, display_name, base_hosts, auth_mode, redistribution)
-     VALUES ('nse', 'NSE Archives', '{}', 'none', 'permitted') ON CONFLICT DO NOTHING`,
+     VALUES ($1, 'ZZZ DQ Test Provider', '{}', 'none', 'permitted') ON CONFLICT DO NOTHING`,
+    [TEST_PROVIDER],
   );
   await pool.query(
     `INSERT INTO provider_endpoint (endpoint_key, provider, integration_class, url_template, parser_version)
-     VALUES ('nse.bhavcopy', 'nse', 'ingestion', 'fixture', 'v1') ON CONFLICT DO NOTHING`,
+     VALUES ($1, $2, 'ingestion', 'fixture', 'v1') ON CONFLICT DO NOTHING`,
+    [TEST_ENDPOINT_KEY, TEST_PROVIDER],
   );
   await pool.query(
     `INSERT INTO job_definition (job_id, description, timezone, catalog_version)
-     VALUES ('nse.bhavcopy', 'dq test job', 'Asia/Kolkata', 'v1') ON CONFLICT DO NOTHING`,
+     VALUES ($1, 'dq test job', 'Asia/Kolkata', 'v1') ON CONFLICT DO NOTHING`,
+    [TEST_JOB_ID],
   );
 });
 
 afterEach(async () => {
-  await pool.query(`DELETE FROM market_bar WHERE source = 'nse'`);
-  await pool.query(`DELETE FROM delivery_stat WHERE source = 'nse'`);
-  await pool.query(`DELETE FROM trading_session WHERE exchange = 'NSE'`);
-  await pool.query(`DELETE FROM raw_object WHERE endpoint_key = 'nse.bhavcopy'`);
-  await pool.query(`DELETE FROM ingestion_run WHERE job_id = 'nse.bhavcopy'`);
+  // Scoped by the TEST-ONLY source/exchange/job_id -- can never match real
+  // production rows, regardless of dates or symbol names used below.
+  await pool.query(`DELETE FROM market_bar WHERE source = $1`, [TEST_SOURCE]);
+  await pool.query(`DELETE FROM delivery_stat WHERE source = $1`, [TEST_SOURCE]);
+  await pool.query(`DELETE FROM trading_session WHERE exchange = $1`, [TEST_EXCHANGE]);
+  await pool.query(`DELETE FROM raw_object WHERE endpoint_key = $1`, [TEST_ENDPOINT_KEY]);
+  await pool.query(`DELETE FROM ingestion_run WHERE job_id = $1`, [TEST_JOB_ID]);
   await pool.query(`DELETE FROM security WHERE symbol LIKE 'ZZZDQ%'`);
-  await pool.query(`DELETE FROM job_definition WHERE job_id = 'nse.bhavcopy'`);
-  await pool.query(`DELETE FROM provider_endpoint WHERE endpoint_key = 'nse.bhavcopy'`);
-  await pool.query(`DELETE FROM provider WHERE provider = 'nse'`);
+  await pool.query(`DELETE FROM job_definition WHERE job_id = $1`, [TEST_JOB_ID]);
+  await pool.query(`DELETE FROM provider_endpoint WHERE endpoint_key = $1`, [TEST_ENDPOINT_KEY]);
+  await pool.query(`DELETE FROM provider WHERE provider = $1`, [TEST_PROVIDER]);
   // Restore the registry to what migration 006 seeded, in case a test edited it.
   await pool.query(`UPDATE dq_check SET spec = '{"minSymbols": 1000, "maxSymbols": 3500}'::jsonb WHERE check_id = 'bhavcopy-symbol-count'`);
   await pool.query(`UPDATE dq_check SET spec = '{"maxRejectRate": 0.5}'::jsonb WHERE check_id = 'bhavcopy-reject-rate'`);
@@ -76,54 +103,54 @@ test('bhavcopy-freshness: fails when stale, passes once caught up', async () => 
   const ref = todayRefWeekday();
   await pool.query(
     `INSERT INTO trading_session (exchange, session_date, open_at, close_at, is_holiday)
-     VALUES ('NSE', $1::date - 10, now(), now(), false)`,
-    [ref],
+     VALUES ($2, $1::date - 10, now(), now(), false)`,
+    [ref, TEST_EXCHANGE],
   );
-  const stale = await checkBhavcopyFreshness(pool);
+  const stale = await checkBhavcopyFreshness(pool, SCOPE);
   expect(stale.status).toBe('fail');
 
   await pool.query(
     `INSERT INTO trading_session (exchange, session_date, open_at, close_at, is_holiday)
-     VALUES ('NSE', $1::date, now(), now(), false) ON CONFLICT DO NOTHING`,
-    [ref],
+     VALUES ($2, $1::date, now(), now(), false) ON CONFLICT DO NOTHING`,
+    [ref, TEST_EXCHANGE],
   );
-  const fresh = await checkBhavcopyFreshness(pool);
+  const fresh = await checkBhavcopyFreshness(pool, SCOPE);
   expect(fresh.status).toBe('info');
 });
 
 test('bhavcopy-symbol-count: warns below the registry band, passes once the band is widened', async () => {
   const client = await pool.connect();
-  const runId = await openRun(client, { jobId: 'nse.bhavcopy', endpointKey: 'nse.bhavcopy', codeCommit: 'test' });
+  const runId = await openRun(client, { jobId: TEST_JOB_ID, endpointKey: TEST_ENDPOINT_KEY, codeCommit: 'test' });
   await client.query(
     `INSERT INTO security (symbol, name, exchange, status) VALUES ('ZZZDQ1', 'x', 'NSE', 'listed') ON CONFLICT DO NOTHING`,
   );
   await client.query(
     `INSERT INTO market_bar (symbol, session_date, interval, source, close, available_at, run_id)
-     VALUES ('ZZZDQ1', '2026-08-12', '1d', 'nse', 100, now(), $1)`,
-    [runId],
+     VALUES ('ZZZDQ1', '2026-08-12', '1d', $1, 100, now(), $2)`,
+    [TEST_SOURCE, runId],
   );
   await closeRun(client, runId, { status: 'succeeded', metrics: metrics(1, 1, 0) });
   client.release();
 
-  const belowBand = await checkBhavcopySymbolCount(pool); // 1 symbol vs default band 1000-3500
+  const belowBand = await checkBhavcopySymbolCount(pool, SCOPE); // 1 symbol vs default band 1000-3500
   expect(belowBand.status).toBe('warn');
 
   await pool.query(`UPDATE dq_check SET spec = '{"minSymbols": 1, "maxSymbols": 3500}'::jsonb WHERE check_id = 'bhavcopy-symbol-count'`);
-  const inBand = await checkBhavcopySymbolCount(pool);
+  const inBand = await checkBhavcopySymbolCount(pool, SCOPE);
   expect(inBand.status).toBe('info');
 });
 
 test('bhavcopy-reject-rate: warns over threshold, passes once the threshold is raised', async () => {
   const client = await pool.connect();
-  const runId = await openRun(client, { jobId: 'nse.bhavcopy', endpointKey: 'nse.bhavcopy', codeCommit: 'test' });
+  const runId = await openRun(client, { jobId: TEST_JOB_ID, endpointKey: TEST_ENDPOINT_KEY, codeCommit: 'test' });
   await closeRun(client, runId, { status: 'succeeded', metrics: metrics(10, 1, 9) }); // 90% rejected
   client.release();
 
-  const overThreshold = await checkBhavcopyRejectRate(pool); // default max 0.5
+  const overThreshold = await checkBhavcopyRejectRate(pool, SCOPE); // default max 0.5
   expect(overThreshold.status).toBe('warn');
 
   await pool.query(`UPDATE dq_check SET spec = '{"maxRejectRate": 0.99}'::jsonb WHERE check_id = 'bhavcopy-reject-rate'`);
-  const underRaisedThreshold = await checkBhavcopyRejectRate(pool);
+  const underRaisedThreshold = await checkBhavcopyRejectRate(pool, SCOPE);
   expect(underRaisedThreshold.status).toBe('info');
 });
 
@@ -132,30 +159,30 @@ test('market-bar-ohlc-sanity: fails on a non-positive close, passes once removed
   // insert can genuinely violate it -- this is the real gap the check exists
   // to catch defense-in-depth, on top of the parser's own reject-on-ingest.
   const client = await pool.connect();
-  const runId = await openRun(client, { jobId: 'nse.bhavcopy', endpointKey: 'nse.bhavcopy', codeCommit: 'test' });
+  const runId = await openRun(client, { jobId: TEST_JOB_ID, endpointKey: TEST_ENDPOINT_KEY, codeCommit: 'test' });
   await client.query(
     `INSERT INTO security (symbol, name, exchange, status) VALUES ('ZZZDQ2', 'x', 'NSE', 'listed') ON CONFLICT DO NOTHING`,
   );
   await client.query(
     `INSERT INTO market_bar (symbol, session_date, interval, source, close, available_at, run_id)
-     VALUES ('ZZZDQ2', '2026-08-12', '1d', 'nse', 0, now(), $1)`,
-    [runId],
+     VALUES ('ZZZDQ2', '2026-08-12', '1d', $1, 0, now(), $2)`,
+    [TEST_SOURCE, runId],
   );
   await closeRun(client, runId, { status: 'succeeded', metrics: metrics(1, 1, 0) });
   client.release();
 
-  const violating = await checkMarketBarOhlcSanity(pool);
+  const violating = await checkMarketBarOhlcSanity(pool, SCOPE);
   expect(violating.status).toBe('fail');
   expect(violating.observed.violatingRows).toBe(1);
 
   await pool.query(`DELETE FROM market_bar WHERE symbol = 'ZZZDQ2'`);
-  const clean = await checkMarketBarOhlcSanity(pool);
+  const clean = await checkMarketBarOhlcSanity(pool, SCOPE);
   expect(clean.status).toBe('info');
 });
 
 test('delivery-pct-range: the TABLE ITSELF rejects an out-of-range value (defense in depth); check passes on clean data', async () => {
   const client = await pool.connect();
-  const runId = await openRun(client, { jobId: 'nse.bhavcopy', endpointKey: 'nse.bhavcopy', codeCommit: 'test' });
+  const runId = await openRun(client, { jobId: TEST_JOB_ID, endpointKey: TEST_ENDPOINT_KEY, codeCommit: 'test' });
   await client.query(
     `INSERT INTO security (symbol, name, exchange, status) VALUES ('ZZZDQ3', 'x', 'NSE', 'listed') ON CONFLICT DO NOTHING`,
   );
@@ -169,10 +196,10 @@ test('delivery-pct-range: the TABLE ITSELF rejects an out-of-range value (defens
   try {
     await client.query(
       `INSERT INTO delivery_stat (symbol, session_date, source, delivery_pct, available_at, run_id)
-       VALUES ('ZZZDQ3', '2026-08-12', 'nse', 150, now(), $1)`,
-      [runId],
+       VALUES ('ZZZDQ3', '2026-08-12', $1, 150, now(), $2)`,
+      [TEST_SOURCE, runId],
     );
-    const violating = await checkDeliveryPctRange(pool);
+    const violating = await checkDeliveryPctRange(pool, SCOPE);
     expect(violating.status).toBe('fail');
     expect(violating.observed.violatingRows).toBe(1);
   } finally {
@@ -182,15 +209,16 @@ test('delivery-pct-range: the TABLE ITSELF rejects an out-of-range value (defens
   await closeRun(client, runId, { status: 'succeeded', metrics: metrics(0, 0, 0) });
   client.release();
 
-  const clean = await checkDeliveryPctRange(pool);
+  const clean = await checkDeliveryPctRange(pool, SCOPE);
   expect(clean.status).toBe('info');
 
   // And the constraint really is back: a fresh violating insert now throws.
   await expect(
     pool.query(
       `INSERT INTO delivery_stat (symbol, session_date, source, delivery_pct, available_at, run_id)
-       VALUES ('ZZZDQ3', '2026-08-13', 'nse', -5, now(),
-         (SELECT run_id FROM ingestion_run WHERE job_id='nse.bhavcopy' ORDER BY started_at DESC LIMIT 1))`,
+       VALUES ('ZZZDQ3', '2026-08-13', $1, -5, now(),
+         (SELECT run_id FROM ingestion_run WHERE job_id=$2 ORDER BY started_at DESC LIMIT 1))`,
+      [TEST_SOURCE, TEST_JOB_ID],
     ),
   ).rejects.toThrow(/violates check constraint/);
 });
@@ -200,16 +228,17 @@ test('calendar-continuity: warns on any weekday gap when the threshold is tight,
   // following Wednesday, skipping Tuesday) -- a genuine 1-weekday gap.
   await pool.query(
     `INSERT INTO trading_session (exchange, session_date, open_at, close_at, is_holiday) VALUES
-       ('NSE', '2026-08-10', now(), now(), false),
-       ('NSE', '2026-08-12', now(), now(), false)`, // 2026-08-11 (Tue) missing
+       ($1, '2026-08-10', now(), now(), false),
+       ($1, '2026-08-12', now(), now(), false)`, // 2026-08-11 (Tue) missing
+    [TEST_EXCHANGE],
   );
 
   await pool.query(`UPDATE dq_check SET spec = '{"maxConsecutiveWeekdayGap": 0}'::jsonb WHERE check_id = 'calendar-continuity'`);
-  const tight = await checkCalendarContinuity(pool);
+  const tight = await checkCalendarContinuity(pool, SCOPE);
   expect(tight.status).toBe('warn');
   expect(tight.observed.longestGapWeekdays).toBe(1);
 
   await pool.query(`UPDATE dq_check SET spec = '{"maxConsecutiveWeekdayGap": 10}'::jsonb WHERE check_id = 'calendar-continuity'`);
-  const relaxed = await checkCalendarContinuity(pool);
+  const relaxed = await checkCalendarContinuity(pool, SCOPE);
   expect(relaxed.status).toBe('info');
 });

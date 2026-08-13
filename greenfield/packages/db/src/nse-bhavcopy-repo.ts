@@ -194,9 +194,10 @@ export interface SecurityMasterSpanRow {
   symbolsUpdated: number;
 }
 
-export async function deriveSecurityMasterFromMarketBar(pool: pg.Pool): Promise<SecurityMasterSpanRow> {
+export async function deriveSecurityMasterFromMarketBar(pool: pg.Pool, source: string = 'nse'): Promise<SecurityMasterSpanRow> {
   const { rows: latestRows } = await pool.query<{ latest: string | null }>(
-    `SELECT MAX(session_date)::text AS latest FROM market_bar WHERE source = 'nse'`,
+    `SELECT MAX(session_date)::text AS latest FROM market_bar WHERE source = $1`,
+    [source],
   );
   const latestSession = latestRows[0]?.latest ?? null;
   if (!latestSession) {
@@ -207,7 +208,7 @@ export async function deriveSecurityMasterFromMarketBar(pool: pg.Pool): Promise<
     `WITH spans AS (
        SELECT symbol, MIN(session_date) AS first_seen, MAX(session_date) AS last_seen
        FROM market_bar
-       WHERE source = 'nse'
+       WHERE source = $2
        GROUP BY symbol
      )
      UPDATE security s
@@ -217,7 +218,7 @@ export async function deriveSecurityMasterFromMarketBar(pool: pg.Pool): Promise<
          updated_at = now()
      FROM spans
      WHERE s.symbol = spans.symbol`,
-    [latestSession],
+    [latestSession, source],
   );
 
   return { latestSession, symbolsUpdated: rowCount ?? 0 };
@@ -238,10 +239,10 @@ export async function queryDqCheckSpec<T>(pool: pg.Pool, checkId: string, fallba
   return rows[0]?.spec ?? fallback;
 }
 
-export async function queryLatestSessionWeekdayGap(pool: pg.Pool): Promise<{ latestSession: string | null; weekdayGap: number }> {
+export async function queryLatestSessionWeekdayGap(pool: pg.Pool, exchange: string = 'NSE'): Promise<{ latestSession: string | null; weekdayGap: number }> {
   const { rows } = await pool.query<{ latest_session: string | null; weekday_gap: number }>(
     `WITH latest AS (
-       SELECT MAX(session_date) AS latest_session FROM trading_session WHERE exchange = 'NSE'
+       SELECT MAX(session_date) AS latest_session FROM trading_session WHERE exchange = $1
      ),
      today_ref AS (
        SELECT CASE EXTRACT(ISODOW FROM CURRENT_DATE)
@@ -256,14 +257,16 @@ export async function queryLatestSessionWeekdayGap(pool: pg.Pool): Promise<{ lat
          WHERE EXTRACT(ISODOW FROM d) < 6
        ), 0)::int AS weekday_gap
      FROM latest, today_ref`,
+    [exchange],
   );
   return { latestSession: rows[0]?.latest_session ?? null, weekdayGap: rows[0]?.weekday_gap ?? 0 };
 }
 
-export async function queryLatestSessionSymbolCount(pool: pg.Pool): Promise<{ sessionDate: string | null; symbolCount: number }> {
+export async function queryLatestSessionSymbolCount(pool: pg.Pool, source: string = 'nse'): Promise<{ sessionDate: string | null; symbolCount: number }> {
   const { rows } = await pool.query<{ session_date: string | null; n: number }>(
     `SELECT MAX(session_date)::text AS session_date, count(DISTINCT symbol)::int AS n
-     FROM market_bar WHERE source = 'nse' AND session_date = (SELECT MAX(session_date) FROM market_bar WHERE source = 'nse')`,
+     FROM market_bar WHERE source = $1 AND session_date = (SELECT MAX(session_date) FROM market_bar WHERE source = $1)`,
+    [source],
   );
   return { sessionDate: rows[0]?.session_date ?? null, symbolCount: rows[0]?.n ?? 0 };
 }
@@ -277,26 +280,28 @@ export async function queryAvgRejectRate(pool: pg.Pool, jobId: string): Promise<
   return { avgRate: rows[0]?.avg_rate ?? null, runsEvaluated: rows[0]?.n ?? 0 };
 }
 
-export async function queryOhlcSanityViolations(pool: pg.Pool): Promise<number> {
+export async function queryOhlcSanityViolations(pool: pg.Pool, source: string = 'nse'): Promise<number> {
   const { rows } = await pool.query<{ n: number }>(
     `SELECT count(*)::int AS n FROM market_bar
-     WHERE source = 'nse' AND (close <= 0 OR (high IS NOT NULL AND low IS NOT NULL AND high < low))`,
+     WHERE source = $1 AND (close <= 0 OR (high IS NOT NULL AND low IS NOT NULL AND high < low))`,
+    [source],
   );
   return rows[0]?.n ?? 0;
 }
 
-export async function queryDeliveryPctViolations(pool: pg.Pool): Promise<number> {
+export async function queryDeliveryPctViolations(pool: pg.Pool, source: string = 'nse'): Promise<number> {
   const { rows } = await pool.query<{ n: number }>(
     `SELECT count(*)::int AS n FROM delivery_stat
-     WHERE source = 'nse' AND delivery_pct IS NOT NULL AND (delivery_pct < 0 OR delivery_pct > 100)`,
+     WHERE source = $1 AND delivery_pct IS NOT NULL AND (delivery_pct < 0 OR delivery_pct > 100)`,
+    [source],
   );
   return rows[0]?.n ?? 0;
 }
 
-export async function queryLongestWeekdayCalendarGap(pool: pg.Pool): Promise<{ gapLen: number; gapStart: string | null; gapEnd: string | null }> {
+export async function queryLongestWeekdayCalendarGap(pool: pg.Pool, exchange: string = 'NSE'): Promise<{ gapLen: number; gapStart: string | null; gapEnd: string | null }> {
   const { rows } = await pool.query<{ gap_len: number | null; gap_start: string | null; gap_end: string | null }>(
     `WITH bounds AS (
-       SELECT MIN(session_date) AS d0, MAX(session_date) AS d1 FROM trading_session WHERE exchange = 'NSE'
+       SELECT MIN(session_date) AS d0, MAX(session_date) AS d1 FROM trading_session WHERE exchange = $1
      ),
      weekdays AS (
        SELECT d::date AS d, row_number() OVER (ORDER BY d::date) AS wd_ord
@@ -305,7 +310,7 @@ export async function queryLongestWeekdayCalendarGap(pool: pg.Pool): Promise<{ g
      ),
      missing AS (
        SELECT w.d, w.wd_ord FROM weekdays w
-       LEFT JOIN trading_session ts ON ts.exchange = 'NSE' AND ts.session_date = w.d
+       LEFT JOIN trading_session ts ON ts.exchange = $1 AND ts.session_date = w.d
        WHERE ts.session_date IS NULL
      ),
      grp AS (
@@ -313,6 +318,7 @@ export async function queryLongestWeekdayCalendarGap(pool: pg.Pool): Promise<{ g
      )
      SELECT count(*)::int AS gap_len, MIN(d)::text AS gap_start, MAX(d)::text AS gap_end
      FROM grp GROUP BY grp_key ORDER BY gap_len DESC LIMIT 1`,
+    [exchange],
   );
   const row = rows[0];
   return { gapLen: row?.gap_len ?? 0, gapStart: row?.gap_start ?? null, gapEnd: row?.gap_end ?? null };
@@ -320,23 +326,25 @@ export async function queryLongestWeekdayCalendarGap(pool: pg.Pool): Promise<{ g
 
 // ── Coverage report queries (Task 2.5) ──────────────────────────────────────
 
-export async function queryPerYearCoverage(pool: pg.Pool): Promise<Array<{ year: number; distinctSessions: number; distinctSymbols: number }>> {
+export async function queryPerYearCoverage(pool: pg.Pool, source: string = 'nse'): Promise<Array<{ year: number; distinctSessions: number; distinctSymbols: number }>> {
   const { rows } = await pool.query<{ year: number; distinct_sessions: number; distinct_symbols: number }>(
     `SELECT EXTRACT(YEAR FROM session_date)::int AS year,
             count(DISTINCT session_date)::int AS distinct_sessions,
             count(DISTINCT symbol)::int AS distinct_symbols
-     FROM market_bar WHERE source = 'nse'
+     FROM market_bar WHERE source = $1
      GROUP BY 1 ORDER BY 1`,
+    [source],
   );
   return rows.map((r) => ({ year: r.year, distinctSessions: r.distinct_sessions, distinctSymbols: r.distinct_symbols }));
 }
 
-export async function queryPerSymbolSessionSpan(pool: pg.Pool): Promise<{ min: number; median: number; max: number }> {
+export async function queryPerSymbolSessionSpan(pool: pg.Pool, source: string = 'nse'): Promise<{ min: number; median: number; max: number }> {
   const { rows } = await pool.query<{ min_n: number | null; median_n: number | null; max_n: number | null }>(
     `SELECT min(n)::int AS min_n,
             percentile_cont(0.5) WITHIN GROUP (ORDER BY n) AS median_n,
             max(n)::int AS max_n
-     FROM (SELECT symbol, count(DISTINCT session_date) AS n FROM market_bar WHERE source = 'nse' GROUP BY symbol) t`,
+     FROM (SELECT symbol, count(DISTINCT session_date) AS n FROM market_bar WHERE source = $1 GROUP BY symbol) t`,
+    [source],
   );
   return {
     min: rows[0]?.min_n ?? 0,

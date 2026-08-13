@@ -6,9 +6,23 @@
 // contract test proves the parser is correct against a known shape; this
 // proves the adapter is STILL correct against what the live archive actually
 // returns today.
+//
+// This file deliberately uses the REAL 'nse'/'nse.bhavcopy' identifiers --
+// that's the whole point of a live canary (data-sources.md: use the
+// fetcher's own real resolution, not a fake). That is exactly what made its
+// OLD cleanup dangerous: it unconditionally deleted market_bar/delivery_stat/
+// trading_session for the tested date, ALL raw_object/ingestion_run rows for
+// job_id='nse.bhavcopy' (no date scope at all), and the shared provider/
+// provider_endpoint/job_definition registry rows -- on 2026-08-13 this
+// combination is what wiped the real 2021-present backfill after the DB
+// held both real and test-canary data simultaneously. Fixed: never delete
+// the registry (it's a permanent, idempotent seed, same as
+// run-full-backfill.ts's own seedNseBhavcopyRegistry); only delete fact rows
+// this SPECIFIC invocation actually created (never when the result was an
+// idempotent skip, meaning real production data already owned that date).
 import { describe, expect, test } from 'vitest';
 import pg from 'pg';
-import { createPool } from '@greenfield/db';
+import { createPool, seedNseBhavcopyRegistry } from '@greenfield/db';
 import { runBackfillForDate } from './backfill.js';
 
 try {
@@ -24,28 +38,23 @@ describe.runIf(RUN_LIVE)('nse.bhavcopy [live]', () => {
     const pool: pg.Pool = createPool();
     // A real, already-confirmed trading day (verified live 2026-08-13).
     const date = '2026-08-12';
+    // Permanent, idempotent registry seed -- same helper the real backfill
+    // uses. Never deleted below: it's shared production state, not a fixture.
+    await seedNseBhavcopyRegistry(pool);
+
+    const result = await runBackfillForDate(pool, date, { codeCommit: 'live-canary' });
+    const thisInvocationWroteData = result.status === 'succeeded' && result.reason !== 'already completed (idempotent no-op)';
+
     try {
-      await pool.query(
-        `INSERT INTO provider (provider, display_name, base_hosts, auth_mode, redistribution)
-         VALUES ('nse', 'NSE Archives', '{archives.nseindia.com}', 'none', 'permitted')
-         ON CONFLICT (provider) DO NOTHING`,
-      );
-      await pool.query(
-        `INSERT INTO provider_endpoint (endpoint_key, provider, integration_class, url_template, parser_version)
-         VALUES ('nse.bhavcopy', 'nse', 'ingestion',
-                 'https://archives.nseindia.com/products/content/sec_bhavdata_full_{DDMMYYYY}.csv', 'v1')
-         ON CONFLICT (endpoint_key) DO NOTHING`,
-      );
-      await pool.query(
-        `INSERT INTO job_definition (job_id, description, timezone, catalog_version)
-         VALUES ('nse.bhavcopy', 'NSE full bhavcopy backfill', 'Asia/Kolkata', 'v1')
-         ON CONFLICT (job_id) DO NOTHING`,
-      );
-
-      const result = await runBackfillForDate(pool, date, { codeCommit: 'live-canary' });
-
-      expect(result.status).toBe('succeeded');
-      expect(result.rowsAccepted).toBeGreaterThan(1000); // real NSE days run ~1800-2200 equity rows
+      if (result.reason === 'already completed (idempotent no-op)') {
+        // Real production data already covers this date -- that's still a
+        // valid live-health signal (the real pipeline reached this date),
+        // just verify the data exists rather than asserting a fresh write.
+        expect(result.status).toBe('skipped');
+      } else {
+        expect(result.status).toBe('succeeded');
+        expect(result.rowsAccepted).toBeGreaterThan(1000); // real NSE days run ~1800-2200 equity rows
+      }
 
       const { rows } = await pool.query(
         `SELECT symbol, close, run_id, available_at, provenance_quality
@@ -64,15 +73,18 @@ describe.runIf(RUN_LIVE)('nse.bhavcopy [live]', () => {
       );
       expect(sessionRows[0]?.is_holiday).toBe(false);
     } finally {
-      await pool.query(`DELETE FROM market_bar WHERE source = 'nse' AND session_date = $1`, [date]);
-      await pool.query(`DELETE FROM delivery_stat WHERE source = 'nse' AND session_date = $1`, [date]);
-      await pool.query(`DELETE FROM trading_session WHERE exchange = 'NSE' AND session_date = $1`, [date]);
-      await pool.query(`DELETE FROM raw_object WHERE endpoint_key = 'nse.bhavcopy'`);
-      await pool.query(`DELETE FROM ingestion_run WHERE job_id = 'nse.bhavcopy'`);
-      await pool.query(`DELETE FROM security WHERE listed_from = $1`, [date]);
-      await pool.query(`DELETE FROM job_definition WHERE job_id = 'nse.bhavcopy'`);
-      await pool.query(`DELETE FROM provider_endpoint WHERE endpoint_key = 'nse.bhavcopy'`);
-      await pool.query(`DELETE FROM provider WHERE provider = 'nse'`);
+      // Only clean up what THIS invocation actually created. If the date was
+      // already covered by the real backfill, thisInvocationWroteData is
+      // false and nothing here runs -- deleting it would delete real data.
+      if (thisInvocationWroteData) {
+        await pool.query(`DELETE FROM market_bar WHERE source = 'nse' AND session_date = $1`, [date]);
+        await pool.query(`DELETE FROM delivery_stat WHERE source = 'nse' AND session_date = $1`, [date]);
+        await pool.query(`DELETE FROM trading_session WHERE exchange = 'NSE' AND session_date = $1`, [date]);
+        await pool.query(`DELETE FROM security WHERE listed_from = $1`, [date]);
+      }
+      // raw_object/ingestion_run rows for this run are left in place -- they
+      // are audit history (a real fetch really happened), not test fixtures,
+      // and deleting them was never actually necessary for isolation.
       await pool.end();
     }
   }, 60_000);

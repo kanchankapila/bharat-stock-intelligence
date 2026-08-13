@@ -71,6 +71,14 @@ export interface BackfillDateOptions {
    * point at a local fixture server instead of live internet -- same
    * discipline as provider-sdk's own tests. */
   urlForDate?: (date: string) => string;
+  /** Defaults to NSE_BHAVCOPY_JOB_ID/NSE_BHAVCOPY_ENDPOINT_KEY. Overridable
+   * so tests never have to write ingestion_run/raw_object rows under the
+   * SAME identifier a real production backfill uses. Sharing that identifier
+   * is exactly what let a test's cleanup delete the real 2021-present
+   * backfill's data on 2026-08-13 (found via a live incident, not a review)
+   * -- this override exists so no test needs to make that mistake again. */
+  jobId?: string;
+  endpointKey?: string;
 }
 
 export async function runBackfillForDate(
@@ -78,9 +86,12 @@ export async function runBackfillForDate(
   date: string,
   options: BackfillDateOptions,
 ): Promise<DateOutcome> {
+  const jobId = options.jobId ?? NSE_BHAVCOPY_JOB_ID;
+  const endpointKey = options.endpointKey ?? NSE_BHAVCOPY_ENDPOINT_KEY;
+
   // Idempotent: a date already closed succeeded/skipped is a no-op. Dry-run
   // deliberately bypasses this -- it's a preview, not a checkpointed attempt.
-  if (!options.dryRun && (await isRunAlreadyCompleted(pool, NSE_BHAVCOPY_JOB_ID, date))) {
+  if (!options.dryRun && (await isRunAlreadyCompleted(pool, jobId, date))) {
     return { date, status: 'skipped', rowsAccepted: 0, rowsRejected: 0, reason: 'already completed (idempotent no-op)' };
   }
 
@@ -102,8 +113,8 @@ export async function runBackfillForDate(
   const client = await pool.connect();
   try {
     const runId = await openRun(client, {
-      jobId: NSE_BHAVCOPY_JOB_ID,
-      endpointKey: NSE_BHAVCOPY_ENDPOINT_KEY,
+      jobId,
+      endpointKey,
       codeCommit: options.codeCommit,
       inputWatermark: date,
     });
@@ -133,12 +144,33 @@ export async function runBackfillForDate(
 
     // Raw capture BEFORE parse -- a parser bug stays replayable.
     await insertRawObject(client, {
-      runId, endpointKey: NSE_BHAVCOPY_ENDPOINT_KEY, contentHash: raw.contentHash,
+      runId, endpointKey, contentHash: raw.contentHash,
       httpStatus: raw.httpStatus, contentType: raw.contentType, byteSize: raw.byteSize,
       storageUri: `local://raw/${raw.contentHash}`,
     });
 
     const parsed = parseBhavcopy(raw.body);
+
+    // "HTTP 200 is not success" (§B3), and this is why: NSE's archive server
+    // returns HTTP 200 with the PREVIOUS FRIDAY's file content verbatim when
+    // queried for a Sunday's date (Saturday correctly 404s). Live-verified
+    // 2026-08-13: requesting 10-Jan-2021 (a Sunday) returns a byte-identical
+    // response to 08-Jan-2021 (Friday), DATE1 column and all. The file's own
+    // parsed date is authoritative, never the requested URL date -- if they
+    // disagree, there is no genuine new data for this date, and treating it
+    // as a real session would silently fabricate a trading day that never
+    // happened (this exact bug wrote 51 phantom "Sunday sessions" into 2021
+    // alone before this check existed).
+    const fileDate = parsed.accepted[0]?.marketBar.sessionDate;
+    if (fileDate && fileDate !== date) {
+      const reason = `stale content: requested ${date} but file's own DATE1 says ${fileDate} (NSE served rolled-over data, not a real file for this date)`;
+      await closeRun(client, runId, {
+        status: 'skipped', reason,
+        metrics: { ...emptyMetrics(), outputWatermark: date },
+      });
+      return { date, status: 'skipped', rowsAccepted: 0, rowsRejected: 0, reason };
+    }
+
     const metrics: JobMetrics = {
       rowsSeen: parsed.accepted.length + parsed.rejected.length,
       rowsAccepted: parsed.accepted.length,

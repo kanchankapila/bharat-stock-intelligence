@@ -1,10 +1,21 @@
 // Task 2.3 Verify: "a query asserting that at least one symbol has a
 // non-NULL listed_to predating the latest session -- if zero, the universe
 // is still survivorship-biased and the task has failed."
+//
+// Isolation, post-incident (2026-08-13): this file already used distinct
+// test-only job/provider/endpoint ids, but its market_bar rows hardcoded
+// source='nse' and its deriveSecurityMaster(pool) call defaulted to
+// source='nse' too -- so once real backfilled data existed, this test's
+// "latest session" assertion would read the REAL latest session (not its
+// own 3-row fixture), and deriveSecurityMaster would recompute listed/
+// delisted status over the ENTIRE real universe on every test run. Fixed:
+// a distinct test-only source, passed explicitly to deriveSecurityMaster.
 import { afterEach, beforeEach, expect, test } from 'vitest';
 import pg from 'pg';
 import { createPool, closeRun, openRun } from '@greenfield/db';
 import { deriveSecurityMaster } from './security-master.js';
+
+const TEST_SOURCE = 'zzzsm';
 
 let pool: pg.Pool;
 
@@ -28,29 +39,29 @@ beforeEach(async () => {
   );
   await pool.query(
     `INSERT INTO security (symbol, name, exchange, status, listed_from) VALUES
-       ('ZZZALIVE', 'ZZZ Alive Co', 'NSE', 'listed', '2026-08-10'),
-       ('ZZZDEAD',  'ZZZ Dead Co',  'NSE', 'listed', '2026-08-10')`,
+       ('ZZZALIVE', 'ZZZ Alive Co', 'NSE', 'listed', '2027-02-08'),
+       ('ZZZDEAD',  'ZZZ Dead Co',  'NSE', 'listed', '2027-02-08')`,
   );
 
   const client = await pool.connect();
   try {
-    // ZZZALIVE: present on every session including the latest (2026-08-12).
-    for (const date of ['2026-08-10', '2026-08-11', '2026-08-12']) {
+    // ZZZALIVE: present on every session including the latest (2027-02-10).
+    for (const date of ['2027-02-08', '2027-02-09', '2027-02-10']) {
       const runId = await openRun(client, { jobId: 'zzzsm-job', endpointKey: 'zzzsm.bars', codeCommit: 'test' });
       await client.query(
         `INSERT INTO market_bar (symbol, session_date, interval, source, close, available_at, run_id)
-         VALUES ('ZZZALIVE', $1, '1d', 'nse', 100, now(), $2)`,
-        [date, runId],
+         VALUES ('ZZZALIVE', $1, '1d', $3, 100, now(), $2)`,
+        [date, runId, TEST_SOURCE],
       );
       await closeRun(client, runId, { status: 'succeeded', metrics: metrics(1) });
     }
-    // ZZZDEAD: only present through 2026-08-11 -- delisted before the latest session.
-    for (const date of ['2026-08-10', '2026-08-11']) {
+    // ZZZDEAD: only present through 2027-02-09 -- delisted before the latest session.
+    for (const date of ['2027-02-08', '2027-02-09']) {
       const runId = await openRun(client, { jobId: 'zzzsm-job', endpointKey: 'zzzsm.bars', codeCommit: 'test' });
       await client.query(
         `INSERT INTO market_bar (symbol, session_date, interval, source, close, available_at, run_id)
-         VALUES ('ZZZDEAD', $1, '1d', 'nse', 50, now(), $2)`,
-        [date, runId],
+         VALUES ('ZZZDEAD', $1, '1d', $3, 50, now(), $2)`,
+        [date, runId, TEST_SOURCE],
       );
       await closeRun(client, runId, { status: 'succeeded', metrics: metrics(1) });
     }
@@ -60,7 +71,7 @@ beforeEach(async () => {
 });
 
 afterEach(async () => {
-  await pool.query(`DELETE FROM market_bar WHERE source = 'nse' AND symbol IN ('ZZZALIVE', 'ZZZDEAD')`);
+  await pool.query(`DELETE FROM market_bar WHERE source = $1 AND symbol IN ('ZZZALIVE', 'ZZZDEAD')`, [TEST_SOURCE]);
   await pool.query(`DELETE FROM raw_object WHERE endpoint_key = 'zzzsm.bars'`);
   await pool.query(`DELETE FROM ingestion_run WHERE job_id = 'zzzsm-job'`);
   await pool.query(`DELETE FROM security WHERE symbol IN ('ZZZALIVE', 'ZZZDEAD')`);
@@ -71,22 +82,22 @@ afterEach(async () => {
 });
 
 test('a symbol absent from the latest session gets a non-NULL listed_to and status=delisted', async () => {
-  const result = await deriveSecurityMaster(pool);
-  expect(result.latestSession).toBe('2026-08-12');
+  const result = await deriveSecurityMaster(pool, TEST_SOURCE);
+  expect(result.latestSession).toBe('2027-02-10');
 
   const { rows } = await pool.query(
     `SELECT symbol, status, listed_from::text, listed_to::text FROM security WHERE symbol = 'ZZZDEAD'`,
   );
   expect(rows[0].status).toBe('delisted');
-  expect(rows[0].listed_from).toBe('2026-08-10');
-  expect(rows[0].listed_to).toBe('2026-08-11');
+  expect(rows[0].listed_from).toBe('2027-02-08');
+  expect(rows[0].listed_to).toBe('2027-02-09');
   // The actual Verify assertion: listed_to is non-NULL and predates the latest session.
   expect(rows[0].listed_to).not.toBeNull();
   expect(rows[0].listed_to < result.latestSession!).toBe(true);
 });
 
 test('a symbol present in the latest session stays listed with a NULL listed_to', async () => {
-  await deriveSecurityMaster(pool);
+  await deriveSecurityMaster(pool, TEST_SOURCE);
   const { rows } = await pool.query(
     `SELECT status, listed_to FROM security WHERE symbol = 'ZZZALIVE'`,
   );

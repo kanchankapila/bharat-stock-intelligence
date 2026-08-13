@@ -21,6 +21,6 @@ import { deriveSecurityMasterFromMarketBar, type SecurityMasterSpanRow } from '@
 
 export type SecurityMasterResult = SecurityMasterSpanRow;
 
-export async function deriveSecurityMaster(pool: pg.Pool): Promise<SecurityMasterResult> {
-  return deriveSecurityMasterFromMarketBar(pool);
+export async function deriveSecurityMaster(pool: pg.Pool, source: string = 'nse'): Promise<SecurityMasterResult> {
+  return deriveSecurityMasterFromMarketBar(pool, source);
 }
