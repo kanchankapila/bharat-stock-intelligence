@@ -2158,7 +2158,15 @@ class UnifiedRanker:
             )
 
             et = self._get_entry_targets(sym, confluence_map, rec_log_map, unified_map, sector_map)
-            if not et.get('trade_reasoning'):
+            # `trade_reasoning`'s fallback sources (confluence_signals, recommendation_log) are
+            # looked up by bare symbol and narrate THEIR OWN, independently-timed bull/bear read
+            # -- same mismatch already fixed for entry/stop/target above, just in text form.
+            # Confirmed live 2026-08-13 (PNGSREVA): row classified Strong Sell/S_ELITE while its
+            # confluence-sourced trade_reasoning read "35 bullish scanners..." in unhedged bullish
+            # prose, and didn't even match this row's own screener_names_payload bull count (24).
+            # Only trust the external narrative for an actionable long call; every other
+            # classification gets the summary computed from THIS row's own counts.
+            if not et.get('trade_reasoning') or classification not in ('Strong Buy', 'Buy'):
                 et['trade_reasoning'] = screener_summary
 
             # Event-trigger disclosure. These are NOT in unified_score and deliberately do not
