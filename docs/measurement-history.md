@@ -104,6 +104,28 @@ the guard fails 3 of 9).
 - **552 screeners cleared the sample bar (≥10 dates, ≥5 liquid members/date) at 1d; 51 were nominally significant at p<0.05 against 28 expected by chance, and ZERO survived Benjamini-Hochberg FDR or Bonferroni.** At 5d two survived nominally — `moneycontrol/371 "Downward Momentum"` and `moneycontrol/178 "Ben Graham Undervalued"` — but 5d returns on consecutive dates overlap 80%, and once Newey-West corrected their t-stats fall to −3.70 and −3.35 against the ~4.2 Bonferroni needs. **Neither is established.** If you test screeners again, the overlap correction is not optional: the uncorrected t-stat is inflated by roughly √5.
 - **The population has clear direction, and it is negative.** Mean per-screener 1d excess **−0.0596pp (t=−6.46, n=552)**; 3 of the 4 sources are individually significant (et_marketstats −0.19/t=−4.73, trendlyne −0.048/t=−4.51, etnow −0.076/t=−2.51; moneycontrol insignificant). Appearing on a screener is, on average, a mildly *bad* sign.
 - **The sentiment labels are significantly INVERTED.** Bullish-labelled screeners return **−0.1204pp (t=−6.62)**; bearish-labelled are indistinguishable from zero (−0.0138, t=−0.96). **bullish minus bearish = −0.1066pp, t=−4.61, p<0.001** — a working label system needs that difference significantly *positive*. Mechanism, not mystery: `screener_master.classified_by` is `'keyword'` for **all 1,669** rows, so sentiment is pattern-matched off the screener's *name* and has never been validated against an outcome.
+  > **2026-08-13 follow-up: one real mechanism found and fixed, this exact t-stat NOT re-measured.**
+  > `NLPScreenerInference.domain_override()` (`nlp_engine.py`) already has a MEASURED override for
+  > oversold/near-52w-low/below-lower-BB (settled by the 5y backtest above `screener_oversold` etc.),
+  > but checked `_VAL_RICH`/`_VAL_CHEAP` (reasoned-only) BEFORE it. Trendlyne/ETnow screener "names"
+  > are sometimes full marketing paragraphs, e.g. `screener_catalog`'s `"Close Within 52 Week Low
+  > Zone..."` row carries ~500 chars of ad copy ending "...hidden potential that lies within these
+  > undervalued gems, waiting to be unearthed" — the stray word "undervalued" tripped `_VAL_CHEAP`
+  > and shipped this row `bullish` live, opposite of its own measured, strongly-bearish 52w-low
+  > family (t=−3.79). Fixed by re-ordering `domain_override` so the measured family runs before the
+  > reasoned-only valuation checks (`nlp_engine.py`, regression test
+  > `test_measured_family_beats_incidental_valuation_words_in_marketing_copy`, negative-controlled).
+  > Re-running `reclassify_screener_sentiment.py --apply` against live Postgres corrected **94** of
+  > 2,539 `screener_catalog` rows and 92 of 1,672 `screener_master` rows (35 neutral→bearish, 32
+  > bearish→neutral, 12–13 neutral→bullish, 10–11 bullish→bearish, 3 bullish→neutral) — both tables
+  > are now internally consistent (0 pending changes on re-dry-run). **This is a plumbing fix, not a
+  > re-measurement**: the −0.1066pp/t=−4.61 bullish-minus-bearish number above was computed by a
+  > one-off audit script against the labels as they stood 2026-08-11, not by `factor_backtest.py`,
+  > so there is no cheap re-run — reproducing it needs the same point-in-time
+  > `screener_appearances`-vs-forward-return join, now against corrected labels. Until that is
+  > redone, treat the −4.61 t-stat as **stale, not disproven**: it is likely somewhat less negative
+  > post-fix (94 rows moved, many from a wrong label toward the label the MEASURED family already
+  > says is correct), but by how much is unmeasured. Do not cite −4.61 as the current number.
 - **Two categories survive Bonferroni across the 10 tested, both negative**: `technical` (−0.042/t=−3.38 at 1d) and `technical_momentum` (−0.136/t=−3.21 at 1d, **−0.673/t=−3.29 at 5d** — the most negative category found). This is the same short-horizon-momentum-is-negative result the factor panel and the Gap-Up/breakout setups both give. Nothing with a positive sign reached significance.
 - **`screener_master.tier` is degenerate and cannot prioritise anything**: 1,527 of 1,669 rows are `D`, 112 `Unranked`, 29 `C`, **1 `B`, and no `A` at all**. Every screener that met the sample bar was tier D.
 

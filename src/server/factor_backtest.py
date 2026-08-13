@@ -271,6 +271,12 @@ FACTORS = {
     'screener_near_52w_low': lambda d: d['prox_52w_low'],
     # C: does trading below the lower Bollinger band predict up (snap-back) or down?
     'screener_below_lower_bb': lambda d: -d['bb_pos'],
+    # D: the one screener setup measurement.md records as significantly POSITIVE (unlike A/C
+    # above) -- reconstructed from price so it gets the same test as the rest of this family
+    # instead of resting on the screener-membership read. Signed like screener_oversold: top-K
+    # selects the MOST-gapped-down names, so positive net excess means "gap-down is bullish".
+    'gap_down': lambda d: -d['gap_pct'],
+    'gap_up':   lambda d: d['gap_pct'],
     # The level of delivery % was already tested and failed. These are the CHANGE forms.
     'delivery_spike':   lambda d: d['deliv_spike'],
     'delivery_trend':   lambda d: d['deliv_trend'],
@@ -460,6 +466,16 @@ def load_price_panel(start: str = DEFAULT_START,
     _ma20 = gr['close'].rolling(20, min_periods=15).mean().reset_index(level=0, drop=True)
     _sd20 = gr['close'].rolling(20, min_periods=15).std().reset_index(level=0, drop=True)
     px['bb_pos'] = (px['close'] - _ma20) / (2.0 * _sd20.replace(0, np.nan))
+
+    # Overnight gap: today's open vs the prior session's close, as %. measurement.md flags
+    # "Gap Down <= -2%" as the one significantly positive setup found anywhere in this repo
+    # (every other common bullish setup -- Gap Up, breakout, volume shocker -- is inverted),
+    # but it has only ever been read off the screener's own membership, never reconstructed
+    # from price like screener_oversold/near_52w_low/below_lower_bb above. Doing that here
+    # gives it the same 5-year, survivorship-free, cost-aware test instead of a screener-name
+    # argument. Uses `open`/prior `close`, both already known before date D's own close, so
+    # this needs no extra look-ahead care beyond what the harness already provides.
+    px['gap_pct'] = (px['open'] / g['close'].shift(1) - 1) * 100
 
     # Delivery/participation CHANGE vs each name's own baseline. All three are differenced
     # against the same symbol's trailing history, so a structurally high-delivery stock scores
