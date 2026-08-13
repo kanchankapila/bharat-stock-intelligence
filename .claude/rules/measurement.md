@@ -145,6 +145,23 @@ day). 3 real movers had no `unified_recommendations` row at all (TIIL, SENCO, SG
 further this pass. n=2 dates is far too thin to draw a verdict; re-check once ~30 pre-market dates
 accumulate per the calendar constraint above.
 
+**A second, unrelated `scoring_engine.py` touch same day (2026-08-13) is explicitly NOT a scoring
+change and doesn't need a `factor_backtest.py` run.** `_log_recommendations`'s batched price/ATR
+lookup wrapped `quant_scores.rank_composite` in a bogus `ORDER BY qs.date DESC LIMIT 1`
+(`quant_scores` has no `date` column — see `recurring-bugs.md`'s "column referenced in SQL that
+doesn't exist" entry, third occurrence). Because it's a single 5-column `SELECT`, the resulting
+`UndefinedColumn` error aborted the whole statement, silently nulling `entry_price`/`target_1-3`/
+`stop_loss`/`news_sentiment_score`/`quant_score` for every `recommendation_log` row from
+`scoring_engine` — a **data-completeness bug in a downstream logging table, not a change to any
+score, weight, or classification formula**. `factor_backtest.py` tests price-panel factor edge
+(momentum, value, etc.) and has no code path that reads `recommendation_log`'s enrichment columns
+at all, so running it here would measure something unconnected to the diff — the kind of
+evidence-shaped-but-meaningless artifact `recurring-bugs.md`'s "fabricated backtest" entry warns
+about, not genuine verification. The real, applicable measurement is a direct before/after
+population count, done live 2026-08-13: `recommendation_log` rows for the day went from 0/1,584
+to **1,492/1,584 (94%) with `entry_price`/`quant_score` populated** after the fix and a live
+`process_scoring()` re-run. No factor's measured edge in this file changed as a result of this fix.
+
 ## Already tested — do not re-run without a reason
 
 Each of these was measured on the 5-year price panel with the spec above. Re-testing them costs days and returns the same answer. If you think one deserves another look, state what changed (more history, a different horizon, a different construction) before spending the time. Full derivation for any row: `docs/measurement-history.md`.

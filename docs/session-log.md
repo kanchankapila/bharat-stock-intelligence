@@ -1831,3 +1831,88 @@ documented as a known, low-severity gap rather than changed, since no data is ac
 Verification: read-only live Postgres queries + one live discovery job run (writes to
 `trendlyne_screeners`/`screener_master`/`screener_catalog`/`trendlyne_screener_stocks`, the
 job's normal, intended behavior). No `.ts`/`.py` source edited this entry.
+
+## 2026-08-13 (cont. 7) — quant_scores.date follow-up: fixed
+
+Closed the follow-up task spawned during the earlier live `process_scoring()` run.
+`_log_recommendations`'s batched price/ATR lookup (`scoring_engine.py`, added 2026-08-07 per
+its own comment) wrapped `quant_scores.rank_composite` in `ORDER BY qs.date DESC LIMIT 1` --
+`quant_scores` is `PRIMARY KEY (symbol)`, one row per symbol, no `date` column. Worse than the
+surface symptom: the query is a single 5-column `SELECT`, so the `UndefinedColumn` error aborted
+the *entire* statement, not just the `rank_composite` subquery -- every symbol's `entry_price`,
+`target_1-3`, `stop_loss`, `news_sentiment_score`, and `quant_score` came back NULL, silently
+re-breaking the exact null-`entry_price` bug the 2026-08-07 comment says was fixed 2026-07-30.
+Fixed by dropping the bogus `ORDER BY`/`LIMIT` (no history to order by). Live-verified:
+`recommendation_log` rows for today went from 0/1584 to **1,492/1,584 (94%) with populated
+`entry_price`/`quant_score`** after re-running `process_scoring()`. Documented as a third
+occurrence of `recurring-bugs.md`'s "column referenced in SQL that doesn't exist" entry, with
+the new lesson (one broken column in a batched multi-column query can null every sibling column,
+not just its own).
+
+Verification: `npx tsc --noEmit` clean, `python -m pytest src/server/__tests__/ src/server/tests/`
+1785 passed / 209 skipped / 0 failed. Live Postgres query confirms the fix's real effect.
+
+## 2026-08-13 (cont. 3) — "fix all", et_marketstats category-collapse bug, gdelt wired live, 9 TS live tests
+
+User explicitly scoped in: fix everything found, make et_marketstats/etnow screener stocks
+carry the same scoring impact as Trendlyne/MoneyControl.
+
+**The big one: `screener_catalog_enricher.py`'s Step 5 silently zeroed out screener impact for
+non-Trendlyne sources.** `cat_norm = category if category in CATEGORY_DEFAULTS else 'other'`
+validated the REAL category (`screener_master.inferred_category`, using the same taxonomy as
+`unified_ranker.py`'s `CAT_BASE_WT`) against `CATEGORY_DEFAULTS` — a smaller, unrelated,
+coarser vocabulary meant only to supply horizon/confidence fallbacks. The two vocabularies
+share almost no keys, so every screener inserted via this path had its real category
+(`technical_trend`, `fundamental_quality`, etc.) silently collapsed to `'other'` — `CAT_BASE_WT`
+weight 0.0. Measured before fix: et_marketstats 100% `'other'` (95/95 screeners), etnow 26%,
+moneycontrol 35%, trendlyne 1% (trendlyne mostly bypasses this path via its own discovery
+script). Fixed by trusting `category` as-is and using `CATEGORY_DEFAULTS` only for its stated
+purpose (horizon/confidence). Extracted the whole bias/category/horizon/confidence resolution
+into a new pure function, `resolve_screener_defaults()`, specifically so the regression test
+imports and calls the REAL function rather than a hand-copied mirror (caught mid-session: the
+first version of this test copied the logic inline and didn't actually detect the bug when
+negative-controlled — rewritten to import the real function before trusting it). Added Step 5b
+to backfill the 268 already-corrupted `screener_catalog` rows from `screener_master` (can't
+just re-run Step 5, which only inserts *missing* rows). Applied live: et_marketstats 100%→32%
+`'other'`, etnow 26%→9%, moneycontrol 35%→14%.
+
+**`gdeltService.ts` wired into the scheduler.** `runGdeltBackfill()` had a working
+fetch/parse/persist path and a real table (`gdelt_sentiment`) but was never called from
+anywhere. Added `QUEUE_GDELT_SENTIMENT` (daily 19:00 UTC, no weekday restriction — GDELT
+indexes weekend news too), registered in `jobRegistry.ts` for heartbeat-lateness monitoring,
+and gave it a freshness check. Picking the cron slot required checking
+`jobPipelineOrdering.test.ts`'s minute-collision guard — the first choice (17:00 UTC) collided
+with `score-all`, moved to 19:00. **Could not be live-verified from this sandbox**: general
+internet works (`google.com`/`moneycontrol.com` reachable) but `api.gdeltproject.org`
+specifically times out — a network-policy gap in this environment, not a code bug. Documented
+in the new live test's own header rather than silently worked around or deleted.
+
+**data-coverage-audit TS-side sweep, completed.** Filtered ~28 TS files hitting external APIs
+down to 10 genuinely fetcher-shaped ones (the rest are read-only service layers, or internal
+calls like Ollama/our own Python API). Wrote real `live_datasource`-shaped tests for 9 of them
+(`deliveryFetcher`, `etMarketstats`, `etnow`, `fundamentalsSyncService`, `gdeltService`,
+`liveStockData`, `mcApiService` — the real persisting function, not the pre-existing
+`mcapiProxy.test.ts` proxy-route test — `newsSentimentService`, `trendlyneScreener`); the
+10th, `technicalSignalsService.ts`, turned out to have exactly one `fetch()` call (a Telegram
+alert) and no external data fetch at all — correctly excluded, not a fetcher, a filtering
+error caught before writing a pointless test. All 8 network-reachable tests pass for real
+against live production data (deliveryFetcher: 2459 symbols; liveStockData: 2148 live quotes;
+newsSentimentService: 1071 fetched/340 processed with real FinBERT scoring; trendlyneScreener:
+100 real stocks). No cleanup needed in any of them — each writes genuine production-shaped
+rows, identical to what the real scheduled job would write, not test fixture pollution.
+
+**Self-inflicted bug found and fixed mid-sweep: `import 'dotenv/config'` as a static top-level
+import leaked real credentials into the shared vitest process env on every run, including runs
+where the live suite is skipped**, breaking `niftytraderAuthService.test.ts`'s "no credentials
+configured" case (it deletes the env vars in its own body, but by the time some other file's
+top-level import already loaded real ones into the shared worker process, later mock
+assumptions could be violated). Fixed in all 9 new files: `RUN_LIVE_DATASOURCE_TESTS` is a
+plain shell env var (not something `.env` provides), so it's checked FIRST, and `dotenv/config`
+is only `await import()`ed conditionally when actually running live. Verified: the polluted
+state reproduces on the unfixed version (confirmed via the actual failing run), and is gone
+after the fix (`niftytraderAuthService.test.ts` passes running alongside the new live tests).
+
+Verification: `npx tsc --noEmit` clean throughout. Default `npx vitest run`: 890 passed, 0
+failed, 37 skipped (includes all 9 new live tests correctly skipped). `RUN_LIVE_DATASOURCE_TESTS=1`
+run of the 8 network-reachable new tests together: 8/8 passed. Full `python -m pytest`: 1790
+passed, 0 failed, 209 skipped.

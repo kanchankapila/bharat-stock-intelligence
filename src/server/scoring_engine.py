@@ -1139,8 +1139,7 @@ class AlphaQuantScoringEngine:
                             WHERE cs.symbol = ts.symbol AND cs.atr IS NOT NULL
                             ORDER BY cs.computed_at DESC LIMIT 1) AS atr,
                            (SELECT qs.rank_composite FROM quant_scores qs
-                            WHERE qs.symbol = ts.symbol AND qs.rank_composite IS NOT NULL
-                            ORDER BY qs.date DESC LIMIT 1) AS rank_composite
+                            WHERE qs.symbol = ts.symbol AND qs.rank_composite IS NOT NULL) AS rank_composite
                     FROM technical_signals ts
                     WHERE ts.symbol IN ({placeholders})
                       AND ts.date = (SELECT MAX(date) FROM technical_signals ts2 WHERE ts2.symbol = ts.symbol)
