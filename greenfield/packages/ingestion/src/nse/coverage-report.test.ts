@@ -109,7 +109,13 @@ beforeEach(async () => {
 });
 
 afterEach(async () => {
-  await pool.query(`DELETE FROM market_bar WHERE source = $1`, [TEST_SOURCE]);
+  // market_bar's only index is the PK (symbol, session_date, interval,
+  // source) -- `source` alone isn't a leading column, so on the real
+  // 3M+-row table this was a full sequential scan that intermittently blew
+  // vitest's 10s hook timeout. Symbols are always 'ZZZCOV%' (see beforeEach)
+  // so restoring that prefix filter makes it a sargable index range scan
+  // again, same shape as security-master.test.ts's working delete.
+  await pool.query(`DELETE FROM market_bar WHERE source = $1 AND symbol LIKE 'ZZZCOV%'`, [TEST_SOURCE]);
   await pool.query(`DELETE FROM raw_object WHERE endpoint_key = $1`, [TEST_ENDPOINT_KEY]);
   await pool.query(`DELETE FROM ingestion_run WHERE job_id = $1`, [TEST_JOB_ID]);
   await pool.query(`DELETE FROM security WHERE symbol LIKE 'ZZZCOV%'`);

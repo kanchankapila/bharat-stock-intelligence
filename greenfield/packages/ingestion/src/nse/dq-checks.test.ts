@@ -83,8 +83,13 @@ beforeEach(async () => {
 afterEach(async () => {
   // Scoped by the TEST-ONLY source/exchange/job_id -- can never match real
   // production rows, regardless of dates or symbol names used below.
-  await pool.query(`DELETE FROM market_bar WHERE source = $1`, [TEST_SOURCE]);
-  await pool.query(`DELETE FROM delivery_stat WHERE source = $1`, [TEST_SOURCE]);
+  // Both tables' only index is a PK leading with `symbol`, not `source`; on
+  // the real 3M+-row table a source-only filter is a full sequential scan
+  // that risks blowing vitest's hook timeout (seen live on
+  // coverage-report.test.ts's equivalent query). Test symbols are always
+  // 'ZZZDQ%' (see below), so add that prefix to keep the delete sargable.
+  await pool.query(`DELETE FROM market_bar WHERE source = $1 AND symbol LIKE 'ZZZDQ%'`, [TEST_SOURCE]);
+  await pool.query(`DELETE FROM delivery_stat WHERE source = $1 AND symbol LIKE 'ZZZDQ%'`, [TEST_SOURCE]);
   await pool.query(`DELETE FROM trading_session WHERE exchange = $1`, [TEST_EXCHANGE]);
   await pool.query(`DELETE FROM raw_object WHERE endpoint_key = $1`, [TEST_ENDPOINT_KEY]);
   await pool.query(`DELETE FROM ingestion_run WHERE job_id = $1`, [TEST_JOB_ID]);
