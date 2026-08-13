@@ -2155,6 +2155,66 @@ it was the flake it was diagnosed as, not a real regression.
 
 ---
 
+## 2026-08-13 — `trade-desk` skill: the daily trading loop, bounded by what is actually measured
+
+User asked for "a skill that helps me trade and make huge profits in Indian share market."
+Built the skill; declined the premise of the profit claim rather than the request. This repo's
+own `measurement.md` records zero of 26 backtested factors as positive-and-significant, a
+canonical ranker at IC ≈ 0.0001 (t=0.02), and 14 of 23 `feature_store` columns significantly
+*negative* — a skill promising large profits would be the "evidence-shaped output" failure
+class that file exists to prevent, in skill form.
+
+**What the skill is built around.** Exactly one setup here has survived a real measurement
+review: `screener_combo_finder.py --tier1`'s capitulation triple (`gap_down` AND `open_eq_low`
+AND `top_loser` on session D → long at D+1 open, exit D+1 close), +0.53%/day excess net of
+15bps, t=+3.61, 425 dates, 6/6 years positive. The skill is the operational wrapper around
+that one result: freshness gate → candidate generation reusing `compute_tier1_precursors` /
+`live_capitulation_screener.py` (never re-deriving the thresholds) → sizing → execution to the
+measured open→close convention → journal → weekly grading.
+
+Files: `.claude/skills/trade-desk/SKILL.md`, `.claude/skills/trade-desk/references/edge-inventory.md`
+(one-page distillation of what is tradeable vs. already dead, so a trade idea gets checked
+against the killed list before it gets sized), `src/server/trade_journal.py`,
+`src/server/tests/test_trade_journal.py`.
+
+**The design decision worth recording: grade the user's fills against the model's fills.**
+The edge is 0.53%/day — smaller than one sloppy entry. So `trade_journal.py` computes two
+benchmark-relative numbers per trade, `model_excess` (stock_ohlcv open→close, what the backtest
+would have earned) and `real_excess` (the user's actual fills, same benchmark subtraction), and
+reports the gap. If execution drag exceeds the 0.53% the setup pays, the setup is untradeable
+at that size *regardless of how good the backtest looks* — and, importantly, the verdict says
+so rather than letting the user read it as the signal being dead. `report` refuses a verdict
+below 40 trade dates (the backtest had 425) and prints `STOP` when the realized 95% CI upper
+bound goes below zero.
+
+**Bug found in this session's own code, by its own test.** The first `winsorize()` used
+`quantile()` with default linear interpolation, which does *not* clip a lone extreme value —
+with one corrupt bar in n=100 the cutoff lands ~1% of the way toward the outlier, so the
+"winsorized" mean came out +26% instead of +1%. The code read as correct; only the test
+written specifically for the corrupt-bar case caught it. Fixed with
+`interpolation="higher"/"lower"` so the cutoff is an observed value. Checked repo-wide: no
+other instance (`dl_engine.py`, `unified_ranker.py`, `factor_backtest.py` all use fixed
+absolute bounds, which are immune). Added to `recurring-bugs.md` anyway, since the panel spec
+mandates winsorizing and the next implementation will likely reach for quantiles.
+
+Verification: 19 new tests, all negative-controlled for real — reverted the per-date
+aggregation to pooled and removed the NaN guard, confirmed 7 failures including the pooling
+control, restored, 19 pass. `scripts/check_recurring_bugs.py` clean on both new files.
+`trade_journal.py` exercised end to end (log → grade → report) against a throwaway SQLite
+fixture with `USE_POSTGRES=false`: hand-checked the arithmetic (+2.36% gross − 0.15% cost −
+1.0% universe = +1.21% excess), confirmed two trades on one date collapse to one observation,
+and confirmed a deliberately sloppy fill surfaces as +0.82%/date drag against the 0.53% edge.
+Full `pytest`: 1,722 passed, 5 failed, 224 skipped — all 5 failures are `ModuleNotFoundError`
+(`lightgbm`, plus 9 modules that could not be collected at all for `ta`/`nse`/`torch`) in this
+bare cloud container, pre-existing and unrelated; every change this session is additive
+(3 new paths + a 2-line `.gitignore` append), touching no existing source file.
+
+**Not done, and deliberately:** no memory-index update — `MEMORY.md` lives at a Windows path
+unavailable from this container. Worth adding an entry for the trade-desk skill from a local
+session.
+
+---
+
 ## 2026-08-13 — Tooling/infrastructure recommendations survey (advisory, no code change)
 
 Asked for free libraries/tools/MCP servers/Claude Code features that would make this codebase
