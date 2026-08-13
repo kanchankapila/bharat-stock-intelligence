@@ -61,7 +61,7 @@ class TestBackfillDaysToResultsUsesLogicalTradingDate:
         updates = _updates(conn)
         assert len(updates) == 1
         _, params = updates[0]
-        assert params == ("2026-07-31",)
+        assert params == ("2026-07-31", "2026-07-31", "2026-07-31")
 
     def test_wrong_calendar_date_would_match_nothing_silently(self, monkeypatch):
         monkeypatch.setattr(mef, "logical_trading_date", lambda: "2026-08-01")
@@ -71,7 +71,43 @@ class TestBackfillDaysToResultsUsesLogicalTradingDate:
         mef._backfill_days_to_results(conn)
 
         _, params = _updates(conn)[0]
-        assert params == ("2026-08-01",)  # would NOT match a 2026-07-31 grid row
+        # would NOT match a 2026-07-31 grid row
+        assert params == ("2026-08-01", "2026-08-01", "2026-08-01")
+
+    def test_days_computation_anchored_to_logical_trading_date_not_wall_clock(self, monkeypatch):
+        """2026-08-13 regression: the WRITE TARGET used logical_trading_date() but the DAYS
+        CALCULATION itself still anchored to real wall-clock (julianday('now') / CURRENT_DATE)
+        -- a different clock whenever the job crosses midnight IST. Live-confirmed on UNIECOM:
+        days_to_next_results was correctly 2 on 2026-08-11 and NULL for all 2,190 symbols on
+        2026-08-12, the exact morning its 2-day-out earnings date mattered. Negative control:
+        reverting the fix (restoring 'now'/CURRENT_DATE) makes this fail."""
+        monkeypatch.setattr(mef, "logical_trading_date", lambda: "2026-07-31")
+        monkeypatch.setattr(mef, "use_postgres", lambda: False)
+        conn = _FakeConn()
+
+        mef._backfill_days_to_results(conn)
+
+        sql, params = _updates(conn)[0]
+        assert "'now'" not in sql, "days computation must not anchor to SQLite's real-time now()"
+        assert params == ("2026-07-31", "2026-07-31", "2026-07-31"), (
+            "both the days-until-results calculation and the result_date filter must use the "
+            "same logical_trading_date() as the write target, not real wall-clock"
+        )
+
+    def test_postgres_days_computation_anchored_to_logical_trading_date(self, monkeypatch):
+        """Same regression, Postgres branch: CURRENT_DATE was a literal SQL keyword the test
+        harness can't mock, so this bug survived every existing test here (they all force the
+        SQLite branch and only checked the write target). Assert the PG SQL carries no
+        unparameterized CURRENT_DATE and binds logical_trading_date() throughout instead."""
+        monkeypatch.setattr(mef, "logical_trading_date", lambda: "2026-07-31")
+        monkeypatch.setattr(mef, "use_postgres", lambda: True)
+        conn = _FakeConn()
+
+        mef._backfill_days_to_results(conn)
+
+        sql, params = _updates(conn)[0]
+        assert "CURRENT_DATE" not in sql, "days computation must not anchor to Postgres's real CURRENT_DATE"
+        assert params == ("2026-07-31", "2026-07-31", "2026-07-31")
 
 
 class TestBackfillRapidFeaturesUsesLogicalTradingDate:

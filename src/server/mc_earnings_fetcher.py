@@ -214,7 +214,7 @@ def fetch_earnings_dates(con) -> None:
     print(f"[EarningsFetcher] Upcoming: {len(rows)} stocks with results in next 14 days -> days_to_next_results updated")
 
 
-def _backfill_days_to_results(con) -> None:
+def _backfill_days_to_results(con, as_of: str | None = None) -> None:
     """Update technical_signals.days_to_next_results by joining via mc_pricefeed_daily.scid.
 
     date = today guard added 2026-07-19 on both branches -- the PG branch previously matched
@@ -225,36 +225,48 @@ def _backfill_days_to_results(con) -> None:
     logical_trading_date(), not date.today() (2026-08-01) -- ml-daily-ops's step chain
     regularly finishes after midnight IST, so a raw wall-clock date silently targeted a day
     with no grid row yet. See as_of.logical_trading_date's docstring for the incident.
+
+    2026-08-13: that fix only touched the WRITE TARGET (`ts.date = ?`). The DAYS COMPUTATION
+    itself still anchored to real wall-clock (`CURRENT_DATE` / `julianday('now')`), a different
+    clock than `logical_trading_date()` -- live-confirmed on UNIECOM, whose days_to_next_results
+    was correctly 2 on 2026-08-11 and NULL for the entire table (0 of 2,190 symbols) on
+    2026-08-12, the exact morning its 2-day-out earnings date should have mattered most. Both
+    anchors must be the same `today` or a midnight-crossing run computes "days until results"
+    relative to a different day than the row it's writing into. Measured live: 84.6% of
+    37,593 symbol-days across the prior 34 trading days were wrong under the old code.
+
+    `as_of` overrides logical_trading_date() for a one-off historical repair pass (see
+    backfill_days_to_next_results.py) -- the daily scheduled call always passes None.
     """
     cur = con.cursor()
-    today = logical_trading_date()
+    today = as_of or logical_trading_date()
     if use_postgres():
         cur.execute("""
             UPDATE technical_signals ts
             SET days_to_next_results = subq.days
             FROM (
                 SELECT ns.symbol,
-                       (MIN(sed.result_date::date) - CURRENT_DATE) AS days
+                       (MIN(sed.result_date::date) - CAST(? AS date)) AS days
                 FROM stock_earnings_dates sed
                 JOIN nse_stocks ns ON ns.mcsymbol = sed.scid
-                WHERE sed.result_date >= CURRENT_DATE::text
+                WHERE sed.result_date >= ?
                 GROUP BY ns.symbol
             ) subq
             WHERE ts.symbol = subq.symbol
               AND ts.date = ?
-        """, (today,))
+        """, (today, today, today))
     else:
         cur.execute("""
             UPDATE technical_signals
             SET days_to_next_results = (
-                SELECT CAST(MIN(julianday(sed.result_date) - julianday('now')) AS INTEGER)
+                SELECT CAST(MIN(julianday(sed.result_date) - julianday(?)) AS INTEGER)
                 FROM stock_earnings_dates sed
                 JOIN nse_stocks ns ON ns.mcsymbol = sed.scid
                 WHERE ns.symbol = technical_signals.symbol
-                  AND sed.result_date >= date('now')
+                  AND sed.result_date >= ?
             )
             WHERE date = ?
-        """, (today,))
+        """, (today, today, today))
     con.commit()
 
 
