@@ -523,7 +523,12 @@ def main() -> None:
     # Same silent-degradation guard as trendlyne_price_analysis_fetcher.py (its sibling in the
     # same trendlyne-midweek batch): a run where most/all stocks come back "no data" must not
     # look identical to a healthy one.
-    tracker = FetchTracker("trendlyne_adv_tech_fetcher")
+    # abort_after_consecutive_fails=20 (2026-08-13): its price-analysis sibling was WAF-blocking
+    # on request 1 of every run and grinding through the whole universe anyway until the outer
+    # timeout killed it -- see fetch_utils.FetchTracker. This fetcher's failures are currently
+    # interspersed with real successes (18-28% success, not 0%), so the breaker won't trip
+    # under that pattern, but it's cheap defense-in-depth against a full block later.
+    tracker = FetchTracker("trendlyne_adv_tech_fetcher", abort_after_consecutive_fails=20)
 
     def _fetch_one(args):
         symbol, tlid = args

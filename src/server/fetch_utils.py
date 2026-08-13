@@ -55,15 +55,39 @@ class FetchTracker:
     so a silently-degraded run stops looking identical to a healthy one in the job monitor.
     """
 
-    def __init__(self, job_name: str, fail_threshold: float = 0.15, min_total_for_threshold: int = 10):
+    def __init__(self, job_name: str, fail_threshold: float = 0.15, min_total_for_threshold: int = 10,
+                 abort_after_consecutive_fails: int | None = None):
         self.job_name = job_name
         self.fail_threshold = fail_threshold
         self.min_total_for_threshold = min_total_for_threshold
+        self.abort_after_consecutive_fails = abort_after_consecutive_fails
         self.succeeded: list[str] = []
         self.failed: list[str] = []
+        self._consecutive_fails = 0
 
     def record(self, item: str, ok: bool) -> None:
         (self.succeeded if ok else self.failed).append(item)
+        if ok:
+            self._consecutive_fails = 0
+            return
+        self._consecutive_fails += 1
+        # 2026-08-13: trendlyne_price_analysis_fetcher.py was hitting a WAF block on request 1
+        # every run (405 on every retry, every symbol) and grinding through all ~2234 stocks
+        # anyway -- each one still paying retry_get's full 3-attempt backoff -- until the
+        # *outer* 40-minute runPython timeout SIGKILLed it (~52min real, over budget), every
+        # ~30-90min via the catch-up retry loop, all day. A total/near-total upstream block
+        # doesn't get better by finishing the run; bailing out after N consecutive failures
+        # turns a 40-minute forced kill into a fail-fast exit within seconds, and stops
+        # hammering an already-blocking WAF with the remaining ~2200 requests. Opt-in
+        # (default None) so this doesn't change behavior for fetchers that legitimately have
+        # long stretches of expected misses (e.g. tickers genuinely delisted mid-universe-scan).
+        if (self.abort_after_consecutive_fails is not None
+                and self._consecutive_fails >= self.abort_after_consecutive_fails):
+            print(f"[FETCH SUMMARY] {self.job_name}: aborting early after "
+                  f"{self._consecutive_fails} consecutive failures (most recent: {item}; "
+                  f"{len(self.succeeded)}/{self.total} succeeded so far) -- upstream looks "
+                  f"blocked/down, not worth grinding through the rest of the run at the same rate.")
+            sys.exit(1)
 
     @property
     def total(self) -> int:

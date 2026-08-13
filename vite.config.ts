@@ -96,11 +96,26 @@ export default defineConfig(({mode}) => {
       // checkout has none), which is worse, not better: the local suite disagreed with CI and
       // the local red was easy to learn to ignore. Vitest's defaults are replaced wholesale
       // when `exclude` is set, so node_modules/dist/build are restated here deliberately.
+      //
+      // greenfield/ is a separate pnpm workspace with its own isolated Postgres/Redis/S3 stack
+      // and its own per-package .env files (deliberately different ports -- see those files'
+      // own comments). This root config's `loadEnv(mode, '.', '')` loads the ROOT .env with an
+      // empty prefix (needed for GEMINI_API_KEY), and Vitest injects everything loadEnv returns
+      // into process.env for every collected test file -- so a root `npx vitest run` was
+      // clobbering greenfield's own DATABASE_URL with the root app's unrelated
+      // `DATABASE_URL=database.sqlite`. pg-connection-string then mis-parses that bare filename
+      // (no `://`) and extracts the literal substring "base" inside "database.sqlite" as the
+      // hostname, so every greenfield DB test failed with `getaddrinfo ENOTFOUND base` --
+      // nothing wrong with greenfield's code, just the wrong env reaching it. greenfield has its
+      // own `pnpm -r run test` (run from greenfield/, confirmed to pick up its own .env
+      // correctly with no interference) -- excluded here the same way .claude/worktrees/ is,
+      // since it's an independently-configured tree, not part of this vitest run.
       exclude: [
         '**/node_modules/**',
         '**/dist/**',
         '**/build/**',
         '**/.claude/worktrees/**',
+        '**/greenfield/**',
       ],
     },
   };

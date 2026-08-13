@@ -27,6 +27,20 @@ export interface JobScheduleEntry {
   everyMs?: number;
   graceMinutes: number;
   critical: boolean;
+  /**
+   * Overrides cronPattern for getLateJobs()'s deadline math ONLY -- cronPattern itself is left
+   * untouched so it keeps mirroring the real `repeat: { pattern }` registration byte-for-byte
+   * (jobRegistryCronMirror.test.ts pins that). For a market-hours job whose cron includes a
+   * generous post-close tail (every 15 minutes across hours 3 through 10 UTC, which fires
+   * through 10:45 UTC as a safety margin even though the runtime isMarketOpen() gate correctly
+   * closes it at 10:00 UTC and no-ops the rest), the literal LAST cron slot is not when the job
+   * was actually last expected to do real work -- so a deadline computed from it is guaranteed
+   * to have passed by the time the 18:45 UTC digest runs, every single trading day, regardless
+   * of whether the job ran fine. Mirrors MONITOR_SCRIPTS' `technical-signals` entry
+   * (monitorScripts.ts), which already solves the identical problem via computeCronLateness()'s
+   * multi-pattern support.
+   */
+  lateDeadlineCronPatterns?: string[];
 }
 
 // ── Market-hours policy (IST 09:15–15:30 = UTC 03:45–10:00, Mon–Fri, minus holidays) ──
@@ -67,13 +81,16 @@ export const JOB_REGISTRY: JobScheduleEntry[] = [
   { jobName: 'signal-outcomes', label: 'Signal Outcome Tracker', cronPattern: '30 3 * * 1-5', graceMinutes: 45, critical: true },
   { jobName: 'news-sentiment', label: 'News Sentiment Refresh', everyMs: 15 * 60 * 1000, graceMinutes: 45, critical: true },
   { jobName: 'trendlyne-intraday', label: 'Trendlyne Intraday Scan', everyMs: 15 * 60 * 1000, graceMinutes: 45, critical: false },
-  { jobName: 'intraday-fetcher', label: 'Intraday Bar Fetcher', cronPattern: '*/15 3-10 * * 1-5', graceMinutes: 45, critical: false },
+  { jobName: 'intraday-fetcher', label: 'Intraday Bar Fetcher', cronPattern: '*/15 3-10 * * 1-5', graceMinutes: 45, critical: false,
+    lateDeadlineCronPatterns: ['45 3 * * 1-5', '*/15 4-9 * * 1-5', '0 10 * * 1-5'] },
   { jobName: 'research-premarket', label: 'Premarket Research', cronPattern: '0 3 * * 1-5', graceMinutes: 60, critical: false },
   { jobName: 'research-postclose', label: 'Postclose Research', cronPattern: '45 10 * * 1-5', graceMinutes: 60, critical: false },
   { jobName: 'dl-macro-fetch', label: 'DL Macro Fetcher', cronPattern: '30 2 * * 1-5', graceMinutes: 60, critical: false },
   { jobName: 'preopen-snapshot', label: 'Preopen Snapshot', cronPattern: '40 3 * * 1-5', graceMinutes: 45, critical: false },
-  { jobName: 'market-regime-refresh', label: 'Market Regime Refresh (intraday)', cronPattern: '*/15 3-10 * * 1-5', graceMinutes: 45, critical: false },
-  { jobName: 'intraday-ranker', label: 'Intraday Ranker (regime + ranking)', cronPattern: '*/15 3-10 * * 1-5', graceMinutes: 45, critical: false },
+  { jobName: 'market-regime-refresh', label: 'Market Regime Refresh (intraday)', cronPattern: '*/15 3-10 * * 1-5', graceMinutes: 45, critical: false,
+    lateDeadlineCronPatterns: ['45 3 * * 1-5', '*/15 4-9 * * 1-5', '0 10 * * 1-5'] },
+  { jobName: 'intraday-ranker', label: 'Intraday Ranker (regime + ranking)', cronPattern: '*/15 3-10 * * 1-5', graceMinutes: 45, critical: false,
+    lateDeadlineCronPatterns: ['45 3 * * 1-5', '*/15 4-9 * * 1-5', '0 10 * * 1-5'] },
   { jobName: 'closed-day-early-batch', label: 'Closed-Day Early Batch (holiday pipeline)', cronPattern: '40 1 * * 1-5', graceMinutes: 60, critical: false },
   { jobName: 'dl-retrain-emergency', label: 'DL Emergency Retrain (drift-triggered)', graceMinutes: 0, critical: false },
   { jobName: 'confluence-compute', label: 'Confluence Engine', everyMs: 30 * 60 * 1000, graceMinutes: 45, critical: true },
@@ -83,7 +100,8 @@ export const JOB_REGISTRY: JobScheduleEntry[] = [
   { jobName: 'agent-auditor', label: 'Agent: Auditor', cronPattern: '0 11 * * 1-5', graceMinutes: 60, critical: false },
   { jobName: 'agent-optimizer', label: 'Agent: Optimizer', cronPattern: '0 12 * * 1-5', graceMinutes: 60, critical: false },
   { jobName: 'unified-ranker', label: 'Unified Daily Ranker', cronPattern: '0 2 * * 1-5', graceMinutes: 45, critical: true },
-  { jobName: 'live-screener-collect', label: 'Live Screener Poller', cronPattern: '*/15 3-10 * * 1-5', graceMinutes: 30, critical: false },
+  { jobName: 'live-screener-collect', label: 'Live Screener Poller', cronPattern: '*/15 3-10 * * 1-5', graceMinutes: 30, critical: false,
+    lateDeadlineCronPatterns: ['45 3 * * 1-5', '*/15 4-9 * * 1-5', '0 10 * * 1-5'] },
   // graceMinutes 45 -> 360: the processor's own comment says "5.5h backstop... the last
   // three runs took 153/157/239 min" (queues.ts's withJobTimeout('quant-eod-sync', 5.5h,...)),
   // and the Worker's own lockDuration is 120min -- 45min grace flagged 'late' on every run

@@ -102,3 +102,21 @@ def test_to_unified_signal_row_preserves_bearish_and_empty_patterns():
     assert out['signal_type'] == 'Bearish'
     assert out['ai_reasoning'] == '[]'
     assert out['technical_score'] == 71.0
+
+
+# ── naive-local-clock regression guard (2026-08-13) ─────────────────────────────
+# analyze_stock()/process_all() need a live DB connection (TechnicalAnalysisEngine.__init__
+# opens one) so this checks the source directly rather than mocking a DB just to exercise two
+# lines. A naive datetime.datetime.now() on this host's IST-configured local clock lands
+# ~5:30 ahead of true UTC once stored in a TIMESTAMPTZ column (signal_generated_at), and
+# produces TOMORROW's calendar date for signal_date on any run after 18:30 UTC/00:00 IST --
+# see recurring-bugs.md and the fix's own inline comments in technical_analysis_engine.py.
+
+def test_last_updated_and_signal_date_are_not_naive_local_time():
+    import inspect
+    import technical_analysis_engine as tae
+    src = inspect.getsource(tae)
+    assert "datetime.datetime.now().isoformat()" not in src
+    assert "datetime.datetime.now().date().isoformat()" not in src
+    assert "datetime.datetime.now(datetime.timezone.utc)" in src
+    assert "logical_write_floor" in src
