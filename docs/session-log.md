@@ -2069,3 +2069,55 @@ Verification: `npx tsc --noEmit` clean. `npx vitest run`: 912 passed, 0 failed, 
 `python -m pytest`: 1790 passed, 0 failed, 221 skipped — the prior entry's 1 failure
 (`test_unified_ranker.py`'s append-only-snapshot test) did not recur on this run, confirming
 it was the flake it was diagnosed as, not a real regression.
+
+---
+
+## 2026-08-13 — Tooling/infrastructure recommendations survey (advisory, no code change)
+
+Asked for free libraries/tools/MCP servers/Claude Code features that would make this codebase
+more production-grade. Surveyed the actual repo rather than listing popular packages; wrote
+`docs/optimization-recommendations.md`.
+
+Concrete gaps measured during the survey, each of which maps onto a bug class already recorded
+in `.claude/rules/recurring-bugs.md`:
+
+- **502 `.py` files with no linter, formatter, or type checker** — no `pyproject.toml`,
+  `setup.cfg`, `.ruff.toml`, or `mypy.ini` anywhere in the tree. `ruff`'s `DTZ` rules flag naive
+  `date.today()`/`datetime.now()` directly (the 11-file / 10-recurrence write-anchor class), and
+  `recurring-bugs.md`'s own note that `float(x or 0)` "needs type information the script doesn't
+  have" is a description of mypy.
+- **Python dependencies completely unpinned** — `requirements.txt` is bare package names. This
+  guarantees the "Declared ≠ installed" class recurs; `uv lock` / `uv sync --frozen` turns it
+  from a silent multi-day outage into a startup error.
+- **Zero metrics instrumentation** — no `prom-client`, no OpenTelemetry, no `/metrics`, against
+  34 cron registrations and 200 `runPython()` call sites. Every incident in the "Monitoring blind
+  spots" section (skip-path-stamped-as-success, the nightly SIGKILL that meant a script's last
+  statement never ran, the 721:1 write amplification) is invisible in logs and visible in a
+  metric. One histogram + one labelled counter inside `pythonRunner.ts` covers all 200 sites.
+- **~1 MB of static data in the browser bundle** — `src/data/stocklist.ts` (600 K) +
+  `nseStocks.ts` (444 K), imported by 13 frontend components. `vite.config.ts`'s existing
+  `manualChunks` comment says outright that the split "doesn't reduce first-load bytes"; moving
+  these server-side does.
+- **No real-Postgres test harness** — `testcontainers` is the direct fix for
+  `recurring-bugs.md`'s "a NaN-detection test on SQLite passes against unfixed code" (SQLite
+  coerces NaN to NULL on insert). `freezegun` is the direct fix for the weekend/holiday date
+  classes; `hypothesis` for `sql_translate.py`'s multi-word-cast family.
+- **No ESLint** across 425 TS/TSX files — only `tsc --noEmit`. `no-floating-promises` alone
+  matters: an unawaited promise in a BullMQ worker is a silently-swallowed job failure.
+
+**One recommendation is not purely additive and is flagged as such in the doc:** adopting
+`statsmodels` HAC (Newey–West) standard errors would change the significance of numbers already
+published in `measurement.md`. Every t-stat there is computed on overlapping forward returns
+(a 21d horizon sampled daily has ~21 days of autocorrelation), which a naive
+`mean / (std/sqrt(n))` overstates. The strongly-negative verdicts (`stoch_d` t=−9.28 et al.)
+would survive; the marginal ones (`insider_net` t=1.73, `value_book_to_price` t=1.99) may not.
+Treated in the doc as a measurement change subject to `measurement.md`'s own rules, not a
+free win.
+
+Deliberate omissions, with reasons, in the doc's "Explicitly not recommended" section — Prefect/
+Dagster (the specific bug it would solve is already fixed by a queue-step split; migrating 34
+crons + 200 call sites is not worth it), Feast (the constraint is data depth, not feature
+serving), Ray/Dask (single box), and any weight-optimisation library (`measurement.md`:
+"reweighting the existing engines is not a fix" — there is no incumbent factor to beat).
+
+Advisory only: no `.ts`, `.py`, SQL, or migration touched, so no gate applies.
