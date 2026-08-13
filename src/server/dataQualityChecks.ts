@@ -526,6 +526,29 @@ const TABLE_FRESHNESS_CHECKS: TableFreshnessConfig[] = [
   { id: 'news-sentiment-freshness', label: 'news_sentiment_items (RSS + Google News + BSE + GNews)',
     category: 'reference', critical: false, table: 'news_sentiment_items', dateColumn: 'fetched_at',
     tradingDayAware: false, warnDays: 1, failDays: 3 },
+  // Found 2026-08-13 (data-coverage-audit, TS-side sweep): news_articles/market_sentiment_
+  // snapshots are written by the SAME news-sentiment job as news_sentiment_items right above
+  // but had no checks of their own -- calibrated identically (same job, same cadence).
+  { id: 'news-articles-freshness', label: 'news_articles (BSE event classifier input)',
+    category: 'reference', critical: false, table: 'news_articles', dateColumn: 'timestamp',
+    nativeDateColumn: true, tradingDayAware: false, warnDays: 1, failDays: 3 },
+  { id: 'market-sentiment-snapshots-freshness', label: 'market_sentiment_snapshots',
+    category: 'reference', critical: false, table: 'market_sentiment_snapshots', dateColumn: 'snapshot_at',
+    nativeDateColumn: true, tradingDayAware: false, warnDays: 1, failDays: 3 },
+  // fundamentalsSyncService.ts's runFullFundamentalsSync() runs weekly ('fundamentals-sync-
+  // weekly' cron) -- calibrated like tl_financial_quality above (10/16 days), not the 3/5-day
+  // daily-cadence default, or this would false-warn every week between syncs.
+  { id: 'historical-fundamentals-freshness', label: 'historical_fundamentals (dated fundamentals time series)',
+    category: 'fundamentals', critical: false, table: 'historical_fundamentals', dateColumn: 'date', warnDays: 10, failDays: 16 },
+  // gdelt_sentiment: found EMPTY (0 rows) earlier this same audit -- gdeltService.ts's
+  // runGdeltBackfill() existed but was never called from anywhere. Wired into queues.ts
+  // (QUEUE_GDELT_SENTIMENT, daily 19:00 UTC) the same day, so this check is now meaningful
+  // rather than permanently red. tradingDayAware:false (GDELT indexes news on weekends too);
+  // warnDays/failDays generous relative to the 24h cadence to absorb one GDELT rate-limit
+  // throttle/retry without false-alarming the next morning.
+  { id: 'gdelt-sentiment-freshness', label: 'gdelt_sentiment (per-company news tone, GDELT DOC API)',
+    category: 'reference', critical: false, table: 'gdelt_sentiment', dateColumn: 'computed_at',
+    tradingDayAware: false, warnDays: 2, failDays: 4 },
 ];
 
 export const DATA_QUALITY_CHECKS: DataQualityCheck[] = [
@@ -928,11 +951,21 @@ export const DATA_QUALITY_CHECKS: DataQualityCheck[] = [
     // took date.today() while the pipeline deliberately runs early on closed days. Such a
     // snapshot is unreachable to any consumer joining on a trading date. Fixed at source by
     // as_of.logical_session_date(); this catches a regression or a new writer repeating it.
+    //
+    // NOT a bare "no matching stock_ohlcv row" test (2026-08-13 false positive, found live):
+    // logical_session_date() also rolls a run whose market OPEN has already passed forward to
+    // the NEXT session (as_of.py, 2026-08-12) -- a legitimate evening/post-close re-run for
+    // TODAY correctly gets stamped with TOMORROW's date, a real future weekday that simply has
+    // no stock_ohlcv row yet because that session hasn't happened. A bare NOT EXISTS flagged
+    // 2026-08-14 (a Friday) every night until that day's bar landed. Only a WEEKEND date is
+    // knowable as bad in advance (never gets a bar); a non-weekend date only counts as bad once
+    // it is safely in the past and still has no bar.
     sql: `SELECT COUNT(DISTINCT u.computed_at) AS bad_days
           FROM unified_recommendations u
-          WHERE NOT EXISTS (
-            SELECT 1 FROM stock_ohlcv s WHERE s.date = u.computed_at::date
-          )`,
+          WHERE EXTRACT(ISODOW FROM u.computed_at::date) IN (6, 7)
+             OR (u.computed_at::date < CURRENT_DATE AND NOT EXISTS (
+                   SELECT 1 FROM stock_ohlcv s WHERE s.date = u.computed_at::date
+                 ))`,
     evaluate: (row) => {
       const bad = Number(row?.bad_days) || 0;
       if (bad > 0) return {

@@ -6,6 +6,43 @@ Historical record, split out of CLAUDE.md on 2026-08-11 (it was 64% of that file
 
 ## Recent session notes
 
+### 2026-08-13 — Daily Data-Integrity Report triage: a deploy-race straggler and a false-positive check
+
+Two `🚨 critical` failures in the nightly Telegram report, both traced live against production
+before touching anything.
+
+**`signal-provenance-monotonic` (2,477 rows).** Not a new bug — the known `signal_generated_at`
+drift class (`recurring-bugs.md`). Traced: all 2,477 bad rows are `signal_source='technical'`,
+`created_at` 2026-08-12 15:49-22:44 UTC. Migration `1786920000000` (the repair for this exact
+class) had already run, at 09:21 UTC that same day — *before* these rows were written. The 3
+writer fixes were already correct in source. Conclusion: a **committed != deployed** race — the
+migration landed before pm2 picked up the fixed code, so a ~7h window kept writing fresh drift
+after the repair ran. Bad-row count held flat at 2,477 while total rows grew across three
+consecutive report samples (58,236 -> 58,342 -> 58,410), proving the writer-side fix has held
+since 22:44 UTC 08-12 with zero new violations. Re-ran the migration's own repair UPDATE by hand
+(2,477 -> 0, verified) rather than writing a new migration for what is now pure historical
+residue.
+
+**`unified-recommendations-trading-day` (1 date) — genuine false positive, not a data bug.**
+Flagged date was 2026-08-14, a Friday, generated 2026-08-13 13:46 UTC (19:16 IST, after both
+that day's open and close) — 2,188 rows, one snapshot. Root cause: `as_of.logical_session_date()`
+gained a second behavior 2026-08-12 (rolls a run whose market open has passed forward to the
+*next* session — turns a stale post-close artefact into a gradeable pre-market signal, by
+design). The check's SQL predated that change and tested a bare "no matching `stock_ohlcv` row",
+which can't tell a real weekend/holiday mislabel from a legitimate next-day pre-market label that
+simply hasn't traded yet. It would have cried wolf every night until 08-14's bar landed. Fixed in
+`dataQualityChecks.ts`: only flag a date that is a real weekend (`EXTRACT(ISODOW) IN (6,7)`,
+knowable in advance) or is strictly in the past and still missing a bar (a genuine gap). No data
+repair needed — 2026-08-14 was never corrupt, only pending. `npx tsc --noEmit` clean, `npx vitest
+run` 890 passed/37 skipped, `pytest` 1790 passed/209 skipped (pre-existing, unrelated to this
+diff — concurrent-session files already showed modified in `git status` before this session
+touched anything). `pm2 restart bharat-server` done to deploy.
+
+**Lesson, filed to `recurring-bugs.md`**: a data-quality check's own assumption can go stale when
+the source logic it guards grows a new legitimate case — this is a different shape from the
+already-documented "check tests a proxy instead of the real thing" and "gated job read as stale"
+monitoring-blind-spot entries, so it got its own line rather than folded into one of those.
+
 ### 2026-08-13 — Nightly ingest audit: two unbounded fetchers, a dead parser, 412 broken provider ids
 
 Traced where the ~3h ml-daily-ops chain actually goes and whether the ingested data reaches the
@@ -1916,3 +1953,21 @@ Verification: `npx tsc --noEmit` clean throughout. Default `npx vitest run`: 890
 failed, 37 skipped (includes all 9 new live tests correctly skipped). `RUN_LIVE_DATASOURCE_TESTS=1`
 run of the 8 network-reachable new tests together: 8/8 passed. Full `python -m pytest`: 1790
 passed, 0 failed, 209 skipped.
+
+## 2026-08-13 (cont. 4) — new skill: onboard-data-source
+
+Added `.claude/skills/onboard-data-source/SKILL.md`: a repeatable procedure for fetch → explore
+→ resolve ticker → build fetcher → mandatory live_datasource test → mandatory freshness check →
+honest ML-value assessment, for onboarding any new external URL/API as a data source. Codifies
+this session's own `data-sources.md`/`recurring-bugs.md`/`measurement.md` discipline (including
+the dotenv-leak and category-collapse bugs found this session) into one invokable checklist
+rather than relying on each future session re-deriving it from the rule files.
+
+## 2026-08-13 (cont. 5) — onboard-data-source: multi-URL support
+
+Extended the skill added moments earlier: added Phase 0 (intake a batch — enumerate, dedupe
+against already-onboarded domains, group by provider so resolution/fetcher-file decisions are
+made once per provider not once per URL, track via TodoWrite) and a closing batch-summary
+table (one row per URL/group: what it is, resolution match rate, fetcher, table, test/check
+status, ML verdict) so a multi-URL run produces one reviewable report instead of N disconnected
+ones. Explicitly does not self-parallelize across subagents — that stays the user's call.
