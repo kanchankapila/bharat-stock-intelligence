@@ -498,6 +498,21 @@ class AlphaQuantScoringEngine:
     def _source_cat_key(meta: dict) -> str:
         return f"{meta['source']}|{meta['signal_type_tag']}|{meta['sentiment']}"
 
+    @staticmethod
+    def _screener_polarity(sentiment: str):
+        """Maps a screener's signal_bias to (score_multiplier, reason_bucket_key).
+
+        'neutral' is a real, populated third state (27.8% of screener_catalog rows -- sector-
+        theme, large-cap-style, ownership-institutional membership tags, none of them
+        directional) and must not push the score toward Sell, nor be filed as bearish
+        evidence in reasons. See recurring-bugs.md's "ternary that branches on == 'bullish'".
+        """
+        if sentiment == 'bullish':
+            return 1, 'positive_screeners'
+        if sentiment == 'bearish':
+            return -1, 'negative_screeners'
+        return 0, None
+
     # ------------------------------------------------------------------
     # Recency decay: screeners last_updated > DECAY_HALFLIFE_DAYS ago
     # are down-weighted exponentially. Keeps stale data from over-influencing.
@@ -851,7 +866,7 @@ class AlphaQuantScoringEngine:
                 _init_stock(symbol)
 
                 base_score  = 5.0
-                sentiment_mult = 1 if meta['sentiment'] == 'bullish' else -1
+                sentiment_mult, lst_key = self._screener_polarity(meta['sentiment'])
                 cat_weight  = self.CATEGORY_WEIGHTS.get(meta['category'], 0.5)
                 src_weight  = self.SOURCE_WEIGHTS.get(meta['source'], 0.9)
 
@@ -878,10 +893,10 @@ class AlphaQuantScoringEngine:
                 stock_scores[symbol]['sources'].add(meta['source'])
                 stock_scores[symbol]['categories'].add(meta['category'])
 
-                reason = {'name': meta['name'], 'sentiment': meta['sentiment'],
-                          'source': meta['source'], 'category': meta['category']}
-                lst_key = 'positive_screeners' if meta['sentiment'] == 'bullish' else 'negative_screeners'
-                stock_scores[symbol][lst_key].append(reason)
+                if lst_key:
+                    reason = {'name': meta['name'], 'sentiment': meta['sentiment'],
+                              'source': meta['source'], 'category': meta['category']}
+                    stock_scores[symbol][lst_key].append(reason)
 
             # ── Final score aggregation ──────────────────────────────────
             for symbol, data in stock_scores.items():

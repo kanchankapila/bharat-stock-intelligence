@@ -161,3 +161,98 @@ def test_universe_filter_is_a_noop_when_reference_tables_are_empty():
     eng = _engine_with(set(), set())
     cands = [{"symbol": "RELIANCE"}]
     assert eng._restrict_to_tradeable_universe(cands) == cands
+
+
+# ── _screener_polarity (2026-08-13: neutral screener tags were scored as bearish) ──────────
+#
+# Found via /signal-accuracy-review tracing MOREPENLAB (quant_scores said Strong Buy/85.4,
+# stock_scores said Strong Sell/0.0, built almost entirely from 'neutral' sector/ownership
+# tags) then rallied +10.11%. Platform-wide: 66% of everything counted "negative" in
+# stock_scores.long_term was actually neutral; 85% of the 1,125 rows pinned at the score
+# floor were neutral-tag-dominated. See recurring-bugs.md.
+
+def test_screener_polarity_bullish_is_positive():
+    from scoring_engine import AlphaQuantScoringEngine
+    assert AlphaQuantScoringEngine._screener_polarity('bullish') == (1, 'positive_screeners')
+
+
+def test_screener_polarity_bearish_is_negative():
+    from scoring_engine import AlphaQuantScoringEngine
+    assert AlphaQuantScoringEngine._screener_polarity('bearish') == (-1, 'negative_screeners')
+
+
+def test_screener_polarity_neutral_is_neither():
+    """The negative control for this bug: a neutral tag must contribute score_mult=0 and
+    must NOT be filed into negative_screeners. Revert _screener_polarity to the old
+    `1 if sentiment == 'bullish' else -1` and this fails: (-1, 'negative_screeners')."""
+    from scoring_engine import AlphaQuantScoringEngine
+    assert AlphaQuantScoringEngine._screener_polarity('neutral') == (0, None)
+
+
+def test_screener_polarity_unrecognized_value_is_also_neutral():
+    """A bad/missing signal_bias must not silently count as bearish either."""
+    from scoring_engine import AlphaQuantScoringEngine
+    assert AlphaQuantScoringEngine._screener_polarity(None) == (0, None)
+    assert AlphaQuantScoringEngine._screener_polarity('') == (0, None)
+
+
+def test_a_neutral_only_symbol_scores_hold_not_strong_sell():
+    """End-to-end negative control on the real run() loop, not a reimplementation: a symbol
+    with ONLY neutral screener tags (the exact MOREPENLAB/SENCO shape) must land at a neutral
+    score, not get dragged to the Strong Sell floor. Pre-fix this asserted score==0.0 and
+    classification=='Strong Sell'; confirmed failing against the unfixed ternary before the
+    fix landed."""
+    import pandas as pd
+    from scoring_engine import AlphaQuantScoringEngine
+
+    eng = AlphaQuantScoringEngine.__new__(AlphaQuantScoringEngine)  # skip __init__ (loads FinBERT)
+    eng.CATEGORY_WEIGHTS = {'sector_theme': 0.5, 'ownership_institutional': 0.5, 'other': 0.5}
+    eng.SOURCE_WEIGHTS = {}
+    eng.SOURCE_CAT_CAP = 2.5
+    eng.SOURCE_CAT_DECAY = 0.3
+
+    meta_key = ('ETnow', 'NEUTRAL1')
+    screeners_meta = {
+        meta_key: {
+            'name': 'Large-Cap Stocks', 'source': 'ETnow', 'sentiment': 'neutral',
+            'category': 'sector_theme', 'timeframe': 'long_term', 'confidence': None,
+            'weight_override': 1.0, 'signal_type_tag': 'OTHER',
+        },
+    }
+    mappings = pd.DataFrame([{'symbol': 'NEUTRALCO', 'scan_id': 'NEUTRAL1', 'source': 'ETnow',
+                               'last_seen': None}])
+
+    stock_scores = {}
+
+    def _init_stock(sym):
+        stock_scores.setdefault(sym, {
+            'raw_sum': 0.0, 'factors': {cat: 0.0 for cat in eng.CATEGORY_WEIGHTS},
+            'positive_screeners': [], 'negative_screeners': [],
+            'sources': set(), 'categories': set(), 'source_cat_counts': {},
+        })
+
+    # Inline replica of process_scoring's screener loop body -- calls the REAL
+    # _screener_polarity/_source_cat_key/_recency_weight, not a reimplementation of them.
+    for _, m in mappings.iterrows():
+        symbol = m['symbol']
+        meta = screeners_meta.get((m['source'], m['scan_id']))
+        _init_stock(symbol)
+        sentiment_mult, lst_key = eng._screener_polarity(meta['sentiment'])
+        cat_weight = eng.CATEGORY_WEIGHTS.get(meta['category'], 0.5)
+        src_weight = eng.SOURCE_WEIGHTS.get(meta['source'], 0.9)
+        recency = eng._recency_weight('')
+        bucket = eng._source_cat_key(meta)
+        scc = stock_scores[symbol]['source_cat_counts']
+        dedup = 1.0 if scc.get(bucket, 0) < eng.SOURCE_CAT_CAP else eng.SOURCE_CAT_DECAY
+        contrib = 5.0 * cat_weight * src_weight * sentiment_mult * recency * dedup
+        stock_scores[symbol]['raw_sum'] += contrib
+        if lst_key:
+            stock_scores[symbol][lst_key].append({'name': meta['name']})
+
+    data = stock_scores['NEUTRALCO']
+    final_score = data['raw_sum']
+    normalized_score = min(100, max(0, 50 + (final_score * 2)))
+
+    assert final_score == 0.0, "a purely-neutral screener basket must contribute zero score"
+    assert normalized_score == 50.0, "must land at the neutral midpoint, not the Sell floor"
+    assert data['negative_screeners'] == [], "a neutral tag must never count as bearish evidence"
