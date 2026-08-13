@@ -1111,3 +1111,83 @@ export async function fetchMcStockNews(scId: string, symbol?: string): Promise<M
   const res = await mcFetchJson<any>(url, 3, symbol);
   return parseMcStockNews(scId, res);
 }
+
+// ── MC per-stock EARNINGS news (mc_news.php, related_scid + earnings category) ───────────
+// Distinct from fetchMcStockNews above: that hits mc_apis/mc_pricechart_homepage/news (general
+// per-stock headlines); this hits MC's own article-search API filtered to the earnings
+// sub-category for one scId -- live-verified 2026-08-13 to return the real reported quarterly
+// numbers (net sales/profit/EBITDA/EPS), not just a "shares jump X%" reaction wrapper.
+
+export interface McRelatedNewsItem {
+  id: string;
+  headline: string;
+  intro: string;
+  posturl: string;
+  creation_date_epoch: string;
+  update_date_epoch: string;
+}
+
+export interface McRelatedNewsResponse {
+  scId: string;
+  status: McNewsStatus;
+  news: McRelatedNewsItem[];
+}
+
+/** query object -> the numbered-object response ({"0": {...}, "1": {...}}) `mc_news.php`
+ *  actually returns, not an array -- Object.values() normalizes it. */
+export function parseMcRelatedNews(scId: string, res: any): McRelatedNewsResponse {
+  if (!res || typeof res !== 'object') return { scId, status: 'fetch_failed', news: [] };
+  const items = Object.values(res).filter((v): v is any => v && typeof v === 'object' && 'id' in v);
+  if (items.length === 0) return { scId, status: 'no_news', news: [] };
+  const news: McRelatedNewsItem[] = items.map((item) => ({
+    id: String(item.id ?? ''),
+    headline: decodeMangledEscapes(item.headline || ''),
+    intro: decodeMangledEscapes(item.intro || ''),
+    posturl: item.posturl || item.canonical_url || '',
+    creation_date_epoch: String(item.creation_date_epoch ?? ''),
+    update_date_epoch: String(item.update_date_epoch ?? ''),
+  }));
+  return { scId, status: 'ok', news };
+}
+
+export async function fetchMcEarningsNews(scId: string, symbol?: string, limit = 8): Promise<McRelatedNewsResponse> {
+  const url = `https://www.moneycontrol.com/newsapi/mc_news.php?query=categories_slug:"business"+AND+`
+    + `sub_category_slug:"earnings"+AND+related_scid:"${encodeURIComponent(scId)}"&start=0&limit=${limit}`;
+  const res = await mcFetchJson<any>(url, 3, symbol);
+  return parseMcRelatedNews(scId, res);
+}
+
+// ── MC market-wide stock-move blurbs (deals/get-stock-news) ──────────────────────────────
+// One call, no per-stock loop -- each item already carries its own `scid`, so this is cheap
+// and (unlike the top-N-by-market-cap per-stock cycles above) reaches whatever stock MC itself
+// chose to write a move-blurb for, including names outside our tracked top-100/150 universe --
+// live-verified 2026-08-13 this is exactly the population (smaller/loser-side names) our
+// existing per-stock cycles under-cover.
+
+export interface McDealsNewsItem {
+  id: string;
+  heading: string;
+  posturl: string;
+  scid: string;
+  cmp: string;
+  changePct: string;
+  updateDateEpoch: string;
+}
+
+export function parseMcDealsNews(res: any): McDealsNewsItem[] {
+  if (!res || res.success !== 1 || !Array.isArray(res.data)) return [];
+  return res.data.map((item: any) => ({
+    id: String(item.id ?? ''),
+    heading: decodeMangledEscapes(item.heading || ''),
+    posturl: item.posturl || '',
+    scid: item.scid || '',
+    cmp: item.cmp || '',
+    changePct: item.perChange || '',
+    updateDateEpoch: String(item.update_date_epoch ?? ''),
+  }));
+}
+
+export async function fetchMcDealsNews(): Promise<McDealsNewsItem[]> {
+  const res = await mcFetchJson<any>('https://api.moneycontrol.com/mcapi/v1/deals/get-stock-news', 3);
+  return parseMcDealsNews(res);
+}

@@ -26,8 +26,8 @@ import { runPython } from './pythonRunner';
 import {
   buildAliasIndex, extractSymbolsByName, companyAliases, NEWS_ALIAS_OVERRIDES, type AliasEntry,
 } from './newsEntityTagger';
-import { resolveMoneycontrolSymbol } from './stockMapping';
-import { fetchMcStockNews } from './mcApiService';
+import { resolveMoneycontrolSymbol, getStockMapping } from './stockMapping';
+import { fetchMcStockNews, fetchMcEarningsNews, fetchMcDealsNews } from './mcApiService';
 
 function toSqliteDateTime(date: Date): string {
   return date.toISOString().replace('T', ' ').substring(0, 19);
@@ -842,6 +842,161 @@ export async function runInvestingIdeasCycle(): Promise<{ fetched: number; inser
   if (inserted > 0) await persistNewsRows(sentRows, legacyRows);
   console.log(`[SENTIMENT] Investing.com cycle: fetched=${fetched}, processed=${inserted}`);
   return { fetched, inserted };
+}
+
+// ─── NSE Corporate Announcements (official exchange RSS, free, no key) ───────
+// nsearchives.nseindia.com is the static RSS archive path, NOT the dynamic NSE API/website
+// this codebase's other notes call Akamai-walled. Live-verified 2026-08-13: Node's own fetch()
+// with this file's generic NEWS_SOURCES header gets silently blackholed (abort/timeout, no
+// response at all) against this host, but the same request with a browser-shaped
+// User-Agent/Referer/Accept succeeds (200, real same-day content) -- a header-level gate, not
+// a TLS-fingerprint one. Needs its own fetch, not the shared fetchSource() above.
+//
+// Item <title> is the company's LEGAL NAME here, not a headline about a subject (unlike every
+// other RSS source in this file) -- isolating just the title for extractSymbols() mirrors how
+// BSE's SLONGNAME field is isolated below, and is actually cleaner than scanning combined
+// title+description prose, where a shorter unrelated alias could false-match.
+interface NseRssFeed { key: string; name: string; url: string }
+export const NSE_RSS_FEEDS: NseRssFeed[] = [
+  { key: 'announcements', name: 'NSE Announcements', url: 'https://nsearchives.nseindia.com/content/RSS/Online_announcements.xml' },
+  { key: 'results', name: 'NSE Financial Results', url: 'https://nsearchives.nseindia.com/content/RSS/Financial_Results.xml' },
+];
+
+export async function fetchNseRss(url: string, timeoutMs = 15000): Promise<RawNewsItem[]> {
+  try {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
+    const res = await fetch(url, {
+      signal: controller.signal,
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Referer': 'https://www.nseindia.com/',
+        'Accept': 'application/rss+xml, application/xml, text/xml',
+      },
+    });
+    clearTimeout(timer);
+    if (!res.ok) return [];
+    return parseRSS(await res.text());
+  } catch {
+    return [];
+  }
+}
+
+async function runNseRssFeed(feed: NseRssFeed): Promise<{ fetched: number; inserted: number }> {
+  await ensureNSESymbols();
+  const items = await fetchNseRss(feed.url);
+  const sentRows = new Map<string, unknown[]>();
+  const legacyRows = new Map<string, unknown[]>();
+  for (const raw of items) {
+    const syms = extractSymbols(raw.title); // title-only, see comment above
+    if (syms.length === 0) continue; // name doesn't resolve to a tracked NSE symbol -- skip
+    processNewsItem(
+      { title: `${raw.title}: ${feed.name}`.slice(0, 300), description: raw.description, link: raw.link, pubDate: raw.pubDate },
+      feed.name, 'INDIAN', sentRows, legacyRows, syms[0],
+    );
+  }
+  const inserted = sentRows.size;
+  if (inserted > 0) await persistNewsRows(sentRows, legacyRows);
+  console.log(`[SENTIMENT] ${feed.name}: ${items.length} fetched → ${inserted} mapped to NSE symbols`);
+  return { fetched: items.length, inserted };
+}
+
+export async function runNseAnnouncementsCycle(): Promise<{ fetched: number; inserted: number }> {
+  return runNseRssFeed(NSE_RSS_FEEDS[0]);
+}
+export async function runNseFinancialResultsCycle(): Promise<{ fetched: number; inserted: number }> {
+  return runNseRssFeed(NSE_RSS_FEEDS[1]);
+}
+
+// ─── MoneyControl per-stock EARNINGS news (results-window-targeted) ──────────
+// Distinct from runMcStockNewsCycle above (general per-stock headlines, top-100-by-market-cap
+// universe): this hits MC's earnings-category article search and targets whichever symbols are
+// actually near a results date, reusing technical_signals.days_to_next_results (mc_earnings_
+// fetcher.py, fixed 2026-08-13) instead of a flat top-N cut -- so a small-cap outside the top
+// 100 by market cap still gets covered exactly when it matters (a live gap traced this session:
+// MARKSANS/TDPOWERSYS/SENCO's real Q1 numbers were only ever captured via reactive market-wide
+// RSS, never a dedicated per-stock earnings query). `?` unresolved via getStockMapping (which
+// checks mcsymbol among other fields) skips rather than guesses.
+const MC_EARNINGS_RESULTS_WINDOW_DAYS = 3; // matches RESULTS_SEASON_WINDOW_DAYS's definition of "imminent"
+
+async function stocksNearResults(windowDays = MC_EARNINGS_RESULTS_WINDOW_DAYS): Promise<string[]> {
+  try {
+    const rows = await dbAll(
+      `SELECT DISTINCT symbol FROM technical_signals
+       WHERE days_to_next_results BETWEEN ? AND ?
+         AND date = (SELECT MAX(date) FROM technical_signals t2 WHERE t2.symbol = technical_signals.symbol)`,
+      [-windowDays, windowDays],
+    ) as { symbol: string }[];
+    return rows.map(r => r.symbol);
+  } catch {
+    return [];
+  }
+}
+
+export async function runMcEarningsNewsCycle(): Promise<{ symbols: number; inserted: number }> {
+  const symbols = await stocksNearResults();
+  if (symbols.length === 0) return { symbols: 0, inserted: 0 };
+
+  await ensureNSESymbols();
+  const sentRows = new Map<string, unknown[]>();
+  const legacyRows = new Map<string, unknown[]>();
+
+  const BATCH = 8; // matches mcFetchJson's own concurrency ceiling elsewhere in the app
+  for (let i = 0; i < symbols.length; i += BATCH) {
+    const batch = symbols.slice(i, i + BATCH);
+    await Promise.all(batch.map(async (symbol) => {
+      try {
+        const scId = getStockMapping(symbol)?.mcsymbol;
+        if (!scId) return;
+        const res = await fetchMcEarningsNews(scId, symbol);
+        if (res.status !== 'ok') return;
+        for (const item of res.news) {
+          if (!item.posturl) continue; // no link -> no stable dedup id
+          const epoch = Number(item.creation_date_epoch || item.update_date_epoch);
+          const pubDate = epoch ? new Date(epoch * 1000).toISOString() : '';
+          processNewsItem(
+            { title: item.headline, description: item.intro, link: item.posturl, pubDate },
+            'MoneyControl Earnings', 'INDIAN', sentRows, legacyRows, symbol,
+          );
+        }
+      } catch { /* one bad stock must not abort the batch */ }
+    }));
+  }
+
+  const inserted = sentRows.size;
+  if (inserted > 0) await persistNewsRows(sentRows, legacyRows);
+  console.log(`[SENTIMENT] MC earnings-news cycle: ${symbols.length} near-results symbols → ${inserted} articles`);
+  return { symbols: symbols.length, inserted };
+}
+
+// ─── MoneyControl market-wide stock-move blurbs (deals/get-stock-news) ───────
+// One call, no per-stock loop -- each item already carries its own `scid`, resolved via
+// getStockMapping (checks mcsymbol directly, no new resolver needed). Reaches whatever stock
+// MC itself chose to write a move-blurb for, including names outside every other MC cycle's
+// tracked universe -- live-verified 2026-08-13 this includes loser-side/smaller names the
+// existing top-100-by-market-cap per-stock cycles under-cover.
+export async function runMcDealsNewsCycle(): Promise<{ fetched: number; inserted: number }> {
+  await ensureNSESymbols();
+  const items = await fetchMcDealsNews();
+  if (items.length === 0) return { fetched: 0, inserted: 0 };
+
+  const sentRows = new Map<string, unknown[]>();
+  const legacyRows = new Map<string, unknown[]>();
+  for (const item of items) {
+    if (!item.posturl) continue;
+    const symbol = getStockMapping(item.scid)?.symbol;
+    if (!symbol) continue; // scid outside our 2,005-stock mapping table -- skip, don't guess
+    const epoch = Number(item.updateDateEpoch);
+    const pubDate = epoch ? new Date(epoch * 1000).toISOString() : '';
+    processNewsItem(
+      { title: item.heading, description: `CMP ${item.cmp} (${item.changePct}%)`, link: item.posturl, pubDate },
+      'MoneyControl Deals', 'INDIAN', sentRows, legacyRows, symbol,
+    );
+  }
+  const inserted = sentRows.size;
+  if (inserted > 0) await persistNewsRows(sentRows, legacyRows);
+  console.log(`[SENTIMENT] MC deals-news cycle: ${items.length} fetched → ${inserted} mapped to NSE symbols`);
+  return { fetched: items.length, inserted };
 }
 
 // ─── Main Fetch + Score Cycle ─────────────────────────────────────────────────

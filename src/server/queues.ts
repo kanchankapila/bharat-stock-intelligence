@@ -403,6 +403,17 @@ async function processLiveScreenerCollect(_job: Job): Promise<{ skipped: boolean
   // produced a first model.
   await runPython('live_screener_ml_ranker.py', ['--score'], 3 * 60_000)
     .catch(e => console.warn('[QUEUE] live_screener_ml_ranker --score failed:', (e as Error).message));
+
+  // 'todayCapitulation' (2026-08-13): gap-down + opened-at-the-low + top-loser-of-the-day,
+  // computed live from intraday_ohlcv (not a NiftyTrader API filter like the ones above).
+  // The only combo in this session's signal-accuracy-review work that cleared Bonferroni
+  // across its full search space -- factor_backtest.py's single-filter gap_down/gap_up are
+  // both significantly NEGATIVE net of costs; this specific triple is +0.5258%/day next-
+  // session, t=3.58, p=0.0004, 424 days (measurement.md). Writes into the same
+  // live_screener_appearances table under that filter_key -- same run cadence, no schema
+  // change, no new consumer needed.
+  await runPython('live_capitulation_screener.py', [], 3 * 60_000)
+    .catch(e => console.warn('[QUEUE] live_capitulation_screener failed:', (e as Error).message));
   return { skipped: false };
 }
 
@@ -1735,6 +1746,81 @@ export async function initQueues(): Promise<boolean> {
           removeOnFail: 3,
         },
       ),
+      // NSE official RSS (2026-08-13) -- see newsSentimentService.ts's NSE_RSS_FEEDS comment
+      // for the header-gate finding. Online_announcements is a high-volume general firehose,
+      // same cadence class as the flat NEWS_SOURCES cycle above.
+      addJobWithCatchup(newsSentimentQueue,
+        'nse-announcements-refresh',
+        {},
+        {
+          repeat: { every: 15 * 60 * 1000 }, // 15 min
+          jobId: 'nse-announcements-repeatable',
+          removeOnComplete: 3,
+          removeOnFail: 3,
+        },
+      ),
+      // Financial_Results is low-volume (few items/day outside results season) but the highest-
+      // signal single feed here -- an hourly poll matches BSE announcements' own cadence below.
+      addJobWithCatchup(newsSentimentQueue,
+        'nse-financial-results-refresh',
+        {},
+        {
+          repeat: { every: 60 * 60 * 1000 }, // hourly
+          jobId: 'nse-financial-results-repeatable',
+          removeOnComplete: 3,
+          removeOnFail: 3,
+        },
+      ),
+      // Results-season 2nd pass -- identical reasoning to bse-announcements-refresh-hot below:
+      // a results filing is the most price-sensitive kind of announcement this feed carries,
+      // and an hourly-only poll can sit on one for up to 59 min. No-op outside results season.
+      addJobWithCatchup(newsSentimentQueue,
+        'nse-financial-results-refresh-hot',
+        {},
+        {
+          repeat: { every: 60 * 60 * 1000, offset: 30 * 60 * 1000 },
+          jobId: 'nse-financial-results-hot-repeatable',
+          removeOnComplete: 3,
+          removeOnFail: 3,
+        },
+      ),
+      // MC per-stock earnings news, targeted at technical_signals.days_to_next_results (2026-08-13)
+      // -- hourly matches BSE announcements' cadence for the same "results are price-sensitive"
+      // reasoning; the days_to_next_results window itself (not this cadence) is what keeps the
+      // request volume small, not a coarse top-N-by-market-cap cut.
+      addJobWithCatchup(newsSentimentQueue,
+        'mc-earnings-news-refresh',
+        {},
+        {
+          repeat: { every: 60 * 60 * 1000 }, // hourly
+          jobId: 'mc-earnings-news-repeatable',
+          removeOnComplete: 3,
+          removeOnFail: 3,
+        },
+      ),
+      // Same results-season 2nd pass, same reasoning.
+      addJobWithCatchup(newsSentimentQueue,
+        'mc-earnings-news-refresh-hot',
+        {},
+        {
+          repeat: { every: 60 * 60 * 1000, offset: 30 * 60 * 1000 },
+          jobId: 'mc-earnings-news-hot-repeatable',
+          removeOnComplete: 3,
+          removeOnFail: 3,
+        },
+      ),
+      // MC deals/get-stock-news (2026-08-13) -- one cheap call, no per-stock loop, so this can
+      // run as densely as the flat 15-min NEWS_SOURCES cycle without a rate-budget concern.
+      addJobWithCatchup(newsSentimentQueue,
+        'mc-deals-news-refresh',
+        {},
+        {
+          repeat: { every: 15 * 60 * 1000 }, // 15 min
+          jobId: 'mc-deals-news-repeatable',
+          removeOnComplete: 3,
+          removeOnFail: 3,
+        },
+      ),
     ]);
 
     newsSentimentWorker = new Worker(
@@ -1761,6 +1847,26 @@ export async function initQueues(): Promise<boolean> {
           await svc.runGNewsGlobalCycle();
         } else if (job.name === 'investing-ideas-refresh') {
           await svc.runInvestingIdeasCycle();
+        } else if (job.name === 'nse-announcements-refresh') {
+          await svc.runNseAnnouncementsCycle();
+        } else if (job.name === 'nse-financial-results-refresh') {
+          await svc.runNseFinancialResultsCycle();
+        } else if (job.name === 'nse-financial-results-refresh-hot') {
+          if (!(await svc.isResultsSeasonActive())) {
+            console.log('[QUEUE] nse-financial-results-refresh-hot skipped — not results season');
+            return;
+          }
+          await svc.runNseFinancialResultsCycle();
+        } else if (job.name === 'mc-earnings-news-refresh') {
+          await svc.runMcEarningsNewsCycle();
+        } else if (job.name === 'mc-earnings-news-refresh-hot') {
+          if (!(await svc.isResultsSeasonActive())) {
+            console.log('[QUEUE] mc-earnings-news-refresh-hot skipped — not results season');
+            return;
+          }
+          await svc.runMcEarningsNewsCycle();
+        } else if (job.name === 'mc-deals-news-refresh') {
+          await svc.runMcDealsNewsCycle();
         } else {
           await svc.runNewsSentimentCycle();
         }
