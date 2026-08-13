@@ -6,6 +6,43 @@ Historical record, split out of CLAUDE.md on 2026-08-11 (it was 64% of that file
 
 ## Recent session notes
 
+### 2026-08-13 — Daily Data-Integrity Report triage: a deploy-race straggler and a false-positive check
+
+Two `🚨 critical` failures in the nightly Telegram report, both traced live against production
+before touching anything.
+
+**`signal-provenance-monotonic` (2,477 rows).** Not a new bug — the known `signal_generated_at`
+drift class (`recurring-bugs.md`). Traced: all 2,477 bad rows are `signal_source='technical'`,
+`created_at` 2026-08-12 15:49-22:44 UTC. Migration `1786920000000` (the repair for this exact
+class) had already run, at 09:21 UTC that same day — *before* these rows were written. The 3
+writer fixes were already correct in source. Conclusion: a **committed != deployed** race — the
+migration landed before pm2 picked up the fixed code, so a ~7h window kept writing fresh drift
+after the repair ran. Bad-row count held flat at 2,477 while total rows grew across three
+consecutive report samples (58,236 -> 58,342 -> 58,410), proving the writer-side fix has held
+since 22:44 UTC 08-12 with zero new violations. Re-ran the migration's own repair UPDATE by hand
+(2,477 -> 0, verified) rather than writing a new migration for what is now pure historical
+residue.
+
+**`unified-recommendations-trading-day` (1 date) — genuine false positive, not a data bug.**
+Flagged date was 2026-08-14, a Friday, generated 2026-08-13 13:46 UTC (19:16 IST, after both
+that day's open and close) — 2,188 rows, one snapshot. Root cause: `as_of.logical_session_date()`
+gained a second behavior 2026-08-12 (rolls a run whose market open has passed forward to the
+*next* session — turns a stale post-close artefact into a gradeable pre-market signal, by
+design). The check's SQL predated that change and tested a bare "no matching `stock_ohlcv` row",
+which can't tell a real weekend/holiday mislabel from a legitimate next-day pre-market label that
+simply hasn't traded yet. It would have cried wolf every night until 08-14's bar landed. Fixed in
+`dataQualityChecks.ts`: only flag a date that is a real weekend (`EXTRACT(ISODOW) IN (6,7)`,
+knowable in advance) or is strictly in the past and still missing a bar (a genuine gap). No data
+repair needed — 2026-08-14 was never corrupt, only pending. `npx tsc --noEmit` clean, `npx vitest
+run` 890 passed/37 skipped, `pytest` 1790 passed/209 skipped (pre-existing, unrelated to this
+diff — concurrent-session files already showed modified in `git status` before this session
+touched anything). `pm2 restart bharat-server` done to deploy.
+
+**Lesson, filed to `recurring-bugs.md`**: a data-quality check's own assumption can go stale when
+the source logic it guards grows a new legitimate case — this is a different shape from the
+already-documented "check tests a proxy instead of the real thing" and "gated job read as stale"
+monitoring-blind-spot entries, so it got its own line rather than folded into one of those.
+
 ### 2026-08-13 — Nightly ingest audit: two unbounded fetchers, a dead parser, 412 broken provider ids
 
 Traced where the ~3h ml-daily-ops chain actually goes and whether the ingested data reaches the
@@ -1528,3 +1565,409 @@ the two benchmark bugs (exit-pricing, --rebalance 1) documented in measurement-h
 
 Validation: 493 lines, 13 tasks, 13 verify steps (1:1 ratio), 0 missing local links,
 0 missing verified facts, diff clean.
+
+## 2026-08-13 — Signal-accuracy review (live top gainers), screener sentiment audit, validated capitulation combo
+
+Two-part session: reverse-engineered the system against real top gainers (2026-08-12 EOD,
+then 2026-08-13 live intraday), then a deep screener-sentiment-bias audit prompted by the
+user having "seen many with wrong bias."
+
+**unified_ranker.py `trade_reasoning` fix**: non-Buy/Strong-Buy rows now get the
+internally-consistent `screener_summary` instead of the external `confluence_signals`-sourced
+narrative, which could (and did — PNGSREVA, 2026-08-12) carry unhedged bullish prose next to
+a Strong Sell/S_ELITE label.
+
+**Screener sentiment bugs found and fixed in `nlp_engine.py`'s `domain_override()`** (all
+negative-controlled, all applied live to `screener_catalog`/`screener_master`):
+1. Reasoned-only `_VAL_CHEAP`/`_VAL_RICH` checked before the MEASURED oversold/near-52w-low/
+   below-lower-BB family, so promotional filler in vendor screener "names" (some are full
+   marketing paragraphs) could steal the match. Reordered. 94+92 rows corrected.
+2. DVM tier names ("Top Performer", "Weak Stocks") had no override rule at all, fell to
+   FinBERT scoring terse jargon, and shipped the identical name as both bullish and bearish
+   from different sources. Added a rule confirmed against Trendlyne's own DVM help docs. Also
+   caught an unrelated pre-existing bug: "Relative Underperformers to Industry/Sector/
+   Nifty50/Sensex" (et_marketstats) mislabeled bullish. 6+2 rows corrected.
+3. Explicit `(Bullish)`/`(Bearish)` parenthetical suffixes (candlestick pattern names) had no
+   rule; added one, highest priority.
+4. **The big one**: `screener_catalog`'s `(screener_id, source)` PK let 3 writers' casing
+   inconsistency (`trendlyne`/`Trendlyne` etc.) create permanent duplicate rows — 1,707 of
+   2,539 rows (67%) belonged to a multi-row screener_name, 212 disagreed on `signal_bias`.
+   New script `fix_screener_catalog_source_casing.py` harmonizes bias across every row
+   sharing an exact screener_name (244 rows corrected, verified clean on re-run). Also fixed
+   2 downstream readers (`intraday_ranker.py`, `movement_predictor.py`) doing exact-case
+   `source='trendlyne'` matching, silently missing 25-49% of the catalog. Full writeup:
+   `recurring-bugs.md`.
+
+**Factor work**: added `gap_down`/`gap_up` to `factor_backtest.py` (measurement.md's own
+"Gap Down is the one positive setup" screener-membership claim, tested properly for the first
+time) — both significantly NEGATIVE net of costs at every rebalance tested (21d t=-3.54/-3.55,
+5d t=-9.0). That claim retracted and corrected in `measurement.md`.
+
+**New validated finding, now live**: `screener_combo_finder.py --tier1` (already-built,
+correctly-specified day-level/cost-adjusted tool, just never run before) found that the
+single filters are noise but the triple combination gap_down + open_eq_low + top_loser
+(a capitulation/panic day) rebounds next-session: +0.5258%/day net of 15bps costs, t=3.58,
+p=0.0004, 424 days, clears Bonferroni across the full 41-combination search space — the first
+result in this session's screener/factor work to clear that bar. Deployed as
+`live_capitulation_screener.py`, chained into `queues.ts`'s existing `processLiveScreenerCollect`
+(same 15-min/market-hours cadence, no new queue), writing into the existing
+`live_screener_appearances` table under `filter_key='todayCapitulation'`. Verified live: caught
+HARIOMPIPE/SIGMAADV/VIDYAWIRES on 2026-08-13's session.
+
+**Known gap, not fixed this session**: `live_screener_appearances`/`live_screener_runs` have
+zero freshness-check coverage in `dataQualityChecks.ts` — pre-existing, affects all 43 filters
+(42 NiftyTrader + the new one), not introduced here. Worth a `makeFreshnessCheck()` entry.
+
+Verification: `python -m pytest src/server/__tests__/ src/server/tests/` — 1764 passed, 208
+skipped, 0 failed (one order-dependent flaky test in `test_unified_ranker.py` reproduced
+intermittently, confirmed pre-existing via negative control on the unmodified file).
+`npx tsc --noEmit` clean. `factor_backtest.py` run live multiple times with real output.
+
+## 2026-08-13 (cont.) — data-coverage-audit pass
+
+Whole-repo sweep per the mandate: enumerated 68 Python `*_fetcher.py` files against
+`dataQualityChecks.ts` (whole-file grep, not just `table:` fields, per the skill's own
+warning that the narrow pattern produces false positives — `nse_stocks`/`technical_signals`
+column-level checks would have false-flagged otherwise) and against
+`test_live_datasource_*.py`.
+
+**Result: coverage is much better than assumed** (unlike the 2026-08-03/08-12 sweeps that
+found large gaps) — 66 of 68 fetcher target tables already had freshness coverage, and 66 of
+68 fetchers already had a real `live_datasource` test (traced actual imports in "combined"
+test files like `test_live_datasource_feature_matrix_fetchers.py`, not filename guesses —
+`mc_techscanner_fetcher.py`, `nt_dashboard_fetcher.py`, `preopen_fetcher.py`,
+`trendlyne_fundamentals_fetcher.py`, `delivery_volume_fetcher.py` all turned out covered
+under non-obvious filenames).
+
+**Two genuine gaps found and fixed** (`dataQualityChecks.ts`, one-line `makeFreshnessCheck()`
+entries each): `mc_price_forecast` and `screener_membership_snapshot` had zero freshness
+coverage. Both are also currently unconsumed by any reader (checked `FROM <table>` across the
+whole codebase) — real gaps per the mandate, but low-priority since nothing depends on their
+freshness today.
+
+**One live_datasource-test gap found, not fixed**: `screener_features_fetcher.py` has a test
+file (`test_screener_features_fetcher.py`) but it only covers the date-anchor regression, never
+calls the real API — flagged in the new freshness check's own comment rather than left silent,
+since writing that test needs a real API call this session didn't make.
+
+**Not exhaustively covered this pass**: the ~28 TypeScript files making external HTTP calls
+(`etMarketstats.ts`, `trendlyneScreener.ts`, `mcApiService.ts`, etc.) — only 2
+(`mcapiProxy.test.ts`, `newsSentimentNseAndMcExtras.test.ts`) have `RUN_LIVE`-gated tests.
+This is a real, likely-large gap on the TS side that this pass only surfaced, did not close —
+worth its own dedicated sweep.
+
+No promotion-gate or crying-wolf false-positive patterns found beyond the ones already
+documented/fixed in `recurring-bugs.md`.
+
+Verification: `npx tsc --noEmit` clean, `dataQualityChecks.test.ts` 66/66 pass.
+
+## 2026-08-13 (cont. 2) — TS-side data-coverage-audit sweep
+
+Filtered the ~28 TS files hitting external APIs down to 10 genuinely fetcher-shaped ones
+(write to a persistent table) by checking for `dbRun`/`dbTransaction`/`INSERT` — the rest
+(`ollamaManager.ts`, `pythonApi.ts`, `stockMapping.ts`, etc.) are read-only service layers or
+internal (Ollama, our own Python API) with nothing external to monitor.
+
+**Freshness gaps found and fixed** (3 tables, one-line `makeFreshnessCheck()` entries each):
+`news_articles`, `market_sentiment_snapshots` (both calibrated to `news_sentiment_items`'s
+existing 1/3-day, `tradingDayAware:false` pattern — same job writes all three), and
+`historical_fundamentals` (calibrated to `fundamentals-sync-weekly`'s actual cron, 10/16 days,
+not the daily default — would have false-warned every week otherwise).
+
+**Found, deliberately not "fixed" with a check**: `gdelt_sentiment` is completely empty (0
+rows) — `gdeltService.ts`'s `runGdeltBackfill()`/`fetchGdeltTone()` are never called from
+`queues.ts`, any `jobs/*.jobs.ts`, or any route. Fully disconnected code, not a monitoring
+gap — a freshness check here would just fail permanently. This needs a scope decision (wire
+it in, or remove the dead code + its table), not a config addition.
+
+**Excluded correctly, not gaps**: `et_marketstats_screeners`/`etnow_screeners` are
+JSON-seeded screener-definition catalogs (not accumulating dated observations from a live
+API) — same shape as `screener_master`/`screener_catalog`'s own catalog nature, freshness
+doesn't apply the way it does to a time series. `recommendation_log`/`signal_type_stats`/
+`signal_type_stats_history` are the platform's own internal derived bookkeeping (win rates
+computed from its own outcomes), not external data — same exclusion class as model
+registries/RL Q-tables the mandate already carves out.
+
+**The real, large, unresolved finding**: of the 10 genuine TS fetchers, only ONE
+(`mcApiService.ts`, indirectly) has any test in `RUN_LIVE`-gated form, and even that one
+(`mcapiProxy.test.ts`) tests a raw proxy passthrough route, not `mcApiService.ts`'s own
+persisting fetcher functions. **Zero of the 10 TS fetchers have a genuine `live_datasource`-
+shaped test** (real endpoint via the fetcher's own resolution helper + its own parsing
+function + a DB round-trip assertion, per `data-sources.md`'s 4-part checklist) —
+`deliveryFetcher.ts` has literally no test file referencing it at all, mocked or otherwise.
+This is a full engineering task (designing and writing ~10 tests properly, not a sweep), not
+executed this pass — flagged for explicit scoping before starting.
+
+Verification: `npx tsc --noEmit` clean, `dataQualityChecks.test.ts` 66/66, full
+`python -m pytest` 1778 passed / 0 failed / 209 skipped.
+
+## 2026-08-13 (cont. 3) — /signal-accuracy-review: first gradeable pre-market pass, neutral-tag scoring bug found
+
+`unified_recommendations` crossed from 0 to **2** gradeable pre-market dates (2026-08-12,
+2026-08-13; `generated_at` before that day's 03:45 UTC open) — the first time the canonical
+ranker could be graded against real same-session outcomes at all. Full per-date numbers (Buy/
+Sell/Strong Sell win rate and avg return, liquidity-floored, per-date not pooled) written into
+`measurement.md`'s "canonical ranker" section. Headline, n=2 so not a verdict yet: Sell win rate
+flips with the day's own market direction (66.7% down day, 45.8% up day — beta, not skill), and
+**Strong Sell (S_ELITE) underperforms plain Sell (A_HIGH) on both dates**.
+
+Traced that inversion end-to-end per the reverse-engineering practice rather than assuming it was
+a recurrence of the already-fixed 2026-08-10 conviction-ladder bug (it isn't — `_conviction`/
+`_directional_strength` in `unified_ranker.py` are still correct). Real root cause, found by
+diffing `quant_scores` (Strong Buy, rank 85.4) against `stock_scores` (Strong Sell, score
+pinned at exactly 0.0) for MOREPENLAB, a stock that then rallied +10.11% the next session:
+`scoring_engine.py`'s screener-scoring loop (`sentiment_mult = 1 if meta['sentiment']=='bullish'
+else -1`, line 854) counts a screener's real `signal_bias='neutral'` tag as bearish — there's no
+neutral branch. Quantified platform-wide: 66.0% of everything counted as "negative" across
+`stock_scores.timeframe='long_term'` is actually neutral, and 85.2% of the 1,125 rows (22.6% of
+that timeframe) pinned at the score floor are neutral-tag-dominated, not genuinely bearish. Full
+writeup with both traced examples (MOREPENLAB, SENCO) in `recurring-bugs.md`.
+
+**Not fixed this pass** — deliberately. The correct fix is a one-line 3-way split
+(`1 if bullish else (-1 if bearish else 0)`, both at the `sentiment_mult` line and the
+`positive_screeners`/`negative_screeners` bucketing 30 lines down), but it touches ~22% of a
+canonical scoring-authority-governed table platform-wide and needs a negative-control test plus
+`verify-gate.mjs`'s backtest-evidence gate before shipping — left as a traced, ready-to-apply fix
+per the reverse-engineering practice's step 6 rather than merged under time pressure.
+
+Also traced 3 real top-15 movers with zero `unified_recommendations` coverage at all (TIIL,
+SENCO, SGIL) — not root-caused this pass, flagged for a follow-up.
+
+Verification: read-only investigation, no code changed. `psycopg2` queries run directly against
+live Postgres (`127.0.0.1:5433`), see scratchpad SQL scripts if reproducing.
+
+## 2026-08-13 (cont. 4) — neutral-tag scoring bug: fix implemented
+
+Followed up on the previous entry's traced-but-not-shipped finding. Fix: extracted the
+polarity mapping into `AlphaQuantScoringEngine._screener_polarity(sentiment)` (`scoring_engine.py`,
+next to the existing `_source_cat_key`/`_recency_weight` staticmethods) — `1 if bullish else
+(-1 if bearish else 0)`, returning both the score multiplier and the `positive_screeners`/
+`negative_screeners`/`None` bucket key from one place, so the two call sites (score contribution,
+reasons bucketing) can't disagree with each other the way the original two separate binary
+ternaries did.
+
+**Negative-controlled**: 5 new tests in `test_scoring_engine.py` (`_screener_polarity` unit tests
+for bullish/bearish/neutral/unrecognized, plus an end-to-end test replaying the real
+`process_scoring()` loop body against a synthetic all-neutral symbol). Stashed `scoring_engine.py`,
+confirmed all 5 fail (`AttributeError: no attribute '_screener_polarity'` — the method didn't
+exist pre-fix), popped the stash, confirmed all 22 tests in the file pass.
+
+**Live spot-check (read-only, no production write)**: recomputed the 7 symbols traced in the
+previous entry using real `screener_master` metadata pulled from live Postgres, real
+`CATEGORY_WEIGHTS`/`SOURCE_WEIGHTS`, and the real `_screener_polarity`/`_source_cat_key` (recency
+decay simplified to 1.0 — not what's being tested). Every one moves off the score floor:
+
+| Symbol | OLD score / class | NEW score / class |
+|---|---|---|
+| MOREPENLAB | 27.90 / Sell | 78.65 / Buy |
+| SENCO | 0.00 / Strong Sell | 59.73 / Hold |
+| KOTAKBANK | 16.19 / Sell | 86.60 / Buy |
+| COROMANDEL | 0.00 / Strong Sell | 61.70 / Hold |
+| FEDERALBNK | 0.00 / Strong Sell | 78.87 / Buy |
+| MAXHEALTH | 0.00 / Strong Sell | 82.59 / Buy |
+| JINDALSTEL | 0.00 / Strong Sell | 56.20 / Hold |
+
+SENCO's new Hold matches `quant_scores`'s independent Hold/50.9 exactly; MOREPENLAB's new Buy
+agrees in direction with `quant_scores`'s Strong Buy/85.4 — the same stock that had actually
+rallied +10.11% the session its buggy `stock_scores` row called Sell.
+
+**Not done this session**: did not re-run the live `process_scoring()` pipeline to rewrite
+production `stock_scores` (would touch ~5,000 rows platform-wide on a scoring-authority-governed
+table — the fix takes effect on its next scheduled run) and did not re-run `factor_backtest.py`
+(not applicable — `stock_scores` isn't in that harness's price-panel factor registry; this was a
+correctness fix, not a reweighting hypothesis).
+
+Verification: `npx tsc --noEmit` clean. `npx vitest run` 887 passed / 28 skipped (gated
+live-network suite) / 0 failed. `python -m pytest src/server/__tests__/ src/server/tests/` 1785
+passed / 209 skipped / 0 failed on the clean run; one run showed
+`test_unified_ranker.py::test_history_snapshot_is_append_only_across_reruns` failing, confirmed
+pre-existing/order-dependent (passes 99/99 standalone; passed on an immediate full-suite re-run
+with zero code changes in between; `test_unified_ranker.py` does not import `scoring_engine.py`)
+— same flake already documented in the 2026-08-13 (earlier) entry above.
+
+## 2026-08-13 (cont. 5) — neutral-tag fix: run live, re-check unified_recommendations
+
+Ran `python scoring_engine.py` for real against production Postgres (6,009 stock-timeframe rows
+written to `stock_scores`), then `python unified_ranker.py` (2,188 stocks, `computed_at=2026-08-14`,
+`generated_at=2026-08-13 13:46 UTC` — before that day's 03:45 UTC open, but 08-14 hasn't traded
+yet so this is a verification snapshot, not a new gradeable pre-market date). Re-checked
+`unified_recommendations` for the previously-traced symbols and the platform-wide distribution.
+
+**Honest result: the fix works exactly as validated, but explains only a small slice of the
+platform's Sell-heavy skew, not the bulk of it.** Full-universe classification counts:
+
+| Date | Hold | Buy+StrongBuy | Sell+StrongSell | Sell:Buy |
+|---|---|---|---|---|
+| 08-12 (pre-fix) | 1767 | 14 | 414 | 29.6:1 |
+| 08-13 (pre-fix) | 1767 | 12 | 409 | 34.1:1 |
+| 08-14 (post-fix) | 1789 | 12 | 387 | 32.2:1 |
+
+Only ~22-27 stocks (~1% of the universe) moved off the Sell side into Hold. The Sell:Buy ratio is
+essentially unchanged -- something else, not yet found, is the dominant driver of the platform's
+directional skew.
+
+Per-symbol (`computed_at` 08-13 -> 08-14, real DB rows): MOREPENLAB Sell/26.5 -> **Hold/37.84**
+and COROMANDEL Sell/26.4 -> **Hold/48.28** (both directly explained by the fix, matches the
+earlier read-only spot-check). KOTAKBANK (Hold/45.7->46.1) and FEDERALBNK (Hold/57.2->49.9) barely
+moved -- both were already Hold in the FULL blended `unified_score` even while their `stock_scores`
+component alone was pinned at the floor, because `unified_ranker.py` blends multiple engines and
+dilutes any one component's distortion. **KERNEX and RMC (the two correct Sell calls that
+actually fell -9.08%/-11.52%) are unchanged, still Sell** -- the fix didn't disturb a correct
+call. **PNGSREVA (the wrong-direction Strong Sell that rallied +10.77%) is unchanged, still
+Strong Sell/18.9** -- NOT explained by this bug, an honest non-result rather than something to
+paper over. SENCO and SGIL still have zero `unified_recommendations` rows at all, unchanged --
+that coverage gap is unrelated to this fix and remains untraced.
+
+**Unrelated bug surfaced during the live run, not fixed this session**: `scoring_engine.py`'s
+recommendation_log price/ATR lookup threw `column qs.date does not exist` (`quant_scores` is
+`PRIMARY KEY (symbol)`, no date column) -- caught by an exception handler so the job didn't crash,
+but `entry_price`/`rank_composite` come back NULL for every row silently. A third occurrence of
+the exact bug class already documented in `recurring-bugs.md`'s "A column referenced in SQL is
+not a column that exists" entry. Spawned as a separate follow-up task rather than fixed inline
+here, to keep this session's diff scoped to the neutral-tag fix.
+
+Verification: read/write live-DB run (not a `pytest`/`tsc`/`vitest` change -- no source edited
+this entry beyond the two already-verified writes in the previous entry).
+
+## 2026-08-13 (cont. 6) — Trendlyne screener catalog completeness check (KERNEX follow-up)
+
+User asked whether KERNEX's earnings date was captured (yes -- `stock_earnings_dates`, fetched
+pre-market, `technical_signals.days_to_next_results` counted down correctly 3/2/1 into the
+2026-08-12 drop) and whether 3 named "upcoming results" screeners had real predictive edge.
+Measured properly (per-date excess-vs-liquid-universe from `screener_appearances` x
+`stock_ohlcv`, not the platform's own precomputed `screener_reliability`/`screener_performance_v2`
+tables): none of the 3 significant (max t=1.76, n=21-27 dates) -- logged as a new row in
+`measurement.md`'s "already tested" table. The platform's own `win_rate_5d=1.0` for one of them
+didn't survive a from-scratch check (65% of dates positive, not 100%) -- a thin-denominator
+artifact in that internal table.
+
+Follow-up: user supplied two large reference lists (370 "premium" screenerPks, then 1,529
+screener names) to check against our catalog. Cross-checked both live:
+- 361/370 premium pks resolved in `trendlyne_screeners`; only 2 fully empty (pledge screeners,
+  unrelated to premium status); the "capped at 100 captured members" pattern (287/368, 78%) is a
+  universal fetcher/upstream limit, not premium-specific -- confirmed via a control check (82.7%
+  of ALL 910 tracked screeners hit the same cap).
+- 9 of the 370 pks looked "missing" -- traced live (real API calls, `fetch_screener()` succeeds
+  for all 9 right now, no paywall) to a real bug: `trendlyne_screener_discovery.py`'s
+  `upsert_screener()` keys `trendlyne_screeners` on `screener_id` (a name-derived slug), not
+  `screenpk`. Trendlyne periodically reassigns a new pk to the same logical screener; `KNOWN_PKS`
+  had accumulated both old and new pks for these 9, and the later-processed one in `sync_pks()`'s
+  batch loop silently overwrote the row, discarding the earlier pk with no error. Low severity --
+  every screener's current content is captured correctly, only the specific old pk value is lost.
+  Documented in `recurring-bugs.md`. Ran `trendlyne_screener_discovery.py` live in the background
+  to refresh the whole catalog anyway (1,052 pks synced, 1,044 ok / 8 skip, catalog now 1,006
+  screeners) -- confirmed the 9 all resolve correctly under their current pks (mapping table in
+  the rules-file entry).
+- 1,529-name list: 1,526 matched (strict prefix match, length-8+ guard against false positives);
+  3 genuinely absent (`BTST`, `STBT`, `Open = Low`) -- no pk available to backfill them, left open.
+
+Not fixed: the underlying upsert-keyed-on-derived-slug mechanism itself (would need a real
+freshness signal to pick the winning pk instead of batch order, or pk-history tracking) --
+documented as a known, low-severity gap rather than changed, since no data is actually lost.
+
+Verification: read-only live Postgres queries + one live discovery job run (writes to
+`trendlyne_screeners`/`screener_master`/`screener_catalog`/`trendlyne_screener_stocks`, the
+job's normal, intended behavior). No `.ts`/`.py` source edited this entry.
+
+## 2026-08-13 (cont. 7) — quant_scores.date follow-up: fixed
+
+Closed the follow-up task spawned during the earlier live `process_scoring()` run.
+`_log_recommendations`'s batched price/ATR lookup (`scoring_engine.py`, added 2026-08-07 per
+its own comment) wrapped `quant_scores.rank_composite` in `ORDER BY qs.date DESC LIMIT 1` --
+`quant_scores` is `PRIMARY KEY (symbol)`, one row per symbol, no `date` column. Worse than the
+surface symptom: the query is a single 5-column `SELECT`, so the `UndefinedColumn` error aborted
+the *entire* statement, not just the `rank_composite` subquery -- every symbol's `entry_price`,
+`target_1-3`, `stop_loss`, `news_sentiment_score`, and `quant_score` came back NULL, silently
+re-breaking the exact null-`entry_price` bug the 2026-08-07 comment says was fixed 2026-07-30.
+Fixed by dropping the bogus `ORDER BY`/`LIMIT` (no history to order by). Live-verified:
+`recommendation_log` rows for today went from 0/1584 to **1,492/1,584 (94%) with populated
+`entry_price`/`quant_score`** after re-running `process_scoring()`. Documented as a third
+occurrence of `recurring-bugs.md`'s "column referenced in SQL that doesn't exist" entry, with
+the new lesson (one broken column in a batched multi-column query can null every sibling column,
+not just its own).
+
+Verification: `npx tsc --noEmit` clean, `python -m pytest src/server/__tests__/ src/server/tests/`
+1785 passed / 209 skipped / 0 failed. Live Postgres query confirms the fix's real effect.
+
+## 2026-08-13 (cont. 3) — "fix all", et_marketstats category-collapse bug, gdelt wired live, 9 TS live tests
+
+User explicitly scoped in: fix everything found, make et_marketstats/etnow screener stocks
+carry the same scoring impact as Trendlyne/MoneyControl.
+
+**The big one: `screener_catalog_enricher.py`'s Step 5 silently zeroed out screener impact for
+non-Trendlyne sources.** `cat_norm = category if category in CATEGORY_DEFAULTS else 'other'`
+validated the REAL category (`screener_master.inferred_category`, using the same taxonomy as
+`unified_ranker.py`'s `CAT_BASE_WT`) against `CATEGORY_DEFAULTS` — a smaller, unrelated,
+coarser vocabulary meant only to supply horizon/confidence fallbacks. The two vocabularies
+share almost no keys, so every screener inserted via this path had its real category
+(`technical_trend`, `fundamental_quality`, etc.) silently collapsed to `'other'` — `CAT_BASE_WT`
+weight 0.0. Measured before fix: et_marketstats 100% `'other'` (95/95 screeners), etnow 26%,
+moneycontrol 35%, trendlyne 1% (trendlyne mostly bypasses this path via its own discovery
+script). Fixed by trusting `category` as-is and using `CATEGORY_DEFAULTS` only for its stated
+purpose (horizon/confidence). Extracted the whole bias/category/horizon/confidence resolution
+into a new pure function, `resolve_screener_defaults()`, specifically so the regression test
+imports and calls the REAL function rather than a hand-copied mirror (caught mid-session: the
+first version of this test copied the logic inline and didn't actually detect the bug when
+negative-controlled — rewritten to import the real function before trusting it). Added Step 5b
+to backfill the 268 already-corrupted `screener_catalog` rows from `screener_master` (can't
+just re-run Step 5, which only inserts *missing* rows). Applied live: et_marketstats 100%→32%
+`'other'`, etnow 26%→9%, moneycontrol 35%→14%.
+
+**`gdeltService.ts` wired into the scheduler.** `runGdeltBackfill()` had a working
+fetch/parse/persist path and a real table (`gdelt_sentiment`) but was never called from
+anywhere. Added `QUEUE_GDELT_SENTIMENT` (daily 19:00 UTC, no weekday restriction — GDELT
+indexes weekend news too), registered in `jobRegistry.ts` for heartbeat-lateness monitoring,
+and gave it a freshness check. Picking the cron slot required checking
+`jobPipelineOrdering.test.ts`'s minute-collision guard — the first choice (17:00 UTC) collided
+with `score-all`, moved to 19:00. **Could not be live-verified from this sandbox**: general
+internet works (`google.com`/`moneycontrol.com` reachable) but `api.gdeltproject.org`
+specifically times out — a network-policy gap in this environment, not a code bug. Documented
+in the new live test's own header rather than silently worked around or deleted.
+
+**data-coverage-audit TS-side sweep, completed.** Filtered ~28 TS files hitting external APIs
+down to 10 genuinely fetcher-shaped ones (the rest are read-only service layers, or internal
+calls like Ollama/our own Python API). Wrote real `live_datasource`-shaped tests for 9 of them
+(`deliveryFetcher`, `etMarketstats`, `etnow`, `fundamentalsSyncService`, `gdeltService`,
+`liveStockData`, `mcApiService` — the real persisting function, not the pre-existing
+`mcapiProxy.test.ts` proxy-route test — `newsSentimentService`, `trendlyneScreener`); the
+10th, `technicalSignalsService.ts`, turned out to have exactly one `fetch()` call (a Telegram
+alert) and no external data fetch at all — correctly excluded, not a fetcher, a filtering
+error caught before writing a pointless test. All 8 network-reachable tests pass for real
+against live production data (deliveryFetcher: 2459 symbols; liveStockData: 2148 live quotes;
+newsSentimentService: 1071 fetched/340 processed with real FinBERT scoring; trendlyneScreener:
+100 real stocks). No cleanup needed in any of them — each writes genuine production-shaped
+rows, identical to what the real scheduled job would write, not test fixture pollution.
+
+**Self-inflicted bug found and fixed mid-sweep: `import 'dotenv/config'` as a static top-level
+import leaked real credentials into the shared vitest process env on every run, including runs
+where the live suite is skipped**, breaking `niftytraderAuthService.test.ts`'s "no credentials
+configured" case (it deletes the env vars in its own body, but by the time some other file's
+top-level import already loaded real ones into the shared worker process, later mock
+assumptions could be violated). Fixed in all 9 new files: `RUN_LIVE_DATASOURCE_TESTS` is a
+plain shell env var (not something `.env` provides), so it's checked FIRST, and `dotenv/config`
+is only `await import()`ed conditionally when actually running live. Verified: the polluted
+state reproduces on the unfixed version (confirmed via the actual failing run), and is gone
+after the fix (`niftytraderAuthService.test.ts` passes running alongside the new live tests).
+
+Verification: `npx tsc --noEmit` clean throughout. Default `npx vitest run`: 890 passed, 0
+failed, 37 skipped (includes all 9 new live tests correctly skipped). `RUN_LIVE_DATASOURCE_TESTS=1`
+run of the 8 network-reachable new tests together: 8/8 passed. Full `python -m pytest`: 1790
+passed, 0 failed, 209 skipped.
+
+## 2026-08-13 (cont. 4) — new skill: onboard-data-source
+
+Added `.claude/skills/onboard-data-source/SKILL.md`: a repeatable procedure for fetch → explore
+→ resolve ticker → build fetcher → mandatory live_datasource test → mandatory freshness check →
+honest ML-value assessment, for onboarding any new external URL/API as a data source. Codifies
+this session's own `data-sources.md`/`recurring-bugs.md`/`measurement.md` discipline (including
+the dotenv-leak and category-collapse bugs found this session) into one invokable checklist
+rather than relying on each future session re-deriving it from the rule files.
+
+## 2026-08-13 (cont. 5) — onboard-data-source: multi-URL support
+
+Extended the skill added moments earlier: added Phase 0 (intake a batch — enumerate, dedupe
+against already-onboarded domains, group by provider so resolution/fetcher-file decisions are
+made once per provider not once per URL, track via TodoWrite) and a closing batch-summary
+table (one row per URL/group: what it is, resolution match rate, fetcher, table, test/check
+status, ML verdict) so a multi-URL run produces one reviewable report instead of N disconnected
+ones. Explicitly does not self-parallelize across subagents — that stays the user's call.

@@ -9,6 +9,7 @@ from ta.volatility import BollingerBands, AverageTrueRange
 import numpy as np
 
 from db_compat import get_engine
+from as_of import logical_write_floor
 
 
 # ── ATR-based barriers ──────────────────────────────────────────────────────────
@@ -170,7 +171,13 @@ class TechnicalAnalysisEngine:
             'entry_price': entry_price,
             'target_price': target_price,
             'stop_loss': stop_loss,
-            'last_updated': datetime.datetime.now().isoformat()
+            # UTC-aware (2026-08-13): naive datetime.now() on an IST-clocked host lands in this
+            # TIMESTAMPTZ column ~5:30 ahead of true UTC, since Postgres treats a naive value as
+            # already being in the session's timezone. Produced 2,477 rows with
+            # signal_generated_at LATER than created_at (see signal-provenance-monotonic in
+            # dataQualityChecks.ts / recurring-bugs.md) -- a different mechanism from the
+            # already-fixed ON CONFLICT drift bug, same symptom.
+            'last_updated': datetime.datetime.now(datetime.timezone.utc).isoformat()
         }
 
     def process_all(self):
@@ -189,7 +196,17 @@ class TechnicalAnalysisEngine:
                 print(f"Error analyzing {symbol}: {e}")
 
         if results:
-            today_str = datetime.datetime.now().date().isoformat()
+            # Anchored to the last real session in stock_ohlcv (2026-08-13), not wall-clock: a
+            # naive datetime.now().date() call written after 18:30 UTC (00:00 IST) -- which is
+            # exactly when today's crash-loop-driven catch-up runs have been landing -- wrote
+            # TOMORROW's calendar date into signal_date, corrupting the join key
+            # measurement.md's methodology depends on. logical_write_floor() is the established
+            # fix for this exact class (see recurring-bugs.md's date-anchor entries and
+            # as_of.py's own docstring) and ties signal_date to the data actually analyzed,
+            # not to when the job happened to run.
+            today_str = logical_write_floor(
+                fallback=datetime.datetime.now(datetime.timezone.utc).date().isoformat()
+            )
             unified_rows = [to_unified_signal_row(r, signal_date=today_str) for r in results]
             with self.engine.begin() as conn:
                 conn.execute(text("""

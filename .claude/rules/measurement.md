@@ -117,6 +117,51 @@ run is now preserved; the 3 runs that had a `generated_at` were seeded into it (
 roughly six trading weeks from 2026-08-12 — not an engineering one. Anything computed from the
 live `unified_recommendations` table alone is grading a post-close re-run against its own day.
 
+**First real grading pass, 2026-08-13 (n=2 dates: 2026-08-12, 2026-08-13 — do not treat any of this
+as significant, it's a preview of the method, not a verdict).** Every non-Hold pre-market call
+joined to same-session realized return, liquidity ≥₹1cr ADT, `is_suspect` excluded, per-date:
+
+| Date (market direction) | Buy n / win% / avg | Sell n / win% / avg | Strong Sell n / win% / avg |
+|---|---|---|---|
+| 2026-08-12 (down day, Hold avg -0.24%) | 10 / 50% / +0.06% | 147 / 66.7% / **-0.45%** | 33 / 57.6% / **+0.26%** (wrong-direction avg) |
+| 2026-08-13 (up day, Hold avg +0.30%) | 11 / 54.5% / +0.22% | 142 / 45.8% / **+0.39%** (wrong-direction avg) | 33 / 42.4% / **+0.66%** (wrong-direction avg) |
+
+Two things stand out even at n=2: (1) the Sell bucket's win rate flips with the day's overall
+market direction (66.7% on a down day, 45.8% on an up day) — consistent with the standing
+zero-IC finding, i.e. it looks like beta exposure to that day's broad tape, not stock-specific
+skill; (2) **Strong Sell (S_ELITE) underperforms plain Sell (A_HIGH) on BOTH dates** — the
+opposite of what conviction should mean. Traced, not guessed: this is NOT a recurrence of the
+2026-08-10 conviction-ladder-direction bug (`_directional_strength`/`_conviction` in
+`unified_ranker.py` are still correct — verified by reading the code). It traces instead to
+`recurring-bugs.md`'s newly-added neutral-tag-as-bearish bug in `scoring_engine.py`: the most
+extreme (near-0) `unified_score`s concentrate in illiquid/thin-coverage names whose `stock_scores`
+component is artificially floored by miscounted neutral screener tags, not by genuine bearish
+evidence — extremity of a corrupted score doesn't predict direction. Top-15
+gainers/losers cross-check (see `recurring-bugs.md` for the traced misses): of 4 non-Hold calls
+on real double-digit movers, 2 correct (KERNEX Sell -9.08%, RMC Sell -11.52%) and 2 wrong-direction
+at high conviction (PNGSREVA Strong Sell/S_ELITE +10.77%, MOREPENLAB Sell/A_HIGH +10.11% — the
+latter directly traced to the neutral-tag bug, `quant_scores` had it at Strong Buy/85.4 the same
+day). 3 real movers had no `unified_recommendations` row at all (TIIL, SENCO, SGIL) — not traced
+further this pass. n=2 dates is far too thin to draw a verdict; re-check once ~30 pre-market dates
+accumulate per the calendar constraint above.
+
+**A second, unrelated `scoring_engine.py` touch same day (2026-08-13) is explicitly NOT a scoring
+change and doesn't need a `factor_backtest.py` run.** `_log_recommendations`'s batched price/ATR
+lookup wrapped `quant_scores.rank_composite` in a bogus `ORDER BY qs.date DESC LIMIT 1`
+(`quant_scores` has no `date` column — see `recurring-bugs.md`'s "column referenced in SQL that
+doesn't exist" entry, third occurrence). Because it's a single 5-column `SELECT`, the resulting
+`UndefinedColumn` error aborted the whole statement, silently nulling `entry_price`/`target_1-3`/
+`stop_loss`/`news_sentiment_score`/`quant_score` for every `recommendation_log` row from
+`scoring_engine` — a **data-completeness bug in a downstream logging table, not a change to any
+score, weight, or classification formula**. `factor_backtest.py` tests price-panel factor edge
+(momentum, value, etc.) and has no code path that reads `recommendation_log`'s enrichment columns
+at all, so running it here would measure something unconnected to the diff — the kind of
+evidence-shaped-but-meaningless artifact `recurring-bugs.md`'s "fabricated backtest" entry warns
+about, not genuine verification. The real, applicable measurement is a direct before/after
+population count, done live 2026-08-13: `recommendation_log` rows for the day went from 0/1,584
+to **1,492/1,584 (94%) with `entry_price`/`quant_score` populated** after the fix and a live
+`process_scoring()` re-run. No factor's measured edge in this file changed as a result of this fix.
+
 ## Already tested — do not re-run without a reason
 
 Each of these was measured on the 5-year price panel with the spec above. Re-testing them costs days and returns the same answer. If you think one deserves another look, state what changed (more history, a different horizon, a different construction) before spending the time. Full derivation for any row: `docs/measurement-history.md`.
@@ -135,6 +180,7 @@ Each of these was measured on the 5-year price panel with the spec above. Re-tes
 | screener bullish consensus | IC −0.027, t=−2.36 | significantly negative; cleaning the labels made it *more* negative |
 | `screener_breadth` (multi-screener persistence — count of independent screeners currently flagging a name, sentiment-agnostic) | 5d/15bps top-50: −0.11%/period, t=−0.45; top-25/0bps: −0.23%, t=−0.73. Both **negative point estimates**, both far from significant. 21d gives 1 period (uninterpretable, disregarded). | **not significant, and low-power** (only 9 periods — `screener_appearances` spans just ~2.5 months). No evidence of edge; also no evidence it's dead the way the negative-and-significant rows above are. Re-test only once the table has enough history for a real 21d-rebalance read (needs ~12+ months). See `_add_screener_breadth` in `factor_backtest.py` for the construction. |
 | **every individual screener** (1,563, one at a time) | **0 survive FDR or Bonferroni** | population direction is negative, sentiment labels inverted |
+| 3 named "upcoming/recent results" screeners (`upcoming-results-with-rising-delivery-volumes`, `results-in-the-last-two-days-with-yoy-and-qoq-net-profit-growth`, `potential-outperformers:-...-in-the-previous-quarter`) — tested 2026-08-13 after a user question about whether KERNEX's pre-results move was flagged by any of these | 5d excess-vs-liquid-universe, per-date then averaged, winsorized, `is_suspect` excluded, ≥₹1cr ADT, computed fresh from `screener_appearances` × `stock_ohlcv` (not the platform's own `screener_reliability`/`screener_performance_v2` tables, which are a proxy and were not trusted blindly — see below): rising-delivery +0.83%/period t=1.76 (15/23 dates won); net-profit-growth +0.01%/period t=0.02 (11/21); potential-outperformers +0.34%/period t=0.59 (15/27). | **not significant, any of the three** — none clears a single-test bar (max t=1.76), let alone a 3-way correction. All three point estimates are positive but weak; no evidence of edge, and (same caveat as `screener_breadth`) too few dates (21-27, `screener_appearances`' full ~2.5-month history) to rule dead either. 20d horizon has almost no resolved observations yet (recent appearances haven't aged 20 sessions) — not measurable, same constraint as `screener_breadth`. **The platform's own precomputed `screener_reliability`/`screener_performance_v2` reported `win_rate_5d=1.0`/`wr_10d=1.0` for rising-delivery** — did not survive contact with a from-scratch measurement (65% of dates positive, not 100%); almost certainly a thin-denominator artifact on the internal table, not a genuine signal — another instance of not trusting this platform's own self-reported reliability score over a direct measurement. |
 | **`feature_store`** (23 candidate technical/fundamental/news columns not already in `FACTORS`, wired into `factor_backtest.py` via `_add_feature_store`/`FEATURE_STORE_FACTORS`, 5d/15bps top-50, live re-run 2026-08-12 against Postgres) | **14 of 23 clear a 23-factor Bonferroni (\|t\|≳3.15) — all 14 negative.** Worst: `stoch_d` t=−9.28, `williams_r` t=−9.02, `stoch_k` t=−9.00, `cci` t=−7.57, `di_plus` t=−7.34, `dist_sma20_pct` t=−6.40, `vwap_dist_pct` t=−5.78, `volume_ratio_20d` t=−5.75, `obv_slope` t=−4.98, `atr_pct` t=−4.81, `volume_ratio_5d` t=−4.71, `macd_hist` t=−3.92, `mtf_alignment_score` t=−3.38, `bb_width` t=−3.15. Not significant either way: `di_minus` (+1.34 — does **not** reproduce the 2026-08-11 ad hoc IC test's t=+7.70), `adx`, `dist_sma200_pct`, `debt_to_equity`, `roe`, `op_margins`, `piotroski_f`, `news_sentiment_score`, `news_impact_count`. **`rev_growth`/`eps_growth` are 100% NULL** (never written by `feature_engineering.py`) — dead schema, same shape as the known `pcr_oi`/`pcr_vol` NULL pair. | **no new factor; every clean-trend/overbought/high-volume reading is inverted — reconfirms the platform's dominant 5d mean-reversion finding, this time via the full turnover/cost-aware portfolio harness rather than a raw IC.** `feature_store` no longer belongs on any "untested" list. |
 | news sentiment | same-day +0.13 IC, next-day −0.03 | real but not tradeable — the move is over by the first entry you can take |
 | `near_52w_high`, `low_beta`, `low_idio_vol` | insignificant | US-published factors that did not transfer |
@@ -144,6 +190,7 @@ Each of these was measured on the 5-year price panel with the spec above. Re-tes
 | **sector-neutral (industry-relative) value & momentum** | **every one worse than its raw parent; B/P +0.82→+0.46%/mo, t 2.08→1.12** | **rejected** — confound (smaller universe) ruled out with a registered control |
 | `gap_down` (reconstructed from price, top-50/25bps/21d rebal.) | net excess −1.33%/period, t=−3.54, 1/6 years positive; at 5d/15bps: −0.73%/period, t=−9.0, 0/6 years | **significantly negative net of costs** — ~90-93% one-way turnover every rebalance (gap-movers barely persist) drives 5.6-13.7%/yr cost drag that eats the gross edge. Supersedes the "Gap Down is the one positive setup" screener-membership reading (same-day descriptive, not tradeable — see `measurement-history.md`) |
 | `gap_up` (same construction, control) | net excess −1.45%/period, t=−3.55, 0/6 years positive | **significantly negative net of costs**, same magnitude/sign as `gap_down` — both directions are a turnover trap, not an edge either way |
+| **`screener_combo_finder.py --tier1`'s "capitulation" triple (`gap_down` AND `open_eq_low` AND `top_loser`, next-session open→close, single day, not a rebalanced hold)** | Reviewed 2026-08-13 (`/measurement-integrity-review`): reproduced live, 425 days / 651 signal-rows, spread +0.53%/day net of 15bps, t=+3.61, p=0.0003, clears the 41-combination Bonferroni bar. **Robust**: winsorizing at 1/2/5% *strengthens* it (t 3.69–3.94); dropping the single most extreme day still gives t=3.49; dropping the top 3 most extreme days still gives t=3.25, p=0.0013. **6/6 years positive** (2021–2026), 3 of 6 individually significant. | **Not a contradiction of the `gap_down`/`gap_up` rows above** — different construct entirely: those rank/hold the top-K gapped names for a 21d rebalance and eat turnover-drag costs; this is a same-next-session open→close return on a much narrower, rarer AND'd condition (real capitulation — gapped down, opened at the low, AND already among the day's biggest losers — not just "gapped down"). Reads as a genuine short-horizon reversal/bounce off a panic day, not a continuation trade. **Two real gaps found, neither changes the verdict**: (1) the script has no winsorization step despite the panel spec requiring one — checked live, doesn't matter here, but should still be added for consistency; (2) `run_tier1`'s verdict logic (`is_edge = spread_pct > 0`) only ever surfaces the best *positive*-direction combo — the single most significant combo in the full 41-row table is actually negative-direction (`gap_down,open_eq_high`, t=−4.12, spread=−0.53%, stronger than the "winning" positive one), which the console output/verdict never highlights. Low signal density (~1.5 signals/day when it fires, ~651 stock-days across 5.5y) means this is thin — narrow enough to watch, not yet enough to call it capacity-proven at scale. `live_capitulation_screener.py`'s docstring says "See measurement.md" — this row is that entry. |
 
 ## Not testable — do not spend time here without a genuinely new angle
 

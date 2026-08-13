@@ -162,23 +162,31 @@ export async function getLateJobs(now: Date = new Date()): Promise<Array<{
 
     const late: Array<{ job: string; label: string; expectedAt: Date; hoursLate: number; lastError: string | null }> = [];
     for (const entry of JOB_REGISTRY) {
+      const row = byName.get(entry.jobName);
+      const lastSuccess = row?.last_success_at ?? null;
+
       let expectedAt: Date;
-      if (entry.cronPattern) {
+      if (entry.lateDeadlineCronPatterns) {
+        // See jobRegistry.ts's doc comment: computes lateness against the job's real work
+        // window, not its cron's generous post-close tail slots.
+        const result = computeCronLateness(entry.lateDeadlineCronPatterns, entry.graceMinutes, lastSuccess, now);
+        if (!result.late) continue;
+        expectedAt = result.expectedAt;
+      } else if (entry.cronPattern) {
         const interval = CronExpressionParser.parse(entry.cronPattern, { currentDate: now, tz: 'Etc/UTC' });
         expectedAt = interval.prev().toDate();
+        const deadline = expectedAt.getTime() + entry.graceMinutes * 60_000;
+        if (now.getTime() < deadline) continue; // not late yet
+        if ((lastSuccess ?? 0) >= expectedAt.getTime()) continue; // already succeeded for this occurrence
       } else if (entry.everyMs) {
         const boundary = Math.floor(now.getTime() / entry.everyMs) * entry.everyMs;
         expectedAt = new Date(boundary);
+        const deadline = expectedAt.getTime() + entry.graceMinutes * 60_000;
+        if (now.getTime() < deadline) continue; // not late yet
+        if ((lastSuccess ?? 0) >= expectedAt.getTime()) continue; // already succeeded for this occurrence
       } else {
         continue; // event-driven, no schedule to be late against
       }
-
-      const deadline = expectedAt.getTime() + entry.graceMinutes * 60_000;
-      if (now.getTime() < deadline) continue; // not late yet
-
-      const row = byName.get(entry.jobName);
-      const lastSuccess = row?.last_success_at ?? 0;
-      if (lastSuccess >= expectedAt.getTime()) continue; // already succeeded for this occurrence
 
       late.push({
         job: entry.jobName,

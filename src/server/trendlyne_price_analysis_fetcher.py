@@ -348,7 +348,10 @@ def main() -> None:
     # empty, script still exited 0 and logged "execution completed") must not look identical to
     # a healthy run -- FetchTracker exits non-zero once the failure rate crosses its threshold,
     # so pythonRunner/T.run() surfaces it as a real job failure instead of a silent no-op.
-    tracker = FetchTracker("trendlyne_price_analysis_fetcher")
+    # abort_after_consecutive_fails=20 (2026-08-13): this endpoint has been WAF-blocking on
+    # request 1 of every run (405 on every retry) and grinding through all ~2234 stocks anyway
+    # until the outer runPython timeout kills it ~52min in -- see fetch_utils.FetchTracker.
+    tracker = FetchTracker("trendlyne_price_analysis_fetcher", abort_after_consecutive_fails=20)
 
     def _fetch_one(args):
         symbol, tlid = args
