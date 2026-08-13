@@ -479,6 +479,19 @@ class NLPScreenerInference:
     # earnings_beat_features.py to estimate with PERIOD_LAG_DAYS). REASONED, NOT MEASURED.
     _EVENT = re.compile(r'upcoming\s+result|results?\s+(?:due|expected|calendar)|board\s+meeting')
 
+    # Trendlyne's own DVM tier names (Durability/Valuation/Momentum quadrant labels).
+    # Confirmed 2026-08-13 against Trendlyne's help docs: an unqualified "Top/Strong
+    # Performer" means all three components score >50-55, i.e. genuinely all-around good --
+    # not read off the name, checked against https://help.trendlyne.com's own DVM FAQ. Found
+    # live: 'Top Performer DVM Stocks (subscription)' shipped 'bearish' from one source and
+    # 'bullish' from another for the IDENTICAL name -- the generic path (FinBERT, a financial
+    # NEWS model scoring a terse jargon phrase) is unreliable here, same class as the other
+    # domain_override families. Checked LAST, after RISK/VAL/OVERSOLD, so a genuine caveat
+    # already resolves correctly: 'Strong Performer, Getting Expensive (DVM)' hits VAL_RICH
+    # ('expensive') first and stays bearish, as it should.
+    _DVM_STRONG = re.compile(r'\btop\s+performer|\bstrong\s+performers?\b')
+    _DVM_WEAK = re.compile(r'\bweak\s+(?:stocks?|performers?)\b|\bunderperformers?\b')
+
     @classmethod
     def domain_override(cls, text: str):
         """Return 'bullish'/'bearish'/'neutral' for families the generic layers get wrong,
@@ -488,27 +501,39 @@ class NLPScreenerInference:
         Order matters and is deliberate:
           1. risk before valuation -- "high debt at a low P/E" is a value trap, and the
              leverage is the more load-bearing fact.
-          2. the MEASURED families before the generic lists, because the measurement
-             disagrees with the plain-English reading of the name.
+          2. the MEASURED families before the generic (reasoned-only) valuation list, because
+             the measurement disagrees with the plain-English reading of the name -- and,
+             found live 2026-08-13, because Trendlyne/MoneyControl screener "names" are
+             sometimes full marketing paragraphs (e.g. "...near their 52-week lows... hidden
+             potential that lies within these undervalued gems...") where a stray promotional
+             word like "undervalued" used to steal the match ahead of the screener's actual,
+             measured, strongly-bearish 52w-low criterion. VAL_CHEAP/VAL_RICH are reasoned
+             fixes for the generic high/low keyword lists, not backtested -- they should not
+             outrank a family with an actual t-stat.
         """
         t = (text or '').lower()
         if cls._RISK_UP.search(t):
             return 'bearish'
         if cls._RISK_DOWN.search(t):
             return 'bullish'
-        if cls._VAL_RICH.search(t):
-            return 'bearish'
-        if cls._VAL_CHEAP.search(t):
-            return 'bullish'
-        # Measured: stretched-down is bearish, stretched-up carries no signal.
+        # Measured: stretched-down is bearish, stretched-up carries no signal. Checked before
+        # VAL_RICH/VAL_CHEAP -- see the ordering note above.
         if cls._OVERSOLD.search(t):
             return 'bearish'
         if cls._OVERBOUGHT.search(t):
             return 'neutral'
+        if cls._VAL_RICH.search(t):
+            return 'bearish'
+        if cls._VAL_CHEAP.search(t):
+            return 'bullish'
         if cls._EVENT.search(t):
             return 'neutral'
         if cls._BARE_YIELD.search(t) and not cls._YIELD_QUALIFIER.search(t):
             return 'neutral'
+        if cls._DVM_STRONG.search(t):
+            return 'bullish'
+        if cls._DVM_WEAK.search(t):
+            return 'bearish'
         return None
 
     def infer(self, name: str, description: str = "") -> Dict[str, Any]:

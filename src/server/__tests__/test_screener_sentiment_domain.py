@@ -87,6 +87,18 @@ class TestMeasuredFamilies:
         assert ov('oversold zone') == 'bearish'
         assert ov('overbought zone') == 'neutral'
 
+    def test_measured_family_beats_incidental_valuation_words_in_marketing_copy(self):
+        """Live bug, 2026-08-13: Trendlyne/MoneyControl screener 'names' are sometimes full
+        promotional paragraphs. A stray 'undervalued' in the ad copy used to steal the match
+        via VAL_CHEAP before the screener's real, measured, strongly-bearish 52w-low signal
+        got a chance -- e.g. 'Close Within 52 Week Low Zone' shipped live as 'bullish'."""
+        assert ov(
+            'close within 52 week low zone refers to stocks that have recently closed '
+            'their trading session within the range of their lowest price observed in the '
+            'past 52 weeks. explore the hidden potential that lies within these '
+            'undervalued gems, waiting to be unearthed.'
+        ) == 'bearish'
+
 
 class TestReasonedAbstentions:
     """REASONED, not measured -- flagged so nobody cites these as empirical."""
@@ -104,6 +116,28 @@ class TestReasonedAbstentions:
                                       'Board Meeting', 'Results due this week'])
     def test_scheduled_event_is_not_a_direction(self, name):
         assert ov(name) == 'neutral'
+
+
+class TestDvmTierNames:
+    """Trendlyne's own DVM (Durability/Valuation/Momentum) quadrant labels, confirmed against
+    Trendlyne's help docs 2026-08-13: an unqualified Top/Strong Performer means all three
+    components score >50-55. Live bug: 'Top Performer DVM Stocks (subscription)' shipped
+    'bearish' from one source and 'bullish' from another for the identical name."""
+
+    @pytest.mark.parametrize('name', [
+        'Top Performer DVM Stocks (subscription)', 'Strong Performers - High DVM Stocks',
+    ])
+    def test_unqualified_top_performer_is_bullish(self, name):
+        assert ov(name) == 'bullish'
+
+    @pytest.mark.parametrize('name', ['Weak Stocks (DVM)', 'Expensive Underperformers (DVM)'])
+    def test_weak_or_underperformer_is_bearish(self, name):
+        assert ov(name) == 'bearish'
+
+    def test_a_genuine_caveat_still_wins_over_the_dvm_tier_name(self):
+        """'Strong Performer' alone is bullish, but VAL_RICH ('expensive') is checked first --
+        a caveated tier name should stay bearish, not flip on the word 'performer'."""
+        assert ov('Strong Performer, Getting Expensive (DVM)') == 'bearish'
 
 
 class TestFallsThroughWhenItHasNoOpinion:
