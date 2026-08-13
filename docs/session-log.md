@@ -1971,3 +1971,74 @@ made once per provider not once per URL, track via TodoWrite) and a closing batc
 table (one row per URL/group: what it is, resolution match rate, fetcher, table, test/check
 status, ML verdict) so a multi-URL run produces one reviewable report instead of N disconnected
 ones. Explicitly does not self-parallelize across subagents — that stays the user's call.
+
+## 2026-08-14 — onboard-data-source: 69-URL batch run, 4 Tier-1 fetchers built
+
+Ran the newly-added skill for real against a 69-URL batch (investsights.in + tapetide.com).
+Most of the batch was already covered by the 2026-08-05/06/07 `url_explorer` rounds or already
+built; 4 genuinely new endpoints were confirmed live and promoted to Tier 1, then built end to
+end (fetcher → `live_datasource` test → freshness check → `ml-daily-ops` scheduling):
+
+- `investsights_fundamentals_fetcher.py` → `investsights_fundamentals_history` — per-stock TTM
+  levels + FMP ratios (incl. Piotroski F-score, Altman Z-score) + growth metrics + DCF fair
+  value. The only fair-value estimate on this platform.
+- `investsights_factor_scores_fetcher.py` → `investsights_factor_scores` — cross-sectional PE/
+  ROE/ROCE/D-E/revenue-growth/margin/1m-return snapshot. **Not a per-stock crawl**: the
+  `advanced-screener/query` POST endpoint is a paginated batch query (5,377-row provider
+  universe, page-capped at 100 server-side regardless of requested `limit`), so this fetcher
+  paginates via `offset` rather than looping symbols — ~15s for full coverage.
+- `investsights_announcement_intel_fetcher.py` → `investsights_announcement_intel` — per-stock
+  corporate filings/announcements/presentations/results/concalls/credit-ratings, PDF-linked,
+  PK `(source, uid)` per the composite-key rule. Deliberately does not duplicate
+  `concall_takeaways`'s AI-summarized text — stores filing metadata only.
+- `investsights_pe_band_fetcher.py` → `investsights_pe_band_history` — rolling PE-band chart
+  (price vs. historical PE deciles). **Built against a schema that was live earlier in this
+  same session and had gone dark (404, every symbol, every path variant tried) by the time
+  the fetcher was tested** — flagged per `feedback_failing_urls.md` rather than guessed
+  around; scheduled anyway (cheap, see below) so a provider-side recovery is picked up
+  automatically.
+
+**Two real bugs caught by actually running these against production, not just `tsc`/pytest**:
+(1) `dcf_reliable`/`has_ai_analysis`/`has_ai_research` were written as Python `bool`, but
+declared `INTEGER` columns — psycopg2/SQLAlchemy raised `DatatypeMismatch` on the very first
+live write (`RELIANCE`); root cause was a clever generated-type `ensure_schema()` comprehension
+that had silently mistyped one column — rewritten as an explicit, boring column list, and every
+bool value now stored as `int(bool(...))`. (2) `market-pulse/stock/{symbol}/documents` 404s
+**with** a trailing slash and 200s **without** one, opposite of most APIs' usual leniency —
+found because the raw `curl` (no slash) worked while the fetcher's own `retry_get` call (with
+slash) 404'd on the identical URL otherwise.
+
+`investsights_pe_band_fetcher.py` also picked up `FetchTracker(abort_after_consecutive_fails=10)`
+— same fix as the 2026-08-13 `trendlyne_price_analysis_fetcher.py` WAF-block incident — so a
+dead endpoint fails fast (~30s) instead of grinding through the full `--limit` with a 3-attempt
+retry backoff per symbol every night.
+
+All 4 tables live-verified end to end against production Postgres (not SQLite dev fallback):
+real rows read back, numeric columns finite, `symbol`/`uid` columns real identifiers. 11 new
+`live_datasource` tests, all passing for real (`RUN_LIVE_DATASOURCE_TESTS=1`). 4 new
+`TABLE_FRESHNESS_CHECKS` entries (`investsights-fundamentals-freshness`,
+`investsights-factor-scores-freshness`, `investsights-announcement-intel-freshness`,
+`investsights-pe-band-freshness` — the last with no `failDays`, matching the "sparse by
+nature" convention, so a live-but-still-dead endpoint only warns). All 4 scheduled inside
+`ml-daily-ops`: fundamentals/announcement-intel/pe-band as sequential steps (20/15/20 min
+budgets), factor-scores inside the existing parallel batch next to
+`investsights_sector_intel_fetcher.py` (2 min, matches its paginated-not-per-stock speed).
+
+**ML value (Phase 8, honest)**: none of these four are wired into `unified_ranker.py`/
+`scoring_engine.py`/`factor_backtest.py` — that needs a `factor_backtest.py` run first per
+`measurement.md`, and every one of them starts with ~1 date of history today (a calendar
+constraint, not an engineering one — not testable for months). Piotroski/Altman are a genuine
+cross-validation candidate against `mc_stockvitals_history_fetcher.py`'s independently-computed
+versions of the same scores, not attempted this session. `investsights_factor_scores`'s
+cross-sectional PE/ROE/ROCE panel is the most promising long-run candidate (broad universe,
+paginated cheaply) once enough dated history accumulates.
+
+Verification: `npx tsc --noEmit` clean. `npx vitest run`: 890 passed, 0 failed, 37 skipped
+(unchanged from the prior entry — no `.ts` logic changed beyond `queues.ts`/
+`dataQualityChecks.ts` config additions). Full `python -m pytest`: 1787 passed, 1 failed, 220
+skipped. The 1 failure (`test_unified_ranker.py::TestUnifiedRankerRun::
+test_history_snapshot_is_append_only_across_reruns`) is **not this session's work** — this
+session never touched `unified_ranker.py` or its test file (confirmed via `git diff`), and the
+test passes cleanly in isolation (`pytest test_unified_ranker.py::... -v` → 1 passed); it's a
+pre-existing order/state-dependent flake that only surfaces inside the full-suite run, not a
+regression introduced here.

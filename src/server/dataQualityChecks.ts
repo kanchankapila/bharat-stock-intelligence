@@ -318,6 +318,22 @@ const TABLE_FRESHNESS_CHECKS: TableFreshnessConfig[] = [
     category: 'fundamentals', critical: false, table: 'stock_corporate_action_history', dateColumn: 'fetched_at', warnDays: 10, failDays: 16 },
   { id: 'nse-filed-corporate-actions-freshness', label: 'nse_filed_corporate_actions (InvestSights, sourced from real NSE filings)',
     category: 'fundamentals', critical: false, table: 'nse_filed_corporate_actions', dateColumn: 'fetched_at', warnDays: 3, failDays: 5 },
+  // onboard-data-source batch, 2026-08-13 -- 4 new InvestSights per-stock/screener endpoints.
+  // See investsights_fundamentals_fetcher.py / investsights_factor_scores_fetcher.py /
+  // investsights_announcement_intel_fetcher.py docstrings for the endpoints + quirks.
+  { id: 'investsights-fundamentals-freshness', label: 'investsights_fundamentals_history (TTM + FMP ratios + growth + DCF)',
+    category: 'fundamentals', critical: false, table: 'investsights_fundamentals_history', dateColumn: 'fetched_date', warnDays: 3, failDays: 5 },
+  { id: 'investsights-factor-scores-freshness', label: 'investsights_factor_scores (cross-sectional PE/ROE/ROCE/growth screener snapshot)',
+    category: 'fundamentals', critical: false, table: 'investsights_factor_scores', dateColumn: 'fetched_date', warnDays: 3, failDays: 5 },
+  { id: 'investsights-announcement-intel-freshness', label: 'investsights_announcement_intel (per-stock filings/announcements/concall/rating docs)',
+    category: 'fundamentals', critical: false, table: 'investsights_announcement_intel', dateColumn: 'fetched_at', warnDays: 3, failDays: 5 },
+  // investsights_pe_band_history's source endpoint (/fundamentals/{symbol}/pe-band) started
+  // 404ing for every symbol shortly after this fetcher was onboarded (see
+  // investsights_pe_band_fetcher.py's docstring + its live_datasource test) -- no failDays,
+  // matching the "sparse by nature" convention, so this only ever warns rather than paging
+  // on a provider-side outage this fetcher can't fix. Remove the omission once confirmed live.
+  { id: 'investsights-pe-band-freshness', label: 'investsights_pe_band_history (rolling PE-band chart)',
+    category: 'fundamentals', critical: false, table: 'investsights_pe_band_history', dateColumn: 'date', warnDays: 3 },
   // Found 2026-08-13 (fetcher-accuracy-review sweep, batch 2): 3 more mc_earnings_fetcher.py
   // tables (siblings of stock-earnings-dates-freshness above, same daily fetcher/schedule).
   { id: 'mc-earnings-rapid-freshness', label: 'mc_earnings_rapid (MC results-calendar rapid categories)',

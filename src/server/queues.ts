@@ -111,6 +111,7 @@ export const QUEUE_QUANT_EOD_SYNC = 'quant-eod-sync';
 export const QUEUE_TRENDLYNE_DAILY_FETCH = 'trendlyne-daily-fetch';
 export const QUEUE_LIVE_SCREENER_COLLECT = 'live-screener-collect';
 export const QUEUE_TRENDLYNE_CHECKLIST_CYCLE = 'trendlyne-checklist-cycle';
+export const QUEUE_GDELT_SENTIMENT = 'gdelt-sentiment';
 
 const BULK_CACHE_KEY      = 'live-stocks-bulk';
 const BULK_TTL_SECONDS    = 5 * 60;
@@ -169,6 +170,8 @@ export let mlWeeklyRetrainQueue: Queue | null = null;
 let mlWeeklyRetrainWorker: Worker | null = null;
 export let intradayFetcherQueue: Queue | null = null;
 let intradayFetcherWorker: Worker | null = null;
+export let gdeltSentimentQueue: Queue | null = null;
+let gdeltSentimentWorker: Worker | null = null;
 export let researchPremarketQueue: Queue | null = null;
 export let researchPostcloseQueue: Queue | null = null;
 let researchPremarketWorker: Worker | null = null;
@@ -432,6 +435,28 @@ async function processIntradayFetcher(_job: Job): Promise<{ skipped: boolean }> 
   return { skipped: false };
 }
 
+// Found 2026-08-13 (data-coverage-audit): gdeltService.ts's runGdeltBackfill() existed with a
+// working parser/fetcher and a real table (gdelt_sentiment) but was never called from any
+// queue/job/route — fully disconnected code, table permanently at 0 rows. Wired in here rather
+// than deleted: GDELT is the only source on this platform with historical per-company tone
+// back to 2015 (RSS/Google News don't backfill), so it's worth keeping live.
+//
+// No isMarketOpen() gate -- GDELT indexes global news continuously, weekends and holidays
+// included, unlike NSE-trading-day-gated fetchers above. Trailing 3-day window (not just
+// "yesterday") so a missed run self-heals via the ON CONFLICT upsert in runGdeltBackfill,
+// same reasoning as every other backfill-shaped job in this file. limit=150 matches the
+// function's own default (~roughly this platform's liquid-universe size) -- GDELT's ~1
+// req/5.2s rate limit makes 150 companies a ~13-minute run; do not raise this without also
+// widening the cron gap, or a slow run risks overlapping the next scheduled tick.
+async function processGdeltSentiment(_job: Job): Promise<{ skipped: boolean }> {
+  const { runGdeltBackfill } = await import('./gdeltService');
+  const end = new Date();
+  const start = new Date(end.getTime() - 3 * 24 * 60 * 60 * 1000);
+  const result = await runGdeltBackfill(start, end, 150);
+  console.log(`[QUEUE] gdelt-sentiment: ${result.rows} rows across ${result.companies} companies`);
+  return { skipped: false };
+}
+
 /**
  * Overall execution budget for a heavy processor.
  *
@@ -503,6 +528,27 @@ async function processMlDailyOps(job: Job): Promise<{ success: boolean }> {
   // 5 min budget is generous headroom over the measured sub-minute runtime.
   await runPython('investsights_investor_activity_fetcher.py', [], 5 * 60_000)
     .catch(e => console.warn('[QUEUE] investsights_investor_activity_fetcher failed:', (e as Error).message));
+
+  // InvestSights per-stock TTM/FMP-ratios/growth-metrics/DCF fair-value snapshot (onboard-
+  // data-source batch, 2026-08-13) → investsights_fundamentals_history. --limit 300 (liquid-
+  // by-market-cap): 4 sequential requests/symbol, measured ~2.3s/symbol incl. rate limit —
+  // 20 min budget is generous headroom over the ~12 min measured full-limit runtime.
+  await runPython('investsights_fundamentals_fetcher.py', ['--limit', '300'], 20 * 60_000)
+    .catch(e => console.warn('[QUEUE] investsights_fundamentals_fetcher failed:', (e as Error).message));
+
+  // InvestSights per-stock filings/announcements/concall/rating documents (same batch) →
+  // investsights_announcement_intel. --limit 200 (heavier payload per symbol than the
+  // fundamentals fetcher above, up to ~44 nested filing items/symbol).
+  await runPython('investsights_announcement_intel_fetcher.py', ['--limit', '200'], 15 * 60_000)
+    .catch(e => console.warn('[QUEUE] investsights_announcement_intel_fetcher failed:', (e as Error).message));
+
+  // InvestSights rolling PE-band chart (same batch). Its source endpoint 404s for every
+  // symbol as of 2026-08-13 onboarding (see the fetcher's own docstring + live_datasource
+  // test) -- scheduled anyway so a future recovery is picked up automatically; cheap even
+  // while broken thanks to FetchTracker's abort_after_consecutive_fails fail-fast (~30s/night,
+  // not a full --limit grind). 20 min budget covers the "endpoint is back" case.
+  await runPython('investsights_pe_band_fetcher.py', ['--limit', '300'], 20 * 60_000)
+    .catch(e => console.warn('[QUEUE] investsights_pe_band_fetcher failed:', (e as Error).message));
 
   // MarketsMojo daily-cadence series (onboarded 2026-08-11, backfilled once, never scheduled
   // until now — their dataQualityChecks entries were set at warnDays 3/failDays 5 with no job
@@ -737,6 +783,11 @@ async function processMlDailyOps(job: Job): Promise<{ success: boolean }> {
     // analysis) → sector_rrg_history/sector_correlation_{pairs,stats,summary}.
     runPython('investsights_sector_intel_fetcher.py', [], 2 * 60_000)
       .catch(e => console.warn('[QUEUE] investsights_sector_intel_fetcher failed:', (e as Error).message)),
+    // Cross-sectional PE/ROE/ROCE/growth screener snapshot (onboard-data-source batch,
+    // 2026-08-13) → investsights_factor_scores. Paginated batch query, not per-stock —
+    // measured ~15s for the full ~5,377-row provider universe, 2 min budget is ample.
+    runPython('investsights_factor_scores_fetcher.py', [], 2 * 60_000)
+      .catch(e => console.warn('[QUEUE] investsights_factor_scores_fetcher failed:', (e as Error).message)),
     // Ranked institutional buy/sell deal activity (2026-08-06 urls.txt analysis) → institutional_deal_signals.
     runPython('institutional_deals_fetcher.py', [], 2 * 60_000)
       .catch(e => console.warn('[QUEUE] institutional_deals_fetcher failed:', (e as Error).message)),
@@ -2069,6 +2120,36 @@ export async function initQueues(): Promise<boolean> {
     intradayFetcherWorker.on('failed', (_, err) => {
       console.error('[QUEUE] intraday-fetcher failed:', err.message);
       recordHeartbeat('intraday-fetcher', 'failed', err?.message);
+    });
+
+    // ── GDELT sentiment (daily, 19:00 UTC = 12:30 AM IST, every day incl. weekends -- news
+    // accumulates on non-trading days too, unlike the NSE-specific fetchers above). Deliberately
+    // NOT 17:00-18:00 UTC -- that whole window is the evening-batch cluster (score-all 17:00,
+    // quant-score-daily 17:30, ml-daily-ops-adjacent jobs through 18:45); 19:00 sits clear of it
+    // with the full ~13 min runtime (150 companies x ~5.2s GDELT rate limit) as headroom before
+    // the next scheduled job at 20:30 -- see processGdeltSentiment's own comment before touching
+    // this, and jobPipelineOrdering.test.ts's minute-collision check before picking a new slot.
+    gdeltSentimentQueue = new Queue(QUEUE_GDELT_SENTIMENT, { connection });
+    const gdeltRep = await gdeltSentimentQueue.getRepeatableJobs();
+    for (const r of gdeltRep) await gdeltSentimentQueue.removeRepeatableByKey(r.key);
+    await gdeltSentimentQueue.add('gdelt-sentiment', {}, {
+      repeat: { pattern: '0 19 * * *', tz: 'Etc/UTC' },
+      jobId: 'gdelt-sentiment',
+      removeOnComplete: 5,
+      removeOnFail: 3,
+    });
+    gdeltSentimentWorker = new Worker(
+      QUEUE_GDELT_SENTIMENT,
+      processGdeltSentiment,
+      { connection, concurrency: 1, lockDuration: 20 * 60 * 1000, lockRenewTime: 3 * 60 * 1000 },
+    );
+    gdeltSentimentWorker.on('completed', () => {
+      console.log('[QUEUE] gdelt-sentiment completed');
+      recordHeartbeat('gdelt-sentiment', 'success');
+    });
+    gdeltSentimentWorker.on('failed', (_, err) => {
+      console.error('[QUEUE] gdelt-sentiment failed:', err.message);
+      recordHeartbeat('gdelt-sentiment', 'failed', err?.message);
     });
 
     // ── Live Screener paced collector (every 15 min during market hours: 3:30-10:00 UTC = 9:00-15:30 IST)
