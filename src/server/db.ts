@@ -1766,6 +1766,15 @@ migrateColumn('technical_signals', 'rs_rank_21d',     'REAL');
 migrateColumn('technical_signals', 'rs_rank_63d',     'REAL');
 // Insider activity (computed by insider_features.py from insider_trades rolling 90d)
 migrateColumn('technical_signals', 'insider_buy_pct_90d', 'REAL');
+// insider_trades' own CREATE TABLE above never got these three -- live Postgres has had them
+// for a while (date_iso: added for the alphabetic-sort bug, see insider-trades-recency's own
+// comment in dataQualityChecks.ts; pct_transacted/source: fetcher provenance), but the SQLite
+// dev-fallback schema drifted behind it. Found 2026-08-14 repointing misc.router.ts's
+// getInsiderTransactions off the dead insider_transactions table onto this one, which reads
+// date_iso -- would have silently 500'd under the SQLite dev fallback without this.
+migrateColumn('insider_trades', 'date_iso', 'TEXT');
+migrateColumn('insider_trades', 'pct_transacted', 'REAL');
+migrateColumn('insider_trades', 'source', 'TEXT');
 // Intraday microstructure features (computed by intraday_features.py from intraday_ohlcv)
 migrateColumn('technical_signals', 'opening_range_break',  'REAL');
 migrateColumn('technical_signals', 'vwap_deviation_pct',   'REAL');

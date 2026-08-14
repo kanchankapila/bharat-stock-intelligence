@@ -503,14 +503,20 @@ const TABLE_FRESHNESS_CHECKS: TableFreshnessConfig[] = [
   // index_membership_fetcher.py both UPDATE nse_stocks in place (surveillance flags /
   // Nifty50-200-Midcap150-Smallcap250 membership) rather than writing a dedicated dated table,
   // so neither had ever gotten a freshness check -- the standard factory still applies since
-  // both fetchers stamp their own *_updated_at column on every write. warnDays/failDays looser
-  // than the daily 3/5 pattern: both run inside the same daily ml-daily-ops chain as
-  // asm-gsm/mc-earnings but a few days' staleness on surveillance/index-membership status is a
-  // real-world non-event (ASM/GSM/index reconstitution changes are rare), unlike a stale price.
+  // both fetchers stamp their own *_updated_at column on every write. asm_gsm_fetcher.py runs
+  // daily (queues.ts, ml-daily-ops), so 5/10 is already loose relative to its cadence -- a few
+  // days' staleness on surveillance flags is a real-world non-event (ASM/GSM entries are rare).
   { id: 'nse-stocks-surveillance-freshness', label: 'nse_stocks.is_asm/gsm_stage (ASM/GSM surveillance flags)',
     category: 'reference', critical: false, table: 'nse_stocks', dateColumn: 'surveillance_updated_at', warnDays: 5, failDays: 10 },
+  // index_membership_fetcher.py's own docstring says "Run weekly" and it is wired only into
+  // nse-sync-weekly (jobs/sync.jobs.ts, cron '0 2 * * 0' -- Sunday), NOT the daily chain the
+  // comment above used to claim it shared with asm-gsm. At 5/10-day thresholds this false-warned
+  // every Thu/Fri/Sat of every week (5+ days since the last Sunday run, every week, by
+  // construction) -- caught 2026-08-14 from a real daily digest warning at 5.1d. Recalibrated to
+  // this file's own established weekly-cadence pair (10/16, see historical-fundamentals-freshness
+  // and tl-financial-quality-freshness) instead of the daily 5/10 default.
   { id: 'nse-stocks-index-flags-freshness', label: 'nse_stocks index membership flags (Nifty50/100/200/Midcap150/Smallcap250)',
-    category: 'reference', critical: false, table: 'nse_stocks', dateColumn: 'index_flags_updated_at', warnDays: 5, failDays: 10 },
+    category: 'reference', critical: false, table: 'nse_stocks', dateColumn: 'index_flags_updated_at', warnDays: 10, failDays: 16 },
   { id: 'mc-broker-reco-freshness', label: 'mc_broker_reco',
     category: 'reference', critical: false, table: 'mc_broker_reco', dateColumn: 'fetched_at', warnDays: 5, failDays: 10 },
   // Found 2026-08-13 (data-coverage-audit): moneycontrol_fetcher.py writes this (analyst

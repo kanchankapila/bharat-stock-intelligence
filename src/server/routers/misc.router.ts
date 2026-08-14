@@ -330,19 +330,29 @@ export const miscRouter = router({
       return { date: latest.date, indicator: value, zone, trail: rows.slice(1, 8) };
     }, 900)),
 
-  // Raw NSE PIT (insider) filings: promoter/designated-person transactions with before/after
-  // %holding — richer than getDeals, previously only consumed as a binary flag by the scoring
-  // engine (technical_signals.insider_buy_flag/sell_flag).
+  // Insider/promoter transactions: was raw NSE PIT filings from insider_transactions, but that
+  // table has been stuck at 2026-05-02 for 3+ months (NSE's corporates-pit endpoint ignores its
+  // own from/to params -- see insider_transactions_fetcher.py's compute_and_write_features
+  // docstring, 2026-08-07) -- confirmed live 2026-08-14 (23,596 rows, still MAX(transaction_date)
+  // = 2026-05-02). The ML feature side switched to insider_trades (MoneyControl + Tickertape,
+  // fresh to within a day, already used for technical_signals.promoter_*_90d_cr) that same day,
+  // but this UI-facing procedure was missed and kept serving the frozen table. Repointed
+  // 2026-08-14. Trade-off: insider_trades has no before/after %holding (that's NSE PIT-specific;
+  // this source's closest analogue is pct_transacted, % of float, not carried here since no
+  // consumer reads it) -- before_pct/after_pct now come back null, which every consumer already
+  // renders as '—'.
   getInsiderTransactions: publicProcedure
     .input(z.object({ symbol: z.string().optional(), limit: z.number().min(1).max(200).optional().default(100) }))
     .query(async ({ input }) => {
       try {
         const rows = await dbAll<any>(
-          `SELECT symbol, person_name, person_category, transaction_mode, quantity, value_cr,
-                  before_pct, after_pct, transaction_date
-           FROM insider_transactions
+          `SELECT symbol, "acquirerName" AS person_name, category AS person_category,
+                  "typeOfTransaction" AS transaction_mode, quantity,
+                  ROUND(CAST("valueInr" AS NUMERIC) / 1e7, 4) AS value_cr,
+                  NULL AS before_pct, NULL AS after_pct, date_iso AS transaction_date
+           FROM insider_trades
            ${input.symbol ? "WHERE symbol = ?" : ""}
-           ORDER BY transaction_date DESC
+           ORDER BY date_iso DESC
            LIMIT ?`,
           input.symbol ? [input.symbol.toUpperCase(), input.limit] : [input.limit]
         );

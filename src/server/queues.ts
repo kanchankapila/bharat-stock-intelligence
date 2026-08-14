@@ -1229,11 +1229,16 @@ async function processMlWeeklyRetrain(_job: Job): Promise<{ success: boolean }> 
   // them. Drop this step rather than let it grow if nothing has parsed them by the next audit.
   await runPython('extra_endpoints_fetcher.py', ['--scope', 'weekly'], 90 * 60_000)
     .catch(e => console.warn('[QUEUE] extra_endpoints_fetcher (weekly scope) failed:', (e as Error).message));
-  // Moved off the nightly chain (2026-08-13): 14m47 of ml-daily-ops every night to refresh a
-  // feed measured 73.7 days stale. SEBI PIT filings are sparse and event-driven; weekly is the
-  // cadence the data actually has. 30 min matches the budget it had on the daily chain.
-  await runPython('insider_transactions_fetcher.py', [], 30 * 60_000)
-    .catch(e => console.warn('[QUEUE] insider_transactions_fetcher failed:', (e as Error).message));
+  // insider_transactions_fetcher.py: moved off the nightly chain 2026-08-13 (14m47/night for a
+  // feed measured 73.7 days stale), then dropped from this weekly slot entirely 2026-08-14 --
+  // NSE's corporates-pit endpoint ignores its own from/to params, so the table it fills
+  // (insider_transactions) can structurally never gain a new row regardless of cadence
+  // (confirmed live: still MAX(transaction_date)=2026-05-02 after 3+ months of nightly-then-
+  // weekly runs). The real ML feature source switched to insider_trades (MoneyControl +
+  // Tickertape, fresh to ~1 day) back on 2026-08-07 -- compute_and_write_features() in the same
+  // .py file already reads from insider_trades, not this fetch. The 30-min slot bought nothing.
+  // Fetcher file, insider_transactions table, and its data-quality check are left in place
+  // (still runnable by hand if NSE's endpoint is ever fixed) -- only the schedule is removed.
   // trendlyne_adv_tech_fetcher.py + trendlyne_price_analysis_fetcher.py moved to the
   // trendlyne-midweek queue (Tuesday) to de-conflict from this Sunday batch.
   // trendlyne_overview_fetcher.py moved into company-profiles-sync (dedupes the
