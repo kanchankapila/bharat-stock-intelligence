@@ -14,6 +14,14 @@ below is sourced from it. If you are about to say a setup works, that file is wh
 claim has to come from, and `references/edge-inventory.md` next to this file is the
 one-page distillation of what is tradeable and what is already dead.
 
+**Load the `trade_desk_skill` memory entry before generating a trade plan, if it exists.**
+Per `CLAUDE.md`'s memory-index rule — this skill's own entry accumulates things worth not
+rediscovering session to session: known execution-drag figures, any change to
+`EXPECTED_EXCESS_PCT`/`EXPECTED_T` since a `factor_backtest.py` re-run, and gotchas in the
+storage layer. If it hasn't been filed into the real memory store yet, check
+`docs/memory/trade_desk_skill.md` in this repo instead — cloud sessions sometimes stage
+entries there when the Windows memory path is unreachable, and it isn't always caught up.
+
 ## The honest prior — state this to the user once per session, then stop repeating it
 
 - **One setup on this platform has survived a real measurement review**: the tier-1
@@ -135,6 +143,15 @@ python trade_journal.py log --symbol PRECWIRE --signal-date 2026-08-12 \
 
 Log at entry even if you don't yet know the exit; `grade` fills the rest. Skipping the
 losers is the fastest way to build a journal that lies to you.
+
+**Storage.** The `trade_journal` Postgres table (migration `1787000000000`) is the record —
+`log` writes there directly whenever the DB is reachable. If it isn't (no tunnel to `:5433`,
+logging from a laptop), the row goes to an offline JSONL file instead
+(`$TRADE_JOURNAL_PATH`, default `<repo>/trade_journal.jsonl`, gitignored) and `log`/`report`
+say so explicitly. Run `python trade_journal.py sync` once reconnected to push offline rows
+into the table — it's idempotent (keyed on the trade's own id), so re-running it is always
+safe. `grade`/`report` read across both stores automatically, so nothing is invisible in the
+meantime; `sync` just moves the offline rows into the record everyone else can see.
 
 ## Phase 6 — Grade, weekly
 

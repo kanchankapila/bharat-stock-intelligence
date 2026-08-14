@@ -16,14 +16,21 @@ the setup is not tradeable by you at your size, however good the backtest looks.
 Everything is per-date-then-averaged and winsorized per .claude/rules/measurement.md's
 panel spec -- pooling trade rows has flipped a conclusion three separate times in this repo.
 
+STORAGE
+    Postgres `trade_journal` (migration 1787000000000) is the record. When the DB is
+    unreachable -- logging a trade from a laptop with no tunnel to :5433 -- rows go to an
+    offline JSONL file instead and `sync` reconciles them on the next connect. Rows are keyed
+    on a writer-issued uuid, so a row landing twice upserts rather than duplicating, and
+    `synced_at` makes the reconciliation idempotent. Offline file: $TRADE_JOURNAL_PATH,
+    default <repo>/trade_journal.jsonl (gitignored).
+
 USAGE
     python trade_journal.py log --symbol MOREPENLAB --signal-date 2026-08-12 \
         --trade-date 2026-08-13 --qty 100 --entry 61.40 --exit 62.85
     python trade_journal.py grade                  # fill model fills/benchmark from OHLCV
+    python trade_journal.py sync                   # push offline-logged rows into Postgres
     python trade_journal.py report                 # per-date stats + verdict vs expectation
     python trade_journal.py report --since 2026-07-01
-
-Journal file: $TRADE_JOURNAL_PATH, default <repo>/trade_journal.jsonl (gitignored).
 """
 from __future__ import annotations
 
@@ -39,7 +46,7 @@ import numpy as np
 import pandas as pd
 from scipy import stats
 
-from db_compat import read_df
+from db_compat import execute, read_df
 from screener_combo_finder import COST_PCT, MIN_ADTV, MIN_PRICE
 
 # The tier-1 verdict this journal exists to check its own results against. Sourced from
@@ -172,28 +179,156 @@ def verdict(model: dict | None, real: dict | None) -> str:
             f"Not distinguishable from zero either way. Keep the size that survives being wrong.")
 
 
-# ── journal I/O ───────────────────────────────────────────────────────────────────────
+# ── journal I/O: Postgres first, offline JSONL fallback ───────────────────────────────
+#
+# The DB is the record. The file exists so a trade can still be logged from a laptop with no
+# tunnel to :5433 -- those rows carry synced_at=NULL and are reconciled by `sync`. Rows are
+# keyed on a writer-issued uuid, so the same row landing twice is an upsert, not a duplicate.
 
-def load_journal() -> pd.DataFrame:
+COLUMNS = [
+    "id", "setup", "symbol", "signal_date", "trade_date", "side", "qty",
+    "entry_price", "exit_price", "notes", "logged_at",
+    "model_open", "model_close", "universe_ret",
+    "model_excess_pct", "real_excess_pct", "slippage_pct", "synced_at",
+]
+GRADE_COLUMNS = ["model_open", "model_close", "universe_ret",
+                 "model_excess_pct", "real_excess_pct", "slippage_pct"]
+
+_db_ok: bool | None = None
+
+
+def db_available() -> bool:
+    """Cheap one-shot probe, cached for the process.
+
+    Deliberately catches broadly: an unreachable DB is the normal offline case this fallback
+    exists for, not an error worth a traceback. It is reported, never silent -- a journal that
+    quietly stopped writing to Postgres is exactly the 'success on a step that wrote nothing'
+    class in recurring-bugs.md."""
+    global _db_ok
+    if _db_ok is None:
+        try:
+            read_df("SELECT 1 AS ok FROM trade_journal WHERE 1 = 0")
+            _db_ok = True
+        except Exception as exc:  # noqa: BLE001 -- see docstring
+            print(f"[TradeJournal] database unavailable ({type(exc).__name__}), using the "
+                  f"offline journal at {journal_path()}. Run `sync` once reconnected.")
+            _db_ok = False
+    return _db_ok
+
+
+def _clean(rec: dict) -> dict:
+    return {k: (None if (v is None or (isinstance(v, float) and not math.isfinite(v)))
+                else v) for k, v in rec.items()}
+
+
+def _read_file() -> pd.DataFrame:
     path = journal_path()
     if not path.exists():
-        return pd.DataFrame()
+        return pd.DataFrame(columns=COLUMNS)
     records = [json.loads(line) for line in path.read_text().splitlines() if line.strip()]
-    return pd.DataFrame(records)
+    df = pd.DataFrame(records)
+    for col in COLUMNS:
+        if col not in df.columns:
+            df[col] = None
+    return df
 
 
-def append_trade(rec: dict) -> None:
+def _write_file(df: pd.DataFrame) -> None:
     path = journal_path()
     path.parent.mkdir(parents=True, exist_ok=True)
-    with path.open("a") as f:
-        f.write(json.dumps(rec) + "\n")
-
-
-def rewrite_journal(df: pd.DataFrame) -> None:
-    path = journal_path()
-    lines = [json.dumps({k: (None if pd.isna(v) else v) for k, v in rec.items()})
+    lines = [json.dumps(_clean({k: rec.get(k) for k in COLUMNS}))
              for rec in df.to_dict("records")]
     path.write_text("\n".join(lines) + ("\n" if lines else ""))
+
+
+def _read_db() -> pd.DataFrame:
+    df = read_df(f"SELECT {', '.join(COLUMNS)} FROM trade_journal")
+    if df.empty:
+        return pd.DataFrame(columns=COLUMNS)
+    return df
+
+
+def _upsert_db(rec: dict) -> None:
+    rec = _clean({k: rec.get(k) for k in COLUMNS})
+    cols = ", ".join(COLUMNS)
+    marks = ", ".join(["?"] * len(COLUMNS))
+    # synced_at is excluded from the update list on purpose: it records when a row first
+    # reconciled into the DB, and walking it forward on every re-write is precisely what turned
+    # unified_signals.signal_generated_at into a last-seen time (migration 1786920000000).
+    updates = ", ".join(f"{c} = excluded.{c}" for c in COLUMNS
+                        if c not in ("id", "synced_at"))
+    execute(f"INSERT INTO trade_journal ({cols}) VALUES ({marks}) "
+            f"ON CONFLICT (id) DO UPDATE SET {updates}",
+            tuple(rec[c] for c in COLUMNS))
+
+
+def load_journal() -> pd.DataFrame:
+    """DB rows, plus any offline rows not yet reconciled into it.
+
+    `_source` marks where each row came from so grade results are written back to the right
+    place. It is an internal column and is stripped before persisting."""
+    file_df = _read_file()
+    if not db_available():
+        file_df["_source"] = "file"
+        return file_df
+
+    db_df = _read_db()
+    db_df["_source"] = "db"
+    if file_df.empty:
+        return db_df
+    pending = file_df[~file_df["id"].isin(db_df["id"])].copy()
+    if pending.empty:
+        return db_df
+    print(f"[TradeJournal] {len(pending)} offline row(s) not yet in the database — "
+          f"run `python trade_journal.py sync`.")
+    pending["_source"] = "file"
+    return pd.concat([db_df, pending], ignore_index=True)
+
+
+def append_trade(rec: dict) -> str:
+    if db_available():
+        rec = dict(rec, synced_at=datetime.datetime.now(datetime.UTC).isoformat())
+        _upsert_db(rec)
+        return "database"
+    _write_file(pd.concat([_read_file(), pd.DataFrame([rec])], ignore_index=True))
+    return "offline journal"
+
+
+def persist(df: pd.DataFrame) -> None:
+    """Write graded rows back to whichever store each came from."""
+    if "_source" not in df.columns:
+        df = df.assign(_source="db" if db_available() else "file")
+    if db_available():
+        for rec in df[df["_source"] == "db"].to_dict("records"):
+            _upsert_db(rec)
+    file_rows = df[df["_source"] == "file"]
+    if not file_rows.empty or journal_path().exists():
+        _write_file(file_rows)
+
+
+def sync() -> int:
+    """Reconcile offline rows into the database. Idempotent -- upserts on id, and stamps
+    synced_at only on rows that did not already carry one."""
+    if not db_available():
+        print("[TradeJournal] still offline — nothing synced.")
+        return 0
+    file_df = _read_file()
+    if file_df.empty:
+        print("[TradeJournal] offline journal is empty — nothing to sync.")
+        return 0
+
+    now = datetime.datetime.now(datetime.UTC).isoformat()
+    for rec in file_df.to_dict("records"):
+        if not rec.get("synced_at"):
+            rec["synced_at"] = now
+        _upsert_db(rec)
+    print(f"[TradeJournal] synced {len(file_df)} offline row(s) into trade_journal.")
+
+    # The DB now holds them. Keep the file as the offline log rather than deleting it, but
+    # stamp it so a second sync is a no-op rather than a re-upsert of stale grading columns.
+    file_df["synced_at"] = file_df["synced_at"].fillna(now)
+    _write_file(file_df)
+    return len(file_df)
 
 
 # ── DB-backed grading ─────────────────────────────────────────────────────────────────
@@ -225,8 +360,7 @@ def grade(verbose: bool = True) -> int:
         print("[TradeJournal] journal is empty — nothing to grade.")
         return 0
 
-    for col in ("model_open", "model_close", "universe_ret", "model_excess_pct",
-                "real_excess_pct", "slippage_pct"):
+    for col in GRADE_COLUMNS:
         if col not in df.columns:
             df[col] = None
 
@@ -273,7 +407,7 @@ def grade(verbose: bool = True) -> int:
                 print(f"[TradeJournal] {trade_date} {symbol:12s} model={model_ex:+.2f}% "
                       f"real={real_ex if real_ex is None else f'{real_ex:+.2f}%'}")
 
-    rewrite_journal(df)
+    persist(df)
     print(f"[TradeJournal] graded {graded} trade(s).")
     return graded
 
@@ -328,9 +462,15 @@ def cmd_log(a) -> None:
         "notes": a.notes,
         "logged_at": datetime.datetime.now(datetime.UTC).isoformat(),
     }
-    append_trade(rec)
+    # setup is compared lowercase everywhere; normalising at the one writer is what stops the
+    # two-spellings-of-one-enum collision that bit signal_source and screener_catalog.source.
+    rec["setup"] = (rec["setup"] or "").strip().lower()
+    where = append_trade(rec)
+    if not rec["signal_date"]:
+        print("[TradeJournal] note: no --signal-date given. The tier-1 setup fires on session D "
+              "and trades on D+1; without it, nothing records which session the setup fired.")
     print(f"[TradeJournal] logged {rec['side']} {rec['qty']} {rec['symbol']} "
-          f"on {rec['trade_date']} → {journal_path()}")
+          f"on {rec['trade_date']} → {where}")
 
 
 def main() -> None:
@@ -350,6 +490,7 @@ def main() -> None:
     lg.add_argument("--notes")
 
     sub.add_parser("grade", help="fill benchmark + excess columns from settled OHLCV")
+    sub.add_parser("sync", help="reconcile offline-logged trades into the database")
 
     rp = sub.add_parser("report", help="per-date stats and verdict")
     rp.add_argument("--since")
@@ -359,6 +500,8 @@ def main() -> None:
         cmd_log(a)
     elif a.cmd == "grade":
         grade()
+    elif a.cmd == "sync":
+        sync()
     elif a.cmd == "report":
         report(since=a.since)
 

@@ -94,6 +94,35 @@ db.exec(`
   );
   CREATE INDEX IF NOT EXISTS idx_mf_portfolio_holdings_user ON mf_portfolio_holdings(userId);
 
+  -- The /trade-desk skill's trade journal (src/server/trade_journal.py). User-entered trades,
+  -- graded against settled OHLCV. Mirrors migration 1787000000000 -- see that file for why the
+  -- PK is the writer-issued id rather than (symbol, trade_date), why every grading column is
+  -- nullable, and why this table gets no freshness check. Not a signal table: it grades the
+  -- user's own fills, never the platform's signals.
+  CREATE TABLE IF NOT EXISTS trade_journal (
+    id TEXT PRIMARY KEY,
+    setup TEXT NOT NULL,
+    symbol TEXT NOT NULL,
+    signal_date TEXT,
+    trade_date TEXT NOT NULL,
+    side TEXT NOT NULL DEFAULT 'LONG',
+    qty REAL,
+    entry_price REAL,
+    exit_price REAL,
+    notes TEXT,
+    logged_at TEXT,
+    model_open REAL,
+    model_close REAL,
+    universe_ret REAL,
+    model_excess_pct REAL,
+    real_excess_pct REAL,
+    slippage_pct REAL,
+    synced_at TEXT,
+    created_at TEXT DEFAULT CURRENT_TIMESTAMP
+  );
+  CREATE INDEX IF NOT EXISTS idx_trade_journal_trade_date ON trade_journal(trade_date);
+  CREATE INDEX IF NOT EXISTS idx_trade_journal_setup_date ON trade_journal(setup, trade_date);
+
   -- 2. Core Stock Data
   CREATE TABLE IF NOT EXISTS nse_stocks (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
