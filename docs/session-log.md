@@ -6,6 +6,92 @@ Historical record, split out of CLAUDE.md on 2026-08-11 (it was 64% of that file
 
 ## Recent session notes
 
+### 2026-08-14 — `screener-combo-predictor`: coverage report on tier-2 (NiftyTrader) filter keys found the same-day parser had a second, worse blind spot
+
+Ran `screener_name_concepts.py --coverage` against `LIVE_SCREENER_FILTERS` (the 45 camelCase
+keys `liveScreenerCollector.ts` polls every 15 min — this IS `screener_combo_finder.py`'s
+tier-2 feature set) rather than only the 1,534-name EOD catalog it was built and measured
+against yesterday. Coverage came back **40.0%**, against 82.1% on the prose catalog, with only
+4 of 47 tags firing.
+
+**Root cause:** `normalize_name`'s de-glue rule assumes "Title + run-on description" (one
+boundary, keep the head) — correct for ETnow's glued names, wrong for an identifier that has
+no whitespace and many boundaries. `todayGapUP` → `today`; `range52WeekHigh` →
+`range52week`; both then matched nothing. Fixed by adding a second branch keyed on the
+absence of whitespace: an identifier is split on camelCase and letter/digit boundaries
+instead of de-glued. `todayGapUP` → `today gap up`, `range52WeekHigh` → `range 52 week
+high`. Tier-2 coverage: **40.0% → 100%** (45/45), same-day-relevant 24.4% → 53.3%, human
+catalog unaffected (still 82.1%, still all tags firing on the full corpus).
+
+**A second, independent gap the identifier fix exposed rather than caused:** no tag covered
+"opened at the high/low" at all — `open_eq_high`/`open_eq_low` are two of the three legs of
+the capitulation triple, the one combination in `measurement.md` with a measured surviving
+edge (t=+3.61), and the vocabulary had never tagged the concept because it's rare in prose
+screener names but present in nearly every live filter set. Added `mech_open_extreme`,
+matched against both the identifier form (`todayStockOpenHigh`) and prose (`"opened at the
+low"`), with a check that `open interest at a high` does NOT false-positive.
+
+16 new tests (38 total), every new guard negative-controlled by patching the source seven
+ways (identifier branch removed, `mech_open_extreme` removed, the consecutive-caps boundary
+removed, the letter/digit boundary removed, the whitespace discriminator inverted) and
+confirming each patch fails the test written for it before restoring.
+
+**Takeaway for anyone touching this module: `--coverage` on the 1,534-name catalog alone is
+not sufficient self-audit.** The module feeds two structurally different naming systems
+(prose descriptions vs. machine filter keys) and a fix validated against one silently
+regressed nothing on the other only because the two failure modes happened not to overlap —
+that will not always be true. Run `--coverage` against both corpora before trusting a change.
+
+### 2026-08-13 — New skill: `screener-combo-predictor` (name→concept-tag decomposition + daily predict/grade/learn loop)
+
+Built `.claude/skills/screener-combo-predictor/SKILL.md` plus its one non-prose component,
+`src/server/screener_name_concepts.py` (pure stdlib, no DB/network, 22 tests in
+`src/server/tests/test_screener_name_concepts.py`).
+
+**The idea, and why it isn't a rerun of an already-dead measurement.** `measurement.md` records
+that all 1,563 screeners tested one-at-a-time survive neither FDR nor Bonferroni. That is partly
+a *power* problem: one screener contributes a handful of (symbol, date) rows, so nothing can
+clear a 1,563-way correction even if real. Decomposing the 1,534-name catalog by NAME onto 46
+orthogonal concept tags across 8 facets (timeframe / mechanism / participation / fundamental /
+event / descriptive) pools every screener expressing a concept across all three providers, which
+is what gives `screener_combo_finder.py`'s day-level t-test enough observations per cell. The tag
+is the testable unit; the individual screener is not. Measured coverage: **82.1% of names carry
+≥1 signal tag, 50.8% same-day relevant, all 46 tags fire.**
+
+**Deliberately reused rather than rebuilt**: `screener_combo_finder.py`'s `_day_level_backtest()`
+/ `search_combinations()` for validation, and — for the learning loop —
+`live_capitulation_screener.py`'s pattern of writing picks into the existing
+`live_screener_appearances` under a new `filter_key`. That last choice means
+`live_screener_resolver.py` grades the picks automatically and `backtest_live_screener.py` /
+`live_screener_optimizer.py` / combo-finder tier 2 all consume them, with **zero schema change
+and no migration**. No new predictions table was added.
+
+**Two bugs found in my own parser by the discipline, not by reading it:**
+1. `mech_ma_stack` matched only Trendlyne's `SMA100` ordering and silently dropped ETnow/
+   MoneyControl's `100Day EMA` family (11 names) from combination search. Found by the
+   `--coverage` self-audit's uncovered-names list, not by inspecting the regex.
+2. The ETnow de-glue heuristic (split at lowercase→uppercase to strip a run-on description)
+   split *inside* domain camelCase tokens — `Strong QoQ EPS Growth in recent results` became
+   `Strong Qo`, losing the quarterly/growth/results tags entirely. Fixed by skipping boundaries
+   inside an `[A-Z][a-z][A-Z]` run (YoY/QoQ/MoM/FnO) plus a short-head guard for lowercase-initial
+   company names (eClerx/iGate).
+
+**Negative-controlling the tests is what caught bug 2.** Two tests passed against deliberately
+broken code on the first attempt: the de-glue test asserted on a name whose guard never fired,
+and the same-day-veto test used a pure-fundamental name that returns False via the fallback
+regardless of the veto. Both were rewritten against real catalog names that actually exercise the
+branch (`Increasing public shareholding in the past quarter (QoQ)` for the veto). Every
+behavioral guard in the module now has a control that fails when it is removed — verified by
+patching the source six ways and re-running.
+
+**Not done here (no production access in this session):** the container has no Postgres and no
+pandas/numpy, so nothing was run against live data. Loop A's tier-2 wiring, the daily pick
+emission, and all grading are specified in the skill but **unmeasured** — the skill states this
+and requires a live run + backtest evidence before any combination is promoted. The skill also
+carries `measurement.md`'s priors (screener sentiment inverted; gap_up/gap_down both negative
+net of costs; the capitulation triple as incumbent at t=+3.61) so a future session argues against
+them instead of rediscovering them.
+
 ### 2026-08-13 — Daily Data-Integrity Report triage: a deploy-race straggler and a false-positive check
 
 Two `🚨 critical` failures in the nightly Telegram report, both traced live against production
