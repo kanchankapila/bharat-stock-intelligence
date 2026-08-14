@@ -6,6 +6,48 @@ Historical record, split out of CLAUDE.md on 2026-08-11 (it was 64% of that file
 
 ## Recent session notes
 
+### 2026-08-14 — `screener-combo-predictor` Loop A3: wired concept-tag pooling into `screener_combo_finder.py`'s tier 2 (was previously only described in the skill, not implemented)
+
+Follow-up to the same day's tier-2 coverage fix. The skill's Loop A3 said to pool concept
+tags into tier 2's combination search; that was prose only until now. Implemented:
+
+- `_pool_by_concept_tag(wide, name_of, tag_prefix)` — pure OR-pool transform over an
+  already-materialized wide 0/1 frame, no DB. `_load_niftytrader_flags` calls it after its
+  existing pivot to add `ntTag_<tag>` columns alongside the 45 sparse `nt_<filter_key>`
+  columns it already produced.
+- `_load_eod_screener_category_flags` now also selects `screener_master.name` and emits
+  `eodTag_<tag>` rows into the same long-format list that already produces `eod_<category>_
+  <sentiment>` rows, decomposed via `decompose(name).signal_tags`. Deliberately **decoupled
+  from `inferred_sentiment`** rather than gated on it — that field is measured as inverted in
+  `measurement.md`, so a `neutral`-labelled screener (previously contributed nothing at all)
+  now still pools its concept tags. Verified by hand: a constructed `neutral`-sentiment ROE/
+  ROCE row correctly produced `eodTag_fund_quality=1` with no `eod_*` column set.
+- `run_tier2`'s `feature_cols` needed no change — it already derives from every non-id column
+  in the merged frame.
+
+**Actually executed this time, not just written.** This container had no pandas/numpy/scipy/
+sqlalchemy when the skill and `screener_name_concepts.py` were first built; they're
+installed now, which let `screener_combo_finder.py` import cleanly (its DB calls are all
+inside functions, never at import time) and let both new loaders' pure logic be exercised
+directly against constructed DataFrames/rows — not merely asserted. 4 new unit tests
+(`TestPoolByConceptTag`, 47 total in the two files), each negative-controlled by patching the
+source and confirming the corresponding test fails: OR→AND pooling, the missing-column guard,
+`signal_tags`→`tags` (re-admitting descriptive tags), and a hardcoded `tag_prefix` (which
+would silently collide the NiftyTrader and EOD tag namespaces on `run_tier2`'s merge). One
+control (the missing-column guard) was vacuous on the first attempt — the test never actually
+put the referenced column outside `wide`'s columns — rewritten against a case that does.
+Ran the full python suite after (`tests/ __tests__/` with deps installed, 1,606 passed / 26
+failed / 35 errors) and confirmed none of the failures or errors touch either file; all are
+pre-existing gaps from still-missing deps (`sklearn`, `curl_cffi`, `torch`, …) in unrelated
+engines.
+
+**Still unmeasured against production** — no Postgres was reachable in this session. The
+wiring is real, tested at the pure-transform level, and the SQL only adds one already-joined
+column (`sm.name`) to an existing SELECT, but nobody has confirmed live that `ntTag_*`/
+`eodTag_*` columns actually appear in a real merged frame or that tier 2's reported spreads
+change sensibly. Flagged in the skill doc; do not promote anything from tier 2 off this
+addition alone.
+
 ### 2026-08-14 — `screener-combo-predictor`: coverage report on tier-2 (NiftyTrader) filter keys found the same-day parser had a second, worse blind spot
 
 Ran `screener_name_concepts.py --coverage` against `LIVE_SCREENER_FILTERS` (the 45 camelCase

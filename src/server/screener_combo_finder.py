@@ -54,6 +54,7 @@ from scipy import stats
 from db_compat import connect, read_df, translate
 from breakout_classifier import _load_ohlcv
 from flyer_classifier import build_flyer_labels, _prev_trading_day_map, TRAIN_LOOKBACK_DAYS
+from screener_name_concepts import decompose
 
 GAP_THRESHOLD = 0.02     # >=2% gap at the open, vs prior close
 TOP_PCT = 0.05           # top/bottom 5% of the universe by same-day return
@@ -206,6 +207,41 @@ def run_tier1(persist: bool) -> dict | None:
 
 
 # ── Tier 2: NiftyTrader live filters + EOD screener category membership, short history ──
+#
+# Concept-tag pooling (screener_name_concepts.py, added after --coverage was run against the
+# real corpora this tier draws on). Both loaders below add ~47 dense tag_ columns alongside
+# their existing sparse raw columns: 45 NiftyTrader filter_keys and ~90 (category, sentiment)
+# combinations mostly cannot individually clear MIN_SIGNALS, but the CONCEPTS they express
+# (gap, oscillator-oversold, MA stack, opened-at-extreme, ...) pool observations across every
+# raw column expressing that concept, the same reasoning search_combinations() already
+# depends on for tier 1. See screener-combo-predictor SKILL.md, Loop A3. UNMEASURED as of
+# this addition -- no live run against Postgres has happened yet; see MIN_DAYS/MIN_SIGNALS
+# and tier 2's own "not scored as edge/no-edge" verdict below, which applies unchanged.
+
+
+def _pool_by_concept_tag(wide: pd.DataFrame, name_of: dict, tag_prefix: str = "tag_") -> pd.DataFrame:
+    """OR-pool one-hot raw filter_key/screener-name columns in an already-materialized wide
+    0/1 frame onto concept tags via screener_name_concepts.decompose(). Pure transform, no DB
+    -- unit-tested directly against constructed frames.
+
+    `name_of` maps a column name IN `wide` to the human-readable screener name or filter_key
+    to decompose (not the tag_prefix output name). A column present in `wide` but absent from
+    `name_of`, or one whose name decomposes to no signal tags, contributes nothing to any tag
+    -- silent by design, matching decompose()'s own "uncovered name" allowance (see
+    screener_name_concepts.py --coverage)."""
+    cols_by_tag: dict[str, list[str]] = {}
+    for col, name in name_of.items():
+        if col not in wide.columns:
+            continue
+        for tag in decompose(name).signal_tags:
+            cols_by_tag.setdefault(tag, []).append(col)
+    if not cols_by_tag:
+        return pd.DataFrame(index=wide.index)
+    return pd.DataFrame(
+        {f"{tag_prefix}{tag}": wide[cols].max(axis=1).astype(int) for tag, cols in cols_by_tag.items()},
+        index=wide.index,
+    )
+
 
 def _load_niftytrader_flags() -> pd.DataFrame:
     df = read_df(
@@ -217,8 +253,10 @@ def _load_niftytrader_flags() -> pd.DataFrame:
     df["v"] = 1
     wide = df.drop_duplicates(["symbol", "date", "filter_key"]).pivot_table(
         index=["symbol", "date"], columns="filter_key", values="v", fill_value=0).reset_index()
-    wide.columns = ["symbol", "date"] + [f"nt_{c}" for c in wide.columns[2:]]
-    return wide
+    raw_keys = list(wide.columns[2:])  # filter_key values, captured before the nt_ rename below
+    wide.columns = ["symbol", "date"] + [f"nt_{c}" for c in raw_keys]
+    tags = _pool_by_concept_tag(wide, {f"nt_{k}": k for k in raw_keys}, tag_prefix="ntTag_")
+    return pd.concat([wide, tags], axis=1)
 
 
 def _load_eod_screener_category_flags() -> pd.DataFrame:
@@ -230,7 +268,7 @@ def _load_eod_screener_category_flags() -> pd.DataFrame:
     part of why this whole tier is reported as low-data/directional only."""
     df = read_df("""
         SELECT sa.symbol, sa.appeared_date, sa.exited_date,
-               sm.inferred_category, sm.inferred_sentiment
+               sm.inferred_category, sm.inferred_sentiment, sm.name AS screener_name
         FROM screener_appearances sa
         JOIN screener_master sm ON sm.source = sa.source AND sm.scan_id = sa.screener_id
         WHERE sa.appeared_date >= (CURRENT_DATE - INTERVAL '60 days')
@@ -252,11 +290,20 @@ def _load_eod_screener_category_flags() -> pd.DataFrame:
     for r in df.itertuples(index=False):
         sentiment = "bull" if r.inferred_sentiment == "bullish" else (
             "bear" if r.inferred_sentiment == "bearish" else None)
-        if not sentiment:
-            continue
+        # Concept tags from the screener's own NAME, resolved once per row (not once per
+        # date -- `dates` can run to ~60 entries). Deliberately decoupled from
+        # inferred_sentiment: measurement.md measures that field as inverted, so pooling by
+        # concept must not inherit its bias by gating on it. .signal_tags already excludes
+        # descriptive tags (sector/theme membership) -- the same class of "what the company
+        # is, not what its price is doing" scoring_engine.py's neutral-tag-as-bearish bug
+        # wrongly treated as a signal.
+        name_tags = decompose(r.screener_name).signal_tags if r.screener_name else []
         for d in dates:
             if r.appeared_date <= d <= r.exited_date:
-                rows.append((r.symbol, d, f"eod_{r.inferred_category}_{sentiment}"))
+                if sentiment:
+                    rows.append((r.symbol, d, f"eod_{r.inferred_category}_{sentiment}"))
+                for tag in name_tags:
+                    rows.append((r.symbol, d, f"eodTag_{tag}"))
     if not rows:
         return pd.DataFrame()
     long = pd.DataFrame(rows, columns=["symbol", "date", "cat"]).drop_duplicates()

@@ -93,13 +93,30 @@ day-level, benchmark-relative, cost-adjusted core that this repo trusts —
 `_day_level_backtest()` aggregates to one row per (combo, day) *before* any t-stat, which is
 the fix for the per-appearance-row inflation that makes a persistent filter look reliable.
 
-Add concept tags as tier-2 features by joining `screener_appearances` → `screener_catalog`
-→ `decompose_catalog()`, then call the existing `search_combinations()`. Keep `max_size=3`.
+**Concept-tag pooling into tier 2 is wired, not just described.** `_pool_by_concept_tag()`
+OR-pools NiftyTrader's 45 sparse `nt_<filter_key>` columns onto `ntTag_<tag>` columns after
+the existing pivot; the EOD loader (`_load_eod_screener_category_flags`) now also selects
+`screener_master.name` and emits `eodTag_<tag>` rows alongside the existing `eod_<category>_
+<sentiment>` rows, decomposed via `decompose(name).signal_tags` — deliberately decoupled
+from `inferred_sentiment`, which `measurement.md` measures as inverted, so a `neutral`-labelled
+row now still contributes its concept tags instead of being dropped entirely. `run_tier2`'s
+`feature_cols` picks both up automatically (it's every non-id column in the merged frame), so
+no further wiring is needed there. Both loaders are unit-tested pure-transform-only
+(`TestPoolByConceptTag` in `test_screener_combo_finder.py`) — the DB-fetching halves
+(`read_df(...)`) are exercised the same way the rest of this module always has been: by
+running it against production, not by a mock.
 
 ```bash
 python src/server/screener_combo_finder.py --tier1              # incumbent, deep history
 python src/server/screener_combo_finder.py --tier2              # concept tags, SHORT history
 ```
+
+**This wiring has not been run against production Postgres as of this writing** — no DB was
+reachable in the session that added it. Before trusting a single tier-2 number: confirm
+`ntTag_*`/`eodTag_*` columns actually appear in the merged frame, sanity-check a handful by
+hand against `decompose()`'s own output for that filter_key/screener name, and treat
+everything tier 2 reports exactly as low-data/directional per the rest of this section —
+adding tags does not change that verdict, only the density of what's being searched.
 
 **Report tier-2 as a directional lead, never a finding.** `screener_appearances` spans ~2.5
 months. That is fewer periods than `screener_breadth`, which is already flagged low-power.
