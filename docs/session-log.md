@@ -2152,7 +2152,7 @@ Two things found while validating, both worth keeping:
    later CPU install found the requirement satisfied and did nothing. Verified with
    `uv pip install --dry-run`: the CPU index resolves **0** nvidia/cuda packages,
    `sentence-transformers==5.5.1` off the default index resolves **18**. The hook installs CPU
-   torch first. CI still has this ordering bug — not fixed here, and worth a follow-up.
+   torch first. **`ci.yml` fixed in the follow-up commit below.**
 2. **The CPU-torch step is a success-that-did-nothing trap.** `download.pytorch.org` is a 403
    policy denial through this sandbox's agent proxy (pypi.org and files.pythonhosted.org are
    allowed, that host is not), and `uv pip install torch` *also* exits 0 when torch is already
@@ -2171,3 +2171,34 @@ Verification: hook runs clean in both branches; `npx tsc --noEmit` exit 0;
 `pytest src/server/__tests__/test_logical_session_date.py test_relative_strength.py` 17 passed.
 Not verified: anything needing a live DB (no Postgres/Redis in this container) — `schema:drift`
 and the `live_datasource` tests remain unrunnable here by design, which the hook says out loud.
+
+### (cont.) `ci.yml` torch ordering fixed, plus a guard so it cannot regress
+
+Swapped the two install lines in the `python-tests` job so CPU torch installs **before**
+`backend-python/requirements.txt`, and added an assertion step after it.
+
+The step was named "Install dependencies (CPU torch — no CUDA runner in CI)" and had never once
+produced a CPU build. It stripped the `torch` line from the requirements file, installed the
+requirements, then installed CPU torch — but `transformers==5.9.0` and
+`sentence-transformers==5.5.1` both depend on torch, so the requirements install had already
+resolved the default CUDA wheel and the CPU install that followed found the requirement
+satisfied and exited 0 having done nothing. Every run of this job downloaded and cached several
+GB of CUDA libraries onto a GPU-less runner.
+
+**Why it survived: nothing downstream ever checked which torch it got.** The step's exit code is
+0 in both the working and broken orderings, so there was no signal to notice. Same shape as this
+file's skip-path-stamped-as-success class — a step reporting success for work it didn't do.
+The new `Assert CPU-only torch` step checks the artifact instead of the exit code: it counts
+`nvidia-*` packages in `pip list` and fails the job if any are present. Counting nvidia packages
+rather than matching a `+cpu` version suffix keeps the check tied to the actual harm and
+independent of PyTorch's version-string conventions.
+
+Negative-controlled, per the rule that a test which never failed against the bug protects
+nothing: run against this container (which carries the CUDA build the old ordering produces) the
+guard exits **1** and names all 16 nvidia packages; against a clean package list it exits **0**.
+`ci.yml` re-parsed with `yaml.safe_load` afterwards and the step order asserted programmatically
+(`pip install torch --index-url` precedes `pip install -r`), not eyeballed.
+
+Not verified: the job has not been run on a real GitHub runner from here. One residual risk worth
+knowing — if a `ubuntu-latest` image ever ships `nvidia-*` **pip** packages preinstalled, the
+guard would false-positive; the standard image does not today.

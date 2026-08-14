@@ -40,12 +40,40 @@ jobs:
           python-version: '3.12'
           cache: pip
 
+      # ORDER MATTERS. This step used to install the requirements file first and CPU
+      # torch second, which did NOT produce a CPU build: `transformers` and
+      # `sentence-transformers` both depend on torch, so the requirements install
+      # already resolved the default (CUDA) wheel, and the CPU install that followed
+      # found the requirement satisfied and did nothing — silently, exit 0.
+      # Measured 2026-08-13 with `uv pip install --dry-run`: the CPU index resolves
+      # 0 nvidia/cuda packages, `sentence-transformers==5.5.1` off the default index
+      # resolves 18. So every run of this job was downloading and caching several GB
+      # of CUDA libraries onto a runner with no GPU, under a step named "CPU torch".
+      # Installing CPU torch FIRST is what makes it the build everything else
+      # resolves against. Do not reorder these two lines.
       - name: Install dependencies (CPU torch — no CUDA runner in CI)
         run: |
           python -m pip install --upgrade pip
+          pip install torch --index-url https://download.pytorch.org/whl/cpu
           grep -v '^torch' backend-python/requirements.txt > /tmp/requirements-ci.txt
           pip install -r /tmp/requirements-ci.txt
-          pip install torch --index-url https://download.pytorch.org/whl/cpu
+
+      # The bug above was invisible for its whole life because the install step exits
+      # 0 either way — nothing downstream ever checked which torch it got. Assert on
+      # the artifact, not the exit code. Counting nvidia-* packages rather than
+      # matching a "+cpu" version suffix keeps this tied to the actual harm and
+      # independent of PyTorch's version-string conventions.
+      - name: Assert CPU-only torch (guards the install order above)
+        run: |
+          python -c "import torch; print('torch', torch.__version__)"
+          n=$(pip list --format=freeze | grep -ci '^nvidia-' || true)
+          if [ "$n" -gt 0 ]; then
+            echo "::error::CUDA torch resolved — $n nvidia-* packages installed on a GPU-less runner."
+            echo "The CPU-torch install in the previous step must come BEFORE the requirements install."
+            pip list --format=freeze | grep -i '^nvidia-'
+            exit 1
+          fi
+          echo "No nvidia-* packages installed — CPU torch confirmed."
 
       # Hard gate (2026-07-18): the 13 pre-existing failures this job used to tolerate are
       # fixed — mostly stale test fixtures (schema drift after migrations, hardcoded dates
