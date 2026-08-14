@@ -14,13 +14,12 @@ below is sourced from it. If you are about to say a setup works, that file is wh
 claim has to come from, and `references/edge-inventory.md` next to this file is the
 one-page distillation of what is tradeable and what is already dead.
 
-**Load the `trade_desk_skill` memory entry before generating a trade plan, if it exists.**
-Per `CLAUDE.md`'s memory-index rule — this skill's own entry accumulates things worth not
-rediscovering session to session: known execution-drag figures, any change to
-`EXPECTED_EXCESS_PCT`/`EXPECTED_T` since a `factor_backtest.py` re-run, and gotchas in the
-storage layer. If it hasn't been filed into the real memory store yet, check
-`docs/memory/trade_desk_skill.md` in this repo instead — cloud sessions sometimes stage
-entries there when the Windows memory path is unreachable, and it isn't always caught up.
+**Load the `trade_desk_skill` memory entry before generating a trade plan.** Per `CLAUDE.md`'s
+memory-index rule — it accumulates things worth not rediscovering session to session: known
+execution-drag figures, any change to `EXPECTED_EXCESS_PCT`/`EXPECTED_T` since a
+`factor_backtest.py` re-run, and gotchas in the storage layer. If a session has no filesystem
+access to the Windows memory path (a cloud/headless run), it won't be loadable — say so rather
+than silently skipping it.
 
 ## The honest prior — state this to the user once per session, then stop repeating it
 

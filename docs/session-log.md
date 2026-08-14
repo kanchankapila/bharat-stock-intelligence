@@ -2433,6 +2433,57 @@ design. `python -m pytest`: 1,730 passed (+8 new storage tests), 5 failed — sa
 
 ---
 
+## 2026-08-14 (cont.) — same change, verified live; memory filed for real
+
+A follow-up local session (same task, no shared context with the one above — the container
+that wrote it had been lost mid-task) independently arrived at the identical design: same
+migration, byte-for-byte identical `trade_journal.py`/`db.ts`, same `synced_at`-exclusion fix,
+same negative-control fix for the vacuous idempotency test. Reconciled by diffing rather than
+re-merging blind: every file matched except a comment and `SKILL.md`'s memory pointer, so this
+session's near-duplicate commit was dropped and the two genuine deltas landed on top of the
+pushed one instead of alongside it.
+
+**What this pass adds that the container session couldn't reach:**
+
+- **Migration actually applied.** `npm run migrate:up` against the real dev Postgres at
+  127.0.0.1:5433 (unreachable from the cloud container). `information_schema.columns` confirms
+  all 19 columns live.
+- **Real end-to-end run against live Postgres, not a fixture.** Logged/graded/reported an
+  actual RELIANCE trade against real `stock_ohlcv` (model −1.07%, real +0.74%, drag −1.81%/date
+  on a single sample — `report` correctly refused a verdict, "TOO EARLY"). Forced a genuinely
+  unreachable `POSTGRES_URL` (not a patched flag) to drive the offline path for real, confirmed
+  the JSONL row, `sync`'d it back, confirmed via query. Smoke-test rows deleted afterward —
+  table left as found.
+- **Two things learned only by running on Windows, worth keeping:** (1) this repo's Python
+  CLIs print em-dashes/arrows unconditionally (`screener_combo_finder.py` included, not
+  something introduced here), and a stock Windows console defaults to cp437/cp1252 — a bare
+  `python trade_journal.py` crashes with `UnicodeEncodeError` unless `PYTHONIOENCODING=utf-8`
+  is set first; the DB write can succeed before the crashing `print()`, so it can look like a
+  silent failure. (2) `.env`'s `POSTGRES_URL` beats `POSTGRES_HOST`/`POSTGRES_PORT` overrides
+  via `load_dotenv(override=False)` — to genuinely force the offline path for testing, override
+  `POSTGRES_URL` itself.
+- **`npm run schema:drift` ran for real** (previously only reachable as "unable to verify" with
+  no live DB). Reports `trade_journal` as new drift, correctly, plus five pre-existing unrelated
+  entries already stale in `db/schema.postgres.sql` from prior sessions — left untouched, same
+  reasoning as the container session's own revert (wrong generator for that file).
+- **Memory filed for real.** This machine has filesystem access to
+  `C:\Users\amitk\.claude\projects\d--Github-bharat-stock-intelligence\memory\` that the cloud
+  container didn't. Wrote `trade_desk_skill.md` there directly and added its `MEMORY.md` index
+  line, then deleted the in-repo `docs/memory/trade_desk_skill.md` stand-in — it's fully
+  superseded now, not just redundant. Updated `SKILL.md`'s memory-loading paragraph to drop the
+  now-dangling pointer to the deleted file.
+
+Verification, this pass: `npx tsc --noEmit` clean. `npx vitest run`: 912/912, 0 failed, 40
+skipped — unchanged from baseline (this pass touched no `.ts` logic, only `db.ts`'s schema
+block, already covered by the pushed commit's run). `pytest`: 1,763 of 1,764 relevant tests
+pass — the one failure is `test_unified_ranker.py`'s already-documented append-only-snapshot
+flake (2026-08-13 entry), reproduced passing standalone; one module
+(`test_screener_sentiment_domain.py`) uncollectable on this machine due to a local Windows
+Application Control policy blocking `torch.dll`, unrelated to this change and not present in
+CI. `check_recurring_bugs.py` clean.
+
+---
+
 ## 2026-08-14 (cont. 2) — greenfield BUILD_STAGE_5_SPEC.md: Task 5.1 (ranker construction) + Task 5.2 (shadow-period preregistration)
 
 Continuation of the greenfield rebuild (`greenfield/`, separate codebase from the legacy system
