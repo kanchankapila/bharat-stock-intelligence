@@ -2121,3 +2121,53 @@ serving), Ray/Dask (single box), and any weight-optimisation library (`measureme
 "reweighting the existing engines is not a fix" — there is no incumbent factor to beat).
 
 Advisory only: no `.ts`, `.py`, SQL, or migration touched, so no gate applies.
+
+### (cont.) SessionStart hook — remote sessions could not run any Definition-of-done check
+
+Measured on this running Claude-Code-on-the-web container: **no `node_modules`, no
+`backend-python/venv`, no pytest/pandas/numpy/torch**. Every cloud session on this repo was
+therefore structurally incapable of running `npx tsc --noEmit`, `npx vitest run`, or
+`python -m pytest` — the three commands CLAUDE.md's "Definition of done" requires before a task
+may be called done, in a repo whose most-repeated recorded failure is claiming done without
+having run them. Four other cloud sessions were working this repo concurrently at the time,
+under the same constraint.
+
+Added `.claude/hooks/session-start.sh` + a `SessionStart` entry merged into the existing
+`.claude/settings.json` hooks block (`PreToolUse` rules-pointer and `Stop` verify-gate left
+untouched). Two branches:
+
+- **remote** — installs `npm install` + the pinned `backend-python/requirements.txt` (the file
+  CI installs; the root `requirements.txt` is unpinned and deliberately not used). Marker-file
+  idempotent, keyed on a hash of the requirements file: second run is 0.010s.
+- **local** — installs nothing. Asserts `backend-python/venv` exists, `.env` sets
+  `USE_POSTGRES=true`, and Postgres answers on the port `.env` names. That check exists because
+  of this file's own documented class: a hand-run script that silently talks to SQLite instead
+  of production Postgres "will happily print convincing numbers."
+
+Two things found while validating, both worth keeping:
+
+1. **`ci.yml` installs CPU torch in the wrong order.** It strips the torch line, installs the
+   requirements, then installs CPU torch — but `transformers` and `sentence-transformers` both
+   depend on torch, so the requirements step already resolved the default CUDA build and the
+   later CPU install found the requirement satisfied and did nothing. Verified with
+   `uv pip install --dry-run`: the CPU index resolves **0** nvidia/cuda packages,
+   `sentence-transformers==5.5.1` off the default index resolves **18**. The hook installs CPU
+   torch first. CI still has this ordering bug — not fixed here, and worth a follow-up.
+2. **The CPU-torch step is a success-that-did-nothing trap.** `download.pytorch.org` is a 403
+   policy denial through this sandbox's agent proxy (pypi.org and files.pythonhosted.org are
+   allowed, that host is not), and `uv pip install torch` *also* exits 0 when torch is already
+   present without ever contacting the index. First draft trusted that exit code and printed
+   "CPU build, no CUDA libraries" over a `2.13.0+cu130` install. Rewritten to report the
+   measured `torch.__version__` rather than the command's intent, and the CPU index is now
+   optional (a blocked index degrades to default PyPI with an explicit warning, instead of
+   failing the whole install).
+
+The hook never exits non-zero — bricking a session on a transient network failure is worse than
+the problem — but on a failed install it prints an explicit banner saying the checks cannot run
+and must not be reported as passing.
+
+Verification: hook runs clean in both branches; `npx tsc --noEmit` exit 0;
+`npx vitest run .claude/hooks/verify-gate.test.mjs` 13 passed;
+`pytest src/server/__tests__/test_logical_session_date.py test_relative_strength.py` 17 passed.
+Not verified: anything needing a live DB (no Postgres/Redis in this container) — `schema:drift`
+and the `live_datasource` tests remain unrunnable here by design, which the hook says out loud.
