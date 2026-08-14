@@ -2160,3 +2160,120 @@ available here), Task 5.4 (promotion-gate.ts), Task 5.5 (cutover — requires ex
 confirmation per spec invariant 24, not to be automated regardless). Task 5.6's other three dq
 checks (`shadow-recommendation-freshness`, `shadow-rank-variance`, `dual-run-divergence-sane`)
 depend on Task 5.3/5.4 existing first.
+
+## 2026-08-14 (cont. 3) — greenfield BUILD_STAGE_5_SPEC.md: Task 5.3 (dual-run divergence) + Task 5.4 (promotion gate)
+
+Continuation of the same session as "Task 5.1 + Task 5.2" above. This entry covers Task 5.3 and
+Task 5.4.
+
+**Task 5.3 — dual-run divergence analysis.** `legacy-repo.ts` gained
+`queryLegacyUnifiedRecommendationsForSession` (real column names confirmed from the live-Postgres
+migration `1786800000000_unified-recommendations-generated-at.sql` and `unified_ranker.py`'s own
+`classification` vocabulary — `Strong Buy`/`Buy`/`Hold`/`Sell`/`Strong Sell`, not guessed), filtered
+to `generated_at < computed_at 03:45 UTC` (measurement.md's own pre-market cutoff) so a same-day
+post-close re-run can't be compared against as if it were the old system's morning call. First draft
+string-interpolated the `computed_at` date directly into the SQL — a real injection risk, caught
+before it shipped — `queryOldDb` (`legacy-repo.ts`) now takes an optional `params` array and the
+query is properly parameterized `$1`. Smoke-tested against a throwaway table shaped like the real
+`unified_recommendations` on the local Postgres (the real legacy DB is not reachable in this
+environment — nothing listens on `127.0.0.1:5433`); confirmed the query resolves through this
+engine correctly and the pre-market filter genuinely excludes a synthetic post-close row.
+
+`divergence.ts` (pure logic): rank correlation (via `research-harness.ts`'s `spearman`, newly
+exported rather than reimplemented) and directional agreement rate (decisive calls only — NEUTRAL
+excluded on both sides, same convention as every win-rate calculation in this project) over the
+union of both systems' own top-50. `legacyDirection`'s neutral-exclusion and the topK/union
+construction both negative-controlled (reverted, confirmed the relevant test fails, restored).
+
+Two new dq_checks (migration 012): `shadow-rank-variance` (fires FAIL on a collapsed universe or a
+near-zero-variance score distribution — the concrete historical bug this guards against is a broken
+RL gate that once excluded 825 symbols platform-wide with nothing catching it for a full session)
+and `dual-run-divergence-sane` (fires WARN if the divergence monitor has gone silently inert —
+rows exist but the payload is always NULL, same shape as the documented "inert UNION half" bug in
+`reward_engine.py`). Both negative-controlled.
+
+`run-divergence-analysis.ts` ties it together (un-split, one-shot, same convention as
+`record-feature-set.ts` — nothing here needs test isolation beyond what the pure logic and the
+smoke-tested query already cover) and was run **for real, end to end**, against the local Postgres
+standing in for both databases (real engine, not mocked): seeded Task 5.0 evidence + 3 shadow
+`recommendation` rows + a throwaway `unified_recommendations` table with matching legacy rows,
+ran the actual script, confirmed `rankCorrelation=1.000`/`directionalAgreement=1.000` were computed
+and written to `audit_metric` correctly, then confirmed `checkDualRunDivergenceSane` reads them
+back correctly. Cleaned up after.
+
+**Task 5.4 — promotion gate.** `evaluate-promotion-gate.ts` (logic) / `promotion-gate.ts` (thin CLI
+entrypoint, same split as `write-recommendations.ts`/`run-ranker.ts` and for the identical reason —
+the first draft of `run-ranker.ts` earlier in this session already burned this lesson once).
+Four checks, fail-closed on the first unmet condition, exit code is the literal decision:
+
+1. `min_dates` preregistered shadow sessions accumulated (`queryShadowProgress`, never a manual
+   count).
+2. The shadow ranker's OWN realized forward-return significance, re-measured live against real
+   price data (never re-quoting Task 5.0's backtest number) via `research-harness.ts`'s real
+   `computeNetAnnualizedExcessReturn`/`computeIC` — reused, not reimplemented. Resolved an ambiguity
+   in the spec text (which names `computeIC` but also says "net-of-cost per Task 5.0.1", and
+   `computeIC` itself has no cost concept): gates on `computeNetAnnualizedExcessReturn`'s net t-stat
+   (the same statistic Task 5.0's own decision rule used), computes `computeIC` too and reports it
+   as a diagnostic. A single canonical horizon (5d) is the sole gating test, not "5d or 21d, either
+   clears it" — accepting either would be an undisclosed second multiple-comparison problem the
+   recorded Bonferroni bar was never sized for; 21d is computed and reported, never gated on. The
+   pass condition is explicitly "positive AND significant", not `|t|` alone — a significantly
+   NEGATIVE (backwards) ranker must not promote just because its magnitude clears the bar, which
+   is exactly the class of bug this project's own history has hit before (Strong Sell
+   underperforming plain Sell in the predecessor's conviction ladder).
+3. Zero fail-severity `dq_result` rows from Task 5.3's two monitors since preregistration.
+4. No `is_publishable = true` row exists ANYWHERE (global, not scoped to the ranker being
+   evaluated) — idempotency guard.
+
+`topK`/`costBps`/rebalance days/`market_bar` source are all overridable (`GateOptions`, defaulting
+to the real production values) — without this, testing step 2 would require a real 50-symbol price
+panel just to get `computeNetAnnualizedExcessReturn` to count a single period (`cohort.length <
+topK` skips the date entirely). Same pattern already used for `featureSetVersion` in
+`write-recommendations.ts` earlier this session.
+
+Negative-controlled per spec's explicit requirement ("feed it a synthetic shadow run with a
+known-zero-IC ranker and confirm exit code 1; feed it one with an injected, deliberately strong
+synthetic IC signal and confirm exit code 0"), extended to all 4 steps individually plus the
+sign-requirement case: 8 tests total, a small synthetic 4-symbol/10-session price panel (real
+symbols, real Postgres, the real harness functions). One test-design bug caught by the tests
+themselves before it shipped: a first attempt used constant per-step compounding drift, which
+makes every rebalance period's excess return IDENTICAL — zero variance across periods drives the
+t-stat's denominator to exactly 0 regardless of the mean's size, so the "strong signal" case
+produced `netTStat=null` for the same structural reason as the deliberate zero-IC case, defeating
+its own point. Fixed with explicit day-to-day-varying price paths. Two branches negative-controlled
+by reverting the real source and confirming the relevant test fails: the positive-AND-significant
+sign check, and step 4's global (not per-ranker) scope.
+
+**A real, live-caught bug in `record-shadow-preregistration.ts` (Task 5.2), found only by actually
+running the script, not by review or unit tests.** It never seeded its own `job_definition` row
+before calling `openRun` (every sibling Stage 5 script does) — `ingestion_run.job_id` FKs to
+`job_definition`, so the very first real invocation threw `ingestion_run_job_id_fkey`. Compounded
+by a second bug in the same file: the failure occurred outside any try/catch, so it propagated to
+the top-level `main().catch()`, which never calls `pool.end()` — an open `pg.Pool` kept the process
+alive instead of exiting, so instead of a clean error the script hung until an external timeout
+killed it. Both fixed (job_definition seed added; body wrapped in try/finally with `pool.end()` in
+the finally on every path). Re-run for real after the fix: first invocation succeeds and preregisters
+cleanly (exit 0), second invocation correctly refuses (exit 1, invariant 13), both exit promptly.
+Recorded in `.claude/rules/recurring-bugs.md` ("Writes & keys") since the pattern — a one-shot
+script missing its sibling scripts' job_definition seed — could recur in any future addition to this
+directory. **Tell:** this shipped past two rounds of "typecheck clean, unit tests pass" — it was
+only caught by the smoke-testing discipline this session used throughout (run every new script for
+real against the local Postgres, not just its logic layer's unit tests), which this project's own
+`data-sources.md`/`recurring-bugs.md` conventions call for and this file's own earlier entries
+warn is easy to skip.
+
+Verification: `npx tsc --noEmit` clean in both `packages/db` and `packages/ingestion`. Full
+`vitest run` (single-fork, excluding the pre-existing unrelated `nse/backfill.test.ts` symbol-
+fixture collision noted in the previous entry): 170 passed, 1 skipped, 0 failed — 35 new Stage 5.3/
+5.4 tests (13 divergence unit tests, 4 new dq-check tests, 8 promotion-gate tests, plus the earlier
+entry's 60) plus the full pre-existing suite unchanged. Migrations 010-012 all verified to
+round-trip. Every one-shot script this session added (`record-shadow-preregistration.ts`,
+`run-divergence-analysis.ts`, `promotion-gate.ts`) was run for real against the local Postgres, not
+just typechecked — this is what caught the job_definition bug above.
+
+**Not done, explicitly deferred (unchanged from the prior entry, still blocked on the same
+constraints):** Task 5.5 (cutover — requires explicit human confirmation per spec invariant 24,
+never to be automated regardless of environment). Task 5.6's remaining check
+(`shadow-recommendation-freshness`) — not required by either 5.2, 5.3, or 5.4's own Verify text,
+unlike `promotion-not-premature`/`shadow-rank-variance`/`dual-run-divergence-sane`, which were all
+built because their parent tasks' own Verify steps required them.

@@ -6,10 +6,15 @@
 // ingestion script (raw `pg` imports are eslint-banned outside this package).
 import pg from 'pg';
 
-async function queryOldDb<T extends pg.QueryResultRow>(connectionString: string, sql: string): Promise<T[]> {
+// `params` is optional (every function here predates it, and fetches
+// unconditionally with no WHERE input) -- added for
+// queryLegacyUnifiedRecommendationsForSession's `computed_at` filter, which
+// must be parameterized, not string-interpolated, the same discipline this
+// package already applies to greenfield's own pool everywhere else.
+async function queryOldDb<T extends pg.QueryResultRow>(connectionString: string, sql: string, params: unknown[] = []): Promise<T[]> {
   const pool = new pg.Pool({ connectionString });
   try {
-    const { rows } = await pool.query<T>(sql);
+    const { rows } = await pool.query<T>(sql, params);
     return rows;
   } finally {
     await pool.end();
@@ -87,5 +92,43 @@ export async function queryLegacyScreenerMasterMcEtnow(connectionString: string)
   return queryOldDb<LegacyScreenerMasterRow>(
     connectionString,
     `SELECT scan_id, name, source FROM screener_master WHERE source IN ('MoneyControl', 'ETnow')`,
+  );
+}
+
+export interface LegacyUnifiedRecommendationRow {
+  symbol: string;
+  unified_score: number | null;
+  classification: string | null;
+  conviction_level: string | null;
+}
+
+/** Task 5.3 (BUILD_STAGE_5_SPEC.md): the old system's live ranker, read-only,
+ * for one `computed_at` trading date -- column names confirmed against the
+ * real live-Postgres migrations (`migrations/1786800000000_unified-
+ * recommendations-generated-at.sql`: `generated_at TIMESTAMPTZ`, joined with
+ * `computed_at`), not guessed from the SQLite schema-of-record alone
+ * (`db.ts` is dev-fallback only, per this repo's own `recurring-bugs.md`).
+ *
+ * Restricted to `generated_at < (computed_at date + '03:45:00')` -- the same
+ * pre-market cutoff `measurement.md`'s own grading methodology uses -- so a
+ * same-day POST-close re-run (which silently overwrote the earlier pre-market
+ * ranking under the old system's bare-DATE key before
+ * `unified_recommendations_history` existed) can never be compared against as
+ * if it were the old system's morning call. `unified_recommendations` itself
+ * is NOT append-only (unlike the new `recommendation` table), so this is a
+ * best-effort filter on whatever the live row's `generated_at` currently
+ * says, not a guarantee -- Task 5.3's comparison is explicitly descriptive
+ * only, never a promotion criterion, precisely because of gaps like this one
+ * in the old system's own provenance. */
+export async function queryLegacyUnifiedRecommendationsForSession(
+  connectionString: string, computedAt: string,
+): Promise<LegacyUnifiedRecommendationRow[]> {
+  return queryOldDb<LegacyUnifiedRecommendationRow>(
+    connectionString,
+    `SELECT symbol, unified_score, classification, conviction_level
+     FROM unified_recommendations
+     WHERE computed_at = $1
+       AND (generated_at IS NULL OR generated_at < ($1::date + interval '3 hours 45 minutes'))`,
+    [computedAt],
   );
 }
