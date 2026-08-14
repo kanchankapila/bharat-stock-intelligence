@@ -8,6 +8,7 @@ import { trpc } from '../lib/trpc';
 import { cn } from '../lib/utils';
 import { ScreenerRankingPanel } from './ScreenerRankingPanel';
 import { ScreenerSurfacingSignalsPanel } from './ScreenerSurfacingSignalsPanel';
+import { LegacyScoreBanner } from './CanonicalSourceNote';
 
 // ── Tier config ───────────────────────────────────────────────────────────────
 const TIER = {
@@ -340,6 +341,12 @@ export function ScreenerIntelligencePage({ onSelectStock }: { onSelectStock?: (s
           <ScreenerSurfacingSignalsPanel onSelectStock={onSelectStock} />
         ) : (
         <>
+        {/* Tier/Win Rate/Score below are precomputed in screener_performance_v2, same table
+            already disclaimed in v6's Screener Browser and v5's ScreenerLabPage -- see
+            measurement.md and the canonical-read-audit finding this banner exists to fix. */}
+        <div className="flex-shrink-0 px-5 pt-3">
+          <LegacyScoreBanner note="Tier, Win Rate, and Score are precomputed per-screener in screener_performance_v2. A from-scratch remeasurement of this same table found its win-rate figures didn't reproduce (one screener read 100%, remeasured at 65%), and 0 of 1,563 individual screeners tested clear a false-discovery correction -- treat this as a browse of what a screener currently flags, not a graded prediction. Check Alpha / Buy Recs for the canonical, regime-aware view." />
+        </div>
         {/* Category cards row */}
         <div className="flex-shrink-0 px-5 py-3 border-b border-slate-800/50">
           <div className="grid grid-cols-6 xl:grid-cols-9 gap-2">
