@@ -2574,3 +2574,58 @@ available here), Task 5.4 (promotion-gate.ts), Task 5.5 (cutover — requires ex
 confirmation per spec invariant 24, not to be automated regardless). Task 5.6's other three dq
 checks (`shadow-recommendation-freshness`, `shadow-rank-variance`, `dual-run-divergence-sane`)
 depend on Task 5.3/5.4 existing first.
+
+## 2026-08-14 (cont. 3) — log review found `drift_detector.py` pinning a permanent false EMERGENCY_RETRAIN
+
+A routine "review the logs for errors/warnings" pass noticed `drift_detector.py` had fired
+`EMERGENCY_RETRAIN` on every single day it ran since at least 2026-08-01, with `max_psi` pinned
+at ~12.4-12.9 and `crit_frac` at 76-87% — never moving the way genuine market drift would, and
+correlated with `dl-retrain-emergency` stalling (08-13: "job stalled more than allowable limit"),
+i.e. the alarm was ringing continuously with the retrain response not reliably keeping up.
+
+**Root cause, confirmed live against production `feature_store`:** `check_feature_drift()`'s
+"recent 30-day window" was `df.iloc[-30:]` — the last 30 *rows*, not the last 30 *days*.
+`feature_store` is a long `(symbol, date)` panel (~2,400 rows per date), so that sliced the last
+30 *symbols of a single date*, not a 30-day window. Any market-wide column broadcast identically
+to every symbol on a date (`fii_10d_net`, `dxy`, `nifty_vix`, `crude_ret_5d`, …) then had
+near-zero variance in "recent" against a real multi-date baseline — guaranteeing an enormous PSI
+every run regardless of actual drift. Live query confirmed: pre-fix "recent" was 30 rows, all
+from `2026-08-13` only.
+
+**This had a live production consequence, not just a noisy log line.** `get_drift_multiplier()`
+reads the same `drift_score` and `scoring_engine.py`'s `_refresh_drift_multiplier()` applies it as
+a real 0.85x haircut on every stock's `win_probability` whenever `drift_score > PSI_CRIT (0.25)`.
+The pinned value (avg_psi ~2.8-3.3) was ~10x+ over that threshold every day, so the haircut has
+likely been permanently active for at least two weeks.
+
+**Fix:** slice `baseline`/`recent` by distinct `date`, not by row position
+(`src/server/drift_detector.py`, `check_feature_drift()`). Negative-controlled: added
+`test_negative_control_old_row_slice_falsely_flags_this_exact_data` confirming the old
+`df.iloc[-30:]` logic misclassifies a synthetic no-real-drift panel as critical, and
+`test_recent_window_spans_multiple_dates_not_one` confirming the fix does not
+(`src/server/tests/test_drift_detector.py`). Full suite: 1856 passed, 221 skipped, 1 pre-existing
+unrelated flake (`test_unified_ranker.py::test_history_snapshot_is_append_only_across_reruns`,
+confirmed passes in isolation, unrelated to this change).
+
+**Live-verified against real production data** (read-only, `execute()` mocked out — no writes):
+post-fix numbers dropped substantially but are **not fully clean** — `max_psi` 12.888 → 4.426,
+`avg_psi` 3.186 → 0.658, `crit_frac` 82.26% → 61.29%, **still above `EMERGENCY_RETRAIN` thresholds**.
+Traced the residual: two fundamental columns, `op_margins` and `roe`, are exactly `0.0` (zero
+variance) across the entire 320-date baseline window and only recently started carrying real,
+noisy values (`op_margins` recent std=65.6) — a column that was dead/constant for the whole
+baseline and just came alive reads as extreme "drift" under PSI regardless of correct
+date-windowing, same shape as `measurement.md`'s already-documented `feature_store`
+`rev_growth`/`eps_growth` 100%-NULL pair. **Not fixed this session** — separate defect, needs its
+own investigation into when/why `op_margins`/`roe` started populating and whether the baseline
+window should exclude the dead period rather than the PSI calc changing. The remainder of the
+elevated PSI (dii_3d_net, nifty_vix, nifty_ret_21d — genuine macro columns with real mean/std
+shifts between the Jan'25-Apr'26 baseline and the last 30 trading days) may be real, if unusually
+large, macro regime movement — not investigated further, out of scope of the sampling bug.
+
+**Consequence for the drift multiplier:** the 0.85x haircut is very likely to keep firing today
+even post-fix (avg_psi 0.658 > PSI_CRIT 0.25), but for a mix of a real (if partial) reason now,
+not a fabricated one. Not itself a scoring-formula change (`scoring_engine.py`/`unified_ranker.py`
+untouched), so the `verify-gate.mjs` backtest-evidence mandate doesn't apply here — but flagging
+per `measurement.md`'s spirit: any `win_probability` claim made over the last ~2 weeks was
+carrying an unexplained, roughly-constant 15% haircut that had nothing to do with actual model
+health.
