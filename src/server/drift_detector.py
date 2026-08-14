@@ -47,9 +47,17 @@ def check_feature_drift(model_name: str = "LSTM_TFT_ENSEMBLE") -> dict:
     if len(df) < 60:
         return {"status": "INSUFFICIENT_DATA"}
 
-    cutoff_idx = int(len(df) * 0.8)
-    baseline   = df.iloc[:cutoff_idx]
-    recent     = df.iloc[-30:] if len(df) > 30 else df.iloc[cutoff_idx:]
+    # feature_store is a long (symbol, date) panel -- ~2,400 rows per date -- so slicing
+    # by ROW count (the old df.iloc[-30:]) grabbed the last 30 symbols of a single date,
+    # not a 30-day window. Any market-wide column broadcast identically to every symbol
+    # on a date (fii_10d_net, dxy, nifty_vix, ...) then had near-zero variance in "recent"
+    # against a real multi-date baseline, pinning PSI far above PSI_CRIT every run
+    # regardless of actual drift. Slice by distinct DATE instead.
+    dates      = np.sort(df["date"].unique())
+    cutoff_idx = int(len(dates) * 0.8)
+    recent_dates = dates[-30:] if len(dates) > 30 else dates[cutoff_idx:]
+    baseline   = df[df["date"].isin(dates[:cutoff_idx])]
+    recent     = df[df["date"].isin(recent_dates)]
 
     psi_scores = {}
     for col in numeric_cols:
