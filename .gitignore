@@ -108,3 +108,6 @@ logs/
 
 .superpowers/
 .claude/.session-start/
+
+# Personal trade journal (trade-desk skill) — user data, not source
+trade_journal.jsonl

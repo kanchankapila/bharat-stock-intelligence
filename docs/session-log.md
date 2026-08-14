@@ -2155,6 +2155,73 @@ it was the flake it was diagnosed as, not a real regression.
 
 ---
 
+## 2026-08-13 — `trade-desk` skill: the daily trading loop, bounded by what is actually measured
+
+User asked for "a skill that helps me trade and make huge profits in Indian share market."
+Built the skill; declined the premise of the profit claim rather than the request. This repo's
+own `measurement.md` records zero of 26 backtested factors as positive-and-significant, a
+canonical ranker at IC ≈ 0.0001 (t=0.02), and 14 of 23 `feature_store` columns significantly
+*negative* — a skill promising large profits would be the "evidence-shaped output" failure
+class that file exists to prevent, in skill form.
+
+**What the skill is built around.** Exactly one setup here has survived a real measurement
+review: `screener_combo_finder.py --tier1`'s capitulation triple (`gap_down` AND `open_eq_low`
+AND `top_loser` on session D → long at D+1 open, exit D+1 close), +0.53%/day excess net of
+15bps, t=+3.61, 425 dates, 6/6 years positive. The skill is the operational wrapper around
+that one result: freshness gate → candidate generation reusing `compute_tier1_precursors` /
+`live_capitulation_screener.py` (never re-deriving the thresholds) → sizing → execution to the
+measured open→close convention → journal → weekly grading.
+
+Files: `.claude/skills/trade-desk/SKILL.md`, `.claude/skills/trade-desk/references/edge-inventory.md`
+(one-page distillation of what is tradeable vs. already dead, so a trade idea gets checked
+against the killed list before it gets sized), `src/server/trade_journal.py`,
+`src/server/tests/test_trade_journal.py`.
+
+**The design decision worth recording: grade the user's fills against the model's fills.**
+The edge is 0.53%/day — smaller than one sloppy entry. So `trade_journal.py` computes two
+benchmark-relative numbers per trade, `model_excess` (stock_ohlcv open→close, what the backtest
+would have earned) and `real_excess` (the user's actual fills, same benchmark subtraction), and
+reports the gap. If execution drag exceeds the 0.53% the setup pays, the setup is untradeable
+at that size *regardless of how good the backtest looks* — and, importantly, the verdict says
+so rather than letting the user read it as the signal being dead. `report` refuses a verdict
+below 40 trade dates (the backtest had 425) and prints `STOP` when the realized 95% CI upper
+bound goes below zero.
+
+**Bug found in this session's own code, by its own test.** The first `winsorize()` used
+`quantile()` with default linear interpolation, which does *not* clip a lone extreme value —
+with one corrupt bar in n=100 the cutoff lands ~1% of the way toward the outlier, so the
+"winsorized" mean came out +26% instead of +1%. The code read as correct; only the test
+written specifically for the corrupt-bar case caught it. Fixed with
+`interpolation="higher"/"lower"` so the cutoff is an observed value. Checked repo-wide: no
+other instance (`dl_engine.py`, `unified_ranker.py`, `factor_backtest.py` all use fixed
+absolute bounds, which are immune). Added to `recurring-bugs.md` anyway, since the panel spec
+mandates winsorizing and the next implementation will likely reach for quantiles.
+
+Verification: 19 new tests, all negative-controlled for real — reverted the per-date
+aggregation to pooled and removed the NaN guard, confirmed 7 failures including the pooling
+control, restored, 19 pass. `scripts/check_recurring_bugs.py` clean on both new files.
+`trade_journal.py` exercised end to end (log → grade → report) against a throwaway SQLite
+fixture with `USE_POSTGRES=false`: hand-checked the arithmetic (+2.36% gross − 0.15% cost −
+1.0% universe = +1.21% excess), confirmed two trades on one date collapse to one observation,
+and confirmed a deliberately sloppy fill surfaces as +0.82%/date drag against the 0.53% edge.
+Full `pytest`: 1,722 passed, 5 failed, 224 skipped — all 5 failures are `ModuleNotFoundError`
+(`lightgbm`, plus 9 modules that could not be collected at all for `ta`/`nse`/`torch`) in this
+bare cloud container, pre-existing and unrelated; every change this session is additive
+(3 new paths + a 2-line `.gitignore` append), touching no existing source file.
+
+**Memory entry staged in-repo, not filed.** `MEMORY.md` lives at a Windows path unavailable
+from this container, and `~/.claude/projects/` here holds only the session transcript and is
+reclaimed with the container — so an entry written there would not survive. Written instead to
+`docs/memory/trade_desk_skill.md`, in the store's own format, with the `MEMORY.md` index line
+to add quoted at the top of the file. **Copy it into the real memory store from a local session
+and delete the repo copy** — left in-repo it will rot, since nothing else reads that path.
+Beyond the skill itself it records two things worth not rediscovering: the
+quantile-winsorization interpolation trap, and that exercising any `db_compat` path against a
+throwaway SQLite fixture needs **both** `USE_POSTGRES=false` *and* `DATABASE_URL=sqlite:///…`
+— setting only the latter still connects to Postgres and refuses on :5433.
+
+---
+
 ## 2026-08-13 — Tooling/infrastructure recommendations survey (advisory, no code change)
 
 Asked for free libraries/tools/MCP servers/Claude Code features that would make this codebase
@@ -2296,6 +2363,127 @@ guard exits **1** and names all 16 nvidia packages; against a clean package list
 Not verified: the job has not been run on a real GitHub runner from here. One residual risk worth
 knowing — if a `ubuntu-latest` image ever ships `nvidia-*` **pip** packages preinstalled, the
 guard would false-positive; the standard image does not today.
+
+---
+
+## 2026-08-14 — trade-desk: connect the journal to Postgres, wire the skill to memory
+
+User: "connect this to database and memory." Two independent pieces of prior work needed
+finishing: `trade_journal.py` shipped storing trades only in an offline JSONL file, and the
+trade-desk memory entry was staged in-repo (`docs/memory/trade_desk_skill.md`) rather than
+filed. Asked which "memory" (Claude memory store vs. the chatbot's ChromaDB) and how the
+journal should store trades before doing the work — Claude memory store + Postgres-with-
+JSONL-fallback, both as recommended.
+
+**Database.** New `trade_journal` table (migration `1787000000000`), mirrored into `db.ts`'s
+SQLite schema-of-record for the dev fallback path. `trade_journal.py`'s `log`/`grade`/`sync`
+now route through `db_compat`, DB-first: `append_trade` probes the DB once per process and
+falls back to the offline JSONL file when unreachable, printing that it did so; `load_journal`
+reads across both stores so nothing is invisible while offline; `sync` reconciles offline rows
+into the table, upserted on the trade's own uuid so re-running is always safe. `synced_at` is
+excluded from the upsert's `DO UPDATE SET` list on purpose — it records when a row *first*
+reconciled, and walking it forward on re-sync is the exact `signal_generated_at`
+generation-time-becomes-last-seen-time bug already logged in `recurring-bugs.md`.
+
+**A negative-control test had to be fixed twice before it actually proved anything** — worth
+recording as its own lesson. The first version of the synced_at-preservation test passed
+whether or not the code was broken, for two independent reasons: (1) the test double
+(`FakeDB`) hardcoded "preserve synced_at" instead of parsing the real `DO UPDATE SET` clause
+`_upsert_db` emits — reimplementing the logic under test, the exact class `recurring-bugs.md`
+already names; (2) even with a fake reading the real SQL, the original assertion only re-ran
+sync on a single-machine flow where both stores already agree after the first sync, so
+re-writing the same value can't distinguish "excluded from the update" from "included but
+unchanged." Fixed by (1) making `FakeDB` parse the actual update-column list out of the SQL
+string, and (2) adding a scenario that seeds the DB and the file with *different* stamps (the
+two-machine case) and asserts the earlier one wins. Only then did reverting the exclusion
+actually fail the test. Lesson for the rule files: a negative control needs its own negative
+control when the test double could plausibly agree with either the fixed or the broken code.
+
+**`db/schema.postgres.sql` regeneration attempted and reverted.** Ran
+`scripts/generate_pg_schema.py` (reads local `database.sqlite`) expecting to add
+`trade_journal` to the checked-in snapshot — but that file's own header says it's generated by
+a different script, `scripts/generatePgSchemaFromLive.ts`, from live production Postgres, not
+local SQLite. The SQLite-based run produced a ~98KB diff of unrelated noise (index syntax,
+DEFAULT values from ad-hoc `pgEnsureColumns()` calls in prod) that would have destroyed real
+drift information only the live-Postgres generator captures. Reverted, left untouched.
+
+**Not deployed.** `npm run migrate:up` could not run for real — no live `POSTGRES_URL`
+reachable from this container. The migration is committed, not applied to production; whoever
+has DB access needs to run it before the DB path is genuinely live.
+
+**Memory.** `docs/memory/trade_desk_skill.md` (staged 2026-08-13) extended with today's
+storage work and the negative-control lesson above. Still staged, not filed — this container
+has no access to the Windows memory path either. `trade-desk/SKILL.md` now explicitly points
+at loading that entry (or its in-repo staged copy) before generating a trade plan, so future
+sessions pick up known drag figures and storage gotchas rather than rediscovering them.
+
+**Verification.** Installed `npm install` (no `node_modules` existed) and confirmed `npx tsc
+--noEmit` clean, `npx vitest run`: 912 passed, 40 skipped, 0 failed (matches the last
+recorded baseline). Booted `db.ts` for real against a throwaway path and confirmed
+`trade_journal` creates with the right columns/indexes; hand-verified the Postgres upsert SQL
+translates correctly (`?`→`:pN`, `ON CONFLICT`/`excluded.*` pass through, no `::` casts to
+trip the multi-word-cast trap). End-to-end against a live SQLite fixture built from the real
+schema: `log` while reachable writes straight to the table and never touches the offline file;
+`log` while unreachable writes the file and says so; `sync` moves it into the table and
+correctly no-ops on re-run; `grade` correctly left an out-of-fixture symbol (PRECWIRE)
+ungraded rather than fabricating a benchmark, exactly per the "refuse rather than coerce"
+design. `python -m pytest`: 1,730 passed (+8 new storage tests), 5 failed — same 5
+`lightgbm`-dependent pre-existing failures as before, unrelated to this change.
+`check_recurring_bugs.py` clean on every touched file.
+
+---
+
+## 2026-08-14 (cont.) — same change, verified live; memory filed for real
+
+A follow-up local session (same task, no shared context with the one above — the container
+that wrote it had been lost mid-task) independently arrived at the identical design: same
+migration, byte-for-byte identical `trade_journal.py`/`db.ts`, same `synced_at`-exclusion fix,
+same negative-control fix for the vacuous idempotency test. Reconciled by diffing rather than
+re-merging blind: every file matched except a comment and `SKILL.md`'s memory pointer, so this
+session's near-duplicate commit was dropped and the two genuine deltas landed on top of the
+pushed one instead of alongside it.
+
+**What this pass adds that the container session couldn't reach:**
+
+- **Migration actually applied.** `npm run migrate:up` against the real dev Postgres at
+  127.0.0.1:5433 (unreachable from the cloud container). `information_schema.columns` confirms
+  all 19 columns live.
+- **Real end-to-end run against live Postgres, not a fixture.** Logged/graded/reported an
+  actual RELIANCE trade against real `stock_ohlcv` (model −1.07%, real +0.74%, drag −1.81%/date
+  on a single sample — `report` correctly refused a verdict, "TOO EARLY"). Forced a genuinely
+  unreachable `POSTGRES_URL` (not a patched flag) to drive the offline path for real, confirmed
+  the JSONL row, `sync`'d it back, confirmed via query. Smoke-test rows deleted afterward —
+  table left as found.
+- **Two things learned only by running on Windows, worth keeping:** (1) this repo's Python
+  CLIs print em-dashes/arrows unconditionally (`screener_combo_finder.py` included, not
+  something introduced here), and a stock Windows console defaults to cp437/cp1252 — a bare
+  `python trade_journal.py` crashes with `UnicodeEncodeError` unless `PYTHONIOENCODING=utf-8`
+  is set first; the DB write can succeed before the crashing `print()`, so it can look like a
+  silent failure. (2) `.env`'s `POSTGRES_URL` beats `POSTGRES_HOST`/`POSTGRES_PORT` overrides
+  via `load_dotenv(override=False)` — to genuinely force the offline path for testing, override
+  `POSTGRES_URL` itself.
+- **`npm run schema:drift` ran for real** (previously only reachable as "unable to verify" with
+  no live DB). Reports `trade_journal` as new drift, correctly, plus five pre-existing unrelated
+  entries already stale in `db/schema.postgres.sql` from prior sessions — left untouched, same
+  reasoning as the container session's own revert (wrong generator for that file).
+- **Memory filed for real.** This machine has filesystem access to
+  `C:\Users\amitk\.claude\projects\d--Github-bharat-stock-intelligence\memory\` that the cloud
+  container didn't. Wrote `trade_desk_skill.md` there directly and added its `MEMORY.md` index
+  line, then deleted the in-repo `docs/memory/trade_desk_skill.md` stand-in — it's fully
+  superseded now, not just redundant. Updated `SKILL.md`'s memory-loading paragraph to drop the
+  now-dangling pointer to the deleted file.
+
+Verification, this pass: `npx tsc --noEmit` clean. `npx vitest run`: 912/912, 0 failed, 40
+skipped — unchanged from baseline (this pass touched no `.ts` logic, only `db.ts`'s schema
+block, already covered by the pushed commit's run). `pytest`: 1,763 of 1,764 relevant tests
+pass — the one failure is `test_unified_ranker.py`'s already-documented append-only-snapshot
+flake (2026-08-13 entry), reproduced passing standalone; one module
+(`test_screener_sentiment_domain.py`) uncollectable on this machine due to a local Windows
+Application Control policy blocking `torch.dll`, unrelated to this change and not present in
+CI. `check_recurring_bugs.py` clean.
+
+---
+
 ## 2026-08-14 (cont. 2) — greenfield BUILD_STAGE_5_SPEC.md: Task 5.1 (ranker construction) + Task 5.2 (shadow-period preregistration)
 
 Continuation of the greenfield rebuild (`greenfield/`, separate codebase from the legacy system
