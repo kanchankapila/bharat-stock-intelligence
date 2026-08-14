@@ -1181,7 +1181,6 @@ baselined at 53/302 dead columns, alarming on growth rather than on the known ba
   - Both recorded in `measurement.md`'s `smart_money` row. Neither regression was caught by CI — `tsc --noEmit` clean and the targeted + full pytest suites (1737 passed/208 skipped) were green *before and after* both fixes, same "green suite protects nothing" pattern documented elsewhere in this file.
   - **Verification**: `check_recurring_bugs.py` clean on both files; full `pytest` 1737 passed/208 skipped, 0 failures.
 
-<<<<<<< HEAD
 ## 2026-08-12 — Scheduled the measurement layer; graded the live signals directly
 
 **Why:** every audit/measurement check in this repo ran only when a human session invoked it.
@@ -1341,7 +1340,6 @@ catch-up runs, that session gets NO ranking rather than a mislabelled one. There
 pre-market signal to give it, and consumers already cold-start-fall-back to stock_scores.
 
 tsc clean, pytest 1741 passed, check_recurring_bugs clean.
-=======
 - **Documented the complete external data-source surface for reuse in a new project (2026-08-12).** Added `docs/DATA_SOURCE_INTEGRATION_GUIDE.md`: canonical NSE-symbol and provider-ID contracts; exchange, price, fundamental, screener, F&O, alternative-data, news, AI, and operational integrations; endpoint families; auth and headers; principal outputs; scheduling ownership; live-test/freshness requirements; migration order; broken/excluded sources; and Python/TypeScript implementation inventories. Reconciled three inventories (network-owning code, scheduled jobs, and tests/monitoring), then extracted URL hosts from non-test `src/server` Python/TypeScript files. The first check found 18 uncategorized host literals, including real omissions for Sensibull and Investing.com; patched those and distinguished Indiatimes SAS discovery probes from production ingestion. Final executable check: **63 production HTTP hosts, 0 uncategorized**, 16 guide sections. Linked the guide from `README.md`. No runtime code changed.
 
 - **Closed the screener/POST-method gap in the data-source guide (2026-08-12).** A host-complete catalog was not method-complete: it omitted NiftyTrader's live and EOD screener POST routes, its three stock-analysis POST routes, and exact MarketsMojo POST bodies. Added canonical matrices for **13 screener endpoint families**, **10 external provider-data POST endpoints**, and **2 authentication POSTs**, while explicitly excluding AI, notifications, internal bridges, inbound APIs, and frontend-to-backend calls. Also captured ET trending and Trendlyne read-through screener variants. Source-measured inventories: MoneyControl 143 configured rows; Trendlyne 1,052 unique discovery PKs; ETNow 438 captured requests with one failed source-index capture; ET Marketstats 91 captured bodies plus four code-defined extras (95). Repository-wide scan classified 27 direct POST call sites. Executable validation found **0 missing matrix endpoints** and all four counts matched source. Documentation only; no runtime code changed.
@@ -1349,7 +1347,6 @@ tsc clean, pytest 1741 passed, check_recurring_bugs clean.
 - **Corrected the data-source guide from route-family completeness to concrete request-corpus completeness (2026-08-12).** The earlier 13-family screener matrix did not explain the user's 1,800+ concrete screener requests. Added an artifact-level reconciliation to `docs/DATA_SOURCE_INTEGRATION_GUIDE.md`: **1,983 unique raw GET URLs**, **1,983 normalized rows / 1,980 unique**, the historical **250-template** field profile (**212 returned data / 38 failed**), and the three supplemental 919-row metadata subsets. Reconciled screener instances as **1,388 broad-heuristic rows in `urls.txt` + 438 ETNow POST definitions + 95 ET Marketstats definitions = 1,921 non-overlapping concrete request records**; distinguished this from the prior narrower keyword audit's 1,382 and from production-enabled counts. Documented why the original malformed corpus yields 250 structural templates while canonicalizing first yields 248: malformed variants and three duplicates converge, not disappear. Executable source check matched all expected values exactly: `(1983, 1983, 1983, 1980, 250, 248, 1388, 438, 95, 1921, 919)`.
 
 - **Added whole-universe and taxonomy URL-mapping instructions to the data-source guide (2026-08-12).** Documented how `endpoint_registry.py` maps all 15 recognized URL parameter aliases to `scripts/stocklist.json` fields, how path/derived IDs must be declared, and how `extra_endpoints_fetcher.py` expands stock × endpoint tasks while reporting missing IDs instead of guessing. Measured the current map rather than repeating the stale 180-stock description: **2,005 rows / 2,001 unique symbols**, four duplicate symbols, and field coverage from 1,787 `scripcode` rows to 2,004 `tlid`/`tlname` rows. Added separate all-index expansion through `indexMapping.ts`/`index_provider_map`, including provider sync jobs and ID-vs-bridge-symbol use. Added both sector/industry modes: provider-native aggregate/constituent endpoints using explicit taxonomy values (12 live-verified MoneyControl slugs), and internal constituent selection from active `nse_stocks` followed by the same provider-ID renderer. Source-derived validation passed for all counts, duplicate names, 15 aliases, 12 slugs, index example, and required taxonomy queries. Documentation only; no runtime code changed.
->>>>>>> 83693f4d3cd6644a9e15a69a7677016acf4f645d
 
 ## 2026-08-12 (cont.) — Reward engine dead UNION half: deleted, not resurrected
 
@@ -2156,6 +2153,149 @@ Verification: `npx tsc --noEmit` clean. `npx vitest run`: 912 passed, 0 failed, 
 (`test_unified_ranker.py`'s append-only-snapshot test) did not recur on this run, confirming
 it was the flake it was diagnosed as, not a real regression.
 
+---
+
+## 2026-08-13 — Tooling/infrastructure recommendations survey (advisory, no code change)
+
+Asked for free libraries/tools/MCP servers/Claude Code features that would make this codebase
+more production-grade. Surveyed the actual repo rather than listing popular packages; wrote
+`docs/optimization-recommendations.md`.
+
+Concrete gaps measured during the survey, each of which maps onto a bug class already recorded
+in `.claude/rules/recurring-bugs.md`:
+
+- **502 `.py` files with no linter, formatter, or type checker** — no `pyproject.toml`,
+  `setup.cfg`, `.ruff.toml`, or `mypy.ini` anywhere in the tree. `ruff`'s `DTZ` rules flag naive
+  `date.today()`/`datetime.now()` directly (the 11-file / 10-recurrence write-anchor class), and
+  `recurring-bugs.md`'s own note that `float(x or 0)` "needs type information the script doesn't
+  have" is a description of mypy.
+- **Python dependencies completely unpinned** — `requirements.txt` is bare package names. This
+  guarantees the "Declared ≠ installed" class recurs; `uv lock` / `uv sync --frozen` turns it
+  from a silent multi-day outage into a startup error.
+- **Zero metrics instrumentation** — no `prom-client`, no OpenTelemetry, no `/metrics`, against
+  34 cron registrations and 200 `runPython()` call sites. Every incident in the "Monitoring blind
+  spots" section (skip-path-stamped-as-success, the nightly SIGKILL that meant a script's last
+  statement never ran, the 721:1 write amplification) is invisible in logs and visible in a
+  metric. One histogram + one labelled counter inside `pythonRunner.ts` covers all 200 sites.
+- **~1 MB of static data in the browser bundle** — `src/data/stocklist.ts` (600 K) +
+  `nseStocks.ts` (444 K), imported by 13 frontend components. `vite.config.ts`'s existing
+  `manualChunks` comment says outright that the split "doesn't reduce first-load bytes"; moving
+  these server-side does.
+- **No real-Postgres test harness** — `testcontainers` is the direct fix for
+  `recurring-bugs.md`'s "a NaN-detection test on SQLite passes against unfixed code" (SQLite
+  coerces NaN to NULL on insert). `freezegun` is the direct fix for the weekend/holiday date
+  classes; `hypothesis` for `sql_translate.py`'s multi-word-cast family.
+- **No ESLint** across 425 TS/TSX files — only `tsc --noEmit`. `no-floating-promises` alone
+  matters: an unawaited promise in a BullMQ worker is a silently-swallowed job failure.
+
+**One recommendation is not purely additive and is flagged as such in the doc:** adopting
+`statsmodels` HAC (Newey–West) standard errors would change the significance of numbers already
+published in `measurement.md`. Every t-stat there is computed on overlapping forward returns
+(a 21d horizon sampled daily has ~21 days of autocorrelation), which a naive
+`mean / (std/sqrt(n))` overstates. The strongly-negative verdicts (`stoch_d` t=−9.28 et al.)
+would survive; the marginal ones (`insider_net` t=1.73, `value_book_to_price` t=1.99) may not.
+Treated in the doc as a measurement change subject to `measurement.md`'s own rules, not a
+free win.
+
+Deliberate omissions, with reasons, in the doc's "Explicitly not recommended" section — Prefect/
+Dagster (the specific bug it would solve is already fixed by a queue-step split; migrating 34
+crons + 200 call sites is not worth it), Feast (the constraint is data depth, not feature
+serving), Ray/Dask (single box), and any weight-optimisation library (`measurement.md`:
+"reweighting the existing engines is not a fix" — there is no incumbent factor to beat).
+
+Advisory only: no `.ts`, `.py`, SQL, or migration touched, so no gate applies.
+
+### (cont.) SessionStart hook — remote sessions could not run any Definition-of-done check
+
+Measured on this running Claude-Code-on-the-web container: **no `node_modules`, no
+`backend-python/venv`, no pytest/pandas/numpy/torch**. Every cloud session on this repo was
+therefore structurally incapable of running `npx tsc --noEmit`, `npx vitest run`, or
+`python -m pytest` — the three commands CLAUDE.md's "Definition of done" requires before a task
+may be called done, in a repo whose most-repeated recorded failure is claiming done without
+having run them. Four other cloud sessions were working this repo concurrently at the time,
+under the same constraint.
+
+Added `.claude/hooks/session-start.sh` + a `SessionStart` entry merged into the existing
+`.claude/settings.json` hooks block (`PreToolUse` rules-pointer and `Stop` verify-gate left
+untouched). Two branches:
+
+- **remote** — installs `npm install` + the pinned `backend-python/requirements.txt` (the file
+  CI installs; the root `requirements.txt` is unpinned and deliberately not used). Marker-file
+  idempotent, keyed on a hash of the requirements file: second run is 0.010s.
+- **local** — installs nothing. Asserts `backend-python/venv` exists, `.env` sets
+  `USE_POSTGRES=true`, and Postgres answers on the port `.env` names. That check exists because
+  of this file's own documented class: a hand-run script that silently talks to SQLite instead
+  of production Postgres "will happily print convincing numbers."
+
+Two things found while validating, both worth keeping:
+
+1. **`ci.yml` installs CPU torch in the wrong order.** It strips the torch line, installs the
+   requirements, then installs CPU torch — but `transformers` and `sentence-transformers` both
+   depend on torch, so the requirements step already resolved the default CUDA build and the
+   later CPU install found the requirement satisfied and did nothing. Verified with
+   `uv pip install --dry-run`: the CPU index resolves **0** nvidia/cuda packages,
+   `sentence-transformers==5.5.1` off the default index resolves **18**. The hook installs CPU
+   torch first. **`ci.yml` fixed in the follow-up commit below.**
+2. **The CPU-torch step is a success-that-did-nothing trap.** `download.pytorch.org` is a 403
+   policy denial through this sandbox's agent proxy (pypi.org and files.pythonhosted.org are
+   allowed, that host is not), and `uv pip install torch` *also* exits 0 when torch is already
+   present without ever contacting the index. First draft trusted that exit code and printed
+   "CPU build, no CUDA libraries" over a `2.13.0+cu130` install. Rewritten to report the
+   measured `torch.__version__` rather than the command's intent, and the CPU index is now
+   optional (a blocked index degrades to default PyPI with an explicit warning, instead of
+   failing the whole install).
+
+The hook never exits non-zero — bricking a session on a transient network failure is worse than
+the problem — but on a failed install it prints an explicit banner saying the checks cannot run
+and must not be reported as passing.
+
+Verification: hook runs clean in both branches; `npx tsc --noEmit` exit 0;
+`npx vitest run .claude/hooks/verify-gate.test.mjs` 13 passed;
+`pytest src/server/__tests__/test_logical_session_date.py test_relative_strength.py` 17 passed.
+Not verified: anything needing a live DB (no Postgres/Redis in this container) — `schema:drift`
+and the `live_datasource` tests remain unrunnable here by design, which the hook says out loud.
+
+### (cont.) `ci.yml` torch ordering fixed, plus a guard so it cannot regress
+
+Swapped the two install lines in the `python-tests` job so CPU torch installs **before**
+`backend-python/requirements.txt`, and added an assertion step after it.
+
+The step was named "Install dependencies (CPU torch — no CUDA runner in CI)" and had never once
+produced a CPU build. It stripped the `torch` line from the requirements file, installed the
+requirements, then installed CPU torch — but `transformers==5.9.0` and
+`sentence-transformers==5.5.1` both depend on torch, so the requirements install had already
+resolved the default CUDA wheel and the CPU install that followed found the requirement
+satisfied and exited 0 having done nothing. Every run of this job downloaded and cached several
+GB of CUDA libraries onto a GPU-less runner.
+
+**Why it survived: nothing downstream ever checked which torch it got.** The step's exit code is
+0 in both the working and broken orderings, so there was no signal to notice. Same shape as this
+file's skip-path-stamped-as-success class — a step reporting success for work it didn't do.
+The new `Assert CPU-only torch` step checks the artifact instead of the exit code, asserting
+`torch.version.cuda is None`.
+
+**The first version of that guard was wrong and failed CI — correction below.** It counted
+`nvidia-*` packages in `pip list` and failed if any were present, on the reasoning that this
+stayed independent of PyTorch's version-string conventions. It ran red against a **correctly
+CPU-built** torch: the CI log shows `torch 2.13.0+cpu` (so the ordering fix itself worked on the
+first try) alongside exactly one nvidia package, `nvidia-nccl-cu12`. That package is
+`Required-by: xgboost`, which declares `nvidia-nccl-cu12; platform_system == 'Linux'`
+unconditionally — nothing to do with torch, whose own CUDA dependency is `nvidia-nccl-`**`cu13`**,
+a different package. Counting nvidia packages answers "did anything in the dependency tree want
+CUDA", which is not the question being asked. `torch.version.cuda` (None on a CPU wheel, a
+version string on a CUDA one) is the actual predicate, and is equally independent of version-string
+formatting. A `# Do NOT rewrite this to count nvidia-* packages` comment now sits on the step,
+because the wrong version looks more thorough than the right one.
+
+Negative-controlled, per the rule that a test which never failed against the bug protects
+nothing: run against this container (which carries the CUDA build the old ordering produces) the
+guard exits **1** and names all 16 nvidia packages; against a clean package list it exits **0**.
+`ci.yml` re-parsed with `yaml.safe_load` afterwards and the step order asserted programmatically
+(`pip install torch --index-url` precedes `pip install -r`), not eyeballed.
+
+Not verified: the job has not been run on a real GitHub runner from here. One residual risk worth
+knowing — if a `ubuntu-latest` image ever ships `nvidia-*` **pip** packages preinstalled, the
+guard would false-positive; the standard image does not today.
 ## 2026-08-14 (cont. 2) — greenfield BUILD_STAGE_5_SPEC.md: Task 5.1 (ranker construction) + Task 5.2 (shadow-period preregistration)
 
 Continuation of the greenfield rebuild (`greenfield/`, separate codebase from the legacy system

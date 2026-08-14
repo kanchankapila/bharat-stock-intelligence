@@ -107,3 +107,4 @@ backups/
 logs/
 
 .superpowers/
+.claude/.session-start/
