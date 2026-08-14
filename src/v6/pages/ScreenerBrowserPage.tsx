@@ -2,6 +2,7 @@ import React, { useMemo, useState } from 'react';
 import { Search, Filter, Layers3, TrendingUp, TrendingDown, Minus, ChevronLeft, ChevronRight, ListFilter } from 'lucide-react';
 import { trpc } from '../../lib/trpc';
 import { Card } from '../../components/Card';
+import { LegacyScoreBanner } from '../../components/CanonicalSourceNote';
 import { cn } from '../../lib/utils';
 
 type SearchMode = 'screeners' | 'stocks';
@@ -260,6 +261,10 @@ const ScreenerBrowser: React.FC<{ onSelectStock?: (symbol: string) => void }> = 
   return (
     <div className="space-y-4">
       <FactorPaperScreen onSelectStock={onSelectStock} />
+      {/* Tier/Win Rate/Alpha below are precomputed in screener_performance_v2, not the
+          canonical model -- see measurement.md and the canonical-read-audit finding this
+          banner exists to fix. */}
+      <LegacyScoreBanner note="Tier, Win Rate, Avg Return, and Alpha are precomputed per-screener in screener_performance_v2. A from-scratch remeasurement of this same table found its win-rate figures didn't reproduce (one screener read 100%, remeasured at 65%), and 0 of 1,563 individual screeners tested clear a false-discovery correction -- treat this as a browse of what a screener currently flags, not a graded prediction. Check Alpha / Buy Recs for the canonical, regime-aware view." />
       {/* Filter bar */}
       <div className="flex flex-wrap items-center gap-2">
         <div className="flex items-center gap-2 glass rounded-xl px-3 py-2 flex-1 min-w-[220px]">
