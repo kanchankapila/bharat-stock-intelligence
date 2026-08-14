@@ -59,21 +59,31 @@ jobs:
           pip install -r /tmp/requirements-ci.txt
 
       # The bug above was invisible for its whole life because the install step exits
-      # 0 either way — nothing downstream ever checked which torch it got. Assert on
-      # the artifact, not the exit code. Counting nvidia-* packages rather than
-      # matching a "+cpu" version suffix keeps this tied to the actual harm and
-      # independent of PyTorch's version-string conventions.
+      # 0 either way — nothing downstream ever checked which torch it got. So assert
+      # on the artifact, not the exit code.
+      #
+      # `torch.version.cuda` is the predicate: None on a CPU build, a version string
+      # ("13.0") on a CUDA one. Do NOT rewrite this to count `nvidia-*` packages —
+      # that was the first attempt and it failed CI on 2026-08-13 against a correctly
+      # CPU-built torch. `xgboost` declares `nvidia-nccl-cu12; platform_system ==
+      # 'Linux'` unconditionally, so one nvidia package is present on this runner no
+      # matter which torch is installed. (torch's own CUDA dep is nvidia-nccl-**cu13**
+      # — a different package.) Counting nvidia packages measures "did anything in the
+      # tree want CUDA", which is not the question.
       - name: Assert CPU-only torch (guards the install order above)
         run: |
-          python -c "import torch; print('torch', torch.__version__)"
-          n=$(pip list --format=freeze | grep -ci '^nvidia-' || true)
-          if [ "$n" -gt 0 ]; then
-            echo "::error::CUDA torch resolved — $n nvidia-* packages installed on a GPU-less runner."
-            echo "The CPU-torch install in the previous step must come BEFORE the requirements install."
-            pip list --format=freeze | grep -i '^nvidia-'
-            exit 1
-          fi
-          echo "No nvidia-* packages installed — CPU torch confirmed."
+          python - <<'PY'
+          import sys, torch
+          cuda = torch.version.cuda
+          print(f"torch {torch.__version__}   torch.version.cuda={cuda}")
+          if cuda is not None:
+              print(f"::error::torch is a CUDA build (cuda={cuda}) on a GPU-less runner. "
+                    "The CPU-torch install must come BEFORE the requirements install in "
+                    "the previous step, or transformers/sentence-transformers resolve the "
+                    "default CUDA wheel first and the CPU install becomes a no-op.")
+              sys.exit(1)
+          print("CPU-only torch confirmed.")
+          PY
 
       # Hard gate (2026-07-18): the 13 pre-existing failures this job used to tolerate are
       # fixed — mostly stale test fixtures (schema drift after migrations, hardcoded dates

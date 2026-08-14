@@ -2188,10 +2188,21 @@ GB of CUDA libraries onto a GPU-less runner.
 **Why it survived: nothing downstream ever checked which torch it got.** The step's exit code is
 0 in both the working and broken orderings, so there was no signal to notice. Same shape as this
 file's skip-path-stamped-as-success class — a step reporting success for work it didn't do.
-The new `Assert CPU-only torch` step checks the artifact instead of the exit code: it counts
-`nvidia-*` packages in `pip list` and fails the job if any are present. Counting nvidia packages
-rather than matching a `+cpu` version suffix keeps the check tied to the actual harm and
-independent of PyTorch's version-string conventions.
+The new `Assert CPU-only torch` step checks the artifact instead of the exit code, asserting
+`torch.version.cuda is None`.
+
+**The first version of that guard was wrong and failed CI — correction below.** It counted
+`nvidia-*` packages in `pip list` and failed if any were present, on the reasoning that this
+stayed independent of PyTorch's version-string conventions. It ran red against a **correctly
+CPU-built** torch: the CI log shows `torch 2.13.0+cpu` (so the ordering fix itself worked on the
+first try) alongside exactly one nvidia package, `nvidia-nccl-cu12`. That package is
+`Required-by: xgboost`, which declares `nvidia-nccl-cu12; platform_system == 'Linux'`
+unconditionally — nothing to do with torch, whose own CUDA dependency is `nvidia-nccl-`**`cu13`**,
+a different package. Counting nvidia packages answers "did anything in the dependency tree want
+CUDA", which is not the question being asked. `torch.version.cuda` (None on a CPU wheel, a
+version string on a CUDA one) is the actual predicate, and is equally independent of version-string
+formatting. A `# Do NOT rewrite this to count nvidia-* packages` comment now sits on the step,
+because the wrong version looks more thorough than the right one.
 
 Negative-controlled, per the rule that a test which never failed against the bug protects
 nothing: run against this container (which carries the CUDA build the old ordering produces) the
