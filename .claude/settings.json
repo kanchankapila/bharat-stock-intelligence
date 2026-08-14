@@ -38,6 +38,10 @@
           {
             "type": "command",
             "command": "node .claude/hooks/rules-pointer.mjs"
+          },
+          {
+            "type": "command",
+            "command": "node .claude/hooks/env-guard.mjs"
           }
         ]
       }
