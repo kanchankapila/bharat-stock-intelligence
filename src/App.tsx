@@ -544,7 +544,7 @@ export default function App() {
             } />
             <Route path="/todays-picks" element={<TodaysPicks onSelectStock={handleSelectStock} />} />
             <Route path="/early-spotter" element={<EarlyHoursSpotter onSelectStock={handleSelectStock} />} />
-            <Route path="/screener-intelligence" element={<ScreenerIntelligencePage />} />
+            <Route path="/screener-intelligence" element={<ScreenerIntelligencePage onSelectStock={handleSelectStock} />} />
             <Route path="/agent-data-scientist" element={<AgentDataScientistPage />} />
             <Route path="/agent-strategist"     element={<AgentStrategistPage />} />
             <Route path="/agent-auditor"        element={<AgentAuditorPage />} />
@@ -633,6 +633,7 @@ export default function App() {
           watchlist={watchlist}
           onToggleWatchlist={toggleWatchlist}
           onSelectStock={setDrawerSymbol}
+          userId={user?.uid}
         />
         <AlertsToast userId={user?.uid} />
       </>
@@ -715,6 +716,7 @@ export default function App() {
         watchlist={watchlist}
         onToggleWatchlist={toggleWatchlist}
         onSelectStock={setDrawerSymbol}
+        userId={user?.uid}
       />
 
       <AlertsToast userId={user?.uid} />

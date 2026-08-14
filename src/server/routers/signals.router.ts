@@ -193,12 +193,20 @@ export const signalsRouter = router({
     }))
     .query(async ({ input }) => {
       const { correlationService } = await import('../correlationService');
-      const [correlations, alignmentScore] = await Promise.all([
-        correlationService.analyzeSignalPortfolioAlignment(input.signalId, input.signalSymbol, input.portfolio),
+      // analyzeSignalPortfolioAlignment WRITES signal_portfolio_correlation (storeCorrelation,
+      // one row per holding) -- the three reads below all SELECT from that same table for this
+      // signalId, so they must run AFTER it completes, not concurrently with it. Was
+      // `Promise.all([analyze, getPortfolioAlignmentScore])`: on any signalId never correlated
+      // before, the score read raced the write and always returned the "no rows yet" neutral
+      // default (50) on a signal's first-ever lookup, only reflecting real data on a second
+      // call for the same signalId. Found 2026-08-14 wiring this procedure into its first UI
+      // consumer -- never caught because nothing had ever exercised this path before.
+      const correlations = await correlationService.analyzeSignalPortfolioAlignment(input.signalId, input.signalSymbol, input.portfolio);
+      const [alignmentScore, hedges, concentrationRisk] = await Promise.all([
         correlationService.getPortfolioAlignmentScore(input.signalId),
+        correlationService.getHedgeRecommendations(input.signalId),
+        correlationService.getConcentrationRisk(input.signalId),
       ]);
-      const hedges = await correlationService.getHedgeRecommendations(input.signalId);
-      const concentrationRisk = await correlationService.getConcentrationRisk(input.signalId);
       return {
         correlations, alignmentScore, hedges, concentrationRisk,
         recommendation: {

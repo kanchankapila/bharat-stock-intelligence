@@ -1,10 +1,11 @@
 import React from 'react';
 import { motion } from 'motion/react';
-import { X, Bookmark, CheckCircle2, History, TrendingUp, Activity, Award, ShieldAlert, Maximize2, Minimize2 } from 'lucide-react';
+import { X, Bookmark, CheckCircle2, History, TrendingUp, Activity, Award, ShieldAlert, Maximize2, Minimize2, PieChart, ChevronDown, ChevronUp } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { trpc } from '../lib/trpc';
 import stockData from '../data/stocklist';
 import { MCStockInfoPanel } from './MCStockInfoPanel';
+import { SignalPortfolioImpact } from './SignalPortfolioImpact';
 
 interface SlideOutDrawerProps {
   symbol: string | null;
@@ -13,6 +14,7 @@ interface SlideOutDrawerProps {
   watchlist: string[];
   onToggleWatchlist: (symbol: string, metadata?: { price?: number; name?: string; source?: string }) => void;
   onSelectStock?: (symbol: string) => void;
+  userId?: string | null;
 }
 
 export const SlideOutDrawer: React.FC<SlideOutDrawerProps> = ({
@@ -22,12 +24,15 @@ export const SlideOutDrawer: React.FC<SlideOutDrawerProps> = ({
   watchlist,
   onToggleWatchlist,
   onSelectStock,
+  userId,
 }) => {
   const [isMaximized, setIsMaximized] = React.useState(false);
+  const [impactSignalId, setImpactSignalId] = React.useState<number | null>(null);
   const isWatchlisted = symbol ? watchlist.includes(symbol) : false;
 
   React.useEffect(() => {
     setIsMaximized(false);
+    setImpactSignalId(null);
   }, [symbol]);
 
   // Fetch deep quant scores (incorporating fundamentals)
@@ -304,6 +309,23 @@ export const SlideOutDrawer: React.FC<SlideOutDrawerProps> = ({
                           <div>Target: <span className="font-bold text-emerald-400 tabular-nums">₹{sig.target}</span></div>
                           <div>Stop-loss: <span className="font-bold text-rose-400 tabular-nums">₹{sig.stopLoss}</span></div>
                         </div>
+                        {userId && (
+                          <div className="mt-2.5 pt-2.5 border-t border-white/[0.05]">
+                            <button
+                              onClick={() => setImpactSignalId(impactSignalId === sig.id ? null : sig.id)}
+                              className="flex items-center gap-1.5 text-[10px] font-bold text-indigo-400 hover:text-indigo-300 uppercase tracking-wider"
+                            >
+                              <PieChart className="w-3 h-3" />
+                              Portfolio Impact
+                              {impactSignalId === sig.id ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
+                            </button>
+                            {impactSignalId === sig.id && (
+                              <div className="mt-2.5">
+                                <SignalPortfolioImpact signalId={sig.id} signalSymbol={symbol} />
+                              </div>
+                            )}
+                          </div>
+                        )}
                       </div>
                     );
                   })}
