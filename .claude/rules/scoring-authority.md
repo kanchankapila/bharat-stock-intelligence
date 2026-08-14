@@ -23,6 +23,24 @@ not deleting the input tables. Both closed 2026-08: `getTopRatedStocks` (`scorin
 `requireUnifiedCoverage` filter, with the same cold-start fallback. Any new engine should still
 write a *component* score the ranker ingests — never a parallel "final" score.
 
+**`timeframe_scores` is NOT a fourth producer — it is a pre-existing violation of the "never
+write a parallel final score" rule above, found by the 2026-08-14 canonical-read-audit, decided
+here rather than left undocumented.** `scoringService.ts`'s `computeTimeframeScores` (called from
+`screeners.router.ts`'s `computeTimeframeScores`/`getTimeframeRanking` procedures, rendered by
+`ScreenerRankingPanel.tsx` inside the live, routed `/screener-intelligence` page) computes its own
+hand-rolled weighted blend — `momentum_score * 0.4 + technical_composite_score * 0.4 +
+return_on_equity-derived * 0.2` — on demand, per screener run, writing to `timeframe_scores`. It
+does not feed `unified_ranker.py`, is not blended into `unified_recommendations`, and has never
+been backtested (no `factor_backtest.py` run, no entry in `measurement.md`) — exactly the
+unmeasured-parallel-score shape this file exists to prevent. It predates this rule file and is
+reachable in production today, so the fix is disclosure, not silent removal: `ScreenerRankingPanel.tsx`
+now carries an inline caveat ("not the canonical unified model, not backtested"). Treat it as a
+deprecation candidate, not a base to extend — do not add inputs to `computeTimeframeScores`'s
+formula or route new UI to `getTimeframeRanking`; route new work to `unified_ranker.py`'s inputs
+instead. Removing it outright needs a decision on whether `/screener-intelligence`'s
+"compute rankings on this screener run" interaction has a real user, which this audit didn't
+establish either way.
+
 `quant_scores` previously had three writers with a real ordering bug: `institutional_quant_engine.py`
 ran inside `ml-daily-ops` (7:30 PM IST) and did a full `DELETE`+re-`INSERT`, but `quantScoringService.ts`'s
 own upsert ran 3.5h later (11 PM IST) writing the identical columns — the earlier engine's writes were

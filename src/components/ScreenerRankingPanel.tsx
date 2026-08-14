@@ -14,6 +14,13 @@ export function ScreenerRankingPanel({ timeframe = 'short', runId, screenerId }:
         <h3 className="text-sm font-semibold text-slate-200">Top {timeframe} rankings</h3>
         <span className="text-[11px] text-slate-500">{rows.length} symbols</span>
       </div>
+      {/* This score is computeTimeframeScores' own ad-hoc weighted blend (momentum 0.4 +
+          technical 0.4 + fundamental 0.2), written to timeframe_scores -- not blended into
+          unified_recommendations and not backtested. See scoring-authority.md. */}
+      <p className="text-[11px] text-amber-400/80">
+        Ad-hoc composite score, not the canonical unified model and not backtested for edge --
+        see Alpha / Buy Recs for the canonical, regime-aware view.
+      </p>
       <div className="overflow-auto rounded-xl border border-slate-800 bg-slate-950/50">
         <table className="min-w-full text-xs text-slate-300">
           <thead className="bg-slate-900/80 text-slate-500">
