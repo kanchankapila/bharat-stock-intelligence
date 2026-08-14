@@ -3361,6 +3361,19 @@ def incremental_update(n_days: int = 3, n_rounds: int = 20, dry_run: bool = Fals
         print(f"[Ensemble] Held-out gate skipped (holdout lacks both classes or batch too small) -- applying ungated.")
 
     lgbm_model.booster_ = new_booster
+
+    # Same backup-before-overwrite promote_or_register() already does for the weekly --train
+    # path -- this incremental path writes to the same live ENSEMBLE_PATH but had no backup at
+    # all (found live-verifying the gate, 2026-08-15). A bad write here (pickle corruption, an
+    # edge case the held-out gate's AUC check doesn't catch) had no rollback path before this.
+    if os.path.exists(ENSEMBLE_PATH):
+        backup = f"{ENSEMBLE_PATH}.{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}.bak"
+        try:
+            shutil.copy2(ENSEMBLE_PATH, backup)
+            print(f"[Ensemble] Backed up current model to {backup}")
+        except Exception as e:
+            print(f"[Ensemble] Backup failed (continuing): {e}")
+
     with open(ENSEMBLE_PATH, 'wb') as f:
         pickle.dump(ensemble, f, protocol=pickle.HIGHEST_PROTOCOL)
 

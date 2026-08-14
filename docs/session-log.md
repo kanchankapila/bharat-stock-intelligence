@@ -2629,3 +2629,158 @@ untouched), so the `verify-gate.mjs` backtest-evidence mandate doesn't apply her
 per `measurement.md`'s spirit: any `win_probability` claim made over the last ~2 weeks was
 carrying an unexplained, roughly-constant 15% haircut that had nothing to do with actual model
 health.
+
+---
+
+## 2026-08-14 — onboard-data-source batch audit: no new work, registry health confirmed
+
+User invoked `/onboard-data-source` with a ~250-URL batch. Turned out to be `src/server/urls_sample.json`
+(857 entries, added 2026-07-30 commit `8d8e1b9`) pasted back in — confirmed by exact first-two-URL
+match plus 8 spot-checked fragments from deep in the list. That file already fully fed
+`endpoint_registry.py`/`extra_endpoints_fetcher.py`/`extra_features_parser.py` across 3+ prior
+sessions. Ran a live health audit instead of re-onboarding (full report:
+`docs/audits/2026-08-14-onboard-data-source-batch-audit.md`).
+
+**Confirmed healthy, live-queried against production Postgres:** 34 `CURATED_EXTRA_ENDPOINTS`
+all enabled/parser_ready/fetched (1,996 rows in `extra_endpoint_responses`, latest 2026-08-14);
+1024 `ai_memory`-sourced candidates all still `enabled=0` (654 invalid — mostly unfilled `default`
+placeholders from the AI-fabricated `ai_endpoint_memory.json`, not real captured data). The
+2026-08-12 SIGKILL fix (`recurring-bugs.md`'s "step that only runs at the end of a script that
+gets killed") is holding: `technical_signals.ext_*` columns at 46-77% populated on the last
+completed day (2026-08-13), `queues.ts` runs fetch/parse as separate steps, both
+`test_endpoint_registry.py` (7) and `test_extra_features_parser.py` (14) pass.
+
+**Real gap found, not fixed (out of scope for a health audit):** 10 of 34 curated endpoints are
+market-wide and archived-only — fetched weekly, never parsed past the raw JSON blob. Two look
+like real misses: `tickertape_mmi` (India's retail Fear & Greed gauge, still absent from the
+whole frontend) and `tickertape_deals` (659K+ bulk/block deals, richer than the existing
+`block_deal_fetcher.py` pull). Also noted: Sensibull/MSE/BloombergQuint URLs in the original
+batch were never promoted to curated status at all — open item if pursued.
+
+No code changed this session.
+
+---
+
+## 2026-08-14 (session 2) — "run all skills" re-ask: found the audit already done, verified +
+## closed 3 fresh gaps instead of re-running 13 agents
+
+User asked to run every applicable skill/command, document findings, and fix them. Before
+fanning out, checked for an existing same-day audit doc and found one:
+`docs/audit-2026-08-14/full-sweep-findings.md`, a 12-audit sweep from earlier the same day whose
+"Remediation log" section matched this session's `git status` file-for-file (every modified
+fetcher/router/component and all 4 new test files). 13 background agents re-running those same
+audits were stopped mid-run rather than duplicating a finished sweep — see that file's "Session 2
+addendum" for the full writeup; summary here.
+
+**Verified the existing (uncommitted) remediation actually holds:** `tsc --noEmit` clean;
+`vitest run` 916/917 (1 pre-existing order-dependent flake, confirmed passes standalone);
+`pytest` 1874/1874 (+3 after this session's own fixes below → 1877/1877). No regressions from
+the earlier session's work.
+
+**Ran one fresh `code-review` pass on the current diff (the one review not yet in the existing
+audit doc) and fixed all 3 findings it surfaced — all three in code the earlier remediation had
+just touched:**
+
+1. `block_deal_fetcher.py`'s `_calendar_days_back()`/`main()` still anchored on bare
+   `date.today()` instead of `as_of.logical_trading_date()` — same midnight-crossing
+   `ml-daily-ops` failure shape as the fix this file already got earlier today, from the
+   opposite direction. Fixed; `test_block_deal_fetcher_date_labeling.py` extended (4→5 tests,
+   negative-controlled).
+2. `marketsmojo_financials_fetcher.py`'s incremental-write guard (`known.get(key) == value`)
+   couldn't tell "key never seen before" from "key stored as NULL" — both read as `None` from a
+   dict miss — so a brand-new symbol's first-ever unparseable cell (`-`/`N/A`) was silently
+   never written. Fixed to `key in known and known[key] == value`;
+   `test_marketsmojo_incremental_write_siblings.py` gained a negative-controlled test.
+3. `mc_earnings_fetcher.py`'s Postgres date-format regex accepted 1-2 digit days while the
+   parallel SQLite GLOB required exactly 2 — latent (0 live rows currently trip it), but a
+   dialect-inconsistent result for the same input if the vendor ever emits an unpadded day.
+   Tightened to match; hoisted the regex to a module-level `PG_RESULT_DATE_RE` constant so
+   `test_mc_earnings_fetcher_stale_quarter.py` could assert the real pattern against the real
+   SQLite GLOB directly instead of a hand-copied duplicate.
+
+All 3 fixes negative-controlled: reverted each, confirmed its new test fails against the
+pre-fix code, restored, confirmed green. Full suite re-run clean after all three together.
+
+**Attempted and reverted:** regenerating `db/schema.postgres.sql` (the earlier audit's §8, flagged
+LOW/not-yet-fixed) via `scripts/generate_pg_schema.py` produced a file 1520 lines smaller than
+committed — this session's local `database.sqlite` dev file isn't in the same state as whatever
+generated the last committed snapshot, so this would have been a regression, not a fix. Reverted
+via `git checkout`. Also confirmed (live `schema:drift`) that even a correct regen can't close the
+real gap: the generator reads the local SQLite schema-of-record, not live Postgres, and live
+Postgres has ~60 tables/many columns with no SQLite mirror at all (206 vs 145 tables). Left as
+documented backlog, matching the original audit's own triage — needs local `database.sqlite`
+reconciled against the committed snapshot's source state before attempting again, not a redo of
+today's regen.
+
+**Lesson applied, worth repeating:** before running a "sweep everything" instruction a second
+time in the same day, check for an existing dated audit doc and diff it against `git status`.
+The instruction doesn't know whether the work was already done; the assistant has to check.
+
+**Follow-up, same session, user asked to "fix all" the remaining items.** Added a
+backup-before-overwrite to `ml_ensemble.py`'s `incremental_update()` (mirrors the existing
+`promote_or_register()` pattern — this path had none). Live-ran the real (non-dry-run)
+`--incremental` invocation against production to verify the gate actually fires, per §9's own
+"not yet live-verified" caveat: it didn't fire at all — `getattr(est, 'estimator', est)` on a
+`CalibratedClassifierCV`-wrapped base model returns the unfitted constructor prototype, not the
+fitted booster (which lives 2 levels deeper, one per CV fold, 3 of them). The whole incremental
+warm-start feature has been dead code (safe no-op) since it was added earlier today — confirmed
+live, model file byte-identical before/after. Deliberately did NOT fix the detection to make the
+function start actually mutating the live model, since that's an unmeasured scoring-behavior
+change on a live trading-signal model, not a mechanical bug fix — flagged in `recurring-bugs.md`
+for a real follow-up with backtest evidence instead. §3 and §10 aren't code fixes (a data-usage
+decision and a historical note, respectively); §8 wasn't re-attempted after this session's earlier
+revert — needs `database.sqlite` reconciled against the last committed snapshot's source state
+first.
+
+Nothing committed this session — working tree (original remediation + this session's fixes)
+left for the user to review.
+
+---
+
+## 2026-08-15 — Closed the archived-only registry backlog: 3 new fetchers, 2 false starts avoided
+
+Follow-up to the 2026-08-14 audit above (`docs/audits/2026-08-14-onboard-data-source-batch-audit.md`).
+User asked to onboard the 10 flagged archived-only endpoints plus the never-promoted
+Sensibull/MSE/BloombergQuint URLs.
+
+**Re-confirmed no new URLs** before building anything: host+path diff of the full pasted batch
+against root `urls.txt` (1,983 lines) found 0 of 318 distinct host+paths missing.
+
+**2 endpoints turned out already covered — caught before building, not after**:
+`tickertape_mmi` is already `mmi_fetcher.py` → `macro_asset_prices` (`INDIA_MMI`, live through
+2026-08-14); `tickertape_deals` is already `tickertape_deals_fetcher.py --insider` → `block_deals`
+(wired into `ml-daily-ops` since 2026-07-31). Would have built two duplicate fetchers without
+checking first.
+
+**3 new fetchers built, tested, live-verified against production, wired into `queues.ts`, with
+freshness checks added** (`stockedge-high-delivery-alerts-recency`, `trading80-call-alerts-recency`,
+`marketsmojo-stock-picks-recency` in `dataQualityChecks.ts`):
+
+- `stockedge_high_delivery_fetcher.py` → `stockedge_high_delivery_alerts` (5/5 rows live). `Symb`
+  is already an NSE ticker, no resolution needed. Noted in its own docstring: same construct as
+  `measurement.md`'s already-dead `delivery_spike`/`delivery_trend` factors — archived for
+  cross-check value, not expected to have edge.
+- `trading80_call_alerts_fetcher.py` → `trading80_call_alerts` (9/10 + 9/10 rows live). **Found a
+  real bug while building**: the API's `changes` list carries `id: null` on every row (only `new`
+  has real ids) — first version silently stored 0 of 10 `changes` rows. Fixed with a
+  `stockid:calltime` composite-key fallback; re-verified live, fixed.
+- `marketsmojo_stock_picks_fetcher.py` → `marketsmojo_stock_picks` (5/5 rows live). Reuses
+  `trading80_call_alerts_fetcher.py`'s `load_sid_to_symbol_map()` (shared MarketsMojo/Trading80
+  `stockid` space) rather than re-deriving it.
+
+**5 endpoints + 3 providers assessed and rejected, not built blind** — full reasons in the audit
+doc: `marketsmojo_results_corner` (its `dotsum` block is byte-identical to data
+`marketsmojo_header_info` already captures platform-wide), `marketsmojo_marketaction` (3 freeform
+text lines, not tabular), `investsights_investors_list` (aggregate directory, the real per-stock
+signal already exists via `investsights_investor_activity_fetcher.py`), `trendlyne_market_insight`
+(overlaps the existing news pipeline, needs real dedup work), `trendlyne_mf_home` (returned
+`tableData: []` on both live tests — not confirmed working), Sensibull (`invalid platform access
+token`, no accessible auth), MSE (`mseindia.com/api/ticker` works, but 93% of its universe is
+already canonically NSE-priced — redundant secondary-venue quotes), BloombergQuint (HTTP 000,
+dead domain).
+
+**Verified once, everything touched**: `tsc --noEmit` clean; `pytest src/server/__tests__/
+src/server/tests/` 1,904 passed / 227 skipped; `vitest run` 916 passed / 40 skipped / 1 flake
+(`signalReportCard.test.ts`, unrelated file, passed in isolation — DB contention, not a
+regression). None of the 3 new tables feed scoring/`unified_ranker.py` — all flagged unmeasured
+in their own docstrings.

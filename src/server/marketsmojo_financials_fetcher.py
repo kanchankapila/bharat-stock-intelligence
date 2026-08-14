@@ -133,7 +133,12 @@ def write_financials_history(conn, symbol: str, rows: list, fetched_at: str,
     written = 0
     for statement, period_label, line_item, raw_value in rows:
         value = _parse_numeric(raw_value)
-        if known is not None and known.get((statement, period_label, line_item)) == value:
+        key = (statement, period_label, line_item)
+        # known.get(key) == value would also match a key NEVER SEEN before (dict.get's default
+        # is None, same as an unparseable raw_value) -- silently skipping the first write for
+        # any new cell whose value happens to be unparseable. `key in known` first makes "new"
+        # and "already stored as NULL" distinguishable.
+        if known is not None and key in known and known[key] == value:
             continue
         conn.execute(
             """

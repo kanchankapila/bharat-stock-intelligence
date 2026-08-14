@@ -130,3 +130,20 @@ def test_financials_full_rerun_upserts_everything_regardless_of_known():
     write_financials_history(conn, "TESTSYM", rows, "2026-08-11", known={})
     # --full passes known=None
     assert write_financials_history(conn, "TESTSYM", rows, "2026-08-12", known=None) == 1
+
+
+def test_NEGATIVE_CONTROL_new_unparseable_cell_is_written_not_skipped():
+    """known.get(key) == value can't tell "key never seen before" from "key stored as NULL" --
+    both read as None from a plain dict.get on a miss. A brand-new symbol's known={} plus a
+    cell whose raw_value is a placeholder ('-', 'N/A') parses to None, and None == None was
+    True -- so the very first write for that cell was silently skipped forever, unlike every
+    other new row (which the pre-fix code unconditionally wrote). Fails against
+    `known.get(key) == value` (with no `key in known` guard), passes against the fix."""
+    conn = _financials_db()
+    rows = [("income", "FY24", "revenue", "-")]  # unparseable placeholder -> None
+    written = write_financials_history(conn, "TESTSYM", rows, "2026-08-11", known={})
+    assert written == 1, "a never-before-seen cell must be written even if it parses to NULL"
+    stored = conn.execute(
+        "SELECT COUNT(*) FROM marketsmojo_financials_history WHERE symbol = 'TESTSYM'"
+    ).fetchone()[0]
+    assert stored == 1

@@ -380,6 +380,16 @@ def fetch_rapid_results(con) -> None:
     print(f"[EarningsFetcher] Rapid: {total} total ({counts_str}) -> {mapped} mapped to NSE symbols")
 
 
+# Vendor result_date format guard: "Month DD, YYYY", zero-padded day (confirmed live: "August
+# 06, 2026", not "August 6, 2026"). Day digits pinned to exactly 2 to match the SQLite branch's
+# GLOB pattern ('[0-9][0-9]') inside _backfill_rapid_features below -- an unpadded single-digit
+# day would otherwise parse correctly on Postgres via TO_DATE but silently fail the SQLite guard
+# (degrading to NULL, sorts last), a dialect-inconsistent result for identical input (found by
+# code-review 2026-08-14). Module-level so test_mc_earnings_fetcher_stale_quarter.py can assert
+# the real pattern directly instead of a hand-copied regex that could drift from it.
+PG_RESULT_DATE_RE = r'^[A-Za-z]+ [0-9]{2}, [0-9]{4}$'
+
+
 def _backfill_rapid_features(con) -> int:
     """Update technical_signals with earnings category scores and NP growth from rapid results.
 
@@ -409,11 +419,10 @@ def _backfill_rapid_features(con) -> int:
     # updates the WHOLE table in one statement, so one malformed result_date would abort every
     # symbol's update, not just its own row -- confirmed live TO_DATE('garbage', ...) raises
     # "invalid value ... for Month". The regex guard falls back to NULL (sorts last) instead.
-    # Assumes the vendor's own "Month DD, YYYY" zero-padded-day format (confirmed live: "August
-    # 06, 2026", not "August 6, 2026"; 0 of the live rows fail the guard as of 2026-08-14).
-    _PG_DATE_RE = r'^[A-Za-z]+ [0-9]{1,2}, [0-9]{4}$'
+    # 0 of the live rows fail the PG_RESULT_DATE_RE guard as of 2026-08-14 -- see its module-level
+    # docstring comment above for why the day-digit width matters.
     _pg_sort_date = (
-        f"CASE WHEN r.result_date ~ '{_PG_DATE_RE}' "
+        f"CASE WHEN r.result_date ~ '{PG_RESULT_DATE_RE}' "
         f"THEN TO_DATE(r.result_date, 'FMMonth DD, YYYY') ELSE NULL END"
     )
     if use_postgres():

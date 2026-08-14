@@ -34,6 +34,7 @@ from datetime import date, datetime, timedelta
 
 import requests
 
+from as_of import logical_trading_date
 from db_compat import connect
 from fetch_utils import retry_get
 
@@ -267,9 +268,16 @@ def _calendar_days_back(n: int) -> list[date]:
     one real capture mislabeled a day early, the other correct if NSE's feed still showed it the
     next day. Anchoring at today (not today-1) plus the tightened live-endpoint condition below
     fixes both the --days 1 case and the corresponding slot in any larger --days N backfill.
+
+    "Today" is `as_of.logical_trading_date()`, not the bare calendar date: this fetcher is one
+    of ~30 sequential steps inside ml-daily-ops, which regularly finishes after midnight IST
+    (see logical_trading_date's own docstring). A bare date.today() run at e.g. 00:30 IST would
+    anchor on the NEXT calendar day, route to fetch_live() (which only ever reflects that day's
+    still-empty pre-market session) and mislabel the day that just closed -- the same failure
+    shape this function was written to fix, from the opposite direction.
     """
     days = []
-    d = date.today()
+    d = date.fromisoformat(logical_trading_date())
     while len(days) < n:
         if d.weekday() < 5:
             days.append(d)
@@ -297,7 +305,7 @@ def main() -> None:
     else:
         dates = _calendar_days_back(args.days)
 
-    today = date.today()
+    today = date.fromisoformat(logical_trading_date())
     total = 0
 
     for i, trade_date in enumerate(dates):

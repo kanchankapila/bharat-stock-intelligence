@@ -89,6 +89,35 @@ def test_same_day_tie_falls_back_to_strongest_score(monkeypatch):
     assert row["earnings_category_yoy"] == 1
 
 
+def test_NEGATIVE_CONTROL_pg_date_regex_matches_sqlite_glob_day_width():
+    """PG_RESULT_DATE_RE (used to guard Postgres's TO_DATE) and the SQLite branch's GLOB pattern
+    ('[0-9][0-9]' for the day) must accept/reject the same inputs -- otherwise an unpadded
+    single-digit day ("August 6, 2026") parses fine on Postgres but silently degrades to NULL
+    (sorts last) on the SQLite dev fallback, a dialect-inconsistent result for identical input.
+    Fails against the pre-fix `[0-9]{1,2}` (which accepts a single digit the SQLite GLOB
+    rejects), passes once both require exactly 2 digits."""
+    import re
+    import sqlite3
+
+    single_digit = "August 6, 2026"
+    double_digit = "August 06, 2026"
+
+    pg_re = re.compile(mef.PG_RESULT_DATE_RE)
+    conn = sqlite3.connect(":memory:")
+    sqlite_glob = "SELECT ? GLOB '[A-Za-z]* [0-9][0-9], [0-9][0-9][0-9][0-9]'"
+
+    pg_single = bool(pg_re.match(single_digit))
+    sqlite_single = bool(conn.execute(sqlite_glob, (single_digit,)).fetchone()[0])
+    assert pg_single == sqlite_single, (
+        f"single-digit day: Postgres regex matched={pg_single}, SQLite GLOB matched={sqlite_single} "
+        "-- the two dialects must agree"
+    )
+
+    pg_double = bool(pg_re.match(double_digit))
+    sqlite_double = bool(conn.execute(sqlite_glob, (double_digit,)).fetchone()[0])
+    assert pg_double is True and sqlite_double is True, "the real vendor format must match both"
+
+
 def test_undated_row_never_beats_a_dated_row(monkeypatch):
     monkeypatch.setattr(mef, "use_postgres", lambda: False)
     monkeypatch.setattr(mef, "logical_trading_date", lambda: "2026-08-14")
