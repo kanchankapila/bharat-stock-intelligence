@@ -179,12 +179,17 @@ def run():
         kw = extract_signal_keywords(name)
         url = ts_url or (tl_screener_url(screenpk) if source == "trendlyne" and screenpk else None)
 
+        # WHERE screener_id = ? alone (no source filter) let this silently overwrite a
+        # DIFFERENT provider's row sharing the same numeric screener_id with keywords/url
+        # derived from THIS row's source -- same class as trendlyne_screener_discovery.py's fix,
+        # cross-writer-collision-audit 2026-08-14. `source` here is this loop's own per-row
+        # value (from the `rows` query), so scoping to it is correct, not just defensive.
         con.execute("""
             UPDATE screener_catalog
             SET signal_keywords = ?,
                 screener_url = COALESCE(screener_url, ?)
-            WHERE screener_id = ?
-        """, (kw, url, scid))
+            WHERE screener_id = ? AND source = ?
+        """, (kw, url, scid, source))
         catalog_updated += 1
 
     con.commit()

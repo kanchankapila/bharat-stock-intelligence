@@ -44,17 +44,28 @@ def track_outcomes(conn):
         AND DATE(computed_at) <= DATE('now', '-1 day')
     """).fetchall()
 
-    # Load all OHLCV closing prices in memory to avoid N+1 queries. is_suspect-guarded to match
-    # outcome_resolver.py's (the technical-sourced sibling writer) existing convention -- this
-    # cache previously had zero data-quality guarding, so a confluence signal_outcomes row could
-    # price its exit off a known-bad bar (2026-08-04: live-verified 52% of extreme screener
-    # return_20d rows trace to an is_suspect bar in the exit window -- the same contamination
-    # class, just discovered via a different table this time).
+    if not signal_rows:
+        print('[OUTCOME-TRACKER] No signals to track')
+        return 0
+
+    # Load OHLCV closing prices in memory to avoid N+1 queries, bounded to the window this run
+    # can actually resolve (earliest signal date -> today) -- loading the WHOLE table here (no
+    # date bound) is what blew the 5-min budget every night for 11 days straight as stock_ohlcv
+    # grew from ~611K to 2.6M+ rows between successful runs (job-runtime-audit, 2026-08-14): a
+    # fixed budget calibrated once against a growing, unbounded query is guaranteed to eventually
+    # time out. is_suspect-guarded to match outcome_resolver.py's (the technical-sourced sibling
+    # writer) existing convention -- this cache previously had zero data-quality guarding, so a
+    # confluence signal_outcomes row could price its exit off a known-bad bar (2026-08-04:
+    # live-verified 52% of extreme screener return_20d rows trace to an is_suspect bar in the
+    # exit window -- the same contamination class, just discovered via a different table this
+    # time).
     ohlcv_cache = {}
-    print("[OUTCOME-TRACKER] Loading OHLCV cache into memory...")
+    min_signal_date = min(str(row['signal_date']) for row in signal_rows)
+    print(f"[OUTCOME-TRACKER] Loading OHLCV cache into memory (date >= {min_signal_date})...")
     ohlcv_rows = conn.execute(
         "SELECT symbol, date, close FROM stock_ohlcv "
-        "WHERE close IS NOT NULL AND close > 0 AND COALESCE(is_suspect, 0) = 0"
+        "WHERE close IS NOT NULL AND close > 0 AND COALESCE(is_suspect, 0) = 0 AND date >= ?",
+        (min_signal_date,)
     ).fetchall()
     for row in ohlcv_rows:
         sym = row['symbol']
@@ -118,6 +129,7 @@ def track_outcomes(conn):
 
             if len(params_list) >= 5000:
                 conn.executemany(insert_sql, params_list)
+                conn.commit()  # a kill mid-run keeps what's already resolved instead of losing everything
                 params_list = []
 
     if params_list:

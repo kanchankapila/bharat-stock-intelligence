@@ -575,9 +575,15 @@ export const screenersRouter = router({
       sector: z.string().optional(),
     }))
     .query(async ({ input }) => {
+      // date('now', ? || ' days') never translated to Postgres -- sqlTranslate.ts's date('now',
+      // ...) rule only matches a bare quoted-string modifier, not a parameter concatenation, so
+      // this threw `function date(unknown, text) does not exist` on every call in production
+      // (trpc-surface-review full sweep, 2026-08-14). Same JS-computed-cutoff fix already
+      // applied to getScreenerSurfacingSignals in this file.
       const params: any[] = [];
-      let where = 'WHERE date >= date(\'now\', ? || \' days\')';
-      params.push(-input.days);
+      const cutoff = new Date(Date.now() - input.days * 24 * 3600_000).toISOString().slice(0, 10);
+      let where = 'WHERE date >= ?';
+      params.push(cutoff);
       if (input.sector) {
         where += ' AND sector = ?';
         params.push(input.sector);
@@ -629,6 +635,11 @@ export const screenersRouter = router({
       limit: z.number().min(1).max(200).default(50),
     }))
     .query(async ({ input }) => {
+      // Cutoff computed in JS and bound as a parameter, not `NOW() - INTERVAL ...` -- this
+      // codebase has repeatedly been bitten by Postgres-only date arithmetic that doesn't
+      // survive sqlTranslate.ts's translation to the SQLite dev fallback (same pattern already
+      // proven safe at monitor.router.ts's news-sentiment stat).
+      const cutoff = new Date(Date.now() - input.days * 24 * 3600_000).toISOString();
       return dbAll(`
         SELECT symbol, signal_date, signal_type, confidence_score,
                entry_price, target_price, stop_loss,
@@ -636,10 +647,10 @@ export const screenersRouter = router({
                reasoning
         FROM unified_signals
         WHERE signal_source = 'SCREENER_SURFACING'
-          AND signal_date >= NOW() - (? || ' days')::interval
+          AND signal_date >= ?
         ORDER BY signal_date DESC, screener_momentum_score DESC
         LIMIT ?
-      `, [input.days, input.limit]);
+      `, [cutoff, input.limit]);
     }),
     
     // Ids here must be real quant_scores columns (see SCREENER_CRITERIA_COLUMNS below) --

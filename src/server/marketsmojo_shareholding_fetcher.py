@@ -108,9 +108,29 @@ def fetch_shareholding_history(sid: str, session: requests.Session, exchange: st
     return rows or None
 
 
-def write_shareholding_history(conn, symbol: str, rows: list, fetched_at: str) -> int:
+def load_known_max_dates(conn) -> dict[tuple[str, str], str]:
+    """(symbol, category) -> max stored period_date, as ISO text. Same rationale as
+    marketsmojo_technical_fetcher.py's fetcher of the same name (recurring-bugs.md's
+    write-amplification class): no since-param on this API, so this is what lets a rerun skip
+    periods already held instead of re-upserting the whole history every call.
+    """
+    rows = conn.execute(
+        "SELECT symbol, category, MAX(period_date) FROM marketsmojo_shareholding_history "
+        "GROUP BY symbol, category"
+    ).fetchall()
+    return {
+        (r[0], r[1]): (r[2].isoformat() if hasattr(r[2], "isoformat") else str(r[2]))
+        for r in rows if r[2] is not None
+    }
+
+
+def write_shareholding_history(conn, symbol: str, rows: list, fetched_at: str,
+                                known: dict[tuple[str, str], str] | None = None) -> int:
     written = 0
     for category, period_date, value in rows:
+        since = (known or {}).get((symbol, category))
+        if since and period_date and period_date <= since:  # ISO dates, lexicographic == chronological
+            continue
         conn.execute(
             """
             INSERT INTO marketsmojo_shareholding_history
@@ -127,13 +147,16 @@ def write_shareholding_history(conn, symbol: str, rows: list, fetched_at: str) -
     return written
 
 
-def run(symbols: list[str] | None = None) -> None:
+def run(symbols: list[str] | None = None, full: bool = False) -> None:
     sid_map = load_sid_map()
     symbols = [s.upper() for s in symbols] if symbols else sorted(sid_map.keys())
     session = requests.Session()
     session.headers.update(HEADERS)
     conn = connect()
     fetched_at = date.today().isoformat()
+    known = None if full else load_known_max_dates(conn)
+    if known is not None:
+        print(f"[marketsmojo shareholding] {len(known)} (symbol,category) pairs known -- fetching new periods only")
 
     total_rows = 0
     ok = 0
@@ -146,7 +169,7 @@ def run(symbols: list[str] | None = None) -> None:
         if not rows:
             print(f"  [marketsmojo shareholding] {symbol}: empty response")
             continue
-        n = write_shareholding_history(conn, symbol, rows, fetched_at)
+        n = write_shareholding_history(conn, symbol, rows, fetched_at, known)
         total_rows += n
         ok += 1
         print(f"  [marketsmojo shareholding] {symbol}: {n} rows")
@@ -158,5 +181,6 @@ def run(symbols: list[str] | None = None) -> None:
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--symbols", nargs="*", help="restrict to these NSE symbols (default: full universe)")
+    parser.add_argument("--full", action="store_true", help="force a complete re-upsert (backfill/vendor restatement)")
     args = parser.parse_args()
-    run(args.symbols)
+    run(args.symbols, full=args.full)

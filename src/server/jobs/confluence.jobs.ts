@@ -86,7 +86,14 @@ async function processConfluenceOutcomes(job: Job): Promise<void> {
   // and the old concurrent 120s budget both starved the tracker AND timeout-killed the
   // trainer (its real runtime is several minutes) — 10 of its last 11 runs failed this way.
   // Per-step .catch keeps a failure in one from aborting the other.
-  await runPython('confluence_outcome_tracker.py', [], 5 * 60_000)
+  // Was 5 min -- job-runtime-audit (2026-08-14) found this budget had been blown every single
+  // scheduled run for 11 consecutive days as stock_ohlcv's unbounded full-table OHLCV load grew
+  // past what any fixed budget survives. Fixed the query to bound by date (confluence_outcome_
+  // tracker.py), but the first catch-up run against the 11-day backlog still took 17m24s
+  // (652,679 outcomes tracked) -- bumped to 20 min for real headroom against a normal day's
+  // incremental volume plus margin, matching the "give real headroom" precedent already used for
+  // alphaQuant's own daily scoring job (see alphaQuantClient.ts).
+  await runPython('confluence_outcome_tracker.py', [], 20 * 60_000)
     .catch(e => console.warn('[QUEUE] confluence_outcome_tracker failed:', (e as Error).message));
   await runPython('confluence_ml_engine.py', ['--train'], 15 * 60_000)
     .catch(e => console.warn('[QUEUE] confluence_ml_engine --train failed:', (e as Error).message));

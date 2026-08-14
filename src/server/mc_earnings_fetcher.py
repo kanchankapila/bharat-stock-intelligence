@@ -392,10 +392,33 @@ def _backfill_rapid_features(con) -> int:
     today = logical_trading_date()
 
     # For each symbol in technical_signals, find the most recent rapid result per sub_type.
-    # We pick the row with the highest |category_score| (strongest signal) when multiple exist.
+    # Was `ORDER BY ABS(r.category_score) DESC` -- picked the historically most EXTREME result,
+    # not the most recent one, despite this function's own docstring claiming "most recent".
+    # mc_earnings_rapid's PK is (scid, sub_type, category), not result_date, and nothing purges
+    # a superseded row when a stock's category changes quarter to quarter -- so a strong-but-old
+    # quarter could permanently outrank a weaker-but-current one forever. Live-confirmed
+    # 2026-08-14 (measurement-integrity-review): 442/2,017 multi-row symbols (21.9%) had the old
+    # query's pick disagree with what result_date would have picked; RAMKY showed a May 2026
+    # "Beat Positive" label while its real Aug 2026 quarter landed "WP".
+    #
+    # result_date is free text ("May 27, 2026" / "August 10, 2026"), not ISO -- a raw string sort
+    # is lexicographic, not chronological ('M' > 'A', so May would sort AFTER August; live-caught
+    # while verifying this exact fix, the first attempt at `ORDER BY result_date DESC` silently
+    # picked the same wrong row as before). Parse it into a real sortable date first, guarded by
+    # a format regex: Postgres's TO_DATE THROWS (not NULL) on unparseable input, and this query
+    # updates the WHOLE table in one statement, so one malformed result_date would abort every
+    # symbol's update, not just its own row -- confirmed live TO_DATE('garbage', ...) raises
+    # "invalid value ... for Month". The regex guard falls back to NULL (sorts last) instead.
+    # Assumes the vendor's own "Month DD, YYYY" zero-padded-day format (confirmed live: "August
+    # 06, 2026", not "August 6, 2026"; 0 of the live rows fail the guard as of 2026-08-14).
+    _PG_DATE_RE = r'^[A-Za-z]+ [0-9]{1,2}, [0-9]{4}$'
+    _pg_sort_date = (
+        f"CASE WHEN r.result_date ~ '{_PG_DATE_RE}' "
+        f"THEN TO_DATE(r.result_date, 'FMMonth DD, YYYY') ELSE NULL END"
+    )
     if use_postgres():
         # Primary join via nse_stocks.mcsymbol (2260+ entries); mc_pricefeed_daily as secondary.
-        cur.execute("""
+        cur.execute(f"""
             UPDATE technical_signals ts
             SET
                 earnings_category_yoy  = yoy.category_score,
@@ -412,7 +435,7 @@ def _backfill_rapid_features(con) -> int:
                 FROM mc_earnings_rapid r
                 JOIN nse_stocks ns ON ns.mcsymbol = r.scid
                 WHERE r.sub_type = 'yoy'
-                ORDER BY ns.symbol, ABS(r.category_score) DESC
+                ORDER BY ns.symbol, {_pg_sort_date} DESC NULLS LAST, ABS(r.category_score) DESC
             ) yoy
             LEFT JOIN (
                 SELECT DISTINCT ON (ns.symbol)
@@ -422,12 +445,28 @@ def _backfill_rapid_features(con) -> int:
                 FROM mc_earnings_rapid r
                 JOIN nse_stocks ns ON ns.mcsymbol = r.scid
                 WHERE r.sub_type = 'qoq'
-                ORDER BY ns.symbol, ABS(r.category_score) DESC
+                ORDER BY ns.symbol, {_pg_sort_date} DESC NULLS LAST, ABS(r.category_score) DESC
             ) qoq ON qoq.symbol = yoy.symbol
             WHERE ts.symbol = yoy.symbol
               AND ts.date = ?
         """, (today,))
     else:
+        # SQLite: no TO_DATE, so build a sortable 'YYYY-MM-DD' string with a month-name CASE.
+        # Malformed input degrades to NULL (via the outer CASE's ELSE), not a crash -- SQLite has
+        # no equivalent throw-on-parse-failure behavior to guard against here, but the same
+        # NULL-sorts-last outcome keeps both branches consistent.
+        _sqlite_sort_date = """
+            CASE WHEN result_date GLOB '[A-Za-z]* [0-9][0-9], [0-9][0-9][0-9][0-9]' THEN
+                substr(result_date, -4, 4) || '-' ||
+                CASE substr(result_date, 1, instr(result_date, ' ') - 1)
+                    WHEN 'January' THEN '01' WHEN 'February' THEN '02' WHEN 'March' THEN '03'
+                    WHEN 'April' THEN '04' WHEN 'May' THEN '05' WHEN 'June' THEN '06'
+                    WHEN 'July' THEN '07' WHEN 'August' THEN '08' WHEN 'September' THEN '09'
+                    WHEN 'October' THEN '10' WHEN 'November' THEN '11' WHEN 'December' THEN '12'
+                    ELSE NULL END || '-' ||
+                substr(result_date, instr(result_date, ' ') + 1, 2)
+            ELSE NULL END
+        """
         for col_score, col_growth, sub_type in [
             ("earnings_category_yoy", "earnings_np_growth_yoy", "yoy"),
             ("earnings_category_qoq", "earnings_np_growth_qoq", "qoq"),
@@ -441,7 +480,7 @@ def _backfill_rapid_features(con) -> int:
                         JOIN mc_pricefeed_daily mpd ON mpd.scid = r.scid
                         WHERE mpd.symbol = technical_signals.symbol
                           AND r.sub_type = ?
-                        ORDER BY ABS(r.category_score) DESC
+                        ORDER BY ({_sqlite_sort_date.replace('result_date', 'r.result_date')}) DESC, ABS(r.category_score) DESC
                         LIMIT 1
                     ),
                     {col_growth} = (
@@ -450,7 +489,7 @@ def _backfill_rapid_features(con) -> int:
                         JOIN mc_pricefeed_daily mpd ON mpd.scid = r.scid
                         WHERE mpd.symbol = technical_signals.symbol
                           AND r.sub_type = ?
-                        ORDER BY ABS(r.category_score) DESC
+                        ORDER BY ({_sqlite_sort_date.replace('result_date', 'r.result_date')}) DESC, ABS(r.category_score) DESC
                         LIMIT 1
                     )
                 WHERE date = ?

@@ -60,7 +60,11 @@ export const sentimentRouter = router({
          FROM fii_dii_flow ORDER BY date DESC LIMIT 1`
       );
 
-      const fmt = (n: number | null) => n != null ? Number(n).toFixed(2) : '0.00';
+      // null must stay null, not "0.00" -- a genuine flat day and a missing row (1,908/2,601
+      // fii_dii_flow rows have NULL dii_net, live-checked 2026-08-14) are not the same thing,
+      // and both frontend consumers already null-check this field and render '—' correctly --
+      // they just never got the chance because this used to coerce null away first.
+      const fmt = (n: number | null) => n != null ? Number(n).toFixed(2) : null;
 
       if (rows.length) {
         const r = rows[0];

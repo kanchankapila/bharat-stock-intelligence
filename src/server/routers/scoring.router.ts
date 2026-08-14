@@ -6,12 +6,19 @@ import { router, publicProcedure, adminProcedure } from "../trpc";
 import { cacheGet } from "../cacheService";
 
 // Cached latest computed_at for unified_recommendations — avoids MAX() scan on every strategy query.
-// Invalidated when unified_ranker writes new recommendations (via triggerStockScoring mutation).
+// TTL, not invalidate-on-write-only (trpc-surface-review, 2026-08-14): the real refresh path is
+// unified_ranker.py's own BullMQ schedule, which never calls the admin-only triggerStockScoring
+// mutation this used to rely on for invalidation -- once a fresh computed_at landed, the join in
+// getBestComboSignals stopped matching this stale cached value and requireUnifiedRec silently
+// filtered every row out (stocks: []), with no error. Matches commandCenter.router.ts's
+// _urLatestAtCC, which already carries this exact 5-minute TTL for the same reason.
 let _urLatestAt: string | null = null;
+let _urLatestAtExp = 0;
 async function urLatestAt(): Promise<string | null> {
-  if (!_urLatestAt) {
+  if (!_urLatestAt || Date.now() > _urLatestAtExp) {
     const row = await dbGet<{ ts: string }>('SELECT MAX(computed_at) AS ts FROM unified_recommendations');
     _urLatestAt = row?.ts ?? null;
+    _urLatestAtExp = Date.now() + 5 * 60_000;
   }
   return _urLatestAt;
 }

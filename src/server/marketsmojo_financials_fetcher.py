@@ -110,11 +110,31 @@ def fetch_financials_history(
     return out or None
 
 
-def write_financials_history(conn, symbol: str, rows: list, fetched_at: str) -> int:
+def load_known_values(conn, symbol: str) -> dict[tuple[str, str, str], float | None]:
+    """(statement, period_label, line_item) -> stored value, for one symbol.
+
+    This table has no date column to bound a "since" query by (PK is symbol/statement/
+    period_label/line_item, not date) -- old reported quarters essentially never change, so the
+    write-amplification fix here is "skip the write if the value hasn't changed" rather than
+    technical_fetcher.py's "skip dates already held". Scoped per-symbol (not the whole table) to
+    keep this cheap. Same write-amplification class as recurring-bugs.md's marketsmojo entry.
+    """
+    rows = conn.execute(
+        "SELECT statement, period_label, line_item, value FROM marketsmojo_financials_history "
+        "WHERE symbol = ?", (symbol,)
+    ).fetchall()
+    return {(r[0], r[1], r[2]): r[3] for r in rows}
+
+
+def write_financials_history(conn, symbol: str, rows: list, fetched_at: str,
+                              known: dict[tuple[str, str, str], float | None] | None = None) -> int:
     """rows: [(statement, period_label, line_item, raw_value), ...]. Upserts one row per
-    (symbol, statement, period_label, line_item). Returns rows written."""
+    (symbol, statement, period_label, line_item). Returns rows actually written (changed/new)."""
     written = 0
     for statement, period_label, line_item, raw_value in rows:
+        value = _parse_numeric(raw_value)
+        if known is not None and known.get((statement, period_label, line_item)) == value:
+            continue
         conn.execute(
             """
             INSERT INTO marketsmojo_financials_history
@@ -124,14 +144,14 @@ def write_financials_history(conn, symbol: str, rows: list, fetched_at: str) -> 
                 value      = excluded.value,
                 fetched_at = excluded.fetched_at
             """,
-            (symbol, statement, period_label, line_item, _parse_numeric(raw_value), fetched_at),
+            (symbol, statement, period_label, line_item, value, fetched_at),
         )
         written += 1
     conn.commit()
     return written
 
 
-def run(symbols: list[str] | None = None) -> None:
+def run(symbols: list[str] | None = None, full: bool = False) -> None:
     sid_map = load_sid_map()
     symbols = [s.upper() for s in symbols] if symbols else sorted(sid_map.keys())
     session = requests.Session()
@@ -150,7 +170,8 @@ def run(symbols: list[str] | None = None) -> None:
         if not rows:
             print(f"  [marketsmojo financials] {symbol}: empty response")
             continue
-        n = write_financials_history(conn, symbol, rows, fetched_at)
+        known = None if full else load_known_values(conn, symbol)
+        n = write_financials_history(conn, symbol, rows, fetched_at, known)
         total_rows += n
         ok += 1
         print(f"  [marketsmojo financials] {symbol}: {n} cells")
@@ -162,5 +183,6 @@ def run(symbols: list[str] | None = None) -> None:
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--symbols", nargs="*", help="restrict to these NSE symbols (default: full universe)")
+    parser.add_argument("--full", action="store_true", help="force a complete re-upsert (backfill/vendor restatement)")
     args = parser.parse_args()
-    run(args.symbols)
+    run(args.symbols, full=args.full)

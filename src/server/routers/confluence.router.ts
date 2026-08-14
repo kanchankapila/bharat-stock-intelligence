@@ -22,13 +22,20 @@ export function confluenceJoinOnSignalDate(): string {
 }
 
 // Cached latest computed_at for confluence_signals — avoids a MAX() scan on every request.
-// Invalidated when refreshConfluenceSignals() runs.
+// TTL, not invalidate-on-write-only (trpc-surface-review, 2026-08-14): the real producer is the
+// confluence-compute BullMQ job, which runs every 30 minutes and never calls the admin-only
+// refreshConfluenceSignals() mutation this used to rely on for invalidation -- confluence_signals
+// is insert-only so this doesn't go empty the way scoring.router.ts's equivalent bug did, but it
+// silently served an increasingly stale batch with no staleness indicator. Same 5-minute TTL
+// convention as commandCenter.router.ts's _urLatestAtCC / scoring.router.ts's _urLatestAt.
 let _confluenceLatestAt: string | null = null;
+let _confluenceLatestAtExp = 0;
 
 async function confluenceLatestAt(): Promise<string | null> {
-  if (!_confluenceLatestAt) {
+  if (!_confluenceLatestAt || Date.now() > _confluenceLatestAtExp) {
     const row = await dbGet<{ ts: string }>('SELECT MAX(computed_at) AS ts FROM confluence_signals');
     _confluenceLatestAt = row?.ts ?? null;
+    _confluenceLatestAtExp = Date.now() + 5 * 60_000;
   }
   return _confluenceLatestAt;
 }

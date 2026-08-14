@@ -3223,8 +3223,27 @@ def run(do_train: bool = True, do_score: bool = True,
     print("[Ensemble] Done.")
 
 
+INCREMENTAL_REGRESSION_TOLERANCE = 0.02  # matches online_learner.py's ONLINE_REGRESSION_TOLERANCE
+
+
+def incremental_gate_passes(pre_auc: float, post_auc: float,
+                             tolerance: float = INCREMENTAL_REGRESSION_TOLERANCE) -> bool:
+    """True if the updated model's held-out AUC didn't regress beyond tolerance vs. pre-update."""
+    return post_auc >= pre_auc - tolerance
+
+
 def incremental_update(n_days: int = 3, n_rounds: int = 20, dry_run: bool = False) -> bool:
-    """Warm-start LGBM on last `n_days` of new resolved outcomes. Returns True if applied."""
+    """Warm-start LGBM on last `n_days` of new resolved outcomes. Returns True if applied.
+
+    Gated (2026-08-14, ml-promotion-gate-review finding): unlike the weekly --train path, which
+    routes through promote_or_register(), this used to overwrite the live ENSEMBLE_PATH
+    unconditionally -- no held-out AUC, no baseline comparison. A bad n_days batch (mislabeled
+    outcomes, a feature regression) would permanently degrade the model used for every
+    subsequent day's scoring with no detection or rollback. Now carves the most recent slice of
+    the incremental batch out as a held-out set, trains only on the rest, and discards the
+    updated booster (keeps the prior one on disk) if held-out AUC regresses beyond
+    INCREMENTAL_REGRESSION_TOLERANCE versus the pre-update model on the same holdout.
+    """
     if not os.path.exists(ENSEMBLE_PATH):
         print("[Ensemble] No saved model — run --train first.")
         return False
@@ -3264,8 +3283,11 @@ def incremental_update(n_days: int = 3, n_rounds: int = 20, dry_run: bool = Fals
         ORDER BY so.signal_date ASC
     """
     df = read_df(q, (cutoff,))
-    if len(df) < 5:
-        print(f"[Ensemble] Only {len(df)} new outcomes — skipping incremental.")
+    # Need enough rows for both a real incremental-training slice AND a held-out gate slice --
+    # the old threshold (5) left no room for a holdout at all, which is exactly how this used to
+    # apply every batch unconditionally.
+    if len(df) < 8:
+        print(f"[Ensemble] Only {len(df)} new outcomes — skipping incremental (need >=8 for a held-out gate).")
         return False
 
     print(f"[Ensemble] Incremental: {len(df)} outcomes from last {n_days}d")
@@ -3298,10 +3320,28 @@ def incremental_update(n_days: int = 3, n_rounds: int = 20, dry_run: bool = Fals
             X[col] = 0.0
     X_aligned = X[feature_names].astype(np.float32)
 
-    ds = lgb.Dataset(X_aligned, label=y, free_raw_data=False)
+    # Held-out gate: carve the most recent slice out of training (df/X/y are already sorted by
+    # signal_date ASC from the query), train only on what's left, and discard the update rather
+    # than commit it if held-out AUC regresses beyond tolerance versus the PRE-update model on
+    # the same holdout. Skip gating (apply ungated, prior behavior) only if the holdout doesn't
+    # have both outcome classes -- AUC is undefined there, not evidence of anything.
+    n = len(df)
+    holdout_n = max(3, int(n * 0.2))
+    train_n = n - holdout_n
+    X_train, y_train = X_aligned.iloc[:train_n], y[:train_n]
+    X_hold,  y_hold   = X_aligned.iloc[train_n:], y[train_n:]
+
+    can_gate = train_n >= 3 and len(set(y_hold)) > 1
+    pre_auc = None
+    if can_gate:
+        from sklearn.metrics import roc_auc_score
+        pre_pred = lgbm_model.booster_.predict(X_hold)
+        pre_auc = roc_auc_score(y_hold, pre_pred)
+
+    ds = lgb.Dataset(X_train if can_gate else X_aligned, label=y_train if can_gate else y, free_raw_data=False)
     lgbm_train_params = dict(lgbm_model.get_params())
     lgbm_train_params['device'] = _lightgbm_device(str(lgbm_train_params.get('device', 'cpu')))
-    lgbm_model.booster_ = lgb.train(
+    new_booster = lgb.train(
         lgbm_train_params,
         ds,
         num_boost_round=n_rounds,
@@ -3309,6 +3349,18 @@ def incremental_update(n_days: int = 3, n_rounds: int = 20, dry_run: bool = Fals
         callbacks=[lgb.log_evaluation(period=-1)],
     )
 
+    if can_gate:
+        post_auc = roc_auc_score(y_hold, new_booster.predict(X_hold))
+        if not incremental_gate_passes(pre_auc, post_auc):
+            print(f"[Ensemble] Incremental update REJECTED: held-out AUC {pre_auc:.4f} -> {post_auc:.4f} "
+                  f"(regressed beyond {INCREMENTAL_REGRESSION_TOLERANCE} tolerance on {holdout_n} held-out rows). "
+                  f"Live model left unchanged.")
+            return False
+        print(f"[Ensemble] Held-out AUC {pre_auc:.4f} -> {post_auc:.4f} on {holdout_n} rows, applying.")
+    else:
+        print(f"[Ensemble] Held-out gate skipped (holdout lacks both classes or batch too small) -- applying ungated.")
+
+    lgbm_model.booster_ = new_booster
     with open(ENSEMBLE_PATH, 'wb') as f:
         pickle.dump(ensemble, f, protocol=pickle.HIGHEST_PROTOCOL)
 

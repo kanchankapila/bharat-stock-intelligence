@@ -59,9 +59,29 @@ def fetch_fintrend_history(sid: str, session: requests.Session, exchange: int = 
     return rows or None
 
 
-def write_fintrend_history(conn, symbol: str, rows: list, fetched_at: str) -> int:
+def load_known_max_dates(conn) -> dict[str, str]:
+    """symbol -> max stored date, as ISO text. Same rationale as marketsmojo_technical_fetcher.py's
+    fetcher of the same name (recurring-bugs.md's write-amplification class): the API returns the
+    whole series every call with no since-param, so this is what lets a rerun skip the dates it
+    already has instead of re-upserting the whole history every time.
+    """
+    rows = conn.execute(
+        "SELECT symbol, MAX(date) FROM marketsmojo_fintrend_history GROUP BY symbol"
+    ).fetchall()
+    return {
+        r[0]: (r[1].isoformat() if hasattr(r[1], "isoformat") else str(r[1]))
+        for r in rows if r[1] is not None
+    }
+
+
+def write_fintrend_history(conn, symbol: str, rows: list, fetched_at: str,
+                            known: dict[str, str] | None = None) -> int:
+    since = (known or {}).get(symbol)
     written = 0
     for row in rows:
+        row_date = row.get("date")
+        if since and row_date and row_date <= since:  # ISO dates, lexicographic == chronological
+            continue
         conn.execute(
             """
             INSERT INTO marketsmojo_fintrend_history
@@ -73,7 +93,7 @@ def write_fintrend_history(conn, symbol: str, rows: list, fetched_at: str) -> in
                 fin_txt        = excluded.fin_txt,
                 fetched_at     = excluded.fetched_at
             """,
-            (symbol, row["date"], row.get("score"), row.get("fin_trend_dir"),
+            (symbol, row_date, row.get("score"), row.get("fin_trend_dir"),
              row.get("fin_txt"), fetched_at),
         )
         written += 1
@@ -81,13 +101,16 @@ def write_fintrend_history(conn, symbol: str, rows: list, fetched_at: str) -> in
     return written
 
 
-def run(symbols: list[str] | None = None) -> None:
+def run(symbols: list[str] | None = None, full: bool = False) -> None:
     sid_map = load_sid_map()
     symbols = [s.upper() for s in symbols] if symbols else sorted(sid_map.keys())
     session = requests.Session()
     session.headers.update(HEADERS)
     conn = connect()
     fetched_at = date.today().isoformat()
+    known = None if full else load_known_max_dates(conn)
+    if known is not None:
+        print(f"[marketsmojo fintrend] {len(known)} symbols known -- fetching new dates only")
 
     total_rows = 0
     ok = 0
@@ -100,7 +123,7 @@ def run(symbols: list[str] | None = None) -> None:
         if not rows:
             print(f"  [marketsmojo fintrend] {symbol}: empty response")
             continue
-        n = write_fintrend_history(conn, symbol, rows, fetched_at)
+        n = write_fintrend_history(conn, symbol, rows, fetched_at, known)
         total_rows += n
         ok += 1
         print(f"  [marketsmojo fintrend] {symbol}: {n} rows")
@@ -112,5 +135,6 @@ def run(symbols: list[str] | None = None) -> None:
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--symbols", nargs="*", help="restrict to these NSE symbols (default: full universe)")
+    parser.add_argument("--full", action="store_true", help="force a complete re-upsert (backfill/vendor restatement)")
     args = parser.parse_args()
-    run(args.symbols)
+    run(args.symbols, full=args.full)

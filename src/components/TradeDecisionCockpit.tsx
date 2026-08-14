@@ -9,6 +9,7 @@ import { cn } from '../lib/utils';
 import { RiskMetricsDashboard } from './RiskMetricsDashboard';
 import { ActivityFeed } from './ActivityFeed';
 import { formatISTWithLocal, relativeFromNow } from '../lib/timeFormat';
+import { LegacyScoreBanner } from './CanonicalSourceNote';
 
 const fmt = (n: number | null | undefined, dec = 2) =>
   n == null ? '—' : n.toLocaleString('en-IN', { minimumFractionDigits: dec, maximumFractionDigits: dec });
@@ -92,6 +93,8 @@ export const TradeDecisionCockpit: React.FC<{ onSelectStock: (symbol: string) =>
 
   return (
     <div className="p-4 space-y-4 max-w-screen-2xl mx-auto">
+
+      <LegacyScoreBanner note="This cockpit's STRONG BUY/BUY/WATCH/HOLD verdict is a hand-rolled blend (technical + fundamental + momentum + sentiment) computed separately from the unified cross-engine model -- check Alpha / Buy Recs for the canonical, regime-aware view of the same stocks." />
 
       {/* ── Market Pulse Strip ─────────────────────────────────────── */}
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2">

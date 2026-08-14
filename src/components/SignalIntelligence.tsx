@@ -7,6 +7,7 @@ import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell } from 
 import { motion, AnimatePresence } from 'motion/react';
 import { trpc } from '../lib/trpc';
 import { cn } from '../lib/utils';
+import { LegacyScoreBanner } from './CanonicalSourceNote';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -289,6 +290,7 @@ export function SignalIntelligence() {
 
   return (
     <div className="p-4 space-y-4 min-h-screen">
+      <LegacyScoreBanner note="Multi-screener consensus and scanner reliability, computed separately from the unified cross-engine model -- measured bullish screener consensus has been significantly negative (IC -0.027) and this platform's own screener_reliability win rates have not survived from-scratch re-measurement, so treat conviction here as directional context, not a standalone signal. Check Alpha / Buy Recs for the canonical, regime-aware view." />
       {/* ── Header ──────────────────────────────────────────────────────────── */}
       <div className="flex items-center justify-between flex-wrap gap-3">
         <div>

@@ -1028,7 +1028,11 @@ class UnifiedRanker:
                     screener_id = row.get('screener_id', '').strip() or slugify(name)
                     rows.append((
                         screener_id,
-                        row['source'].strip(),
+                        row['source'].strip().lower(),  # match screener_catalog_enricher.py's
+                        # lowercase convention -- an uncontrolled-case source here re-splits an
+                        # existing (screener_id, source) row into a second row on every reseed
+                        # if the CSV's casing differs from what another writer already used for
+                        # the same screener_id (cross-writer-collision-audit, 2026-08-14).
                         name,
                         row['category'].strip(),
                         row.get('subcategory', '').strip(),

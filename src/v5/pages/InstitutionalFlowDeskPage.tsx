@@ -119,14 +119,18 @@ export function InstitutionalFlowDeskPage() {
             </thead>
             <tbody>
               {institutionalDetails.map((row: any, i: number) => {
-                const netVal = Number(row.netBuySell);
+                // Number(null) is 0 in JS, not NaN -- Number.isFinite(netVal) would read a
+                // missing value as a genuine flat 0 and color it positive. Check nullness
+                // directly instead (live 2026-08-14: fii_dii_flow.dii_net is NULL on 1,908/2,601
+                // rows, no longer coerced to "0.00" by the backend as of this same fix).
+                const netVal = row.netBuySell != null ? Number(row.netBuySell) : null;
                 return (
                   <tr key={`${s(row.category)}-${i}`} className="v5-table-row-intel border-b border-[var(--v5-border)]">
                     <td className="px-3 py-2 font-semibold text-[var(--v5-ink)]">{s(row.category, '—')}</td>
                     <td className="px-3 py-2 text-[var(--v5-ink-soft)]">{s(row.date, '—')}</td>
                     <td className="px-3 py-2 text-[var(--v5-ink-soft)]">{row.buyValue ?? '—'}</td>
                     <td className="px-3 py-2 text-[var(--v5-ink-soft)]">{row.sellValue ?? '—'}</td>
-                    <td className={`px-3 py-2 font-semibold ${Number.isFinite(netVal) ? (netVal >= 0 ? 'text-[var(--v5-positive)]' : 'text-[var(--v5-negative)]') : 'text-[var(--v5-ink-soft)]'}`}>
+                    <td className={`px-3 py-2 font-semibold ${netVal != null && Number.isFinite(netVal) ? (netVal >= 0 ? 'text-[var(--v5-positive)]' : 'text-[var(--v5-negative)]') : 'text-[var(--v5-ink-soft)]'}`}>
                       {row.netBuySell ?? '—'}
                     </td>
                   </tr>

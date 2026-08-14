@@ -102,9 +102,29 @@ def fetch_index_history(index_id: int, session: requests.Session, period: str = 
     return out or None
 
 
-def write_index_history(conn, index_id: int, name: str, rows: list, fetched_at: str) -> int:
+def load_known_max_dates(conn) -> dict[int, str]:
+    """index_id -> max stored date, as ISO text. Same rationale as marketsmojo_technical_
+    fetcher.py's fetcher of the same name (recurring-bugs.md's write-amplification class) --
+    applied here too for consistency even though the index universe is small enough that the
+    blast radius was never as severe as the per-symbol fetchers.
+    """
+    rows = conn.execute(
+        "SELECT index_id, MAX(date) FROM marketsmojo_index_history GROUP BY index_id"
+    ).fetchall()
+    return {
+        r[0]: (r[1].isoformat() if hasattr(r[1], "isoformat") else str(r[1]))
+        for r in rows if r[1] is not None
+    }
+
+
+def write_index_history(conn, index_id: int, name: str, rows: list, fetched_at: str,
+                         known: dict[int, str] | None = None) -> int:
+    since = (known or {}).get(index_id)
     written = 0
     for row in rows:
+        row_date = row["date"].isoformat() if hasattr(row["date"], "isoformat") else str(row["date"])
+        if since and row_date <= since:  # ISO dates, lexicographic == chronological
+            continue
         conn.execute(
             """
             INSERT INTO marketsmojo_index_history (index_id, name, date, price, fetched_at)
@@ -121,12 +141,15 @@ def write_index_history(conn, index_id: int, name: str, rows: list, fetched_at: 
     return written
 
 
-def run(index_ids: list[int] | None = None) -> None:
+def run(index_ids: list[int] | None = None, full: bool = False) -> None:
     ids = index_ids or sorted(INDEX_NAMES.keys())
     session = requests.Session()
     session.headers.update(HEADERS)
     conn = connect()
     fetched_at = date.today().isoformat()
+    known = None if full else load_known_max_dates(conn)
+    if known is not None:
+        print(f"[marketsmojo index] {len(known)} indices known -- fetching new dates only")
 
     total_rows = 0
     ok = 0
@@ -139,7 +162,7 @@ def run(index_ids: list[int] | None = None) -> None:
         if not rows:
             print(f"  [marketsmojo index] {name} ({index_id}): empty response")
             continue
-        n = write_index_history(conn, index_id, name, rows, fetched_at)
+        n = write_index_history(conn, index_id, name, rows, fetched_at, known)
         total_rows += n
         ok += 1
         print(f"  [marketsmojo index] {name} ({index_id}): {n} rows")
@@ -151,5 +174,6 @@ def run(index_ids: list[int] | None = None) -> None:
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--ids", nargs="*", type=int, help="restrict to these index ids (default: full known catalog)")
+    parser.add_argument("--full", action="store_true", help="force a complete re-upsert (backfill/vendor restatement)")
     args = parser.parse_args()
-    run(args.ids)
+    run(args.ids, full=args.full)

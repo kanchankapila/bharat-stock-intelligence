@@ -1067,7 +1067,11 @@ const StockHeaderCard: React.FC<{
         <p className="text-[11px] text-slate-400 leading-relaxed border-t border-slate-800/60 pt-2">
           <span className="text-indigo-400 font-semibold">Why: </span>{unifiedScore.trade_reasoning}
           {unifiedScore.engine_coverage_count != null && (
-            <span className="text-slate-600 ml-1.5">({unifiedScore.engine_coverage_count}/7 engines · {relativeFromNow(dataUpdatedAt)})</span>
+            // unified_recommendations.computed_at (the ranker's real generation time), not
+            // dataUpdatedAt (react-query's client fetch time) -- the latter always reads "just
+            // now" as long as the tab stays open, even when the underlying ranker run is days
+            // stale (data-honesty-review, 2026-08-14).
+            <span className="text-slate-600 ml-1.5">({unifiedScore.engine_coverage_count}/7 engines · {relativeFromNow(unifiedScore.computed_at ?? dataUpdatedAt)})</span>
           )}
         </p>
       )}

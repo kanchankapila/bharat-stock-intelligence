@@ -1256,6 +1256,29 @@ export const DATA_QUALITY_CHECKS: DataQualityCheck[] = [
       return { status: 'pass', detail: `Latest regime row ${fmtDays(stale)} old` };
     },
   },
+  {
+    // Found 2026-08-14 (job-runtime-audit): confluence_outcome_tracker.py had silently failed
+    // its 5-min budget every scheduled run for 11 consecutive days (2026-08-03 through 08-14) --
+    // its own .catch() in confluence.jobs.ts only console.warns, so BullMQ kept reporting
+    // 'completed', and NOTHING watched either of this job's two write targets
+    // (screener_reliability, confluence-sourced signal_outcomes), so nothing else could have
+    // caught it either. screener_reliability is checked here since it's this job's own
+    // exclusive output table (no other writer) -- a clean, unambiguous "is this job still
+    // running" signal, unlike signal_outcomes which has multiple signal_source writers sharing
+    // one table and would need a source-scoped WHERE the generic factory doesn't support.
+    id: 'screener-reliability-freshness',
+    label: 'screener_reliability (confluence_outcome_tracker.py liveness)',
+    category: 'outcomes',
+    critical: true,
+    sql: `SELECT MAX(last_updated) AS last_date FROM screener_reliability`,
+    evaluate: (row, now) => {
+      const stale = tradingDaysStale(row?.last_date, now);
+      if (stale == null) return { status: 'fail', detail: 'screener_reliability is empty' };
+      if (stale > 4) return { status: 'fail', detail: `Latest screener_reliability row is ${fmtDays(stale)} old -- confluence_outcome_tracker.py may be failing silently` };
+      if (stale > 2) return { status: 'warn', detail: `Latest screener_reliability row is ${fmtDays(stale)} old` };
+      return { status: 'pass', detail: `Latest screener_reliability row ${fmtDays(stale)} old` };
+    },
+  },
 
   // ── Reference / surveillance data ──────────────────────────────────────
   {

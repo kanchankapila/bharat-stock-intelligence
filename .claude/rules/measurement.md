@@ -162,6 +162,26 @@ population count, done live 2026-08-13: `recommendation_log` rows for the day we
 to **1,492/1,584 (94%) with `entry_price`/`quant_score` populated** after the fix and a live
 `process_scoring()` re-run. No factor's measured edge in this file changed as a result of this fix.
 
+**A `unified_ranker.py` touch (2026-08-14, cross-writer-collision-audit) is the same shape:
+explicitly NOT a scoring change, no `factor_backtest.py` run warranted.** `seed_screener_catalog()`
+wrote `row['source']` into `screener_catalog` verbatim from `screener_scoring_v2.csv`, uncontrolled
+case — other writers of the same table (`screener_catalog_enricher.py`, `trendlyne_screener_
+discovery.py`) already normalize to lowercase, and `screener_catalog`'s PK is `(screener_id,
+source)`, so a differently-cased reseed could silently create a second row for a screener that
+already existed, rather than the `ON CONFLICT` upsert hitting the same row. Changed to
+`.strip().lower()` to match the existing convention. **Traced, not assumed, that this cannot
+currently affect any live score:** `seed_screener_catalog()` only runs when `SELECT COUNT(*) FROM
+screener_catalog` is 0 (`unified_ranker.py:1933-1934`); live-checked 2026-08-14, the table holds
+2,539 rows, so this function is dormant in production today and the fix has zero live effect —
+it only prevents the casing-duplicate bug on a future reseed-from-empty. Separately, every
+downstream reader of `screener_catalog.source` in this same file already matches case-insensitively
+(`LOWER(sc.source) = 'trendlyne'` etc., lines 1257-1260), so even when this function last ran, the
+write-time casing didn't change which rows a query matched — only whether a reseed correctly
+upserted onto an existing row versus silently duplicating it. `factor_backtest.py` has no code
+path that reads `screener_catalog` at all (it operates on the price panel), so running it would
+measure something unconnected to this diff, same reasoning as the `_log_recommendations` entry
+above.
+
 ## Already tested — do not re-run without a reason
 
 Each of these was measured on the 5-year price panel with the spec above. Re-testing them costs days and returns the same answer. If you think one deserves another look, state what changed (more history, a different horizon, a different construction) before spending the time. Full derivation for any row: `docs/measurement-history.md`.

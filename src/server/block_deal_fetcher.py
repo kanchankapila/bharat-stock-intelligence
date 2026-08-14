@@ -257,9 +257,19 @@ def backfill_technical_signals(today: str, con) -> int:
 
 
 def _calendar_days_back(n: int) -> list[date]:
-    """Return last n calendar days (weekdays only), most recent first."""
+    """Return last n calendar days (weekdays only) INCLUDING today, most recent first.
+
+    Was anchored at today - 1 unconditionally -- with the live-endpoint branch below matching
+    "trade_date >= today - 1", that made the --days 1 default (a single date: yesterday) fetch
+    from the LIVE endpoint (which can only ever return TODAY's session) and stamp the result
+    with yesterday's date. Live-confirmed 2026-08-14 (fetcher-accuracy-review): byte-identical
+    deals for BIOCON/METROPOLIS/SUDEEPPHRM/THYROCARE/URBANCO filed under two adjacent dates --
+    one real capture mislabeled a day early, the other correct if NSE's feed still showed it the
+    next day. Anchoring at today (not today-1) plus the tightened live-endpoint condition below
+    fixes both the --days 1 case and the corresponding slot in any larger --days N backfill.
+    """
     days = []
-    d = date.today() - timedelta(days=1)
+    d = date.today()
     while len(days) < n:
         if d.weekday() < 5:
             days.append(d)
@@ -293,8 +303,10 @@ def main() -> None:
     for i, trade_date in enumerate(dates):
         print(f"[Block] Fetching {trade_date} ({i+1}/{len(dates)})…")
 
-        if trade_date >= today - timedelta(days=1):
-            # Use live endpoint for today/yesterday
+        if trade_date >= today:
+            # Live endpoint only ever reflects TODAY's session -- using it for any earlier date
+            # (yesterday included) mislabels today's deals with that earlier date. Everything
+            # before today must come from the historical endpoint instead.
             raw_list = fetch_live(session)
         else:
             raw_list = fetch_historical(trade_date, session)

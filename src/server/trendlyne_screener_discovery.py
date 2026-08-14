@@ -449,11 +449,19 @@ def upsert_screener(con, info: dict):
     # screener-catalog-freshness's comment in dataQualityChecks.ts (that check proxies via
     # screener_master.last_updated; this stamp is a direct signal on screener_catalog itself).
     horizon = "intraday" if info["timeframe"] == "intraday" else "swing"
+    # Both the UPDATE's WHERE and the INSERT's source value are scoped to lowercase 'trendlyne'
+    # (cross-writer-collision-audit, 2026-08-14): screener_catalog's PK is (screener_id, source),
+    # and other providers (moneycontrol, etnow) independently issue their own screener ids that
+    # numerically overlap Trendlyne's screenpks. WHERE screener_id=? alone (no source filter)
+    # let this UPDATE silently overwrite a DIFFERENT provider's row sharing the same numeric id;
+    # the hardcoded "Trendlyne" (capitalized) INSERT also fought screener_catalog_enricher.py's
+    # lowercase convention, so the same logical screener could re-split into two catalog rows
+    # under different casing every time this and another writer both touched it.
     updated = con.execute("""
         UPDATE screener_catalog
         SET screener_name=?, category=?, subcategory=?, signal_bias=?,
             investment_horizon=?, signal_keywords=?, screener_url=?, fetched_at=CURRENT_TIMESTAMP
-        WHERE screener_id=?
+        WHERE screener_id=? AND LOWER(source)='trendlyne'
     """, (info["name"], info["category"], info["category"], info["sentiment"],
           horizon, keywords, info["screener_url"], info["screener_id"])).rowcount
     if not updated:
@@ -462,7 +470,7 @@ def upsert_screener(con, info: dict):
                 (screener_id, source, screener_name, category, subcategory,
                  signal_bias, investment_horizon, confidence, signal_keywords, screener_url, fetched_at)
             VALUES (?,?,?,?,?,?,?,0.75,?,?,CURRENT_TIMESTAMP)
-        """, (info["screener_id"], "Trendlyne", info["name"], info["category"],
+        """, (info["screener_id"], "trendlyne", info["name"], info["category"],
               info["category"], info["sentiment"], horizon, keywords, info["screener_url"]))
 
     # trendlyne_screener_stocks

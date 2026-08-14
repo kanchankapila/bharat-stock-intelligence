@@ -75,27 +75,37 @@ export const MoneyFlowPulseWidget: React.FC = () => {
       {flows.length > 0 && (
         <div className="mt-4 pt-4 border-t border-slate-800/50 space-y-2">
           <div className="text-[9px] text-slate-500 uppercase tracking-widest">Institutional Activity</div>
-          {flows.slice(0, 2).map((flow: any) => (
-            <div key={flow.category} className="p-3 bg-slate-950 border border-slate-800 rounded-xl flex justify-between items-center">
-              <div>
-                <h4 className="text-[10px] font-black text-slate-400 uppercase tracking-widest">{flow.category} Activity</h4>
-                <p className="text-[9px] font-bold text-slate-600 mt-0.5 uppercase tracking-wider">Date: {flow.date}</p>
-              </div>
-              <div className="text-right">
-                <span className={cn(
-                  'text-xs font-black italic tracking-tight px-2.5 py-0.5 rounded-lg block mb-1',
-                  parseFloat(flow.netBuySell) >= 0 ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/10' : 'bg-rose-500/10 text-rose-400 border border-rose-500/10'
-                )}>
-                  {parseFloat(flow.netBuySell) >= 0 ? '+' : ''}₹{parseFloat(flow.netBuySell).toLocaleString()} Cr
-                </span>
-                <div className="flex gap-2 text-[9px] font-bold text-slate-500 justify-end">
-                  <span>B: ₹{parseFloat(flow.buyValue).toLocaleString()}</span>
-                  <span>•</span>
-                  <span>S: ₹{parseFloat(flow.sellValue).toLocaleString()}</span>
+          {flows.slice(0, 2).map((flow: any) => {
+            // netBuySell/buyValue/sellValue come back null (not "0.00") when the source row is
+            // missing -- render '—' rather than parseFloat(null)-as-zero, which used to be
+            // indistinguishable from a genuine flat day (1,908/2,601 fii_dii_flow rows have
+            // NULL dii_net, live-checked 2026-08-14).
+            const net = flow.netBuySell != null ? parseFloat(flow.netBuySell) : null;
+            const buy = flow.buyValue != null ? parseFloat(flow.buyValue) : null;
+            const sell = flow.sellValue != null ? parseFloat(flow.sellValue) : null;
+            return (
+              <div key={flow.category} className="p-3 bg-slate-950 border border-slate-800 rounded-xl flex justify-between items-center">
+                <div>
+                  <h4 className="text-[10px] font-black text-slate-400 uppercase tracking-widest">{flow.category} Activity</h4>
+                  <p className="text-[9px] font-bold text-slate-600 mt-0.5 uppercase tracking-wider">Date: {flow.date}</p>
+                </div>
+                <div className="text-right">
+                  <span className={cn(
+                    'text-xs font-black italic tracking-tight px-2.5 py-0.5 rounded-lg block mb-1',
+                    net == null ? 'bg-slate-800/50 text-slate-500 border border-slate-700/50'
+                      : net >= 0 ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/10' : 'bg-rose-500/10 text-rose-400 border border-rose-500/10'
+                  )}>
+                    {crFmt(net)}
+                  </span>
+                  <div className="flex gap-2 text-[9px] font-bold text-slate-500 justify-end">
+                    <span>B: {buy != null ? `₹${buy.toLocaleString()}` : '—'}</span>
+                    <span>•</span>
+                    <span>S: {sell != null ? `₹${sell.toLocaleString()}` : '—'}</span>
+                  </div>
                 </div>
               </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       )}
     </Card>
