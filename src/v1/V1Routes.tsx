@@ -163,7 +163,7 @@ const V1Routes = ({
                             <Route path="/options" element={<div className="p-6"><OptionsIntelligence /></div>} />
                             <Route path="/todays-picks" element={<TodaysPicks onSelectStock={onSelectStock} />} />
                             <Route path="/early-spotter" element={<EarlyHoursSpotter onSelectStock={onSelectStock} />} />
-                            <Route path="/screener-intelligence" element={<ScreenerIntelligencePage />} />
+                            <Route path="/screener-intelligence" element={<ScreenerIntelligencePage onSelectStock={onSelectStock} />} />
                             <Route path="/agent-data-scientist" element={<AgentDataScientistPage />} />
                             <Route path="/agent-strategist" element={<AgentStrategistPage />} />
                             <Route path="/agent-auditor" element={<AgentAuditorPage />} />

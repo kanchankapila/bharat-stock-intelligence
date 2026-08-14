@@ -7,6 +7,7 @@ import {
 import { trpc } from '../lib/trpc';
 import { cn } from '../lib/utils';
 import { ScreenerRankingPanel } from './ScreenerRankingPanel';
+import { ScreenerSurfacingSignalsPanel } from './ScreenerSurfacingSignalsPanel';
 
 // ── Tier config ───────────────────────────────────────────────────────────────
 const TIER = {
@@ -239,13 +240,14 @@ const HORIZONS = ['5d', '10d', '20d', '60d', '120d'] as const;
 const TIERS = ['A', 'B', 'C', 'D', 'Unranked'] as const;
 const SOURCES = ['trendlyne', 'moneycontrol', 'etnow'] as const;
 
-export function ScreenerIntelligencePage() {
+export function ScreenerIntelligencePage({ onSelectStock }: { onSelectStock?: (s: string) => void } = {}) {
   const [horizon, setHorizon] = useState<typeof HORIZONS[number]>('20d');
   const [filterTier, setFilterTier] = useState<string>('');
   const [filterCategory, setFilterCategory] = useState<string>('');
   const [filterSource, setFilterSource] = useState<string>('');
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [sortAsc, setSortAsc] = useState(false);
+  const [viewMode, setViewMode] = useState<'leaderboard' | 'signals'>('leaderboard');
 
   const { data: categoryStats } = trpc.getScreenerCategoryStats.useQuery({ horizon });
   const { data: leaderboard, isLoading } = trpc.getScreenerLeaderboard.useQuery({
@@ -286,30 +288,58 @@ export function ScreenerIntelligencePage() {
             </p>
           </div>
           <div className="flex items-center gap-2">
-            {/* Horizon pills */}
+            {/* View toggle: precomputed leaderboard vs live screener-surfacing signals feed
+                (unified_signals, signal_source='SCREENER_SURFACING') -- two different tables,
+                two different questions ("which screeners have historically ranked well" vs
+                "what did a screener just flag"). */}
             <div className="flex items-center gap-1 bg-slate-800/50 rounded-lg p-1">
-              {HORIZONS.map(h => (
-                <button
-                  key={h}
-                  onClick={() => setHorizon(h)}
-                  className={cn(
-                    'text-[10px] px-2 py-0.5 rounded transition-colors',
-                    horizon === h ? 'bg-indigo-600 text-white' : 'text-slate-400 hover:text-slate-200'
-                  )}
-                >{h}</button>
-              ))}
+              <button
+                onClick={() => setViewMode('leaderboard')}
+                className={cn(
+                  'text-[10px] px-2 py-0.5 rounded transition-colors',
+                  viewMode === 'leaderboard' ? 'bg-indigo-600 text-white' : 'text-slate-400 hover:text-slate-200'
+                )}
+              >Leaderboard</button>
+              <button
+                onClick={() => setViewMode('signals')}
+                className={cn(
+                  'text-[10px] px-2 py-0.5 rounded transition-colors',
+                  viewMode === 'signals' ? 'bg-indigo-600 text-white' : 'text-slate-400 hover:text-slate-200'
+                )}
+              >Surfacing Signals</button>
             </div>
-            <button
-              onClick={() => triggerRecompute({})}
-              disabled={recomputing}
-              className="text-[10px] px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-400 flex items-center gap-1.5 disabled:opacity-50"
-            >
-              <RefreshCcw className={cn('w-3 h-3', recomputing && 'animate-spin')} />
-              Recompute
-            </button>
+            {viewMode === 'leaderboard' && (
+              <>
+                {/* Horizon pills */}
+                <div className="flex items-center gap-1 bg-slate-800/50 rounded-lg p-1">
+                  {HORIZONS.map(h => (
+                    <button
+                      key={h}
+                      onClick={() => setHorizon(h)}
+                      className={cn(
+                        'text-[10px] px-2 py-0.5 rounded transition-colors',
+                        horizon === h ? 'bg-indigo-600 text-white' : 'text-slate-400 hover:text-slate-200'
+                      )}
+                    >{h}</button>
+                  ))}
+                </div>
+                <button
+                  onClick={() => triggerRecompute({})}
+                  disabled={recomputing}
+                  className="text-[10px] px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-400 flex items-center gap-1.5 disabled:opacity-50"
+                >
+                  <RefreshCcw className={cn('w-3 h-3', recomputing && 'animate-spin')} />
+                  Recompute
+                </button>
+              </>
+            )}
           </div>
         </div>
 
+        {viewMode === 'signals' ? (
+          <ScreenerSurfacingSignalsPanel onSelectStock={onSelectStock} />
+        ) : (
+        <>
         {/* Category cards row */}
         <div className="flex-shrink-0 px-5 py-3 border-b border-slate-800/50">
           <div className="grid grid-cols-6 xl:grid-cols-9 gap-2">
@@ -400,6 +430,8 @@ export function ScreenerIntelligencePage() {
             </table>
           )}
         </div>
+        </>
+        )}
       </div>
 
       {/* Detail panel */}
