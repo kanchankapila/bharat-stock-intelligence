@@ -6,6 +6,7 @@ import { Card } from '../../components/Card';
 import { cn } from '../../lib/utils';
 import { ConvictionPill } from '../../components/StockTagRow';
 import { AddToPortfolioButton } from '../../components/AddToPortfolioButton';
+import { CanonicalBadge } from '../../components/CanonicalSourceNote';
 
 // Command Center teaser for the canonical unified_recommendations ranking (same query as
 // /alpha's CommandCenterDashboard/getBuyRecommendations) -- so a user sees the platform's actual
@@ -23,7 +24,12 @@ export const TopPicksWidget: React.FC<{ onSelectStock?: (symbol: string) => void
       title="Today's Top Picks"
       icon={Zap}
       onClick={() => navigate('/alpha')}
-      action={<ArrowRight className="w-3.5 h-3.5 text-slate-500" />}
+      action={
+        <div className="flex items-center gap-2">
+          <CanonicalBadge />
+          <ArrowRight className="w-3.5 h-3.5 text-slate-500" />
+        </div>
+      }
     >
       {isLoading ? (
         <div className="text-xs text-slate-500 py-6 text-center animate-pulse">Loading canonical picks…</div>
