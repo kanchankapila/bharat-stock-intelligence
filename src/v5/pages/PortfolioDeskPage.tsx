@@ -4,6 +4,7 @@ import { trpc } from '../../lib/trpc';
 import { fmtFixed, n, numOrNull, s } from '../utils';
 import { V5KpiStrip } from '../components/V5KpiStrip';
 import { V5DecisionSummaryStrip, V5InsightPanel, V5MiniBarChart } from '../components/V5Visuals';
+import { CanonicalBadge } from '../../components/CanonicalSourceNote';
 
 function parseSymbols(input: string): string[] {
   return input
@@ -148,6 +149,7 @@ export function PortfolioDeskPage() {
             <div className="flex items-center gap-2">
               <Sparkles className="h-4 w-4 text-sky-700" />
               <h2 className="v5-section-title">Suggested Allocation Universe</h2>
+              <CanonicalBadge />
             </div>
             <p className="v5-section-subtitle">Top conviction candidates from the unified model stack.</p>
           </div>

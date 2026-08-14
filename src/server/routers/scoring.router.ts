@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { dbGet, dbAll } from "../dbAsync";
-import { getTopRatedStocks, syncAndScore, recalculateScores, getStockScoreDetail } from "../scoringService";
+import { getTopRatedStocks, syncAndScore, getStockScoreDetail } from "../scoringService";
 import { crossSourceFilter, regimeSectorFilter, qualityOversoldScanner } from "../strategySignalsService";
 import { router, publicProcedure, adminProcedure } from "../trpc";
 import { cacheGet } from "../cacheService";
@@ -46,9 +46,6 @@ export const scoringRouter = router({
       _urLatestAt = null; // unified_ranker will write new rows
       return syncAndScore();
     }),
-
-  recalculateScoresOnly: adminProcedure
-    .mutation(async () => recalculateScores()),
 
   runQuantScoring: adminProcedure
     .mutation(async () => {

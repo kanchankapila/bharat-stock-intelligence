@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { trpc } from '../../../lib/trpc';
-import { Send, Settings, Save, AlertCircle, CheckCircle2 } from 'lucide-react';
+import { Send, Settings, Save, AlertCircle, CheckCircle2, Eye } from 'lucide-react';
 
 export const V2Settings: React.FC = () => {
   // Telegram Settings state
@@ -13,9 +13,18 @@ export const V2Settings: React.FC = () => {
   const [niftyTraderToken, setNiftyTraderToken] = useState('');
   const [niftyTraderStatus, setNiftyTraderStatus] = useState<{ text: string; type: 'success' | 'error' } | null>(null);
 
+  // Recommendations Digest state
+  const [digestStatus, setDigestStatus] = useState<{ text: string; type: 'success' | 'error' } | null>(null);
+
   const { data: currentSettings, refetch } = trpc.getTelegramSettings.useQuery();
   const saveMutation = trpc.saveTelegramSettings.useMutation();
   const testMutation = trpc.testTelegramConnection.useMutation();
+
+  // 08:15 IST weekday cron builds this from unified_recommendations + intraday_recommendations
+  // (telegramRecommendations.ts) -- these two admin actions were previously wired into the
+  // tRPC router but had no UI, found by the 2026-08-14 canonical-read-audit.
+  const previewDigestQ = trpc.previewRecommendationsDigest.useQuery(undefined, { enabled: false });
+  const sendDigestMutation = trpc.sendRecommendationsDigest.useMutation();
 
   const { data: ntSettings, refetch: refetchNT } = trpc.getNiftyTraderToken.useQuery();
   const saveNTMutation = trpc.saveNiftyTraderToken.useMutation();
@@ -77,6 +86,20 @@ export const V2Settings: React.FC = () => {
       }
     } catch (err: any) {
       setStatusMessage({ text: err.message || 'Error occurred during test connection', type: 'error' });
+    }
+  };
+
+  const handleSendDigest = async () => {
+    setDigestStatus(null);
+    try {
+      const res = await sendDigestMutation.mutateAsync();
+      if (res.success) {
+        setDigestStatus({ text: `Digest sent (${res.picks ?? 0} picks).`, type: 'success' });
+      } else {
+        setDigestStatus({ text: res.error || 'Digest send failed.', type: 'error' });
+      }
+    } catch (err: any) {
+      setDigestStatus({ text: err.message || 'Error occurred while sending digest', type: 'error' });
     }
   };
 
@@ -158,6 +181,51 @@ export const V2Settings: React.FC = () => {
             </button>
           </div>
         </form>
+      </div>
+
+      {/* 1b. Recommendations Digest Panel */}
+      <div className="p-6 bg-terminal-panel border border-terminal-border rounded-2xl space-y-6">
+        <div className="border-b border-terminal-border pb-4">
+          <h3 className="text-sm font-black text-slate-200 uppercase tracking-wider font-mono">Recommendations Digest</h3>
+          <p className="text-[10px] text-slate-500 font-medium">
+            Swing/positional (unified_recommendations) + intraday picks, normally sent automatically at 08:15 IST weekdays. Preview the formatted text or send it to the Telegram chat above right now.
+          </p>
+        </div>
+
+        {digestStatus && (
+          <div className={`p-4 rounded-xl border flex items-center gap-3 text-xs font-medium ${
+            digestStatus.type === 'success' ? 'bg-emerald-500/5 border-emerald-500/20 text-emerald-400' : 'bg-rose-500/5 border-rose-500/20 text-rose-400'
+          }`}>
+            {digestStatus.type === 'success' ? <CheckCircle2 className="w-4 h-4" /> : <AlertCircle className="w-4 h-4" />}
+            <span>{digestStatus.text}</span>
+          </div>
+        )}
+
+        {previewDigestQ.data && (
+          <pre className="w-full max-h-64 overflow-y-auto whitespace-pre-wrap bg-terminal-bg border border-terminal-border rounded-xl py-3 px-4 text-[11px] text-slate-300 font-mono">
+            {previewDigestQ.data.text}
+          </pre>
+        )}
+
+        <div className="flex gap-4">
+          <button
+            type="button"
+            onClick={() => previewDigestQ.refetch()}
+            disabled={previewDigestQ.isFetching}
+            className="flex-1 py-3 bg-terminal-panel hover:bg-slate-900 border border-terminal-border text-slate-200 font-black text-xs rounded-xl transition-all flex items-center justify-center gap-2 uppercase tracking-widest cursor-pointer"
+          >
+            <Eye className="w-4 h-4 text-indigo-400" /> {previewDigestQ.isFetching ? 'Building…' : 'Preview'}
+          </button>
+
+          <button
+            type="button"
+            onClick={handleSendDigest}
+            disabled={!currentSettings?.hasToken || sendDigestMutation.isPending}
+            className="px-6 py-3 bg-indigo-600 hover:bg-indigo-500 text-white font-black text-xs rounded-xl transition-all flex items-center justify-center gap-2 uppercase tracking-widest shadow-lg shadow-indigo-600/20 cursor-pointer"
+          >
+            <Send className="w-4 h-4" /> {sendDigestMutation.isPending ? 'Sending…' : 'Send Now'}
+          </button>
+        </div>
       </div>
 
       {/* 2. NiftyTrader Settings Panel */}

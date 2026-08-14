@@ -6,6 +6,92 @@ Historical record, split out of CLAUDE.md on 2026-08-11 (it was 64% of that file
 
 ## Recent session notes
 
+### 2026-08-14 — `screener-combo-predictor`: coverage report on tier-2 (NiftyTrader) filter keys found the same-day parser had a second, worse blind spot
+
+Ran `screener_name_concepts.py --coverage` against `LIVE_SCREENER_FILTERS` (the 45 camelCase
+keys `liveScreenerCollector.ts` polls every 15 min — this IS `screener_combo_finder.py`'s
+tier-2 feature set) rather than only the 1,534-name EOD catalog it was built and measured
+against yesterday. Coverage came back **40.0%**, against 82.1% on the prose catalog, with only
+4 of 47 tags firing.
+
+**Root cause:** `normalize_name`'s de-glue rule assumes "Title + run-on description" (one
+boundary, keep the head) — correct for ETnow's glued names, wrong for an identifier that has
+no whitespace and many boundaries. `todayGapUP` → `today`; `range52WeekHigh` →
+`range52week`; both then matched nothing. Fixed by adding a second branch keyed on the
+absence of whitespace: an identifier is split on camelCase and letter/digit boundaries
+instead of de-glued. `todayGapUP` → `today gap up`, `range52WeekHigh` → `range 52 week
+high`. Tier-2 coverage: **40.0% → 100%** (45/45), same-day-relevant 24.4% → 53.3%, human
+catalog unaffected (still 82.1%, still all tags firing on the full corpus).
+
+**A second, independent gap the identifier fix exposed rather than caused:** no tag covered
+"opened at the high/low" at all — `open_eq_high`/`open_eq_low` are two of the three legs of
+the capitulation triple, the one combination in `measurement.md` with a measured surviving
+edge (t=+3.61), and the vocabulary had never tagged the concept because it's rare in prose
+screener names but present in nearly every live filter set. Added `mech_open_extreme`,
+matched against both the identifier form (`todayStockOpenHigh`) and prose (`"opened at the
+low"`), with a check that `open interest at a high` does NOT false-positive.
+
+16 new tests (38 total), every new guard negative-controlled by patching the source seven
+ways (identifier branch removed, `mech_open_extreme` removed, the consecutive-caps boundary
+removed, the letter/digit boundary removed, the whitespace discriminator inverted) and
+confirming each patch fails the test written for it before restoring.
+
+**Takeaway for anyone touching this module: `--coverage` on the 1,534-name catalog alone is
+not sufficient self-audit.** The module feeds two structurally different naming systems
+(prose descriptions vs. machine filter keys) and a fix validated against one silently
+regressed nothing on the other only because the two failure modes happened not to overlap —
+that will not always be true. Run `--coverage` against both corpora before trusting a change.
+
+### 2026-08-13 — New skill: `screener-combo-predictor` (name→concept-tag decomposition + daily predict/grade/learn loop)
+
+Built `.claude/skills/screener-combo-predictor/SKILL.md` plus its one non-prose component,
+`src/server/screener_name_concepts.py` (pure stdlib, no DB/network, 22 tests in
+`src/server/tests/test_screener_name_concepts.py`).
+
+**The idea, and why it isn't a rerun of an already-dead measurement.** `measurement.md` records
+that all 1,563 screeners tested one-at-a-time survive neither FDR nor Bonferroni. That is partly
+a *power* problem: one screener contributes a handful of (symbol, date) rows, so nothing can
+clear a 1,563-way correction even if real. Decomposing the 1,534-name catalog by NAME onto 46
+orthogonal concept tags across 8 facets (timeframe / mechanism / participation / fundamental /
+event / descriptive) pools every screener expressing a concept across all three providers, which
+is what gives `screener_combo_finder.py`'s day-level t-test enough observations per cell. The tag
+is the testable unit; the individual screener is not. Measured coverage: **82.1% of names carry
+≥1 signal tag, 50.8% same-day relevant, all 46 tags fire.**
+
+**Deliberately reused rather than rebuilt**: `screener_combo_finder.py`'s `_day_level_backtest()`
+/ `search_combinations()` for validation, and — for the learning loop —
+`live_capitulation_screener.py`'s pattern of writing picks into the existing
+`live_screener_appearances` under a new `filter_key`. That last choice means
+`live_screener_resolver.py` grades the picks automatically and `backtest_live_screener.py` /
+`live_screener_optimizer.py` / combo-finder tier 2 all consume them, with **zero schema change
+and no migration**. No new predictions table was added.
+
+**Two bugs found in my own parser by the discipline, not by reading it:**
+1. `mech_ma_stack` matched only Trendlyne's `SMA100` ordering and silently dropped ETnow/
+   MoneyControl's `100Day EMA` family (11 names) from combination search. Found by the
+   `--coverage` self-audit's uncovered-names list, not by inspecting the regex.
+2. The ETnow de-glue heuristic (split at lowercase→uppercase to strip a run-on description)
+   split *inside* domain camelCase tokens — `Strong QoQ EPS Growth in recent results` became
+   `Strong Qo`, losing the quarterly/growth/results tags entirely. Fixed by skipping boundaries
+   inside an `[A-Z][a-z][A-Z]` run (YoY/QoQ/MoM/FnO) plus a short-head guard for lowercase-initial
+   company names (eClerx/iGate).
+
+**Negative-controlling the tests is what caught bug 2.** Two tests passed against deliberately
+broken code on the first attempt: the de-glue test asserted on a name whose guard never fired,
+and the same-day-veto test used a pure-fundamental name that returns False via the fallback
+regardless of the veto. Both were rewritten against real catalog names that actually exercise the
+branch (`Increasing public shareholding in the past quarter (QoQ)` for the veto). Every
+behavioral guard in the module now has a control that fails when it is removed — verified by
+patching the source six ways and re-running.
+
+**Not done here (no production access in this session):** the container has no Postgres and no
+pandas/numpy, so nothing was run against live data. Loop A's tier-2 wiring, the daily pick
+emission, and all grading are specified in the skill but **unmeasured** — the skill states this
+and requires a live run + backtest evidence before any combination is promoted. The skill also
+carries `measurement.md`'s priors (screener sentiment inverted; gap_up/gap_down both negative
+net of costs; the capitulation triple as incumbent at t=+3.61) so a future session argues against
+them instead of rediscovering them.
+
 ### 2026-08-13 — Daily Data-Integrity Report triage: a deploy-race straggler and a false-positive check
 
 Two `🚨 critical` failures in the nightly Telegram report, both traced live against production
@@ -1095,7 +1181,6 @@ baselined at 53/302 dead columns, alarming on growth rather than on the known ba
   - Both recorded in `measurement.md`'s `smart_money` row. Neither regression was caught by CI — `tsc --noEmit` clean and the targeted + full pytest suites (1737 passed/208 skipped) were green *before and after* both fixes, same "green suite protects nothing" pattern documented elsewhere in this file.
   - **Verification**: `check_recurring_bugs.py` clean on both files; full `pytest` 1737 passed/208 skipped, 0 failures.
 
-<<<<<<< HEAD
 ## 2026-08-12 — Scheduled the measurement layer; graded the live signals directly
 
 **Why:** every audit/measurement check in this repo ran only when a human session invoked it.
@@ -1255,7 +1340,6 @@ catch-up runs, that session gets NO ranking rather than a mislabelled one. There
 pre-market signal to give it, and consumers already cold-start-fall-back to stock_scores.
 
 tsc clean, pytest 1741 passed, check_recurring_bugs clean.
-=======
 - **Documented the complete external data-source surface for reuse in a new project (2026-08-12).** Added `docs/DATA_SOURCE_INTEGRATION_GUIDE.md`: canonical NSE-symbol and provider-ID contracts; exchange, price, fundamental, screener, F&O, alternative-data, news, AI, and operational integrations; endpoint families; auth and headers; principal outputs; scheduling ownership; live-test/freshness requirements; migration order; broken/excluded sources; and Python/TypeScript implementation inventories. Reconciled three inventories (network-owning code, scheduled jobs, and tests/monitoring), then extracted URL hosts from non-test `src/server` Python/TypeScript files. The first check found 18 uncategorized host literals, including real omissions for Sensibull and Investing.com; patched those and distinguished Indiatimes SAS discovery probes from production ingestion. Final executable check: **63 production HTTP hosts, 0 uncategorized**, 16 guide sections. Linked the guide from `README.md`. No runtime code changed.
 
 - **Closed the screener/POST-method gap in the data-source guide (2026-08-12).** A host-complete catalog was not method-complete: it omitted NiftyTrader's live and EOD screener POST routes, its three stock-analysis POST routes, and exact MarketsMojo POST bodies. Added canonical matrices for **13 screener endpoint families**, **10 external provider-data POST endpoints**, and **2 authentication POSTs**, while explicitly excluding AI, notifications, internal bridges, inbound APIs, and frontend-to-backend calls. Also captured ET trending and Trendlyne read-through screener variants. Source-measured inventories: MoneyControl 143 configured rows; Trendlyne 1,052 unique discovery PKs; ETNow 438 captured requests with one failed source-index capture; ET Marketstats 91 captured bodies plus four code-defined extras (95). Repository-wide scan classified 27 direct POST call sites. Executable validation found **0 missing matrix endpoints** and all four counts matched source. Documentation only; no runtime code changed.
@@ -1263,7 +1347,6 @@ tsc clean, pytest 1741 passed, check_recurring_bugs clean.
 - **Corrected the data-source guide from route-family completeness to concrete request-corpus completeness (2026-08-12).** The earlier 13-family screener matrix did not explain the user's 1,800+ concrete screener requests. Added an artifact-level reconciliation to `docs/DATA_SOURCE_INTEGRATION_GUIDE.md`: **1,983 unique raw GET URLs**, **1,983 normalized rows / 1,980 unique**, the historical **250-template** field profile (**212 returned data / 38 failed**), and the three supplemental 919-row metadata subsets. Reconciled screener instances as **1,388 broad-heuristic rows in `urls.txt` + 438 ETNow POST definitions + 95 ET Marketstats definitions = 1,921 non-overlapping concrete request records**; distinguished this from the prior narrower keyword audit's 1,382 and from production-enabled counts. Documented why the original malformed corpus yields 250 structural templates while canonicalizing first yields 248: malformed variants and three duplicates converge, not disappear. Executable source check matched all expected values exactly: `(1983, 1983, 1983, 1980, 250, 248, 1388, 438, 95, 1921, 919)`.
 
 - **Added whole-universe and taxonomy URL-mapping instructions to the data-source guide (2026-08-12).** Documented how `endpoint_registry.py` maps all 15 recognized URL parameter aliases to `scripts/stocklist.json` fields, how path/derived IDs must be declared, and how `extra_endpoints_fetcher.py` expands stock × endpoint tasks while reporting missing IDs instead of guessing. Measured the current map rather than repeating the stale 180-stock description: **2,005 rows / 2,001 unique symbols**, four duplicate symbols, and field coverage from 1,787 `scripcode` rows to 2,004 `tlid`/`tlname` rows. Added separate all-index expansion through `indexMapping.ts`/`index_provider_map`, including provider sync jobs and ID-vs-bridge-symbol use. Added both sector/industry modes: provider-native aggregate/constituent endpoints using explicit taxonomy values (12 live-verified MoneyControl slugs), and internal constituent selection from active `nse_stocks` followed by the same provider-ID renderer. Source-derived validation passed for all counts, duplicate names, 15 aliases, 12 slugs, index example, and required taxonomy queries. Documentation only; no runtime code changed.
->>>>>>> 83693f4d3cd6644a9e15a69a7677016acf4f645d
 
 ## 2026-08-12 (cont.) — Reward engine dead UNION half: deleted, not resurrected
 
@@ -2213,3 +2296,93 @@ guard exits **1** and names all 16 nvidia packages; against a clean package list
 Not verified: the job has not been run on a real GitHub runner from here. One residual risk worth
 knowing — if a `ubuntu-latest` image ever ships `nvidia-*` **pip** packages preinstalled, the
 guard would false-positive; the standard image does not today.
+## 2026-08-14 (cont. 2) — greenfield BUILD_STAGE_5_SPEC.md: Task 5.1 (ranker construction) + Task 5.2 (shadow-period preregistration)
+
+Continuation of the greenfield rebuild (`greenfield/`, separate codebase from the legacy system
+this file otherwise documents). Task 5.0 (cost-aware re-measurement, zero of 24 factor×horizon
+combinations survive net of 25bps costs) was already committed (`39639d6`). This session did
+Task 5.1 and Task 5.2.
+
+**Task 5.1 — ranker construction.** `stage5/ranker.ts`: pure logic, no DB — weights derived from
+Task 5.0's recorded `audit_metric` evidence (`selectSurvivingFactors`/`buildRankerSpec`), never a
+hardcoded weight list, so a future re-run of Task 5.0 with more data re-weights the ranker by
+itself. Zero survivors (this panel's actual, current state) produces an explicit **null ranker**
+on `momentum_63d` alone, labelled `unvalidated: true` everywhere it appears (`model_version.metrics`,
+every `recommendation.breakdown`) — never silently presented as validated. Deliberately does NOT
+reuse the predecessor's Strong Buy/Sell vocabulary (`recurring-bugs.md`'s documented inverted
+conviction-ladder bug); classifies by percentile bucket instead and grades on `score`. Migration
+010 adds `recommendation` verbatim from `GREENFIELD_BUILD_SPEC.md` C6 (append-only,
+`PK(symbol, generated_at, ranker_version)`, `CHECK(facts_cutoff <= generated_at)`), plus a
+`score`-is-finite `CHECK` (NaN sorts highest in Postgres — same class as the predecessor's
+documented NaN-ranking bug) and a partial index for the promotion gate's "any publishable row
+yet" query. `write-recommendations.ts` holds the writer logic (`buildSpecFromEvidence`,
+`writeRecommendationsForSession`); `run-ranker.ts` is a thin entrypoint that only invokes it — same
+split as `stage4/compute-features.ts`/`run-compute-features.ts`, and load-bearing: the first draft
+put the writer logic and an unconditional top-level `main().catch(...)` in the same file, and
+*importing* `buildSpecFromEvidence` from a test triggered the whole script's real-DB side effects
+on every test run (caught live via a stray `[ranker] FAILED: ...` in test stderr).
+
+**Two real bugs found and fixed via this task's own tests, not by inspection:**
+1. `bulkInsertRecommendations`'s bulk `unnest(...)` insert passed `veto_reasons` (a `text[]`
+   column) as a `text[][]` parameter alongside 13 scalar-array siblings — `unnest()` flattens
+   *every* dimension of a multidimensional array in row-major order, it does not treat the inner
+   arrays as "one value per row". Fixed by passing `jsonb[]` and reconstituting the real array
+   inside the `SELECT` via `jsonb_array_elements_text`. Recorded in `.claude/rules/recurring-bugs.md`
+   (SQL dialect section) since the next writer to touch an array-typed column (`signal.targets`)
+   will hit the identical trap.
+2. Several of my own test fixtures used a session date in 2027 (matching `dq-checks.test.ts`'s
+   established "future date avoids colliding with real data" convention) while letting
+   `generated_at` default to real wall-clock `now()` — which is *earlier* than a 2027
+   `facts_cutoff`, tripping `recommendation`'s own `CHECK(facts_cutoff <= generated_at)` before the
+   test's actual assertion. Fixed by using explicit, mutually-consistent timestamps; the
+   `recommendation`-table version of this convention needs facts_cutoff and generated_at chosen
+   together, not just "any future date" the way a bare `feature_snapshot` fixture can get away with.
+
+Task 5.1.2's Verify (facts_cutoff never exceeds its source `feature_snapshot` row's; re-running
+produces a new row, never an overwrite) is both unit- and DB-tested — including a test that a
+genuine `(symbol, generated_at, ranker_version)` collision throws rather than silently coalescing,
+proving append-only is enforced by the schema itself, not just writer discipline. All new logic
+negative-controlled (Bonferroni-bar bypass, NaN/null-coercion, direction-orientation, the two SQL
+bugs above): reverted, confirmed the relevant test fails, restored.
+
+**Task 5.2 — shadow-period preregistration.** `record-shadow-preregistration.ts` (one-shot,
+un-split like `record-feature-set.ts`) inserts `shadow_period_preregistration` into `audit_metric`
+(`min_dates=30`, `min_calendar_weeks=6` per spec) and **refuses to run a second time** — spec
+invariant 13 forbids shortening the window after seeing early results, and a courtesy warning
+doesn't enforce that, a hard refusal does. Migration 011 registers the `promotion-not-premature`
+dq_check (Task 5.2's own Verify #2, and one of Task 5.6's four checks — implemented now since Task
+5.2 can't be verified without it); `stage5/dq-checks.ts`'s `checkPromotionNotPremature` fails if any
+`ranker_version` has an `is_publishable=true` row while fewer than the preregistered `min_dates`
+distinct sessions have accumulated for it, *or* if one exists with no preregistration on record at
+all. Deliberately does not source its threshold from the mutable `dq_check.spec` column the way
+Stage 4's checks do — the only legitimate source is the append-only preregistration row itself,
+read earliest-first so a hypothetical second (bug) insert can never loosen the bar. Negative-controlled.
+
+**Environment note, not a code finding:** this session ran in a fresh remote container with no
+Docker registry access (proxy blocked `production.cloudfront.docker.com`) and no prior Stage 0-4
+backfill — a real local PostgreSQL 16 was built from the OS package instead of the repo's own
+`docker-compose.yml`, migrated, and seeded with the real 2,000-symbol NSE `stocklist.ts` (not
+synthetic data) so every test still runs against a real Postgres engine with real symbols. This
+container's `audit_metric`/`feature_snapshot` are empty — the actual 3,274,144-row Stage 4
+backfill and Task 5.0 measurement run described in `BUILD_STAGE_5_SPEC.md` lived in a prior,
+now-gone session's container. Every claim above ("re-run against real production data") is scoped
+to what this container actually has: a real schema, real symbols, and scoped fixture rows — not
+the historical 5-year panel. Also found and worked around, not fixed (pre-existing, unrelated to
+this session's changes): `nse/backfill.test.ts`'s own `afterEach` unconditionally deletes a fixed
+list of real symbols including RELIANCE from `security` as fixture cleanup, which collides with
+any other test needing that symbol if it runs later in the same process — order-dependent, not a
+regression, worth a real fix in its own session.
+
+Verification: `npx tsc --noEmit` clean in both `packages/db` and `packages/ingestion`. Full
+`vitest run` (single-fork, excluding the known-colliding `nse/backfill.test.ts`): 143 passed, 1
+skipped, 0 failed — includes all 36 new Stage 5 tests (20 ranker unit tests, 10 write-path
+DB-integration tests, 4 dq-check tests) plus the full pre-existing Stage 0-4 suite unchanged.
+Migrations 010/011 verified to round-trip (`migrate:down` then `migrate:up` restores the same
+schema state) against the real local Postgres.
+
+**Not done this session, explicitly deferred:** Task 5.3 (dual-run divergence vs. the legacy
+system's live `unified_recommendations` — needs read access to that separate database, not
+available here), Task 5.4 (promotion-gate.ts), Task 5.5 (cutover — requires explicit human
+confirmation per spec invariant 24, not to be automated regardless). Task 5.6's other three dq
+checks (`shadow-recommendation-freshness`, `shadow-rank-variance`, `dual-run-divergence-sane`)
+depend on Task 5.3/5.4 existing first.

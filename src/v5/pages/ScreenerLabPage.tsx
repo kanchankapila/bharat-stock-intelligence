@@ -5,6 +5,7 @@ import { fmtFixed, n, numOrNull, s } from '../utils';
 import { V5KpiStrip } from '../components/V5KpiStrip';
 import { V5DecisionSummaryStrip, V5InsightPanel, V5MiniBarChart } from '../components/V5Visuals';
 import { stockDisplayName } from '../stockIdentity';
+import { LegacyScoreBanner } from '../../components/CanonicalSourceNote';
 
 export function ScreenerLabPage({ onSelectSymbol }: { onSelectSymbol?: (symbol: string) => void }) {
   const [minBullish, setMinBullish] = useState(2);
@@ -202,9 +203,13 @@ export function ScreenerLabPage({ onSelectSymbol }: { onSelectSymbol?: (symbol: 
       <div className="v5-card col-span-12 p-4">
         <div className="mb-2 flex items-center gap-2">
           <Filter className="h-4 w-4 text-sky-700" />
-          <h3 className="v5-title text-base font-semibold">Screener Reliability Leaderboard</h3>
+          <h3 className="v5-title text-base font-semibold">Screener Leaderboard</h3>
         </div>
-        <div className="overflow-x-auto">
+        {/* Tier/Win Rate/Bayesian below are precomputed in screener_performance_v2, not the
+            canonical model -- see measurement.md and the canonical-read-audit finding this
+            banner exists to fix (same table as v6's Screener Browser). */}
+        <LegacyScoreBanner note="Tier, Win Rate, and Bayesian score are precomputed per-screener in screener_performance_v2. A from-scratch remeasurement of this same table found its win-rate figures didn't reproduce (one screener read 100%, remeasured at 65%), and 0 of 1,563 individual screeners tested clear a false-discovery correction -- the confluence shortlist above, which reads unified_recommendations, is the canonical view; this leaderboard is a browse of what a screener currently flags, not a graded prediction." />
+        <div className="mt-3 overflow-x-auto">
           <table className="min-w-full text-sm">
             <thead>
               <tr className="border-b border-[var(--v5-border)] text-left text-xs uppercase tracking-wide text-[var(--v5-muted)]">
