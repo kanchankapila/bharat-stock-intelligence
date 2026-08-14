@@ -2069,3 +2069,94 @@ Verification: `npx tsc --noEmit` clean. `npx vitest run`: 912 passed, 0 failed, 
 `python -m pytest`: 1790 passed, 0 failed, 221 skipped — the prior entry's 1 failure
 (`test_unified_ranker.py`'s append-only-snapshot test) did not recur on this run, confirming
 it was the flake it was diagnosed as, not a real regression.
+
+## 2026-08-14 (cont. 2) — greenfield BUILD_STAGE_5_SPEC.md: Task 5.1 (ranker construction) + Task 5.2 (shadow-period preregistration)
+
+Continuation of the greenfield rebuild (`greenfield/`, separate codebase from the legacy system
+this file otherwise documents). Task 5.0 (cost-aware re-measurement, zero of 24 factor×horizon
+combinations survive net of 25bps costs) was already committed (`39639d6`). This session did
+Task 5.1 and Task 5.2.
+
+**Task 5.1 — ranker construction.** `stage5/ranker.ts`: pure logic, no DB — weights derived from
+Task 5.0's recorded `audit_metric` evidence (`selectSurvivingFactors`/`buildRankerSpec`), never a
+hardcoded weight list, so a future re-run of Task 5.0 with more data re-weights the ranker by
+itself. Zero survivors (this panel's actual, current state) produces an explicit **null ranker**
+on `momentum_63d` alone, labelled `unvalidated: true` everywhere it appears (`model_version.metrics`,
+every `recommendation.breakdown`) — never silently presented as validated. Deliberately does NOT
+reuse the predecessor's Strong Buy/Sell vocabulary (`recurring-bugs.md`'s documented inverted
+conviction-ladder bug); classifies by percentile bucket instead and grades on `score`. Migration
+010 adds `recommendation` verbatim from `GREENFIELD_BUILD_SPEC.md` C6 (append-only,
+`PK(symbol, generated_at, ranker_version)`, `CHECK(facts_cutoff <= generated_at)`), plus a
+`score`-is-finite `CHECK` (NaN sorts highest in Postgres — same class as the predecessor's
+documented NaN-ranking bug) and a partial index for the promotion gate's "any publishable row
+yet" query. `write-recommendations.ts` holds the writer logic (`buildSpecFromEvidence`,
+`writeRecommendationsForSession`); `run-ranker.ts` is a thin entrypoint that only invokes it — same
+split as `stage4/compute-features.ts`/`run-compute-features.ts`, and load-bearing: the first draft
+put the writer logic and an unconditional top-level `main().catch(...)` in the same file, and
+*importing* `buildSpecFromEvidence` from a test triggered the whole script's real-DB side effects
+on every test run (caught live via a stray `[ranker] FAILED: ...` in test stderr).
+
+**Two real bugs found and fixed via this task's own tests, not by inspection:**
+1. `bulkInsertRecommendations`'s bulk `unnest(...)` insert passed `veto_reasons` (a `text[]`
+   column) as a `text[][]` parameter alongside 13 scalar-array siblings — `unnest()` flattens
+   *every* dimension of a multidimensional array in row-major order, it does not treat the inner
+   arrays as "one value per row". Fixed by passing `jsonb[]` and reconstituting the real array
+   inside the `SELECT` via `jsonb_array_elements_text`. Recorded in `.claude/rules/recurring-bugs.md`
+   (SQL dialect section) since the next writer to touch an array-typed column (`signal.targets`)
+   will hit the identical trap.
+2. Several of my own test fixtures used a session date in 2027 (matching `dq-checks.test.ts`'s
+   established "future date avoids colliding with real data" convention) while letting
+   `generated_at` default to real wall-clock `now()` — which is *earlier* than a 2027
+   `facts_cutoff`, tripping `recommendation`'s own `CHECK(facts_cutoff <= generated_at)` before the
+   test's actual assertion. Fixed by using explicit, mutually-consistent timestamps; the
+   `recommendation`-table version of this convention needs facts_cutoff and generated_at chosen
+   together, not just "any future date" the way a bare `feature_snapshot` fixture can get away with.
+
+Task 5.1.2's Verify (facts_cutoff never exceeds its source `feature_snapshot` row's; re-running
+produces a new row, never an overwrite) is both unit- and DB-tested — including a test that a
+genuine `(symbol, generated_at, ranker_version)` collision throws rather than silently coalescing,
+proving append-only is enforced by the schema itself, not just writer discipline. All new logic
+negative-controlled (Bonferroni-bar bypass, NaN/null-coercion, direction-orientation, the two SQL
+bugs above): reverted, confirmed the relevant test fails, restored.
+
+**Task 5.2 — shadow-period preregistration.** `record-shadow-preregistration.ts` (one-shot,
+un-split like `record-feature-set.ts`) inserts `shadow_period_preregistration` into `audit_metric`
+(`min_dates=30`, `min_calendar_weeks=6` per spec) and **refuses to run a second time** — spec
+invariant 13 forbids shortening the window after seeing early results, and a courtesy warning
+doesn't enforce that, a hard refusal does. Migration 011 registers the `promotion-not-premature`
+dq_check (Task 5.2's own Verify #2, and one of Task 5.6's four checks — implemented now since Task
+5.2 can't be verified without it); `stage5/dq-checks.ts`'s `checkPromotionNotPremature` fails if any
+`ranker_version` has an `is_publishable=true` row while fewer than the preregistered `min_dates`
+distinct sessions have accumulated for it, *or* if one exists with no preregistration on record at
+all. Deliberately does not source its threshold from the mutable `dq_check.spec` column the way
+Stage 4's checks do — the only legitimate source is the append-only preregistration row itself,
+read earliest-first so a hypothetical second (bug) insert can never loosen the bar. Negative-controlled.
+
+**Environment note, not a code finding:** this session ran in a fresh remote container with no
+Docker registry access (proxy blocked `production.cloudfront.docker.com`) and no prior Stage 0-4
+backfill — a real local PostgreSQL 16 was built from the OS package instead of the repo's own
+`docker-compose.yml`, migrated, and seeded with the real 2,000-symbol NSE `stocklist.ts` (not
+synthetic data) so every test still runs against a real Postgres engine with real symbols. This
+container's `audit_metric`/`feature_snapshot` are empty — the actual 3,274,144-row Stage 4
+backfill and Task 5.0 measurement run described in `BUILD_STAGE_5_SPEC.md` lived in a prior,
+now-gone session's container. Every claim above ("re-run against real production data") is scoped
+to what this container actually has: a real schema, real symbols, and scoped fixture rows — not
+the historical 5-year panel. Also found and worked around, not fixed (pre-existing, unrelated to
+this session's changes): `nse/backfill.test.ts`'s own `afterEach` unconditionally deletes a fixed
+list of real symbols including RELIANCE from `security` as fixture cleanup, which collides with
+any other test needing that symbol if it runs later in the same process — order-dependent, not a
+regression, worth a real fix in its own session.
+
+Verification: `npx tsc --noEmit` clean in both `packages/db` and `packages/ingestion`. Full
+`vitest run` (single-fork, excluding the known-colliding `nse/backfill.test.ts`): 143 passed, 1
+skipped, 0 failed — includes all 36 new Stage 5 tests (20 ranker unit tests, 10 write-path
+DB-integration tests, 4 dq-check tests) plus the full pre-existing Stage 0-4 suite unchanged.
+Migrations 010/011 verified to round-trip (`migrate:down` then `migrate:up` restores the same
+schema state) against the real local Postgres.
+
+**Not done this session, explicitly deferred:** Task 5.3 (dual-run divergence vs. the legacy
+system's live `unified_recommendations` — needs read access to that separate database, not
+available here), Task 5.4 (promotion-gate.ts), Task 5.5 (cutover — requires explicit human
+confirmation per spec invariant 24, not to be automated regardless). Task 5.6's other three dq
+checks (`shadow-recommendation-freshness`, `shadow-rank-variance`, `dual-run-divergence-sane`)
+depend on Task 5.3/5.4 existing first.
