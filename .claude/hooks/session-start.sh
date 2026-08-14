@@ -131,14 +131,16 @@ else
   # Prefer the CPU torch wheel so a GPU-less container doesn't carry several GB of
   # unusable nvidia-* libraries.
   #
-  # ORDER MATTERS, and ci.yml gets it wrong. CI installs the requirements file
-  # first and CPU torch second — but `transformers` and `sentence-transformers`
-  # both depend on torch, so the first command already resolved the default
-  # (CUDA) build and the later CPU install found the requirement satisfied and
-  # did nothing. Measured 2026-08-13 with `uv pip install --dry-run`: the CPU
-  # index resolves 0 nvidia/cuda packages, `sentence-transformers==5.5.1` off the
-  # default index resolves 18. Installing CPU torch FIRST is what makes it the
-  # build everything else resolves against.
+  # ORDER MATTERS: installing the requirements file before CPU torch does NOT
+  # produce a CPU build. `transformers` and `sentence-transformers` both depend
+  # on torch, so the requirements install would already resolve the default
+  # (CUDA) build, and a CPU install that followed would find the requirement
+  # satisfied and do nothing. Measured 2026-08-13 with `uv pip install
+  # --dry-run`: the CPU index resolves 0 nvidia/cuda packages,
+  # `sentence-transformers==5.5.1` off the default index resolves 18.
+  # Installing CPU torch FIRST is what makes it the build everything else
+  # resolves against — same fix, and same reasoning, as ci.yml's
+  # python-tests job.
   #
   # But treat the CPU index as OPTIONAL, not required. Some sandboxes reach PyPI
   # (pypi.org and files.pythonhosted.org are on the agent proxy's noProxy list)
