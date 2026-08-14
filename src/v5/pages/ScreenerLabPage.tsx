@@ -203,7 +203,7 @@ export function ScreenerLabPage({ onSelectSymbol }: { onSelectSymbol?: (symbol: 
       <div className="v5-card col-span-12 p-4">
         <div className="mb-2 flex items-center gap-2">
           <Filter className="h-4 w-4 text-sky-700" />
-          <h3 className="v5-title text-base font-semibold">Screener Reliability Leaderboard</h3>
+          <h3 className="v5-title text-base font-semibold">Screener Leaderboard</h3>
         </div>
         {/* Tier/Win Rate/Bayesian below are precomputed in screener_performance_v2, not the
             canonical model -- see measurement.md and the canonical-read-audit finding this
