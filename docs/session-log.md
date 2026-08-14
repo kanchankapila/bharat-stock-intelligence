@@ -6,6 +6,42 @@ Historical record, split out of CLAUDE.md on 2026-08-11 (it was 64% of that file
 
 ## Recent session notes
 
+### 2026-08-14 — `screener-combo-predictor`: coverage report on tier-2 (NiftyTrader) filter keys found the same-day parser had a second, worse blind spot
+
+Ran `screener_name_concepts.py --coverage` against `LIVE_SCREENER_FILTERS` (the 45 camelCase
+keys `liveScreenerCollector.ts` polls every 15 min — this IS `screener_combo_finder.py`'s
+tier-2 feature set) rather than only the 1,534-name EOD catalog it was built and measured
+against yesterday. Coverage came back **40.0%**, against 82.1% on the prose catalog, with only
+4 of 47 tags firing.
+
+**Root cause:** `normalize_name`'s de-glue rule assumes "Title + run-on description" (one
+boundary, keep the head) — correct for ETnow's glued names, wrong for an identifier that has
+no whitespace and many boundaries. `todayGapUP` → `today`; `range52WeekHigh` →
+`range52week`; both then matched nothing. Fixed by adding a second branch keyed on the
+absence of whitespace: an identifier is split on camelCase and letter/digit boundaries
+instead of de-glued. `todayGapUP` → `today gap up`, `range52WeekHigh` → `range 52 week
+high`. Tier-2 coverage: **40.0% → 100%** (45/45), same-day-relevant 24.4% → 53.3%, human
+catalog unaffected (still 82.1%, still all tags firing on the full corpus).
+
+**A second, independent gap the identifier fix exposed rather than caused:** no tag covered
+"opened at the high/low" at all — `open_eq_high`/`open_eq_low` are two of the three legs of
+the capitulation triple, the one combination in `measurement.md` with a measured surviving
+edge (t=+3.61), and the vocabulary had never tagged the concept because it's rare in prose
+screener names but present in nearly every live filter set. Added `mech_open_extreme`,
+matched against both the identifier form (`todayStockOpenHigh`) and prose (`"opened at the
+low"`), with a check that `open interest at a high` does NOT false-positive.
+
+16 new tests (38 total), every new guard negative-controlled by patching the source seven
+ways (identifier branch removed, `mech_open_extreme` removed, the consecutive-caps boundary
+removed, the letter/digit boundary removed, the whitespace discriminator inverted) and
+confirming each patch fails the test written for it before restoring.
+
+**Takeaway for anyone touching this module: `--coverage` on the 1,534-name catalog alone is
+not sufficient self-audit.** The module feeds two structurally different naming systems
+(prose descriptions vs. machine filter keys) and a fix validated against one silently
+regressed nothing on the other only because the two failure modes happened not to overlap —
+that will not always be true. Run `--coverage` against both corpora before trusting a change.
+
 ### 2026-08-13 — New skill: `screener-combo-predictor` (name→concept-tag decomposition + daily predict/grade/learn loop)
 
 Built `.claude/skills/screener-combo-predictor/SKILL.md` plus its one non-prose component,

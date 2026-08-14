@@ -46,11 +46,23 @@ _GLUED_BOUNDARY = re.compile(r"(?<=[a-z])(?=[A-Z])")
 _CAMEL_TOKEN = re.compile(r"[A-Z][a-z][A-Z]")
 
 
+# Two different naming systems feed this module. Human screener names (Trendlyne/ETnow/
+# MoneyControl) are prose and need the run-on-description de-glue below. The NiftyTrader
+# live-screener `filter_key`s -- which ARE screener_combo_finder.py's tier-2 feature set --
+# are camelCase identifiers ("todayGapUP", "range52WeekHigh"), where the de-glue's
+# split-once-and-keep-the-head rule truncates to "today"/"range52week" and drops the concept
+# entirely. Whitespace is the discriminator: prose always has some, an identifier never does.
+_IDENT_BOUNDARY = re.compile(
+    r"(?<=[a-z0-9])(?=[A-Z])|(?<=[A-Z])(?=[A-Z][a-z])|(?<=[a-zA-Z])(?=\d)|(?<=\d)(?=[a-zA-Z])")
+
+
 def normalize_name(name: str) -> str:
-    """Lowercase, de-glue a run-on description, collapse whitespace/punctuation."""
+    """Lowercase, split an identifier or de-glue a run-on description, collapse whitespace."""
     if not name:
         return ""
     stripped = name.strip()
+    if not re.search(r"\s", stripped):
+        return re.sub(r"\s+", " ", _IDENT_BOUNDARY.sub(" ", stripped).lower()).strip()
     head = stripped
     for match in _GLUED_BOUNDARY.finditer(stripped):
         i = match.start()
@@ -81,13 +93,17 @@ CONCEPT_PATTERNS: list[tuple[str, str, str]] = [
     # Both orderings occur in the live catalog and mean the same thing: Trendlyne writes
     # "SMA100", ETnow/MoneyControl write "100Day EMA". Matching only one silently drops the
     # other family from combination search -- caught by --coverage, not by reading the regex.
-    ("mech_ma_stack", "mechanism", r"\b[se]ma\s*\d+\b|\b\d+\s*-?\s*day\s*[se]ma\b|moving average"),
+    ("mech_ma_stack", "mechanism", r"\b[se]ma\s*\d+\b|\b\d+\s*-?\s*(day\s*)?[se]ma\b|moving average"),
     ("mech_crossover", "mechanism", r"\bcross(ing|ed|over)?\b|golden cross|death cross"),
-    ("mech_breakout", "mechanism", r"breakout|breaking out|\bbreach|new high"),
+    ("mech_breakout", "mechanism", r"breakout|breaking out|\bbreach|new high|\borb\b"),
     ("mech_breakdown", "mechanism", r"breakdown|breaking down|new low"),
     ("mech_gap", "mechanism", r"\bgap\b|\bgaps\b"),
     ("mech_52w_high", "mechanism", r"52\s*-?\s*week high|52w high|all.time high"),
     ("mech_52w_low", "mechanism", r"52\s*-?\s*week low|52w low"),
+    # The tier-1 open_eq_high/open_eq_low concept -- a leg of the ONE combination that has
+    # survived measurement here (the capitulation triple) -- had no tag at all until the
+    # NiftyTrader keys made the gap visible: prose names rarely say it, every live filter set does.
+    ("mech_open_extreme", "mechanism", r"\bopen(ed|s)?\s*(=|eq|at)?\s*(the\s+)?(day'?s\s+)?(high|low)\b"),
     ("mech_supertrend", "mechanism", r"supertrend"),
     ("mech_bollinger", "mechanism", r"bollinger|\bbb\b"),
     ("mech_candlestick", "mechanism", r"harami|doji|engulfing|hammer|marubozu|candle|star\b"),
@@ -95,10 +111,10 @@ CONCEPT_PATTERNS: list[tuple[str, str, str]] = [
     ("mech_oscillator", "mechanism", r"\brsi\b|\bcci\b|\bmfi\b|williams|stochastic|\bmacd\b|\badx\b|oscillator"),
     ("mech_overbought", "mechanism", r"overbought"),
     ("mech_oversold", "mechanism", r"oversold"),
-    ("mech_momentum", "mechanism", r"momentum|trending up|trending down|\btrend\b"),
+    ("mech_momentum", "mechanism", r"momentum|trending up|trending down|\btrend\b|higher high|lower low"),
     ("mech_reversal", "mechanism", r"reversal|pullback|bounce|recovery"),
     ("mech_relative_strength", "mechanism", r"relative (out|under)performance|versus (nifty|industry|sector)|outperform|underperform"),
-    ("mech_volatility", "mechanism", r"volatil|\batr\b|\bnr7\b|inside day|outside day"),
+    ("mech_volatility", "mechanism", r"volatil|\batr\b|\bnr\s*7\b|inside day|outside day"),
     ("mech_consolidation", "mechanism", r"consolidat|\brange bound\b|sideways"),
     ("mech_pivot_level", "mechanism", r"\bpivot\b|support level|\bresistance\b|\bsupport\b"),
     # volume / participation

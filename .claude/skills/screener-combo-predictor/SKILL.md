@@ -49,16 +49,29 @@ python src/server/screener_name_concepts.py --name "30 min Supertrend Buys"
 ```
 
 **Why name decomposition is the right move, not a shortcut.** 1,534 screener names across
-Trendlyne/ETnow/MoneyControl collapse onto 46 orthogonal tags across 8 facets (timeframe,
+Trendlyne/ETnow/MoneyControl collapse onto 47 orthogonal tags across 8 facets (timeframe,
 mechanism, participation, fundamental, event, descriptive). A single screener contributes a
 handful of (symbol, date) rows — far too few to clear a 1,563-way correction even if its
 edge were real. A tag like `mech_oversold` pools every screener expressing that concept
 across all three providers, which is what gives the day-level t-test enough observations to
 say anything. **The tag is the testable unit; the individual screener is not.**
 
-Current measured coverage: **82.1% of names carry ≥1 signal tag, 50.8% are same-day
-relevant, all 46 tags fire.** Re-run `--coverage` after any catalog growth. If a tag stops
-firing it is dead vocabulary that still looks like coverage — fix or drop it.
+Measured coverage, both naming systems that feed the search:
+
+| Corpus | Names | ≥1 signal tag | Same-day relevant |
+|---|---|---|---|
+| EOD catalog (`screener_names.csv`, prose) | 1,534 | **82.1%** | 50.9% |
+| Tier-2 live filters (`LIVE_SCREENER_FILTERS`, camelCase keys) | 45 | **100%** | 53.3% |
+
+Re-run `--coverage` after any catalog growth. If a tag stops firing on the *full* catalog it
+is dead vocabulary that still looks like coverage — fix or drop it. (Running `--coverage` on
+a narrow subset like the 45 live filters will legitimately report most tags as never firing;
+that warning only means something against the whole corpus.)
+
+To audit the tier-2 filter keys, emit them from `liveScreenerCollector.ts`'s
+`LIVE_SCREENER_FILTERS` as a `source,screener_id,screener_name` CSV and pass `--csv`. The
+decomposer detects an identifier by the absence of whitespace and splits it on camelCase and
+letter/digit boundaries instead of applying the prose de-glue.
 
 Three things the decomposer already handles, all of them logged bug classes:
 - `source` is lowercased (`screener_catalog` carries `trendlyne`/`Trendlyne` as distinct PK rows).
@@ -96,7 +109,7 @@ months. That is fewer periods than `screener_breadth`, which is already flagged 
 A combination is promotable only if **all** hold:
 
 1. Day-level t-stat clears **Bonferroni across the full search space you actually enumerated**
-   (not the shortlist you kept). With ~46 tags at depth ≤3 that bar is high — say so plainly
+   (not the shortlist you kept). With ~47 tags at depth ≤3 that bar is high — say so plainly
    rather than quietly comparing against t=2.
 2. Positive in **≥4 of 6 calendar years**, or an explicit statement that history is too short.
 3. Survives winsorization at 1/2/5% and dropping the 3 most extreme days.

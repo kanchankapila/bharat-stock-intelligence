@@ -56,6 +56,54 @@ def test_normalize_handles_empty_and_none_like():
     assert normalize_name("") == ""
 
 
+# ── camelCase identifiers (screener_combo_finder.py's tier-2 live-screener features) ───
+
+@pytest.mark.parametrize("key,expected", [
+    ("todayGapUP", "today gap up"),
+    ("range52WeekHigh", "range 52 week high"),
+    ("orb5minHigh", "orb 5 min high"),
+    ("todayAbove20SMA", "today above 20 sma"),
+    ("stockPEBelow5", "stock pe below 5"),      # consecutive-caps boundary: PE|Below
+    ("todayNR7", "today nr 7"),
+    ("higherHighHigherLow", "higher high higher low"),
+])
+def test_camelcase_filter_keys_split_into_words(key, expected):
+    """NiftyTrader `filter_key`s are camelCase identifiers, not prose. The prose de-glue rule
+    (split once, keep the head) truncated them -- 'todayGapUP' became 'today' -- so tier 2's
+    entire live-screener half contributed almost no tags to combination search. Fails against
+    the pre-fix normalize_name, which had no identifier branch."""
+    assert normalize_name(key) == expected
+
+
+@pytest.mark.parametrize("key,tag", [
+    ("todayGapUP", "mech_gap"),
+    ("todayStockOpenLow", "mech_open_extreme"),
+    ("range52WeekHigh", "mech_52w_high"),
+    ("orb5minHigh", "mech_breakout"),
+    ("todayAbove200SMA", "mech_ma_stack"),
+    ("yesterdayNR7", "mech_volatility"),
+    ("roce20To50", "fund_quality"),
+])
+def test_every_live_filter_family_earns_a_mechanism_tag(key, tag):
+    assert tag in decompose(key).tags
+
+
+def test_open_extreme_tag_exists_for_the_incumbent_combos_leg():
+    """`open_eq_low` is a leg of the capitulation triple — the one combination in
+    measurement.md with a surviving edge — but no tag covered it until the identifier fix
+    made the gap visible. Fails if mech_open_extreme is removed from CONCEPT_PATTERNS."""
+    assert "mech_open_extreme" in {tag for tag, _, _ in CONCEPT_PATTERNS}
+    assert "mech_open_extreme" in decompose("todayStockOpenHigh").tags
+    assert "mech_open_extreme" in decompose("Stocks that opened at the low").tags
+
+
+def test_identifier_branch_does_not_capture_prose_names():
+    """The whitespace discriminator must not send a real screener name down the identifier
+    path, where the ETnow description would be split into words instead of stripped. Fails if
+    the `not re.search(r"\\s", ...)` guard is inverted or dropped."""
+    assert normalize_name("High Dividend Yield StocksIdentifies stocks with payouts") == "high dividend yield stocks"
+
+
 # ── the moving-average ordering regression ─────────────────────────────────────────────
 
 @pytest.mark.parametrize("name", [
