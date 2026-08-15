@@ -13,9 +13,11 @@ of this. This skill exists for the gaps those cannot see:
   a pipeline reporting health while producing nothing — skip stamped as success, a job SIGKILLed
   before its last step, a fresh table whose feature column is 100% NULL, a monitor that has fired
   on 16/16 runs.
-- **`data_quality_results` is PK'd on `check_id`** — one row per check, overwritten every run.
-  There is **no history**, so a check that has always passed and one that started passing an hour
-  ago look identical. Week-over-week comparison has to come from this skill's own ledger.
+- **`data_quality_results` is PK'd on `check_id`** — one row per check, overwritten every run, so
+  a check that has always passed and one that started passing an hour ago look identical there.
+  `data_quality_history` (added 2026-08-15) is the append-only counterpart — query that for
+  verdict-over-time. It starts on 2026-08-15, so anything older than that is only comparable via
+  this skill's own ledger.
 - **The frontend has zero monitoring and zero component tests.** Six shells, `v6` is what a fresh
   visitor lands on.
 - **The 12 deep audits are run only when someone remembers.** Rotation below fixes that.
@@ -65,18 +67,29 @@ The four processes (`bharat-server`:3000, `ml-api`:8000, `chatbot`:8001, `alphaq
 `pm2 jlist` says "online"; that is not the same as answering.
 
 ```bash
-for p in 3000 8000 8001 8002; do echo -n "$p "; curl -s -o /dev/null -w "%{http_code}\n" --max-time 5 http://127.0.0.1:$p/ || echo DOWN; done
+curl -s -o /dev/null -w "3000 %{http_code}\n" --max-time 5 http://127.0.0.1:3000/
+for p in 8000 8001 8002; do curl -s -o /dev/null -w "$p %{http_code}\n" --max-time 5 http://127.0.0.1:$p/docs; done
 npm run smoke:ci   # boots the real tRPC router against Postgres — catches router-vs-schema drift
 ```
+
+**Probe the Python services at `/docs`, not `/`.** All three are FastAPI with no root route, so
+`/` returns 404 on a perfectly healthy service — a `/`-based probe reports three false DOWNs every
+single run, which is how a health check stops being read.
 
 ## Lane 3 — Jobs & data quality
 
 ```bash
 npm run dq:check
+backend-python/venv/Scripts/python.exe scripts/integrity_sweep.py
 ```
 
-Then the two things `dq:check` structurally cannot report (see Lane 4 for how to run SQL here —
-`psql` is not on PATH):
+`integrity_sweep.py` is the data-layer half and answers what `dq:check` cannot: columns that are
+100% NULL on the latest date in an otherwise-fresh table, columns frozen at one value for every
+row, and tables stalled against *their own* cadence rather than a hardcoded bar. Run both — a
+fresh table is not a delivered feature.
+
+Then the two things neither can report (see Lane 4 for how to run SQL here — `psql` is not on
+PATH):
 
 ```sql
 -- (a) Jobs that never succeed, and jobs that have never failed (a check that cannot fail is not a check)
@@ -195,26 +208,16 @@ regardless of rotation — the schedule is the floor, not the ceiling.
 
 ## Lane 7 — Report and ledger
 
-Append one section to `docs/weekend-audit-log.md` (create it if absent). Keep the shape identical
-every week or the trend is unreadable:
+Everything lands in **one file — `docs/audit-findings.md`** (create it if absent): the findings
+table at the top, carried across runs with stable IDs, and a per-run lane table appended under
+"Run log". One file, so a finding and the run that produced it can't drift apart.
 
-```markdown
-## 2026-08-15 (week 33, rotation group 1 — backend)
+Keep the lane table's shape identical every week or the trend is unreadable — lanes 0-7, a
+✅/⚠️/❌ verdict each, and **`skipped` written as `skipped`**. A lane that didn't run is never
+reported as green; the 2026-08-15 baseline run skipped lanes 5 and 6 and says so.
 
-| Lane | Verdict | Notes |
-|---|---|---|
-| 0 deploy | ✅ / ⚠️ / ❌ | services vs HEAD, restart counts |
-| 1 repo | | tsc / vitest / pytest / recurring-bugs / schema-drift / build |
-| 2 services | | 4 ports, smoke:ci |
-| 3 jobs+DQ | | n critical fail, n warn, n jobs 100%-failing |
-| 4 database | | largest table + delta vs last week, dead_pct worst, idle-in-txn |
-| 5 frontend | | v6 renders, console errors |
-| 6 rotation | | group N — findings |
-
-**New this week:** …
-**Unchanged from last week:** … (a finding repeating 3 weeks running is its own finding)
-**Fixed and live-verified:** …
-```
+Close each entry with **New this week / Unchanged from last week / Fixed and live-verified**. A
+finding unchanged across 3 runs is its own finding — escalate it rather than letting it roll.
 
 State plainly what is red, what got worse *since last weekend* (the part no other tool in this
 repo can tell you), and what you deliberately did not fix. Only claim a lane passed if its command

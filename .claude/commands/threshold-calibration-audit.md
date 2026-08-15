@@ -34,9 +34,19 @@ The signature is one row:
 SELECT status, count(*) FROM data_quality_results GROUP BY 1;
 ```
 
-`data_quality_results` is PK'd on `check_id` and overwritten each run — **it has no history**, so
-this table alone cannot answer the question for DQ checks. For those, derive variance from
-`job_heartbeat` instead, and from any results table an engine writes its own verdicts into:
+`data_quality_results` is PK'd on `check_id` and overwritten each run, so that table alone cannot
+answer the question. Use `data_quality_history` (append-only, added 2026-08-15) — a check with one
+distinct status across many runs is the finding:
+
+```sql
+SELECT check_id, count(*) AS runs, count(DISTINCT status) AS distinct_status,
+       min(status) AS always
+FROM data_quality_history GROUP BY 1 HAVING count(*) > 5 AND count(DISTINCT status) = 1
+ORDER BY runs DESC;
+```
+
+Until that table has depth, corroborate from `job_heartbeat` and from any results table an engine
+writes its own verdicts into:
 
 ```sql
 SELECT job_name, run_count, fail_count FROM job_heartbeat

@@ -6,6 +6,139 @@ Historical record, split out of CLAUDE.md on 2026-08-11 (it was 64% of that file
 
 ## Recent session notes
 
+### 2026-08-15 — Postgres made unconditional; audit sweep across frontend/backend/DB; a "flaky" ranker test turned out to be a real snapshot-loss bug
+
+Started as a whole-codebase audit for gaps, became four connected pieces of work. Everything
+below was live-verified against production Postgres unless stated.
+
+**1. Postgres is now the only database, structurally — this is the headline.**
+`pgConfig.ts`'s `usePostgres()` and `sql_translate.py`'s `use_postgres()` both read
+`USE_POSTGRES === 'true'`, i.e. **SQLite by default**. Any process that did not load `.env` — a
+hand-run script, a cron entry, a trimmed subprocess env — silently used the local
+`database.sqlite` and printed convincing numbers. That file is 3.49 GB and ~2 months stale
+(`unified_recommendations` max 2026-06-19 vs 2026-08-17 live). Both now return Postgres
+unconditionally for every real process, consulting **no environment variable at all**; the SQLite
+fixture is reachable only inside a test runner (`process.env.VITEST` / `"pytest" in sys.modules`,
+runner-owned markers `.env` cannot forge) AND with an explicit opt-in. Verified in a clean
+interpreter: unset → Postgres, `=false` → Postgres, `=0` → Postgres. Pinned by
+`src/server/__tests__/postgresOnly.test.ts` and the "Postgres-only guarantee" block in
+`src/server/tests/test_sql_translate.py`, both negative-controlled, plus a cross-language test
+that fails if the TS and Python rules ever drift.
+
+*Correction recorded:* `infra_gotchas`' long-standing "AlphaQuant writing SQLite" was **never
+true** — `pcr_engine.py`/`portfolio_analytics.py` carried two dead `sqlite:///`-forcing lines they
+never referenced (both call `get_engine()`); deleted, and live-verified they resolve to
+`postgresql+psycopg2`.
+
+*A design mistake worth remembering:* the first attempt defaulted **tests** to Postgres too. The
+suite went 115s → 600s+ because ~100 test files build their own SQLite fixture and never set the
+variable — they were being pointed at LIVE PRODUCTION. Killed it and checked for damage: 0 test
+symbols in any live table, 0 recent writes, core row counts unchanged. Nothing was written, but
+that is luck, not design. Inside a test runner the old rule now stands deliberately.
+
+**2. A "flaky" test was a real bug for weeks.**
+`test_history_snapshot_is_append_only_across_reruns` was recorded across sessions as an
+order-dependent flake. It was reporting `expected 2 distinct generated_at, got 1` in every failing
+run — the assertion names the bug outright. Root cause: `datetime.now()`'s resolution is the
+system clock tick, not the microseconds its ISO output implies —
+`time.get_clock_info('time').resolution` is **0.015625 s** here, and 2,000 back-to-back calls
+returned **one** distinct value. `unified_ranker.run()` finishes inside one tick on a small
+universe, so two runs shared a `generated_at`, and since `unified_recommendations_history` is
+PK `(symbol, generated_at)` with `ON CONFLICT DO NOTHING`, the second run's ENTIRE snapshot was
+silently discarded — the exact evidence loss that table exists to prevent. Fixed with
+`_next_generated_at()` (strictly increasing, 1µs bump on collision, stays real wall-clock because
+the pre-market provenance filter depends on it).
+
+Two wrong turns worth recording: running it with `-s` made it PASS (print I/O widened the
+inter-run gap — instrumentation that changes timing can hide a timing bug), and my first
+root-cause theory (SQLite truncating the timestamp on write) was **disproved** by actually storing
+two microsecond-separated datetimes and reading back 2 distinct rows. Proof of fix: a file
+containing nothing but five `assert True` statements used to reproduce the failure
+deterministically; the full suite now passes with it present (1974 passed).
+
+**3. Database — a statistics problem, not an indexing one.**
+`last_analyze`/`last_autoanalyze`/`last_autovacuum` were **NULL on all 8 largest tables** (300 of
+419 platform-wide). autovacuum is on and healthy; the default `autovacuum_analyze_scale_factor`
+of 0.1 demands 1.68M changed rows on a 16.7M-row table, and the 2026-08-14 MarketsMojo
+incremental-write guards — correct in themselves — removed exactly the churn that had been keeping
+stats fresh. `VACUUM ANALYZE`d the 8 tables (verified **zero** rows lost: 45,366,761 before and
+after, diff empty) and added migration `1787030000000` setting
+`autovacuum_analyze_scale_factor=0, autovacuum_analyze_threshold=50000` — flat and
+size-independent, because a percentage gets *rarer* as a table grows, which is backwards.
+Measured effect on `marketsmojo_technical_fetcher`'s own incremental-guard query: Parallel Seq
+Scan (cost 449,303, median 4.47s) → Parallel Index Only Scan (cost 378,469, median 2.60s); the PK
+already covered it, but a never-vacuumed table has an empty visibility map so index-only scan was
+unavailable.
+
+**Retention: the recommendation is DO NOT.** My own audit implied these unbounded tables needed a
+policy. Traced the consumers instead: `marketsmojo_technical_history`, `trendlyne_pb/pe_history`
+and `nse_universe_history` are ALL read by `factor_backtest.py` over a 5–5.5 year window — the
+harness `measurement.md`'s entire factor table rests on. A retention policy would silently destroy
+the measurement history. The 3 existing hypertable policies are appropriate; add no more without a
+per-table consumer trace like this one.
+
+**4. MarketsMojo incrementality — confirmed working.**
+All 5 fetchers are incremental after one full fetch. `technical` proven over two nights
+(14.7M → 2.0M → 64k → 33k rows/night); `index` completed its first real full fetch on 08-14 (81
+indices, 2016→2026) and goes incremental from tonight; `financials`/`fintrend`/`shareholding` are
+weekly and their guards (added 08-14) have not had their first incremental run yet.
+
+**5. Schema drift — closed for the first time.**
+A prior session tried `generate_pg_schema.py`, got a file 1,520 lines smaller, and correctly
+reverted: that script generates the Postgres snapshot **from SQLite** and structurally cannot see
+Postgres-only tables. `generatePgSchemaFromLive.ts` reads live catalogs — ran it (+289/−89) and
+`npm run schema:drift` now reports **clean, 210/210**. Deleted `generate_pg_schema.py` (Phase 1 of
+the new `docs/SQLITE_DECOMMISSION_PLAN.md`), after first updating the five comments in
+`checkSchemaDrift.ts`/`generatePgSchemaFromLive.ts` that cited it as the canonical source of their
+HYPERTABLES and SKIP sets — it was not a clean `rm`.
+
+**6. A real accuracy bug: `signal_source` is not label-uniform.**
+`getWinRateStats` scoped to `signal_source='technical'`, which looked sufficient. Live, that
+source resolves to THREE groups: `path_barrier` 198,723 rows @ 68.7%, **NULL label 1,722 rows @
+99.4%**, plus the separate confluence/`terminal_pct2` family. The unlabeled rows sit *inside* the
+labeled rows' date range and the 2000-row window had no label filter — a few low-volume days and a
+99.4% slice enters the headline number. Cause: `signalOutcomesService.ts` is a **third writer** of
+`signal_outcomes` that never stamped `label_definition`, while both siblings do. Its rule is
+`MAX(high) over horizon > 2%` — genuinely `path_barrier`, so the 99.4% is what MFE labeling does,
+not bad grading. Fixed both halves (writer stamps, report filters) and surfaced the convention in
+`DailySignals.tsx`. Negative-controlled independently: reverting the writer fails 2 tests,
+reverting the filter fails 1.
+
+**7. Frontend audit + fixes, consistent across all four shells.**
+Measured: 104 of 155 `.tsx` files branch on `isLoading`, only **14** on `isError`, and **0 of the
+15** widgets composing the v6 default home — a failed query rendered as a skeleton spinning
+forever. Added a `QueryCache.onError` in `main.tsx` (one place, covers every query present and
+future). Accessibility was effectively absent: **5** of 155 files used any `aria-*`, **one**
+`role=` in the whole app, 15 files with focus styles against 376 `<button>`s. Added
+`:focus-visible` + `.skip-link` to `index.css` (the one stylesheet all six shells load) and a
+shared `src/lib/a11y.tsx` (`useEscapeKey`, `SkipLink`, `MAIN_CONTENT_ID`) applied identically to
+AppShell/V2AppShell/V5App/V6Shell — shared deliberately, because four hand-copies is exactly how
+the documented shell-parity drift happens. Also `src/lib/format.ts` (+15 negative-controlled
+tests): every formatter renders missing/NaN as `—`, never `0`, which is this platform's dominant
+"missing data shown as a real value" class.
+
+**8. Backend hardening.**
+20 unauthenticated mutations, several expensive. `enqueueSignals` took an **unbounded** `z.array`
+where each element becomes an LLM job → `.max(200)`. Added `expensiveProcedure` (reuses the
+existing `makeRateLimiter`), 20/min/IP, on the 6 costly public mutations — rate-limit rather than
+`protectedProcedure` deliberately, since all 6 have real logged-out callers and the app is usable
+signed-out. Note `server.ts:307`'s stated premise that tRPC "already sits behind
+protectedProcedure" does not hold: 282 of 315 procedures are public. Removed
+`define: { 'process.env.GEMINI_API_KEY': ... }` from `vite.config.ts` — literal text substitution
+into the client bundle, safe today only because `aiService` happens to be server-only while
+CLAUDE.md documents `src/services/` as the frontend layer.
+
+**Deliberately NOT done:** the TEXT→DATE conversion of `trendlyne_pb/pe_history` /
+`nse_universe_history` (all 11.57M values verified clean ISO, both consumers safe, but it is a
+2.45 GB locking rewrite buying type hygiene on data where nothing is currently broken — user
+called it: skip); SQLite decommission Phase 2 (refined scope: ~100 files genuinely need
+conversion, not the 278 first estimated — 120 of 258 touch no DB at all; needs its own session).
+
+**Concurrency note:** the branch moved from `ac930f9` to `087f399` mid-session via other sessions'
+commits, and a staged `git rm` of mine was swept into one of them (`e95dc48`, whose message does
+not mention it) — the `git add -A` hazard CLAUDE.md warns about, observed live.
+
+
 ### 2026-08-14 — `screener-combo-predictor`: coverage report on tier-2 (NiftyTrader) filter keys found the same-day parser had a second, worse blind spot
 
 Ran `screener_name_concepts.py --coverage` against `LIVE_SCREENER_FILTERS` (the 45 camelCase
@@ -3387,3 +3520,63 @@ that *just started* failing from one red for weeks, which is why a real FAIL sat
 (pass→fail) rather than on absolute severity, and it also yields class-3 detection for free: any
 check whose verdict never varies across N runs is uninformative by construction. Recommended, not
 implemented — it needs a migration and a decision on alert routing.
+
+## 2026-08-15 — Weekend audit harness: 2 skills, 3 commands, and the first real run
+
+Built the recurring whole-system audit the platform never had, then ran it — and the run
+immediately found things, including two defects in the harness itself.
+
+**What existed already, and why this still needed building.** The 15-min `jobWatchdog`, ~150
+`dataQualityChecks.ts` entries and 12 audit commands all answer *"is it fresh"*, never *"is it
+correct"* — which is the shape of this repo's dominant bug class. Nothing ran on a schedule
+across backend + frontend + DB together, and the 12 deep audits ran only when someone remembered.
+
+- **`weekend-audit`** (skill) — 8 lanes: deploy drift (`pm_uptime` vs HEAD), repo/build, the 4
+  services, jobs+DQ, Postgres, the 6 shells, rotation, remediate. Reuses `dq:check`,
+  `schema:drift`, `smoke:ci`, `check_recurring_bugs.py`, and this session's sibling
+  `integrity_sweep.py` rather than adding monitoring.
+- **`audit-loop`** (skill) — the find→fix→verify→immunize half. Triages FIX / EVIDENCE /
+  INVESTIGATE / ACCEPT so an unmeasured scoring change can't ride in on a green suite, and every
+  fix ends at the strongest immunization rung — a check in `check_recurring_bugs.py`, not another
+  paragraph in a rules file.
+- **3 new commands** for the clusters with the highest recurrence counts and (verified by
+  grepping all 12 existing commands) zero coverage: `/temporal-correctness-audit` (~35 recorded
+  instances, only 2 of 6 signatures automated), `/test-integrity-audit` (suites green while
+  protecting nothing), `/threshold-calibration-audit` (the `drift_detector` 16/16 class).
+  Rotation is now 15 commands over 5 weeks, keyed on `date +%V % 5`.
+
+**Findings from the first real run** (`docs/audit-findings.md`, AF-20260815-01..08):
+
+- **AF-01, new and unowned:** `087f399` fixed the window-includes-today date anchor in
+  `dataQualityChecks.ts` and its own commit message says the bug was reintroduced in **both**
+  that file and `integrity_sweep.py` — but only one was fixed. The sweep still anchors on raw
+  `MAX(date)` (`latest_date_expr`, L49-71), so it reports ~25 false DEAD columns on every run.
+- **AF-02:** `bharat-server` booted 05:54 UTC with 11 code commits landed since (latest 15:43
+  IST) — running ~4h20m behind HEAD. `.ts` is not hot-reloaded. Left for the sessions actively
+  committing to time their own restart.
+- **AF-03:** `data_quality_history` exists live but not in `db/schema.postgres.sql`; created by
+  self-creating DDL, never reflected back. `schema:drift` fails on it.
+- **AF-04:** `signalOutcomesServiceSource.test.ts` fails in the working tree, passes 4/4 at HEAD
+  in a clean worktree — the in-flight `label_definition='path_barrier'` filter isn't in the
+  fixture. Another session's.
+
+**Two defects found in the harness by running it, both fixed** — the argument for running an
+audit rather than shipping it: the service probe used `/` for the three FastAPI services, which
+have no root route (three false DOWNs every run, AF-07); and both skills asserted
+`data_quality_results` has no history, which `11fcda6` falsified the same day by adding
+`data_quality_history` — the verdict-variance query was pointed at the wrong table (AF-08).
+Also corrected `CLAUDE.md`'s "62 freshness/coverage checks" to ~150 (live: 147, 22 critical).
+
+**Verified, not assumed.** Every SQL block was run against production before committing. That
+surfaced two more corrections: `psql` is not on PATH here (blocks now carry the venv+psycopg2
+recipe and a mandatory `statement_timeout`), and `pg_total_relation_size`/unused-index queries
+hang under live contention (reordered last, marked expensive). A full `integrity_sweep.py` run
+exceeds 400s — scope it with `--table` or allow longer.
+
+**Lanes 5 (frontend) and 6 (rotation group 3) were not run** and are recorded as skipped, not
+green. Closing them is the first task of the next pass.
+
+**Concurrency note.** Three sessions edited this repo simultaneously today. The tree moved twice
+mid-task: a vitest run was invalidated by `signalOutcomesService.ts` being written at 14:17:47
+while the suite was running, and a commit landed between a pre-commit `git status` and the
+`git commit`. Staging by explicit path is what kept the two apart.

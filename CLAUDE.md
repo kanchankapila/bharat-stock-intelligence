@@ -79,7 +79,7 @@ src/server/
   queues.ts          BullMQ definitions + all cron schedules
   jobs/*.jobs.ts     decomposed job registrations
   cacheService.ts    Redis → in-memory fallback
-  dataQualityChecks.ts   62 freshness/coverage checks, daily cron + Telegram
+  dataQualityChecks.ts   ~150 freshness/coverage checks, daily cron + Telegram
   *.py               ML engines — canonical ranker is unified_ranker.py
 ```
 
