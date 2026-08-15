@@ -14,7 +14,7 @@ import {
   testTrendlyneApiResponse,
   recategorizeAllScreeners,
 } from "../trendlyneScreener";
-import { router, publicProcedure, adminProcedure } from "../trpc";
+import { router, publicProcedure, adminProcedure, expensiveProcedure } from "../trpc";
 import { SCANNER_CATALOG } from "../config/scannerCatalog";
 
 // Real quant_scores columns runScreener is allowed to filter on (see db.ts's CREATE TABLE).
@@ -505,7 +505,7 @@ export const screenersRouter = router({
       }
     }),
 
-  computeTimeframeScores: publicProcedure
+  computeTimeframeScores: expensiveProcedure
     .input(z.object({ runId: z.string().optional(), screenerId: z.string().optional(), timeframe: z.enum(['intraday','short','medium','long']).optional(), topN: z.number().optional() }))
     .mutation(async ({ input }) => {
       const scoring = await import('../scoringService');
@@ -680,7 +680,7 @@ export const screenersRouter = router({
       return criteria;
     }),
 
-  runScreener: publicProcedure
+  runScreener: expensiveProcedure
     .input(z.array(z.object({
       id: z.enum(SCREENER_CRITERIA_COLUMNS),
       operator: z.enum(['gt', 'lt', 'eq', 'gte', 'lte']),

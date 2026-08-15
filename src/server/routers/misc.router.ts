@@ -16,10 +16,10 @@ import {
   fetchStockEarningsSummary,
   type FnoIndexId,
 } from "../marketIntelService";
-import { router, publicProcedure } from "../trpc";
+import { router, publicProcedure, expensiveProcedure } from "../trpc";
 
 export const miscRouter = router({
-  getAIAnalysis: publicProcedure
+  getAIAnalysis: expensiveProcedure
     .input(z.object({ symbol: z.string(), data: z.record(z.string(), z.unknown()) }))
     .mutation(async ({ input }) => {
       const { symbol, data } = input;
@@ -184,7 +184,7 @@ export const miscRouter = router({
       }, 1800)
     ),
 
-  analyzePortfolio: publicProcedure
+  analyzePortfolio: expensiveProcedure
     .input(z.object({ symbols: z.array(z.string()), weights: z.array(z.number()) }))
     .mutation(async ({ input }) => {
       try {

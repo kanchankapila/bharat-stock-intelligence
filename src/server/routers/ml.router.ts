@@ -3,7 +3,7 @@ import { TRPCError } from "@trpc/server";
 import { dbGet, dbAll, dbRun } from "../dbAsync";
 import { alphaQuant } from "../alphaQuantClient";
 import { enqueueWalkForwardOptimize, getWalkForwardOptimizeJobStatus } from "../queues";
-import { router, publicProcedure, adminProcedure } from "../trpc";
+import { router, publicProcedure, adminProcedure, expensiveProcedure } from "../trpc";
 import { fetchWithCache } from "../cacheService";
 
 type RocResult = {
@@ -526,7 +526,7 @@ export const mlRouter = router({
   // no writes, no expensive job trigger, so this stays public like its sibling saveBacktestStrategy
   // (it was previously adminProcedure, which silently 401'd the public Backtest tab for every
   // non-admin user -- an oversight from the 2026-07-23 mass admin-gating pass, not intentional).
-  runBacktest: publicProcedure
+  runBacktest: expensiveProcedure
     .input(z.object({
       symbol:   z.string(),
       strategy: z.string(),

@@ -2,7 +2,7 @@ import { z } from "zod";
 import { dbGet, dbAll, dbRun } from "../dbAsync";
 import { enqueueAISignals, getAIQueueStats } from "../queues";
 import { invalidateAISignalCache } from "../signals";
-import { router, publicProcedure, protectedProcedure, adminProcedure } from "../trpc";
+import { router, publicProcedure, protectedProcedure, adminProcedure, expensiveProcedure } from "../trpc";
 
 /** ISO timestamp `days` ago — used instead of SQLite datetime('now','-N days') so the
  *  same query runs on both SQLite and Postgres (a parameterised interval isn't portable). */
@@ -53,11 +53,14 @@ export const signalsRouter = router({
       return { success: true };
     }),
 
-  enqueueSignals: publicProcedure
+  // .max(200): this array was unbounded, and every element becomes a BullMQ AI-queue job (an
+  // LLM call each). The two real callers batch the visible dashboard table -- DashboardPage.tsx
+  // and V3Dashboard.tsx -- which is tens of symbols, well under this ceiling.
+  enqueueSignals: expensiveProcedure
     .input(z.array(z.object({
-      symbol:    z.string(),
+      symbol:    z.string().max(32),
       stockData: z.record(z.string(), z.unknown()),
-    })))
+    })).max(200))
     .mutation(async ({ input }) => enqueueAISignals(input)),
 
   getQueueStats: publicProcedure

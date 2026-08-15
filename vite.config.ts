@@ -7,9 +7,21 @@ export default defineConfig(({mode}) => {
   const env = loadEnv(mode, '.', '');
   return {
     plugins: [react(), tailwindcss()],
-    define: {
-      'process.env.GEMINI_API_KEY': JSON.stringify(env.GEMINI_API_KEY),
-    },
+    // NO `define` for GEMINI_API_KEY (removed 2026-08-15). `define` is a literal text
+    // substitution into every module in the CLIENT graph, so it bakes the secret into the
+    // browser bundle in plaintext for anyone to read via view-source.
+    //
+    // It was survivable only by accident: the sole consumers, src/services/aiService.ts and
+    // src/services/geminiService.ts, happen to be imported exclusively from src/server/*, which
+    // runs in Node under tsx and reads the real process.env -- never through this transform.
+    // But CLAUDE.md documents src/services/ as the FRONTEND layer ("aiService (Ollama),
+    // geminiService (fallback)"), next to marketService, which genuinely is frontend. One
+    // component importing aiService as documented would have shipped the key, with nothing
+    // failing loudly to say so.
+    //
+    // If a browser-side Gemini call is ever genuinely needed, it must go through a server
+    // procedure, not a bundled key. Client-safe config belongs in a VITE_-prefixed var, which
+    // Vite exposes on import.meta.env by design and which is understood to be public.
     resolve: {
       alias: {
         '@': path.resolve(__dirname, '.'),
