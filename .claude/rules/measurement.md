@@ -251,15 +251,51 @@ unconnected to the diff, the "evidence-shaped but meaningless artifact" `recurri
 about. Same reasoning as this file's `_log_recommendations` and `seed_screener_catalog` entries.
 The applicable measurement is the before/after impact table above, taken from live production.
 
-**Still unmeasured, and flagged rather than glossed:** whether `win_probability` has any forward
-predictive edge *at all* on this panel. An attempt to grade it against realized next-open→close
-returns (per this file's panel spec) did not complete — `stock_ohlcv` is a compressed hypertable
-and the window functions needed for next-open entry force wide chunk decompression, timing out
-repeatedly. **So this change is justified on correctness (a calibrated probability must not be
-rescaled, and must not become more confident under a haircut), not on demonstrated edge.** If
-`win_probability` turns out to carry no signal, the correct follow-up is to stop feeding it into
-the score at all — not to re-tune the haircut. That grading run is the open item; it needs either
-a materialized price panel or a decompression-aware query.
+### ⚠ PRELIMINARY — `win_probability` grades POSITIVE, unlike `unified_score`. Do not act on it yet.
+
+Graded 2026-08-15 against realized returns, full panel spec (per-date then averaged, winsorised
+1/99 on observed values, `is_suspect` excluded, ≥₹1cr ADT20, **next-day OPEN entry**):
+
+| column | h=1d rank IC | h=5d rank IC |
+|---|---|---|
+| **raw `win_probability`** (model output, never fitted on outcomes) | **+0.0364, t=+2.58** (41 dates) | **+0.0763, t=+3.58** (38 dates) |
+| `calibrated_win_probability` (isotonic fit ON realized outcomes) | +0.0472, t=+3.41 (36) | +0.1007, t=+4.15 (33) |
+
+Top-decile-by-`win_probability` excess vs the day's own universe: **+0.183%/day (t=+2.56)** at
+h=1, **+0.886%/period (t=+3.24)** at h=5. The day's 10 biggest real gainers sat at a mean
+`win_probability` percentile of **0.550** vs 0.500 for chance.
+
+**Leakage was tested for, not assumed.** `calibrated_win_probability` is produced by
+`ml_calibration.py` fitting isotonic on realized `signal_outcomes` — i.e. potentially on the very
+outcomes being graded. Grading the **raw** column separately isolates that: raw is independently
+positive, so this is **not purely a leakage artifact**. That calibrated is consistently stronger
+than raw is nonetheless consistent with *some* leakage in the calibrated column, and it should not
+be quoted as the headline number.
+
+**Why this does NOT contradict this file's "no edge" headline:** that verdict is about
+`unified_score` (5d rank IC ≈ 0.0001, t=0.02) and the 26 `FACTORS`. `win_probability` is a
+different, previously-ungraded column — the LGBM ensemble's own output. This is new information,
+not a reversal.
+
+**Four reasons this is NOT yet a tradeable edge, and must not be treated as one:**
+1. **IC is not edge, and this platform has been burned by exactly that.** See `delivery_pct` in
+   the table above: quintile spread t=+7.82, yet **dead** as a long-only factor net of costs
+   (−1.04%/period at 21d/25bps). Nothing here is cost- or turnover-aware. A real
+   `factor_backtest.py`-style net-of-cost run is required before any claim of tradeability.
+2. **Provenance is unverified.** It is assumed, not proven, that a date-`d` `win_probability` is
+   written before `d+1`'s open. `ml_ensemble --score` only fills `WHERE win_probability IS NULL`
+   (so it does not rewrite history), but the write *timing* was not traced. This repo has already
+   had one confident, wrong result from exactly this class (`signal_generated_at`, t=−3.44 → −1.28
+   once re-anchored) — treat the provenance filter as unchecked until someone traces it.
+3. **h=5 windows overlap** on consecutive dates, so those 38 observations are autocorrelated and
+   the t-stat is optimistic. h=1 (t=+2.58 raw) is the cleaner read.
+4. **Only 41 dates** (`win_probability` history starts 2026-05-16). Thin, and the same span that
+   this file elsewhere calls insufficient for a verdict.
+
+**Next step, in order:** trace write-timing provenance → re-run h=1 only, non-overlapping →
+cost/turnover-aware portfolio run. If it survives all three, it is the first genuinely positive
+signal measured on this platform and belongs in the "already tested" table with a real entry.
+Until then it stays here, flagged preliminary.
 
 ## Not testable — do not spend time here without a genuinely new angle
 
