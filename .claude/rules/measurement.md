@@ -182,6 +182,30 @@ path that reads `screener_catalog` at all (it operates on the price panel), so r
 measure something unconnected to this diff, same reasoning as the `_log_recommendations` entry
 above.
 
+**A third `unified_ranker.py` touch (2026-08-15, `_next_generated_at`) is again NOT a scoring
+change — but unlike the two above it fixed a real, silent evidence-loss bug, so read this one.**
+`run()` stamped `generated_at = datetime.now(timezone.utc)`. That reads the SYSTEM CLOCK TICK,
+not the microseconds its ISO output implies: measured on this machine,
+`time.get_clock_info('time').resolution` is **0.015625 s** and 2,000 back-to-back
+`datetime.now(timezone.utc)` calls returned **exactly one distinct value**. Since
+`unified_recommendations_history` is `PRIMARY KEY (symbol, generated_at)` with
+`ON CONFLICT DO NOTHING`, two runs completing inside one 15.6 ms tick share a timestamp and the
+**second run's entire snapshot is silently discarded** — no error, no warning, no row-count
+change. That is the exact evidence loss this table was created to prevent (see "The canonical
+ranker is not gradeable yet" above: re-runs overwriting each other left exactly ONE provably
+pre-market date). Fixed by making the stamp strictly increasing within a process (bump 1µs on
+collision), which keeps it a true wall-clock value — it must stay one, because the pre-market
+provenance filter depends on it. **No score, weight, threshold or classification is touched, so
+`factor_backtest.py` measures nothing connected to this diff**; the applicable verification is
+the direct one, done: the previously-"flaky"
+`test_history_snapshot_is_append_only_across_reruns` now passes under the exact condition that
+deterministically failed it (full suite + one added test file), and two new negative-controlled
+tests in `test_sql_translate.py` fail against the bare `datetime.now()` form. **Production
+exposure is smaller than dev's but not zero** — Linux has ~1 ns clock resolution, so the live
+pm2 ranker is unlikely to have lost snapshots this way; the defect was that a snapshot table's
+uniqueness guarantee rested on the host's clock granularity at all. Worth re-reading if a future
+grading pass finds fewer `generated_at` values than there were runs.
+
 ## Already tested — do not re-run without a reason
 
 Each of these was measured on the 5-year price panel with the spec above. Re-testing them costs days and returns the same answer. If you think one deserves another look, state what changed (more history, a different horizon, a different construction) before spending the time. Full derivation for any row: `docs/measurement-history.md`.

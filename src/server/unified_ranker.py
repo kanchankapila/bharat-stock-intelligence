@@ -1005,6 +1005,47 @@ def factor_crowding_multiplier(factor_scores: dict) -> tuple:
     return 1.0, None
 
 
+_last_generated_at: "datetime | None" = None
+
+
+def _next_generated_at() -> datetime:
+    """Wall-clock UTC, but guaranteed STRICTLY INCREASING within this process.
+
+    Why this is not just `datetime.now(timezone.utc)` (fixed 2026-08-15):
+
+    `unified_recommendations_history` is PRIMARY KEY (symbol, generated_at) and its insert is
+    `ON CONFLICT DO NOTHING` -- deliberately, because silently rewriting a snapshot is the exact
+    failure that table exists to prevent. That design assumes two runs can never share a
+    timestamp. They can: `datetime.now()`'s resolution is the SYSTEM CLOCK TICK, not the
+    microseconds its ISO output implies. Measured on Windows 2026-08-15 --
+    `time.get_clock_info('time').resolution` is 0.015625 s, and 2000 back-to-back
+    `datetime.now(timezone.utc)` calls returned exactly ONE distinct value.
+
+    `run()` over a small universe finishes well inside 15.6 ms, so two runs in quick succession
+    (a retry, a double-trigger, a same-process re-run) produce the IDENTICAL generated_at, the
+    ON CONFLICT fires, and the second run's ENTIRE snapshot is discarded with no error, no
+    warning, and no row-count change to notice. That reproduces precisely the evidence loss
+    documented in measurement.md: re-runs overwriting each other until the canonical ranker had
+    only one provably pre-market date and could not be graded against forward returns at all.
+
+    Linux (production pm2) has ~1 ns clock resolution, so live exposure is far smaller than on
+    a Windows dev box -- but a snapshot table's uniqueness guarantee must not rest on how coarse
+    the host's clock happens to be. Bumping by 1 microsecond on collision keeps the value a real
+    wall-clock timestamp (it is used to prove a run was pre-market) while making the key
+    reliable.
+
+    Found via `test_history_snapshot_is_append_only_across_reruns`, which had been dismissed as
+    an order-dependent flake for weeks -- it was reporting a real defect the whole time. Test
+    ordering only changed how long the gap between the two runs was.
+    """
+    global _last_generated_at
+    now = datetime.now(timezone.utc)
+    if _last_generated_at is not None and now <= _last_generated_at:
+        now = _last_generated_at + timedelta(microseconds=1)
+    _last_generated_at = now
+    return now
+
+
 class UnifiedRanker:
     def __init__(self, conn=None, csv_path=None, corrections_path=None):
         self.conn = conn or connect()
@@ -1928,7 +1969,7 @@ class UnifiedRanker:
         # measuring a session against its own date's row could silently be look-ahead.
         # One timestamp for the whole run -- one run is one generation event, and a per-row
         # now() would imply a precision that does not exist.
-        generated_at = datetime.now(timezone.utc)
+        generated_at = _next_generated_at()
 
         if self.conn.execute('SELECT COUNT(*) FROM screener_catalog').fetchone()[0] == 0:
             self.seed_screener_catalog()
