@@ -19,7 +19,7 @@ Run:  python online_learner.py
       python online_learner.py --dry-run
 """
 
-import os, sys, json, datetime, argparse, pickle, warnings
+import copy, os, sys, json, datetime, argparse, pickle, warnings
 warnings.filterwarnings('ignore')
 
 import numpy as np
@@ -196,18 +196,25 @@ def predict_sgd(state: dict, X: np.ndarray) -> np.ndarray:
 ONLINE_REGRESSION_TOLERANCE = 0.02
 
 
-def register_update(conn: ConnWrapper, state: dict, n_new: int, cv_auc: float):
-    """Registers this incremental update in model_registry.
+def register_update(conn: ConnWrapper, state: dict, n_new: int, cv_auc: float) -> bool:
+    """Registers this incremental update in model_registry. Returns whether it was marked
+    active -- the caller uses this to decide whether to persist the post-update SGD state to
+    disk or revert to its own pre-update snapshot (see run()'s save_sgd call).
 
     Promotion gate (Finding #17, 2026-07-28 full-stack audit): this used to insert every
     update as is_active=1 with no comparison to pre-update state and no deactivation of
     prior rows -- model_registry could accumulate multiple 'active' online_sgd rows, and a
     regressed update was indistinguishable from a good one to anything reading is_active.
-    Unlike confluence_ml_engine.py/cs_ranker.py, partial_fit has already mutated the live
-    SGD state by the time this is called (there is no separate candidate file to withhold),
-    so this can't prevent a bad batch from being absorbed -- what it CAN do, and now does,
-    is keep model_registry honest: deactivate the previous active row, and only mark this
-    one active if cv_auc didn't regress beyond ONLINE_REGRESSION_TOLERANCE versus it.
+    Deactivate the previous active row, and only mark this one active if cv_auc didn't
+    regress beyond ONLINE_REGRESSION_TOLERANCE versus it.
+
+    Fixed 2026-08-15 (recurring-bugs.md, "the live online_sgd.pkl is never withheld even when
+    cv_auc regresses"): partial_fit mutates the live SGD state in place with no undo, so this
+    function alone can't prevent a bad batch from being absorbed into the in-memory state --
+    but the ON-DISK file is a different question. run() now snapshots state before partial_fit
+    and only writes the post-update state to disk if this returns True, otherwise it re-persists
+    the pre-update snapshot -- so a regression this function correctly refuses to mark active no
+    longer survives into the next process that loads online_sgd.pkl either.
     """
     baseline_auc = None
     try:
@@ -244,6 +251,7 @@ def register_update(conn: ConnWrapper, state: dict, n_new: int, cv_auc: float):
         notes,
     ))
     conn.commit()
+    return bool(is_active)
 
 
 # ── Score pending signals ─────────────────────────────────────────────────────
@@ -361,6 +369,10 @@ def run(window_days: int = 180, min_new: int = 5, dry_run: bool = False):
             print("[OnlineLearner] Dry-run: skipping update and scoring.")
             return
 
+        # Snapshot before partial_fit mutates state in place (no undo exists for online
+        # learning otherwise) -- restored below if register_update rejects this batch, so a
+        # regression is not persisted to disk even though it can't be un-absorbed in memory.
+        pre_update_state = copy.deepcopy(state)
         state = partial_fit_sgd(state, Xtrain, ytrain)
 
         # Crude AUC on val set
@@ -376,8 +388,14 @@ def run(window_days: int = 180, min_new: int = 5, dry_run: bool = False):
 
         print(f"[OnlineLearner] Updated — samples_seen={state['n_samples_seen']}  "
               f"val_AUC={cv_auc:.4f}")
-        save_sgd(state)
-        register_update(conn, state, len(df), cv_auc)
+        is_active = register_update(conn, state, len(df), cv_auc)
+        # save_sgd used to run unconditionally BEFORE register_update, so a regressed batch's
+        # weights were persisted to disk even when model_registry correctly refused to mark it
+        # active -- the on-disk file and the registry's "what's live" claim could disagree.
+        # Persist the pre-update snapshot instead when rejected.
+        save_sgd(state if is_active else pre_update_state)
+        if not is_active:
+            print("[OnlineLearner] Regressed update NOT persisted to disk — reverted to the pre-update SGD state.")
 
         try:
             from signal_type_priors import update_priors_from_outcomes

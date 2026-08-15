@@ -313,7 +313,7 @@ export const screenersRouter = router({
         FROM screener_performance_v2 spv
         JOIN screener_master sm ON sm.scan_id = spv.screener_id AND sm.source = spv.source
         ${where}
-        ORDER BY spv.bayesian_score DESC
+        ORDER BY NULLIF(spv.bayesian_score, 'NaN'::float8) DESC
         LIMIT ? OFFSET ?
       `, params);
     }),
@@ -371,7 +371,7 @@ export const screenersRouter = router({
                target_1, risk_reward, trade_reasoning
         FROM unified_recommendations
         WHERE ${conditions.join(' AND ')}
-        ORDER BY unified_score DESC
+        ORDER BY NULLIF(unified_score, 'NaN'::float8) DESC
         LIMIT ?
       `, params);
 
@@ -624,7 +624,7 @@ export const screenersRouter = router({
         WHERE rn = 1
           AND screener_momentum_score >= ?
           AND screener_bull_count > screener_bear_count
-        ORDER BY screener_momentum_score DESC
+        ORDER BY NULLIF(screener_momentum_score, 'NaN'::float8) DESC
         LIMIT ?
       `, [input.minMomentum, input.topN]);
     }),
@@ -648,7 +648,7 @@ export const screenersRouter = router({
         FROM unified_signals
         WHERE signal_source = 'SCREENER_SURFACING'
           AND signal_date >= ?
-        ORDER BY signal_date DESC, screener_momentum_score DESC
+        ORDER BY signal_date DESC, NULLIF(screener_momentum_score, 'NaN'::float8) DESC
         LIMIT ?
       `, [cutoff, input.limit]);
     }),

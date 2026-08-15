@@ -1023,13 +1023,25 @@ export interface McStockNewsResponse {
  * Only rewrite sequences that carry a digit and decode above ASCII, so ordinary
  * words that happen to be hex-shaped are left alone.
  */
+// Smart-quote codepoints that legitimately sit mid-word via a mangled contraction/possessive
+// ("Coforgeu2019s" -> "Coforge's"). Found live 2026-08-11 (news_pipeline memory): the original
+// prefix-boundary guard below (a non-alnum char required before "u") blocked exactly this, the
+// single most common real case, because the letter before "u" in a possessive is the word
+// itself. Not opened up to every codepoint -- a dash or other punctuation mid-word (the
+// "Neu2013ral" case the test suite already pins) is still presumed a coincidental hex-shaped
+// substring inside a real word, not a mangled escape.
+const MID_WORD_SAFE_CODEPOINTS = new Set([0x2018, 0x2019, 0x201c, 0x201d]);
+
 export function decodeMangledEscapes(text: string): string {
   if (!text) return text;
-  return text.replace(/(^|[^A-Za-z0-9])u([0-9a-fA-F]{4})/g, (match, prefix: string, hex: string) => {
+  return text.replace(/u([0-9a-fA-F]{4})/g, (match: string, hex: string, offset: number, full: string) => {
     if (!/\d/.test(hex)) return match;
     const code = parseInt(hex, 16);
     if (code < 0x80) return match;
-    return prefix + String.fromCharCode(code);
+    const charBefore = offset > 0 ? full[offset - 1] : '';
+    const wordCharBefore = /[A-Za-z0-9]/.test(charBefore);
+    if (wordCharBefore && !MID_WORD_SAFE_CODEPOINTS.has(code)) return match;
+    return String.fromCharCode(code);
   });
 }
 

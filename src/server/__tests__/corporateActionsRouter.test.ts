@@ -7,6 +7,7 @@ process.env.USE_POSTGRES = 'false';
 const { default: db } = await import('../db');
 
 import { createCallerFactory } from '../trpc';
+import { cacheDel } from '../cacheService';
 
 const { appRouter } = await import('../router');
 const createCaller = createCallerFactory(appRouter);
@@ -193,6 +194,20 @@ describe('getFiledCorporateActionsCalendar', () => {
     `);
     insert.run('https://x/old.pdf', 'OLDCO', '2020-01-01');
 
+    // getFiledCorporateActionsCalendar wraps its query in fetchWithCache keyed by
+    // `daysBack:daysForward:symbol` -- {daysBack:14, daysForward:60} is this file's default
+    // and the first test above already populated that exact key, so calling with the same
+    // values here would silently reuse ITS cached result instead of running this test's own
+    // query. That masked a real bug: the router's WHERE clause used to no-op entirely under
+    // the SQLite dev fallback (CURRENT_DATE ± (? || ' days')::interval -- stripPgCasts leaves
+    // invalid arithmetic behind, trpc-surface-review 2026-08-14 / fixed 2026-08-15) --
+    // run in isolation with `-t`, this test correctly failed pre-fix; run as part of the full
+    // file, the stale cache from the first test masked it and it passed regardless. Clear the
+    // key explicitly rather than picking different daysBack/daysForward values -- SQLite's
+    // untyped storage-class comparison rules make the no-op's symptom value-dependent (a
+    // (5,5) window happens not to trigger it at all; (14,60) reliably does), so changing the
+    // values to dodge the collision would trade one accidental pass for another.
+    await cacheDel('fund:filed-corp-actions:14:60:');
     const rows = await caller.getFiledCorporateActionsCalendar({ daysBack: 14, daysForward: 60 });
     expect(rows.find((r: any) => r.symbol === 'OLDCO')).toBeUndefined();
   });

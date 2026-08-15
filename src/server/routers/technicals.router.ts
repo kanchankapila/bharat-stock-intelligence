@@ -137,7 +137,7 @@ export const technicalsRouter = router({
         )
         SELECT * FROM scored
         WHERE unified_score >= ?
-        ORDER BY unified_score DESC
+        ORDER BY NULLIF(unified_score, 'NaN'::float8) DESC
         LIMIT ?
       `, [d, dExclusive, d, input.minConfluence, input.minUnified, input.limit]);
     }),

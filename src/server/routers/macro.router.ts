@@ -110,14 +110,19 @@ export const macroRouter = router({
     }))
     .query(async ({ input }) => {
       try {
+        // JS-computed cutoffs -- `CURRENT_DATE ± (? || ' days')::interval` silently no-ops
+        // under the SQLite dev fallback (trpc-surface-review, 2026-08-14; same fix already
+        // applied to fundamentals.router.ts's corporate-actions-calendar procedures).
+        const fromDate = new Date(Date.now() - input.daysBack * 24 * 3600_000).toISOString().slice(0, 10);
+        const toDate = new Date(Date.now() + input.daysForward * 24 * 3600_000).toISOString().slice(0, 10);
         const rows = await dbAll<any>(
           `SELECT event_date, event_time, country_name, event_name, category, impact, actual, previous, consensus
            FROM eco_calendar
-           WHERE event_date >= (CURRENT_DATE - (? || ' days')::interval)::text
-             AND event_date <= (CURRENT_DATE + (? || ' days')::interval)::text
+           WHERE event_date >= ?
+             AND event_date <= ?
              AND impact >= ?
            ORDER BY event_date ASC, impact DESC`,
-          [input.daysBack, input.daysForward, input.minImpact]
+          [fromDate, toDate, input.minImpact]
         );
         return rows || [];
       } catch (e: any) {

@@ -2967,3 +2967,69 @@ Verified: `tsc --noEmit` clean; `pytest` 1,918 passed / 230 skipped (1 pre-exist
 `test_history_snapshot_is_append_only_across_reruns`, confirmed unrelated — passes in
 isolation, same flake the audit doc already names); `vitest run` 917 passed / 40 skipped / 0
 failed.
+
+---
+
+## 2026-08-15 (cont. 3) — Batch 1 of the 13 pending items: 7 closed, 2 real bugs found while fixing
+
+User asked to fix all 13 remaining pending items from the review. Re-verified each against
+current `main` before touching it (two already turned out fixed by earlier commits this
+session hadn't accounted for: `getBestComboSignals`/`confluence.router.ts`'s no-TTL cache was
+already fixed in `958ddd5`; `CommandCenterDashboard.tsx` already rendered `computed_at` — only
+`TopPicksWidget.tsx` genuinely needed it, a case-sensitive grep (`computed_at` vs `ComputedAt`)
+had missed it).
+
+**Fixed, live-verified where applicable:**
+- `TopPicksWidget.tsx` — added the missing `lastComputedAt` freshness label (backend already
+  returned it).
+- `V6Shell.tsx`'s `DataHealthChip` — added `isError` handling; a hard query failure used to
+  render "Health nominal" (empty-array fallback made both issue counts read 0).
+- `ScreenerIntelligencePage.tsx` — added the `LegacyScoreBanner` disclaimer v5/v6's dedicated
+  screener pages already carry; this page (routed in v1/v2/v3/**v6 default shell**) didn't.
+- `mcApiService.ts`'s `decodeMangledEscapes()` — fixed the prefix-boundary bug (missed
+  `"Coforgeu2019s"` because the letter before "u" isn't a boundary). Narrowed the fix to
+  smart-quote codepoints only (0x2018/0x2019/0x201C/0x201D) so the existing
+  `"Neu2013ral"`-stays-untouched test (mid-word dash) still holds — negative-controlled.
+- `ml_ensemble.py`'s `_base_models(cv=3)` — made `cv` keyword-only with no default; the one
+  real call site already passes a real `TimeSeriesSplit`, so a future omission now throws
+  instead of silently getting `StratifiedKFold(3)` (shuffles time order).
+- `online_learner.py` — `save_sgd()` used to run unconditionally before the regression check,
+  so a rejected update's weights were still persisted to disk even though `model_registry`
+  correctly refused to mark it active. `partial_fit` can't be undone in memory, but the on-disk
+  file can now honor the rejection: `run()` snapshots `state` before `partial_fit`, and
+  `register_update()` now returns whether it marked the update active so the caller can persist
+  the snapshot instead when it didn't. Negative-controlled.
+- 3 SQLite-dev-fallback date no-ops (`getCorporateActionsCalendar`/`getFiledCorporateActionsCalendar`
+  in `fundamentals.router.ts`, `getEcoCalendar` in `macro.router.ts`) — replaced
+  `CURRENT_DATE ± (? || ' days')::interval` with JS-computed date-string params, matching the
+  existing `getScreenerSurfacingSignals` fix. **Live-verified the bug was real, not just
+  plausible**: raw-tested the residual post-`stripPgCasts` SQL directly against better-sqlite3 —
+  `CURRENT_DATE - ('14' || ' days')` evaluates to the integer `2012` (numeric coercion), and
+  comparing that against a TEXT date column matched every row regardless of window.
+- 8 unguarded `ORDER BY <score> DESC` sites on NaN-capable columns across `commandCenter.router.ts`
+  (3), `screeners.router.ts` (4), `technicals.router.ts` (1) — wrapped in
+  `NULLIF(col, 'NaN'::float8)`, matching `risk.router.ts`'s existing guard (Postgres sorts NaN
+  highest, so an unscored row would rank #1). Currently dormant (no live NaN), same as when
+  `risk.router.ts`'s guard was added.
+
+**2 real bugs found while fixing, not while reviewing — both in test infrastructure, not the
+routers themselves:**
+1. The existing `corporateActionsRouter.test.ts`'s "excludes filings outside the requested
+   window" test passed against BOTH the buggy and fixed router code when run as part of the
+   full file, only correctly failing the buggy code when run in isolation (`-t`). Root cause:
+   `getFiledCorporateActionsCalendar`'s `fetchWithCache` cache key
+   (`daysBack:daysForward:symbol`) collided with an earlier test in the same file using the
+   same default values — the earlier test's cached (bug-free-looking, small) result was being
+   silently reused instead of exercising this test's own query. Fixed with an explicit
+   `cacheDel()` before the assertion, keeping the original `(14, 60)` window (confirmed via a
+   direct better-sqlite3 trace that the bug's manifestation is value-dependent under SQLite's
+   untyped storage-class comparison rules — a `(5, 5)` window happens not to trigger it at all,
+   which very nearly became the "fix" before this was caught).
+2. (Documented above) `decodeMangledEscapes()`'s existing test suite already had a test pinning
+   the mid-word-dash-stays-untouched behavior (`"Neu2013ral"`) — the fix had to preserve that
+   exact case while still repairing the mid-word-quote case, not just relax the boundary check
+   wholesale.
+
+Verified after every change in this batch: `tsc --noEmit` clean; `pytest` 1,919 passed / 230
+skipped (1 pre-existing unrelated flake, confirmed passes standalone); `vitest run` 919 passed
+/ 40 skipped / 0 failed.
