@@ -94,19 +94,46 @@ def get_buy_signals(
     db_path: str = DB_PATH,
 ) -> list[dict]:
     """
-    Active BUY signals. Queries unified_signals (live, updated daily).
+    Active bullish signals. Queries unified_signals (live, updated daily).
+
+    Three measured facts about unified_signals drive the shape of this query (all
+    live-measured 2026-08-15 over a trailing 7 days, 15,752 rows):
+
+    1. signal_type is NOT a single vocabulary. The largest writer
+       (technical_analysis_engine.py, signal_source='technical') emits
+       'Bullish'/'Bearish'; the smaller ones emit 'BUY'/'SELL'. Matching only 'BUY'
+       selected 834 of 15,752 rows and silently dropped every signal from the
+       dominant source.
+    2. confidence_score carries TWO INCOMPATIBLE SCALES in the same column:
+       0-1 fractions from technical_scan/screener/SCREENER_SURFACING (0.10-0.95) and
+       0-100 from AI (49-73). db.ts documents it as "0-100, from any source", so the
+       0-1 writers are the ones out of spec. Normalised here at read time rather than
+       rewriting production signal metadata -- that is a separate, evidence-requiring
+       change (see .claude/rules/measurement.md), not a chatbot fix.
+    3. signal_source='technical' never writes confidence_score at all -- 14,732 of
+       15,752 rows are NULL. `confidence_score >= ?` is never true for NULL, so those
+       rows were excluded a second, independent time. They are included now with
+       confidence surfaced as NULL (honestly "unknown" to the caller) and sorted last,
+       because returning ~5% of the signal table as "active signals" is the worse lie.
     """
     conn = _connect(db_path)
     cutoff = (datetime.now() - timedelta(days=7)).strftime("%Y-%m-%d")
 
+    # Both scales normalised onto the documented 0-100 range before comparison.
+    conf_100 = ("CASE WHEN confidence_score <= 1 THEN confidence_score * 100 "
+                "ELSE confidence_score END")
+    # Accept a threshold given either way (callers pass the 0.65 default) so this stays
+    # correct regardless of which scale a caller has in mind.
+    threshold = min_confidence * 100 if min_confidence <= 1 else min_confidence
+
     # unified_signals (live, updated daily)
     try:
         conditions = [
-            "signal_type = 'BUY'",
+            "signal_type IN ('BUY', 'Bullish')",
             "signal_date >= ?",
-            "confidence_score >= ?",
+            f"(confidence_score IS NULL OR {conf_100} >= ?)",
         ]
-        params: list = [cutoff, min_confidence]
+        params: list = [cutoff, threshold]
         if symbol:
             conditions.append("symbol = ?")
             params.append(symbol.upper())
@@ -114,10 +141,12 @@ def get_buy_signals(
         rows = conn.execute(
             f"SELECT symbol, signal_date, signal_source, signal_type, "
             f"entry_price AS entry, target_price AS target, stop_loss AS stopLoss, "
-            f"confidence_score AS confidence, reasoning "
+            f"{conf_100} AS confidence, reasoning "
             f"FROM unified_signals "
             f"WHERE {' AND '.join(conditions)} "
-            f"ORDER BY confidence_score DESC, signal_date DESC LIMIT ?",
+            # COALESCE rather than NULLS LAST: NULLs sort highest on a Postgres DESC,
+            # which would rank every unknown-confidence row above every scored one.
+            f"ORDER BY COALESCE({conf_100}, -1) DESC, signal_date DESC LIMIT ?",
             params,
         ).fetchall()
         conn.close()

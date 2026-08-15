@@ -140,7 +140,7 @@ def get_top_confluence_stocks(
     """
     Top stocks ranked by screener confluence score with full signal context.
     Source: confluence_signals (updated every 30 min), nse_stocks.
-    Includes: entry/target/SL zones, AI conclusion, RSI, trade reasoning, screener names.
+    Includes: entry/target/SL zones, RSI, trade reasoning, screener names.
     """
     db = _connect(db_path)
     rows = []
@@ -183,7 +183,6 @@ def get_top_confluence_stocks(
                 cs.target_1,
                 cs.target_2,
                 cs.risk_reward,
-                cs.ai_conclusion,
                 cs.trade_reasoning,
                 cs.computed_at
             FROM confluence_signals cs
@@ -259,14 +258,17 @@ def get_stock_signals(symbol: str, days: int = 7, db_path: str = DB_PATH) -> dic
     except Exception:
         result["technical_signals"] = []
 
-    # confluence score + AI conclusion + entry/target/SL
+    # confluence score + trade reasoning + entry/target/SL
+    # (ai_conclusion deliberately not selected here or in the two sibling queries above/below:
+    #  no code path anywhere writes that column, so it is 100% NULL in production and only
+    #  added a dead key to the dict handed to the LLM.)
     try:
         row = db.execute(
             "SELECT confluence_score, conviction_level, active_screener_count, "
             "bullish_screener_count, bearish_screener_count, "
             "screener_names_json, rsi, trend_alignment_score, "
             "entry_zone_low, entry_zone_high, stop_loss, target_1, target_2, target_3, "
-            "risk_reward, ai_conclusion, trade_reasoning, suggested_timeframe, computed_at "
+            "risk_reward, trade_reasoning, suggested_timeframe, computed_at "
             "FROM confluence_signals WHERE symbol = ? ORDER BY computed_at DESC LIMIT 1",
             (sym,),
         ).fetchone()
@@ -384,7 +386,7 @@ def get_sector_momentum(sector: str | None = None, limit: int = 12, db_path: str
             rows = db.execute(
                 """SELECT cs.symbol, COALESCE(ns.name, cs.symbol) AS name,
                     cs.confluence_score, cs.conviction_level,
-                    cs.active_screener_count, cs.rsi, cs.ai_conclusion,
+                    cs.active_screener_count, cs.rsi,
                     cs.entry_zone_low, cs.target_1, cs.stop_loss,
                     cs.trade_reasoning
                 FROM confluence_signals cs

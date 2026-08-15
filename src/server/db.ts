@@ -1619,6 +1619,13 @@ db.exec(`
     sector_strength_score  REAL DEFAULT 0,
     fundamental_score      REAL DEFAULT 0,
     ml_breakout_probability REAL,
+    -- DEAD COLUMN (measured live 2026-08-15): no producer and no reader anywhere in the
+    -- repo. confluence_ml_engine.py writes ml_breakout_probability only; nothing in any
+    -- .ts/.tsx/.py reads this one back. 0 of 36,960 rows populated. Left in place because
+    -- confluence_signals is a COMPRESSED hypertable (DROP COLUMN is blocked there), not
+    -- because it is wanted. Do NOT "fix" this by training a second model to fill it --
+    -- that builds a scoring input nothing consumes, which .claude/rules/measurement.md
+    -- requires backtest evidence for. Delete it if compression is ever removed.
     ml_trend_probability   REAL,
     suggested_timeframe    TEXT DEFAULT 'POSITIONAL',
     entry_zone_low         REAL,
@@ -1628,6 +1635,11 @@ db.exec(`
     target_2               REAL,
     target_3               REAL,
     risk_reward            REAL,
+    -- DEAD COLUMN (measured live 2026-08-15): 0 of 36,960 rows populated. confluenceEngine.ts's
+    -- buildUpsertSql has never included it and no scored-object field produces it, so it has been
+    -- NULL since inception; its two readers (ConfluenceSignalCard.tsx, market_tool.py) have
+    -- both been repointed at trade_reasoning, which IS 100% populated. Same compressed-
+    -- hypertable constraint as ml_trend_probability above keeps it physically present.
     ai_conclusion          TEXT,
     trade_reasoning        TEXT,
     sector                 TEXT,
