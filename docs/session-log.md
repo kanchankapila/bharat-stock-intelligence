@@ -131,12 +131,52 @@ CLAUDE.md documents `src/services/` as the frontend layer.
 **Deliberately NOT done:** the TEXT→DATE conversion of `trendlyne_pb/pe_history` /
 `nse_universe_history` (all 11.57M values verified clean ISO, both consumers safe, but it is a
 2.45 GB locking rewrite buying type hygiene on data where nothing is currently broken — user
-called it: skip); SQLite decommission Phase 2 (refined scope: ~100 files genuinely need
-conversion, not the 278 first estimated — 120 of 258 touch no DB at all; needs its own session).
+called it: skip).
 
 **Concurrency note:** the branch moved from `ac930f9` to `087f399` mid-session via other sessions'
 commits, and a staged `git rm` of mine was swept into one of them (`e95dc48`, whose message does
 not mention it) — the `git add -A` hazard CLAUDE.md warns about, observed live.
+
+### Same day, continued — the "flaky" ranker test confirmed fixed; SQLite decommission Phase 2 foundation built and proven
+
+**Flake confirmed resolved, not just theorized.** Ran the previously-failing test 5x standalone
+(5/5 pass) and the full suite 2x with the exact five-`assert True` trigger file present — 1974
+passed both times (152s, 130s), a 20% wall-clock spread with no failure either side. Root cause
+and fix recorded in `.claude/rules/recurring-bugs.md` and `measurement.md`: `datetime.now()`
+resolves to the 15.6ms Windows clock tick, so `unified_ranker.run()`'s two back-to-back calls in
+the test shared a `generated_at`, and `ON CONFLICT DO NOTHING` on
+`unified_recommendations_history`'s `(symbol, generated_at)` PK silently discarded the second
+run's snapshot. Fixed with `_next_generated_at()` (strictly increasing, 1µs bump on collision).
+
+**SQLite decommission Phase 2 — foundation built and proven, not the full ~100-file migration.**
+Added two reusable fixtures to `src/server/tests/conftest.py`:
+  - `pg_schema` — a uniquely-named, empty, auto-cleaned Postgres schema per test, `search_path`
+    pinned so an unqualified table name can only ever shadow production, never write to it.
+  - `pg_conn` — the same schema wrapped in `db_compat.ConnWrapper`, production's own dialect
+    layer. A function written against `?` placeholders and `ON CONFLICT` runs **unmodified**;
+    only the fixture supplying the connection changes, making a conversion a one-line swap.
+
+Converted `test_marketsmojo_incremental_write.py` end-to-end as proof, not a demo: all 4 tests now
+run against real Postgres and exercise the real `ON CONFLICT(...) DO UPDATE` for the first time
+(SQLite accepts that syntax too, so the old version never validated the path production actually
+runs). Negative-controlled against the write-amplification guard it protects (disabling it
+correctly fails the test, 3 rows instead of 0). Verified clean before AND after a full suite run:
+0 rows in real `public.marketsmojo_technical_history`, 0 leftover throwaway schemas. Added 3
+isolation-guarantee tests (unqualified write lands in the throwaway schema not `public`; each
+schema is unique and starts empty; teardown actually drops it) — these must keep passing before
+converting any further file.
+
+**Both `pg_schema`/`pg_conn` and the isolation tests are homed in `test_sql_translate.py`, not a
+new file** — same reason as the Postgres-only guard tests: adding a file under
+`src/server/tests/` perturbs suite timing, which is exactly what the clock-tick bug above turned
+out to hinge on.
+
+Remaining Phase 2 scope stated honestly in `docs/SQLITE_DECOMMISSION_PLAN.md`: ~100 files still
+need converting, one batch at a time, running the isolation tests around each batch — this
+session built and proved the recipe, it did not run the migration.
+
+**Schema drift regenerated a second time** (a `data_quality_history` table appeared live via a
+concurrent session between the two checks) — clean again, 211/211.
 
 
 ### 2026-08-14 — `screener-combo-predictor`: coverage report on tier-2 (NiftyTrader) filter keys found the same-day parser had a second, worse blind spot
