@@ -1498,6 +1498,62 @@ export const DATA_QUALITY_CHECKS: DataQualityCheck[] = [
   // runs, and a same-day denominator reads as a false collapse -- the same bug already fixed
   // once in technical-signals-freshness-coverage.
   {
+    id: 'ml-signal-columns-populated',
+    label: 'every ML signal column on technical_signals is actually being written',
+    category: 'ml',
+    critical: false,
+    // Built 2026-08-15 after a session that found defects in these columns ONE AT A TIME over
+    // weeks -- fix one, wait days for data, find the next. Checking all of them together is a
+    // few seconds and immediately surfaced flyer_probability at 0/2192 on every recent date,
+    // which nothing else was watching.
+    //
+    // These are the columns consumed as SIGNALS (scoring_engine's Factor 3, cs_ranker, the
+    // ranker's gates), as opposed to the ~300 feature inputs covered by
+    // technical-signals-feature-coverage's aggregate count. A dead signal column is a silently
+    // degraded score, not a missing feature -- it must be named, not counted.
+    //
+    // Adding a new ML output column to technical_signals? Add it here. The list is deliberately
+    // explicit rather than derived: these are a handful of known model outputs, and a wrong
+    // derivation (matching any *_probability, say) would silently drop coverage the day someone
+    // renames one.
+    sql: `WITH latest AS (
+            SELECT * FROM technical_signals
+            WHERE date = (SELECT MAX(date) FROM technical_signals WHERE date < CURRENT_DATE::text)
+          )
+          SELECT COUNT(*) AS rows,
+                 COUNT(win_probability)            AS win_probability,
+                 COUNT(calibrated_win_probability) AS calibrated_win_probability,
+                 COUNT(cs_score)                   AS cs_score,
+                 COUNT(flyer_probability)          AS flyer_probability,
+                 COUNT(movement_probability)       AS movement_probability,
+                 COUNT(breakout_probability)       AS breakout_probability
+            FROM latest`,
+    evaluate: (row) => {
+      const rows = Number(row?.rows ?? 0);
+      if (rows === 0) return { status: 'fail', detail: 'No technical_signals rows on the last completed trading day.' };
+      const cols = ['win_probability', 'calibrated_win_probability', 'cs_score',
+                    'flyer_probability', 'movement_probability', 'breakout_probability'];
+      const dead = cols.filter(c => Number(row?.[c] ?? 0) === 0);
+      const thin = cols.filter(c => {
+        const n = Number(row?.[c] ?? 0);
+        return n > 0 && n / rows < 0.5;
+      });
+      if (dead.length) {
+        return {
+          status: 'fail',
+          detail: `${dead.join(', ')} 100% NULL across all ${rows} rows of the last completed day — ` +
+                  `its writer is not landing, and any score consuming it is silently degraded.` +
+                  (thin.length ? ` Also thin (<50%): ${thin.join(', ')}.` : ''),
+        };
+      }
+      if (thin.length) {
+        return { status: 'warn', detail: `Thin coverage (<50% of ${rows} rows): ${thin.join(', ')}.` };
+      }
+      return { status: 'pass', detail: `All ${cols.length} ML signal columns populated across ${rows} rows.` };
+    },
+  },
+
+  {
     id: 'win-probability-scored-in-time',
     label: 'win_probability is written soon enough after its signal date to be a usable signal',
     category: 'ml',

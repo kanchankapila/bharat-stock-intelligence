@@ -251,7 +251,47 @@ unconnected to the diff, the "evidence-shaped but meaningless artifact" `recurri
 about. Same reasoning as this file's `_log_recommendations` and `seed_screener_catalog` entries.
 The applicable measurement is the before/after impact table above, taken from live production.
 
-### ⛔ RETRACTED — the `win_probability` positive result was look-ahead. Do not cite it.
+### ⚠ RETRACTION WITHDRAWN 2026-08-15 — the retraction itself was wrong. Result stands, preliminary.
+
+**Read this whole block before citing anything here; this finding flipped twice in one session.**
+
+The retraction below claimed two defects. **Both are false**, and the error was mine:
+
+1. *"--score runs only weekly."* **Wrong.** `ml_ensemble.py --score` is not the only scoring path.
+   `queues.ts:1037` runs `T.run('ml-ensemble-score', () => pythonApi.scorePending())` **daily**
+   inside ml-daily-ops — an HTTP call to the ml-api service, which is why a grep for `--score`
+   missed it. `python_api.py`'s handler is `ml_ensemble.run(do_train=False, do_score=True)`.
+   Confirmed in data: `unscored = 0` on every recent date (08-10 … 08-14); a weekly cadence would
+   leave a visible backlog. `dataQualityChecks.ts:653` already documented this in a comment —
+   *"win_probability is written by ml-ensemble-score … which runs once in the evening, AFTER
+   technical-scan has written that day's rows (8:30am-4pm IST)"* — i.e. the answer was written
+   down in this repo and I concluded the opposite without reading it.
+2. *"Train-on-test leakage."* **Wrong for the live path.** The daily scorer passes
+   `do_train=False`; it scores with the pickled model from the *previous* weekly retrain, which
+   predates the rows being scored. The weekly `--train --tune --score` does train-then-score, but
+   by the time it runs, daily scoring has already filled those rows, so its `WHERE
+   win_probability IS NULL` matches ~nothing. Not a live leakage path.
+
+**So the numbers stand** — raw h=1d rank IC **+0.0364, t=+2.58** (41 dates), h=5d +0.0763,
+t=+3.58; top-decile excess +0.183%/day; the day's 10 biggest gainers at mean percentile 0.550.
+Rows are written the evening of date *d*, so they are knowable before *d+1*'s open, and the
+next-open entry used in the grading is legitimate.
+
+**The caveats that remain genuinely valid, unchanged:**
+- **IC is not a tradeable edge.** No cost or turnover analysis was run. `delivery_pct` in the
+  table above had spread t=+7.82 and was still **dead** long-only net of costs.
+- **h=5 windows overlap** across consecutive dates, so those observations are autocorrelated and
+  t=+3.58 is optimistic. **h=1 (t=+2.58) is the honest read.**
+- **41 dates is thin**, and `win_probability` history only starts 2026-05-16.
+
+**Provenance is now measured rather than inferred.** Migration `1787050000000` added
+`win_probability_scored_at`, stamped by the scorer itself, and check `win-probability-scored-in-time`
+watches the lag. From the next daily run the real cadence is a number in the data instead of
+something reconstructed from the scheduler — which is what should have settled this the first time.
+**Note:** the 1.41d lag observed on 2026-08-15 is an artifact of a manual test write, NOT the real
+cadence; expect ~0.2-0.5d once the daily scorer stamps a full batch.
+
+### (superseded — the retraction that was itself wrong, kept for the record)
 
 **The provenance trace that the entry below listed as its own #2 caveat was carried out
 2026-08-15 and it invalidates the result.** Two independent, structural defects, either one
