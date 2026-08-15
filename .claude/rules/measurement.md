@@ -251,7 +251,41 @@ unconnected to the diff, the "evidence-shaped but meaningless artifact" `recurri
 about. Same reasoning as this file's `_log_recommendations` and `seed_screener_catalog` entries.
 The applicable measurement is the before/after impact table above, taken from live production.
 
-### ⚠ PRELIMINARY — `win_probability` grades POSITIVE, unlike `unified_score`. Do not act on it yet.
+### ⛔ RETRACTED — the `win_probability` positive result was look-ahead. Do not cite it.
+
+**The provenance trace that the entry below listed as its own #2 caveat was carried out
+2026-08-15 and it invalidates the result.** Two independent, structural defects, either one
+sufficient on its own:
+
+1. **The value does not exist at the entry time it was graded against.** `ml_ensemble.py --score`
+   appears in exactly ONE scheduled place (`queues.ts:1290`), inside the **weekly** retrain job
+   (`--train --tune --score`, "weekly retrain continues"). It scores `WHERE ts.win_probability IS
+   NULL`, i.e. the whole backlog since the last weekly run. So a Monday row's `win_probability` is
+   typically written the FOLLOWING weekend — days after the Tuesday open the grading used as its
+   entry. Nobody could have traded on it. `technical_signals.created_at`/`updated_at` are 100%
+   NULL (dead columns), which is why this had to be traced through the scheduler rather than read
+   off the row; `computed_at` (100% populated) records only when the row was CREATED, a lower
+   bound, and it correctly shows same-day creation — which is what made the setup *look* clean.
+2. **Train-on-test leakage.** In the same invocation `run()` executes `if do_train:` first —
+   `load_training_data()` pulls every resolved `signal_outcomes` row with no cutoff excluding the
+   week about to be scored — and only then scores that week's rows. **The model is fitted on the
+   outcomes of the very rows it subsequently scores.** A positive IC is the expected artifact.
+
+**Retracted numbers** (raw h=1d IC +0.0364 t=+2.58; h=5d +0.0763 t=+3.58; calibrated +0.0472 /
++0.1007; top-decile excess +0.183%/day; gainers at percentile 0.550). Grading the raw column
+separately did rule out *calibration* leakage specifically — but not this, which sits upstream of
+both columns and contaminates raw and calibrated alike. **`unified_score`'s IC ≈ 0.0001 remains
+this platform's honest headline; nothing has displaced it.**
+
+**Separate, real finding worth keeping — `win_probability` is not fit to be a live signal as
+currently produced.** It feeds `scoring_engine`'s Factor 3 (`ml_alignment_points`, 0-20 pts, ~18/20
+mean) and the 0.55/0.40/0.30 bands, yet it is (i) written only weekly, so it is stale by up to
+~5 trading days for most rows, and (ii) produced by a train-then-score-in-one-invocation job, so
+it can never be graded as a forward signal without first separating those steps. Fixing it means
+scoring on a daily cadence with a model trained strictly on data preceding each scored date —
+until then, no measurement of this column can be trusted, in either direction.
+
+### (superseded, kept for the record) PRELIMINARY — `win_probability` grades POSITIVE
 
 Graded 2026-08-15 against realized returns, full panel spec (per-date then averaged, winsorised
 1/99 on observed values, `is_suspect` excluded, ≥₹1cr ADT20, **next-day OPEN entry**):

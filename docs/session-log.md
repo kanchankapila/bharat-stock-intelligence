@@ -3258,3 +3258,44 @@ in `recurring-bugs.md` under a new "Investigating production without breaking it
 client-side timeout orphans rather than cancels a server-side query; and a query that hangs on
 one specific table while others respond is lock contention until proven otherwise, never a
 storage-engine theory. Diagnose with `pg_blocking_pids()` before theorising.
+
+**RETRACTION, 2026-08-15 — the `win_probability` positive result was look-ahead.** The grading
+recorded earlier today (raw h=1d rank IC +0.0364, t=+2.58) listed "provenance is unverified" as
+its own caveat #2. That trace was then carried out, and it invalidates the number. Two structural
+defects, either sufficient alone:
+
+1. **The value did not exist at the graded entry time.** `ml_ensemble.py --score` occurs in
+   exactly one scheduled place (`queues.ts:1290`) — inside the **weekly** retrain
+   (`--train --tune --score`) — and scores `WHERE win_probability IS NULL`, i.e. the backlog since
+   the last weekly run. A Monday row's `win_probability` is typically written the following
+   weekend, days after the Tuesday open used as the entry.
+2. **Train-on-test leakage.** The same invocation runs `if do_train:` first — `load_training_data()`
+   pulls every resolved `signal_outcomes` row with no cutoff excluding the week about to be scored
+   — then scores those rows. The model is fitted on the outcomes of the rows it then scores.
+
+Grading the raw column separately had ruled out *calibration* leakage, but this sits upstream of
+both raw and calibrated. **`unified_score` IC ≈ 0.0001 remains the honest headline.**
+
+**Why it was deceptive, and the durable lesson (filed in `recurring-bugs.md`):** the obvious
+provenance column looked fine. `computed_at` is 100% populated and correctly shows same-day row
+*creation* — but `win_probability` arrives later via `UPDATE`, and the columns that would have
+recorded that write (`created_at`, `updated_at`) are **100% NULL dead columns**. A lower-bound
+timestamp cannot prove a later write happened in time. Before grading any column: grep every
+scheduled invocation of its writer, check the cadence and the flag combination (`--train ...
+--score` in one command is the signature), and confirm the timestamp being trusted records the
+write you care about rather than the row's birth.
+
+**Separate finding worth keeping:** `win_probability` is not fit to be a live signal as currently
+produced. It feeds `scoring_engine`'s Factor 3 (`ml_alignment_points`, mean ~18/20) and the
+0.55/0.40/0.30 bands, while being written only weekly (stale by up to ~5 trading days for most
+rows) and produced by a train-then-score job. Making it gradeable requires daily scoring with a
+model trained strictly on data preceding each scored date. Until then no measurement of this
+column is trustworthy in either direction. This does not change the drift-haircut mechanism fix
+(`a7e8866`), which was justified on correctness — a calibrated probability must not be rescaled,
+and must not become more confident under a haircut — never on this column's edge.
+
+**Three of my own confident conclusions were overturned in this one session** (the
+`op_margins`/`roe` drift explanation; the "compression makes this ungradeable" diagnosis, which
+was actually a lock I caused; and now this). Each was caught only by carrying the check through to
+live data rather than stopping at the plausible explanation — which is the master rule this
+session also recorded.
