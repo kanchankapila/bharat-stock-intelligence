@@ -6,6 +6,7 @@ from scoring_engine import (  # noqa: E402
     apply_ml_score_adjustment,
     ml_alignment_points,
     apply_edge_adjustment_to_win_probs,
+    apply_drift_haircut,
 )
 
 
@@ -256,3 +257,42 @@ def test_a_neutral_only_symbol_scores_hold_not_strong_sell():
     assert final_score == 0.0, "a purely-neutral screener basket must contribute zero score"
     assert normalized_score == 50.0, "must land at the neutral midpoint, not the Sell floor"
     assert data['negative_screeners'] == [], "a neutral tag must never count as bearish evidence"
+
+
+class TestApplyDriftHaircut:
+    """The drift haircut multiplied a CALIBRATED probability by a constant (fixed 2026-08-15).
+    Two defects: (1) `calibrated_win_probability` is an isotonic fit whose whole purpose is that
+    0.60 means a 60% empirical win rate, so scaling it is miscalibration by construction;
+    (2) below 0.5, `wp * m` moves AWAY from neutral -- 0.30 -> 0.255 says "even more sure this
+    loses", the opposite of a confidence haircut. Measured live: 1,448 of 73,563 rows (1.97%)
+    sat below 0.5. Shrinking toward 0.5 reduces confidence in both directions."""
+
+    def test_NEGATIVE_CONTROL_below_half_moves_toward_neutral_not_away(self):
+        """Fails against the old `wp * m` form, which returns 0.255 here (further from 0.5)."""
+        out = apply_drift_haircut({"X": 0.30}, 0.85)
+        assert out["X"] > 0.30, (
+            f"a losing-side probability must move TOWARD 0.5 under a haircut, got {out['X']} "
+            "-- the pre-fix multiply form returns 0.255, i.e. MORE confident"
+        )
+        assert out["X"] == round(0.5 + 0.85 * (0.30 - 0.5), 4)
+
+    def test_above_half_moves_toward_neutral(self):
+        out = apply_drift_haircut({"X": 0.80}, 0.85)
+        assert 0.5 < out["X"] < 0.80
+
+    def test_confidence_strictly_decreases_on_both_sides(self):
+        m = 0.85
+        out = apply_drift_haircut({"hi": 0.90, "lo": 0.10}, m)
+        assert abs(out["hi"] - 0.5) < abs(0.90 - 0.5)
+        assert abs(out["lo"] - 0.5) < abs(0.10 - 0.5)
+
+    def test_neutral_is_a_fixed_point(self):
+        assert apply_drift_haircut({"X": 0.5}, 0.85)["X"] == 0.5
+
+    def test_multiplier_of_one_is_a_no_op_and_returns_input_untouched(self):
+        src = {"A": 0.73, "B": 0.21}
+        assert apply_drift_haircut(src, 1.0) is src
+
+    def test_symmetric_around_neutral(self):
+        out = apply_drift_haircut({"up": 0.70, "dn": 0.30}, 0.85)
+        assert abs((out["up"] - 0.5) + (out["dn"] - 0.5)) < 1e-9

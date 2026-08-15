@@ -28,6 +28,20 @@ def apply_edge_adjustment_to_win_probs(win_prob_map: Dict[str, float], regime_ma
     return out
 
 
+def apply_drift_haircut(win_prob_map: Dict[str, float], multiplier: float) -> Dict[str, float]:
+    """Shrink each win_probability toward the neutral 0.5 by `multiplier`, extracted from the
+    scoring loop for unit testing (same convention as apply_ml_score_adjustment below).
+
+    NOT `wp * multiplier`. See the call site for the full reasoning: these are calibrated
+    probabilities, so scaling them is miscalibration by construction, and below 0.5 the old form
+    was directionally backwards (it made a losing call MORE confident). Same shape as
+    ml_calibration.edge_adjusted_probability, which answers the identical question.
+    """
+    if multiplier >= 1.0:
+        return win_prob_map
+    return {sym: round(0.5 + multiplier * (wp - 0.5), 4) for sym, wp in win_prob_map.items()}
+
+
 def apply_ml_score_adjustment(final_score: float, normalized_score: float, wp) -> float:
     """ML consensus bonus / weak-probability discount, extracted from the scoring loop for unit
     testing. `wp` should already be edge-adjusted by the caller when the flag is enabled."""
@@ -670,11 +684,27 @@ class AlphaQuantScoringEngine:
         except Exception:
             pass
 
-        # Apply drift multiplier to win_probability values (haircut when feature drift detected)
+        # Apply drift multiplier to win_probability values (haircut when feature drift detected).
+        #
+        # SHRINK toward the neutral 0.5, never multiply toward zero (fixed 2026-08-15). These
+        # values are CALIBRATED probabilities -- `calibrated_win_probability` is the output of an
+        # isotonic fit whose entire purpose is that 0.60 means a 60% empirical win rate
+        # (ml_calibration.py) -- so scaling them by a constant is miscalibration by construction.
+        # Worse, `wp * m` is directionally wrong below 0.5: it pushes a 0.30 to 0.255, i.e. MORE
+        # confident the name will lose, when the whole point of a drift haircut is LESS
+        # confidence. Measured on the full live history (73,563 rows / 68 dates): 1,448 rows
+        # (1.97%) sit below 0.5 and were being made more extreme by the old form.
+        #   0.5 + m*(wp-0.5) reduces confidence in BOTH directions and leaves 0.5 fixed, which is
+        # the neutral point every consumer here already assumes (bet_size_from_probability(<=0.5)
+        # == 0; this file's own bonus/discount bands straddle 0.5). Identical shape to
+        # ml_calibration.edge_adjusted_probability, deliberately -- same question, same answer.
+        # Impact is small but systematic and one-directional: the band gates below
+        # (apply_ml_score_adjustment) barely move (50 of 73,563 symbol-days change band), but
+        # ml_alignment_points is CONTINUOUS (int(wp*24), 0-20 pts) and there the old form cost
+        # 2.82 pts/symbol at m=0.85 versus 0.91 under shrinkage -- ~1.9 points of Factor 3, on
+        # every symbol, every drifted day. Full derivation: measurement.md.
         self._refresh_drift_multiplier()
-        if self._drift_multiplier < 1.0:
-            win_prob_map = {sym: round(wp * self._drift_multiplier, 4)
-                           for sym, wp in win_prob_map.items()}
+        win_prob_map = apply_drift_haircut(win_prob_map, self._drift_multiplier)
 
         # Edge-adjust win_probability per symbol's own regime when enabled (see ml_calibration.py
         # -- win_probability has real live discrimination only in some regimes, e.g. BEAR; this

@@ -213,6 +213,54 @@ Each of these was measured on the 5-year price panel with the spec above. Re-tes
 | **`earnings_beat_yoy`/`earnings_beat_qoq`** (PEAD-style post-earnings drift, `earnings_category_yoy`/`_qoq` from `mc_earnings_fetcher.py`'s `_backfill_rapid_features`, BP=+2/PT=+1/LR=0/WP=-1/NT=-2, wired into `factor_backtest.py` 2026-08-13) | 21d rebalance: **0 completed periods** — no result, insufficient runway. 5d/top-50/15bps (the shortest feasible horizon): 3 periods (0.06 years), net excess −0.78%/period, t=−1.79. | **NOT significant, and severely underpowered** — 3 periods is worse than `screener_breadth`'s already-flagged-as-low-power 9. Calendar-constrained: `earnings_category_yoy` has only 19 trading days of real depth (2026-07-20→2026-08-13) — the column is a recent addition, not deep history. Re-test only once it has ~12+ months, same bar as `screener_breadth`. **Separately: `pead_model.py`'s own `compute_pead_score()` is unusable regardless of history depth** — its two required inputs (`eps_growth_yoy`/`eps_growth_qoq`) are ~100% NULL across the entire panel (measured live: populated on 0 symbols except the 2 most recent dates), dead schema, same shape as `feature_store`'s `rev_growth`/`eps_growth` pair above. `earnings_category_yoy`/`_qoq` are the only genuinely-populated earnings-surprise columns on this panel, which is why they're what got tested instead. |
 | **`screener_combo_finder.py --tier1`'s "capitulation" triple (`gap_down` AND `open_eq_low` AND `top_loser`, next-session open→close, single day, not a rebalanced hold)** | Reviewed 2026-08-13 (`/measurement-integrity-review`): reproduced live, 425 days / 651 signal-rows, spread +0.53%/day net of 15bps, t=+3.61, p=0.0003, clears the 41-combination Bonferroni bar. **Robust**: winsorizing at 1/2/5% *strengthens* it (t 3.69–3.94); dropping the single most extreme day still gives t=3.49; dropping the top 3 most extreme days still gives t=3.25, p=0.0013. **6/6 years positive** (2021–2026), 3 of 6 individually significant. | **Not a contradiction of the `gap_down`/`gap_up` rows above** — different construct entirely: those rank/hold the top-K gapped names for a 21d rebalance and eat turnover-drag costs; this is a same-next-session open→close return on a much narrower, rarer AND'd condition (real capitulation — gapped down, opened at the low, AND already among the day's biggest losers — not just "gapped down"). Reads as a genuine short-horizon reversal/bounce off a panic day, not a continuation trade. **Two real gaps found, neither changes the verdict**: (1) the script has no winsorization step despite the panel spec requiring one — checked live, doesn't matter here, but should still be added for consistency; (2) `run_tier1`'s verdict logic (`is_edge = spread_pct > 0`) only ever surfaces the best *positive*-direction combo — the single most significant combo in the full 41-row table is actually negative-direction (`gap_down,open_eq_high`, t=−4.12, spread=−0.53%, stronger than the "winning" positive one), which the console output/verdict never highlights. Low signal density (~1.5 signals/day when it fires, ~651 stock-days across 5.5y) means this is thin — narrow enough to watch, not yet enough to call it capacity-proven at scale. `live_capitulation_screener.py`'s docstring says "See measurement.md" — this row is that entry. |
 
+### The drift haircut on `win_probability` — mechanism fixed 2026-08-15, NOT a factor-edge change
+
+`scoring_engine.py`'s drift haircut multiplied a **calibrated** probability by a constant
+(`wp * 0.85`). Two defects, both measured live before changing anything:
+
+1. `calibrated_win_probability` is an isotonic fit whose entire purpose is that 0.60 means a 60%
+   empirical win rate (`ml_calibration.py`). Scaling it by a constant is miscalibration **by
+   construction**, not a judgment call.
+2. Below 0.5 the old form was directionally backwards: `0.30 * 0.85 = 0.255` is *further* from
+   neutral, i.e. MORE confident the name loses, when a drift haircut should mean less confidence.
+   Measured over the full live history (73,563 rows / 68 dates): **1,448 rows (1.97%) sit below
+   0.5** and were being made more extreme.
+
+Fixed to `0.5 + m*(wp-0.5)` — shrink toward the neutral point, identical in shape to the
+already-present `ml_calibration.edge_adjusted_probability`, which answers the same question and
+whose docstring already argues the case for this codebase's bands.
+
+**Measured impact, honest and small.** The band gates (`apply_ml_score_adjustment`, 0.55/0.40/0.30)
+barely move: **50 of 73,563 symbol-days (0.07%)** change band, because `ml_ensemble`'s
+cross-sectional rank-scaling compresses `win_probability` into a ±7.5% band around each day's
+median (live distribution: mean 0.775, std 0.071, 5th pct 0.664). The real, systematic difference
+is in the **continuous** consumer, `ml_alignment_points` (`int(wp*24)`, Factor 3 of 20 points):
+
+| haircut in force | mean pts lost, MULTIPLY (old) | mean pts lost, SHRINK (new) | gap |
+|---|---|---|---|
+| m=0.93 | 1.63 / 20 | 0.63 / 20 | 1.00 pt on every symbol |
+| m=0.85 | 2.82 / 20 | 0.91 / 20 | 1.92 pts on every symbol |
+
+Blast radius is further reduced by the same-day `drift_detector.py` recalibration: the multiplier
+is now 1.0 on ~75% of days (it was <1.0 on 100% of days before, permanently).
+
+**`factor_backtest.py` was deliberately NOT run, and that is not an omission.** It measures
+price-panel factor edge (momentum, value, …) and has no code path that reads `win_probability`,
+`technical_signals`' ML columns, or `recommendation_log` — running it here would measure something
+unconnected to the diff, the "evidence-shaped but meaningless artifact" `recurring-bugs.md` warns
+about. Same reasoning as this file's `_log_recommendations` and `seed_screener_catalog` entries.
+The applicable measurement is the before/after impact table above, taken from live production.
+
+**Still unmeasured, and flagged rather than glossed:** whether `win_probability` has any forward
+predictive edge *at all* on this panel. An attempt to grade it against realized next-open→close
+returns (per this file's panel spec) did not complete — `stock_ohlcv` is a compressed hypertable
+and the window functions needed for next-open entry force wide chunk decompression, timing out
+repeatedly. **So this change is justified on correctness (a calibrated probability must not be
+rescaled, and must not become more confident under a haircut), not on demonstrated edge.** If
+`win_probability` turns out to carry no signal, the correct follow-up is to stop feeding it into
+the score at all — not to re-tune the haircut. That grading run is the open item; it needs either
+a materialized price panel or a decompression-aware query.
+
 ## Not testable — do not spend time here without a genuinely new angle
 
 - **Fundamentals, analyst, ownership and earnings factors**: every one of those tables has ~30 distinct dates, all starting 2026-06-30 (1–2 independent quarterly observations). Calendar constraint, not engineering — elapsed time or a backfill fixes it, nothing else does.
