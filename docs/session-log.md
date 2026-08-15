@@ -3083,3 +3083,71 @@ wire all 6, full test coverage, no live training run required.
 
 Verified: `tsc --noEmit` clean; `pytest src/server/__tests__/ src/server/tests/` 1,949 passed /
 230 skipped (1 pre-existing unrelated flake, confirmed passes standalone).
+
+---
+
+## 2026-08-15 (cont. 5) — Batch 3: model-registry check, tlid collision, 2 investigations, non-fixes documented
+
+Closes the remaining pending items from the review, live-verified where applicable.
+
+**`model-registry-active-ensemble` freshness check (MEDIUM, fixed):** was reading only the
+active row's `trained_at`, so a weekly retrain correctly rejecting a still-best stale baseline
+(same shape as the already-fixed `strategy-optimizer` case in `monitorScripts.ts`) would warn
+even though the job ran clean. `promote_or_register()` already writes a `model_registry` row on
+every run, promoted or rejected — so unlike `strategy-optimizer` this didn't need
+`job_heartbeat`/`app_settings`, just `MAX(trained_at)` across every row for that model_name, not
+only the active one. 4 new tests (`dataQualityChecks.test.ts`), including the exact case the fix
+targets: active model 79 days old but a run 4 days ago — old logic would warn, new logic passes.
+Live-verified the new query against production: `last_run_at` (2026-08-12) genuinely newer than
+`active_trained_at` (2026-08-09).
+
+**tlid-repair migration's undisclosed 6th collision (MEDIUM, fixed):** confirmed live —
+`TATAMOTORS` and `TMPV` both held `tlid='1362'`. Traced, not guessed: both share the same ISIN
+(`INE155A01022`); `TMPV` has 1,397 days of real OHLCV through today, `TATAMOTORS` has zero rows
+ever, anywhere (`stock_ohlcv`, `technical_signals`, `unified_recommendations`,
+`trendlyne_stock_profile` — only 2 stale rows in `stock_scores`). `TMPV` is the real,
+continuously-traded entity (kept the original listing/ISIN post-demerger); `TATAMOTORS` is stale
+pre-rename seed data still flagged `status=ACTIVE` despite never being fetched. Migration
+`1787020000000` clears `TATAMOTORS`'s `tlid`/`tlname` (deliberately not touching `status` —
+a bigger, separately-reviewable decision). Applied against production; verified only `TMPV` now
+owns `1362`.
+
+**`unified_recommendations.max(computed_at)` reading 3 days ahead — investigated, confirmed NOT
+a bug.** Traced `computed_at=2026-08-17`'s rows to `generated_at=2026-08-14 05:02 UTC`
+(10:32 IST) — after that day's 09:15 IST open. `as_of.logical_session_date()` is explicitly
+documented to roll a run forward once its session's open has passed, and further roll through a
+following weekend — Friday 10:32 IST correctly rolls to Monday 08-17, skipping the closed Sat/Sun.
+This is the intended, documented behavior (a missed-then-caught-up run correctly relabeled as
+pre-market for the next session it can actually be pre-market for), not an anchoring defect. No
+code changed.
+
+**NSE bhavcopy "3 independent code paths" — investigated, narrowed to a real 2-way redundancy,
+not consolidated this session.** `delivery_volume_fetcher.py` turned out to be a red herring —
+it fetches a genuinely different NSE report (`MTO_{date}.DAT`, not `sec_bhavdata_full`) into a
+different table (`stock_delivery_volume`), not part of the overlap. The real redundancy is
+`nse_bhavcopy_fetcher.py` and `deliveryFetcher.ts`'s `fetchDeliveryMap()`: both fetch the
+identical `sec_bhavdata_full_{ddmmyyyy}.csv` URL daily, both parse `DELIV_QTY`/`TTL_TRD_QNTY`
+into a delivery-% figure, into two separate tables (`nse_universe_history.deliv_pct` vs
+`stock_delivery_data.delivery_pct`). Traced real consumers: `nse_universe_history` has genuine
+downstream readers (`as_of.py`, `breakout_classifier.py`, `ohlcv_adjust.py`); `stock_delivery_data`
+has none beyond `dataQualityChecks.ts`/`data_integrity_repair.py` — `fetchDeliveryMap()`'s real
+consumer (`technicalSignalsService.ts`) uses the function's returned in-memory `Map`, not a
+re-read of the table. **Recommendation for a future session**: `nse_bhavcopy_fetcher.py` looks
+canonical; `stock_delivery_data`/`fetchDeliveryMap`'s DB write may be droppable, but confirming
+that needs tracing every `technical_signals.delivery_*` column's write path first — a bigger,
+separately-scoped change than this batch, not attempted here.
+
+**Non-fixes, documented rather than actioned (deliberate decisions or genuinely out of scope):**
+- 3 InvestSights/sector-intel tables landed, unconsumed anywhere — wiring them into scoring
+  needs backtest evidence per `measurement.md`; a product decision for the user, not a bug.
+- `trendlyne_price_analysis_fetcher.py`'s endpoint is 100% 405 upstream — vendor-side, nothing
+  to fix in this codebase.
+- The 7 "Prediction Accuracy" open gaps (label redesign, cross-sectional ranking model, GDELT
+  join, 3 pending feature engines, survivorship bias, `stock_options_oi` structurally NULL) are
+  multi-day feature-engineering roadmap items, not mechanical bugs — not attempted.
+- Trendlyne screener pk churn (screener_pk_collision_2026_08_13 memory) — already explicitly
+  decided low-severity/not-fixed with reasoning recorded; not re-litigated.
+
+**Final verification, everything in this session combined**: `tsc --noEmit` clean; `pytest`
+1,950 passed / 230 skipped, 0 failed (the previously-flaky `test_history_snapshot_is_append_
+only_across_reruns` passed clean this run too); `vitest run` 923 passed / 40 skipped, 0 failed.
