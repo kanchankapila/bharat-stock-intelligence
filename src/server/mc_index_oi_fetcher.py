@@ -11,6 +11,8 @@ from db_compat import execute, executemany
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 log = logging.getLogger(__name__)
 
+SOURCE = "moneycontrol"
+
 def _get_mc_index_map() -> dict:
     """Load {scId: index_name} from DB. Keyed by mc_oi provider_id."""
     from db_compat import load_index_map
@@ -61,8 +63,14 @@ def _ensure_tables():
             PRIMARY KEY (index_name, date, expiry, strike)
         )
     """)
+    # PK includes `source`: nt_oi_snapshot_fetcher.py writes the same (index_name, date, expiry)
+    # key for NIFTY50/NIFTYBANK from NiftyTrader's own OI data -- without the provider in the
+    # key, whichever fetcher runs later silently overwrites the other's max_pain/pcr_oi
+    # (migration 1787010000000, data-sources.md's composite-key rule). This CREATE TABLE only
+    # matters for a fresh SQLite dev DB; the live Postgres table is repaired by the migration.
     execute("""
         CREATE TABLE IF NOT EXISTS index_max_pain (
+            source       TEXT NOT NULL,
             index_name   TEXT NOT NULL,
             date         TEXT NOT NULL,
             expiry       TEXT NOT NULL,
@@ -71,7 +79,7 @@ def _ensure_tables():
             total_ce_oi  BIGINT,
             total_pe_oi  BIGINT,
             fetched_at   TEXT NOT NULL,
-            PRIMARY KEY (index_name, date, expiry)
+            PRIMARY KEY (source, index_name, date, expiry)
         )
     """)
 
@@ -280,16 +288,16 @@ def _fetch_and_store(sc_id: str, expiry: str, date: str, fetched_at: str) -> int
     execute(
         """
         INSERT INTO index_max_pain
-            (index_name, date, expiry, max_pain, pcr_oi, total_ce_oi, total_pe_oi, fetched_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-        ON CONFLICT (index_name, date, expiry) DO UPDATE SET
+            (source, index_name, date, expiry, max_pain, pcr_oi, total_ce_oi, total_pe_oi, fetched_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT (source, index_name, date, expiry) DO UPDATE SET
             max_pain    = EXCLUDED.max_pain,
             pcr_oi      = EXCLUDED.pcr_oi,
             total_ce_oi = EXCLUDED.total_ce_oi,
             total_pe_oi = EXCLUDED.total_pe_oi,
             fetched_at  = EXCLUDED.fetched_at
         """,
-        (index_name, date, expiry, max_pain, pcr_oi, total_ce, total_pe, fetched_at),
+        (SOURCE, index_name, date, expiry, max_pain, pcr_oi, total_ce, total_pe, fetched_at),
     )
 
     log.info(

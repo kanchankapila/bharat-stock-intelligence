@@ -108,9 +108,10 @@ class TestMcIndexOiLiveDataSource:
 
         max_pain_calls = [(sql, params) for sql, params in cap.calls if "index_max_pain" in sql]
         assert max_pain_calls, "_fetch_and_store() never wrote to index_max_pain"
-        # INSERT param order: (index_name, date, expiry, max_pain, pcr_oi, total_ce_oi, total_pe_oi, fetched_at)
+        # INSERT param order: (source, index_name, date, expiry, max_pain, pcr_oi, total_ce_oi, total_pe_oi, fetched_at)
         _, mp_params = max_pain_calls[0]
-        max_pain = mp_params[3]
+        assert mp_params[0] == mio.SOURCE, "index_max_pain.source must be stamped by the fetcher"
+        max_pain = mp_params[4]
         if max_pain is not None:
             assert_numeric_and_finite(max_pain, context="index_max_pain.max_pain")
             # The max-pain strike must be one of the strikes actually seen in the chain --
@@ -121,7 +122,7 @@ class TestMcIndexOiLiveDataSource:
                 f"[{min(strikes)}, {max(strikes)}] -- check for a call/put OI weighting regression"
             )
 
-        pcr_oi = mp_params[4]
+        pcr_oi = mp_params[5]
         if pcr_oi is not None:
             assert_numeric_and_finite(pcr_oi, context="index_max_pain.pcr_oi")
             assert pcr_oi >= 0, f"pcr_oi must be non-negative: {pcr_oi}"

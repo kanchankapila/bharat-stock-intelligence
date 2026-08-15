@@ -2908,7 +2908,10 @@ db.exec(`
     fetched_at    TEXT NOT NULL,
     PRIMARY KEY (index_name, date, expiry, strike)
   );
+  -- PK includes source: mc_index_oi_fetcher.py and nt_oi_snapshot_fetcher.py both write
+  -- NIFTY50/NIFTYBANK from independently-derived OI data (migration 1787010000000).
   CREATE TABLE IF NOT EXISTS index_max_pain (
+    source       TEXT NOT NULL,
     index_name   TEXT NOT NULL,
     date         TEXT NOT NULL,
     expiry       TEXT NOT NULL,
@@ -2917,7 +2920,7 @@ db.exec(`
     total_ce_oi  INTEGER,
     total_pe_oi  INTEGER,
     fetched_at   TEXT NOT NULL,
-    PRIMARY KEY (index_name, date, expiry)
+    PRIMARY KEY (source, index_name, date, expiry)
   );
   -- MoneyControl NSE/BSE advance-decline daily counts
   CREATE TABLE IF NOT EXISTS mc_advance_decline (
