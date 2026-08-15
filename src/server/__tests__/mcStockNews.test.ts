@@ -79,6 +79,22 @@ describe('decodeMangledEscapes', () => {
   it('passes empty input through', () => {
     expect(decodeMangledEscapes('')).toBe('');
   });
+
+  it('repairs a mangled possessive apostrophe immediately after a letter', () => {
+    // Live-confirmed 2026-08-11 (news_pipeline memory): a real ingested MC headline stored
+    // "Coforgeu2019s performance, not just commentary..." as-is because the prefix-boundary
+    // guard required a non-alnum char before "u" -- the letter before "u" in any possessive
+    // IS the word itself, so this was the single most common real case the repair missed.
+    expect(decodeMangledEscapes('Coforgeu2019s performance, not just commentary')).toBe(
+      "Coforge’s performance, not just commentary",
+    );
+  });
+
+  it('still does not touch a mid-word dash (non-quote codepoint)', () => {
+    // The fix for the case above must not regress this: only the smart-quote codepoints are
+    // treated as safe mid-word, not every codepoint >= 0x80.
+    expect(decodeMangledEscapes('Neu2013ral')).toBe('Neu2013ral');
+  });
 });
 
 describe('formatHumanTimestamp', () => {

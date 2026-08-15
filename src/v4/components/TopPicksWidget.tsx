@@ -7,6 +7,7 @@ import { cn } from '../../lib/utils';
 import { ConvictionPill } from '../../components/StockTagRow';
 import { AddToPortfolioButton } from '../../components/AddToPortfolioButton';
 import { CanonicalBadge } from '../../components/CanonicalSourceNote';
+import { relativeFromNow } from '../../lib/timeFormat';
 
 // Command Center teaser for the canonical unified_recommendations ranking (same query as
 // /alpha's CommandCenterDashboard/getBuyRecommendations) -- so a user sees the platform's actual
@@ -18,6 +19,9 @@ export const TopPicksWidget: React.FC<{ onSelectStock?: (symbol: string) => void
     { refetchInterval: 5 * 60_000 }
   );
   const picks = data?.picks ?? [];
+  // data-honesty-review, 2026-08-14: no as-of indicator anywhere a user could spot a stalled
+  // ranker. Backend already returns lastComputedAt (commandCenter.router.ts); just wasn't read.
+  const lastComputedAt = data?.lastComputedAt ?? null;
 
   return (
     <Card
@@ -26,6 +30,11 @@ export const TopPicksWidget: React.FC<{ onSelectStock?: (symbol: string) => void
       onClick={() => navigate('/alpha')}
       action={
         <div className="flex items-center gap-2">
+          {lastComputedAt && (
+            <span className="text-[10px] text-slate-500" title={`Ranker computed_at: ${lastComputedAt}`}>
+              {relativeFromNow(lastComputedAt)}
+            </span>
+          )}
           <CanonicalBadge />
           <ArrowRight className="w-3.5 h-3.5 text-slate-500" />
         </div>

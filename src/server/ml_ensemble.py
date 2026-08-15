@@ -2170,7 +2170,14 @@ def _xgboost_device() -> str:
     return 'cuda' if _torch_cuda_available() else 'cpu'
 
 
-def _base_models(scale_pos_weight: float = 1.0, tuned_params: dict | None = None, cv=3):
+def _base_models(scale_pos_weight: float = 1.0, tuned_params: dict | None = None, *, cv):
+    # No default: an int here silently means sklearn's StratifiedKFold inside
+    # CalibratedClassifierCV, which shuffles time order -- the exact embargo-violating bug this
+    # file's own outer TimeSeriesSplit exists to prevent (recurring-bugs.md, "An int passed as
+    # cv= ... silently means StratifiedKFold"). The one real call site already passes a real
+    # TimeSeriesSplit; a bare int default here was a latent trap for any future call site that
+    # forgot to, with nothing to catch it. Keyword-only + no default makes an omission a loud
+    # TypeError instead of a silent wrong split.
     from sklearn.ensemble import RandomForestClassifier, ExtraTreesClassifier
     from sklearn.linear_model import LogisticRegression
     from sklearn.calibration import CalibratedClassifierCV

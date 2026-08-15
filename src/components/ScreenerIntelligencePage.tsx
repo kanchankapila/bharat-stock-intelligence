@@ -7,6 +7,7 @@ import {
 import { trpc } from '../lib/trpc';
 import { cn } from '../lib/utils';
 import { ScreenerRankingPanel } from './ScreenerRankingPanel';
+import { LegacyScoreBanner } from './CanonicalSourceNote';
 
 // ── Tier config ───────────────────────────────────────────────────────────────
 const TIER = {
@@ -308,6 +309,14 @@ export function ScreenerIntelligencePage() {
               Recompute
             </button>
           </div>
+        </div>
+
+        {/* shell-parity-audit, 2026-08-14: v5's ScreenerLabPage and v6's ScreenerBrowserPage
+            already carry this disclaimer (same screener_performance_v2-backed Win Rate
+            leaderboard, same getScreenerLeaderboard query) but this page -- routed at
+            /screener-intelligence in v1, v2, v3, AND v6 (the default shell) -- didn't. */}
+        <div className="px-5 pt-3 flex-shrink-0">
+          <LegacyScoreBanner note="Tier, Win Rate, Avg Return, and Alpha are precomputed per-screener in screener_performance_v2. A from-scratch remeasurement of this same table found its win-rate figures didn't reproduce (one screener read 100%, remeasured at 65%), and 0 of 1,563 individual screeners tested clear a false-discovery correction -- treat this as a browse of what a screener currently flags, not a graded prediction. Check Alpha / Buy Recs for the canonical, regime-aware view." />
         </div>
 
         {/* Category cards row */}

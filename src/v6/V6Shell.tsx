@@ -70,7 +70,7 @@ const LiveClock: React.FC<{ marketOpen: boolean }> = ({ marketOpen }) => {
  * read-only and cached server-side; it must never block a research page from rendering.
  */
 const DataHealthChip: React.FC<{ onClick: () => void }> = ({ onClick }) => {
-  const { data, isLoading } = trpc.getSystemStatus.useQuery(undefined, {
+  const { data, isLoading, isError } = trpc.getSystemStatus.useQuery(undefined, {
     refetchInterval: 60_000,
     refetchOnWindowFocus: false,
   });
@@ -79,9 +79,13 @@ const DataHealthChip: React.FC<{ onClick: () => void }> = ({ onClick }) => {
   const degraded = rows.filter((r) => ['failed', 'stale', 'never'].includes(String(r.runState))).length;
   const failed = criticalIssues > 0;
   const warn = !failed && degraded > 0;
-  const Icon = failed ? ShieldAlert : ShieldCheck;
-  const label = isLoading ? 'Health …' : failed ? `Health ${criticalIssues} critical` : warn ? `Health ${degraded} degraded` : 'Health nominal';
-  const colors = failed
+  // data-honesty-review, 2026-08-14: a hard query failure (not the DB-internal errors
+  // monitor.router.ts already absorbs into runState) left `data` undefined, `rows` an empty
+  // array, and both counts 0 -- rendering "Health nominal", indistinguishable from a genuinely
+  // healthy system. isError must win over the derived-from-empty-array good state.
+  const Icon = isError || failed ? ShieldAlert : ShieldCheck;
+  const label = isError ? 'Health unknown' : isLoading ? 'Health …' : failed ? `Health ${criticalIssues} critical` : warn ? `Health ${degraded} degraded` : 'Health nominal';
+  const colors = isError || failed
     ? { bg: 'var(--v6-negative-soft)', fg: 'var(--v6-negative)', border: 'rgba(244,63,94,0.24)' }
     : warn
       ? { bg: 'var(--v6-warning-soft)', fg: 'var(--v6-warning)', border: 'rgba(245,158,11,0.24)' }
@@ -93,7 +97,7 @@ const DataHealthChip: React.FC<{ onClick: () => void }> = ({ onClick }) => {
       onClick={onClick}
       className="v6-chip hidden md:inline-flex items-center gap-1.5 text-[10px] font-bold"
       style={{ background: colors.bg, color: colors.fg, border: `1px solid ${colors.border}` }}
-      title="Open System Monitor for pipeline freshness and job failures"
+      title={isError ? 'System Monitor query failed -- open System Monitor to investigate' : 'Open System Monitor for pipeline freshness and job failures'}
       aria-label={`${label}. Open System Monitor`}
     >
       <Icon className="w-3 h-3" aria-hidden="true" />

@@ -54,7 +54,10 @@ export const commandCenterRouter = router({
         query += ` AND timeframe = ?`;
         params.push(input.horizon);
       }
-      query += ` ORDER BY unified_score DESC LIMIT ?`;
+      // trpc-surface-review, 2026-08-14: Postgres sorts NaN highest on ORDER BY DESC, so an
+      // unscored/NaN row would rank #1 instead of last. No live NaN currently (dormant), but
+      // risk.router.ts already guards its own score columns this way for the same reason.
+      query += ` ORDER BY NULLIF(unified_score, 'NaN'::float8) DESC LIMIT ?`;
       params.push(input.limit);
 
       const eodRows = await dbAll<any>(query, params);
@@ -207,7 +210,7 @@ export const commandCenterRouter = router({
         ) ts ON ts.symbol = ur.symbol
         WHERE ur.computed_at = ?
         ${convFilter}${horizonFilter}${sectorFilter}
-        ORDER BY ur.unified_score DESC
+        ORDER BY NULLIF(ur.unified_score, 'NaN'::float8) DESC
         LIMIT ?
       `, params);
 
@@ -257,7 +260,7 @@ export const commandCenterRouter = router({
                  cmp, entry_price, stop_loss, target_1, risk_reward, position_size_pct, reasoning
           FROM intraday_recommendations
           WHERE computed_at = ? AND classification IN ('Buy', 'Strong Buy')
-          ORDER BY intraday_score DESC
+          ORDER BY NULLIF(intraday_score, 'NaN'::float8) DESC
           LIMIT 60
         `, [latest]),
         dbGet<{ reasoning: string }>(`
