@@ -343,6 +343,15 @@ CREATE TABLE IF NOT EXISTS "daily_research_reports" (
 );
 CREATE UNIQUE INDEX uq_daily_research_reports_report_date_report_type ON public.daily_research_reports USING btree (report_date, report_type);
 
+-- ── data_quality_history ─────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS "data_quality_history" (
+  "check_id" TEXT NOT NULL,
+  "status" TEXT NOT NULL,
+  "detail" TEXT,
+  "checked_at" BIGINT NOT NULL
+);
+CREATE INDEX dq_history_check_time ON public.data_quality_history USING btree (check_id, checked_at DESC);
+
 -- ── data_quality_results ─────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS "data_quality_results" (
   "check_id" TEXT NOT NULL PRIMARY KEY,
@@ -796,7 +805,8 @@ CREATE TABLE IF NOT EXISTS "index_max_pain" (
   "total_ce_oi" BIGINT,
   "total_pe_oi" BIGINT,
   "fetched_at" TEXT NOT NULL,
-  PRIMARY KEY ("index_name", "date", "expiry")
+  "source" TEXT NOT NULL,
+  PRIMARY KEY ("source", "index_name", "date", "expiry")
 );
 
 -- ── index_option_oi ─────────────────────────────────────────────
@@ -988,88 +998,6 @@ CREATE TABLE IF NOT EXISTS "intraday_recommendations_history" (
 );
 CREATE INDEX idx_irh_symbol_date ON public.intraday_recommendations_history USING btree (symbol, computed_at, cycle_at);
 
--- Append-only point-in-time snapshot of unified_recommendations (migration 1786940000000).
--- The live table is keyed (symbol, computed_at) on a bare DATE, so a same-day re-run replaces
--- that morning's ranking; this preserves every run, keyed on generated_at.
-CREATE TABLE IF NOT EXISTS "unified_recommendations_history" (
-  "symbol" TEXT NOT NULL,
-  "computed_at" TEXT NOT NULL,
-  "generated_at" TIMESTAMPTZ NOT NULL,
-  "regime" TEXT,
-  "unified_score" DOUBLE PRECISION,
-  "conviction_level" TEXT,
-  "classification" TEXT,
-  "screener_stock_score" DOUBLE PRECISION,
-  "ml_score" DOUBLE PRECISION,
-  "confluence_score" DOUBLE PRECISION,
-  "technical_score" DOUBLE PRECISION,
-  "cs_score" DOUBLE PRECISION,
-  "breakout_score" DOUBLE PRECISION,
-  "smart_money_score" DOUBLE PRECISION,
-  "fundamental_score" DOUBLE PRECISION,
-  "engine_coverage_count" INTEGER,
-  "entry_zone_low" DOUBLE PRECISION,
-  "stop_loss" DOUBLE PRECISION,
-  "target_1" DOUBLE PRECISION,
-  "position_size_pct" DOUBLE PRECISION,
-  "sector" TEXT,
-  PRIMARY KEY ("symbol", "generated_at")
-);
-CREATE INDEX idx_urh_computed_generated ON public.unified_recommendations_history USING btree (computed_at, generated_at);
-
--- Point-in-time snapshot of quant_scores (migration 1786960000000). quant_scores is
--- PRIMARY KEY (symbol) with no date column, so every run overwrites it; without this table
--- its history is unrecoverable, which is what makes the canonical ranker un-backfillable.
-CREATE TABLE IF NOT EXISTS "quant_scores_history" (
-  "symbol" TEXT NOT NULL,
-  "snapshot_date" TEXT NOT NULL,
-  "return_1m" DOUBLE PRECISION,
-  "return_3m" DOUBLE PRECISION,
-  "return_6m" DOUBLE PRECISION,
-  "return_12m" DOUBLE PRECISION,
-  "above_sma200" BIGINT,
-  "sma200_distance_pct" DOUBLE PRECISION,
-  "momentum_score" DOUBLE PRECISION,
-  "annualized_vol" DOUBLE PRECISION,
-  "sharpe_ratio" DOUBLE PRECISION,
-  "max_drawdown_1y" DOUBLE PRECISION,
-  "vol_rank" DOUBLE PRECISION,
-  "sharpe_rank" DOUBLE PRECISION,
-  "trailing_pe" DOUBLE PRECISION,
-  "forward_pe" DOUBLE PRECISION,
-  "debt_to_equity" DOUBLE PRECISION,
-  "return_on_equity" DOUBLE PRECISION,
-  "operating_margins" DOUBLE PRECISION,
-  "revenue_growth" DOUBLE PRECISION,
-  "piotroski_f_score" BIGINT,
-  "valuation_score" DOUBLE PRECISION,
-  "bullish_screener_count" BIGINT,
-  "bearish_screener_count" BIGINT,
-  "screener_category_breadth" BIGINT,
-  "screener_net_score" DOUBLE PRECISION,
-  "confluence_rank" DOUBLE PRECISION,
-  "rank_momentum" DOUBLE PRECISION,
-  "rank_quality" DOUBLE PRECISION,
-  "rank_value" DOUBLE PRECISION,
-  "rank_composite" DOUBLE PRECISION,
-  "composite_class" TEXT,
-  "ohlcv_days" BIGINT,
-  "last_computed" TIMESTAMPTZ,
-  "return_1w" DOUBLE PRECISION,
-  "beta_1y" DOUBLE PRECISION,
-  "beta_6m" DOUBLE PRECISION,
-  "sortino_ratio" DOUBLE PRECISION,
-  "var_95" DOUBLE PRECISION,
-  "mf_quality_score" DOUBLE PRECISION,
-  "mf_momentum_score" DOUBLE PRECISION,
-  "mf_value_score" DOUBLE PRECISION,
-  "mf_risk_adj_score" DOUBLE PRECISION,
-  "mf_macro_score" DOUBLE PRECISION,
-  "mf_composite_score" DOUBLE PRECISION,
-  PRIMARY KEY ("symbol", "snapshot_date")
-);
-CREATE INDEX idx_qsh_snapshot_symbol ON public.quant_scores_history USING btree (snapshot_date, symbol);
-
 -- ── intraday_regime_history ─────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS "intraday_regime_history" (
   "computed_at" TEXT NOT NULL PRIMARY KEY,
@@ -1095,6 +1023,108 @@ CREATE TABLE IF NOT EXISTS "intraday_strategy_lifts" (
   "lift" DOUBLE PRECISION,
   "avg_pnl" DOUBLE PRECISION,
   PRIMARY KEY ("as_of", "dimension", "bucket")
+);
+
+-- ── investsights_announcement_intel ─────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS "investsights_announcement_intel" (
+  "source" TEXT NOT NULL,
+  "uid" TEXT NOT NULL,
+  "symbol" TEXT NOT NULL,
+  "category" TEXT,
+  "origin" TEXT,
+  "title" TEXT,
+  "description" TEXT,
+  "pdf_link" TEXT,
+  "announcement_date" TEXT,
+  "announcement_datetime" TEXT,
+  "has_ai_analysis" INTEGER,
+  "has_ai_research" INTEGER,
+  "extra_json" TEXT,
+  "fetched_at" TEXT DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY ("source", "uid")
+);
+
+-- ── investsights_factor_scores ─────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS "investsights_factor_scores" (
+  "symbol" TEXT NOT NULL,
+  "fetched_date" TEXT NOT NULL,
+  "company_name" TEXT,
+  "sector" TEXT,
+  "market_cap" REAL,
+  "close_price" REAL,
+  "change_pct" REAL,
+  "pe_ratio" REAL,
+  "roe" REAL,
+  "roce" REAL,
+  "debt_to_equity" REAL,
+  "revenue_growth_yoy" REAL,
+  "net_profit_margin" REAL,
+  "return_1m" REAL,
+  "source" TEXT,
+  "fetched_at" TEXT DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY ("symbol", "fetched_date")
+);
+
+-- ── investsights_fundamentals_history ─────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS "investsights_fundamentals_history" (
+  "symbol" TEXT NOT NULL,
+  "fetched_date" TEXT NOT NULL,
+  "ttm_revenue" REAL,
+  "ttm_ebitda" REAL,
+  "ttm_net_profit" REAL,
+  "ttm_total_assets" REAL,
+  "ttm_total_debt" REAL,
+  "ttm_shareholders_equity" REAL,
+  "ttm_operating_cash_flow" REAL,
+  "ttm_free_cash_flow" REAL,
+  "pe_ratio" REAL,
+  "price_to_book" REAL,
+  "price_to_sales" REAL,
+  "ev_to_ebitda" REAL,
+  "gross_profit_margin" REAL,
+  "operating_profit_margin" REAL,
+  "net_profit_margin" REAL,
+  "return_on_equity" REAL,
+  "return_on_assets" REAL,
+  "return_on_capital_employed" REAL,
+  "current_ratio" REAL,
+  "quick_ratio" REAL,
+  "debt_to_equity" REAL,
+  "interest_coverage" REAL,
+  "piotroski_score" INTEGER,
+  "altman_z_score" REAL,
+  "eps_basic" REAL,
+  "dividend_yield" REAL,
+  "fiscal_year" TEXT,
+  "period_end_date" TEXT,
+  "revenue_growth" REAL,
+  "net_income_growth" REAL,
+  "eps_growth" REAL,
+  "operating_income_growth" REAL,
+  "free_cash_flow_growth" REAL,
+  "dcf_stock_price" REAL,
+  "dcf_value" REAL,
+  "dcf_upside_pct" REAL,
+  "dcf_reliable" INTEGER,
+  "source" TEXT,
+  "fetched_at" TEXT DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY ("symbol", "fetched_date")
+);
+
+-- ── investsights_pe_band_history ─────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS "investsights_pe_band_history" (
+  "symbol" TEXT NOT NULL,
+  "date" TEXT NOT NULL,
+  "price" REAL,
+  "pe" REAL,
+  "band_low" REAL,
+  "band_mid_low" REAL,
+  "band_median" REAL,
+  "band_mid_high" REAL,
+  "band_high" REAL,
+  "source" TEXT,
+  "fetched_at" TEXT DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY ("symbol", "date")
 );
 
 -- ── job_heartbeat ─────────────────────────────────────────────
@@ -1277,6 +1307,23 @@ CREATE TABLE IF NOT EXISTS "marketsmojo_shareholding_history" (
 );
 CREATE INDEX idx_marketsmojo_shareholding_history_symbol ON public.marketsmojo_shareholding_history USING btree (symbol);
 
+-- ── marketsmojo_stock_picks ─────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS "marketsmojo_stock_picks" (
+  "id" TEXT NOT NULL PRIMARY KEY,
+  "symbol" TEXT NOT NULL,
+  "list_name" TEXT NOT NULL,
+  "added_date_label" TEXT,
+  "exit_date_label" TEXT,
+  "is_open" INTEGER,
+  "entry_price" REAL,
+  "exit_price" REAL,
+  "change_pct" REAL,
+  "current_price" REAL,
+  "bse500_return_pct" REAL,
+  "source" TEXT,
+  "fetched_at" TEXT DEFAULT CURRENT_TIMESTAMP
+);
+
 -- ── marketsmojo_technical_history ─────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS "marketsmojo_technical_history" (
   "symbol" TEXT NOT NULL,
@@ -1406,6 +1453,7 @@ CREATE TABLE IF NOT EXISTS "mc_estimates_hits_misses" (
   "estimates" DOUBLE PRECISION,
   "surprise" DOUBLE PRECISION,
   "type" TEXT,
+  "fetched_at" TEXT DEFAULT CURRENT_TIMESTAMP,
   PRIMARY KEY ("symbol", "quarter")
 );
 
@@ -1549,6 +1597,7 @@ CREATE TABLE IF NOT EXISTS "mc_seasonality_best_stocks" (
   "min_pct" DOUBLE PRECISION,
   "total_yr" DOUBLE PRECISION,
   "tot_yr" DOUBLE PRECISION,
+  "fetched_at" TEXT DEFAULT CURRENT_TIMESTAMP,
   PRIMARY KEY ("tab_type", "sc_id", "year", "month")
 );
 
@@ -1570,6 +1619,7 @@ CREATE TABLE IF NOT EXISTS "mc_stock_scans" (
   "symbol" TEXT NOT NULL,
   "scan_name" TEXT NOT NULL,
   "description" TEXT,
+  "fetched_at" TEXT DEFAULT CURRENT_TIMESTAMP,
   PRIMARY KEY ("symbol", "scan_name")
 );
 
@@ -1579,6 +1629,7 @@ CREATE TABLE IF NOT EXISTS "mc_stock_vitals" (
   "metric_name" TEXT NOT NULL,
   "score" TEXT,
   "description" TEXT,
+  "fetched_at" TEXT DEFAULT CURRENT_TIMESTAMP,
   PRIMARY KEY ("symbol", "metric_name")
 );
 
@@ -2090,6 +2141,57 @@ CREATE INDEX idx_qs_momentum ON public.quant_scores USING btree (rank_momentum D
 CREATE INDEX idx_qs_quality ON public.quant_scores USING btree (rank_quality DESC);
 CREATE INDEX idx_qs_value ON public.quant_scores USING btree (rank_value DESC);
 
+-- ── quant_scores_history ─────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS "quant_scores_history" (
+  "symbol" TEXT NOT NULL,
+  "snapshot_date" TEXT NOT NULL,
+  "return_1m" DOUBLE PRECISION,
+  "return_3m" DOUBLE PRECISION,
+  "return_6m" DOUBLE PRECISION,
+  "return_12m" DOUBLE PRECISION,
+  "above_sma200" BIGINT,
+  "sma200_distance_pct" DOUBLE PRECISION,
+  "momentum_score" DOUBLE PRECISION,
+  "annualized_vol" DOUBLE PRECISION,
+  "sharpe_ratio" DOUBLE PRECISION,
+  "max_drawdown_1y" DOUBLE PRECISION,
+  "vol_rank" DOUBLE PRECISION,
+  "sharpe_rank" DOUBLE PRECISION,
+  "trailing_pe" DOUBLE PRECISION,
+  "forward_pe" DOUBLE PRECISION,
+  "debt_to_equity" DOUBLE PRECISION,
+  "return_on_equity" DOUBLE PRECISION,
+  "operating_margins" DOUBLE PRECISION,
+  "revenue_growth" DOUBLE PRECISION,
+  "piotroski_f_score" BIGINT,
+  "valuation_score" DOUBLE PRECISION,
+  "bullish_screener_count" BIGINT,
+  "bearish_screener_count" BIGINT,
+  "screener_category_breadth" BIGINT,
+  "screener_net_score" DOUBLE PRECISION,
+  "confluence_rank" DOUBLE PRECISION,
+  "rank_momentum" DOUBLE PRECISION,
+  "rank_quality" DOUBLE PRECISION,
+  "rank_value" DOUBLE PRECISION,
+  "rank_composite" DOUBLE PRECISION,
+  "composite_class" TEXT,
+  "ohlcv_days" BIGINT,
+  "last_computed" TIMESTAMPTZ,
+  "return_1w" DOUBLE PRECISION,
+  "beta_1y" DOUBLE PRECISION,
+  "beta_6m" DOUBLE PRECISION,
+  "sortino_ratio" DOUBLE PRECISION,
+  "var_95" DOUBLE PRECISION,
+  "mf_quality_score" DOUBLE PRECISION,
+  "mf_momentum_score" DOUBLE PRECISION,
+  "mf_value_score" DOUBLE PRECISION,
+  "mf_risk_adj_score" DOUBLE PRECISION,
+  "mf_macro_score" DOUBLE PRECISION,
+  "mf_composite_score" DOUBLE PRECISION,
+  PRIMARY KEY ("symbol", "snapshot_date")
+);
+CREATE INDEX idx_qsh_snapshot_symbol ON public.quant_scores_history USING btree (snapshot_date, symbol);
+
 -- ── recommendation_log ─────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS "recommendation_log" (
   "id" BIGINT GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY,
@@ -2199,6 +2301,7 @@ CREATE TABLE IF NOT EXISTS "screener_catalog" (
   "horiz_mult" DOUBLE PRECISION,
   "signal_keywords" TEXT,
   "screener_url" TEXT,
+  "fetched_at" TEXT DEFAULT CURRENT_TIMESTAMP,
   PRIMARY KEY ("screener_id", "source")
 );
 
@@ -2837,6 +2940,17 @@ CREATE INDEX idx_sf_mktcap ON public.stock_fundamentals USING btree (market_cap)
 CREATE INDEX idx_sf_pe ON public.stock_fundamentals USING btree (trailing_pe);
 CREATE INDEX idx_sf_roe ON public.stock_fundamentals USING btree (return_on_equity);
 
+-- ── stock_mf_holdings ─────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS "stock_mf_holdings" (
+  "symbol" TEXT NOT NULL,
+  "date" TEXT NOT NULL,
+  "mf_holding_pct" REAL,
+  "num_funds" INTEGER,
+  "chg_vs_prev" REAL,
+  "fetched_at" TEXT DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY ("symbol", "date")
+);
+
 -- ── stock_ohlcv ─────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS "stock_ohlcv" (
   "symbol" TEXT NOT NULL,
@@ -2915,6 +3029,24 @@ CREATE INDEX idx_ss_score ON public.stock_scores USING btree (score);
 CREATE INDEX idx_ss_timeframe ON public.stock_scores USING btree (timeframe);
 CREATE INDEX idx_stock_scores_created_at ON public.stock_scores USING btree (created_at DESC);
 CREATE INDEX idx_stock_scores_symbol ON public.stock_scores USING btree (symbol);
+
+-- ── stockedge_high_delivery_alerts ─────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS "stockedge_high_delivery_alerts" (
+  "id" TEXT NOT NULL PRIMARY KEY,
+  "alert_date" TEXT NOT NULL,
+  "symbol" TEXT NOT NULL,
+  "security_id" INTEGER,
+  "exch" TEXT,
+  "name" TEXT,
+  "times_delivery_qty" REAL,
+  "delivery_qty" REAL,
+  "avg_5d_delivery_qty" REAL,
+  "close" REAL,
+  "close_chg_pct" REAL,
+  "slug" TEXT,
+  "source" TEXT,
+  "fetched_at" TEXT DEFAULT CURRENT_TIMESTAMP
+);
 
 -- ── strategy_performance ─────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS "strategy_performance" (
@@ -3014,8 +3146,8 @@ CREATE TABLE IF NOT EXISTS "technical_signals" (
   "delivery_pct" DOUBLE PRECISION,
   "fii_3d_net" DOUBLE PRECISION,
   "win_probability" DOUBLE PRECISION,
-  "created_at" TIMESTAMPTZ,
-  "updated_at" TIMESTAMPTZ,
+  "created_at" TIMESTAMPTZ DEFAULT now(),
+  "updated_at" TIMESTAMPTZ DEFAULT now(),
   "news_sentiment_score" DOUBLE PRECISION,
   "pcr_oi" DOUBLE PRECISION DEFAULT 1.0,
   "pcr_vol" DOUBLE PRECISION DEFAULT 1.0,
@@ -3285,17 +3417,12 @@ CREATE TABLE IF NOT EXISTS "technical_signals" (
   "cfo_cagr_5y" REAL,
   "cfi_cagr_5y" REAL,
   "cff_cagr_5y" REAL,
-  "screener_cat_earnings" REAL,
-  "screener_cat_inst_flow" REAL,
-  "screener_cat_momentum" REAL,
-  "screener_cat_breakout" REAL,
-  "screener_cat_valuation" REAL,
-  "screener_cat_reversal" REAL,
   "ext_is_overall_score" DOUBLE PRECISION,
   "ext_is_percentile_rank" DOUBLE PRECISION,
   "ext_tt_score" DOUBLE PRECISION,
   "enrichment_ffill_age_days" INTEGER,
   "flyer_probability" REAL,
+  "win_probability_scored_at" TIMESTAMPTZ,
   PRIMARY KEY ("symbol", "date")
 );
 CREATE INDEX idx_technical_signals_created_at ON public.technical_signals USING btree (created_at DESC);
@@ -3405,6 +3532,49 @@ CREATE TABLE IF NOT EXISTS "todos" (
   "createdAt" TIMESTAMPTZ DEFAULT now(),
   "updatedAt" TIMESTAMPTZ DEFAULT now(),
   "userId" TEXT
+);
+
+-- ── trade_journal ─────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS "trade_journal" (
+  "id" TEXT NOT NULL PRIMARY KEY,
+  "setup" TEXT NOT NULL,
+  "symbol" TEXT NOT NULL,
+  "signal_date" TEXT,
+  "trade_date" TEXT NOT NULL,
+  "side" TEXT NOT NULL DEFAULT 'LONG'::text,
+  "qty" DOUBLE PRECISION,
+  "entry_price" DOUBLE PRECISION,
+  "exit_price" DOUBLE PRECISION,
+  "notes" TEXT,
+  "logged_at" TIMESTAMPTZ,
+  "model_open" DOUBLE PRECISION,
+  "model_close" DOUBLE PRECISION,
+  "universe_ret" DOUBLE PRECISION,
+  "model_excess_pct" DOUBLE PRECISION,
+  "real_excess_pct" DOUBLE PRECISION,
+  "slippage_pct" DOUBLE PRECISION,
+  "synced_at" TIMESTAMPTZ,
+  "created_at" TIMESTAMPTZ DEFAULT now()
+);
+CREATE INDEX idx_trade_journal_setup_date ON public.trade_journal USING btree (setup, trade_date);
+CREATE INDEX idx_trade_journal_trade_date ON public.trade_journal USING btree (trade_date);
+
+-- ── trading80_call_alerts ─────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS "trading80_call_alerts" (
+  "id" TEXT NOT NULL PRIMARY KEY,
+  "symbol" TEXT NOT NULL,
+  "list_name" TEXT NOT NULL,
+  "call_time_label" TEXT,
+  "call_type" TEXT,
+  "call_duration" TEXT,
+  "target_price" REAL,
+  "stop_loss" REAL,
+  "cmp" REAL,
+  "potential_pct" REAL,
+  "performance_pct" REAL,
+  "prob_success_label" TEXT,
+  "source" TEXT,
+  "fetched_at" TEXT DEFAULT CURRENT_TIMESTAMP
 );
 
 -- ── trendlyne_adv_tech_daily ─────────────────────────────────────────────
@@ -3542,6 +3712,19 @@ CREATE TABLE IF NOT EXISTS "trendlyne_fno_activity" (
   "buildup" TEXT,
   "fetched_at" TEXT DEFAULT CURRENT_TIMESTAMP,
   PRIMARY KEY ("symbol", "date", "expiry", "screen_type", "option_type", "strike")
+);
+
+-- ── trendlyne_market_insights ─────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS "trendlyne_market_insights" (
+  "id" TEXT NOT NULL PRIMARY KEY,
+  "symbol" TEXT NOT NULL,
+  "label" TEXT NOT NULL,
+  "notification" TEXT,
+  "event_time" TEXT NOT NULL,
+  "n_color" TEXT,
+  "source_url" TEXT,
+  "source" TEXT,
+  "fetched_at" TEXT DEFAULT CURRENT_TIMESTAMP
 );
 
 -- ── trendlyne_pb_history ─────────────────────────────────────────────
@@ -3729,6 +3912,33 @@ CREATE INDEX idx_ur_conviction ON public.unified_recommendations USING btree (co
 CREATE INDEX idx_ur_date_score ON public.unified_recommendations USING btree (computed_at, unified_score DESC);
 CREATE INDEX idx_ur_generated_at ON public.unified_recommendations USING btree (computed_at, generated_at);
 CREATE UNIQUE INDEX uq_unified_recommendations_symbol_computed_at ON public.unified_recommendations USING btree (symbol, computed_at);
+
+-- ── unified_recommendations_history ─────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS "unified_recommendations_history" (
+  "symbol" TEXT NOT NULL,
+  "computed_at" TEXT NOT NULL,
+  "generated_at" TIMESTAMPTZ NOT NULL,
+  "regime" TEXT,
+  "unified_score" DOUBLE PRECISION,
+  "conviction_level" TEXT,
+  "classification" TEXT,
+  "screener_stock_score" DOUBLE PRECISION,
+  "ml_score" DOUBLE PRECISION,
+  "confluence_score" DOUBLE PRECISION,
+  "technical_score" DOUBLE PRECISION,
+  "cs_score" DOUBLE PRECISION,
+  "breakout_score" DOUBLE PRECISION,
+  "smart_money_score" DOUBLE PRECISION,
+  "fundamental_score" DOUBLE PRECISION,
+  "engine_coverage_count" INTEGER,
+  "entry_zone_low" DOUBLE PRECISION,
+  "stop_loss" DOUBLE PRECISION,
+  "target_1" DOUBLE PRECISION,
+  "position_size_pct" DOUBLE PRECISION,
+  "sector" TEXT,
+  PRIMARY KEY ("symbol", "generated_at")
+);
+CREATE INDEX idx_urh_computed_generated ON public.unified_recommendations_history USING btree (computed_at, generated_at);
 
 -- ── unified_signal_outcomes ─────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS "unified_signal_outcomes" (
