@@ -54,8 +54,19 @@ def test_generated_at_present_in_insert_columns_values_and_conflict_update():
 def test_run_stamps_one_timestamp_per_run_not_per_row():
     """One run is one generation event. A per-row now() would imply precision that does not
     exist and would make 'was this snapshot pre-market' answerable only per-row."""
-    assert re.search(r"generated_at\s*=\s*datetime\.now\(timezone\.utc\)", RANKER_SRC), \
-        "expected a single run-level UTC timestamp"
+    # Accepts either the bare clock read or the collision-safe helper that replaced it
+    # (_next_generated_at, added 2026-08-15). What matters here is that ONE run-level UTC
+    # timestamp is assigned once -- not which source produced it.
+    #
+    # The helper exists because datetime.now()'s resolution is the system clock tick (0.015625 s
+    # on Windows; 2000 back-to-back calls return ONE distinct value), so two runs inside that
+    # window shared a generated_at and unified_recommendations_history's
+    # `ON CONFLICT(symbol, generated_at) DO NOTHING` silently discarded the second snapshot.
+    # See _next_generated_at()'s docstring in unified_ranker.py.
+    assert re.search(
+        r"generated_at\s*=\s*(datetime\.now\(timezone\.utc\)|_next_generated_at\(\))",
+        RANKER_SRC,
+    ), "expected a single run-level UTC timestamp"
     # Bound to the row dict, not recomputed inside the results loop.
     assert "'generated_at':            generated_at" in RANKER_SRC or \
            re.search(r"'generated_at':\s+generated_at", RANKER_SRC), \
