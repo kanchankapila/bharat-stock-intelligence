@@ -84,18 +84,69 @@ describe('signalOutcomesService.computeSignalOutcomes stamps signal_source', () 
   });
 });
 
-describe('getWinRateStats scopes to signal_source=technical', () => {
+describe('getWinRateStats scopes to one signal_source AND one label_definition', () => {
   it('excludes confluence-sourced outcomes from the win-rate report', async () => {
     db.prepare(`INSERT INTO signal_outcomes
-      (symbol, signal_date, horizon_days, entry_price, outcome, return_pct, signal_source)
-      VALUES ('DDD', '2020-01-01', 5, 100, 'WIN', 5.0, 'technical')`).run();
+      (symbol, signal_date, horizon_days, entry_price, outcome, return_pct, signal_source, label_definition)
+      VALUES ('DDD', '2020-01-01', 5, 100, 'WIN', 5.0, 'technical', 'path_barrier')`).run();
     db.prepare(`INSERT INTO signal_outcomes
-      (symbol, signal_date, horizon_days, entry_price, outcome, return_pct, signal_source)
-      VALUES ('EEE', '2020-01-01', 5, 100, 'LOSS', -5.0, 'confluence')`).run();
+      (symbol, signal_date, horizon_days, entry_price, outcome, return_pct, signal_source, label_definition)
+      VALUES ('EEE', '2020-01-01', 5, 100, 'LOSS', -5.0, 'confluence', 'terminal_pct2')`).run();
 
     const stats = await getWinRateStats();
 
     expect(stats.overall.total).toBe(1);
     expect(stats.overall.wins).toBe(1);
+  });
+
+  // Regression for the contamination found live 2026-08-15: signal_source='technical' was NOT
+  // label-uniform. 1,722 unlabeled rows (written by this service, which never stamped the
+  // column) sat at a 99.4% win rate inside the same date range as 198,723 labeled path_barrier
+  // rows at 68.7%. Filtering on signal_source alone let them blend into the headline number.
+  it('excludes technical rows with a NULL label_definition', async () => {
+    db.prepare(`INSERT INTO signal_outcomes
+      (symbol, signal_date, horizon_days, entry_price, outcome, return_pct, signal_source, label_definition)
+      VALUES ('FFF', '2020-01-02', 5, 100, 'WIN', 5.0, 'technical', 'path_barrier')`).run();
+    // Same source, no label — the shape that was silently inflating the win rate.
+    db.prepare(`INSERT INTO signal_outcomes
+      (symbol, signal_date, horizon_days, entry_price, outcome, return_pct, signal_source)
+      VALUES ('GGG', '2020-01-02', 5, 100, 'WIN', 99.0, 'technical')`).run();
+
+    const stats = await getWinRateStats();
+
+    expect(stats.overall.total).toBe(1);
+    expect(stats.labelDefinition).toBe('path_barrier');
+  });
+
+  // The writer must stamp the label, or the filter above silently drops every row it produces
+  // -- which is exactly the state this service was in before 2026-08-15. Calls the real
+  // function rather than grepping the source, per .claude/rules/recurring-bugs.md's "a test
+  // that reimplements the logic under test passes against the unfixed source".
+  it('computeSignalOutcomes stamps label_definition on the rows it writes', async () => {
+    db.prepare(`INSERT INTO technical_signals (symbol, date, cmp, signal_score, signals_json, stop_loss)
+      VALUES ('HHH', '2020-01-01', 100.0, 6, '[]', NULL)`).run();
+    db.prepare(`INSERT OR IGNORE INTO stock_ohlcv (symbol, date, open, high, low, close, volume)
+      VALUES ('HHH', '2020-01-06', 105.0, 105.0, 105.0, 105.0, 100000)`).run();
+
+    await computeSignalOutcomes(5);
+
+    const row = db.prepare(
+      `SELECT label_definition FROM signal_outcomes WHERE symbol='HHH' AND horizon_days=5`
+    ).get() as any;
+    expect(row?.label_definition).toBe('path_barrier');
+  });
+
+  // And the row it writes must actually survive the report's own filter -- the two halves of
+  // this fix are only correct together.
+  it('a row written by computeSignalOutcomes is counted by getWinRateStats', async () => {
+    db.prepare(`INSERT INTO technical_signals (symbol, date, cmp, signal_score, signals_json, stop_loss)
+      VALUES ('III', '2020-01-01', 100.0, 6, '[]', NULL)`).run();
+    db.prepare(`INSERT OR IGNORE INTO stock_ohlcv (symbol, date, open, high, low, close, volume)
+      VALUES ('III', '2020-01-06', 105.0, 105.0, 105.0, 105.0, 100000)`).run();
+
+    await computeSignalOutcomes(5);
+    const stats = await getWinRateStats();
+
+    expect(stats.overall.total).toBe(1);
   });
 });

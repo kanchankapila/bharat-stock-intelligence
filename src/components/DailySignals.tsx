@@ -675,6 +675,23 @@ export function DailySignals({ onSelectStock, watchlist = [], onToggleWatchlist 
             <p className="text-[10px] text-slate-400">Based on actual stock prices N days after signal date</p>
           </div>
 
+          {/* A win rate is not a comparable number without the labeling convention behind it:
+              measurement.md records path_barrier (max-favorable-excursion) and terminal_pct2
+              (fixed +/-2% terminal) producing 88-91% vs 41-44% over the IDENTICAL calendar
+              window, i.e. the gap is almost entirely the label, not skill. Rendering the
+              percentage alone invites reading a path-barrier number as if it were a terminal
+              one. Same disclosure principle as LegacyScoreBanner on the non-canonical scoring
+              pages. */}
+          {winRates?.labelDefinition && (
+            <p className="text-[10px] leading-relaxed text-amber-300/80 border border-amber-500/20 bg-amber-500/5 rounded-lg px-2.5 py-1.5">
+              Labeled <span className="font-mono font-bold">{winRates.labelDefinition}</span> —
+              a path-based max-favorable-excursion rule, counting a WIN if the barrier was touched
+              at any point in the window. It is <span className="font-bold">not comparable</span> to
+              a fixed terminal-return win rate, which runs far lower on the same signals. Technical
+              scanner outcomes only; confluence-sourced signals use a different rule and are excluded.
+            </p>
+          )}
+
           {!winRates && (
             <div className="flex items-center gap-2 text-sm text-slate-400">
               <Loader2 className="w-4 h-4 animate-spin" />

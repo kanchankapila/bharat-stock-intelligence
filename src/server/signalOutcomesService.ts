@@ -31,6 +31,11 @@ export interface WinRateStats {
   byHorizon: Record<HorizonDays, { total: number; wins: number; winRate: number; avgReturn: number }>;
   byScoreBucket: Record<string, { total: number; wins: number; winRate: number; avgReturn: number }>;
   recentOutcomes: OutcomeRow[];
+  /** Which labeling convention every number above was computed under. Surfaced so a consumer
+   *  can disclose it: `.claude/rules/measurement.md` records path_barrier and terminal_pct2
+   *  producing 88-91% vs 41-44% win rates over the IDENTICAL calendar window, so a win rate
+   *  quoted without its label definition is not a comparable number. */
+  labelDefinition: 'path_barrier';
 }
 
 // signal_source='technical' (2026-08): this grades technical_signals rows -- the same source
@@ -40,16 +45,34 @@ export interface WinRateStats {
 // whichever ran first silently blocked the other. Stamping 'technical' here lets ON CONFLICT
 // correctly update-in-place when either writer re-touches the same key, instead of colliding
 // with the unrelated confluence_outcome_tracker.py writer that also shares this table.
+// label_definition='path_barrier' (added 2026-08-15): this writer never stamped the column at
+// all, while its two sibling writers of this same table both do -- outcome_resolver.py stamps
+// path_barrier, confluence_outcome_tracker.py stamps terminal_pct2. Measured live, that left
+// 1,722 rows with a NULL label at a 99.4% win rate sitting alongside 198,723 labeled
+// path_barrier rows at 68.7%, inside the same date range, indistinguishable to any consumer.
+//
+// path_barrier is the CORRECT label for this writer, not a convenience: computeSignalOutcomes
+// below grades a WIN on `maxReturnPct > 2.0` where maxReturnPct is MAX(high) across the whole
+// horizon -- a path-based max-favorable-excursion rule, exactly what path_barrier denotes. The
+// near-100% win rate is not a bug in the grading, it is what MFE labeling DOES (measurement.md
+// records path_barrier at 88-91% against terminal_pct2's 41-44% over an identical window), and
+// it is precisely why the label has to travel with the number.
+//
+// Safe in DO UPDATE, unlike the signal_generated_at case in recurring-bugs.md: that bug was a
+// provenance TIMESTAMP silently becoming a last-seen time on every re-run. This is a constant
+// describing the rule this code applies, so re-stamping it is idempotent and also repairs the
+// existing NULL rows the next time each is re-graded.
 const UPSERT_OUTCOME_SQL = `
   INSERT INTO signal_outcomes (
     symbol, signal_date, horizon_days, entry_price,
     check_date, exit_price, return_pct, max_return_pct, outcome,
-    signal_score, signals_json, computed_at, signal_source
-  ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, 'technical')
+    signal_score, signals_json, computed_at, signal_source, label_definition
+  ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, 'technical', 'path_barrier')
   ON CONFLICT(symbol, signal_date, horizon_days, signal_source) DO UPDATE SET
     check_date=excluded.check_date, exit_price=excluded.exit_price,
     return_pct=excluded.return_pct, max_return_pct=excluded.max_return_pct,
-    outcome=excluded.outcome, computed_at=excluded.computed_at
+    outcome=excluded.outcome, computed_at=excluded.computed_at,
+    label_definition=excluded.label_definition
 `;
 
 export async function computeSignalOutcomes(horizonDays: HorizonDays = 5): Promise<{
@@ -210,8 +233,27 @@ export async function getWinRateStats(): Promise<WinRateStats> {
   // signal_source='technical' (2026-08): confluence-sourced rows use an incompatible fixed
   // +/-2% labeling threshold -- blending both into one win-rate report would mix two different
   // questions, matching every other signal-accuracy consumer's choice in this codebase.
+  //
+  // label_definition='path_barrier' added 2026-08-15: signal_source alone is NOT a reliable
+  // proxy for the labeling convention, which is what actually has to be uniform here. Measured
+  // live, signal_source='technical' resolves to THREE groups, not one:
+  //     path_barrier   198,723 rows   68.7% win
+  //     (NULL)           1,722 rows   99.4% win   <-- unlabeled, 2026-07-21..2026-08-02
+  //     confluence/terminal_pct2 is the separate 318,292-row family already excluded above
+  // The 1,722 unlabeled rows sit INSIDE path_barrier's own date range (2026-05-16..2026-08-13),
+  // so they are not old data safely below the window -- `ORDER BY signal_date DESC LIMIT 2000`
+  // had no label filter at all, and the only reason they aren't in today's result is that
+  // recent signal volume happens to fill 2,000 rows from 2026-08-13 alone. A few low-volume
+  // days and the window reaches past 2026-08-02 and silently mixes a 99.4%-win-rate slice into
+  // the headline accuracy number, with nothing failing or looking wrong.
+  //
+  // Filter on the thing that must be uniform, not on a proxy for it. Same shape as
+  // `.claude/rules/recurring-bugs.md`'s "enum-ish column with two spellings defeats an IN list"
+  // -- a filter that is correct only by coincidence of the current data distribution.
   const rows = await dbAll(`
-    SELECT * FROM signal_outcomes WHERE outcome != 'PENDING' AND signal_source = 'technical'
+    SELECT * FROM signal_outcomes
+    WHERE outcome != 'PENDING' AND signal_source = 'technical'
+      AND label_definition = 'path_barrier'
     ORDER BY signal_date DESC LIMIT 2000
   `) as OutcomeRow[];
 
@@ -281,6 +323,7 @@ export async function getWinRateStats(): Promise<WinRateStats> {
   const recentOutcomes = rows.slice(0, 50);
 
   return {
+    labelDefinition: 'path_barrier',
     overall,
     bySignalType: Object.fromEntries(
       Object.entries(bySignalType).map(([k, v]) => [k, { total: v.total, wins: v.wins, winRate: v.winRate, avgReturn: v.avgReturn }])
