@@ -232,6 +232,21 @@ const TABLE_FRESHNESS_CHECKS: TableFreshnessConfig[] = [
   // 2026-08-06 urls.txt data analysis (docs/url_explorer) -- see institutional_deals_fetcher.py.
   { id: 'institutional-deal-signals-recency', label: 'institutional_deal_signals (MC ranked topInvestor buy/sell)',
     category: 'flows', critical: false, table: 'institutional_deal_signals', dateColumn: 'deal_date', warnDays: 5, failDays: 10 },
+  // 2026-08-15 registry-archive-only backlog closure -- see stockedge_high_delivery_fetcher.py.
+  // A daily top-5 alert list, not sparse-by-nature, so the same tight thresholds as its
+  // sibling ranked-deal feed above.
+  { id: 'stockedge-high-delivery-alerts-recency', label: 'stockedge_high_delivery_alerts (StockEdge top-5 delivery-spike alerts)',
+    category: 'flows', critical: false, table: 'stockedge_high_delivery_alerts', dateColumn: 'alert_date', warnDays: 5, failDays: 10 },
+  // 2026-08-15 registry-archive-only backlog closure -- see trading80_call_alerts_fetcher.py.
+  // No native date column (fetched_at is the only timestamp on this vendor-calls table), so
+  // nativeDateColumn stays false (the default) and tradingDayAware handles the weekend gap.
+  { id: 'trading80-call-alerts-recency', label: 'trading80_call_alerts (Trading80 vendor buy/sell calls)',
+    category: 'flows', critical: false, table: 'trading80_call_alerts', dateColumn: 'fetched_at', warnDays: 5, failDays: 10 },
+  // 2026-08-15 registry-archive-only backlog closure -- see marketsmojo_stock_picks_fetcher.py.
+  // Sparse by nature (2-3 total picks on a normal day, not one per stock per day), so no
+  // failDays -- matches insider-trades-recency's existing warn-only style for thin feeds.
+  { id: 'marketsmojo-stock-picks-recency', label: 'marketsmojo_stock_picks (MarketsMojo vendor model-portfolio picks)',
+    category: 'flows', critical: false, table: 'marketsmojo_stock_picks', dateColumn: 'fetched_at', warnDays: 10 },
   // Found 2026-08-13 (fetcher-accuracy-review sweep, batch 2).
   { id: 'stock-block-deal-daily-recency', label: 'stock_block_deal_daily (per-symbol daily block-deal roll-up)',
     category: 'flows', critical: false, table: 'stock_block_deal_daily', dateColumn: 'date', warnDays: 14 },
