@@ -26,7 +26,10 @@ export interface DataQualityCheck {
   label: string;
   category:
     | 'ohlcv' | 'signals' | 'ml' | 'scoring' | 'fundamentals'
-    | 'options' | 'flows' | 'outcomes' | 'reference' | 'macro';
+    | 'options' | 'flows' | 'outcomes' | 'reference' | 'macro'
+    // 'meta' = checks ABOUT the check suite itself (new-failure transitions, unvarying
+    // verdicts) rather than about a data table. Added 2026-08-15 with dq-new-failures.
+    | 'meta';
   critical: boolean;
   sql: string;
   params?: unknown[];
@@ -1498,6 +1501,97 @@ export const DATA_QUALITY_CHECKS: DataQualityCheck[] = [
   // runs, and a same-day denominator reads as a false collapse -- the same bug already fixed
   // once in technical-signals-freshness-coverage.
   {
+    id: 'dq-new-failures',
+    label: 'no data-quality check has newly started failing since the previous run',
+    category: 'meta',
+    critical: true,
+    // THE alerting fix (2026-08-15). The problem was never detection -- it was that a genuine
+    // FAIL sat unread inside "145/148 passed, 0 critical failures", because absolute severity
+    // cannot distinguish "this broke an hour ago" from "this has been red for three weeks".
+    // Novelty is the signal: a pass->fail TRANSITION is urgent and actionable; a long-standing
+    // red is a backlog item. This is critical:true precisely because it fires rarely and only
+    // on something that just changed -- the opposite of the alert fatigue that buried the
+    // original failure.
+    sql: `WITH ranked AS (
+            SELECT check_id, status, checked_at,
+                   ROW_NUMBER() OVER (PARTITION BY check_id ORDER BY checked_at DESC) AS rn
+              FROM data_quality_history
+             WHERE checked_at > (EXTRACT(epoch FROM now()) - 86400 * 7) * 1000
+          ), pairs AS (
+            SELECT c.check_id,
+                   MAX(CASE WHEN c.rn = 1 THEN c.status END) AS now_status,
+                   MAX(CASE WHEN c.rn = 2 THEN c.status END) AS prev_status
+              FROM ranked c WHERE c.rn <= 2 GROUP BY c.check_id
+          )
+          SELECT COUNT(*) FILTER (WHERE now_status IN ('fail','error') AND prev_status = 'pass') AS newly_failing,
+                 COUNT(*) FILTER (WHERE now_status = 'warn' AND prev_status = 'pass') AS newly_warning,
+                 COALESCE(string_agg(check_id, ', ') FILTER (WHERE now_status IN ('fail','error') AND prev_status = 'pass'), '') AS newly_failing_ids,
+                 COUNT(*) AS checks_with_history
+            FROM pairs`,
+    evaluate: (row) => {
+      const hist = Number(row?.checks_with_history ?? 0);
+      if (hist === 0) {
+        return { status: 'pass', detail: 'No verdict history yet — needs two runs to compare. Re-check after the next data-quality run.' };
+      }
+      const nf = Number(row?.newly_failing ?? 0);
+      const nw = Number(row?.newly_warning ?? 0);
+      if (nf > 0) {
+        return {
+          status: 'fail',
+          detail: `${nf} check(s) went pass -> fail since the previous run: ${row?.newly_failing_ids}. ` +
+                  `A transition is the actionable signal — investigate these before any long-standing red.`,
+        };
+      }
+      if (nw > 0) return { status: 'warn', detail: `${nw} check(s) went pass -> warn since the previous run.` };
+      return { status: 'pass', detail: `No new failures across ${hist} checks with history.` };
+    },
+  },
+
+  {
+    id: 'dq-uninformative-checks',
+    label: 'no data-quality check has an unvarying verdict (a check that cannot fail proves nothing)',
+    category: 'meta',
+    critical: false,
+    // Class-3 detection, automated for all ~150 checks at once. A verdict that never varies
+    // carries zero information whether it is permanently green or permanently red -- this is
+    // exactly how drift_detector fired EMERGENCY_RETRAIN at 16/16 historical evaluation points
+    // across 14 months while looking like a functioning monitor, and how two checks written in
+    // this same session passed only vacuously. Previously this could only be found by manually
+    // replaying one detector over history; now it surfaces on its own.
+    //
+    // Needs >= 10 runs before judging, so a newly-added check is not flagged for being new.
+    // Permanently-green is reported separately from permanently-red: green-forever is usually a
+    // too-loose threshold, red-forever is usually a real defect nobody is acting on.
+    sql: `WITH agg AS (
+            SELECT check_id, COUNT(*) AS runs, COUNT(DISTINCT status) AS distinct_status,
+                   MIN(status) AS only_status
+              FROM data_quality_history
+             WHERE checked_at > (EXTRACT(epoch FROM now()) - 86400 * 30) * 1000
+             GROUP BY check_id
+          )
+          SELECT COUNT(*) FILTER (WHERE runs >= 10) AS judged,
+                 COUNT(*) FILTER (WHERE runs >= 10 AND distinct_status = 1 AND only_status <> 'pass') AS stuck_bad,
+                 COALESCE(string_agg(check_id, ', ') FILTER (WHERE runs >= 10 AND distinct_status = 1 AND only_status <> 'pass'), '') AS stuck_bad_ids
+            FROM agg`,
+    evaluate: (row) => {
+      const judged = Number(row?.judged ?? 0);
+      if (judged === 0) {
+        return { status: 'pass', detail: 'Not enough verdict history yet (needs 10+ runs per check) — re-check in a few days.' };
+      }
+      const bad = Number(row?.stuck_bad ?? 0);
+      if (bad > 0) {
+        return {
+          status: 'warn',
+          detail: `${bad} check(s) have returned the SAME non-pass verdict on every one of their last 10+ runs: ` +
+                  `${row?.stuck_bad_ids}. Either the defect is real and unactioned, or the check cannot pass — ` +
+                  `both mean it is currently providing no signal.`,
+        };
+      }
+      return { status: 'pass', detail: `${judged} checks judged over 10+ runs; none stuck on a single non-pass verdict.` };
+    },
+  },
+
+  {
     id: 'ml-signal-columns-populated',
     label: 'every ML signal column on technical_signals is actually being written',
     category: 'ml',
@@ -1794,10 +1888,33 @@ const DDL = `CREATE TABLE IF NOT EXISTS data_quality_results (
   checked_at BIGINT
 )`;
 
+// Append-only verdict history, added 2026-08-15. data_quality_results above is a SNAPSHOT --
+// one row per check, overwritten every run -- so it cannot answer the two questions that
+// actually decide whether a failure gets acted on:
+//   1. Did this check just START failing? A pass->fail transition is urgent; a check red for
+//      three weeks is a backlog item. Without history both look identical, which is how a real
+//      FAIL sat unread inside "145/148 passed, 0 critical failures" (2026-08-15).
+//   2. Has this check EVER failed? A verdict that never varies carries zero information whether
+//      it is always green or always red -- the exact defect that let drift_detector fire
+//      EMERGENCY_RETRAIN 16/16 across 14 months while looking like a working monitor. With
+//      history this is detectable automatically, for every check, instead of one at a time.
+// Retention is bounded by the pruning in persistHistory (90 days) so this cannot grow unbounded.
+const HISTORY_DDL = `CREATE TABLE IF NOT EXISTS data_quality_history (
+  check_id   TEXT NOT NULL,
+  status     TEXT NOT NULL,
+  detail     TEXT,
+  checked_at BIGINT NOT NULL
+)`;
+const HISTORY_IDX = `CREATE INDEX IF NOT EXISTS dq_history_check_time
+  ON data_quality_history (check_id, checked_at DESC)`;
+
 let _tableReady: Promise<void> | null = null;
 function ensureTable(): Promise<void> {
   if (!_tableReady) {
-    _tableReady = dbExec(DDL).catch(() => { /* already exists / DB not ready */ });
+    _tableReady = dbExec(DDL)
+      .then(() => dbExec(HISTORY_DDL))
+      .then(() => dbExec(HISTORY_IDX))
+      .catch(() => { /* already exists / DB not ready */ });
   }
   return _tableReady;
 }
@@ -1814,6 +1931,14 @@ async function persistResult(check: DataQualityCheck, result: { status: DataQual
         check.label, check.category, check.critical ? 1 : 0, result.status, result.detail, Date.now(),
       ],
     );
+    // Append to history as well as upserting the snapshot. Best-effort and separately
+    // try/caught: a history write must never break either the snapshot or the check run.
+    try {
+      await dbRun(
+        `INSERT INTO data_quality_history (check_id, status, detail, checked_at) VALUES (?, ?, ?, ?)`,
+        [check.id, result.status, result.detail, Date.now()],
+      );
+    } catch { /* history is diagnostic, never load-bearing */ }
   } catch {
     // Persistence must never break the check run itself.
   }
