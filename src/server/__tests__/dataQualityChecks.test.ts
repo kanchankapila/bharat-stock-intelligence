@@ -541,3 +541,43 @@ describe('audit regression guards (2026-08-11)', () => {
     ]) expect(ids).toContain(id);
   });
 });
+
+describe('technical-signals-provenance-timestamps', () => {
+  const check = DATA_QUALITY_CHECKS.find(c => c.id === 'technical-signals-provenance-timestamps')!;
+  const now = new Date('2026-08-15T12:00:00Z');
+
+  it('is registered', () => {
+    expect(check).toBeDefined();
+  });
+
+  it('NEGATIVE CONTROL: fails when the columns are dead — the exact pre-migration state', () => {
+    // All 73,563 rows had created_at/updated_at NULL before migration 1787040000000. This is the
+    // state that made the 2026-08-15 win_probability look-ahead undetectable; if this check
+    // cannot fail on it, it protects nothing.
+    const r = check.evaluate!({ todays_rows: 2192, created_at_set: 0, updated_at_set: 0 }, now);
+    expect(r.status).toBe('fail');
+    expect(r.detail).toContain('created_at');
+    expect(r.detail).toContain('updated_at');
+  });
+
+  it('fails when only updated_at is dead (DEFAULT applied but trigger missing)', () => {
+    // The realistic partial-failure mode: a DEFAULT fires on INSERT so created_at populates,
+    // while updated_at stays NULL because the BEFORE UPDATE trigger was dropped. That still
+    // destroys write-time provenance for the later enrichment UPDATEs, which is the whole point.
+    const r = check.evaluate!({ todays_rows: 2192, created_at_set: 2192, updated_at_set: 0 }, now);
+    expect(r.status).toBe('fail');
+    expect(r.detail).toContain('updated_at');
+    expect(r.detail).not.toContain('created_at and');
+  });
+
+  it('passes when both are populated', () => {
+    const r = check.evaluate!({ todays_rows: 2192, created_at_set: 2192, updated_at_set: 2192 }, now);
+    expect(r.status).toBe('pass');
+  });
+
+  it('passes vacuously only when no rows exist yet today (holiday/pre-scan)', () => {
+    const r = check.evaluate!({ todays_rows: 0, created_at_set: 0, updated_at_set: 0 }, now);
+    expect(r.status).toBe('pass');
+    expect(r.detail).toContain('nothing to check');
+  });
+});

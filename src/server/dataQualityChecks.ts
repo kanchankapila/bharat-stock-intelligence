@@ -1498,6 +1498,58 @@ export const DATA_QUALITY_CHECKS: DataQualityCheck[] = [
   // runs, and a same-day denominator reads as a false collapse -- the same bug already fixed
   // once in technical-signals-freshness-coverage.
   {
+    id: 'technical-signals-provenance-timestamps',
+    label: 'technical_signals.created_at/updated_at are actually populated on rows written today',
+    category: 'ml',
+    critical: false,
+    // A dead PROVENANCE column is categorically different from a dead ML feature, and must not be
+    // absorbed into the aggregate dead-column count below. Both were 100% NULL on all 73,563 rows
+    // until migration 1787040000000 -- they had no DEFAULT and no writer set them -- and
+    // 'technical-signals-feature-coverage' counted them silently inside a baseline of 53 dead
+    // columns, where two more were indistinguishable from an unpopulated feature.
+    //
+    // The cost of that blindness (2026-08-15): win_probability is written by a LATER UPDATE than
+    // the row's creation, so "was this knowable before the next session's open?" can only be
+    // answered from the UPDATE time. computed_at records the row's BIRTH -- a lower bound that
+    // cannot prove a later write landed in time. With updated_at dead, a naive read of computed_at
+    // ("same-day, looks fine") produced a confident, wrong "win_probability has forward edge,
+    // IC +0.0364, t=+2.58" that had to be retracted once the writer's weekly cadence was traced
+    // through the scheduler instead. See recurring-bugs.md.
+    //
+    // Scoped to rows created TODAY: historical rows are NULL by design (migration 1787040000000
+    // deliberately did not backfill -- stamping a fabricated write time onto an audit column is
+    // worse than an honest NULL), so a whole-table NULL count would never go green.
+    sql: `SELECT COUNT(*) AS todays_rows,
+                 COUNT(created_at) AS created_at_set,
+                 COUNT(updated_at) AS updated_at_set
+            FROM technical_signals
+           WHERE computed_at >= CURRENT_DATE`,
+    evaluate: (row) => {
+      const rows = Number(row?.todays_rows ?? 0);
+      const cSet = Number(row?.created_at_set ?? 0);
+      const uSet = Number(row?.updated_at_set ?? 0);
+      if (rows === 0) {
+        return { status: 'pass', detail: 'No technical_signals rows created yet today — nothing to check.' };
+      }
+      const dead: string[] = [];
+      if (cSet === 0) dead.push('created_at');
+      if (uSet === 0) dead.push('updated_at');
+      if (dead.length) {
+        return {
+          status: 'fail',
+          detail: `${dead.join(' and ')} NULL on all ${rows} rows created today — the DEFAULT/trigger from ` +
+                  `migration 1787040000000 is not in effect. Write provenance is unauditable, which is how the ` +
+                  `2026-08-15 win_probability look-ahead went undetected.`,
+        };
+      }
+      return {
+        status: 'pass',
+        detail: `created_at ${cSet}/${rows}, updated_at ${uSet}/${rows} populated on today's rows.`,
+      };
+    },
+  },
+
+  {
     id: 'technical-signals-feature-coverage',
     label: 'technical_signals feature columns that are 100% NULL on the last completed day',
     category: 'ml',

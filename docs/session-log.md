@@ -3299,3 +3299,32 @@ and must not become more confident under a haircut — never on this column's ed
 was actually a lock I caused; and now this). Each was caught only by carrying the check through to
 live data rather than stopping at the plausible explanation — which is the master rule this
 session also recorded.
+
+**Fixed the blindness that hid it, 2026-08-15.** The retraction above turned on `technical_signals`
+having no usable write-time provenance: `created_at`/`updated_at` existed in the schema but were
+**100% NULL on all 73,563 rows** — no `DEFAULT`, no writer setting them. (`computed_at` is 100%
+populated for exactly one reason: it already carried `DEFAULT now()`.) So the only question that
+mattered — "was this value written before the next session's open?" — was unanswerable from the
+data, and the naive read of `computed_at` (same-day row *creation*, a lower bound) looked
+reassuring while the actual `UPDATE` landed days later.
+
+- **Migration `1787040000000`** — `DEFAULT now()` on both columns plus a `BEFORE UPDATE` trigger
+  (`set_updated_at()`), since a default fires on INSERT only and the whole point is capturing the
+  later enrichment writes. `technical_signals` is not a hypertable, so none of the compressed-chunk
+  hazards apply. Applied to production and **live-verified with a real write**: `updated_at` went
+  `NULL → 2026-08-15 09:32:34+00` on an `UPDATE`. **Deliberately did not backfill** the 73,563
+  existing rows — we do not know when they were written, and stamping `now()` (or `computed_at`)
+  onto an audit column fabricates the exact provenance it exists to record. Historical rows stay
+  NULL and are knowingly ungradeable.
+- **New check `technical-signals-provenance-timestamps`.** The existing
+  `technical-signals-feature-coverage` *did* count these two among its dead columns — but only as
+  an aggregate ("53 dead of N", fail above 65), so two dead **provenance** columns were
+  indistinguishable from two unpopulated ML features. A dead audit column is a categorically
+  different failure and now has its own check that names the columns. Scoped to rows created
+  today, because historical NULLs are by design.
+- **Negative-controlled, because a check that only passes vacuously is the same defect one level
+  up.** Live it returned `PASS — no rows created yet today` (2026-08-15 is Independence Day, a
+  market holiday), which proves nothing on its own. Four tests pin the real branches, including
+  the exact pre-migration state (both columns dead → `fail`) and the realistic partial failure
+  (DEFAULT applied but trigger dropped → still `fail`). `vitest` 946 passed, `tsc` clean,
+  `schema:drift` clean.
