@@ -882,13 +882,30 @@ export const DATA_QUALITY_CHECKS: DataQualityCheck[] = [
     label: 'Active ensemble model exists and was retrained recently',
     category: 'ml',
     critical: false,
-    sql: `SELECT trained_at, cv_roc_auc FROM model_registry
-          WHERE model_name = 'ensemble' AND is_active = 1 ORDER BY trained_at DESC LIMIT 1`,
+    // ml-promotion-gate-review, 2026-08-14: warning past 45 days since the ACTIVE row's own
+    // trained_at can misread a correctly-rejected challenger as a problem -- the weekly retrain
+    // can legitimately keep rejecting a stale-but-still-best baseline for up to
+    // DEFAULT_STALENESS_MAX_REJECTIONS (10) weekly runs (~70 days) before the staleness
+    // override self-heals it, same shape as monitorScripts.ts's already-fixed strategy-
+    // optimizer/screener_weight_history case ("a gated run is a successful run" -- see
+    // monitor.router.ts's LATEST-of-{output probe, stored _ran_at, job_heartbeat} comment).
+    // promote_or_register() writes a model_registry row on EVERY run, promoted or rejected
+    // (register_model(..., activate=False, ...) on the reject path) -- so unlike
+    // strategy-optimizer this doesn't need job_heartbeat/app_settings at all: MAX(trained_at)
+    // across every row (not just the active one) is already proof the job ran, whether or not
+    // it promoted.
+    sql: `SELECT
+            (SELECT trained_at FROM model_registry WHERE model_name = 'ensemble' AND is_active = 1
+             ORDER BY id DESC LIMIT 1) AS active_trained_at,
+            (SELECT cv_roc_auc FROM model_registry WHERE model_name = 'ensemble' AND is_active = 1
+             ORDER BY id DESC LIMIT 1) AS active_auc,
+            (SELECT MAX(trained_at) FROM model_registry WHERE model_name = 'ensemble') AS last_run_at`,
     evaluate: (row, now) => {
-      if (!row) return { status: 'fail', detail: 'No active ensemble model in model_registry' };
-      const stale = daysStale(row.trained_at, now);
-      if (stale != null && stale > 45) return { status: 'warn', detail: `Active ensemble last retrained ${fmtDays(stale)} ago (AUC ${row.cv_roc_auc ?? 'n/a'})` };
-      return { status: 'pass', detail: `Active ensemble retrained ${fmtDays(stale)} ago, AUC ${row.cv_roc_auc ?? 'n/a'}` };
+      if (!row || !row.active_trained_at) return { status: 'fail', detail: 'No active ensemble model in model_registry' };
+      const activeAge = daysStale(row.active_trained_at, now);
+      const runAge = daysStale(row.last_run_at, now) ?? activeAge;
+      if (runAge != null && runAge > 45) return { status: 'warn', detail: `Ensemble retrain hasn't RUN in ${fmtDays(runAge)} (active model itself is ${fmtDays(activeAge)} old, AUC ${row.active_auc ?? 'n/a'})` };
+      return { status: 'pass', detail: `Ensemble retrain last ran ${fmtDays(runAge)} ago; active model is ${fmtDays(activeAge)} old, AUC ${row.active_auc ?? 'n/a'}` };
     },
   },
   {

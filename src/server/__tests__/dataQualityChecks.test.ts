@@ -254,6 +254,42 @@ describe('individual evaluate() functions', () => {
     const r = byId('signal-outcomes-resolution-rate').evaluate({ total: 200, pending: 10 }, now);
     expect(r.status).toBe('pass');
   });
+
+  describe('model-registry-active-ensemble (ml-promotion-gate-review, 2026-08-15)', () => {
+    it('fails when there is no active model at all', () => {
+      const r = byId('model-registry-active-ensemble').evaluate(
+        { active_trained_at: null, active_auc: null, last_run_at: null }, now);
+      expect(r.status).toBe('fail');
+    });
+
+    it('passes a fresh active model with a fresh run', () => {
+      const r = byId('model-registry-active-ensemble').evaluate(
+        { active_trained_at: '2026-07-15T00:00:00Z', active_auc: 0.65,
+          last_run_at: '2026-07-15T00:00:00Z' }, now);
+      expect(r.status).toBe('pass');
+    });
+
+    it('warns when the retrain job itself has not run in a long time', () => {
+      const r = byId('model-registry-active-ensemble').evaluate(
+        { active_trained_at: '2026-05-01T00:00:00Z', active_auc: 0.65,
+          last_run_at: '2026-05-01T00:00:00Z' }, now);
+      expect(r.status).toBe('warn');
+    });
+
+    it('does NOT warn when the active model is old but the job has kept running and correctly rejecting -- the fix', () => {
+      // The bug this check used to have: reading only the ACTIVE row's trained_at means a
+      // weekly retrain that keeps correctly rejecting a still-best stale baseline (the
+      // staleness-override safety valve hasn't fired yet) looked identical to a job that
+      // stopped running entirely. promote_or_register() writes a model_registry row on every
+      // run, promoted or rejected, so last_run_at is real evidence the job ran recently even
+      // though the ACTIVE row is 60 days old.
+      const r = byId('model-registry-active-ensemble').evaluate(
+        { active_trained_at: '2026-05-01T00:00:00Z', active_auc: 0.65,
+          last_run_at: '2026-07-15T00:00:00Z' }, now);
+      expect(r.status).toBe('pass');
+      expect(r.detail).toContain('active model is');
+    });
+  });
 });
 
 describe('mc-consolidated-metrics-freshness (hand-rolled: needs a WHERE source_api filter the factory cannot express)', () => {
