@@ -28,7 +28,7 @@ import numpy as np
 import pandas as pd
 
 from db_compat import connect, read_df, translate, use_postgres
-from model_promotion import decide_promotion_with_nan_guard
+from model_promotion import decide_promotion_with_nan_guard, file_staleness_override_applies
 
 RET_THRESHOLD = 0.06     # +6% forward move = breakout
 HORIZON = 10             # within the next 10 trading days
@@ -341,6 +341,19 @@ def evaluate_purged_cv(df: pd.DataFrame, embargo: int = EMBARGO, n_folds: int = 
             "df": df, "cv_df": cv_df, "oof": oof}
 
 
+def _load_baseline_metrics(model_path: str) -> dict | None:
+    """Full baseline dict (not just test_auc) -- needed for the staleness-override rejection
+    bookkeeping (first_rejected_at/rejection_count, ml-promotion-gate-review 2026-08-15), which
+    lives inside this same pickle so a file-based baseline doesn't need a model_registry row."""
+    if not os.path.exists(model_path):
+        return None
+    try:
+        with open(model_path, "rb") as f:
+            return pickle.load(f)
+    except Exception:
+        return None
+
+
 def _load_baseline_test_auc(model_path: str) -> float | None:
     """The currently-active model's own stored test_auc, or None if there's no existing
     model or it can't be read. Mirrors movement_predictor.py's helper of the same name --
@@ -368,6 +381,50 @@ def _breakout_promotion_decision(test_auc: float, baseline_test_auc: float | Non
     identical _movement_promotion_decision) -- same comparison, same NaN handling."""
     return decide_promotion_with_nan_guard(test_auc, baseline_test_auc, BREAKOUT_PROMOTION_MARGIN,
                                             metric_name="test AUC")
+
+
+def _promote_or_reject_breakout(payload: dict, test_auc: float, auc: float) -> bool:
+    """Writes payload to MODEL_PATH (promoted) or CANDIDATE_PATH (rejected), gated by
+    _breakout_promotion_decision() plus the staleness-override safety valve. Extracted from
+    train() so this decision+write logic is directly testable without a real feature/fit pass
+    (ml-promotion-gate-review, 2026-08-15). Returns whether the model was activated.
+
+    STALENESS OVERRIDE: this file's baseline lives in a pickle, not model_registry, so it had
+    no equivalent to ml_ensemble.py/cs_ranker.py's safety valve against a baseline that's
+    become permanently unbeatable -- every future honest retrain would reject forever.
+    Rejection bookkeeping (first_rejected_at/rejection_count) lives inside the baseline dict
+    itself; see model_promotion.file_staleness_override_applies()'s docstring for the contract.
+    """
+    baseline = _load_baseline_metrics(MODEL_PATH)
+    baseline_test_auc = baseline.get("test_auc") if baseline else None
+    promote, refusal_reason = _breakout_promotion_decision(test_auc, baseline_test_auc)
+
+    staleness_override, age_days, rejection_count = (False, 0.0, 0)
+    if not promote:
+        staleness_override, age_days, rejection_count = file_staleness_override_applies(baseline)
+
+    if promote or staleness_override:
+        with open(MODEL_PATH, "wb") as f:
+            pickle.dump(payload, f)
+        if staleness_override and not promote:
+            print(f"[Breakout] STALENESS OVERRIDE — baseline unbeaten {age_days:.1f}d across "
+                  f"{rejection_count} rejections ({refusal_reason}) -- promoting anyway -> {MODEL_PATH}")
+        else:
+            print(f"[Breakout] PROMOTED (OOF AUC {auc:.4f}, held-out test AUC {test_auc:.4f}, "
+                  f"baseline {baseline_test_auc}) -> {MODEL_PATH}")
+        return True
+
+    if baseline is not None:
+        baseline["rejection_count"] = rejection_count + 1
+        baseline.setdefault("first_rejected_at", datetime.datetime.now().isoformat())
+        with open(MODEL_PATH, "wb") as f:
+            pickle.dump(baseline, f)
+    with open(CANDIDATE_PATH, "wb") as f:
+        pickle.dump(payload, f)
+    print(f"[Breakout] REJECTED — {refusal_reason} Candidate saved to {CANDIDATE_PATH}; "
+          f"active model at {MODEL_PATH} left untouched (rejection bookkeeping updated: "
+          f"{rejection_count + 1} rejections so far).")
+    return False
 
 
 def train(report_only: bool = False, leak_check: bool = False) -> dict:
@@ -426,22 +483,10 @@ def train(report_only: bool = False, leak_check: bool = False) -> dict:
                "horizon": HORIZON, "trained_at": datetime.date.today().isoformat(),
                "oof_auc": auc, "test_auc": test_auc}
     os.makedirs(os.path.dirname(MODEL_PATH), exist_ok=True)
-
-    baseline_test_auc = _load_baseline_test_auc(MODEL_PATH)
-    promote, refusal_reason = _breakout_promotion_decision(test_auc, baseline_test_auc)
-    if promote:
-        with open(MODEL_PATH, "wb") as f:
-            pickle.dump(payload, f)
-        print(f"[Breakout] PROMOTED (OOF AUC {auc:.4f}, held-out test AUC {test_auc:.4f}, "
-              f"baseline {baseline_test_auc}) -> {MODEL_PATH}")
-    else:
-        with open(CANDIDATE_PATH, "wb") as f:
-            pickle.dump(payload, f)
-        print(f"[Breakout] REJECTED — {refusal_reason} Candidate saved to {CANDIDATE_PATH}; "
-              f"active model at {MODEL_PATH} left untouched.")
+    promoted = _promote_or_reject_breakout(payload, test_auc, auc)
 
     return {"trained": True, "n": len(y), "auc": auc, "test_auc": test_auc, "base_rate": base_rate,
-            "lift": lift, "promoted": promote}
+            "lift": lift, "promoted": promoted}
 
 
 def score() -> int:

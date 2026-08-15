@@ -15,7 +15,7 @@ from pathlib import Path
 from typing import Dict, List, Tuple
 
 from db_compat import connect, read_df
-from model_promotion import clears_promotion_bar
+from model_promotion import clears_promotion_bar, file_staleness_override_applies
 from as_of import logical_trading_date
 
 # Must be set before torch/cuBLAS initialises
@@ -762,16 +762,37 @@ def _promote_lstm_version(new_version: int, metrics: Dict) -> bool:
 
     promote = clears_promotion_bar(new_auc, baseline_auc, LSTM_PROMOTION_MARGIN)
 
+    # STALENESS OVERRIDE (ml-promotion-gate-review, 2026-08-15): this file's baseline lives in
+    # a local JSON config, not model_registry, so it had no equivalent to ml_ensemble.py/
+    # cs_ranker.py's safety valve against a baseline that's become permanently unbeatable --
+    # every future honest retrain would reject forever. Bookkeeping lives inside the active
+    # version's own metrics dict (mutating `baseline` in place also updates `version_metrics`/
+    # `cfg`, since `.get()` returns the same dict object, not a copy). See model_promotion.
+    # file_staleness_override_applies()'s docstring for the full contract.
+    staleness_override, age_days, rejection_count = (False, 0.0, 0)
+    if not promote and baseline is not None:
+        staleness_override, age_days, rejection_count = file_staleness_override_applies(baseline)
+        if not staleness_override:
+            rejection_count += 1
+            baseline["rejection_count"] = rejection_count
+            baseline.setdefault("first_rejected_at", datetime.now().isoformat())
+
     version_metrics[str(new_version)] = {k: (None if isinstance(v, float) and np.isnan(v) else v)
                                           for k, v in metrics.items()}
     cfg["lstm_metrics"] = version_metrics
 
-    if not promote:
+    if not promote and not staleness_override:
         print(f"[DL] REFUSED: v{new_version} roc_auc={new_auc:.4f} did not beat active "
               f"v{active_version}'s {baseline_auc:.4f} + {LSTM_PROMOTION_MARGIN} margin. "
-              f"Weights saved to lstm_v{new_version}.pt for inspection; active version unchanged.")
+              f"Weights saved to lstm_v{new_version}.pt for inspection; active version unchanged. "
+              f"(rejection bookkeeping updated: {rejection_count} rejections so far)")
         _save_config(cfg)  # still persist this version's metrics for future comparisons
         return False
+
+    if staleness_override and not promote:
+        print(f"[DL] STALENESS OVERRIDE: v{active_version}'s baseline unbeaten {age_days:.1f}d "
+              f"across {rejection_count} rejections -- promoting v{new_version} "
+              f"(roc_auc={new_auc:.4f}) anyway.")
 
     if CONFIG_PATH.exists():
         backup_path = MODEL_DIR / f"dl_model_config.{datetime.now().strftime('%Y%m%d_%H%M%S')}.bak.json"

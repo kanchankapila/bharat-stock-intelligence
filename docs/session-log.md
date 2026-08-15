@@ -3033,3 +3033,53 @@ routers themselves:**
 Verified after every change in this batch: `tsc --noEmit` clean; `pytest` 1,919 passed / 230
 skipped (1 pre-existing unrelated flake, confirmed passes standalone); `vitest run` 919 passed
 / 40 skipped / 0 failed.
+
+---
+
+## 2026-08-15 (cont. 4) — Batch 2: staleness override extended to 6 more model-promotion gates
+
+Closes the remaining pending item flagged MEDIUM: "the staleness override is adopted by only
+3/9 model_promotion.py consumers." Investigated all 6 missing consumers before writing any
+code — found they split into two genuinely different shapes:
+
+- **`exit_policy.py`** persists to `model_registry` like the 3 existing consumers
+  (`ml_ensemble.py`/`cs_ranker.py`/`confluence_ml_engine.py`) — reused `rejections_since()`/
+  `staleness_override_applies()` directly, same wiring pattern, no new primitives needed.
+- **`dl_engine.py`, `live_screener_ml_ranker.py`, `breakout_classifier.py`,
+  `flyer_classifier.py`, `movement_predictor.py`** persist their baseline to a local
+  pickle/JSON file instead — `rejections_since()` needs a Postgres `model_registry` connection
+  these files don't have, so they had no rejection history to read at all, not just no
+  override logic.
+
+Added `model_promotion.file_staleness_override_applies()` — same safety-valve contract, reading
+`first_rejected_at`/`rejection_count` bookkeeping from inside the baseline's own stored metrics
+dict instead of a DB query. Wired into all 5 file-based engines: each now writes the
+incremented bookkeeping back into its baseline file on every rejected retrain (a real,
+deliberate behavior change — previously a rejected candidate left the baseline file completely
+untouched) and checks the override before refusing.
+
+Given the risk of a mutation change to 6 live training pipelines with no fresh training run in
+this session to live-verify against, asked the user for scope before proceeding; confirmed:
+wire all 6, full test coverage, no live training run required.
+
+**All 6 tested, no existing test broken:**
+- `exit_policy.py`: extended `_active_exit_baseline()` to return `id`/`trained_at`; 3 new
+  staleness tests (both-conditions-required, age-alone/count-alone don't fire) + fixture
+  updated to the new baseline-row shape. 14/14 pass (11 pre-existing + 3 new).
+- `breakout_classifier.py`/`flyer_classifier.py`: extracted the inline promote/reject block
+  into `_promote_or_reject_breakout()`/`_promote_or_reject_flyer()` for testability (previously
+  inline inside `train()`, entangled with real feature computation). 21+7 pass.
+- `movement_predictor.py`: extracted just the staleness-check-and-bookkeep step into
+  `_staleness_check_and_bookkeep()` (the full promote block stays entangled with this file's
+  feature/fit logic, unlike the two above). 16+13 pass.
+- `dl_engine.py`: bookkeeping lives inside `cfg["lstm_metrics"][version]`, mutated in place
+  (same dict object reference, so no extra write-back needed beyond the existing
+  `_save_config(cfg)` call). 33/33 pass (11 existing + new `TestStalenessOverride` class).
+- `live_screener_ml_ranker.py`: added `_bump_rejection_bookkeeping()` (loads/rewrites the FULL
+  artifact, not the trimmed `_load_active_metrics()` view, so the live model object itself is
+  never discarded on a rejection). New dedicated test file, including a `train()`-level wiring
+  test confirming the override actually fires against an impossible baseline
+  (`test_auc=0.999`), not just the helper in isolation. 5/5 pass.
+
+Verified: `tsc --noEmit` clean; `pytest src/server/__tests__/ src/server/tests/` 1,949 passed /
+230 skipped (1 pre-existing unrelated flake, confirmed passes standalone).

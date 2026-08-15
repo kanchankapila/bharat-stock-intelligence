@@ -10,6 +10,7 @@ memory) -- a silent regression here would be the worst possible model to lose qu
 with _load_baseline_test_auc()/_breakout_promotion_decision(), mirroring
 movement_predictor.py's identical pattern.
 """
+import datetime
 import os
 import pickle
 import sys
@@ -17,6 +18,7 @@ import sys
 import numpy as np
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+import breakout_classifier as bc
 from breakout_classifier import (
     _load_baseline_test_auc, _breakout_promotion_decision, BREAKOUT_PROMOTION_MARGIN,
 )
@@ -65,3 +67,79 @@ class TestBreakoutPromotionDecision:
     def test_exactly_at_margin_promotes(self):
         promote, reason = _breakout_promotion_decision(0.61 + BREAKOUT_PROMOTION_MARGIN, 0.61)
         assert promote is True
+
+
+def _iso_days_ago(days: float) -> str:
+    return (datetime.datetime.now() - datetime.timedelta(days=days)).isoformat()
+
+
+class TestPromoteOrRejectBreakoutStalenessOverride:
+    """ml-promotion-gate-review, 2026-08-15: this file's baseline lives in a pickle, not
+    model_registry, so it had no equivalent to ml_ensemble.py/cs_ranker.py's safety valve
+    against a permanently-unbeatable stale baseline."""
+
+    def _write_baseline(self, path, test_auc=0.61, **extra):
+        with open(path, "wb") as f:
+            pickle.dump({"models": [object()], "test_auc": test_auc, "oof_auc": 0.60, **extra}, f)
+
+    def test_first_rejection_stamps_bookkeeping_onto_the_baseline_file(self, monkeypatch, tmp_path):
+        model_path = tmp_path / "breakout.pkl"
+        candidate_path = tmp_path / "breakout.pkl.candidate"
+        monkeypatch.setattr(bc, "MODEL_PATH", str(model_path))
+        monkeypatch.setattr(bc, "CANDIDATE_PATH", str(candidate_path))
+        self._write_baseline(model_path, test_auc=0.61)
+
+        promoted = bc._promote_or_reject_breakout({"test_auc": 0.50}, test_auc=0.50, auc=0.50)
+
+        assert promoted is False
+        assert candidate_path.exists()
+        with open(model_path, "rb") as f:
+            baseline = pickle.load(f)
+        assert baseline["rejection_count"] == 1
+        assert "first_rejected_at" in baseline
+        assert baseline["test_auc"] == 0.61, "the baseline's own metrics must not change, only bookkeeping"
+
+    def test_repeated_rejections_increment_count_without_resetting_first_rejected_at(self, monkeypatch, tmp_path):
+        model_path = tmp_path / "breakout.pkl"
+        candidate_path = tmp_path / "breakout.pkl.candidate"
+        monkeypatch.setattr(bc, "MODEL_PATH", str(model_path))
+        monkeypatch.setattr(bc, "CANDIDATE_PATH", str(candidate_path))
+        first_rejected = _iso_days_ago(5)
+        self._write_baseline(model_path, test_auc=0.61, rejection_count=3, first_rejected_at=first_rejected)
+
+        bc._promote_or_reject_breakout({"test_auc": 0.50}, test_auc=0.50, auc=0.50)
+
+        with open(model_path, "rb") as f:
+            baseline = pickle.load(f)
+        assert baseline["rejection_count"] == 4
+        assert baseline["first_rejected_at"] == first_rejected
+
+    def test_stale_and_repeatedly_rejected_baseline_gets_overridden(self, monkeypatch, tmp_path):
+        model_path = tmp_path / "breakout.pkl"
+        candidate_path = tmp_path / "breakout.pkl.candidate"
+        monkeypatch.setattr(bc, "MODEL_PATH", str(model_path))
+        monkeypatch.setattr(bc, "CANDIDATE_PATH", str(candidate_path))
+        self._write_baseline(model_path, test_auc=0.61, rejection_count=12,
+                              first_rejected_at=_iso_days_ago(10))
+
+        promoted = bc._promote_or_reject_breakout({"test_auc": 0.50}, test_auc=0.50, auc=0.50)
+
+        assert promoted is True, (
+            "a candidate that doesn't clear the bar must still be promoted once the baseline "
+            "is stale enough AND has been rejected against enough times"
+        )
+        with open(model_path, "rb") as f:
+            activated = pickle.load(f)
+        assert activated == {"test_auc": 0.50}, "the override promotes the CANDIDATE, not the stale baseline"
+
+    def test_stale_but_not_enough_rejections_still_rejects(self, monkeypatch, tmp_path):
+        model_path = tmp_path / "breakout.pkl"
+        candidate_path = tmp_path / "breakout.pkl.candidate"
+        monkeypatch.setattr(bc, "MODEL_PATH", str(model_path))
+        monkeypatch.setattr(bc, "CANDIDATE_PATH", str(candidate_path))
+        self._write_baseline(model_path, test_auc=0.61, rejection_count=1,
+                              first_rejected_at=_iso_days_ago(10))
+
+        promoted = bc._promote_or_reject_breakout({"test_auc": 0.50}, test_auc=0.50, auc=0.50)
+
+        assert promoted is False, "staleness alone must not override -- both conditions are required"

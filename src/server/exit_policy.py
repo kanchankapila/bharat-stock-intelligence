@@ -30,7 +30,9 @@ import pandas as pd
 from db_compat import connect, read_df
 from ml_ensemble import build_features
 from as_of import as_of_join_sql
-from model_promotion import decide_promotion_with_nan_guard
+from model_promotion import (decide_promotion_with_nan_guard, rejections_since,
+                              staleness_override_applies,
+                              DEFAULT_STALENESS_MAX_DAYS, DEFAULT_STALENESS_MAX_REJECTIONS)
 
 # Script-relative, not os.getcwd()-relative -- see ml_ensemble.py's MODELS_DIR comment.
 MODELS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'ml_models')
@@ -154,11 +156,12 @@ def _active_exit_baseline(conn) -> dict | None:
     """
     try:
         row = conn.execute(
-            "SELECT cv_roc_auc, cv_accuracy FROM model_registry "
+            "SELECT id, cv_roc_auc, cv_accuracy, trained_at FROM model_registry "
             "WHERE model_name = 'exit_policy' AND is_active = 1 ORDER BY id DESC LIMIT 1"
         ).fetchone()
-        if row and row[0] is not None and row[1] is not None:
-            return {'mfe_holdout_mae': float(row[0]), 'mae_holdout_mae': float(row[1])}
+        if row and row[1] is not None and row[2] is not None:
+            return {'id': row[0], 'mfe_holdout_mae': float(row[1]), 'mae_holdout_mae': float(row[2]),
+                    'trained_at': row[3]}
     except Exception:
         pass
     return None
@@ -175,6 +178,12 @@ def _register_exit_model(conn, payload: dict) -> int:
     Promotes only if BOTH mfe and mae holdout MAE improve (or there's no active baseline
     yet) -- they're one combined pickle file, so a partial improvement can't partially
     overwrite it.
+
+    STALENESS OVERRIDE (ml-promotion-gate-review, 2026-08-14): this file had no equivalent to
+    ml_ensemble.py/cs_ranker.py/confluence_ml_engine.py's safety valve against a baseline whose
+    holdout MAE became permanently unbeatable (e.g. from a leak that's since been fixed) --
+    without it, every future honest retrain would reject forever. Same mechanism, reused
+    directly since this baseline lives in model_registry like those three.
     """
     metrics = payload['metrics']
     baseline = _active_exit_baseline(conn)
@@ -189,16 +198,26 @@ def _register_exit_model(conn, payload: dict) -> int:
         EXIT_PROMOTION_MARGIN, metric_name="MAE MAE")
     promote = promote_mfe and promote_mae
 
+    staleness_override = False
+    age_days = 0.0
+    rejections = 0
+    if baseline is not None and not promote:
+        rejections = rejections_since(conn, 'exit_policy', baseline['id'])
+        staleness_override, age_days = staleness_override_applies(
+            baseline['trained_at'], rejections,
+            DEFAULT_STALENESS_MAX_DAYS, DEFAULT_STALENESS_MAX_REJECTIONS)
+
     os.makedirs(MODELS_DIR, exist_ok=True)
     version = datetime.datetime.utcnow().strftime('%Y%m%d_%H%M%S')
     cur = conn.cursor()
 
-    if not promote:
+    if not promote and not staleness_override:
         with open(EXIT_CANDIDATE_PATH, 'wb') as f:
             pickle.dump(payload, f, protocol=pickle.HIGHEST_PROTOCOL)
         reason = reason_mfe or reason_mae or "did not clear the promotion bar"
         print(f"[EXIT-POLICY] Candidate REJECTED: {reason} Saved to {EXIT_CANDIDATE_PATH} "
-              f"for inspection; active model unchanged.")
+              f"for inspection; active model unchanged. (baseline stale {age_days:.1f}d, "
+              f"{rejections} rejections so far)")
         cur.execute("""
             INSERT INTO model_registry
                 (model_name, model_version, model_type, trained_at, training_samples,
@@ -217,6 +236,8 @@ def _register_exit_model(conn, payload: dict) -> int:
     cur.execute("UPDATE model_registry SET is_active = 0 WHERE model_name = 'exit_policy' AND is_active = 1")
     note = (f"mfe_mae={metrics['mfe_holdout_mae']:.4f} mae_mae={metrics['mae_holdout_mae']:.4f}"
             + (" (bootstrap, no prior baseline)" if baseline is None else
+               f" (STALENESS OVERRIDE: baseline unbeaten {age_days:.1f}d, {rejections} rejections)"
+               if staleness_override and not promote else
                f" (beat baseline mfe={base_mfe:.4f} mae={base_mae:.4f})"))
     cur.execute("""
         INSERT INTO model_registry

@@ -126,3 +126,38 @@ def staleness_override_applies(baseline_trained_at, rejections: int,
     override doesn't apply) so callers can log/report it regardless of outcome."""
     age_days = days_since(baseline_trained_at)
     return (age_days >= max_days and rejections >= max_rejections), age_days
+
+
+def file_staleness_override_applies(baseline_metrics: dict | None,
+                                     max_days: float = DEFAULT_STALENESS_MAX_DAYS,
+                                     max_rejections: int = DEFAULT_STALENESS_MAX_REJECTIONS
+                                     ) -> Tuple[bool, float, int]:
+    """Same safety valve as staleness_override_applies(), for the engines whose promotion
+    gate persists to a local pickle/JSON file instead of model_registry (ml-promotion-gate-
+    review, 2026-08-14: dl_engine.py, live_screener_ml_ranker.py, breakout_classifier.py,
+    flyer_classifier.py, movement_predictor.py) -- rejections_since() needs a Postgres
+    model_registry connection these files don't have, so they had no equivalent self-healing
+    path at all: a stale baseline (e.g. inflated by a leak that's since been fixed) would
+    reject every future honest retrain forever, same class of deadlock already found and
+    fixed twice for the model_registry-backed engines (ensemble, cs_ranker).
+
+    Rejection bookkeeping lives inside the baseline's own stored metrics dict:
+    `first_rejected_at` (ISO string, set the first time a candidate is rejected against this
+    exact baseline) and `rejection_count` (int, incremented on each subsequent rejection).
+    The caller is responsible for writing the incremented fields back into the baseline
+    file's metrics dict when a candidate is rejected, and for clearing both fields when a
+    candidate IS promoted (the new baseline starts with a clean slate) -- this function only
+    reads them and decides.
+
+    Returns (override_applies, age_days, rejection_count) -- age_days/rejection_count are
+    always returned (even when the override doesn't apply) so callers can log regardless of
+    outcome. A baseline with no `first_rejected_at` yet (never been rejected) returns
+    (False, 0.0, 0) -- age is meaningless before the first rejection is recorded."""
+    if not baseline_metrics:
+        return False, 0.0, 0
+    rejection_count = int(baseline_metrics.get('rejection_count') or 0)
+    first_rejected_at = baseline_metrics.get('first_rejected_at')
+    if not first_rejected_at:
+        return False, 0.0, rejection_count
+    age_days = days_since(first_rejected_at)
+    return (age_days >= max_days and rejection_count >= max_rejections), age_days, rejection_count
