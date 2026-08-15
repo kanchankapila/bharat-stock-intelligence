@@ -1498,6 +1498,55 @@ export const DATA_QUALITY_CHECKS: DataQualityCheck[] = [
   // runs, and a same-day denominator reads as a false collapse -- the same bug already fixed
   // once in technical-signals-freshness-coverage.
   {
+    id: 'win-probability-scored-in-time',
+    label: 'win_probability is written soon enough after its signal date to be a usable signal',
+    category: 'ml',
+    critical: false,
+    // This check exists because the 2026-08-15 grading of win_probability produced a clean-looking
+    // forward edge (raw h=1d rank IC +0.0364, t=+2.58) that was pure look-ahead: ml_ensemble.py
+    // --score runs ONLY inside the WEEKLY retrain and scores `WHERE win_probability IS NULL`, so a
+    // Monday row's value is typically written the following weekend -- days after the next-day
+    // open it was graded against. Nothing in the data said so; it took grepping queues.ts.
+    // win_probability_scored_at (migration 1787050000000) makes that lag measurable, so the same
+    // defect now surfaces as a monitor instead of waiting for someone to re-derive it.
+    //
+    // A signal must be written before the next session opens to be actionable. One calendar day
+    // of slack tolerates the normal post-close scoring window; beyond ~3 days the column cannot
+    // be a live signal at all, only a backfilled label.
+    sql: `SELECT COUNT(*) AS scored,
+                 ROUND(AVG(EXTRACT(epoch FROM (win_probability_scored_at - date::date)) / 86400.0)::numeric, 2) AS avg_lag_days,
+                 MAX(EXTRACT(epoch FROM (win_probability_scored_at - date::date)) / 86400.0) AS max_lag_days
+            FROM technical_signals
+           WHERE win_probability_scored_at IS NOT NULL
+             AND date::date >= CURRENT_DATE - 30`,
+    evaluate: (row) => {
+      const scored = Number(row?.scored ?? 0);
+      if (scored === 0) {
+        return {
+          status: 'pass',
+          detail: 'No rows scored since migration 1787050000000 yet — the weekly scorer has not run. ' +
+                  'Re-check after the next ml-ensemble-train run.',
+        };
+      }
+      const avg = Number(row?.avg_lag_days ?? 0);
+      const max = Number(row?.max_lag_days ?? 0);
+      const detail = `${scored} rows scored in the last 30d; win_probability written on average ` +
+                     `${avg.toFixed(2)}d after its signal date (worst ${max.toFixed(2)}d).`;
+      if (avg > 3) {
+        return {
+          status: 'fail',
+          detail: `${detail} That is far too late to be a live signal — it is a backfilled label, and ` +
+                  `grading it against next-day entry is look-ahead (see measurement.md's retraction).`,
+        };
+      }
+      if (avg > 1) {
+        return { status: 'warn', detail: `${detail} Past the next session's open for most rows — not reliably actionable.` };
+      }
+      return { status: 'pass', detail };
+    },
+  },
+
+  {
     id: 'technical-signals-provenance-timestamps',
     label: 'technical_signals.created_at/updated_at are actually populated on rows written today',
     category: 'ml',

@@ -581,3 +581,38 @@ describe('technical-signals-provenance-timestamps', () => {
     expect(r.detail).toContain('nothing to check');
   });
 });
+
+describe('win-probability-scored-in-time', () => {
+  const check = DATA_QUALITY_CHECKS.find(c => c.id === 'win-probability-scored-in-time')!;
+  const now = new Date('2026-08-15T12:00:00Z');
+
+  it('is registered', () => expect(check).toBeDefined());
+
+  it('NEGATIVE CONTROL: fails on the real weekly-scoring lag that caused the retraction', () => {
+    // ml_ensemble --score runs only in the WEEKLY retrain, so a Monday row is typically scored
+    // the following weekend. That is the exact condition that made the 2026-08-15 grading
+    // look-ahead (IC +0.0364, t=+2.58, retracted). If this check cannot fail here, the defect
+    // can recur silently exactly as it did before.
+    const r = check.evaluate!({ scored: 2192, avg_lag_days: 5.2, max_lag_days: 8.9 }, now);
+    expect(r.status).toBe('fail');
+    expect(r.detail).toContain('look-ahead');
+  });
+
+  it('warns when the write lands after the next open but is not yet a backfilled label', () => {
+    const r = check.evaluate!({ scored: 2192, avg_lag_days: 1.8, max_lag_days: 2.4 }, now);
+    expect(r.status).toBe('warn');
+  });
+
+  it('passes on same-evening scoring, which is genuinely actionable next-open', () => {
+    // The 1.41d lag measured live on 2026-08-15 sits in the warn band by design: a value written
+    // ~34h after the signal date has missed the next session's open.
+    const r = check.evaluate!({ scored: 2192, avg_lag_days: 0.4, max_lag_days: 0.9 }, now);
+    expect(r.status).toBe('pass');
+  });
+
+  it('passes explicitly-uninformatively before the scorer has run at all', () => {
+    const r = check.evaluate!({ scored: 0, avg_lag_days: null, max_lag_days: null }, now);
+    expect(r.status).toBe('pass');
+    expect(r.detail).toContain('has not run');
+  });
+});

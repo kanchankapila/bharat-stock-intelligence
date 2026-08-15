@@ -2916,8 +2916,16 @@ def score_pending(conn: ConnWrapper, ensemble: dict) -> int:
     # as a value that passes IS NOT NULL, which then crashes calibration's roc_auc/isotonic
     # and silently corrupts the ranker's bet_size_from_probability. NULL is the honest
     # "unscored" marker every downstream reader already handles.
+    # win_probability_scored_at stamps THIS column's write time (migration 1787050000000).
+    # technical_signals.updated_at moves whenever any of ~300 columns changes and ~15 enrichment
+    # jobs touch these rows daily, so it is a row-level upper bound that cannot establish when
+    # win_probability specifically landed -- the only fact that decides whether the value was
+    # knowable at a given entry time. Its absence is what let the 2026-08-15 grading read as a
+    # genuine forward edge (IC +0.0364, t=+2.58) when this scorer only runs weekly, and the
+    # result had to be retracted. CURRENT_TIMESTAMP, not now(): valid on both dialects.
     cur.executemany(
-        "UPDATE technical_signals SET win_probability = ? WHERE symbol = ? AND date = ?",
+        "UPDATE technical_signals SET win_probability = ?, win_probability_scored_at = CURRENT_TIMESTAMP "
+        "WHERE symbol = ? AND date = ?",
         [(round(float(prob), 4) if np.isfinite(prob) else None, row['symbol'], row['signal_date'])
          for (_, row), prob in zip(df.iterrows(), probs)],
     )

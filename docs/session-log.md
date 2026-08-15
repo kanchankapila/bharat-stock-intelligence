@@ -3328,3 +3328,31 @@ reassuring while the actual `UPDATE` landed days later.
   the exact pre-migration state (both columns dead → `fail`) and the realistic partial failure
   (DEFAULT applied but trigger dropped → still `fail`). `vitest` 946 passed, `tsc` clean,
   `schema:drift` clean.
+
+**Per-column write provenance, 2026-08-15 (migration `1787050000000`).** `updated_at` from the
+previous fix is a row-level upper bound — it moves whenever any of ~300 columns changes, and ~15
+enrichment jobs touch these rows daily — so it can flag a gross problem but cannot answer "when
+was THIS column written", which is the fact that decides whether a signal was knowable at a given
+entry time.
+
+**Deliberately not solved generically.** A per-column audit table would be ~73k × ~300 ≈ 22M rows;
+a JSONB-diff trigger would compare 300 columns per row on every bulk UPDATE. Both are large costs
+to answer a question only ~5 columns ever raise — the ML *output* columns written by a later pass
+than the row itself (`win_probability`, `cs_score`, `flyer_probability`, `movement_probability`,
+`breakout_*`). Added the stamp for `win_probability` only, the column whose untraceable write time
+caused the retraction; the same one-line pattern extends to the others if any is ever graded.
+
+- `win_probability_scored_at TIMESTAMPTZ`, written in the same `UPDATE` as `win_probability` by
+  `ml_ensemble.score_pending` (`CURRENT_TIMESTAMP`, valid on both dialects). Existing rows stay
+  NULL, same honesty reasoning as `1787040000000`.
+- **Live-verified with the real statement** against production: `DISAQ 2026-08-14` →
+  `scored_at 2026-08-15 09:43:49+00`, **measured lag 1.41 days**.
+- **New check `win-probability-scored-in-time`** turns that lag into a monitor: pass ≤1d, warn
+  >1d (past the next open), **fail >3d** (a backfilled label, not a live signal — grading it
+  against next-day entry is look-ahead). Run live it already reports
+  `WARN — 1.41d after its signal date`. Once the weekly scorer stamps a full batch the real ~5d
+  cadence will trip `fail`, which is the point: the defect that took a `queues.ts` grep to find
+  now surfaces on its own.
+- Negative-controlled (5 tests): the real weekly lag (5.2d) → `fail` and names look-ahead; 1.8d →
+  `warn`; 0.4d → `pass`; unscored → an explicitly uninformative pass. `tsc` clean, `vitest`
+  80 passed in that file.
