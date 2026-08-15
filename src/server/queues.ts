@@ -793,6 +793,18 @@ async function processMlDailyOps(job: Job): Promise<{ success: boolean }> {
     // AI-generated earnings-call tone/takeaway (2026-08-06 urls.txt analysis) → concall_takeaways.
     runPython('investsights_concall_fetcher.py', [], 2 * 60_000)
       .catch(e => console.warn('[QUEUE] investsights_concall_fetcher failed:', (e as Error).message)),
+    // StockEdge's "Higher Delivery Quantity" top-5 alert list (2026-08-15, promoted from
+    // endpoint_registry.py's stockedge_high_delivery_qty, archived-only until now) → stockedge_high_delivery_alerts.
+    runPython('stockedge_high_delivery_fetcher.py', [], 60_000)
+      .catch(e => console.warn('[QUEUE] stockedge_high_delivery_fetcher failed:', (e as Error).message)),
+    // Trading80's own buy/sell call list, third-party vendor calls not this platform's own
+    // (2026-08-15, promoted from endpoint_registry.py's trading80_call_alerts) → trading80_call_alerts.
+    runPython('trading80_call_alerts_fetcher.py', [], 60_000)
+      .catch(e => console.warn('[QUEUE] trading80_call_alerts_fetcher failed:', (e as Error).message)),
+    // MarketsMojo's own model-portfolio picks, entry/exit + live P&L (2026-08-15, promoted from
+    // endpoint_registry.py's marketsmojo_stock_picks_history) → marketsmojo_stock_picks.
+    runPython('marketsmojo_stock_picks_fetcher.py', [], 60_000)
+      .catch(e => console.warn('[QUEUE] marketsmojo_stock_picks_fetcher failed:', (e as Error).message)),
     // Market-wide corporate-actions calendar sourced from real NSE filings (2026-08-07
     // urls.txt open-source sourcing pass) → nse_filed_corporate_actions. Daily and cheap (one
     // API call, ~40 rows): the completeness cross-check for mc_corporate_actions_fetcher.py's
