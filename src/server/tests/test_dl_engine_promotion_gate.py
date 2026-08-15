@@ -8,6 +8,7 @@ plus a timestamped config backup, mirroring ml_ensemble.py's pattern. train_lstm
 saves each version to its own versioned .pt path, so a rejected version's weights are
 naturally preserved as a candidate with no extra file-management needed.
 """
+import datetime
 import json
 import os
 import sys
@@ -16,6 +17,10 @@ import numpy as np
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 import dl_engine as dle
+
+
+def _iso_days_ago(days: float) -> str:
+    return (datetime.datetime.now() - datetime.timedelta(days=days)).isoformat()
 
 
 class TestPromoteLstmVersion:
@@ -133,3 +138,63 @@ class TestSaturationGate:
 
         promoted = dle._promote_lstm_version(1, {"roc_auc": 0.65, "frac_saturated": 0.5})
         assert promoted is True, "exactly at the ceiling should not be blocked (only strictly above it)"
+
+
+class TestStalenessOverride:
+    """ml-promotion-gate-review, 2026-08-15: this file's baseline lives in a local JSON
+    config, not model_registry, so it had no equivalent to ml_ensemble.py/cs_ranker.py's
+    safety valve against a permanently-unbeatable stale baseline."""
+
+    def _seed_stale_baseline(self, config_path, active_version=1, roc_auc=0.65,
+                              rejection_count=12, first_rejected_at=None):
+        config_path.write_text(json.dumps({
+            "lstm_version": active_version,
+            "lstm_metrics": {
+                str(active_version): {
+                    "roc_auc": roc_auc,
+                    "rejection_count": rejection_count,
+                    "first_rejected_at": first_rejected_at or _iso_days_ago(10),
+                },
+            },
+        }))
+
+    def test_first_rejection_stamps_bookkeeping(self, monkeypatch, tmp_path):
+        monkeypatch.setattr(dle, "MODEL_DIR", tmp_path)
+        config_path = tmp_path / "dl_model_config.json"
+        monkeypatch.setattr(dle, "CONFIG_PATH", config_path)
+        config_path.write_text(json.dumps({"lstm_version": 1, "lstm_metrics": {"1": {"roc_auc": 0.65}}}))
+
+        promoted = dle._promote_lstm_version(2, {"roc_auc": 0.50})  # well below v1
+
+        assert promoted is False
+        cfg = json.loads(config_path.read_text())
+        assert cfg["lstm_metrics"]["1"]["rejection_count"] == 1
+        assert "first_rejected_at" in cfg["lstm_metrics"]["1"]
+
+    def test_stale_and_repeatedly_rejected_baseline_gets_overridden(self, monkeypatch, tmp_path):
+        monkeypatch.setattr(dle, "MODEL_DIR", tmp_path)
+        config_path = tmp_path / "dl_model_config.json"
+        monkeypatch.setattr(dle, "CONFIG_PATH", config_path)
+        self._seed_stale_baseline(config_path)
+
+        promoted = dle._promote_lstm_version(2, {"roc_auc": 0.50})  # doesn't beat baseline
+
+        assert promoted is True, (
+            "a candidate that doesn't clear the bar must still be promoted once the baseline "
+            "is stale enough AND has been rejected against enough times"
+        )
+        cfg = json.loads(config_path.read_text())
+        assert cfg["lstm_version"] == 2
+
+    def test_stale_but_not_enough_rejections_still_rejects(self, monkeypatch, tmp_path):
+        monkeypatch.setattr(dle, "MODEL_DIR", tmp_path)
+        config_path = tmp_path / "dl_model_config.json"
+        monkeypatch.setattr(dle, "CONFIG_PATH", config_path)
+        self._seed_stale_baseline(config_path, rejection_count=1)
+
+        promoted = dle._promote_lstm_version(2, {"roc_auc": 0.50})
+
+        assert promoted is False
+        cfg = json.loads(config_path.read_text())
+        assert cfg["lstm_version"] == 1
+        assert cfg["lstm_metrics"]["1"]["rejection_count"] == 2

@@ -48,7 +48,7 @@ import pandas as pd
 
 from db_compat import connect, read_df, translate
 from breakout_classifier import compute_ohlcv_features, FEATURE_COLS as OHLCV_FEATURE_COLS
-from model_promotion import decide_promotion_with_nan_guard
+from model_promotion import decide_promotion_with_nan_guard, file_staleness_override_applies
 
 TOP_PCT = 0.90            # top decile of day-range = "high movement"
 MIN_PRICE = 20.0
@@ -385,6 +385,46 @@ def _load_baseline_test_auc(model_path: str) -> float | None:
         return None
 
 
+def _load_baseline_metrics(model_path: str) -> dict | None:
+    """Full baseline dict (not just test_auc) -- needed for the staleness-override rejection
+    bookkeeping (first_rejected_at/rejection_count, ml-promotion-gate-review 2026-08-15).
+    Mirrors breakout_classifier.py's helper of the same name."""
+    if not os.path.exists(model_path):
+        return None
+    try:
+        with open(model_path, "rb") as f:
+            return pickle.load(f)
+    except Exception:
+        return None
+
+
+def _staleness_check_and_bookkeep(model_path: str, baseline: dict | None, promote: bool
+                                   ) -> tuple[bool, float, int]:
+    """STALENESS OVERRIDE (ml-promotion-gate-review, 2026-08-15): this file's baseline lives in
+    a pickle, not model_registry, so it had no equivalent to ml_ensemble.py/cs_ranker.py's
+    safety valve against a baseline that's become permanently unbeatable -- every future honest
+    retrain would reject forever. See model_promotion.file_staleness_override_applies() for the
+    full contract. Extracted from train() (whose own promotion block is entangled with feature/
+    fit logic specific to this file) so the bookkeeping-write path is directly testable.
+
+    If `promote` is already True, does nothing and returns (False, 0.0, 0) -- no rejection to
+    record. Otherwise checks the override and, if it does NOT apply, writes the incremented
+    rejection bookkeeping back into the baseline file so the next retrain sees it.
+
+    Returns (override_applies, age_days, rejection_count_after_this_call).
+    """
+    if promote:
+        return False, 0.0, 0
+    staleness_override, age_days, rejection_count = file_staleness_override_applies(baseline)
+    if not staleness_override and baseline is not None:
+        rejection_count += 1
+        baseline["rejection_count"] = rejection_count
+        baseline.setdefault("first_rejected_at", datetime.datetime.now().isoformat())
+        with open(model_path, "wb") as f:
+            pickle.dump(baseline, f)
+    return staleness_override, age_days, rejection_count
+
+
 def _movement_promotion_decision(test_auc: float, baseline_test_auc: float | None) -> tuple[bool, str | None]:
     """Pure gate decision (Finding #80): returns (promote, refusal_reason).
 
@@ -504,10 +544,15 @@ def train(report_only: bool = False, enrich: bool = False, leak_check: bool = Fa
     # retrain that regresses (bad fold, unlucky init) silently replaced a better production
     # model with a worse one. Mirrors live_screener_ml_ranker.py's
     # _load_active_metrics()/PROMOTION_MARGIN pattern, which this sibling file didn't reuse.
-    baseline_test_auc = _load_baseline_test_auc(MODEL_PATH)
+    baseline = _load_baseline_metrics(MODEL_PATH)
+    baseline_test_auc = baseline.get("test_auc") if baseline else None
     promote, refusal_reason = _movement_promotion_decision(test_auc, baseline_test_auc)
-    if not promote:
-        print(f"[Movement] REFUSED: {refusal_reason} Active model at {MODEL_PATH} left unchanged.")
+    staleness_override, age_days, rejection_count = _staleness_check_and_bookkeep(
+        MODEL_PATH, baseline, promote)
+
+    if not promote and not staleness_override:
+        print(f"[Movement] REFUSED: {refusal_reason} Active model at {MODEL_PATH} left unchanged "
+              f"(rejection bookkeeping updated: {rejection_count} rejections so far).")
         result["trained"] = False
         result["promoted"] = False
         return result
@@ -522,9 +567,13 @@ def train(report_only: bool = False, enrich: bool = False, leak_check: bool = Fa
         pickle.dump({"model": prod, "feature_names": OHLCV_FEATURE_COLS,
                      "trained_at": datetime.date.today().isoformat(), "oof_auc": auc,
                      "test_auc": test_auc}, f)
-    print(f"[Movement] saved model (core OOF AUC {auc:.4f}, held-out test AUC {test_auc:.4f}"
-          + (f", beat baseline {baseline_test_auc:.4f}" if baseline_test_auc is not None else ", no prior model")
-          + f") -> {MODEL_PATH}")
+    if staleness_override and not promote:
+        print(f"[Movement] STALENESS OVERRIDE — baseline unbeaten {age_days:.1f}d across "
+              f"{rejection_count} rejections ({refusal_reason}) -- promoting anyway -> {MODEL_PATH}")
+    else:
+        print(f"[Movement] saved model (core OOF AUC {auc:.4f}, held-out test AUC {test_auc:.4f}"
+              + (f", beat baseline {baseline_test_auc:.4f}" if baseline_test_auc is not None else ", no prior model")
+              + f") -> {MODEL_PATH}")
     result["trained"] = True
     result["promoted"] = True
     return result

@@ -3,6 +3,7 @@ Tests for exit_policy — MFE/MAE regressors and level translation.
 suggest_levels is pure; train_from_df / predict_levels run on synthetic data (no DB).
 """
 
+import datetime
 import os
 import sys
 
@@ -125,8 +126,14 @@ class TestMixedHorizonEmbargo:
 
 
 class _FakeExitCursor:
-    def __init__(self, baseline=None):
+    def __init__(self, baseline=None, rejections=0, trained_at=None):
         self._baseline = baseline  # (mfe_mae, mae_mae) tuple or None
+        self._rejections = rejections
+        # Defaults to now() so staleness_override_applies() reads age_days~=0 and never fires
+        # unless a test explicitly overrides it (see TestExitPolicyStalenessOverride below) --
+        # existing tests above this class predate the staleness override and must see
+        # identical promote/reject behavior to before it was added.
+        self._trained_at = trained_at or datetime.datetime.now().isoformat()
         self.executed = []
         self._next_id = 100
 
@@ -136,8 +143,13 @@ class _FakeExitCursor:
 
     def fetchone(self):
         sql = self.executed[-1][0]
-        if "SELECT cv_roc_auc, cv_accuracy" in sql:
-            return self._baseline
+        if "SELECT id, cv_roc_auc, cv_accuracy, trained_at" in sql:
+            if self._baseline is None:
+                return None
+            mfe_mae, mae_mae = self._baseline
+            return (1, mfe_mae, mae_mae, self._trained_at)
+        if "SELECT COUNT(*) FROM model_registry" in sql:
+            return (self._rejections,)
         if "RETURNING id" in sql:
             self._next_id += 1
             return (self._next_id,)
@@ -145,8 +157,8 @@ class _FakeExitCursor:
 
 
 class _FakeExitConn:
-    def __init__(self, baseline=None):
-        self.cur = _FakeExitCursor(baseline)
+    def __init__(self, baseline=None, rejections=0, trained_at=None):
+        self.cur = _FakeExitCursor(baseline, rejections, trained_at)
         self.committed = 0
 
     def execute(self, sql, params=None):
@@ -225,3 +237,54 @@ class TestExitPolicyPromotionGate:
         deactivate_calls = [c for c in conn.cur.executed
                              if "UPDATE model_registry SET is_active = 0" in c[0]]
         assert len(deactivate_calls) == 1
+
+
+class TestExitPolicyStalenessOverride:
+    """ml-promotion-gate-review, 2026-08-14: exit_policy.py had no equivalent to
+    ml_ensemble.py/cs_ranker.py/confluence_ml_engine.py's safety valve against a baseline
+    whose holdout MAE became permanently unbeatable -- added 2026-08-15, same mechanism,
+    reused directly since this baseline already lives in model_registry."""
+
+    def _stale_trained_at(self, days_ago=10):
+        return (datetime.datetime.now() - datetime.timedelta(days=days_ago)).isoformat()
+
+    def test_stale_and_repeatedly_rejected_baseline_gets_overridden(self, monkeypatch, tmp_path):
+        monkeypatch.setattr(ep, "MODELS_DIR", str(tmp_path))
+        monkeypatch.setattr(ep, "EXIT_MODEL_PATH", str(tmp_path / "exit_policy.pkl"))
+        monkeypatch.setattr(ep, "EXIT_CANDIDATE_PATH", str(tmp_path / "exit_policy.pkl.candidate"))
+
+        # Candidate does NOT beat the baseline (mfe worsens 3.0->3.2), but the baseline has
+        # gone unbeaten 10 days across 12 rejected candidates -- both conditions clear.
+        conn = _FakeExitConn(baseline=(3.0, 2.0), rejections=12, trained_at=self._stale_trained_at(10))
+        ep._register_exit_model(conn, _fake_exit_payload(3.2, 2.5))
+
+        assert os.path.exists(ep.EXIT_MODEL_PATH), (
+            "a candidate that doesn't clear the bar must still be promoted once the baseline "
+            "is stale enough AND has been rejected against enough times"
+        )
+
+    def test_stale_but_not_enough_rejections_still_rejects(self, monkeypatch, tmp_path):
+        monkeypatch.setattr(ep, "MODELS_DIR", str(tmp_path))
+        monkeypatch.setattr(ep, "EXIT_MODEL_PATH", str(tmp_path / "exit_policy.pkl"))
+        monkeypatch.setattr(ep, "EXIT_CANDIDATE_PATH", str(tmp_path / "exit_policy.pkl.candidate"))
+
+        conn = _FakeExitConn(baseline=(3.0, 2.0), rejections=1, trained_at=self._stale_trained_at(10))
+        ep._register_exit_model(conn, _fake_exit_payload(3.2, 2.5))
+
+        assert not os.path.exists(ep.EXIT_MODEL_PATH), (
+            "staleness alone must not override -- both age AND rejection count are required"
+        )
+        assert os.path.exists(ep.EXIT_CANDIDATE_PATH)
+
+    def test_many_rejections_but_not_stale_still_rejects(self, monkeypatch, tmp_path):
+        monkeypatch.setattr(ep, "MODELS_DIR", str(tmp_path))
+        monkeypatch.setattr(ep, "EXIT_MODEL_PATH", str(tmp_path / "exit_policy.pkl"))
+        monkeypatch.setattr(ep, "EXIT_CANDIDATE_PATH", str(tmp_path / "exit_policy.pkl.candidate"))
+
+        conn = _FakeExitConn(baseline=(3.0, 2.0), rejections=50, trained_at=self._stale_trained_at(0.1))
+        ep._register_exit_model(conn, _fake_exit_payload(3.2, 2.5))
+
+        assert not os.path.exists(ep.EXIT_MODEL_PATH), (
+            "rejection count alone must not override -- both age AND rejection count are required"
+        )
+        assert os.path.exists(ep.EXIT_CANDIDATE_PATH)
