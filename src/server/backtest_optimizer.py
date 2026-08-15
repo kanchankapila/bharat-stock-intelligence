@@ -84,6 +84,40 @@ def _write_optimal_params(conn: ConnWrapper, config: dict, sharpe: float):
     conn.commit()
 
 
+MIN_WINDOW_DAYS = 30  # below this, train+holdout can't both hold a meaningful sample
+
+
+def _effective_window_days(conn: ConnWrapper, requested_days: int, today: Optional[datetime.date] = None) -> int:
+    """Clamp `requested_days` to how much technical_signals history actually exists.
+
+    window_days=365 assumed a year of history. Live-verified 2026-08-15: the table's real
+    depth was 91 days (MIN(date)=2026-05-16), so the default TRAIN window (today-365d to
+    today-holdout_days, i.e. ~2025-08 to ~2026-04) predated the table's entire existence --
+    every one of 300 grid combinations returned "No signals found" on EVERY run this script
+    ever made (job_heartbeat: 2 successful runs, app_settings had no optimal_sharpe row at
+    all). This was never a constraint-calibration problem -- CONSTRAINT_WIN_RATE /
+    CONSTRAINT_MAX_DRAWDOWN were never even reached; the search window itself never touched a
+    real row. Clamping here means a stale hardcoded default degrades gracefully as history
+    accumulates instead of silently finding nothing forever. Pure function (a fixed `today` is
+    injectable) so it is directly unit-testable without touching a real DB or Backtester.
+
+    Returns 0 if there is no scored history at all (caller compares against MIN_WINDOW_DAYS).
+    """
+    today = today or datetime.date.today()
+    depth_row = conn.execute(
+        "SELECT MIN(date) FROM technical_signals WHERE signal_score IS NOT NULL"
+    ).fetchone()
+    min_date = depth_row[0] if depth_row else None
+    if not min_date:
+        return requested_days
+    available_days = (today - datetime.date.fromisoformat(str(min_date)[:10])).days
+    if available_days < requested_days:
+        print(f"[BtOptimizer] Requested window={requested_days}d but technical_signals only has "
+              f"{available_days}d of scored history (since {min_date}) -- using {available_days}d.")
+        return max(available_days, 0)
+    return requested_days
+
+
 def run_grid_search(
     conn: ConnWrapper,
     window_days: int = 365,
@@ -98,6 +132,12 @@ def run_grid_search(
     # Sharpe that decides whether app_settings gets updated. Previously every combo (and the
     # promotion decision) used the exact same single window end-to-end -- a pure in-sample
     # search with nothing checking that the winner generalises past the data it was picked on.
+    window_days = _effective_window_days(conn, window_days)
+    if window_days < MIN_WINDOW_DAYS:
+        print(f"[BtOptimizer] Only {window_days}d of scored history available (<{MIN_WINDOW_DAYS}d "
+              f"minimum) -- too little to split into a train/holdout pair. Skipping this run.")
+        return None
+
     end         = datetime.date.today().isoformat()
     start       = (datetime.date.today() - datetime.timedelta(days=window_days)).isoformat()
     holdout_days = int(window_days * (1 - train_frac))
