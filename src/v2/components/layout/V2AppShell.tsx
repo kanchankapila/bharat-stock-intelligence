@@ -8,6 +8,7 @@ import {
   Gauge, Newspaper, Crosshair, Layers, ChartLine, MessageSquare, FileDown,
 } from 'lucide-react';
 import { cn } from '../../../lib/utils';
+import { useEscapeKey, SkipLink, MAIN_CONTENT_ID } from '../../../lib/a11y';
 
 interface V2AppShellProps {
   activeTab: string;
@@ -30,6 +31,10 @@ export const V2AppShell: React.FC<V2AppShellProps> = ({
 }) => {
   const [toastMessage, setToastMessage] = useState<any>(null);
   const [mobileOpen, setMobileOpen] = useState(false);
+  // Escape closes the mobile drawer. Shared hook (src/lib/a11y.tsx) so this cannot drift
+  // between the four shells the way chrome fixes have here before.
+  const closeMobile = React.useCallback(() => setMobileOpen(false), []);
+  useEscapeKey(mobileOpen, closeMobile);
 
   const wsUrl = import.meta.env.VITE_WS_URL || 'ws://localhost:3000/signals';
   const { lastMessage, isConnected } = useWebSocket({ url: wsUrl });
@@ -174,7 +179,7 @@ export const V2AppShell: React.FC<V2AppShellProps> = ({
         </div>
 
         {/* V2 Navigation List */}
-        <nav className="flex-1 min-h-0 overflow-y-auto space-y-4 terminal-scrollbar pr-1">
+        <nav aria-label="Main" className="flex-1 min-h-0 overflow-y-auto space-y-4 terminal-scrollbar pr-1">
           {tabGroups.map((group) => (
             <div key={group.label}>
               <div className="px-3 pb-1 text-[9px] font-black uppercase tracking-widest text-slate-600">
@@ -242,6 +247,7 @@ export const V2AppShell: React.FC<V2AppShellProps> = ({
 
   return (
     <div className="flex h-screen overflow-hidden bg-terminal-bg text-slate-200 font-sans">
+      <SkipLink />
       {/* V2 Sidebar — desktop only; a fixed w-64 rail with no responsive fallback used to render
           on every viewport, leaving ~119px for content at a 375px mobile width (confirmed live
           2026-08-07). Hidden below md; the off-canvas drawer below covers mobile instead. */}
@@ -255,8 +261,12 @@ export const V2AppShell: React.FC<V2AppShellProps> = ({
           <div
             className="fixed inset-0 bg-slate-950/60 backdrop-blur-sm z-30 md:hidden transition-opacity"
             onClick={() => setMobileOpen(false)}
+            aria-hidden="true"
           />
           <aside
+            role="dialog"
+            aria-modal="true"
+            aria-label="Navigation menu"
             className="fixed left-0 top-0 h-full w-64 max-w-[85vw] border-r border-terminal-border bg-terminal-panel flex flex-col justify-between p-3 z-40 md:hidden shadow-2xl transition-transform duration-200"
           >
             {renderSidebarBody((id) => { setActiveTab(id); setMobileOpen(false); })}
@@ -296,7 +306,7 @@ export const V2AppShell: React.FC<V2AppShellProps> = ({
         </header>
 
         {/* Scrollable content main area */}
-        <main className="flex-1 overflow-y-auto p-3 sm:p-6 space-y-6 bg-terminal-bg terminal-scrollbar">
+        <main id={MAIN_CONTENT_ID} tabIndex={-1} className="flex-1 overflow-y-auto p-3 sm:p-6 space-y-6 bg-terminal-bg terminal-scrollbar">
           {children}
         </main>
       </div>

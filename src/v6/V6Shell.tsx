@@ -3,6 +3,7 @@ import {
   TrendingUp, Menu, X, ShieldCheck, ShieldAlert,
 } from 'lucide-react';
 import { cn } from '../lib/utils';
+import { useEscapeKey, SkipLink, MAIN_CONTENT_ID } from '../lib/a11y';
 import { NAV_GROUPS } from '../lib/navGroups';
 import { isNseMarketOpen, currentTimeInZone } from '../lib/timeFormat';
 import { trpc } from '../lib/trpc';
@@ -137,6 +138,12 @@ export const V6Shell: React.FC<V6ShellProps> = ({
     return () => clearInterval(t);
   }, []);
 
+
+  // Escape closes the mobile drawer. Shared hook (src/lib/a11y.tsx) so this cannot drift
+  // between the four shells the way chrome fixes have here before.
+  const closeMobile = React.useCallback(() => setMobileOpen(false), []);
+  useEscapeKey(mobileOpen, closeMobile);
+
   const handleNav = (id: string) => {
     setActiveTab(id);
     setMobileOpen(false);
@@ -174,7 +181,7 @@ export const V6Shell: React.FC<V6ShellProps> = ({
         </button>
       </div>
 
-      <nav className="flex-1 min-h-0 overflow-y-auto v6-scrollbar space-y-3 pr-1">
+      <nav aria-label="Main" className="flex-1 min-h-0 overflow-y-auto v6-scrollbar space-y-3 pr-1">
         {NAV_GROUPS.map((group) => (
           <div key={group.label}>
             <p
@@ -224,6 +231,10 @@ export const V6Shell: React.FC<V6ShellProps> = ({
               <button
                 key={v}
                 onClick={() => switchVersion(v)}
+                // The visible label is 2 characters ("V1", "WB") — meaningless to a screen
+                // reader without this, and "WB" is not even self-evident visually.
+                aria-label={v === 'v6' ? 'Switch to Workbench view' : `Switch to version ${v.toUpperCase()} view`}
+                aria-pressed={active}
                 className="flex-1 py-1 rounded-md text-[10px] font-bold uppercase tracking-wider transition-colors"
                 style={active
                   ? { background: 'var(--v6-accent)', color: '#ffffff' }
@@ -246,6 +257,7 @@ export const V6Shell: React.FC<V6ShellProps> = ({
 
   return (
     <div className={cn('v6-root', 'flex h-screen overflow-hidden')}>
+      <SkipLink />
       {/* Desktop sidebar */}
       <aside
         className="hidden md:flex flex-col w-64 shrink-0 p-4"
@@ -265,9 +277,13 @@ export const V6Shell: React.FC<V6ShellProps> = ({
           <div
             className="fixed inset-0 z-30 md:hidden"
             style={{ background: 'rgba(5, 5, 8, 0.6)', backdropFilter: 'blur(2px)' }}
-            onClick={() => setMobileOpen(false)}
+            onClick={closeMobile}
+            aria-hidden="true"
           />
           <aside
+            role="dialog"
+            aria-modal="true"
+            aria-label="Navigation menu"
             className="fixed left-0 top-0 h-full w-72 max-w-[85vw] z-40 md:hidden flex flex-col p-4"
             style={{
               background: 'var(--v6-surface-raised)',
@@ -340,7 +356,7 @@ export const V6Shell: React.FC<V6ShellProps> = ({
           </div>
         </header>
 
-        <main className="flex-1 overflow-y-auto v6-scrollbar p-4 sm:p-6" style={{ background: 'var(--v6-bg)' }}>
+        <main id={MAIN_CONTENT_ID} tabIndex={-1} className="flex-1 overflow-y-auto v6-scrollbar p-4 sm:p-6" style={{ background: 'var(--v6-bg)' }}>
           {children}
         </main>
       </div>

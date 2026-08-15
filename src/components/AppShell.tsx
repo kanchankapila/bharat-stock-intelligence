@@ -9,6 +9,7 @@ import {
   FlaskConical, Layers, MonitorDot, ChartLine, X, MessageSquare, Gauge, FileDown,
 } from 'lucide-react';
 import { cn } from '../lib/utils';
+import { useEscapeKey, SkipLink, MAIN_CONTENT_ID } from '../lib/a11y';
 import { nseStocksData } from '../data/nseStocks';
 import type { MarketData } from '../services/marketService';
 import type { User as FirebaseUser } from 'firebase/auth';
@@ -381,7 +382,7 @@ const SidebarInner = React.memo(function SidebarInner({ collapsed, setCollapsed,
       <div className="mx-2.5 mt-2 border-t border-slate-800/50 shrink-0" />
 
       {/* Nav */}
-      <nav className="flex-1 overflow-y-auto py-1 px-2 space-y-px" style={{ scrollbarWidth: 'none' }}>
+      <nav aria-label="Main" className="flex-1 overflow-y-auto py-1 px-2 space-y-px" style={{ scrollbarWidth: 'none' }}>
         {NAV_GROUPS.map(group => (
           <div key={group.label}>
             <AnimatePresence initial={false}>
@@ -532,6 +533,10 @@ export const AppShell: React.FC<AppShellProps> = ({
 }) => {
   const [collapsed, setCollapsed]     = useState(false);
   const [mobileOpen, setMobileOpen]   = useState(false);
+  // Escape closes the mobile drawer. Shared hook (src/lib/a11y.tsx) so this cannot drift
+  // between the four shells the way chrome fixes have here before.
+  const closeMobile = React.useCallback(() => setMobileOpen(false), []);
+  useEscapeKey(mobileOpen, closeMobile);
 
   const allNavItems = NAV_GROUPS.flatMap(g => g.items);
   const activeLabel = allNavItems.find(i => i.id === activeTab)?.label ?? '';
@@ -562,6 +567,7 @@ export const AppShell: React.FC<AppShellProps> = ({
 
   return (
     <div className="flex h-screen overflow-hidden bg-transparent text-slate-200">
+      <SkipLink />
       {/* ── Desktop sidebar ── */}
       <motion.aside
         animate={{ width: collapsed ? 60 : 232 }}
@@ -582,6 +588,7 @@ export const AppShell: React.FC<AppShellProps> = ({
               exit={{ opacity: 0 }}
               className="fixed inset-0 bg-slate-900/30 backdrop-blur-sm z-30 md:hidden"
               onClick={() => setMobileOpen(false)}
+              aria-hidden="true"
             />
             <motion.aside
               key="mobile-sidebar"
@@ -717,7 +724,7 @@ export const AppShell: React.FC<AppShellProps> = ({
         </header>
 
         {/* Scrollable content */}
-        <main className="flex-1 overflow-y-auto">
+        <main id={MAIN_CONTENT_ID} tabIndex={-1} className="flex-1 overflow-y-auto">
           {children}
         </main>
       </div>

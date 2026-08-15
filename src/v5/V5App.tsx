@@ -2,6 +2,7 @@ import React, { useMemo, useState } from 'react';
 import { BarChart3, BriefcaseBusiness, CalendarClock, Database, Layers3, Radio, ShieldCheck, Waves, Workflow } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { trpc } from '../lib/trpc';
+import { SkipLink, MAIN_CONTENT_ID } from '../lib/a11y';
 import { MarketPulsePage } from './pages/MarketPulsePage';
 import { PortfolioDeskPage } from './pages/PortfolioDeskPage';
 import { ScreenerLabPage } from './pages/ScreenerLabPage';
@@ -87,6 +88,7 @@ export default function V5App() {
 
   return (
     <div className="v5-root">
+      <SkipLink />
       <div className="v5-shell">
         <div className="v5-layout">
           <aside className="v5-card v5-sidebar p-4">
@@ -110,7 +112,7 @@ export default function V5App() {
               </div>
             </div>
 
-            <nav className="space-y-1">
+            <nav aria-label="Main" className="space-y-1">
               {NAV_ITEMS.map((item) => {
                 const Icon = item.icon;
                 const active = page === item.key;
@@ -131,7 +133,7 @@ export default function V5App() {
             </nav>
           </aside>
 
-          <main className="space-y-4">
+          <main id={MAIN_CONTENT_ID} tabIndex={-1} className="space-y-4">
             <header className="v5-card p-4">
               <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
                 <div>
