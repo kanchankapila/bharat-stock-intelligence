@@ -2664,6 +2664,23 @@ export async function initQueues(): Promise<boolean> {
         const failed = results.filter(r => r.status === 'fail' || r.status === 'error');
         const criticalFailed = failed.filter(r => r.critical);
 
+        // scripts/daily_failure_triage.py (2026-08-15): ~125 of ~148 queues.ts steps are bare
+        // `.catch(e => console.warn(...))`, so their failures are logged and never surface --
+        // job_heartbeat stays 'success', this very check suite has no coverage for them, and
+        // the only way they were previously found was an occasional manual weekly log review.
+        // Wrapping all 125 call sites in StepTracker is the fuller fix and a large, risky edit
+        // to a file several sessions touch concurrently; this reuses the digest that already
+        // exists and is already read daily, at zero risk to the job chain itself.
+        let untrackedFailures: { key: string; n: number; days: number; sample: string }[] = [];
+        try {
+          // runPython resolves relative to src/server/*.py; the triage script lives in
+          // scripts/, one level up, so it's invoked via its relative path from there.
+          const { stdout } = await runPython('../../scripts/daily_failure_triage.py', ['--days', '1', '--json'], 30_000);
+          untrackedFailures = JSON.parse(stdout);
+        } catch (e) {
+          console.warn('[QUEUE] daily_failure_triage step failed (non-fatal, digest continues):', (e as Error).message);
+        }
+
         // r.detail routinely embeds raw snake_case table names (e.g. "mf_sector_allocation is
         // empty") -- unbalanced underscores kill this whole single-message digest in Telegram's
         // legacy Markdown parser (confirmed live 2026-08-04, 08:40 IST, matching this job's cron).
@@ -2675,6 +2692,20 @@ export async function initQueues(): Promise<boolean> {
         if (warned.length) {
           lines.push('', '*Warnings:*');
           for (const r of warned) lines.push(`⚠️ \`${sanitizeMarkdown(r.label)}\` — ${sanitizeMarkdown(r.detail)}`);
+        }
+        if (untrackedFailures.length) {
+          // Deliberately a WARNING section, never a throw source: unlike the DQ checks above
+          // (which only fire on a known, named condition someone chose to watch), this is raw
+          // log triage and its first-ever run already surfaced 15 pre-existing signatures with
+          // no muting review done yet. Throwing on all of them immediately would be exactly the
+          // alert-fatigue failure dq-new-failures (added the same day) exists to prevent -- this
+          // needs a triage pass to populate daily_failure_triage.py's MUTED set for known-benign
+          // upstream conditions before graduating any of it to critical.
+          lines.push('', '*Untracked step failures (not in job_heartbeat):*');
+          for (const f of untrackedFailures.slice(0, 10)) {
+            lines.push(`⚠️ \`${sanitizeMarkdown(f.key)}\` — ${f.n}x/${f.days}d — ${sanitizeMarkdown(f.sample)}`);
+          }
+          if (untrackedFailures.length > 10) lines.push(`… and ${untrackedFailures.length - 10} more (run scripts/daily_failure_triage.py for the full list)`);
         }
         await telegramService.sendMarkdownMessage(lines.join('\n'));
 
