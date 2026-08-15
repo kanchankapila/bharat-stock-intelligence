@@ -2921,3 +2921,49 @@ distinct live. Same unmeasured-factor caveat as the other 3 fetchers from this p
 for future use, not wired into scoring. Full detail in the audit doc's "reversal" section.
 
 Full suite re-verified: `tsc --noEmit` clean, `pytest` 1,916 passed / 230 skipped / 0 failed.
+
+---
+
+## 2026-08-15 (cont. 2) — Fixed index_max_pain PK collision (from the 12-audit pending-items review)
+
+User asked to review pending items from memory/audit files, then picked this one to act on:
+`docs/audit-2026-08-14/full-sweep-findings.md`'s §2 finding that `index_max_pain`'s PK
+`(index_name, date, expiry)` has no provider column, and `mc_index_oi_fetcher.py`/
+`nt_oi_snapshot_fetcher.py` both independently derive max_pain/pcr_oi for NIFTY50/NIFTYBANK,
+silently overwriting each other. Confirmed live before fixing: 93 MC-derived vs 11 NT-derived
+NIFTY50 rows coexisting under the collision-prone key (91/8 for NIFTYBANK).
+
+Same class as the already-documented composite-key-for-provider fixes
+(`screener_master`/`screener_reliability`/`screener_performance_v2`), generalized: this one has
+no opaque provider id at all, just two providers independently producing a row for the same
+natural key. Added an addendum to `.claude/rules/data-sources.md`'s composite-key rule
+capturing the generalization.
+
+Migration `1787010000000_index-max-pain-source-pk.sql`: added `source` (NOT NULL), widened PK
+to `(source, index_name, date, expiry)`. Existing 377 rows backfilled deterministically, not
+guessed — `mc_index_oi_fetcher.py` stamps `fetched_at` via `strftime('...Z')` (always ends
+`Z`), `nt_oi_snapshot_fetcher.py` stamps it from NiftyTrader's own per-record time field (never
+does) — so the existing format itself encodes which writer produced each row. Applied against
+real production Postgres (`npm run migrate:up`); backfill split 184 moneycontrol / 193
+niftytrader.
+
+Updated both fetchers to stamp `source` and upsert on the new key; `db.ts`'s SQLite
+schema-of-record updated to match; fixed one existing test whose param-order assertion shifted
+(`test_live_datasource_mc_index_oi.py`); added `test_nt_oi_snapshot_index_max_pain.py` (2
+tests, `nt_oi_snapshot_fetcher.py` had no regression coverage at all before this).
+
+**Live-verified the actual fix, not just the schema**: ran both fetchers for real against
+NIFTY50 today. Both `moneycontrol` and `niftytrader` rows now coexist for the identical
+`(NIFTY50, 2026-08-15, 2026-08-18)` key with different `pcr_oi` (1.117 vs 0.952) — the exact
+data that used to silently overwrite each other.
+
+`npm run schema:drift` afterward shows `index_max_pain.source` as expected new drift (live but
+not in the `db/schema.postgres.sql` snapshot) — same pre-existing, deliberately-not-regenerated
+gap this file's own §8 finding already documents (a prior session tried regenerating the
+snapshot and reverted it after finding the local dev DB doesn't match whatever state produced
+the committed one). Not re-attempted here, same reasoning.
+
+Verified: `tsc --noEmit` clean; `pytest` 1,918 passed / 230 skipped (1 pre-existing flake,
+`test_history_snapshot_is_append_only_across_reruns`, confirmed unrelated — passes in
+isolation, same flake the audit doc already names); `vitest run` 917 passed / 40 skipped / 0
+failed.

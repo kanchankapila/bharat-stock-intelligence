@@ -32,6 +32,8 @@ import requests
 from db_compat import execute, executemany, query_all
 from fetch_utils import retry_get
 
+SOURCE = "niftytrader"
+
 NT_HEADERS = {
     "User-Agent": (
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
@@ -175,15 +177,15 @@ def save_snapshot(index_name: str, data: list[dict], today: str) -> int:
         snap_ts = str(recs[0].get("time") or "")[:19]
         execute("""
             INSERT INTO index_max_pain
-                (index_name, date, expiry, max_pain, pcr_oi, total_ce_oi, total_pe_oi, fetched_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-            ON CONFLICT (index_name, date, expiry) DO UPDATE SET
+                (source, index_name, date, expiry, max_pain, pcr_oi, total_ce_oi, total_pe_oi, fetched_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT (source, index_name, date, expiry) DO UPDATE SET
                 max_pain    = excluded.max_pain,
                 pcr_oi      = excluded.pcr_oi,
                 total_ce_oi = excluded.total_ce_oi,
                 total_pe_oi = excluded.total_pe_oi,
                 fetched_at  = excluded.fetched_at
-        """, (index_name, today, exp, mp, pcr, int(total_ce), int(total_pe), snap_ts))
+        """, (SOURCE, index_name, today, exp, mp, pcr, int(total_ce), int(total_pe), snap_ts))
 
     return len(rows)
 
