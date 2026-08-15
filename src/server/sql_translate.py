@@ -41,12 +41,47 @@ Covered by test_sql_translate.py.
 """
 import os
 import re
+import sys
 from functools import lru_cache
 
 
+def _in_pytest() -> bool:
+    """True only inside a pytest process. `sys.modules` is owned by the interpreter, so this
+    cannot be forged from .env -- unlike PYTEST_CURRENT_TEST, which pytest sets per-test and is
+    therefore absent at import time, exactly when the dialect gets decided."""
+    return "pytest" in sys.modules
+
+
 def use_postgres() -> bool:
-    """Cutover switch — strictly USE_POSTGRES == 'true' (mirrors pgConfig.ts)."""
-    return os.environ.get("USE_POSTGRES") == "true"
+    """PostgreSQL IS the database. This is no longer a switch. Mirrors pgConfig.ts's
+    usePostgres() -- keep the two identical.
+
+    Was `os.environ.get("USE_POSTGRES") == "true"`, which defaulted to SQLite whenever the
+    variable was absent. That default is why this project kept silently reading a stale local
+    database.sqlite from any process that did not load .env, while printing convincing numbers
+    (see pgConfig.ts's comment for the recorded instances, and .claude/rules/recurring-bugs.md's
+    Environment & deploy section). The local file is 3.49 GB and ~2 months stale, so the
+    fallback does not fail -- it answers, wrongly.
+
+    Now Postgres unconditionally for every REAL process -- dev, prod, cron, hand-run script --
+    with no environment variable consulted at all.
+
+    Inside pytest the historical env-based rule still applies (SQLite unless USE_POSTGRES=true).
+    That is deliberate and is the safe direction: ~240 of this repo's Python test files build
+    their own throwaway SQLite fixture and never set the variable, so defaulting them to
+    Postgres would point the suite at the LIVE production database. Measured 2026-08-15 when
+    this was briefly tried that way: suite runtime went 115s -> 600s+ (verified afterwards to
+    have written nothing -- 0 test symbols in any live table, core row counts unchanged), which
+    is a warning, not a near-miss to repeat. A test that wants Postgres opts in explicitly.
+
+    So the env var survives in exactly one place: choosing a fixture inside a test runner. It
+    can no longer decide which database a real process talks to.
+
+    Pinned by test_sql_translate.py's "Postgres-only guarantee" section.
+    """
+    if _in_pytest():
+        return os.environ.get("USE_POSTGRES") == "true"
+    return True
 
 
 def convert_placeholders(sql: str) -> str:

@@ -25,12 +25,45 @@ export function pgConnectionString(): string {
 }
 
 /**
- * The cutover switch. STRICTLY gated on USE_POSTGRES === 'true' — NOT on the mere
- * presence of POSTGRES_URL, which is set in .env for the migration tooling while the
- * running app must stay on SQLite until the explicit cutover.
+ * PostgreSQL IS the database. This is no longer a switch.
+ *
+ * It used to be `process.env.USE_POSTGRES === 'true'` — a cutover flag from the SQLite era.
+ * That default was the wrong way round and it cost this project repeatedly, because the
+ * failure is SILENT: any process that did not happen to load `.env` resolved to `false` and
+ * talked to a stale local `database.sqlite` while printing entirely convincing numbers.
+ * Recorded instances:
+ *   - A standalone `tsx` script missing `import 'dotenv/config'` reported 121,669
+ *     screener_appearances rows for Trendlyne with 26 carrying a new column. Postgres actually
+ *     held 435,700 and 0. It even resolved a different screenpk for the same screener.
+ *     (`.claude/rules/recurring-bugs.md`, Environment & deploy.)
+ *   - `infra_gotchas` memory recorded "AlphaQuant writing SQLite" for months; it never was —
+ *     two dead `sqlite:///`-forcing lines made it look that way (deleted 2026-08-15).
+ *   - The local `database.sqlite` is 3.49 GB and ~2 months stale on the canonical tables
+ *     (`unified_recommendations` 2026-06-19 vs 2026-08-17 live), so a silent fallback does not
+ *     fail — it answers, wrongly.
+ *
+ * Now: Postgres unconditionally for every REAL process — dev, prod, cron, hand-run script —
+ * with no environment variable consulted at all. A missing or unloaded `.env` can no longer
+ * reroute a process to a different database; the worst it can do is fail to connect, loudly.
+ *
+ * Inside a test runner the historical env-based rule still applies (SQLite unless
+ * `USE_POSTGRES=true`). `VITEST` is set by vitest itself and cannot be supplied by `.env`, so
+ * the escape hatch is unreachable outside the suite. This direction is deliberate: most test
+ * files build a throwaway SQLite fixture and never set the variable, so defaulting THEM to
+ * Postgres would point the suite at the live production database — briefly tried 2026-08-15
+ * on the Python side and immediately visible as a 115s → 600s+ suite (it wrote nothing, but
+ * that is not a thing to rely on twice).
+ *
+ * So the variable survives in exactly one place: choosing a fixture inside a test runner. It
+ * can no longer decide which database a real process talks to. `docs/SQLITE_DECOMMISSION_PLAN.md`
+ * Phase 2 removes even that by moving the suites onto Postgres, after which this is `return true`.
+ *
+ * Pinned by `src/server/__tests__/postgresOnly.test.ts` and the Python mirror
+ * `src/server/tests/test_sql_translate.py` — keep the two rules identical.
  */
 export function usePostgres(): boolean {
-  return process.env.USE_POSTGRES === 'true';
+  if (process.env.VITEST) return process.env.USE_POSTGRES === 'true';
+  return true;
 }
 
 /** Whether Postgres connection info exists (for tooling/health checks, not for routing). */

@@ -195,3 +195,193 @@ def test_build_params_numpy_conversion():
     assert build_params(({"x": np.int32(1)},)) == {"p0": {"x": np.int32(1)}}  # nested dict in tuple isn't deeply cleaned but lists/tuples are:
     assert build_params(([np.float64(1.5)],)) == {"p0": [1.5]}
 
+
+
+# ─── Postgres-only guarantee (2026-08-15) ────────────────────────────────────
+#
+# Deliberately appended to this existing file rather than added as a NEW test file:
+# adding any new file to src/server/tests/ deterministically trips a pre-existing
+# order/state-dependent failure in test_unified_ranker.py
+# (test_history_snapshot_is_append_only_across_reruns -- reproduced 2026-08-15 with a
+# throwaway file containing nothing but five `assert True` statements, so it is unrelated
+# to this content). That bug is real and unfixed; see docs/session-log.md. Homing these
+# tests here pins the guarantee without changing that bug's status either way.
+
+import os
+import subprocess
+import sys
+from pathlib import Path
+
+SERVER_DIR = Path(__file__).resolve().parent.parent
+
+
+def _resolve_in_clean_process(env_overrides: dict) -> str:
+    """Ask a FRESH interpreter -- no pytest in sys.modules -- what dialect it resolves to.
+
+    This is the whole point: the guarantee is about processes that are NOT the test suite.
+    Asserting it from inside pytest would test the escape hatch, not the rule.
+    """
+    env = {k: v for k, v in os.environ.items() if k != "USE_POSTGRES"}
+    env.update(env_overrides)
+    out = subprocess.run(
+        [sys.executable, "-c",
+         "from sql_translate import use_postgres; print(use_postgres())"],
+        cwd=str(SERVER_DIR), env=env, capture_output=True, text=True, timeout=120,
+    )
+    assert out.returncode == 0, f"probe failed: {out.stderr[:400]}"
+    return out.stdout.strip()
+
+
+def test_postgres_when_use_postgres_is_unset():
+    """The exact incident shape: a script that never loaded .env. Previously SQLite."""
+    assert _resolve_in_clean_process({}) == "True"
+
+
+def test_postgres_even_when_use_postgres_is_explicitly_false():
+    """.env must not be able to reroute a non-test process to another database."""
+    assert _resolve_in_clean_process({"USE_POSTGRES": "false"}) == "True"
+
+
+def test_postgres_when_use_postgres_is_garbage():
+    """A typo'd value must not silently mean SQLite, which is what `== 'true'` did."""
+    assert _resolve_in_clean_process({"USE_POSTGRES": "0"}) == "True"
+
+
+def test_inside_pytest_sqlite_stays_the_default_fixture():
+    """Inside the suite the historical rule still applies: SQLite unless USE_POSTGRES=true.
+
+    This direction is load-bearing for SAFETY, not just compatibility. ~240 Python test files
+    build a throwaway SQLite fixture and never set the variable; defaulting them to Postgres
+    points the suite at the LIVE production database. Briefly tried 2026-08-15 -- suite went
+    115s -> 600s+ (it wrote nothing, confirmed, but that is not a thing to rely on twice).
+    """
+    probe = (
+        "import pytest;"  # puts 'pytest' in sys.modules, simulating a test process
+        "from sql_translate import use_postgres; print(use_postgres())"
+    )
+    env = {k: v for k, v in os.environ.items() if k != "USE_POSTGRES"}
+    out = subprocess.run([sys.executable, "-c", probe], cwd=str(SERVER_DIR), env=env,
+                         capture_output=True, text=True, timeout=120)
+    assert out.returncode == 0, out.stderr[:400]
+    assert out.stdout.strip() == "False", "a test process must default to the SQLite fixture"
+
+    env["USE_POSTGRES"] = "true"
+    out2 = subprocess.run([sys.executable, "-c", probe], cwd=str(SERVER_DIR), env=env,
+                          capture_output=True, text=True, timeout=120)
+    assert out2.stdout.strip() == "True", "a test must still be able to opt INTO Postgres"
+
+
+def test_the_two_decision_points_agree():
+    """pgConfig.ts and sql_translate.py must encode the identical rule -- a TS/Python split
+    here would mean the Node server and the ML engines silently disagree about which database
+    they are talking to, which is worse than either default on its own."""
+    ts = (SERVER_DIR / "pgConfig.ts").read_text(encoding="utf-8")
+    assert "if (process.env.VITEST) return process.env.USE_POSTGRES === 'true';" in ts, (
+        "pgConfig.ts's usePostgres() no longer matches sql_translate.py's use_postgres(); "
+        "keep the two rules identical"
+    )
+    assert "return true;" in ts.split("export function usePostgres")[1][:400]
+
+
+# ─── generated_at uniqueness (2026-08-15) ────────────────────────────────────
+#
+# Homed here for the same reason as the Postgres-only block above: adding a NEW file under
+# src/server/tests/ perturbs suite timing, and timing is exactly what this bug is about.
+
+def test_generated_at_is_strictly_increasing_under_a_coarse_clock():
+    """Two runs in quick succession must never share a generated_at.
+
+    unified_recommendations_history is PK (symbol, generated_at) with ON CONFLICT DO NOTHING,
+    so a shared timestamp silently discards an entire run's snapshot. datetime.now()'s
+    resolution is the system clock tick -- measured 0.015625 s on Windows, where 2000
+    back-to-back calls return ONE distinct value -- and unified_ranker.run() finishes well
+    inside that on a small universe.
+    """
+    import sys as _sys
+    from pathlib import Path as _Path
+    _sys.path.insert(0, str(_Path(__file__).resolve().parent.parent))
+    import unified_ranker
+
+    unified_ranker._last_generated_at = None            # fresh process state
+    stamps = [unified_ranker._next_generated_at() for _ in range(50)]
+
+    assert len(set(stamps)) == 50, (
+        f"expected 50 distinct generated_at, got {len(set(stamps))} -- "
+        "a shared timestamp silently drops a snapshot via ON CONFLICT DO NOTHING"
+    )
+    assert stamps == sorted(stamps), "generated_at must be monotonically increasing"
+
+
+def test_generated_at_stays_real_wall_clock_time():
+    """The collision bump must not drift generated_at away from real UTC -- the column is used
+    to prove a run happened pre-market, so it has to stay a true wall-clock timestamp, not a
+    counter that has wandered off."""
+    import sys as _sys
+    from datetime import datetime, timedelta, timezone
+    from pathlib import Path as _Path
+    _sys.path.insert(0, str(_Path(__file__).resolve().parent.parent))
+    import unified_ranker
+
+    unified_ranker._last_generated_at = None
+    before = datetime.now(timezone.utc)
+    stamps = [unified_ranker._next_generated_at() for _ in range(50)]
+    after = datetime.now(timezone.utc)
+
+    assert stamps[0] >= before, "first stamp precedes the call that produced it"
+    # 50 collisions bump by at most 50 microseconds beyond the real clock reading.
+    assert stamps[-1] <= after + timedelta(microseconds=50), (
+        "generated_at drifted past real time by more than the collision bump can explain"
+    )
+
+
+# ─── pg_schema fixture isolation (2026-08-15) ────────────────────────────────
+#
+# Homed here rather than in a new file for the reason documented above. These guard the ONE
+# property that makes Phase 2 of docs/SQLITE_DECOMMISSION_PLAN.md safe: a Postgres-backed test
+# must be unable to touch a production table. Measured 2026-08-15, a Postgres-by-default change
+# briefly aimed ~100 fixture-building test files at the live database; nothing was written, but
+# only by luck. If these tests ever fail, STOP converting tests to Postgres.
+
+def test_pg_schema_shadows_production_tables_not_writes_to_them(pg_schema):
+    """An unqualified CREATE/INSERT must land in the throwaway schema, never in public."""
+    conn, schema = pg_schema
+    cur = conn.cursor()
+
+    # unified_recommendations is a REAL production table. Creating it unqualified here must
+    # shadow it inside the throwaway schema, not touch the live one.
+    cur.execute("CREATE TABLE unified_recommendations (symbol TEXT, unified_score DOUBLE PRECISION)")
+    cur.execute("INSERT INTO unified_recommendations VALUES ('ZZTESTSYM', 1.0)")
+
+    cur.execute("SELECT count(*) FROM unified_recommendations")
+    assert cur.fetchone()[0] == 1, "write did not land in the throwaway schema"
+
+    # The production table must be untouched by that write.
+    cur.execute("SELECT count(*) FROM public.unified_recommendations WHERE symbol = 'ZZTESTSYM'")
+    assert cur.fetchone()[0] == 0, (
+        "TEST WROTE INTO PRODUCTION — the search_path isolation is broken; do not convert "
+        "any further tests to Postgres until this passes"
+    )
+
+    cur.execute("SELECT to_regclass(%s)", (f"{schema}.unified_recommendations",))
+    assert cur.fetchone()[0] is not None, "table was not created in the throwaway schema"
+
+
+def test_pg_schema_is_empty_and_unique_per_test(pg_schema):
+    """Each test gets a fresh schema -- a leftover from a killed run must never be reused as if
+    it were empty, which a name derived from the test name would allow."""
+    conn, schema = pg_schema
+    cur = conn.cursor()
+    cur.execute(
+        "SELECT count(*) FROM information_schema.tables WHERE table_schema = %s", (schema,)
+    )
+    assert cur.fetchone()[0] == 0, "throwaway schema was not empty at test start"
+    assert schema.startswith("t_") and len(schema) == 14
+
+
+def test_pg_schema_drops_on_teardown(pg_schema):
+    """Recorded so the teardown contract is explicit; the drop itself is asserted by the
+    fixture's own finally block running DROP ... CASCADE."""
+    conn, schema = pg_schema
+    cur = conn.cursor()
+    cur.execute("SELECT current_schemas(false)")
+    assert schema in cur.fetchone()[0], "search_path is not pinned to the throwaway schema"
