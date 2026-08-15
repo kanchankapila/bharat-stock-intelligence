@@ -1,6 +1,7 @@
 // Stage 5 (BUILD_STAGE_5_SPEC.md Tasks 5.1-5.2): reading Task 5.0's recorded
 // evidence, and writing the append-only `recommendation` table.
 import type pg from 'pg';
+import { insertAuditMetric } from './stage3-repo.js';
 
 export interface NetMeasurementEvidence {
   runId: string;
@@ -281,4 +282,189 @@ export async function queryShadowPreregistration(pool: pg.Pool): Promise<ShadowP
     firstShadowSession: r.data_watermark,
     generatedAt: r.generated_at,
   };
+}
+
+export interface LatestSessionScores {
+  asOfSession: string | null;
+  scores: number[];
+}
+
+/** Task 5.3 Verify (`shadow-rank-variance`): every score the shadow ranker
+ * wrote for its most recent session, for computing whether the ranking has
+ * degenerated (near-zero variance, or a collapsed universe) -- the concrete
+ * historical bug this guards against excluded 825 symbols platform-wide with
+ * nothing catching it for a full session. */
+export async function queryLatestSessionScores(pool: pg.Pool, rankerVersion: string): Promise<LatestSessionScores> {
+  const { rows } = await pool.query<{ as_of_session: string | null; score: number | null }>(
+    `SELECT as_of_session::text, score
+     FROM recommendation
+     WHERE ranker_version = $1
+       AND as_of_session = (SELECT max(as_of_session) FROM recommendation WHERE ranker_version = $1)`,
+    [rankerVersion],
+  );
+  const asOfSession = rows[0]?.as_of_session ?? null;
+  const scores = rows.map((r) => r.score).filter((s): s is number => s !== null && Number.isFinite(s));
+  return { asOfSession, scores };
+}
+
+export interface DivergenceMetricInput {
+  runId: string;
+  rankerVersion: string;
+  asOfSession: string;
+  rankCorrelation: number | null;
+  directionalAgreementRate: number | null;
+  nCompared: number;
+  nDecisiveBoth: number;
+  nNewOnly: number;
+  nLegacyOnly: number;
+  dataWatermark: string;
+  paramsHash: string;
+  codeCommit: string;
+}
+
+/** Task 5.3: records one session's dual-run divergence result into
+ * audit_metric, under a metric name distinct from every other Stage 5
+ * metric family (`shadow_divergence_*`) so `dual-run-divergence-sane` can
+ * find them without ambiguity. */
+export async function insertDivergenceMetrics(client: pg.ClientBase, input: DivergenceMetricInput): Promise<void> {
+  const dims = { rankerVersion: input.rankerVersion, asOfSession: input.asOfSession };
+  const common = {
+    runId: input.runId, metricVersion: 'v1', dimensions: dims,
+    dataWatermark: input.dataWatermark, paramsHash: input.paramsHash, codeCommit: input.codeCommit,
+  };
+  await insertAuditMetric(client, { ...common, metricName: 'shadow_divergence_rank_correlation', value: input.rankCorrelation, nObservations: input.nCompared });
+  await insertAuditMetric(client, { ...common, metricName: 'shadow_divergence_directional_agreement', value: input.directionalAgreementRate, nObservations: input.nDecisiveBoth });
+  await insertAuditMetric(client, { ...common, metricName: 'shadow_divergence_n_new_only', value: input.nNewOnly, nObservations: null });
+  await insertAuditMetric(client, { ...common, metricName: 'shadow_divergence_n_legacy_only', value: input.nLegacyOnly, nObservations: null });
+}
+
+export interface LatestDivergenceMetric {
+  asOfSession: string;
+  generatedAt: string;
+  rankCorrelation: number | null;
+  directionalAgreementRate: number | null;
+}
+
+/** Task 5.6 `dual-run-divergence-sane`: the most recent N divergence
+ * readings, to check the monitor is actually running (not stale) and
+ * actually computing something (not perpetually NULL -- the "inert UNION
+ * half" bug shape from recurring-bugs.md: a job that looks alive from rows
+ * written alone, with the payload silently always empty). */
+export async function queryRecentDivergenceMetrics(pool: pg.Pool, rankerVersion: string, limit = 5): Promise<LatestDivergenceMetric[]> {
+  const { rows } = await pool.query<{ as_of_session: string; generated_at: string; rank_correlation: number | null; directional_agreement: number | null }>(
+    `SELECT
+       corr.dimensions ->> 'asOfSession' AS as_of_session,
+       corr.generated_at::text,
+       corr.value AS rank_correlation,
+       agree.value AS directional_agreement
+     FROM audit_metric corr
+     LEFT JOIN audit_metric agree
+       ON agree.metric_name = 'shadow_divergence_directional_agreement'
+       AND agree.dimensions = corr.dimensions
+     WHERE corr.metric_name = 'shadow_divergence_rank_correlation'
+       AND corr.dimensions ->> 'rankerVersion' = $1
+     ORDER BY corr.generated_at DESC
+     LIMIT $2`,
+    [rankerVersion, limit],
+  );
+  return rows.map((r) => ({
+    asOfSession: r.as_of_session, generatedAt: r.generated_at,
+    rankCorrelation: r.rank_correlation, directionalAgreementRate: r.directional_agreement,
+  }));
+}
+
+/** Task 5.3: only the MOST RECENT run's rows for one session -- `recommendation`
+ * is append-only (migration 010), so a session that was re-scored has
+ * multiple `generated_at` batches on record; comparing all of them against
+ * the old system in one pass would double/triple-count symbols and corrupt
+ * the divergence read, not just be redundant. */
+export async function queryLatestRecommendationRun(pool: pg.Pool, asOfSession: string, rankerVersion: string): Promise<RecommendationRow[]> {
+  const { rows } = await pool.query<{
+    symbol: string; as_of_session: string; ranker_version: string; generated_at: string;
+    facts_cutoff: string; score: number | null; rank: number | null; classification: string;
+    conviction: string | null; is_publishable: boolean;
+  }>(
+    `SELECT symbol, as_of_session::text, ranker_version, generated_at::text, facts_cutoff::text,
+            score, rank, classification, conviction, is_publishable
+     FROM recommendation
+     WHERE as_of_session = $1 AND ranker_version = $2
+       AND generated_at = (SELECT max(generated_at) FROM recommendation WHERE as_of_session = $1 AND ranker_version = $2)
+     ORDER BY rank`,
+    [asOfSession, rankerVersion],
+  );
+  return rows.map((r) => ({
+    symbol: r.symbol, asOfSession: r.as_of_session, rankerVersion: r.ranker_version,
+    generatedAt: r.generated_at, factsCutoff: r.facts_cutoff, score: r.score, rank: r.rank,
+    classification: r.classification, conviction: r.conviction, isPublishable: r.is_publishable,
+  }));
+}
+
+export interface ShadowScorePoint {
+  symbol: string;
+  sessionDate: string;
+  value: number | null;
+}
+
+/** Task 5.4: every scored (symbol, session) the shadow ranker has ever
+ * produced for `rankerVersion`, one row per pair -- shaped exactly like
+ * research-harness.ts's `FactorPoint[]`, so the SAME `computeIC`/
+ * `computeNetAnnualizedExcessReturn` functions Task 5.0 used can grade the
+ * live shadow ranker's own score as if it were a factor, without
+ * reimplementing anything. `DISTINCT ON` takes only the LATEST run per
+ * session (same append-only-dedup reasoning as queryLatestRecommendationRun,
+ * generalized across the whole shadow window instead of one session). */
+export async function queryShadowScoreSeries(pool: pg.Pool, rankerVersion: string): Promise<ShadowScorePoint[]> {
+  const { rows } = await pool.query<{ symbol: string; as_of_session: string; score: number | null }>(
+    `SELECT DISTINCT ON (symbol, as_of_session) symbol, as_of_session::text, score
+     FROM recommendation
+     WHERE ranker_version = $1
+     ORDER BY symbol, as_of_session, generated_at DESC`,
+    [rankerVersion],
+  );
+  return rows.map((r) => ({ symbol: r.symbol, sessionDate: r.as_of_session, value: r.score }));
+}
+
+/** Task 5.4 gate step 3: how many `fail`-severity dq_result rows either of
+ * Task 5.3's monitors (`shadow-rank-variance`, `dual-run-divergence-sane`)
+ * have raised since a given timestamp -- the promotion gate's own evidence,
+ * not a re-derivation of what those checks currently read as (a check can
+ * flip from fail back to info; the gate cares whether one ever fired during
+ * the shadow window, not only the latest reading). */
+export async function queryDqResultFailCountSince(pool: pg.Pool, checkIds: string[], since: string): Promise<number> {
+  const { rows } = await pool.query<{ n: string }>(
+    `SELECT count(*)::text n FROM dq_result
+     WHERE check_id = ANY($1::text[]) AND status = 'fail' AND evaluated_at >= $2`,
+    [checkIds, since],
+  );
+  return Number(rows[0]?.n ?? 0);
+}
+
+/** Task 5.4 gate step 4 (idempotency guard): is ANYTHING published yet,
+ * across every ranker_version -- global by design, matching spec text ("no
+ * is_publishable = true row exists ANYWHERE yet"), not scoped to the ranker
+ * this particular gate run is evaluating. */
+export async function queryAnyPublishableRecommendationExists(pool: pg.Pool): Promise<boolean> {
+  const { rows } = await pool.query<{ exists: boolean }>(`SELECT EXISTS(SELECT 1 FROM recommendation WHERE is_publishable) AS exists`);
+  return rows[0]?.exists ?? false;
+}
+
+/** Task 5.4 (only the promotion decision itself flips this -- nothing else in
+ * Stage 5 may). Sets is_publishable=true for every row of the given
+ * ranker_version's LATEST scored session only -- not the ranker's entire
+ * shadow history, which would retroactively "publish" months of stale shadow
+ * calls nobody could have acted on. */
+export async function promoteLatestSession(client: pg.ClientBase, rankerVersion: string): Promise<{ asOfSession: string | null; rowsUpdated: number }> {
+  const { rows } = await client.query<{ as_of_session: string | null }>(
+    `SELECT max(as_of_session)::text AS as_of_session FROM recommendation WHERE ranker_version = $1`,
+    [rankerVersion],
+  );
+  const asOfSession = rows[0]?.as_of_session ?? null;
+  if (asOfSession === null) return { asOfSession: null, rowsUpdated: 0 };
+  const { rowCount } = await client.query(
+    `UPDATE recommendation SET is_publishable = true
+     WHERE ranker_version = $1 AND as_of_session = $2
+       AND generated_at = (SELECT max(generated_at) FROM recommendation WHERE ranker_version = $1 AND as_of_session = $2)`,
+    [rankerVersion, asOfSession],
+  );
+  return { asOfSession, rowsUpdated: rowCount ?? 0 };
 }

@@ -4,8 +4,8 @@
 // stage4/dq-checks.test.ts and stage5/run-ranker.test.ts.
 import { afterEach, beforeEach, expect, test } from 'vitest';
 import pg from 'pg';
-import { bulkInsertRecommendations, closeRun, createPool, insertAuditMetric, openRun } from '@greenfield/db';
-import { checkPromotionNotPremature } from './dq-checks.js';
+import { bulkInsertRecommendations, closeRun, createPool, insertAuditMetric, insertDivergenceMetrics, openRun } from '@greenfield/db';
+import { checkDualRunDivergenceSane, checkPromotionNotPremature, checkShadowRankVariance } from './dq-checks.js';
 
 try {
   process.loadEnvFile();
@@ -15,6 +15,12 @@ try {
 
 const TEST_JOB_ID = 'zztest.dq5';
 const SYMBOL = 'HDFCBANK';
+// Real symbols spanning enough of the seeded 2000-symbol stocklist to give
+// checkShadowRankVariance's minSymbols=5 floor something to work with. Not
+// RELIANCE/IDEA/etc -- nse/backfill.test.ts's own afterEach deletes those
+// from `security` as its own fixture cleanup (see run-ranker.test.ts's
+// header comment for the same collision, documented there first).
+const FIVE_SYMBOLS = ['HDFCBANK', 'INFY', 'TCS', 'ICICIBANK', 'SBIN'];
 const RANKER_VERSION = 'zztestdq5-null-v1';
 
 let pool: pg.Pool;
@@ -34,7 +40,7 @@ beforeEach(async () => {
 
 afterEach(async () => {
   await pool.query(`DELETE FROM recommendation WHERE ranker_version LIKE 'zztestdq5%'`);
-  await pool.query(`DELETE FROM audit_metric WHERE metric_name = 'shadow_period_preregistration' AND params_hash = 'zztestdq5'`);
+  await pool.query(`DELETE FROM audit_metric WHERE (metric_name = 'shadow_period_preregistration' AND params_hash = 'zztestdq5') OR metric_name LIKE 'shadow_divergence_%'`);
   await pool.query(`DELETE FROM ingestion_run WHERE job_id = $1`, [TEST_JOB_ID]);
   await pool.query(`DELETE FROM job_definition WHERE job_id = $1`, [TEST_JOB_ID]);
   await pool.end();
@@ -55,6 +61,22 @@ async function insertRecRow(session: string, publishable: boolean) {
         [SYMBOL, RANKER_VERSION, `${session}T12:00:00Z`],
       );
     }
+  } finally {
+    client.release();
+  }
+}
+
+/** Multi-symbol variant for the variance checks -- each symbol gets its own
+ * score for the same session, one recommendation row per symbol. */
+async function insertRecRowsWithScores(session: string, symbolScores: Array<{ symbol: string; score: number }>) {
+  const client = await pool.connect();
+  try {
+    await bulkInsertRecommendations(client, symbolScores.map(({ symbol, score }) => ({
+      symbol, asOfSession: session, rankerVersion: RANKER_VERSION,
+      generatedAt: `${session}T12:00:00Z`, factsCutoff: `${session}T10:00:00Z`,
+      score, rank: 1, classification: 'rank_middle', conviction: null,
+      engineCoverage: 1, breakdown: {}, vetoReasons: [], runId,
+    })));
   } finally {
     client.release();
   }
@@ -101,4 +123,81 @@ test('promotion-not-premature: FAILS when publishable exists but fewer than min_
   await insertRecRow('2021-02-03', false);
   const nowFine = await checkPromotionNotPremature(pool);
   expect(nowFine.status).toBe('info');
+}, 30_000);
+
+// --- shadow-rank-variance ---
+
+test('shadow-rank-variance: info when no recommendation rows exist yet', async () => {
+  const outcome = await checkShadowRankVariance(pool, RANKER_VERSION);
+  expect(outcome.status).toBe('info');
+});
+
+test('shadow-rank-variance: FAILS on a collapsed universe (fewer than minSymbols scored)', async () => {
+  await insertRecRowsWithScores('2021-03-01', [{ symbol: 'HDFCBANK', score: 0.9 }, { symbol: 'INFY', score: 0.1 }]);
+  const outcome = await checkShadowRankVariance(pool, RANKER_VERSION);
+  expect(outcome.status).toBe('fail');
+  expect(outcome.detail).toMatch(/collapsed universe/);
+}, 30_000);
+
+test('shadow-rank-variance: FAILS when every symbol scores identically (degenerate ranking), PASSES with real spread', async () => {
+  await insertRecRowsWithScores('2021-03-01', FIVE_SYMBOLS.map((symbol) => ({ symbol, score: 0.5 })));
+  const degenerate = await checkShadowRankVariance(pool, RANKER_VERSION);
+  expect(degenerate.status).toBe('fail');
+  expect(degenerate.detail).toMatch(/near.identically|below the floor/i);
+
+  await pool.query(`DELETE FROM recommendation WHERE ranker_version = $1`, [RANKER_VERSION]);
+  await insertRecRowsWithScores('2021-03-02', FIVE_SYMBOLS.map((symbol, i) => ({ symbol, score: i / (FIVE_SYMBOLS.length - 1) })));
+  const healthy = await checkShadowRankVariance(pool, RANKER_VERSION);
+  expect(healthy.status).toBe('info');
+}, 30_000);
+
+// --- dual-run-divergence-sane ---
+
+test('dual-run-divergence-sane: info when the shadow ranker has not scored anything yet', async () => {
+  const outcome = await checkDualRunDivergenceSane(pool, RANKER_VERSION);
+  expect(outcome.status).toBe('info');
+});
+
+test('dual-run-divergence-sane: warns once >=2 shadow sessions exist but ZERO divergence readings were ever recorded', async () => {
+  await insertRecRow('2021-03-01', false);
+  await insertRecRow('2021-03-02', false);
+  const outcome = await checkDualRunDivergenceSane(pool, RANKER_VERSION);
+  expect(outcome.status).toBe('warn');
+  expect(outcome.detail).toMatch(/ZERO divergence readings/);
+}, 30_000);
+
+test('dual-run-divergence-sane: warns when recorded readings are ALL NULL (the "inert" case -- looks alive, computes nothing)', async () => {
+  await insertRecRow('2021-03-01', false);
+  const client = await pool.connect();
+  try {
+    await insertDivergenceMetrics(client, {
+      runId, rankerVersion: RANKER_VERSION, asOfSession: '2021-03-01',
+      rankCorrelation: null, directionalAgreementRate: null,
+      nCompared: 0, nDecisiveBoth: 0, nNewOnly: 0, nLegacyOnly: 0,
+      dataWatermark: '2021-03-01', paramsHash: 'zztestdq5', codeCommit: 'test',
+    });
+  } finally {
+    client.release();
+  }
+  const outcome = await checkDualRunDivergenceSane(pool, RANKER_VERSION);
+  expect(outcome.status).toBe('warn');
+  expect(outcome.detail).toMatch(/ALL NULL/);
+}, 30_000);
+
+test('dual-run-divergence-sane: info with a real recorded reading', async () => {
+  await insertRecRow('2021-03-01', false);
+  const client = await pool.connect();
+  try {
+    await insertDivergenceMetrics(client, {
+      runId, rankerVersion: RANKER_VERSION, asOfSession: '2021-03-01',
+      rankCorrelation: 0.42, directionalAgreementRate: 0.6,
+      nCompared: 10, nDecisiveBoth: 8, nNewOnly: 1, nLegacyOnly: 2,
+      dataWatermark: '2021-03-01', paramsHash: 'zztestdq5', codeCommit: 'test',
+    });
+  } finally {
+    client.release();
+  }
+  const outcome = await checkDualRunDivergenceSane(pool, RANKER_VERSION);
+  expect(outcome.status).toBe('info');
+  expect(outcome.observed.rankCorrelation).toBeCloseTo(0.42, 5);
 }, 30_000);
