@@ -3232,3 +3232,29 @@ consumed by **none** of `feature_engineering.py` / `ml_ensemble.py` / `unified_r
 live_datasource tests (covered for "is it landing" and "was it right on day one") but are outside
 drift detection entirely, because drift detection only covers model inputs and these feed no model.
 Consistent with the 2026-08-14 audit's §3 "landed and monitored but consumed nowhere yet".
+
+**Correction to the weekly log review above, 2026-08-15:** that review listed
+`mf_sector_flow_fetcher.py` as a "confirmed still broken, not previously documented" issue.
+The *still broken* half is right; the *not documented* half was wrong. Reading the file, the
+exact diagnosis (AMFI's `DownloadSchemeData_Po.aspx?tp=1` now returns the scheme MASTER list,
+not the portfolio-holdings disclosure) was already recorded there on 2026-08-03, the zero-row
+path already `sys.exit(1)`s specifically so the failure is loud rather than a silent success,
+and `dataQualityChecks.ts`'s `mf-sector-allocation-recency` already carries an `emptyDetail`
+naming the upstream blockage. The nightly error-log line is the *intended* behaviour of a
+correctly-instrumented dead upstream, not an unhandled bug — and per this repo's own standing
+rule (report a dead datasource and ask; don't research a replacement unprompted) no further
+action is correct without a decision on a replacement source. Nothing to fix.
+
+**Self-inflicted production incident, same session — recorded because it changed a technical
+conclusion.** An investigative query run earlier (`... NOT IN (SELECT date FROM stock_ohlcv)`)
+was wrapped in a client-side `timeout 20`. That killed the local node process but left the
+Postgres backend running for **2h15m**, holding a relation lock that **30 queries** queued
+behind, including nightly job steps waiting ~56 minutes. Every subsequent read of `stock_ohlcv`
+hung — which was then wrongly diagnosed as TimescaleDB decompression cost and used to declare
+the `win_probability` grading infeasible. It was not: after `pg_cancel_backend(133600)` the
+queue drained instantly and the same `count(*)` returned in **0.7s**, after which the grading
+ran in seconds and produced the result now recorded in `measurement.md`. Two lessons, both filed
+in `recurring-bugs.md` under a new "Investigating production without breaking it" section: a
+client-side timeout orphans rather than cancels a server-side query; and a query that hangs on
+one specific table while others respond is lock contention until proven otherwise, never a
+storage-engine theory. Diagnose with `pg_blocking_pids()` before theorising.
