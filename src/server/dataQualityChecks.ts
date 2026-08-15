@@ -247,6 +247,10 @@ const TABLE_FRESHNESS_CHECKS: TableFreshnessConfig[] = [
   // failDays -- matches insider-trades-recency's existing warn-only style for thin feeds.
   { id: 'marketsmojo-stock-picks-recency', label: 'marketsmojo_stock_picks (MarketsMojo vendor model-portfolio picks)',
     category: 'flows', critical: false, table: 'marketsmojo_stock_picks', dateColumn: 'fetched_at', warnDays: 10 },
+  // 2026-08-15 -- see trendlyne_market_insight_fetcher.py. event_time is corporate-event
+  // driven (order wins, results, deals), not a fixed daily cadence, so a short warn window.
+  { id: 'trendlyne-market-insights-recency', label: 'trendlyne_market_insights (pre-classified corporate-event feed)',
+    category: 'flows', critical: false, table: 'trendlyne_market_insights', dateColumn: 'event_time', warnDays: 3, failDays: 7 },
   // Found 2026-08-13 (fetcher-accuracy-review sweep, batch 2).
   { id: 'stock-block-deal-daily-recency', label: 'stock_block_deal_daily (per-symbol daily block-deal roll-up)',
     category: 'flows', critical: false, table: 'stock_block_deal_daily', dateColumn: 'date', warnDays: 14 },

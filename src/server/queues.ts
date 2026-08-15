@@ -805,6 +805,12 @@ async function processMlDailyOps(job: Job): Promise<{ success: boolean }> {
     // endpoint_registry.py's marketsmojo_stock_picks_history) → marketsmojo_stock_picks.
     runPython('marketsmojo_stock_picks_fetcher.py', [], 60_000)
       .catch(e => console.warn('[QUEUE] marketsmojo_stock_picks_fetcher failed:', (e as Error).message)),
+    // Trendlyne's pre-classified corporate-event feed (order wins, margin moves, estimate
+    // beats/misses, block deals, ...) — 2026-08-15, promoted from endpoint_registry.py's
+    // trendlyne_market_insight after re-inspection showed it arrives pre-labeled, not raw
+    // headlines needing NLP (see the fetcher's own docstring) → trendlyne_market_insights.
+    runPython('trendlyne_market_insight_fetcher.py', [], 60_000)
+      .catch(e => console.warn('[QUEUE] trendlyne_market_insight_fetcher failed:', (e as Error).message)),
     // Market-wide corporate-actions calendar sourced from real NSE filings (2026-08-07
     // urls.txt open-source sourcing pass) → nse_filed_corporate_actions. Daily and cheap (one
     // API call, ~40 rows): the completeness cross-check for mc_corporate_actions_fetcher.py's

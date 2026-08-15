@@ -2903,3 +2903,21 @@ src/server/tests/` 1,904 passed / 227 skipped; `vitest run` 916 passed / 40 skip
 (`signalReportCard.test.ts`, unrelated file, passed in isolation — DB contention, not a
 regression). None of the 3 new tables feed scoring/`unified_ranker.py` — all flagged unmeasured
 in their own docstrings.
+
+---
+
+## 2026-08-15 (cont.) — trendlyne_market_insight reversal: the earlier rejection was wrong
+
+User asked to specifically re-check `trendlyne_market_insight` after the prior pass rejected it
+as "needs real dedup work." Re-inspecting the payload (not just skimming two rows) found it's
+pre-classified, not raw headlines: 55 distinct vendor event labels (Order Win, Margin Decline,
+Estimates Beat/Miss, Target Upgrade, Block Deal, IPO Listing, ...), 95.5% `NSEcode` match rate
+against `nse_stocks` (191/200, misses all explainable — mostly new IPOs), confirmed not an
+existing `news_sentiment_items` source (0/30). Built `trendlyne_market_insight_fetcher.py` →
+`trendlyne_market_insights`, live-verified 191/200 rows stored, 15 tests passing, wired into
+`queues.ts` with a freshness check. No reliable per-event id exists upstream (only 67% of rows
+have one) — used a composite `(NSEcode, label, event_time)` key instead, confirmed 200/200
+distinct live. Same unmeasured-factor caveat as the other 3 fetchers from this pass — archived
+for future use, not wired into scoring. Full detail in the audit doc's "reversal" section.
+
+Full suite re-verified: `tsc --noEmit` clean, `pytest` 1,916 passed / 230 skipped / 0 failed.

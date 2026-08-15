@@ -198,7 +198,7 @@ production, freshness check added):
 | `marketsmojo_results_corner` | Its per-row `dotsum` block is the identical `q_rank`/`v_rank`/`f_pts`/`tech_score` fields `marketsmojo_header_info` already captures for the full ~1,831-stock universe (confirmed byte-identical to Trading80's own data, per `extra_features_parser.py`'s existing 2026-07-30 comment). A table would store nothing new. |
 | `marketsmojo_marketaction` | 3 freeform text market-commentary lines (e.g. "Nifty closed at 24,366.00..."), not structured/tabular data. |
 | `investsights_investors_list` | Aggregate investor-directory snapshot (stats per investor), not a per-stock time series. The real per-stock signal already exists, at finer grain, via `investsights_investor_activity_fetcher.py`. |
-| `trendlyne_market_insight` | A news-notification feed (order wins, margin misses) that structurally overlaps this platform's existing `news_sentiment_items` pipeline. Onboarding it as a real feature needs dedup/entity-tagging work, not just a table — out of scope for this pass. |
+| ~~`trendlyne_market_insight`~~ | **Reversed 2026-08-15, later same day, after the user asked to re-check it.** The initial rejection above was wrong — assumed without re-inspecting the payload that this needed the same NLP/dedup work as a raw headline feed. It doesn't: every row arrives pre-classified with a `label` from a fixed 55-value taxonomy (Order Win, Margin Decline, Estimates Beat/Miss, Target Upgrade, Block Deal, IPO Listing, ...) and a resolved `NSEcode` — no entity resolution or sentiment inference needed. Trendlyne is not an existing `news_sentiment_items` source (0/30). Built `trendlyne_market_insight_fetcher.py` → `trendlyne_market_insights`, 191/200 rows live-verified (95.5% NSEcode match, 9 misses explainable — mostly brand-new IPOs not yet in `nse_stocks`), wired into `queues.ts` with a freshness check. See below. |
 | `trendlyne_mf_home` | Live-tested twice; returned a real schema but `tableData: []` both times. Looks like it needs an additional param (category/sort) this session didn't find — not confirmed working, not built blind. |
 | Sensibull (`oxide.sensibull.com/*`, 4 URLs: `fii_dii_cash`, `fii_dii_daily`, `iv_chart/{NIFTY,BANKNIFTY}`, `instrument_metacache`) | Live-tested with and without a `Referer`/`Origin` header: `{"success":false,"errors":"invalid platform access token"}`. Needs a real session/API token this environment doesn't have — rejected, not pursued further per this repo's "report a dead/gated source and ask" convention. |
 | MSE (`mseindia.com/api/ticker`) | Live and working (173 symbols, 148/173 fresh as of the fetch date), but 161/173 (93%) of its listed universe is the same companies already canonically priced via NSE `stock_ohlcv` — MSE is a much lower-liquidity secondary venue for the same names. Redundant, not a new signal. |
@@ -209,6 +209,49 @@ production, freshness check added):
 `npx vitest run` — 916 passed, 40 skipped, 1 failure (`signalReportCard.test.ts`, a DB-insert
 timeout unrelated to any file touched here — re-ran in isolation and it passed in 520ms,
 consistent with this repo's known concurrent-session DB contention, not a regression).
+
+## 2026-08-15, later same day: trendlyne_market_insight reversal
+
+User asked to specifically re-check `trendlyne_market_insight` rather than accept the earlier
+rejection. Re-fetched and actually inspected the payload structure (the earlier pass had only
+skimmed two sample rows) — found it materially different from a generic headline feed:
+
+- **55 distinct pre-classified event labels** in the live sample (Order Win ×25, Estimates Beat
+  ×14, Positive Outlook ×14, Margin Growth ×13, Block Deal ×9, Margin Decline ×8, Target
+  Upgrade ×8, Falling Profit ×8, Estimates Miss ×7, Fundraise ×6, IPO Listing ×6, ...) — a fixed
+  vendor taxonomy, not free text needing classification.
+- **100% `NSEcode` coverage** on the raw feed, **95.5% match rate against `nse_stocks`**
+  (191/200) — the 9 misses are all explainable and logged, not silently dropped: 6 are
+  `IPO Listing` events for tickers not yet synced (brand-new listings), 1 is an InvIT trust
+  (not a regular equity), 1 is a malformed upstream row, 1 is a genuine gap.
+- **Confirmed not a duplicate provider**: queried `news_sentiment_items.source` live — 30
+  distinct sources, Trendlyne is not one of them.
+- **200/200 distinct notifications**, spanning ~10 days on an unparameterized call (API caps at
+  200 with a "curtailed" message).
+
+Built `trendlyne_market_insight_fetcher.py` → `trendlyne_market_insights`, following the same
+pattern as the other three fetchers (id/parse/store separated, real regression + `live_datasource`
+tests, live-verified against production). One real design decision, documented in the fetcher's
+own docstring: **no reliable per-event id exists upstream** (only 67% of rows have a
+`/posts/{id}/`-shaped URL; the rest route through company-id paths). Used a composite key
+`(NSEcode, label, event_time)` instead — a specific event type for a specific stock at a specific
+minute is a stable natural key, confirmed 200/200 distinct in the live sample. `timeStamp`
+("14 Aug, 2026  3:31 PM (IST)", double space) is parsed into `event_time`; unparseable rows are
+dropped rather than stored with a fabricated date.
+
+Live-verified: 200 seen, 191 stored, 9 dropped (unresolved symbol / unparseable timestamp) —
+exactly matching the predicted match rate. 15 tests (12 regression + 3 live_datasource), all
+passing. Wired into `queues.ts`; freshness check `trendlyne-market-insights-recency` added
+(`warnDays: 3` — corporate-event driven, not a fixed daily cadence).
+
+**Same caveat as everything else in this pass**: this is descriptive event tagging archived for
+future use, not a measured factor. `label`'s apparent bullish/bearish lean is exactly the shape
+`measurement.md` warns about for screener `signal_bias` (hand-classified sentiment that turned
+out significantly inverted on re-measurement) — do not infer a polarity from `label` and treat
+it as validated without a real `factor_backtest.py` run first.
+
+Full suite re-verified after this addition: `tsc --noEmit` clean; `pytest` 1,916 passed / 230
+skipped, 0 failed.
 
 ## Bottom line (final)
 
