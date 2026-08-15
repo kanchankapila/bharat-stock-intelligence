@@ -80,15 +80,22 @@ class TestGetDriftMultiplier:
     parameter (query_one always opens its own connection regardless)."""
 
     def test_calls_query_one_with_correct_arity(self, monkeypatch):
+        """The original bug was an extra positional `conn` argument (query_one takes exactly
+        (sql, params)). Asserts the ARITY invariant, not a call count -- get_drift_multiplier
+        legitimately makes additional app_settings lookups for its thresholds, and pinning the
+        count would fail on that unrelated change while catching no real defect."""
         calls = []
 
-        def fake_query_one(sql, params=()):
+        def fake_query_one(sql, params=(), *extra):
+            assert not extra, f"query_one called with extra positional args: {extra}"
+            assert isinstance(sql, str), f"first arg must be the SQL string, got {type(sql)}"
             calls.append((sql, params))
-            return {"drift_score": 0.10}
+            return {"drift_score": 0.10, "value": None}
 
         monkeypatch.setattr(dd, "query_one", fake_query_one)
         result = dd.get_drift_multiplier()
-        assert len(calls) == 1, "must call query_one exactly once, with no extra conn argument"
+        assert calls, "must actually query for the drift score"
+        assert any("dl_model_performance" in sql for sql, _ in calls)
         assert result == 1.0
 
     def test_no_drift_row_defaults_to_no_haircut(self, monkeypatch):
@@ -96,16 +103,30 @@ class TestGetDriftMultiplier:
         assert dd.get_drift_multiplier() == 1.0
 
     def test_warn_threshold_applies_moderate_haircut(self, monkeypatch):
-        monkeypatch.setattr(dd, "query_one", lambda *a, **k: {"drift_score": dd.PSI_WARN + 0.01})
+        monkeypatch.setattr(dd, "query_one", lambda *a, **k: {"drift_score": dd.DRIFT_AVG_WARN + 0.01})
         assert dd.get_drift_multiplier() == 0.93
 
     def test_critical_threshold_applies_full_haircut(self, monkeypatch):
-        monkeypatch.setattr(dd, "query_one", lambda *a, **k: {"drift_score": dd.PSI_CRIT + 0.01})
+        monkeypatch.setattr(dd, "query_one", lambda *a, **k: {"drift_score": dd.DRIFT_AVG_CRIT + 0.01})
         assert dd.get_drift_multiplier() == 0.85
 
     def test_below_warn_threshold_no_haircut(self, monkeypatch):
         monkeypatch.setattr(dd, "query_one", lambda *a, **k: {"drift_score": 0.05})
         assert dd.get_drift_multiplier() == 1.0
+
+    def test_NEGATIVE_CONTROL_typical_no_drift_avg_psi_does_not_trigger_a_haircut(self, monkeypatch):
+        """The defect that made this whole review necessary: `drift_score` is avg_psi, but it was
+        compared against PSI_CRIT (a PER-FEATURE bar). avg_psi's measured null on this panel never
+        fell below 0.647 across 16 historical evaluation points, so `ds > 0.25` was true on every
+        run ever made -- a permanent, undecided 0.85x haircut on every stock's win_probability,
+        which then fed hard thresholds (0.55/0.40/0.30) in scoring_engine.apply_ml_score_adjustment.
+        Fails against the pre-fix code (which returns 0.85 here), passes once the multiplier
+        thresholds avg_psi on its own scale."""
+        monkeypatch.setattr(dd, "query_one", lambda *a, **k: {"drift_score": 0.65})
+        assert dd.get_drift_multiplier() == 1.0, (
+            "a drift_score at the LOW end of this panel's own measured no-drift range must not "
+            "apply a haircut -- if it does, the haircut is unconditional and carries no signal"
+        )
 
     def test_a_genuinely_broken_query_still_degrades_gracefully_to_no_haircut(self, monkeypatch):
         """If query_one itself raises for an unrelated reason (DB down), the function
@@ -115,4 +136,40 @@ class TestGetDriftMultiplier:
         def always_raises(*a, **k):
             raise RuntimeError("DB unavailable")
         monkeypatch.setattr(dd, "query_one", always_raises)
+        assert dd.get_drift_multiplier() == 1.0
+
+
+class TestThresholdOverride:
+    """Thresholds are app_settings-overridable defaults, not fixed constants -- so recalibration
+    (which WILL be needed as feature_store grows and the feature set changes) is a settings
+    update rather than a code change. Fail-open: a missing or garbage settings row must fall
+    back to the measured default, never disable drift detection or raise inside a monitor."""
+
+    def test_missing_setting_falls_back_to_default(self, monkeypatch):
+        monkeypatch.setattr(dd, "query_one", lambda *a, **k: None)
+        assert dd._threshold("drift_psi_crit", 3.6) == 3.6
+
+    def test_setting_overrides_default(self, monkeypatch):
+        monkeypatch.setattr(dd, "query_one", lambda *a, **k: {"value": "5.5"})
+        assert dd._threshold("drift_psi_crit", 3.6) == 5.5
+
+    def test_garbage_and_nonfinite_values_fall_back(self, monkeypatch):
+        monkeypatch.setattr(dd, "query_one", lambda *a, **k: {"value": "not-a-number"})
+        assert dd._threshold("drift_psi_crit", 3.6) == 3.6
+        monkeypatch.setattr(dd, "query_one", lambda *a, **k: {"value": "nan"})
+        assert dd._threshold("drift_psi_crit", 3.6) == 3.6
+
+    def test_a_raising_query_does_not_break_the_monitor(self, monkeypatch):
+        def boom(*a, **k):
+            raise RuntimeError("DB down")
+        monkeypatch.setattr(dd, "query_one", boom)
+        assert dd._threshold("drift_psi_crit", 3.6) == 3.6
+
+    def test_haircut_respects_an_overridden_threshold(self, monkeypatch):
+        """End-to-end: an operator raising drift_avg_crit must actually change the haircut."""
+        def fake(sql, params=()):
+            if "app_settings" in sql:
+                return {"value": "9.0"}          # crit bar raised well above the score
+            return {"drift_score": 2.0}          # would be 0.85x under the default 1.5
+        monkeypatch.setattr(dd, "query_one", fake)
         assert dd.get_drift_multiplier() == 1.0

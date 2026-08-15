@@ -3151,3 +3151,84 @@ separately-scoped change than this batch, not attempted here.
 **Final verification, everything in this session combined**: `tsc --noEmit` clean; `pytest`
 1,950 passed / 230 skipped, 0 failed (the previously-flaky `test_history_snapshot_is_append_
 only_across_reruns` passed clean this run too); `vitest run` 923 passed / 40 skipped, 0 failed.
+
+---
+
+## 2026-08-15 — Drift detector: a monitor that fired 100% of the time, and the permanent undecided haircut behind it
+
+Follow-up to the weekly log review (below). The `drift_detector.py` `EMERGENCY_RETRAIN` line was
+previously written off as "the already-known post-fix residual, explained by the dead-then-
+populated `op_margins`/`roe` pair." **That explanation was wrong**, and correcting it surfaced a
+live scoring defect.
+
+**Measured, not assumed** (read-only replay over the real panel: 402 dates, 62 features,
+818k rows; scripts in the session scratchpad, no writes):
+
+1. **`op_margins`/`roe` are minor.** Per-column PSI live: 38 of 62 features (61.3%) breach, and
+   those two rank **7th and 11th** (2.05, 1.20). The real drivers are macro columns —
+   `dii_3d_net` 4.31, `nifty_vix` 3.09, `nifty_ret_21d` 2.59, `fii_10d_net` 2.22.
+2. **The detector had never once produced a negative result.** Replayed at 16 historical
+   evaluation points spanning 14 months and every market condition on record: `EMERGENCY_RETRAIN`
+   fired **16/16 = 100%**. A monitor that always fires carries zero information.
+3. **Root cause: the thresholds were credit-scoring folklore, not measured.** `PSI_CRIT=0.25`
+   assumes stable demographic features; `feature_store` holds z-scored financial series with
+   volatility clustering. Per-feature PSI null on this panel (n=1,178 feature×evaluation pairs):
+   p50=0.526, p90=2.712, p95=3.595, p99=6.248. Under `PSI_CRIT=0.25`, **66.8% of features
+   "breach" when nothing is wrong** — the alarm sat below the data's own noise floor.
+4. **A second, independent defect: `PSI_CRIT` thresholded two different statistics.**
+   `get_drift_multiplier` compares `drift_score` (which is `avg_psi`, the MEAN across features)
+   against the PER-FEATURE bar. `avg_psi`'s measured null never fell below 0.647 across all 16
+   points, so `avg_psi > 0.25` was true on **every run this detector has ever made**.
+5. **A third: a 51-date orphaned window gap.** The 80/20 split left baseline ending 2026-04-27
+   and recent starting 2026-07-08 — 51 trading dates in NEITHER window.
+
+**Why this mattered for accuracy, concretely.** The permanent 0.85x haircut multiplies a
+*calibrated* probability (`COALESCE(calibrated_win_probability, win_probability)`) — and
+`calibrated_win_probability` is the output of an isotonic fit whose entire purpose is that "0.60
+means a 60% empirical win rate". Scaling it by 0.85 is miscalibration by construction. It then
+feeds **hard thresholds** in `scoring_engine.apply_ml_score_adjustment` (0.55 / 0.40 / 0.30):
+every symbol whose true calibrated probability sat in [0.55, 0.647] silently lost the +10% ML
+consensus bonus it had earned, and [0.40, 0.47] took a 0.92x penalty it had not. `ml_alignment_points`
+(`int(wp*24)`, 0-20 pts) lost ~3 points universally. Nobody decided any of this; it was an
+artifact of a miscalibrated monitor.
+
+**Fixed** (`drift_detector.py` only — `scoring_engine.py` deliberately untouched, see below):
+thresholds recalibrated from the measured null (`PSI_CRIT` = p95, `PSI_WARN` = p90); separate
+`DRIFT_AVG_*` constants for the `avg_psi` scale; the orphaned gap closed (baseline is now
+contiguous up to the serving window); and `WARNING` re-keyed off a fraction rather than
+`max_psi > PSI_WARN` — the max of 62 correlated features is an extreme-value statistic that
+tripped at 16/16 points even *after* recalibration, the same "always fires" defect one level down.
+
+**Verified by replay, not assertion.** Post-fix, over the same 16 historical points:
+**75% OK / 25% WARNING / 0% EMERGENCY_RETRAIN**, haircut **1.00x on 75% of days**, 0.93x on 19%,
+0.85x on 6% — i.e. it now discriminates instead of being a constant. Live run today: `max_psi=4.276
+avg=0.526 crit_frac=1.61% -> OK`. Negative-controlled (the new haircut test returns 0.85 against
+the pre-fix code, 1.0 after). Full suite: **1,956 passed, 0 failed**.
+
+**Not hardcoded, and honest about what remains.** All four thresholds are `app_settings`-
+overridable defaults via `_threshold()` (fail-open to the measured value), so recalibration is a
+settings change, not a redeploy. But they are still a point-in-time snapshot and **will** go stale
+as the panel grows — the same failure mode as the 0.25 they replaced. The correct end state is
+self-calibration against the detector's own stored run history (`dl_model_performance.drift_score`
+is already persisted every run). Two real blockers, documented in the module docstring rather than
+hand-waved: (a) that stored history is **methodology-contaminated** — pre-fix rows read 2.7-3.3
+against current 0.53-0.65, so calibrating off it today would re-inherit the bug just fixed; it
+needs a methodology-version column to invalidate stale rows plus time to accumulate clean ones;
+(b) a fully adaptive threshold normalises slow persistent drift (boiling-frog), so it needs an
+absolute floor.
+
+**Deliberately NOT changed, needs sign-off:** the haircut *mechanism* in `scoring_engine.py`.
+Multiplying a calibrated probability toward zero asserts "the true win rate is lower", which drift
+is no evidence for; the correct semantics for "less confident" is shrinking toward the 0.5 base
+rate — and this repo already implements exactly that pattern in `edge_adjusted_probability`.
+Changing it is a real scoring change on `verify-gate.mjs`'s backtest-required list, so it is
+flagged here rather than slipped in.
+
+**Also checked (user question): are newly onboarded sources covered by any of this?** No, and
+correctly so — `stockedge_high_delivery_alerts`, `trading80_call_alerts`, `marketsmojo_stock_picks`,
+`investsights_factor_scores`, `investsights_fundamentals_history` and `sector_rrg_history` are
+consumed by **none** of `feature_engineering.py` / `ml_ensemble.py` / `unified_ranker.py` /
+`scoring_engine.py`, and none appear as `feature_store` columns. They have freshness checks and
+live_datasource tests (covered for "is it landing" and "was it right on day one") but are outside
+drift detection entirely, because drift detection only covers model inputs and these feed no model.
+Consistent with the 2026-08-14 audit's §3 "landed and monitored but consumed nowhere yet".

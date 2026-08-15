@@ -4,9 +4,33 @@ Two-layer drift detection:
   Layer 1: PSI on feature distributions (feature drift)
   Layer 2: Rolling 30-day directional accuracy (prediction drift)
 Writes drift_score to dl_model_performance.
+
+KNOWN LIMITATION -- the PSI thresholds below are a measured point-in-time calibration, not a
+self-maintaining one. They were derived from this panel's own null distribution on 2026-08-15
+(replacing the credit-scoring convention 0.25/0.20, which sat below this data's noise floor and
+made the detector fire EMERGENCY_RETRAIN at 16 of 16 historical evaluation points -- 100%, i.e.
+zero information, while applying a permanent 0.85x haircut to every stock's win_probability).
+Measured values beat borrowed ones, but they are still a snapshot: as feature_store grows,
+gains/loses columns, or the market re-rates, these will drift out of date exactly the way 0.25
+did. They are overridable from `app_settings` so retuning does not require a code change.
+
+The correct end state is self-calibration: threshold each run against the empirical distribution
+of this detector's OWN past runs (`dl_model_performance.drift_score` is already persisted every
+run, so the data is free) and flag when a run is an outlier against that history. Two real
+blockers, neither hand-waveable:
+  1. The stored history is methodology-contaminated -- rows written before the 2026-08-14
+     row-vs-date slice fix and this 2026-08-15 recalibration carry values (2.7-3.3) that are
+     not comparable to current ones (0.53-0.65). Self-calibrating off them today would inherit
+     the very bug that was just fixed. This needs a methodology-version column so a change
+     invalidates prior rows, plus enough clean runs to accumulate.
+  2. A fully adaptive threshold normalises slow, persistent drift -- the boiling-frog failure.
+     Any rolling baseline needs an absolute floor so genuine long-run drift still surfaces.
+Until both are handled, a measured default with a documented derivation is the honest option;
+inventing a bespoke adaptive statistic to ship into live scoring is not.
 """
 
 import json
+import math
 import argparse
 from datetime import datetime, timedelta
 
@@ -15,10 +39,61 @@ import pandas as pd
 
 from db_compat import read_df, query_one, execute
 
-PSI_WARN    = 0.20
-PSI_CRIT    = 0.25
-PSI_FRAC    = 0.20  # fraction of features that must breach PSI_CRIT for emergency retrain
+# ── PSI thresholds, calibrated from THIS panel's measured null (2026-08-15) ────────────────
+# The previous values (PSI_WARN=0.20, PSI_CRIT=0.25) are the credit-scoring convention, which
+# assumes features are slow-moving demographics. feature_store's columns are z-scored financial
+# series with volatility clustering, where two windows of the SAME calm market routinely differ
+# by far more than 0.25 -- so the alarm level sat below this data's own noise floor.
+#
+# Measured, not assumed (scratchpad replay over the real panel, 402 dates / 62 features,
+# training-vs-serving windows evaluated at 16 historical points spanning 14 months):
+#   * The detector fired EMERGENCY_RETRAIN at 16 of 16 evaluation points -- 100%, in every
+#     market condition on record. It had NEVER produced a negative result, so its output
+#     carried no information at all; `get_drift_multiplier`'s 0.85x haircut on win_probability
+#     was in practice an unconditional constant nobody chose.
+#   * Per-feature PSI null distribution (n=1,178 feature x evaluation pairs):
+#     p50=0.526  p75=1.250  p90=2.712  p95=3.595  p99=6.248. Under PSI_CRIT=0.25, 66.8% of
+#     features "breach" when nothing is wrong -- against a PSI_FRAC of 20%.
+# PSI_CRIT is set at the measured p95 so ~5% of features breach under normal conditions, which
+# restores PSI_FRAC=0.20's intended meaning: fire at ~4x the noise floor. PSI_WARN = p90.
+#
+# These are DEFAULTS, not fixed constants: each is overridable from `app_settings` (same
+# pattern as edge_adjustment_enabled / intraday_learned_weights) via _threshold() below, so
+# recalibration is a settings update, not a code change and redeploy. They are still a
+# point-in-time measurement and WILL go stale as the panel grows and the feature set changes --
+# see this module's docstring for the self-calibrating design that would remove them entirely,
+# and why it isn't in place yet.
+PSI_WARN    = 2.70   # measured p90 of the per-feature null
+PSI_CRIT    = 3.60   # measured p95 of the per-feature null
+PSI_FRAC    = 0.20   # fraction of features that must breach PSI_CRIT for emergency retrain
+
+# get_drift_multiplier thresholds `drift_score`, which is avg_psi (the MEAN across features) --
+# a different statistic on a different scale from the per-feature PSI the constants above
+# describe. Reusing PSI_CRIT/PSI_WARN for both conflated the two: avg_psi's own measured null
+# never fell below 0.647 across all 16 evaluation points (range 0.647-1.477), so `avg_psi >
+# PSI_CRIT(0.25)` was true on every run ever made, pinning the haircut permanently on. These are
+# calibrated to avg_psi's own null (p95 ~1.45), so a haircut now means something happened.
+DRIFT_AVG_WARN = 1.20
+DRIFT_AVG_CRIT = 1.50
+
 ACC_DROP    = 0.15  # 15% drop from baseline triggers retrain
+
+
+def _threshold(key: str, default: float) -> float:
+    """Read a drift threshold from app_settings, falling back to the measured default.
+
+    Deliberately fail-open to `default`: a missing/garbage settings row must not silently
+    disable drift detection, and must not raise inside a monitoring path either.
+    """
+    try:
+        row = query_one("SELECT value FROM app_settings WHERE key = ?", (key,))
+        if not row:
+            return default
+        raw = row[0] if isinstance(row, (list, tuple)) else row["value"]
+        val = float(raw)
+        return val if math.isfinite(val) else default
+    except Exception:
+        return default
 
 
 def _psi(expected: np.ndarray, actual: np.ndarray, bins: int = 10) -> float:
@@ -53,10 +128,17 @@ def check_feature_drift(model_name: str = "LSTM_TFT_ENSEMBLE") -> dict:
     # on a date (fii_10d_net, dxy, nifty_vix, ...) then had near-zero variance in "recent"
     # against a real multi-date baseline, pinning PSI far above PSI_CRIT every run
     # regardless of actual drift. Slice by distinct DATE instead.
+    #
+    # The 80/20 split ALSO silently orphaned everything between the two windows: measured
+    # 2026-08-15, baseline ended 2026-04-27 while recent started 2026-07-08, leaving 51 trading
+    # dates in NEITHER window -- so the most recent quarter before the serving window was
+    # invisible to the comparison. Baseline is now everything up to the recent window
+    # (contiguous, no orphans), which is also the honest "what the model was trained on vs what
+    # it is scoring now" question this check is supposed to answer.
     dates      = np.sort(df["date"].unique())
-    cutoff_idx = int(len(dates) * 0.8)
-    recent_dates = dates[-30:] if len(dates) > 30 else dates[cutoff_idx:]
-    baseline   = df[df["date"].isin(dates[:cutoff_idx])]
+    n_recent   = min(30, max(1, len(dates) // 5))
+    recent_dates = dates[-n_recent:]
+    baseline   = df[df["date"].isin(dates[:-n_recent])]
     recent     = df[df["date"].isin(recent_dates)]
 
     psi_scores = {}
@@ -70,15 +152,26 @@ def check_feature_drift(model_name: str = "LSTM_TFT_ENSEMBLE") -> dict:
     if not psi_scores:
         return {"status": "NO_FEATURES"}
 
+    psi_crit  = _threshold("drift_psi_crit", PSI_CRIT)
+    psi_frac  = _threshold("drift_psi_frac", PSI_FRAC)
+    avg_warn  = _threshold("drift_avg_warn", DRIFT_AVG_WARN)
+
     values    = list(psi_scores.values())
-    crit_frac = sum(1 for v in values if v > PSI_CRIT) / len(values)
+    crit_frac = sum(1 for v in values if v > psi_crit) / len(values)
     max_psi   = max(values)
     avg_psi   = float(np.mean(values))
 
+    # WARNING keys off a FRACTION (and avg_psi), never `max_psi > PSI_WARN`. The max of ~62
+    # correlated features is an extreme-value statistic: against any per-feature bar it trips
+    # essentially always, which is the same "fires 100% of the time, therefore says nothing"
+    # defect as the pre-calibration EMERGENCY_RETRAIN -- measured 2026-08-15, max_psi cleared
+    # PSI_WARN at 16 of 16 historical evaluation points even AFTER the thresholds were
+    # recalibrated. max_psi is still reported (it's useful for a human reading the log line),
+    # just not used as a trigger.
     status = "OK"
-    if crit_frac > PSI_FRAC:
+    if crit_frac > psi_frac:
         status = "EMERGENCY_RETRAIN"
-    elif max_psi > PSI_WARN:
+    elif crit_frac > psi_frac / 2 or avg_psi > avg_warn:
         status = "WARNING"
 
     today = datetime.today().strftime("%Y-%m-%d")
@@ -141,10 +234,14 @@ def get_drift_multiplier() -> float:
         )
         if not row:
             return 1.0
+        # DRIFT_AVG_*, not PSI_CRIT/PSI_WARN: `drift_score` is avg_psi (mean across features),
+        # not a per-feature PSI, and the two live on different scales. See the constants' own
+        # derivation above -- comparing avg_psi against the per-feature bar made this haircut
+        # unconditional on every run this detector has ever made.
         ds = float(row[0] if isinstance(row, (list, tuple)) else row['drift_score'])
-        if ds > PSI_CRIT:
+        if ds > _threshold("drift_avg_crit", DRIFT_AVG_CRIT):
             return 0.85
-        if ds > PSI_WARN:
+        if ds > _threshold("drift_avg_warn", DRIFT_AVG_WARN):
             return 0.93
         return 1.0
     except Exception as e:
