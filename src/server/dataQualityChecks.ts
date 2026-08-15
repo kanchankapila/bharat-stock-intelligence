@@ -1516,9 +1516,28 @@ export const DATA_QUALITY_CHECKS: DataQualityCheck[] = [
     // explicit rather than derived: these are a handful of known model outputs, and a wrong
     // derivation (matching any *_probability, say) would silently drop coverage the day someone
     // renames one.
-    sql: `WITH latest AS (
+    // Measured on the last ENRICHED day, not the last day with rows. These columns are written
+    // by ml-daily-ops in the EVENING, enriching the previous completed session -- so the most
+    // recent date in the table is always the one whose enrichment has not run yet, and reading
+    // it reports every enrichment column as 100% dead every single day. Confirmed live
+    // 2026-08-15: date 2026-08-14 showed 0/2192 on delivery_pct, roce, iv_hv_ratio and ~20 more,
+    // while 2026-08-13 was healthy (1939, 1609, 2185) -- ml-daily-ops last succeeded 08-14 20:23
+    // IST and 08-15 was Independence Day, so 08-14's enrichment never ran. This is exactly
+    // recurring-bugs.md's "coverage ratio computed over a window that includes today" class, and
+    // the first version of this check reintroduced it.
+    //
+    // Anchor: the newest date strictly OLDER than the last successful ml-daily-ops run, i.e. a
+    // day enrichment has demonstrably had its chance at. Falls back to the second-newest date if
+    // no heartbeat exists, rather than silently reverting to the broken same-day read.
+    sql: `WITH enriched_through AS (
+            SELECT COALESCE(
+              (SELECT to_timestamp(MAX(last_success_at)/1000)::date FROM job_heartbeat WHERE job_name = 'ml-daily-ops'),
+              (SELECT MAX(date)::date - 1 FROM technical_signals)
+            ) AS d
+          ), latest AS (
             SELECT * FROM technical_signals
-            WHERE date = (SELECT MAX(date) FROM technical_signals WHERE date < CURRENT_DATE::text)
+            WHERE date = (SELECT MAX(date) FROM technical_signals
+                           WHERE date::date < (SELECT d FROM enriched_through))
           )
           SELECT COUNT(*) AS rows,
                  COUNT(win_probability)            AS win_probability,
@@ -1531,8 +1550,13 @@ export const DATA_QUALITY_CHECKS: DataQualityCheck[] = [
     evaluate: (row) => {
       const rows = Number(row?.rows ?? 0);
       if (rows === 0) return { status: 'fail', detail: 'No technical_signals rows on the last completed trading day.' };
+      // flyer_probability is deliberately excluded: it is written WEEKLY (live-checked
+      // 2026-08-15 -- 2193 rows on 2026-08-07, 0 on every other date), so grading it on a daily
+      // bar reports a false failure 6 days in 7. A weekly column needs a weekly-cadence check,
+      // not this one. measurement.md also records flyer_classifier as AUC 0.81 / IC -0.041,
+      // i.e. a known-bad model -- worth deciding whether it should exist at all.
       const cols = ['win_probability', 'calibrated_win_probability', 'cs_score',
-                    'flyer_probability', 'movement_probability', 'breakout_probability'];
+                    'movement_probability', 'breakout_probability'];
       const dead = cols.filter(c => Number(row?.[c] ?? 0) === 0);
       const thin = cols.filter(c => {
         const n = Number(row?.[c] ?? 0);

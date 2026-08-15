@@ -3356,3 +3356,34 @@ caused the retraction; the same one-line pattern extends to the others if any is
 - Negative-controlled (5 tests): the real weekly lag (5.2d) → `fail` and names look-ahead; 1.8d →
   `warn`; 0.4d → `pass`; unscored → an explicitly uninformative pass. `tsc` clean, `vitest`
   80 passed in that file.
+
+**Triage of the "25 dead columns", 2026-08-15 — almost all of it was MY measurement bug.**
+Checking population per date instead of only on the latest date: `2026-08-14` reads 0 for *every*
+enrichment column (delivery_pct, roce, iv_hv_ratio, +20 more) while `2026-08-13` is healthy
+(1939 / 1609 / 2185). One cause, not 25 defects: these columns are written by ml-daily-ops in the
+evening, enriching the previous completed session, so **the newest date in the table is always the
+one whose enrichment has not run yet**. `ml-daily-ops` last succeeded 08-14 20:23 IST and 08-15 is
+Independence Day (skipped), so 08-14 was never enriched. That is precisely `recurring-bugs.md`'s
+own "coverage ratio computed over a window that includes today" class — **reintroduced by me**, in
+both `integrity_sweep.py` and the new `ml-signal-columns-populated` check.
+
+Corrected findings:
+- **`delivery_pct` is NOT dead** — 1939/2189 on the last enriched day. The earlier alarm was my
+  false positive; no fix needed.
+- **`flyer_probability` is WEEKLY, not dead** — 2193 rows on 2026-08-07, 0 elsewhere. Excluded
+  from the daily check (a weekly column graded on a daily bar fails 6 days in 7). Separately worth
+  a decision: `measurement.md` records flyer_classifier at AUC 0.81 / IC −0.041, a known-bad
+  model — should the column exist at all?
+- **Genuinely dead on every date checked**: `fcf_yield`, `eps_revision_3m_pct`. Sporadic:
+  `delivery_trend_30d`, `sector_benchmark`. These are the real residue and remain open.
+- `ml-signal-columns-populated` now anchors on the newest date strictly older than the last
+  successful ml-daily-ops run — a day enrichment has demonstrably had its chance at. Live after
+  the fix: `PASS — All 5 ML signal columns populated across 2189 rows` (was a false FAIL).
+
+**Severity/alerting gap, answered but NOT yet built.** `data_quality_results` holds 150 rows for
+150 checks — a snapshot overwritten每 run, not history. So there is no way to distinguish a check
+that *just started* failing from one red for weeks, which is why a real FAIL sat unread inside
+"145/148 passed, 0 critical". The fix is verdict history plus alerting on **transitions**
+(pass→fail) rather than on absolute severity, and it also yields class-3 detection for free: any
+check whose verdict never varies across N runs is uninformative by construction. Recommended, not
+implemented — it needs a migration and a decision on alert routing.
