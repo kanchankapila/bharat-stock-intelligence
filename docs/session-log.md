@@ -3620,3 +3620,59 @@ green. Closing them is the first task of the next pass.
 mid-task: a vitest run was invalidated by `signalOutcomesService.ts` being written at 14:17:47
 while the suite was running, and a commit landed between a pre-commit `git status` and the
 `git commit`. Staging by explicit path is what kept the two apart.
+
+## 2026-08-15 (cont.) — Two real job failures, root-caused and fixed, not just monitored
+
+User asked "have all critical jobs completed for today?" — checked `job_heartbeat` directly
+(all 23 `critical` `dataQualityChecks.ts` entries were green, but that's a different question
+from "did every job run"). Two were failing, both for days: `trendlyne-midweek` (0 successes in
+11 days, 24/31 runs killed by its 40-min outer timeout) and `agent-auditor` (failing since
+yesterday, "Timed out after 900000ms... No stderr captured"). User then asked to fix both and
+make sure it doesn't happen again — root-caused rather than just retried.
+
+**`trendlyne_adv_tech_fetcher.py`: the endpoint and the fetcher's own logic are both healthy.**
+Live-probed before touching anything: 40 stocks sequentially (0/40 fail, avg 0.1s/call), then
+300 stocks under the fetcher's own real concurrency shape (`ThreadPoolExecutor`, `BATCH_SIZE=15`)
+— 0/300 fail, 19.9s total, projecting ~2.5min for the full ~2233-stock universe. So the repeated
+40-min kills weren't the endpoint or the code — they were **every catch-up retry re-fetching the
+whole universe from scratch**, with no since-parameter analogue. `registerJob.ts`'s
+`addJobWithCatchup` re-queues this job on every pm2 restart if its scheduled run was judged
+missed, and this machine ran a `dl_engine.py` LSTM training job for **10h12m** the same day,
+holding a slot in the shared `MAX_PYTHON_CONCURRENT=5` pool — real, machine-level resource
+contention that a solo probe can't reproduce, turning an isolated 2.5-min job into recurring
+40-min-then-killed runs, and (since nothing was ever persisted-and-skipped) every retry paid the
+full cost again. Fixed: `_load_stocks()` now takes `skip_done_for_date` and excludes symbols
+already written for that date (mirrors `marketsmojo_technical_fetcher.py`'s incremental-write
+fix, applied to wall-clock instead of write-volume). New tests:
+`test_trendlyne_adv_tech_resumability.py` (3 cases, negative-controlled — reverting the filter
+makes 2 fail with `TypeError`). **Live-verified twice, unplanned real-world confirmation**: first
+real run wrote 480/2233 rows (96% of the first 500) then correctly tripped the pre-existing
+`abort_after_consecutive_fails=20` circuit breaker on a genuine live block (a run of `405 Not
+Allowed` responses from Trendlyne, not this repo's bug); the immediate retry logged `"Resuming:
+480 of 2233 stocks already fetched... 1753 remaining"` and only attempted the missing 1753 — the
+fix working exactly as designed. **Caveat surfaced by this same live-verification**: the second
+run got 0/20 before tripping the breaker again, i.e. Trendlyne's WAF is currently blocking this
+IP harder than it was 30 minutes earlier — almost certainly this session's own probing (two
+probes + two full runs, thousands of requests inside an hour). Stopped hitting the endpoint
+further once this was noticed; the block should clear on its own. Existing freshness check
+(`trendlyne-adv-tech-daily-freshness`, `warnDays=10/failDays=16`) already covers this table, so
+no new monitoring was needed — the gap was resilience, not visibility.
+
+**`agent-auditor` (`auditor_agent.py`): `ollama_client.get_narrative()`'s `keep_alive: 0`.**
+Ollama is running, `mistral` is installed — but `keep_alive: 0` forces a full model
+unload+reload on *every single call*, and `auditor_agent.py`/`strategist_agent.py` both call
+`get_narrative()` once per timeframe in a loop (3 timeframes: investment/positional/swing).
+Live-measured cold load: `total_duration=20.7s`, of which `load_duration=20.5s` — eval itself is
+38ms. So a 3-timeframe run paid ~3×20s in guaranteed, self-inflicted reload tax even with zero
+external contention, and under this box's real GPU contention (the same `dl_engine.py` LSTM run
+above shares the one 8GB VRAM pool) that reload cost can run far longer — "Timed out... No
+stderr captured" is the signature of a hang mid-load, not a Python exception (the function's own
+`except Exception` would have printed one). Fixed: dropped `keep_alive: 0` entirely (Ollama's
+own default is 5m), a one-line change in the single shared helper all 4 agent scripts route
+through. New test: `test_ollama_client.py` (2 cases, negative-controlled). **Live-verified**: ran
+`auditor_agent.py` for real — completed in **29.7s** (was timing out at 900s), wrote 3 real,
+distinct Ollama-generated narratives to `agent_audit_reports` for 2026-08-14 (investment 100%
+hit rate, positional/swing 0% — real graded outcomes, not fallback text).
+
+Both fixes are backend-only Python changes (no `.ts`, no migration) — `python -m pytest
+src/server/__tests__/ src/server/tests/` run per CLAUDE.md's definition of done.

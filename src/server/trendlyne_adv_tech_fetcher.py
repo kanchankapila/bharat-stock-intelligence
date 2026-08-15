@@ -467,10 +467,24 @@ def backfill_technical_signals(symbol: str, today: str, feat: dict, con) -> None
 
 # â”€â”€ Stock list â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
-def _load_stocks(symbol_filter: str | None, con) -> list[tuple[str, str]]:
+def _load_stocks(symbol_filter: str | None, con, skip_done_for_date: str | None = None) -> list[tuple[str, str]]:
     """Return [(symbol, tlid), ...] scoped to the NSE master list only (nse_stocks.tlid).
     No trendlyne_screener_stocks fallback — that table carries non-NSE-master symbols
     (junk/delisted/BSE-only tickers) which pulled the universe well past NSE coverage.
+
+    skip_done_for_date: when set, drops symbols that already have a row for that date --
+    resumability. Without this, every catch-up retry (see queues.ts/registerJob.ts's
+    addJobWithCatchup) re-fetches the full ~2200-stock universe from scratch, so a run that
+    gets killed by the outer 40-min timeout at 90% complete throws away that 90% and starts
+    over -- the timeout then recurs on every subsequent retry regardless of how close the
+    prior attempt got. Found 2026-08-15: the endpoint and this fetcher's own logic are both
+    healthy in isolation (live-probed 300/300 stocks, ~0.15s/call, ~2.5min projected
+    full-universe) -- the repeated 40-min kills (24 of the last 31 runs) trace to this
+    machine's shared MAX_PYTHON_CONCURRENT=5 pool getting starved by concurrent long-running
+    jobs (e.g. a same-day dl_engine.py LSTM run held a slot/CPU for 10h12m), which is a
+    resource-contention problem this fetcher can't fix directly -- but it doesn't need to:
+    making every retry cheap (only fetch what's still missing) stops a slow day from
+    compounding into a total-failure day.
     """
     cur = con.cursor()
     cur.execute("""
@@ -486,6 +500,17 @@ def _load_stocks(symbol_filter: str | None, con) -> list[tuple[str, str]]:
     # FetchTracker reports, which is what made a real transient outage indistinguishable
     # from routine noise on 2026-08-12.
     rows, _ = filter_numeric_tlids(rows, "TLAdvTech")
+    if skip_done_for_date:
+        cur.execute(
+            "SELECT symbol FROM trendlyne_adv_tech_daily WHERE date = ?",
+            (skip_done_for_date,),
+        )
+        done = {r[0] for r in cur.fetchall()}
+        if done:
+            before = len(rows)
+            rows = [(s, t) for s, t in rows if s not in done]
+            print(f"[TLAdvTech] Resuming: {before - len(rows)} of {before} stocks already "
+                  f"fetched for {skip_done_for_date}, {len(rows)} remaining.")
     return rows
 
 
@@ -504,19 +529,23 @@ def main() -> None:
     con = connect()
     ensure_schema(con)
 
-    stocks = _load_stocks(args.symbol, con)
+    # Align to the last completed trading session, NOT date.today() -- this job runs in the
+    # trendlyne-midweek batch (Tuesday) and can race the day's grid-ensurer (or run ad-hoc on a
+    # non-trading day), leaving "date >= today" matching zero rows while nulling every existing
+    # row via the ELSE branch. Same bug/fix as trendlyne_price_analysis_fetcher.py and others.
+    # Computed before _load_stocks() so a retry can skip symbols already written for this date.
+    today = logical_write_floor(con, fallback=date.today().isoformat())
+
+    # Only resume-skip on a full-universe run -- an explicit --symbol invocation is a manual
+    # debug/re-fetch and should always hit the API regardless of what's already stored.
+    stocks = _load_stocks(args.symbol, con, skip_done_for_date=None if args.symbol else today)
     if not stocks:
-        print("[TLAdvTech] No stocks with tlid found.")
+        print("[TLAdvTech] No stocks with tlid found (or all already fetched for today).")
         con.close()
         return
     print(f"[TLAdvTech] Processing {len(stocks)} stocks in batches of {BATCH_SIZE} ({BATCH_GAP_SEC}s gap)...")
     session = requests.Session()
     session.headers.update(HEADERS)
-    # Align to the last completed trading session, NOT date.today() -- this job runs in the
-    # trendlyne-midweek batch (Tuesday) and can race the day's grid-ensurer (or run ad-hoc on a
-    # non-trading day), leaving "date >= today" matching zero rows while nulling every existing
-    # row via the ELSE branch. Same bug/fix as trendlyne_price_analysis_fetcher.py and others.
-    today = logical_write_floor(con, fallback=date.today().isoformat())
     ok = 0
     skipped = 0
     done = 0
