@@ -20,6 +20,48 @@ body {
   background-attachment: fixed;
 }
 
+/* ─── Focus visibility (keyboard accessibility) ────────────────────────── */
+/*
+ * Global on purpose, and in index.css rather than a per-shell file: this stylesheet is the one
+ * thing all six shells (v1 AppShell, v2/v3/v4 V2AppShell, v5's isolated tree, v6 V6Shell) load,
+ * so a single rule here reaches every one of them. Measured 2026-08-15 before this existed: 376
+ * <button> elements across 155 .tsx files, and only 15 files defined any focus style at all --
+ * i.e. the app was effectively not keyboard-navigable, because a keyboard user could not see
+ * where they were.
+ *
+ * :focus-visible, not :focus -- the browser applies it for keyboard/AT navigation but not for
+ * mouse clicks, so this adds no visible ring to ordinary pointer use anywhere in the app. That
+ * is what makes it safe to apply this broadly without auditing 155 components' layouts.
+ *
+ * outline + outline-offset rather than box-shadow: outline does not participate in layout, so it
+ * cannot shift or clip inside the many flex/grid/overflow-hidden containers here. Indigo #6366f1
+ * is --v6-accent / index.css's own body-glow accent, so the ring reads as part of the theme.
+ */
+:focus-visible {
+  outline: 2px solid #6366f1;
+  outline-offset: 2px;
+  border-radius: 2px;
+}
+
+/* Skip link: first tabbable element on the page, visually hidden until focused. Without it a
+ * keyboard user must tab through the entire sidebar nav on every page load to reach content. */
+.skip-link {
+  position: absolute;
+  left: -9999px;
+  top: 0;
+  z-index: 100;
+}
+.skip-link:focus {
+  left: 0.5rem;
+  top: 0.5rem;
+  padding: 0.5rem 0.75rem;
+  border-radius: 0.5rem;
+  background: #6366f1;
+  color: #ffffff;
+  font-size: 0.8125rem;
+  font-weight: 600;
+}
+
 /* ─── Custom Scrollbar (Dark Theme) ────────────────────────────────────── */
 ::-webkit-scrollbar {
   width: 5px;
