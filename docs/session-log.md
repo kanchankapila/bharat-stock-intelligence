@@ -3747,3 +3747,73 @@ Corrected in place with dated banners rather than rewritten: `infra_gotchas`'s
 writes to abandoned SQLite" is now false, and its "services NOT under PM2" runbook line contradicts
 the four live pm2 processes), `pm2_restart_required` (listed `db.ts` as a restart trigger),
 `live_datasource_and_quality_coverage` (its env-pollution gotcha is now pytest-scoped only).
+
+## 2026-08-16 (cont.) — Reconcile the backlog to source, then fix what was actually fixable
+
+Follows the staleness sweep above. Four commits: `4edf84a` (sweep), `00c5a5b` (reconcile),
+`c7099a3` + `5261de8` (fixes).
+
+**`ACTION_ITEMS.md` was five weeks unreconciled and 7 of its 25 rows were already done.** #2 (a
+P0) had been fixed 2026-07-30 and still read "verified still open"; #5's breakout classifier was
+already a live weighted ranker component; #7's GDELT was already wired into `build_features`;
+#3/#24/#25 were superseded. Three more were partially done and are now written down to their real
+residual. Every row now carries `[verified 08-16]` or `[unverified]` — that tagging is the actual
+fix, since the file rotted because nothing distinguished a checked fact from an old claim.
+
+**Fixed, each verified rather than assumed:**
+
+- **AF-20260815-01** — `integrity_sweep.py` anchored on raw `MAX(date)`. Now anchors on the newest
+  date strictly older than the last successful `ml-daily-ops`. **Negative-controlled against
+  production**: on 08-14 all six lag-columns read **0 non-null of 2,192 rows** (so the old anchor
+  genuinely did report them DEAD); on 08-13 they are 1,402–2,185. Six false positives removed, and
+  all 7 columns `measurement.md` documents as genuinely never-written are still correctly flagged.
+- **AF-20260816-09/-10** — the dead `USE_POSTGRES` validator and two `if (!usePostgres())` guards
+  that could never fire. The validator's *connection-info* half was **kept and widened** rather
+  than deleted: with Postgres unconditional, a missing `POSTGRES_URL` is always a real
+  misconfiguration. `tsc` then caught a second reference — the boot line printed
+  **"DB engine: SQLite"** on a correctly-configured server.
+- **#14** — `getIndexData` returned a hardcoded `NIFTY 50 @ 22450.30` on any failure, reachable
+  from the live `indices.getIndexDetails` procedure, so a failed *BANKNIFTY* lookup returned a
+  plausible NIFTY quote under the index actually requested. Now `null`, matching the file's own
+  convention.
+- **#15** — `scoring_engine`'s news fallback used `sentiment_score = 1.0`. Measured live first:
+  the column runs **[-1, +1]**, mean |score| **0.404**, median 0.000 — so 1.0 was the maximum on
+  the scale, ~2.5× an average article. Now 0.4, the measured mean. The bare `except Exception` was
+  narrowed to `SQLAlchemyError` and made to log. Traced dormant before changing (all 7 columns
+  exist, 55,432 rows), so zero live score effect — that trace is the applicable measurement and is
+  recorded in `measurement.md`, same precedent as `seed_screener_catalog`.
+- **#16** — narrower than recorded: `StepTracker.finish()` already stamped the job-level *monitor*
+  state correctly; only the BullMQ return was an unconditional `{success:true}`, so the queue read
+  green while the dashboard read red. Both now agree. Returned, not thrown — these run for hours
+  and throwing hands them to BullMQ's retry machinery over one failed step.
+- **`ml_ensemble` warm-start** — `getattr(est,'estimator',est)` returns the unfitted prototype, so
+  the detection found nothing on every run; it runs **nightly** (`queues.ts:1035`) and has been a
+  silent no-op since it was added. Detection fixed (the fitted boosters live one per CV fold, and
+  the correct access already existed elsewhere in the same file). **Deliberately not enabled** —
+  the write now sits behind an explicit `ML_INCREMENTAL_WARMSTART=1`, default off, because
+  warm-starting shifts the distribution each fold's calibrator was fitted against. The gain is
+  that it now states what it found and why it stopped, instead of claiming there is no model.
+
+**Two retractions, both mine, both the same failure this session set out to fix.**
+(1) I twice reported `reward_engine`'s "inert UNION" and its N+1 as open and needing backtest
+evidence. **Both were fixed 2026-08-12**, and the UNION was fixed *better* than repairing it —
+removed as a category error, since an AI/screener signal has no `RSI_DIVERGENCE`-style pattern
+type to weight. Per-source learning lives in `update_source_weights()` → `signal_source_weights`,
+live-verified at **219 rows / 6 sources, `AI` among them**. I repeated a `.claude/rules/` entry
+without opening the function, whose own comment explains all of it.
+(2) I twice reported `portfolio.ts`'s `buildRiskParityWeights` as dead code with zero callers. It
+is **live** at `server.ts:458` via the default-export namespace, which a named-import grep misses.
+Deleting it would have broken the picks-export endpoint. **Grep the bare symbol, not the import.**
+
+**On the 230 pytest skips**: grouped every reason — all 230 are `live_datasource`, zero non-live;
+same for vitest's 41. Deliberate per `data-sources.md` (third-party sites, and they write to
+production Postgres), so not un-skippable without the replica work. Note the shim is now
+**default-on** and the flag deleted, so a plain `pytest` already runs on Postgres.
+
+Verified throughout: `tsc --noEmit` clean · `vitest run` 963 passed / 0 failed · `pytest` 2,025
+passed / 230 skipped / 0 failed · `schema:drift` clean (212 tables).
+
+**Still open and deliberately not touched:** `backtestRunner.ts`'s N+1 (another session has that
+file staged), the 12 calendar/vendor-blocked items, and AF-20260816-11/-12 which another session
+logged while this work was in flight — AF-11 is a **third** occurrence of the enrichment-lag anchor
+class fixed here in `integrity_sweep.py`, this time at `dataQualityChecks.ts:1828`.
