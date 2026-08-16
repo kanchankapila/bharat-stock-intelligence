@@ -53,6 +53,13 @@ def patch_tool_connect(monkeypatch, tool_module, conn):
     shim = type("ConnShim", (), {
         "execute": lambda _s, *a, **k: conn.execute(*a, **k),
         "close": lambda _s: None,
+        # rollback/commit must be forwarded, not omitted: a tool that recovers from a failed
+        # query by rolling back (news_tool's news_sentiment_items -> news_articles fallback)
+        # otherwise hits AttributeError inside its own `except`, the psycopg2 transaction stays
+        # aborted, and the fallback silently returns nothing. A shim that answers to less than
+        # the real connection turns a recoverable path into a dead one.
+        "rollback": lambda _s: conn.rollback(),
+        "commit": lambda _s: conn.commit(),
     })()
     for attr in ("_connect", "connect"):
         if hasattr(tool_module, attr):

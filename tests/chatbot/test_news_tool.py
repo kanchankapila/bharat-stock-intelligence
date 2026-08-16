@@ -25,6 +25,16 @@ def _ago(days: int) -> str:
 @pytest.fixture
 def news_db(pg_conn, monkeypatch):
     conn = pg_conn
+    # Shadow the PRIMARY table with an empty one. get_news_sentiment reads news_sentiment_items
+    # first and only falls back to news_articles; without this, a developer run resolves that
+    # first query against PRODUCTION's public.news_sentiment_items and passes on real rows,
+    # never touching the fixture data seeded below -- green for the wrong reason, and it failed
+    # the moment it ran against an empty database.
+    conn.execute("""CREATE TABLE news_sentiment_items (
+        title TEXT, summary TEXT, source TEXT, published_at TIMESTAMP, sentiment TEXT,
+        sentiment_score DOUBLE PRECISION, impact TEXT, category TEXT, sector TEXT,
+        url TEXT, symbol TEXT, symbols TEXT
+    )""")
     conn.execute("""CREATE TABLE news_articles (
         id TEXT PRIMARY KEY, title TEXT, summary TEXT, source TEXT,
         sentiment TEXT, category TEXT, url TEXT, symbols TEXT,

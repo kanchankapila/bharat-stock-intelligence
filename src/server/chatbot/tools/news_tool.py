@@ -69,7 +69,19 @@ def get_news_sentiment(
             return _summarise(symbol, articles, source="news_sentiment_items")
 
     except Exception:
-        pass
+        # The rollback is what makes the fallback below reachable AT ALL on Postgres. psycopg2
+        # puts the connection in "current transaction is aborted, commands ignored until end of
+        # transaction block" after any failed statement, so a bare `pass` here guaranteed that
+        # the news_articles query underneath ALSO failed -- i.e. the resilience fallback was
+        # dead code, and get_news_sentiment silently returned empty instead of degrading.
+        # Safe to roll back here specifically: this function only reads, so there is no caller
+        # work to discard. Found 2026-08-16 running the suite against an empty database, where
+        # news_sentiment_items does not exist; against production it is masked, because the
+        # first query succeeds and the fallback is never needed.
+        try:
+            conn.rollback()
+        except Exception:
+            pass
 
     # ── Fallback: legacy news_articles ───────────────────────────────────────
     try:
