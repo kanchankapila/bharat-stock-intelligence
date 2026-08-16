@@ -1,9 +1,8 @@
 import React from 'react';
 import { trpc } from '../lib/trpc';
 import {
-  Trophy, TrendingUp, TrendingDown, RefreshCw,
-  Search, ExternalLink, Activity, Zap, CheckCircle2,
-  AlertCircle, Star, Plus, Minus
+  Trophy, RefreshCw,
+  Zap, Star, Plus, Minus
 } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { motion } from 'motion/react';
@@ -103,9 +102,9 @@ const RankingList: React.FC<{
                     </span>
                   </div>
                   <div className="flex items-center gap-3 mt-1.5">
-                    <span className="text-[10px] font-black text-slate-400 uppercase">Score <span className="text-white">{stock.score.toFixed(1)}</span></span>
-                    <span className="text-[10px] font-black text-slate-400 uppercase">Conf <span className="text-blue-400">{stock.confidence.toFixed(0)}%</span></span>
-                    <span className="text-[10px] font-black text-blue-500/80 uppercase tracking-tighter bg-blue-500/5 px-1.5 py-0.5 rounded italic">Driver: {stock.top_domain}</span>
+                    <span className="text-[10px] font-black text-slate-400 uppercase">Score <span className="text-white">{stock.score?.toFixed(1) ?? '—'}</span></span>
+                    <span className="text-[10px] font-black text-slate-400 uppercase">Conf <span className="text-blue-400">{stock.confidence?.toFixed(0) ?? '—'}%</span></span>
+                    <span className="text-[10px] font-black text-blue-500/80 uppercase tracking-tighter bg-blue-500/5 px-1.5 py-0.5 rounded italic">Driver: {stock.top_domain ?? 'Unknown'}</span>
                     {(stock.position_size_pct ?? 0) > 0 && (
                       <span className="text-[10px] font-black text-emerald-400 uppercase tracking-tighter bg-emerald-500/10 px-1.5 py-0.5 rounded italic">Weight: {stock.position_size_pct!.toFixed(1)}%</span>
                     )}
