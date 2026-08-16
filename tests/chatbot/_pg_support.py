@@ -50,8 +50,28 @@ def patch_tool_connect(monkeypatch, tool_module, conn):
     assumed -- and an unknown third spelling fails loudly instead of silently leaving the tool
     pointed at production.
     """
+    def _execute(_s, *a, **k):
+        """Roll back a failed statement before re-raising.
+
+        Every chatbot tool wraps its queries in `except Exception` and degrades gracefully --
+        correct behaviour, and harmless in production where all these tables exist. In a
+        throwaway schema they do not, and on Postgres a failed statement ABORTS THE WHOLE
+        TRANSACTION: the tool swallows the real error, and every later query in the same agent
+        turn fails with "current transaction is aborted" instead. The first error is lost and
+        the cascade is what surfaces. Rolling back here keeps each statement independent, so a
+        tool's own error handling behaves the way it does against the real database.
+        """
+        try:
+            return conn.execute(*a, **k)
+        except Exception:
+            try:
+                conn.rollback()
+            except Exception:
+                pass
+            raise
+
     shim = type("ConnShim", (), {
-        "execute": lambda _s, *a, **k: conn.execute(*a, **k),
+        "execute": _execute,
         "close": lambda _s: None,
         # rollback/commit must be forwarded, not omitted: a tool that recovers from a failed
         # query by rolling back (news_tool's news_sentiment_items -> news_articles fallback)
