@@ -698,7 +698,21 @@ export const miscRouter = router({
           };
         });
 
-        const items = [...signalItems, ...newsItems]
+        // Reserve a share of the feed for signals instead of one global sort + slice.
+        //
+        // A pure recency sort makes this endpoint STRUCTURALLY news-only, not occasionally so.
+        // Measured 2026-08-16 over a 72h window: 5,733 news items against 12,288 eligible
+        // signals, and every news item was newer than the most recent signal (2026-08-14
+        // 14:03, the last session before a weekend). News is written 24/7; signals are
+        // generated a few times a day, so news wins every one of the `limit` slots whenever it
+        // is fresher — which is essentially always. The signal branch of this procedure built
+        // items that could never be returned.
+        //
+        // Both lists are already ordered newest-first by their own queries. Signals take up to
+        // a third of the slots (only as many as exist), news takes the rest, and the combined
+        // result is re-sorted so the feed still reads chronologically.
+        const signalQuota = Math.min(signalItems.length, Math.floor(limit / 3));
+        const items = [...signalItems.slice(0, signalQuota), ...newsItems.slice(0, limit - signalQuota)]
           .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime())
           .slice(0, limit);
 

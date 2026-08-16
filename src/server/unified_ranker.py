@@ -1775,15 +1775,33 @@ class UnifiedRanker:
             return {}
 
     def _get_unified_signals_latest_map(self):
-        # WHERE signal_type = 'BUY': unified_signals carries a real direction column with
+        # Long-direction rows only. unified_signals carries a real direction column with
         # genuinely different geometry conventions per direction (signals.ts's exit logic
-        # treats BUY/SELL rows' stop/target oppositely). This fallback's own caller
+        # treats long/short rows' stop/target oppositely). This fallback's own caller
         # (_get_entry_targets) only ever attaches its result to a long-entry-style setup
         # (entry_zone_low/high, target above, stop below -- see the fallback-2 branch this
         # mirrors), so an unfiltered "latest row regardless of direction" could hand a
-        # Buy-classified row a SELL signal's inverted short-style geometry. Filtering here
-        # matches the BUY-only convention _log_recommendations() already established for the
-        # recommendation_log fallback one tier up.
+        # Buy-classified row a short signal's inverted geometry.
+        #
+        # 'Bullish' added 2026-08-16. The safety property above is about DIRECTION, not about
+        # the literal string 'BUY', and this table has no single signal_type vocabulary:
+        # technical_analysis_engine.py (the largest writer) spells a long 'Bullish'. Excluding
+        # it was not conservative, it was a coverage gap.
+        #
+        # Verified empirically before widening, not assumed -- measured live over the full
+        # table, counting rows by where the target sits relative to the stop:
+        #
+        #   signal_type   rows     long-style   short-style
+        #   BUY          33,772       32,512             0
+        #   Bullish      13,192       13,192             0     <- identical convention, no exceptions
+        #   Bearish      11,211        1,705         9,496     <- MIXED, must stay out
+        #   SELL            451            0           451
+        #
+        # 'Bullish' is exactly as safe here as 'BUY'. 'Bearish' is deliberately NOT added: 15%
+        # of its rows carry long-style geometry, so it fails the very test 'Bullish' passes.
+        # Measured coverage effect: symbols with a usable row in this tier go 2,335 -> 2,393.
+        # Not a scoring change (no score, weight, threshold or classification is touched) --
+        # see the matching entry in .claude/rules/measurement.md.
         try:
             rows = self.conn.execute("""
                 SELECT * FROM (
@@ -1791,7 +1809,7 @@ class UnifiedRanker:
                            stop_loss AS "stopLoss", reasoning AS trade_reasoning,
                            ROW_NUMBER() OVER (PARTITION BY symbol ORDER BY signal_generated_at DESC) AS rn
                     FROM unified_signals
-                    WHERE signal_type = 'BUY'
+                    WHERE signal_type IN ('BUY', 'Bullish')
                 ) t WHERE rn = 1
             """).fetchall()
             return {r['symbol']: r for r in rows}

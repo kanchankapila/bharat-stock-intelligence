@@ -182,6 +182,44 @@ path that reads `screener_catalog` at all (it operates on the price panel), so r
 measure something unconnected to this diff, same reasoning as the `_log_recommendations` entry
 above.
 
+**A fourth `unified_ranker.py` touch (2026-08-16, `_get_unified_signals_latest_map`) is NOT a
+scoring change either — it widened a direction filter, and the widening was measured before it
+was made, not after.** The method's fallback query read `WHERE signal_type = 'BUY'`. Its own
+comment explains why a filter is needed: `_get_entry_targets` only ever attaches this result to
+a long-entry-style setup, so a short row's inverted stop/target would manufacture a nonsense
+plan. That property is about **direction**, not about the literal string `'BUY'` — and
+`unified_signals` has no single `signal_type` vocabulary (`technical_analysis_engine.py`, the
+largest writer, spells a long `'Bullish'`; see `recurring-bugs.md`'s enum-vocabulary entries).
+The filter was therefore excluding the biggest source of valid long rows.
+
+**Widened to `IN ('BUY', 'Bullish')` only after checking the geometry empirically**, by counting
+rows on where the target sits relative to the stop:
+
+| signal_type | rows | long-style | short-style |
+|---|---|---|---|
+| `BUY` | 33,772 | 32,512 | **0** |
+| `Bullish` | 13,192 | **13,192** | **0** |
+| `Bearish` | 11,211 | 1,705 | 9,496 |
+| `SELL` | 451 | 0 | 451 |
+
+`Bullish` is exactly as safe as `BUY` — 100% long-style, no exceptions. **`Bearish` is
+deliberately NOT included**: 15% of its rows carry long-style geometry, so it fails the very
+test `Bullish` passes, and adding it would be the exact bug the original filter existed to
+prevent. Measured coverage effect: symbols with a usable row in this fallback tier go
+**2,335 → 2,393**.
+
+**`factor_backtest.py` was deliberately NOT run, for the same reason as the three entries
+below.** No score, weight, threshold or classification is touched — this changes which
+`entry_price`/`target`/`stop_loss` values enrich a recommendation, and `factor_backtest.py`
+operates on the price panel with no code path reading `unified_signals`' levels at all. Running
+it would measure something unconnected to the diff, the "evidence-shaped but meaningless
+artifact" `recurring-bugs.md` warns about. The applicable measurement is the geometry table
+above, taken from live production. **Unrelated finding worth its own look, recorded here so it
+is not lost: those 1,705 long-style `Bearish` rows are an internal inconsistency in
+`technical_analysis_engine.py`'s own output** (its `Bearish` branch calls
+`compute_atr_barriers(..., 'short')`, which cannot produce a target above the stop) — not
+traced further this pass.
+
 **A third `unified_ranker.py` touch (2026-08-15, `_next_generated_at`) is again NOT a scoring
 change — but unlike the two above it fixed a real, silent evidence-loss bug, so read this one.**
 `run()` stamped `generated_at = datetime.now(timezone.utc)`. That reads the SYSTEM CLOCK TICK,
@@ -394,6 +432,45 @@ not a reversal.
 cost/turnover-aware portfolio run. If it survives all three, it is the first genuinely positive
 signal measured on this platform and belongs in the "already tested" table with a real entry.
 Until then it stays here, flagged preliminary.
+
+## The 7 permanently-NULL `technical_signals` columns are NOT broken writers (checked 2026-08-16)
+
+A NULL-column sweep of `technical_signals` flagged 15 columns as fully NULL on the last
+completed trading day. **That count was itself mostly an artifact, and the residue is not what
+it looked like** — the same false-positive shape as the earlier "25 dead columns" that turned
+out to be the wrong measurement date. Corrected breakdown, each traced individually:
+
+- **6 are not dead at all** — `delivery_pct` (38 distinct dates of history), `iv_hv_ratio` (51),
+  `days_to_next_results` (34), `sector_global_corr_21d` (10), `sector_benchmark` (3),
+  `delivery_trend_30d` (2). All last populated `2026-08-13` against a max grid date of
+  `2026-08-14`: they are **enrichment columns that lag the scan by a day**. Judging them on
+  `max(date)` reads a one-day lag as death. Use "distinct dates ever populated", not "NULL
+  today".
+- **2 are deliberate** — `flyer_probability` and `pead_score` are model outputs in
+  `densify_feature_matrix.NEVER_FILL`, pinned by `test_generated_at_and_never_fill.py`. NULL on
+  a day their producer did not run is the intended behaviour, not a gap.
+- **7 have never been written once, and NONE of them is a bug to fix:**
+
+| column | why it is empty | evidence |
+|---|---|---|
+| `fcf_yield` | **superseded**, by design | `financial_ratios_fetcher.py`'s own comment marks it a pre-"Task 11" original replaced by `fcf_yield_approx` — which is live at 1,441/2,192 rows |
+| `created_at` | dead provenance column | 0 rows in all history; `computed_at` is the real stamp |
+| `eps_revision_3m_pct` | **calendar** | needs a snapshot ~90d back (±14d), so ≥76d of depth; `analyst_estimates_history` spans **50 days** (16 dates, 2026-06-21→08-10) |
+| `target_revision_3m_pct` | **calendar** | same source, same constraint |
+| `analyst_count_chg` | **calendar** | same; ran live — `0 symbols updated, 2337 skipped (2337 insufficient history)` |
+| `pledge_chg_90d` | **calendar** | ran live — wrote 2,230 snapshots then `pledge_chg_90d for 0 symbols`; needs 90d of its own snapshot history |
+| `ccc_trend` | **arithmetically impossible today** | it is a year-over-year CCC delta, and `working_capital_history` holds **one fiscal year per symbol — 0 of 1,675 symbols have 2+** |
+
+**All three producers are scheduled and all three run clean** (`analyst_revision.py`
+queues.ts:841, `fundamentals_snapshot.py` queues.ts:576, `working_capital_fetcher.py` /
+`financial_ratios_fetcher.py` in the weekly batch). Nothing is silently failing; five of the
+seven are waiting on elapsed time or an upstream backfill, and two are dead by design.
+
+**Do not "fix" these, and do not re-audit them as dead columns.** The two genuinely actionable
+follow-ups, neither of which is a code change: a deeper `analyst_estimates_history` backfill (or
+~4 more weeks of accumulation) unblocks the three analyst columns around 2026-09-05, and a
+second fiscal year in `working_capital_history` unblocks `ccc_trend`. `fcf_yield` and
+`created_at` are droppable whenever someone wants the schema tidy.
 
 ## Not testable — do not spend time here without a genuinely new angle
 
