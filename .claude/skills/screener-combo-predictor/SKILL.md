@@ -265,8 +265,8 @@ Plus, for any change to combination selection or ranking:
   first attempt and had to be rewritten; assume yours will too.
 - **Run against live production data and query the result back.** A green suite does not tell
   you a pick was written or graded correctly.
-- Verify `process.env.USE_POSTGRES` before believing any hand-run script's numbers — without
-  `import 'dotenv/config'` a `tsx` script silently reads dev SQLite and prints convincing
-  wrong figures.
+- Cross-check any hand-run script's numbers against a count you already know. (Checking
+  `process.env.USE_POSTGRES` no longer tells you anything — as of 2026-08-15 the dialect reads
+  no env var, so it is `undefined` on a correct script.)
 - Committed ≠ deployed: `.ts` needs `pm2 restart bharat-server`.
 - Close the session per `CLAUDE.md`: `docs/session-log.md`, memory, and `.claude/rules/`.

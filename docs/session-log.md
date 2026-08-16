@@ -3676,3 +3676,74 @@ hit rate, positional/swing 0% — real graded outcomes, not fallback text).
 
 Both fixes are backend-only Python changes (no `.ts`, no migration) — `python -m pytest
 src/server/__tests__/ src/server/tests/` run per CLAUDE.md's definition of done.
+
+## 2026-08-16 — Docs/memory staleness sweep: the checks that outlived what they checked
+
+Reconciliation pass, not an audit run. No audit lane executed. Asked for: bring memory and the
+important `.md` files current "so that confusion is not created because of what is not there
+anymore."
+
+**The finding worth keeping: deleting a thing does not delete the checks pointing at it, and an
+orphaned check does not go quiet — it inverts.** The 2026-08-15 Postgres-only change removed
+`USE_POSTGRES` from every real code path. Eight live *instruction* files still told the reader to
+`print process.env.USE_POSTGRES` to confirm they weren't silently reading dev SQLite. That
+variable is now read by no real process, so **a correct script prints `undefined`** — the
+documented remedy indicts working code and exonerates nothing. Notably, `recurring-bugs.md`'s own
+entry for this hazard had *already* been marked "history, not a live hazard"; the eight downstream
+copies were simply never swept. Fixed in `.claude/commands/{migration-safety-review,
+trpc-surface-review,fetcher-accuracy-review}.md`, `.claude/skills/{deploy-and-verify,weekend-audit,
+screener-combo-predictor}/SKILL.md`, `README.md`, `docs/DATA_SOURCE_INTEGRATION_GUIDE.md`,
+`docs/FETCHER_HEALTH_TRACKER.md`. Same shape for the retired file: `db.ts` →
+`db.sqlite-legacy.ts` had left "mirror the schema change into `db.ts`" and "check the column type
+in `db.ts`" standing as live advice in two review commands. Generalized into
+`.claude/rules/recurring-bugs.md` (Environment & deploy).
+
+**One live defect found by the sweep and deliberately NOT fixed** — logged as **AF-20260816-09**.
+`envConfig.ts:23-35` still validates `USE_POSTGRES` at bootstrap and pushes to `FATAL` (hard exit)
+on any value that isn't `"true"`/`"false"`/unset, justified in its own comment by a SQLite
+fallback that no longer exists. A stale `USE_POSTGRES=1` in a `.env` now hard-crashes
+`bharat-server` at boot over a variable that routes nothing. The ask was documentation, so this is
+a ledger row rather than a code change; the fix is to delete both checks, not reword the message
+and keep the exit.
+
+**Verified live, and only this** — `npm run schema:drift` → "Schema clean", 212 file = 212 live
+(closes AF-20260815-03); `pm2 jlist` vs `git log -1` → 4/4 online, restarted 11:15 UTC against
+HEAD `e7d7700` at 07:03 UTC (closes AF-20260815-02); AF-20260815-04 superseded by the landed
+decommission work. **AF-01 and AF-05 remain open, untouched** — AF-01 is now on its second run as
+open, and this ledger's header says a row surviving 3 runs is itself a finding.
+
+**Graphify rebuilt** to HEAD `e7d77006`: 13,227→**16,107 nodes**, 21,282→**25,455 edges**, 1,031→
+**1,359 files**. Headroom recorded in the memory entry: rebuilds cost **0 tokens** (local AST
+extraction, no LLM — don't ration them), and at 16.1k nodes the graph is 3.2× past the 5,000-node
+HTML viz cap so `graph.html` is no longer emitted, which is expected and exits 0. `db` and
+`use_postgres()` have dropped out of the god-node top 10 — a real signal, the decommission landing,
+not churn.
+
+**`docs/SQLITE_DECOMMISSION_PLAN.md` — the stale number turned out to understate real progress by
+the whole remaining distance.** Three places said "51 Python failures" after its own later
+measurement had recorded 46. Re-ran the real command end to end
+(`SQLITE_SHIM_POSTGRES=1 python -m pytest src/server/__tests__/ src/server/tests/ tests/chatbot/`,
+13m06s): **2,023 passed / 231 skipped / 0 failed.** The trail is 51 → 46 → **0** — the genuine
+dialect bugs are fixed, and the stated reason for keeping the flag opt-in ("don't ship a red
+default suite") no longer applies. Shim confirmed active by conftest's own terminal line, so this
+is not the flag silently disengaging: `[sqlite-decommission] 37 test files still reach Postgres
+through the sqlite3.connect shim`. **That 37 is the real remaining work** — those files pass only
+because they are being redirected; they need converting to `pg_conn`/`pg_db_conn`, then the flag
+goes default-on and the shim is deleted. Measured against the working tree, which carries
+uncommitted Phase 2 work — re-confirm once it lands. The doc's "what carries the second dialect"
+inventory was also the pre-decommission one; rewritten as a then/now table (TS test
+files touching SQLite: 27 → **0**; `USE_POSTGRES` branches: 32 `.ts` → **9 files, none a live
+routing branch**; `sqlite3.connect`: **101 Python files under `src/`**, 100 of them test fixtures
+plus the permanently-excluded `explore_mc_tl.py`).
+
+**`MEMORY.md` gained a "what is no longer there" table** at the top, so a session reads the five
+things that changed underneath the 60 dated history files before reading any of them. Also
+recorded there: **claude-mem is not installed on this machine and never has been** (no plugin
+cache entry, no `~/.claude-mem`, not in the global npm list) — memory is plain files plus
+`MEMORY.md`, and that is the whole mechanism.
+
+Corrected in place with dated banners rather than rewritten: `infra_gotchas`'s
+`alphaquant_split_brain` section (its headline "must run with `USE_POSTGRES=true` or it silently
+writes to abandoned SQLite" is now false, and its "services NOT under PM2" runbook line contradicts
+the four live pm2 processes), `pm2_restart_required` (listed `db.ts` as a restart trigger),
+`live_datasource_and_quality_coverage` (its env-pollution gotcha is now pytest-scoped only).

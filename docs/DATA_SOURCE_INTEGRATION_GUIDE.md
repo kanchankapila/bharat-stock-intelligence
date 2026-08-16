@@ -725,8 +725,8 @@ These are required to reproduce the operating environment, not the market datase
 
 | Service | Purpose | Configuration |
 |---|---|---|
-| PostgreSQL/TimescaleDB | Production persistence | `USE_POSTGRES`, `POSTGRES_URL` or `POSTGRES_*` |
-| SQLite | Development fallback | `DATABASE_URL` |
+| PostgreSQL/TimescaleDB | **The only database** — production and dev alike | `POSTGRES_URL` or `POSTGRES_*` |
+| ~~SQLite~~ | ~~Development fallback~~ | **Removed 2026-08-15.** No `.ts` path remains, and `USE_POSTGRES`/`DATABASE_URL` are read by no real process |
 | Redis/BullMQ | queues, cache, schedules | `REDIS_HOST`, `REDIS_PORT`, `REDIS_PASSWORD` |
 | Firebase Admin | user authentication | Firebase application credentials or `FIREBASE_SERVICE_ACCOUNT_KEY` |
 | Telegram Bot API | alerts | `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID` |

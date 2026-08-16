@@ -131,9 +131,11 @@ cur = psycopg2.connect(os.environ["POSTGRES_URL"]).cursor()
 cur.execute("SET statement_timeout = '25s'")
 ```
 
-A `tsx` script is the other option, but **only with `import 'dotenv/config'`** — without it
-`USE_POSTGRES` is unset, `dbAsync` silently falls back to dev SQLite, and it will print
-convincing numbers from the wrong database.
+A `tsx` script is the other option. It still wants `import 'dotenv/config'` (for `POSTGRES_URL`
+and provider credentials), but the old "without it you silently read dev SQLite" failure is gone
+as of 2026-08-15 — `dbAsync` has no SQLite arm and `usePostgres()` reads no env var. A misconfigured
+script now fails to connect loudly instead of answering wrongly. Don't check `USE_POSTGRES` to
+confirm the dialect; it is `undefined` on a correct script.
 
 Run in this order — cheap and actionable first:
 

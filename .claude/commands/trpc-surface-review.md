@@ -22,13 +22,14 @@ flag it either way per `/canonical-read-audit`.
 - Raw `%s` placeholders in a Postgres branch instead of `?` through `translate()`.
 - Multi-word casts (`::double precision`) — use `::float8`; `stripPgCasts` only matches
   single-token type names.
-- `STDDEV`, `DISTINCT ON`, `NOW()`, `ANY(ARRAY[])` — Postgres-only; confirm there's no SQLite
-  fallback path silently returning `{}` for this procedure (a query failure that disables a gate
-  entirely, without erroring, is worse than a query failure that's visible).
+- `STDDEV`, `DISTINCT ON`, `NOW()`, `ANY(ARRAY[])` — these are now **fine in `.ts`**; there is no
+  SQLite arm in `dbAsync` to fall back to (2026-08-16). The hazard that remains is the one that
+  was always the real one: a query failure sitting behind a `.catch(() => null)` that disables a
+  gate silently instead of erroring.
 - Any `ORDER BY <date_column>` — confirm that column actually exists on the queried table via
-  `information_schema.columns`, not assumed from `db.ts` (the SQLite schema-of-record, not the
-  live Postgres shape). This has aborted whole queries (and nulled every sibling column in the
-  same `SELECT`) three separate times in this exact codebase.
+  `information_schema.columns`. Do **not** read `db.sqlite-legacy.ts` for this; it is retired,
+  imported by nothing, and was wrong about the tables it did describe. This has aborted whole
+  queries (and nulled every sibling column in the same `SELECT`) three separate times here.
 
 ## 3. NaN/null checks (`recurring-bugs.md`'s "NaN & null" table)
 

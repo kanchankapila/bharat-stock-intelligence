@@ -13,7 +13,8 @@ a human running this file's audit by hand. `src/server/dataQualityChecks.ts` now
 freshness/coverage/range/plausibility checks against the tables these fetchers write, on the
 same 15-min cadence as the existing watchdog, folded into the same Telegram daily digest (see
 `checkAndAlertDataQuality`/`buildDailyDigest` in `jobWatchdog.ts`). Run it on demand with
-`npm run dq:check` (needs `USE_POSTGRES=true` against a live instance). When you fix a fetcher
+`npm run dq:check` (needs a reachable live instance — the old `USE_POSTGRES=true` prerequisite
+was dropped 2026-08-15; Postgres is now unconditional). When you fix a fetcher
 bug found here, consider adding a check for it so a regression pages instead of waiting for the
 next manual sweep.
 
