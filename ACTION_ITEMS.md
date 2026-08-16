@@ -98,14 +98,15 @@ git history.
     symbol.
 11. `screener_performance.py` — `[unverified]` `phase_b_fill_returns` (~8 q/row) +
     `phase_c_bayesian` (3 q × 1,521 screeners).
-12. `reward_engine.py::update_weights` — `[verified 08-16, half closed]` **the timeout risk is
-    gone**: the function now takes `days` and defaults to `DEFAULT_WINDOW_DAYS` (L121-127), so it
-    no longer scans full outcomes history unbounded. The **N+1 per-row `SELECT` remains**. Batch
-    via JOIN; verify the batched result matches per-row semantics exactly.
-    ⚠ Before optimising this, read `recurring-bugs.md`: this function's
-    `unified_signal_outcomes` UNION half is **inert** (supplies NULL for the column it keys on),
-    so it cannot learn from AI/QUANT outcomes at all. Making that work is an RL-weighting change
-    needing backtest evidence — do not silently "fix" it while batching.
+12. ~~`reward_engine.py::update_weights`~~ — **CLOSED. Was already fully fixed; this row was
+    stale.** `[verified 08-16]` All three previously-listed concerns are done: the unbounded scan
+    (now `days`/`DEFAULT_WINDOW_DAYS`, L121-127), the N+1 (regime/sector lookups batch-loaded up
+    front, with a comment noting the >150s dry-run hang it fixed), and the "inert UNION" — which
+    was **removed 2026-08-12 rather than repaired**, because it was a category error: an
+    AI/screener signal has no `RSI_DIVERGENCE`-style pattern type to weight. Per-source learning
+    lives in `update_source_weights()` → `signal_source_weights`, **live-verified 2026-08-16 at
+    219 rows across 6 sources, `AI` among them.** Nothing is unlearned. Read the function's own
+    comment block before re-opening any part of this.
 13. `mcApiService.ts` + `moneycontrol_fetcher.py` — `[unverified]` two independent paths hit the
     same 7 MC endpoints per stock in overlapping windows; `mcApiService.ts` uses a private local
     cache instead of shared `cacheService.ts`/Redis.

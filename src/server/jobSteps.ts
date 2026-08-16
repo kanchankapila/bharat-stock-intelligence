@@ -30,8 +30,16 @@ export class StepTracker {
   }
 
   /** Write each tracked step's true monitor state, then a job-level summary heartbeat that
-   *  is 'failed' (with the failing step names) when any step failed, else 'success'. */
-  finish(): void {
+   *  is 'failed' (with the failing step names) when any step failed, else 'success'.
+   *
+   *  Returns that same verdict so the CALLER can report it too. The monitor state has been
+   *  correct here for a while, but every processor still ended `return { success: true }`
+   *  unconditionally, so a run where every Python step failed completed green at the BullMQ
+   *  level while the dashboard showed it red -- two sources of truth disagreeing about the
+   *  same run (ACTION_ITEMS #16). Deliberately returned rather than thrown: these are
+   *  multi-hour jobs, and throwing would hand them to BullMQ's retry machinery and re-run the
+   *  whole chain over one failed step. */
+  finish(): { ok: boolean; failedSteps: string[] } {
     const failed = this.recs.filter(r => !r.ok);
     for (const r of this.recs) updateMonitorState(r.name, r.ok ? 'success' : 'failed', r.error);
 
@@ -44,5 +52,6 @@ export class StepTracker {
       failed.length ? 'failed' : 'success',
       failed.length ? `${failed.length} steps failed: ${names.join(',')}` : undefined,
     );
+    return { ok: failed.length === 0, failedSteps: names };
   }
 }

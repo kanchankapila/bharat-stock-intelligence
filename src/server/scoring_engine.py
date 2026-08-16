@@ -4,6 +4,7 @@ import datetime
 import pandas as pd
 import difflib
 from sqlalchemy import text
+from sqlalchemy.exc import SQLAlchemyError
 from nlp_engine import NLPScreenerInference, NLP_VERSION
 from typing import Dict, Any, List
 
@@ -622,14 +623,29 @@ class AlphaQuantScoringEngine:
                     {'bullish': 'positive', 'bearish': 'negative'}
                 ).fillna('neutral')
                 news_df['is_json_symbols'] = True
-            except Exception:
+            except SQLAlchemyError as exc:
+                # Narrowed from a bare `except Exception` (2026-08-16). A blanket catch here
+                # swallowed ANY failure -- including a transient connection blip -- and silently
+                # swapped in the degraded legacy path with no log line, so nobody could tell a
+                # real outage from normal operation.
+                print(
+                    f"[ScoringEngine] news_sentiment_items unavailable, falling back to legacy "
+                    f"news_articles (magnitudes are estimated, not measured): {exc}"
+                )
                 news_df = pd.read_sql(
                     "SELECT symbols, sentiment, title, source, timestamp AS published_at FROM news_articles",
                     conn,
                 )
                 news_df['sentiment'] = news_df['sentiment'].str.lower()
-                news_df['sentiment_score'] = 1.0  # Fallback
-                news_df['impact'] = 'MEDIUM'      # Fallback
+                # Was 1.0 -- the MAXIMUM magnitude on this column's scale, applied to every
+                # legacy article. Measured live 2026-08-16 over 20k rows: sentiment_score runs
+                # [-1, +1] with mean |score| 0.404 and median 0.000, so 1.0 was scoring every
+                # fallback article as maximally confident, ~2.5x the average real article.
+                # `news_articles` carries only a DIRECTION and no magnitude, so the honest
+                # stand-in is an average-magnitude article, not a maximal one. Direction is
+                # preserved (the consumer's `mult` reads `sentiment`, not this value).
+                news_df['sentiment_score'] = 0.4
+                news_df['impact'] = 'MEDIUM'      # matches impact_mult 1.0, the neutral case
                 news_df['is_json_symbols'] = False
 
         news_map: Dict[str, list] = {}

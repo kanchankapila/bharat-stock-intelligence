@@ -313,6 +313,33 @@ unconnected to the diff, the "evidence-shaped but meaningless artifact" `recurri
 about. Same reasoning as this file's `_log_recommendations` and `seed_screener_catalog` entries.
 The applicable measurement is the before/after impact table above, taken from live production.
 
+### The news-sentiment fallback magnitude (2026-08-16) — a dormant path, measured before changing
+
+`scoring_engine.py`'s news load reads `news_sentiment_items` and, on **any** exception, fell back
+to legacy `news_articles` with `sentiment_score = 1.0` and `impact = 'MEDIUM'`.
+
+**Measured live before touching it, and the measurement is what makes this safe:**
+
+1. **The fallback is dormant in production today.** All 7 columns the primary query needs
+   (`symbols_json`, `sentiment`, `sentiment_score`, `impact`, `title`, `source`, `published_at`)
+   exist on `news_sentiment_items`, which holds 55,432 rows. The `try` branch succeeds, so this
+   fix has **zero live effect on any current score** — same shape as this file's
+   `seed_screener_catalog` entry, and the reason no `factor_backtest.py` run applies (it reads
+   the price panel and has no code path touching `news_sentiment_items` at all).
+2. **But the constant was wrong by the full width of the scale.** Sampled 20,000 rows live:
+   `sentiment_score` runs **[-1, +1]**, mean |score| **0.404**, median |score| **0.000**. The
+   consumer takes `abs(...)` as a magnitude, so `1.0` scored every fallback article at the
+   **maximum possible confidence — ~2.5× the average real article**. `news_articles` carries a
+   direction and no magnitude, so the honest stand-in is an average-magnitude article: changed to
+   **0.4**, the measured mean. Direction is untouched (the consumer's `mult` reads `sentiment`).
+3. **The bare `except Exception` was narrowed to `SQLAlchemyError` and now logs.** Previously any
+   failure — including a transient connection blip — silently swapped in the degraded path with
+   no log line, so a real outage was indistinguishable from normal operation. That silence is why
+   nobody could have noticed if the fallback ever *did* fire.
+
+No score, weight, threshold or classification formula changed; a dormant constant was corrected
+and a swallowed error made visible.
+
 ### ⚠ RETRACTION WITHDRAWN 2026-08-15 — the retraction itself was wrong. Result stands, preliminary.
 
 **Read this whole block before citing anything here; this finding flipped twice in one session.**

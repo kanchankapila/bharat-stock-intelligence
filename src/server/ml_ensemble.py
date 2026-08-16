@@ -3312,17 +3312,49 @@ def incremental_update(n_days: int = 3, n_rounds: int = 20, dry_run: bool = Fals
     with open(ENSEMBLE_PATH, 'rb') as f:
         ensemble = pickle.load(f)
 
+    # `getattr(est, 'estimator', est)` returns CalibratedClassifierCV's constructor-time
+    # PROTOTYPE, which is never fitted -- sklearn clones-and-fits it internally -- so it has no
+    # `booster_` and this loop found nothing on every run. The fitted boosters live one level
+    # down, one PER CV FOLD. The correct access is already used elsewhere in this file (see the
+    # `calibrated_classifiers_[0].estimator` read in the promotion path). Fixed 2026-08-16.
     lgbm_model = None
     lgbm_name  = None
+    n_folds    = 0
     for est_name, est in ensemble.get('base_models', []):
         inner = getattr(est, 'estimator', est)
-        if hasattr(inner, 'booster_'):
-            lgbm_model = inner
-            lgbm_name  = est_name
+        folds = getattr(est, 'calibrated_classifiers_', None)
+        if folds:
+            # As many independently-fitted boosters as `cv=` folds, not one.
+            fitted = [getattr(f, 'estimator', None) for f in folds]
+            fitted = [m for m in fitted if hasattr(m, 'booster_')]
+            if fitted:
+                lgbm_model, lgbm_name, n_folds = fitted[0], est_name, len(fitted)
+                break
+        if hasattr(inner, 'booster_'):          # bare, uncalibrated estimator
+            lgbm_model, lgbm_name, n_folds = inner, est_name, 1
             break
 
     if lgbm_model is None:
         print("[Ensemble] No LGBM model found in saved ensemble.")
+        return False
+
+    # The detection above was broken since this function was added, so the warm-start has been
+    # a silent no-op in production the whole time -- it has NEVER run against the live model.
+    # Turning it on is a real modelling change to a live trading signal, not a lookup fix:
+    # warm-starting shifts the score distribution each fold's calibrator was fitted against, so
+    # whether to refit `calibrators_` afterwards is an open question, and `n_folds` of them
+    # exist rather than one. Per .claude/rules/measurement.md and the verify-gate mandate that
+    # covers this file, it needs backtest evidence BEFORE it starts writing.
+    #
+    # So the gate is now EXPLICIT and defaults off, rather than the previous accidental gate of
+    # "the introspection silently fails". The difference matters: this now says out loud what it
+    # found and why it stopped, instead of claiming there was no model.
+    if os.environ.get('ML_INCREMENTAL_WARMSTART') != '1':
+        print(
+            f"[Ensemble] Found fitted LGBM '{lgbm_name}' ({n_folds} calibrated fold(s)). "
+            f"Warm-start is GATED OFF pending backtest evidence -- set "
+            f"ML_INCREMENTAL_WARMSTART=1 to enable. No model written."
+        )
         return False
 
     if dry_run:
