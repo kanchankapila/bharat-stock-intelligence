@@ -629,17 +629,22 @@ export const miscRouter = router({
         const cutoffIso = new Date(Date.now() - hours * 60 * 60 * 1000).toISOString();
 
         const [signalRows, newsRows] = await Promise.all([
+          // 'Bullish'/'Bearish' as well as BUY/SELL: technical_analysis_engine.py
+          // (signal_source='technical') is the LARGEST writer of this table and uses that
+          // spelling, so a BUY/SELL-only filter excluded it from the feed entirely — measured
+          // 2026-08-16 over a 72h window, 12,288 Bullish/Bearish against 757 BUY/SELL.
+          // Kept as a JS comment, NOT a `--` comment inside the template literal: sqlTranslate
+          // rewrites this string before it reaches the driver and is not comment-aware, so an
+          // in-SQL comment containing quotes broke the query — silently, because the
+          // `.catch(() => [])` below turns any failure into an empty feed rather than an error.
           dbAll<Record<string, unknown>>(`
             SELECT symbol, signal_source, signal_type, entry_price, target_price, stop_loss,
                    confidence_score, signal_generated_at, reasoning
             FROM unified_signals
-            -- 'Bullish'/'Bearish' too: technical_analysis_engine.py (signal_source='technical')
-            -- is the LARGEST writer of this table (24,442 rows) and uses that spelling, so a
-            -- BUY/SELL-only filter excluded it from the activity feed entirely.
             WHERE signal_type IN ('BUY', 'SELL', 'Bullish', 'Bearish') AND signal_generated_at >= ?
             ORDER BY signal_generated_at DESC
             LIMIT ?
-          `, [cutoffIso, limit]).catch(() => []),
+          `, [cutoffIso, limit]).catch((e) => { console.error('[activity-feed] signal query failed:', e?.message ?? e); return []; }),
           (async () => {
             try {
               const { getNewsItems } = await import('../newsSentimentService');
