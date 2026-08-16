@@ -3817,3 +3817,38 @@ passed / 230 skipped / 0 failed · `schema:drift` clean (212 tables).
 file staged), the 12 calendar/vendor-blocked items, and AF-20260816-11/-12 which another session
 logged while this work was in flight — AF-11 is a **third** occurrence of the enrichment-lag anchor
 class fixed here in `integrity_sweep.py`, this time at `dataQualityChecks.ts:1828`.
+
+## 2026-08-16 (cont. 2) — CORRECTION: the Phase 2 TS decommission was discarded after I documented it as landed
+
+**Read this before trusting the two entries above.** They were written while another session's
+SQLite-decommission work sat staged in the working tree, and they describe that state as fact.
+**That work has since been discarded.** Verified at `8ef7c52`: `src/server/db.ts` is present
+(no `db.sqlite-legacy.ts`), `dbAsync.ts` has its `better-sqlite3` arm back,
+`vitest.globalSetup.ts`/`vitest.setup.ts` are gone, and `confluence.router.ts` again carries a
+live `usePostgres() ? … : …` dialect branch.
+
+**What survived, and it is the important half:** the 2026-08-15 Postgres-only guarantee is
+intact. `usePostgres()` is `if (process.env.VITEST) return process.env.USE_POSTGRES === 'true';
+return true;` — so **no real process reads that variable**, and the fixes committed in `c7099a3`
+(deleting `envConfig.ts`'s dead validator and the two never-firing script guards) remain correct,
+because those all ran in real processes.
+
+**What is now false in my own committed docs, and is corrected here:**
+
+- `.claude/commands/migration-safety-review.md` and `trpc-surface-review.md` said `db.ts` was
+  retired and `dbAsync` had no SQLite arm. Both corrected in place, each with a dated warning
+  telling the reader to check the file exists rather than trust the claim.
+- `README.md`'s stack row said "No SQLite path remains in any `.ts`". Corrected to the accurate,
+  narrower statement: Postgres is what every real process talks to; `db.ts` remains the
+  SQLite dev/test schema and must not be read for a live column type.
+- The two entries above, and `ACTION_ITEMS.md`/`docs/audit-findings.md`, still refer to the
+  decommission as landed. Left as written — they are a dated record of what was true when the
+  work was in the tree — but this entry supersedes them on that specific point.
+
+**The lesson, and it is on me.** This session opened by fixing exactly this class: instructions
+that outlived the thing they describe. I then created a fresh instance of it, by documenting
+another session's *uncommitted, staged* work as settled fact and committing that. **Staged is not
+merged.** Anything read out of another session's index is a snapshot of an intention, not of the
+repo — cite it as provisional or verify it against `HEAD` before writing it into a rule file.
+This is the third distinct instance of the class in one day, which is what earns it a rule entry
+rather than another paragraph.

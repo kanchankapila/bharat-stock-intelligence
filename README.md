@@ -427,7 +427,7 @@ python src/server/feature_engineering.py --lookback 252
 |---|---|
 | Frontend | React 19, TypeScript, Vite 6, TailwindCSS 4, Recharts, Framer Motion, Lucide React |
 | Backend | Express.js, tRPC, SuperJSON, React Query |
-| Database | PostgreSQL + TimescaleDB (:5433) — **the only database**. Schema-of-record is `db/schema.postgres.sql`, generated from live via `npm run schema:regen`. No SQLite path remains in any `.ts` |
+| Database | PostgreSQL + TimescaleDB (:5433) — the only database any **real process** talks to (`usePostgres()` reads no env var outside a test runner). `db/schema.postgres.sql`, regenerated from live via `npm run schema:regen`, is the schema to trust. `db.ts` still exists as the SQLite dev/test schema — do not read it for a live column type |
 | Cache / Queue | Redis (ioredis) + BullMQ; in-memory + setInterval fallback |
 | Auth | Firebase (Google OAuth) |
 | AI — Local | Ollama (Mistral / Llama3) |
