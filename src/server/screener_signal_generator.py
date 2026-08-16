@@ -198,7 +198,10 @@ def generate_signals(con, qualifying: dict, entries: dict) -> int:
                 VALUES (?,NOW(),?,?, ?,?,?,?, ?, ?,?,?, NOW())
             """, (
                 symbol, "SCREENER_ENTRY", "SCREENER_SURFACING",
-                price, target_price, stop_loss, min(0.70 + momentum_score * 0.01, 0.92),
+                # 0-100 scale, per db.ts's "confidence_score REAL, -- 0-100, from any source".
+                # Was min(0.70 + momentum_score * 0.01, 0.92) -- a 0-1 fraction in a column the
+                # AI path fills 0-100. See migration 1787070000000.
+                price, target_price, stop_loss, min(70.0 + momentum_score, 92.0),
                 reasoning,
                 round(momentum_score, 4), float(tier1_count), float(len(categories)),
             ))
@@ -223,7 +226,7 @@ def generate_signals(con, qualifying: dict, entries: dict) -> int:
                 (symbol, signal_date, signal_type, signal_source,
                  confidence_score, reasoning, signal_generated_at)
                 VALUES (?, NOW(), 'SECTOR_SCREENER_CONFLUENCE', 'SCREENER_SURFACING',
-                        0.65, ?, NOW())
+                        65.0, ?, NOW())
             """, (
                 f"SECTOR:{sector}",
                 f"{len(symbols)} stocks from {sector} entering high-performing screeners today: "

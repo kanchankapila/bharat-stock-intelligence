@@ -1600,7 +1600,9 @@ export async function runTechnicalSignalScan(options: {
             r.cmp ?? null,
             null,                        // target_price — not computed by technical scanner
             slNumeric,
-            r.signalScore / 10.0,        // normalise 0–10 score to 0–1 confidence
+            r.signalScore * 10.0,        // 0–10 score → 0–100 confidence (db.ts: "0-100, from
+                                         // any source"). Was /10.0, which put this writer on a
+                                         // 0–1 scale in a column the AI path fills 0–100.
             JSON.stringify(r.signals) ?? null,
             r.signalScore,
             signalTs,

@@ -1119,7 +1119,15 @@ db.exec(`
     entry_price        REAL,
     target_price       REAL,
     stop_loss          REAL,
-    confidence_score   REAL,           -- 0-100, from any source
+    -- 0-100, from any source. Enforced as of migration 1787070000000: four writers
+    -- (technical_scan, screener, SCREENER_SURFACING, platform) used to emit a 0-1 FRACTION
+    -- into this same column while the AI path wrote 0-100, so any threshold comparison was a
+    -- no-op for one half and real for the other. 8,448 rows backfilled; the
+    -- unified-signals-confidence-scale data-quality check now fails if a writer regresses.
+    -- NULL is legitimate and means "this source reports no confidence" -- signal_source=
+    -- 'technical' (the largest writer, 24,442 rows) never sets it by design; see
+    -- technical_analysis_engine.py. Treat NULL as unknown, never as zero.
+    confidence_score   REAL,
     reasoning          TEXT,
     technical_score    REAL,           -- Technical analysis component score
     quant_score        REAL,           -- Quantitative analysis component score

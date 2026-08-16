@@ -55,15 +55,15 @@ def signals(pg_conn, monkeypatch):
     """)
     # (symbol, source, type, confidence) -- one row per behaviour under test.
     rows = [
-        # 0-1 scale, 0.90 == 90%: the only row the pre-fix query and this one agree on.
-        ("SCORED",   "technical_scan", "Bullish", 0.90),
+        # Above the 65.0 default on the documented 0-100 scale (migration 1787070000000).
+        ("SCORED",   "technical_scan", "Bullish", 90.0),
         # Dominant source: 'Bullish' spelling AND a NULL confidence -- excluded twice before.
         ("BULLNULL", "technical",      "Bullish", None),
         # NULL confidence on a row whose signal_type the old query already matched, so this
         # isolates the NULL exclusion from the signal_type one.
         ("BUYNULL",  "screener",       "BUY",     None),
-        # 0-100 scale: 40.0 means 40%, which is BELOW the 65% default. The pre-fix query
-        # compared it against 0.65 and let it through.
+        # 40.0 is BELOW the 65.0 default. The pre-fix query compared it against 0.65 and let
+        # it through -- the whole point of the scale being wrong.
         ("AILOW",    "AI",             "BUY",     40.0),
         # Control: widening the signal_type match must not start returning bearish calls.
         ("BEARISH",  "technical",      "Bearish", None),
@@ -116,7 +116,9 @@ def test_scored_rows_outrank_unknown_confidence(signals):
     assert _symbols()[0] == "SCORED"
 
 
-def test_confidence_is_reported_on_one_scale(signals):
-    """0.90 stored on the 0-1 scale is surfaced to the caller as 90, not 0.9."""
+def test_confidence_is_reported_as_stored(signals):
+    """No read-time rescaling: the column is single-scale after migration 1787070000000, so a
+    stored 90.0 is surfaced as 90.0. A CASE that multiplied anything <= 1 would corrupt a
+    legitimately low score."""
     scored = [r for r in sql_tool.get_buy_signals() if r["symbol"] == "SCORED"][0]
     assert scored["confidence"] == pytest.approx(90.0)

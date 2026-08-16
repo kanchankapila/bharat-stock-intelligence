@@ -79,7 +79,67 @@ async function processOutcomeResolver(job: Job): Promise<{ success: boolean }> {
   return { success: true };
 }
 
+export const QUEUE_CHATBOT_REINGEST = 'chatbot-reingest';
+
+/**
+ * Re-embeds the chatbot's ChromaDB index from Postgres.
+ *
+ * app.py's POST /ingest has carried the docstring "called by nightly BullMQ job" since it was
+ * written, and NO SUCH JOB EXISTED -- grepping every .ts in src/server for the endpoint, the
+ * word ingest, or port 8001 found only the frontend's StockChatbot.tsx talking to the service
+ * directly. app.py's startup path only ingests when the chroma_store directory is EMPTY, so
+ * the index was written exactly once and then frozen.
+ *
+ * Measured 2026-08-16, every embedding in the store was created 2026-06-20 -- ~8 weeks stale:
+ *
+ *   collection               indexed   live table rows   newest embedding
+ *   news_articles              1,000            55,230   2026-06-20
+ *   screener_descriptions      1,521             2,539   2026-06-20
+ *   stock_profiles             2,366             2,366   2026-06-20
+ *
+ * The news collection is the worst of the three: a RAG index whose entire value is recency,
+ * holding 1.8% of the articles and nothing newer than June. Nothing was broken in a way any
+ * monitor could see -- the store is populated, the service answers, the tests pass.
+ *
+ * run_full_ingest upserts per collection (see ingest.py's news_articles note), so this is an
+ * incremental refresh, not a full re-embed every night.
+ */
+const CHATBOT_BASE =
+  process.env.CHATBOT_URL ?? `http://127.0.0.1:${process.env.CHATBOT_PORT ?? 8001}`;
+
+async function processChatbotReingest(_job: Job) {
+  const res = await fetch(`${CHATBOT_BASE}/ingest`, { method: 'POST' });
+  if (!res.ok) {
+    // Thrown, not logged-and-swallowed: a chatbot that is down must surface as a failed job
+    // rather than a silent success, which is how this went unnoticed for eight weeks.
+    throw new Error(`chatbot /ingest returned ${res.status}: ${await res.text()}`);
+  }
+  const body = await res.json();
+  console.log('[QUEUE] chatbot-reingest done', body);
+  return body;
+}
+
 export async function registerOperationsJobs(connection: any) {
+  const chatbotReingest = await registerRepeatableJob({
+    connection,
+    queueName: QUEUE_CHATBOT_REINGEST,
+    jobName: 'chatbot-reingest-daily',
+    // 20:00 UTC / 01:30 IST — after stock-scoring (17:00 UTC) and ml-daily-ops have written the
+    // day's scores, so the embedded stock profiles carry that day's numbers rather than
+    // yesterday's. Every day, not 1-5: news_articles accrues on weekends too.
+    repeat: { pattern: '0 20 * * *' },
+    jobId: 'chatbot-reingest-repeatable',
+    removeOnComplete: { age: 86400 },
+    removeOnFail: { age: 604800 },
+    attempts: 2,
+    backoff: { type: 'exponential', delay: 30_000 },
+    processor: processChatbotReingest,
+    monitorName: 'chatbot-reingest',
+    concurrency: 1,
+    // Embedding thousands of documents on CPU is slow; well above the observed full-ingest time.
+    lockDuration: 30 * 60 * 1000,
+  });
+
   const researchPremarket = await registerRepeatableJob({
     connection,
     queueName: QUEUE_RESEARCH_PREMARKET,
@@ -147,5 +207,5 @@ export async function registerOperationsJobs(connection: any) {
     },
   });
 
-  return { researchPremarket, researchPostclose, outcomeResolver };
+  return { researchPremarket, researchPostclose, outcomeResolver, chatbotReingest };
 }

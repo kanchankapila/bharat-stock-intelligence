@@ -1,34 +1,41 @@
 import pytest
 from unittest.mock import patch, MagicMock
-import sqlite3
 import sys, os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..', 'src', 'server', 'chatbot'))
+sys.path.insert(0, os.path.dirname(__file__))  # package dir; makes the sibling conftest importable
 
+from _pg_support import pg_available, patch_tool_connect
+from tools import screener_tool
 from tools.screener_tool import search_screener, get_screener_stocks
+
+pytestmark = pytest.mark.skipif(not pg_available(), reason="live Postgres not reachable")
+
+_DDL = """
+    CREATE TABLE screener_master (
+        scan_id TEXT PRIMARY KEY, name TEXT, source TEXT,
+        inferred_sentiment TEXT, inferred_category TEXT
+    );
+    CREATE TABLE trendlyne_screener_stocks (
+        screener_id TEXT, symbol TEXT, PRIMARY KEY(screener_id, symbol)
+    );
+    CREATE TABLE moneycontrol_screener_stocks (
+        scan_id TEXT, mcsymbol TEXT, symbol TEXT, stock_name TEXT,
+        PRIMARY KEY(scan_id, mcsymbol)
+    );
+    CREATE TABLE nse_stocks (symbol TEXT PRIMARY KEY, name TEXT, sector TEXT, industry TEXT);
+    CREATE TABLE stock_scores (
+        symbol TEXT, timeframe TEXT, score REAL, classification TEXT,
+        confidence REAL, top_domain TEXT, PRIMARY KEY(symbol, timeframe)
+    );
+"""
 
 
 @pytest.fixture
-def screener_db(tmp_path):
-    db_path = str(tmp_path / "s.db")
-    conn = sqlite3.connect(db_path)
-    conn.executescript("""
-        CREATE TABLE screener_master (
-            scan_id TEXT PRIMARY KEY, name TEXT, source TEXT,
-            inferred_sentiment TEXT, inferred_category TEXT
-        );
-        CREATE TABLE trendlyne_screener_stocks (
-            screener_id TEXT, symbol TEXT, PRIMARY KEY(screener_id, symbol)
-        );
-        CREATE TABLE moneycontrol_screener_stocks (
-            scan_id TEXT, mcsymbol TEXT, symbol TEXT, stock_name TEXT,
-            PRIMARY KEY(scan_id, mcsymbol)
-        );
-        CREATE TABLE nse_stocks (symbol TEXT PRIMARY KEY, name TEXT, sector TEXT, industry TEXT);
-        CREATE TABLE stock_scores (
-            symbol TEXT, timeframe TEXT, score REAL, classification TEXT,
-            confidence REAL, top_domain TEXT, PRIMARY KEY(symbol, timeframe)
-        );
-    """)
+def screener_db(pg_conn, monkeypatch):
+    conn = pg_conn
+    # One statement per execute(): SQLAlchemy rejects a multi-statement string.
+    for stmt in filter(str.strip, _DDL.split(";")):
+        conn.execute(stmt)
     conn.execute("INSERT INTO screener_master VALUES ('TL_001','Low PE High ROE','trendlyne','bullish','fundamental')")
     conn.execute("INSERT INTO trendlyne_screener_stocks VALUES ('TL_001','INFY')")
     conn.execute("INSERT INTO trendlyne_screener_stocks VALUES ('TL_001','TCS')")
@@ -37,8 +44,7 @@ def screener_db(tmp_path):
     conn.execute("INSERT INTO stock_scores VALUES ('INFY','long_term',82.0,'Strong Buy',0.85,'Fundamental')")
     conn.execute("INSERT INTO stock_scores VALUES ('TCS','long_term',78.0,'Buy',0.80,'Technical')")
     conn.commit()
-    conn.close()
-    return db_path
+    return patch_tool_connect(monkeypatch, screener_tool, conn)
 
 
 def test_get_screener_stocks_by_id(screener_db):

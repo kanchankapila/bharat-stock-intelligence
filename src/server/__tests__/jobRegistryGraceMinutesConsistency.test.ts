@@ -160,6 +160,7 @@ describe('JOB_REGISTRY.graceMinutes consistency', () => {
     'live-screener-collect': 'liveScreenerCollectWorker = new Worker',
     'quant-eod-sync': "'sync-quant-eod'",
     'outcome-resolver': "jobName: 'outcome-resolver-daily'",
+    'chatbot-reingest': "jobName: 'chatbot-reingest-daily'",
     'ml-daily-ops': 'mlDailyOpsWorker = new Worker',
     'trendlyne-daily-fetch': 'trendlyneDailyFetchWorker = new Worker',
     'ml-weekly-retrain': 'mlWeeklyRetrainWorker = new Worker',

@@ -1485,7 +1485,11 @@ export async function runIntradayScreenerScan(): Promise<{
             entryPrice: entry,
             targetPrice: target,
             stopLoss,
-            confidenceScore: confidence / 100,
+            // NOT /100: `score` is already a percentage (the reasoning string above renders it
+            // with a % sign), and unified_signals.confidence_score is documented in db.ts as
+            // "0-100, from any source". Dividing put this writer on a 0-1 scale while the AI
+            // path wrote 0-100 into the same column -- see migration 1787070000000.
+            confidenceScore: confidence,
             reasoning,
           });
 

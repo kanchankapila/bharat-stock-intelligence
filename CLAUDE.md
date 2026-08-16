@@ -26,7 +26,7 @@ A task is **not** done until the relevant check has actually run and passed. Cla
 ```bash
 npx tsc --noEmit                                    # any .ts change
 npx vitest run                                      # any .ts logic change
-python -m pytest src/server/__tests__/ src/server/tests/  # any .py change (identical to CI)
+python -m pytest src/server/__tests__/ src/server/tests/ tests/chatbot/  # any .py change (identical to CI)
 npm run schema:drift                                # any migration
 ```
 

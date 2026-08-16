@@ -1,9 +1,12 @@
-import sqlite3
 import pytest
 import sys, os
 from datetime import datetime, timedelta
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..', 'src', 'server', 'chatbot'))
+sys.path.insert(0, os.path.dirname(__file__))  # this dir is a package (__init__.py), so the
+                                               # sibling conftest is not importable without this
 
+from _pg_support import pg_available, patch_tool_connect
+from tools import sql_tool
 from tools.sql_tool import (
     get_stock_fundamentals,
     filter_stocks_by_fundamentals,
@@ -12,12 +15,15 @@ from tools.sql_tool import (
     get_quant_scores,
 )
 
+pytestmark = pytest.mark.skipif(not pg_available(), reason="live Postgres not reachable")
+
 
 @pytest.fixture
-def test_db(tmp_path):
-    db_path = str(tmp_path / "test.db")
-    conn = sqlite3.connect(db_path)
-    conn.executescript("""
+def test_db(pg_conn, monkeypatch):
+    conn = pg_conn
+    # One statement per execute(): SQLAlchemy (unlike sqlite3.executescript) rejects a
+    # multi-statement string.
+    _ddl = """
         CREATE TABLE nse_stocks (
             symbol TEXT PRIMARY KEY, name TEXT, sector TEXT, industry TEXT
         );
@@ -38,11 +44,11 @@ def test_db(tmp_path):
             PRIMARY KEY (symbol, timeframe)
         );
         CREATE TABLE unified_signals (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            id SERIAL PRIMARY KEY,
             symbol TEXT, signal_date TEXT, signal_source TEXT, signal_type TEXT,
             entry_price REAL, target_price REAL, stop_loss REAL,
             confidence_score REAL, reasoning TEXT,
-            signal_generated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            signal_generated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         );
         CREATE TABLE screener_master (
             scan_id TEXT PRIMARY KEY, name TEXT, source TEXT,
@@ -60,7 +66,9 @@ def test_db(tmp_path):
             return_1w REAL, return_1m REAL, return_3m REAL, return_6m REAL,
             above_sma200 INTEGER, momentum_score REAL
         );
-    """)
+    """
+    for _stmt in filter(str.strip, _ddl.split(";")):
+        conn.execute(_stmt)
     conn.executemany("INSERT INTO nse_stocks VALUES (?,?,?,?)", [
         ("INFY", "Infosys Ltd", "IT", "Software"),
         ("HDFCBANK", "HDFC Bank", "Banking", "Private Bank"),
@@ -81,7 +89,8 @@ def test_db(tmp_path):
     conn.execute(
         "INSERT INTO unified_signals (symbol, signal_date, signal_source, signal_type, "
         "entry_price, target_price, stop_loss, confidence_score, reasoning) VALUES (?,?,?,?,?,?,?,?,?)",
-        ("INFY", recent_date, "AI", "BUY", 1450.0, 1600.0, 1380.0, 0.88, "Strong momentum"),
+        # 88.0, not 0.88: confidence_score is the 0-100 scale (migration 1787070000000).
+        ("INFY", recent_date, "AI", "BUY", 1450.0, 1600.0, 1380.0, 88.0, "Strong momentum"),
     )
     conn.execute("INSERT INTO screener_master VALUES (?,?,?,?,?)",
                  ("TL_001", "Low PE High ROE", "trendlyne", "bullish", "fundamental"))
@@ -91,8 +100,10 @@ def test_db(tmp_path):
         ("HDFCBANK", 1.5, 5.0, 12.0, 18.0, 1, 65.0),
     ])
     conn.commit()
-    conn.close()
-    return db_path
+    # db_path is vestigial -- every tool's _connect() ignores it. The monkeypatch below is what
+    # actually points the tools at this throwaway schema; the tests keep passing db_path=test_db
+    # so the diff stays a fixture swap rather than a rewrite of every call site.
+    return patch_tool_connect(monkeypatch, sql_tool, conn)
 
 
 def test_get_stock_fundamentals_returns_full_profile(test_db):

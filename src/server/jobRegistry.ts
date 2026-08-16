@@ -114,6 +114,12 @@ export const JOB_REGISTRY: JobScheduleEntry[] = [
   // Found 2026-08-03 while building the graceMinutes mirror-consistency test.
   { jobName: 'quant-eod-sync', label: 'Quant EOD Sync', cronPattern: '30 16 * * 1-5', graceMinutes: 360, critical: false },
   { jobName: 'outcome-resolver', label: 'Outcome Resolver', cronPattern: '0 4 * * 1-5', graceMinutes: 45, critical: true },
+  // Listed here from the day the job was created (2026-08-16), deliberately: the ChromaDB index
+  // this refreshes sat frozen at its 2026-06-20 initial ingest for ~8 weeks precisely because
+  // nothing watched it. graceMinutes 90 covers a slow CPU embedding pass (lockDuration is 30min
+  // per run, x2 attempts, plus catch-up stagger). Keep cronPattern identical to
+  // operations.jobs.ts's `repeat: { pattern }` — a drifted mirror is its own recurring bug.
+  { jobName: 'chatbot-reingest', label: 'Chatbot RAG Re-ingest', cronPattern: '0 20 * * *', graceMinutes: 90, critical: false },
   // graceMinutes 60 -> 270: the Worker's own lockDuration is 4h (240min, "covers the full
   // daily ops run" per queues.ts's own comment) and processMlDailyOps is wrapped in
   // withJobTimeout(..., 3.5h) -- 60min grace flagged 'late' (critical: true, real Telegram

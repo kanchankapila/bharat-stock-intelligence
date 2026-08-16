@@ -69,6 +69,7 @@ def ingest_stock_profiles(client: chromadb.ClientAPI, db_path: str = DB_PATH) ->
     if docs:
         col.upsert(documents=docs, ids=ids, metadatas=metas)
         logger.info(f"Upserted {len(docs)} stock profiles")
+        purge_stale_docs(col, ids)
     return len(docs)
 
 
@@ -92,12 +93,21 @@ def ingest_screener_descriptions(client: chromadb.ClientAPI, db_path: str = DB_P
     for scan_id, name, source, sentiment, category in rows:
         text = f"{name}. Source: {source or 'unknown'}. Category: {category or 'general'}. Sentiment: {sentiment or 'neutral'}."
         docs.append(text)
-        ids.append(f"screener_{scan_id}")
+        # Source MUST be part of the id. screener_master's primary key is (scan_id, source)
+        # because MoneyControl/Trendlyne/ETnow each issue their own small-integer scan_id
+        # independently and their ranges genuinely overlap -- the composite-key rule in
+        # .claude/rules/data-sources.md, which that table already follows. Keying the Chroma
+        # document on the bare scan_id collapsed those back together, and ChromaDB rejects the
+        # whole batch rather than silently overwriting: measured 2026-08-16, 20 duplicated ids
+        # (screener_173, screener_520, ...) raised DuplicateIDError and aborted run_full_ingest
+        # partway -- after stock_profiles had been written, so news_articles never ran at all.
+        ids.append(f"screener_{(source or 'unknown').strip().lower()}_{scan_id}")
         metas.append({"scan_id": scan_id, "name": name, "source": source or "", "type": "screener"})
 
     if docs:
         col.upsert(documents=docs, ids=ids, metadatas=metas)
         logger.info(f"Upserted {len(docs)} screener descriptions")
+        purge_stale_docs(col, ids)
     return len(docs)
 
 
@@ -143,15 +153,78 @@ def ingest_news_articles(client: chromadb.ClientAPI, db_path: str = DB_PATH) -> 
     if docs:
         col.upsert(documents=docs, ids=ids, metadatas=metas)
         logger.info(f"Upserted {len(docs)} news items from news_sentiment_items")
+        # Bounded to the same rolling window the query uses, so the index cannot keep serving
+        # articles that aged out of it months ago.
+        purge_stale_docs(col, ids)
     return len(docs)
 
 
+def purge_stale_docs(col, current_ids: list[str]) -> int:
+    """Delete documents the current run did not produce.
+
+    .claude/rules/recurring-bugs.md: "Any table written as today's full recomputation needs a
+    purge of rows the run did not produce, not just an upsert." A Chroma collection is exactly
+    that shape, and an upsert-only refresh leaves two kinds of debris:
+
+      * Documents whose id scheme changed. Re-keying screeners from `screener_{scan_id}` to
+        `screener_{source}_{scan_id}` (see ingest_screener_descriptions) left every old
+        bare-id document orphaned: the collection went 1,521 -> 3,193 on the first fixed run,
+        i.e. 1,521 stale docs that no future run can ever update, still answering queries.
+      * Rows that dropped out of the source window -- news_articles keeps only the most recent
+        1,000 items, so yesterday's fall out of the query but never out of the index. That is
+        how a "recent news" collection ends up serving June articles in August.
+
+    Deletion is by explicit id difference rather than col.delete(where=...) so it cannot remove
+    anything the run did not consider.
+    """
+    try:
+        existing = set(col.get(include=[])["ids"])
+    except Exception as e:
+        logger.warning(f"[ingest] could not list existing ids for purge: {e}")
+        return 0
+    stale = sorted(existing - set(current_ids))
+    if stale:
+        col.delete(ids=stale)
+        logger.info(f"[ingest] purged {len(stale)} stale docs from {col.name}")
+    return len(stale)
+
+
 def run_full_ingest(db_path: str = DB_PATH) -> dict:
+    """Refresh all three collections. Each is independent: a failure in one must not starve
+    the others.
+
+    This used to be three bare calls in a row, so the DuplicateIDError raised by
+    ingest_screener_descriptions (see its comment) propagated out of the second call and
+    news_articles -- the collection whose entire value is recency -- was never reached. Same
+    shape as the "a step at the END of a script that gets killed never runs" class in
+    .claude/rules/recurring-bugs.md: the later step is starved by an earlier one and nothing
+    distinguishes that from it having run and found nothing.
+
+    Errors are re-raised as a group after all three have been attempted, so the nightly
+    chatbot-reingest job still goes red (a silently-successful no-op is what let this index sit
+    frozen from 2026-06-20 to 2026-08-16) while every healthy collection is still refreshed.
+    """
     client = get_chroma_client()
-    stocks = ingest_stock_profiles(client, db_path)
-    screeners = ingest_screener_descriptions(client, db_path)
-    news = ingest_news_articles(client, db_path)
-    return {"stocks": stocks, "screeners": screeners, "news": news}
+    counts: dict = {}
+    failures: list[str] = []
+    for key, fn in (
+        ("stocks", ingest_stock_profiles),
+        ("screeners", ingest_screener_descriptions),
+        ("news", ingest_news_articles),
+    ):
+        try:
+            counts[key] = fn(client, db_path)
+        except Exception as e:
+            counts[key] = 0
+            failures.append(f"{key}: {type(e).__name__}: {e}")
+            logger.error(f"[ingest] {key} failed: {e}", exc_info=True)
+
+    if failures:
+        raise RuntimeError(
+            f"ingest completed with {len(failures)} failed collection(s) "
+            f"(counts={counts}): " + " | ".join(failures)
+        )
+    return counts
 
 
 if __name__ == "__main__":

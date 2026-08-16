@@ -99,8 +99,14 @@ jobs:
       # root conftest.py, so `pytest src/server/tests/` excluded exactly the tests written
       # to lock in the ranker fixes. Keep this string identical to CLAUDE.md's
       # Definition of Done, or the two drift again.
+      # tests/chatbot/ added 2026-08-16: it was never collected here, and 13 of its 29 tests
+      # were failing against LIVE PRODUCTION (every chatbot tool's _connect ignores the db_path
+      # its fixture built, a no-op since the Postgres-only migration). Converted to the pg_conn
+      # throwaway-schema fixture, which auto-skips when Postgres is unreachable -- verified in
+      # this job's own shape (PGTEST_HOST pointed at an unroutable address): 12 passed,
+      # 17 skipped, 0 failed.
       - name: Run pytest
-        run: python -m pytest src/server/__tests__/ src/server/tests/ -q
+        run: python -m pytest src/server/__tests__/ src/server/tests/ tests/chatbot/ -q
 
       # Static checks for the bug classes that have each recurred 3-10+ times
       # (date.today() write-anchors, raw %s placeholders, fetchers with no

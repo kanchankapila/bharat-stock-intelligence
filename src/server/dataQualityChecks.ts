@@ -765,6 +765,45 @@ export const DATA_QUALITY_CHECKS: DataQualityCheck[] = [
     },
   },
   {
+    id: 'unified-signals-confidence-scale',
+    label: 'unified_signals.confidence_score stays on one (0-100) scale',
+    category: 'signals',
+    critical: false,
+    // Four of the five writers emitted a 0-1 fraction into a column db.ts documents as
+    // "0-100, from any source" (measured 2026-08-16: technical_scan 0.10-1.00,
+    // SCREENER_SURFACING 0.65-0.74, screener 0.80-1.00, platform 0.80 — against AI's 0-98).
+    // Nothing errored, and no NOT NULL/type/drift check can see it: every value is a valid
+    // REAL. It only surfaced as downstream nonsense — a threshold filter that was a no-op for
+    // half the table, and outcome_resolver.py's round(confidence_score) collapsing 1,411 rows
+    // to 0/1. Writers fixed + 8,448 rows backfilled by migration 1787070000000; this is what
+    // catches the next writer that regresses.
+    //
+    // Threshold is a SHARE, not a bare count (recurring-bugs.md: "a check that fires on a bare
+    // count > 0 will fail on correct data"). A genuine 0-100 score below 1.0 is legitimate —
+    // AI's own minimum is 0.000 — so a handful of sub-1 rows is not evidence of anything. A
+    // whole writer back on the wrong scale shows up as a large share, not a few rows.
+    sql: `SELECT COUNT(*) AS scored,
+                 COUNT(*) FILTER (WHERE confidence_score > 0 AND confidence_score <= 1) AS suspect,
+                 COUNT(*) FILTER (WHERE confidence_score > 100 OR confidence_score < 0) AS out_of_range
+            FROM unified_signals
+           WHERE confidence_score IS NOT NULL
+             AND signal_date >= CURRENT_DATE - 30`,
+    evaluate: (row) => {
+      const scored = Number(row?.scored) || 0;
+      const suspect = Number(row?.suspect) || 0;
+      const outOfRange = Number(row?.out_of_range) || 0;
+      if (scored === 0) return { status: 'pass', detail: 'No scored unified_signals rows in the last 30 days' };
+      if (outOfRange > 0) {
+        return { status: 'fail', detail: `${outOfRange} row(s) outside 0-100 — a writer is emitting a scale this column does not use` };
+      }
+      const pct = (suspect / scored) * 100;
+      if (pct >= 5) {
+        return { status: 'fail', detail: `${suspect}/${scored} (${pct.toFixed(1)}%) of scored rows sit in (0, 1] — a writer has regressed to the 0-1 fraction scale (see migration 1787070000000)` };
+      }
+      return { status: 'pass', detail: `${scored} scored rows, all within 0-100 (${suspect} in (0,1], ${pct.toFixed(1)}%)` };
+    },
+  },
+  {
     id: 'signal-source-case-collision',
     label: 'No two signal_source values differ only by case',
     category: 'signals',
