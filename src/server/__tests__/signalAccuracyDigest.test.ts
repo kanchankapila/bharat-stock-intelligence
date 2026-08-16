@@ -1,6 +1,3 @@
-// USE_POSTGRES is read fresh on every dbAsync call, and the suite shares one process — an
-// unpinned value leaks in from whichever file ran last. See .claude/rules/recurring-bugs.md.
-process.env.USE_POSTGRES = 'false';
 process.env.DATABASE_URL = ':memory:';
 
 import { describe, it, expect, beforeEach } from 'vitest';

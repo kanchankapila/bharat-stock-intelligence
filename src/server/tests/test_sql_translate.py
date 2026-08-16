@@ -77,6 +77,28 @@ def test_maps_date_column_to_cast():
         "WHERE (cs.computed_at)::date = :p0"
 
 
+def test_maps_two_arg_date_and_datetime_over_a_column_or_literal():
+    """The 'now' forms were mapped; every other two-argument form was not.
+
+    `date(d, '-30 days')` fell through to the SINGLE-argument rule, which swallowed the whole
+    argument list and produced `(d,'-30 days')::date` -- a row-expression cast that is not a
+    translation-time error and reads as plausible SQL. The all-literal form was left completely
+    untranslated and reached the server as `function date(unknown, unknown) does not exist`.
+    Negative control: against the pre-fix module all four of these assertions fail.
+    """
+    assert _pg("SELECT date(d, '-30 days') FROM t") == \
+        "SELECT (((d)::date + interval '-30 days')::date) FROM t"
+    assert _pg("SELECT date('2026-01-01', '-30 days')") == \
+        "SELECT ((('2026-01-01')::date + interval '-30 days')::date)"
+    assert _pg("SELECT datetime(ts, '+1 day') FROM t") == \
+        "SELECT ((ts)::timestamp + interval '+1 day') FROM t"
+    # and the pre-existing forms must be unchanged by the new rules
+    assert _pg("SELECT date('now', '-30 days')") == \
+        "SELECT ((current_date + interval '-30 days')::date)"
+    assert _pg("SELECT datetime('now', '-1 hour')") == "SELECT (now() + interval '-1 hour')"
+    assert _pg("SELECT date(cs.computed_at) FROM t") == "SELECT (cs.computed_at)::date FROM t"
+
+
 def test_maps_julianday_difference():
     assert _pg("AVG(julianday('now') - julianday(date))") == \
         "AVG(current_date - (date)::date)"
@@ -271,16 +293,40 @@ def test_inside_pytest_sqlite_stays_the_default_fixture():
     assert out2.stdout.strip() == "True", "a test must still be able to opt INTO Postgres"
 
 
-def test_the_two_decision_points_agree():
-    """pgConfig.ts and sql_translate.py must encode the identical rule -- a TS/Python split
-    here would mean the Node server and the ML engines silently disagree about which database
-    they are talking to, which is worse than either default on its own."""
+def test_the_two_decision_points_agree_where_they_still_can():
+    """pgConfig.ts and sql_translate.py agree for every REAL process: Postgres, no env var.
+
+    They deliberately differ in ONE place, and this test pins that difference rather than
+    pretending it away. TypeScript went fully Postgres-only on 2026-08-16 (vitest's `unit` project
+    runs inside a throwaway schema built from db/schema.postgres.sql -- see
+    vitest.globalSetup.ts); Python still honours USE_POSTGRES inside pytest, because ~100 pytest
+    files build their own sqlite3 fixtures and flipping them together would aim the Python suite
+    at live production, which a 2026-08-15 attempt actually did.
+
+    Why TS could not keep the pytest-shaped rule: every `*.live.test.ts` calls
+    `await import('dotenv/config')`, `.env` sets USE_POSTGRES=true, and vitest's
+    `singleFork: true` shares one process.env -- so the first live file to load dotenv flipped
+    every later test file onto production. That wrote 2,148 fabricated Saturday stock_ohlcv bars
+    to production on 2026-08-16. pytest has no equivalent shared-mutation path today, which is
+    why the branch is survivable there and was not here.
+
+    Converting the pytest fixtures is the remaining half of SQLITE_DECOMMISSION_PLAN Phase 2.
+    When it lands this test fails, which is the point -- whoever removes the branch is forced
+    back here to re-assert real parity instead of leaving a stale claim behind.
+    """
     ts = (SERVER_DIR / "pgConfig.ts").read_text(encoding="utf-8")
-    assert "if (process.env.VITEST) return process.env.USE_POSTGRES === 'true';" in ts, (
-        "pgConfig.ts's usePostgres() no longer matches sql_translate.py's use_postgres(); "
-        "keep the two rules identical"
+    ts_body = ts.split("export function usePostgres")[1][:400]
+    assert "return true;" in ts_body
+    assert "USE_POSTGRES" not in ts_body, (
+        "pgConfig.ts's usePostgres() reads an env var again -- that is the exact shape that let "
+        "dotenv/config in a live test reroute the whole suite to production"
     )
-    assert "return true;" in ts.split("export function usePostgres")[1][:400]
+
+    py = (SERVER_DIR / "sql_translate.py").read_text(encoding="utf-8")
+    assert "if _in_pytest():" in py, (
+        "the Python pytest branch is gone -- Phase 2 is complete on both sides, so update this "
+        "test to assert genuine parity (neither side reads USE_POSTGRES at all)"
+    )
 
 
 # ─── generated_at uniqueness (2026-08-15) ────────────────────────────────────
@@ -355,12 +401,17 @@ def test_pg_schema_shadows_production_tables_not_writes_to_them(pg_schema):
     cur.execute("SELECT count(*) FROM unified_recommendations")
     assert cur.fetchone()[0] == 1, "write did not land in the throwaway schema"
 
-    # The production table must be untouched by that write.
-    cur.execute("SELECT count(*) FROM public.unified_recommendations WHERE symbol = 'ZZTESTSYM'")
-    assert cur.fetchone()[0] == 0, (
-        "TEST WROTE INTO PRODUCTION — the search_path isolation is broken; do not convert "
-        "any further tests to Postgres until this passes"
-    )
+    # The production table must be untouched by that write. Resolve it first: it exists on a
+    # developer instance (which IS production) but not on CI's empty service container, where a
+    # bare SELECT is UndefinedTable rather than a clean 0 -- and this assertion matters most
+    # exactly where the suite runs unattended.
+    cur.execute("SELECT to_regclass('public.unified_recommendations')")
+    if cur.fetchone()[0] is not None:
+        cur.execute("SELECT count(*) FROM public.unified_recommendations WHERE symbol = 'ZZTESTSYM'")
+        assert cur.fetchone()[0] == 0, (
+            "TEST WROTE INTO PRODUCTION — the search_path isolation is broken; do not convert "
+            "any further tests to Postgres until this passes"
+        )
 
     cur.execute("SELECT to_regclass(%s)", (f"{schema}.unified_recommendations",))
     assert cur.fetchone()[0] is not None, "table was not created in the throwaway schema"

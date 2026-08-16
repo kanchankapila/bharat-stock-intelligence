@@ -25,6 +25,27 @@ export function pgConnectionString(): string {
 }
 
 /**
+ * The vitest suite's private, throwaway Postgres schema, or null outside the suite.
+ *
+ * Set by `vitest.globalSetup.ts` (which creates the schema, applies db/schema.postgres.sql into
+ * it, and drops it CASCADE afterwards) and read by `pgClient.getPool()`, which pins every pooled
+ * connection's `search_path` to it. This is the TypeScript mirror of the Python side's
+ * `pg_schema`/`pg_conn` fixtures in `src/server/tests/conftest.py` -- same guarantee, same
+ * reason: a test pointed at Postgres WITHOUT a private schema is pointed at LIVE PRODUCTION.
+ *
+ * The name is deliberately NOT `USE_POSTGRES`-shaped and is never read from `.env`. `.env` sets
+ * `USE_POSTGRES=true`, and every `*.live.test.ts` file loads `dotenv/config`; with
+ * `pool: 'forks', singleFork: true` that mutates one shared `process.env` for the whole run, so
+ * the OLD env-var rule made a test's target database depend on FILE EXECUTION ORDER. Measured
+ * 2026-08-16: that wrote 2,148 fabricated Saturday bars into production `stock_ohlcv`, and made
+ * `deliveryFetcher.live` fail against empty SQLite in one run and pass against production in the
+ * next, minutes apart. See the memory entry `live-tests-hit-production-postgres-2026-08-16`.
+ */
+export function vitestSchema(): string | null {
+  return process.env.VITEST_PG_SCHEMA || null;
+}
+
+/**
  * PostgreSQL IS the database. This is no longer a switch.
  *
  * It used to be `process.env.USE_POSTGRES === 'true'` — a cutover flag from the SQLite era.
@@ -46,23 +67,26 @@ export function pgConnectionString(): string {
  * with no environment variable consulted at all. A missing or unloaded `.env` can no longer
  * reroute a process to a different database; the worst it can do is fail to connect, loudly.
  *
- * Inside a test runner the historical env-based rule still applies (SQLite unless
- * `USE_POSTGRES=true`). `VITEST` is set by vitest itself and cannot be supplied by `.env`, so
- * the escape hatch is unreachable outside the suite. This direction is deliberate: most test
- * files build a throwaway SQLite fixture and never set the variable, so defaulting THEM to
- * Postgres would point the suite at the live production database — briefly tried 2026-08-15
- * on the Python side and immediately visible as a 115s → 600s+ suite (it wrote nothing, but
- * that is not a thing to rely on twice).
+ * **`USE_POSTGRES` is no longer read anywhere, including inside the test runner (2026-08-16).**
+ * The test-runner branch used to be `process.env.USE_POSTGRES === 'true'`, on the reasoning that
+ * `VITEST` is runner-owned and `.env` cannot forge it. True, but it missed the second half: every
+ * `*.live.test.ts` file calls `await import('dotenv/config')`, `.env` sets `USE_POSTGRES=true`,
+ * and `pool: 'forks', singleFork: true` means one shared `process.env` for the entire run. So the
+ * FIRST live file to load dotenv silently flipped every test collected after it onto production
+ * Postgres. Measured 2026-08-16: 2,148 fabricated Saturday `stock_ohlcv` bars written to
+ * production, and `deliveryFetcher.live` failing against empty SQLite in one run and passing
+ * against production in the next. A test's target database must not depend on file execution
+ * order.
  *
- * So the variable survives in exactly one place: choosing a fixture inside a test runner. It
- * can no longer decide which database a real process talks to. `docs/SQLITE_DECOMMISSION_PLAN.md`
- * Phase 2 removes even that by moving the suites onto Postgres, after which this is `return true`.
+ * Now: Postgres unconditionally, everywhere. Inside the vitest `unit` project that means the
+ * private throwaway schema `vitest.globalSetup.ts` creates (see `vitestSchema()`); inside the
+ * `live` project and every real process it means the real database. There is no SQLite branch
+ * left to fall into and no variable that can select one.
  *
  * Pinned by `src/server/__tests__/postgresOnly.test.ts` and the Python mirror
  * `src/server/tests/test_sql_translate.py` — keep the two rules identical.
  */
 export function usePostgres(): boolean {
-  if (process.env.VITEST) return process.env.USE_POSTGRES === 'true';
   return true;
 }
 

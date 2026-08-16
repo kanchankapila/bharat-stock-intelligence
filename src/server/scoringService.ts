@@ -212,13 +212,21 @@ export async function computeTimeframeScores(opts: {
   const topN = opts.topN ?? 100;
   const holdingDays = timeframe === 'intraday' ? 1 : timeframe === 'short' ? 7 : timeframe === 'medium' ? 30 : 180;
 
+  // `computed_at`, not `updated_at`. db.ts's SQLite schema-of-record declares the column as
+  // `updated_at`; live Postgres has never had it -- the real column is `computed_at`. So every
+  // write this function has ever attempted against production raised
+  // `column "updated_at" of relation "timeframe_scores" does not exist`, which is why the live
+  // table holds 0 rows. Found 2026-08-16 by the Phase 2 move of the vitest suite onto real
+  // Postgres; the SQLite-backed test passed against the broken SQL for its whole life, which is
+  // precisely the bug class the SQLite decommission exists to end (recurring-bugs.md: "a column
+  // type assumed from db.ts" / "a column referenced in SQL is not a column that exists").
   const upsertSql = `
-    INSERT INTO timeframe_scores (symbol, timeframe, run_id, score, confidence, domains_json, reasons_json, suggested_holding_days, updated_at)
+    INSERT INTO timeframe_scores (symbol, timeframe, run_id, score, confidence, domains_json, reasons_json, suggested_holding_days, computed_at)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-    ON CONFLICT(symbol, timeframe) DO UPDATE SET
+    ON CONFLICT(symbol, timeframe, run_id) DO UPDATE SET
       run_id = excluded.run_id, score = excluded.score, confidence = excluded.confidence,
       domains_json = excluded.domains_json, reasons_json = excluded.reasons_json,
-      suggested_holding_days = excluded.suggested_holding_days, updated_at = excluded.updated_at
+      suggested_holding_days = excluded.suggested_holding_days, computed_at = excluded.computed_at
   `;
 
   // ── Path A: runId provided → load stocks from screener_runs, compute from component tables ──
@@ -268,8 +276,12 @@ export async function computeTimeframeScores(opts: {
 
   const rows = await dbAll<any>(sql, params);
 
-  // Auto-create a screener_runs entry when a screenerId is provided
-  let resolvedRunId: string | null = null;
+  // Auto-create a screener_runs entry when a screenerId is provided.
+  //
+  // run_id is part of the live PRIMARY KEY (symbol, timeframe, run_id), so it can never be NULL
+  // -- this used to default to null whenever no screenerId was passed, which would fail the
+  // upsert outright. db.ts declared a 2-column key and hid that; see the upsert's own comment.
+  let resolvedRunId = `run_adhoc_${timeframe}_${Date.now()}`;
   if (opts.screenerId && rows.length > 0) {
     resolvedRunId = `run_${opts.screenerId}_${Date.now()}`;
     try {

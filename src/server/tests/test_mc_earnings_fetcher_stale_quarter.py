@@ -15,6 +15,15 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 import mc_earnings_fetcher as mef
 
 
+def _use_pg(conn):
+    """Match the code branch to the connection the fixture actually got. conftest's
+    decommission shim swaps sqlite3 for a Postgres-backed ConnWrapper, so this is Postgres
+    everywhere as of 2026-08-16 (the shim is unconditional now; the SQLITE_SHIM_POSTGRES opt-in
+    is gone). Keyed on the CONNECTION rather than hardcoded because only ':memory:' is
+    redirected -- a deliberate temp-file sqlite fixture still hands back real SQLite."""
+    return type(conn).__name__ == "ConnWrapper"
+
+
 def _db():
     conn = sqlite3.connect(":memory:")
     conn.row_factory = sqlite3.Row
@@ -25,6 +34,9 @@ def _db():
             PRIMARY KEY (scid, sub_type, category)
         );
         CREATE TABLE mc_pricefeed_daily (symbol TEXT, scid TEXT, date TEXT);
+        -- The Postgres branch joins nse_stocks.mcsymbol (mc_pricefeed_daily secondary), so both
+        -- have to exist for the same fixture to serve either dialect. See _use_pg above.
+        CREATE TABLE nse_stocks (symbol TEXT, mcsymbol TEXT);
         CREATE TABLE technical_signals (
             symbol TEXT, date TEXT,
             earnings_category_yoy INTEGER, earnings_np_growth_yoy REAL,
@@ -36,11 +48,12 @@ def _db():
 
 
 def test_NEGATIVE_CONTROL_picks_most_recent_quarter_not_strongest_score(monkeypatch):
-    monkeypatch.setattr(mef, "use_postgres", lambda: False)
     monkeypatch.setattr(mef, "logical_trading_date", lambda: "2026-08-14")
     conn = _db()
+    monkeypatch.setattr(mef, "use_postgres", lambda: _use_pg(conn))
     cur = conn.cursor()
     cur.execute("INSERT INTO mc_pricefeed_daily VALUES ('RAMKY', 'SID1', '2026-08-14')")
+    cur.execute("INSERT INTO nse_stocks VALUES ('RAMKY', 'SID1')")
     cur.execute("INSERT INTO technical_signals (symbol, date) VALUES ('RAMKY', '2026-08-14')")
     # Old, strong quarter (score magnitude 2) -- the pre-fix query would have picked this one.
     # result_date uses the real vendor format ("Month DD, YYYY", zero-padded day), not ISO --
@@ -67,11 +80,12 @@ def test_NEGATIVE_CONTROL_picks_most_recent_quarter_not_strongest_score(monkeypa
 
 
 def test_same_day_tie_falls_back_to_strongest_score(monkeypatch):
-    monkeypatch.setattr(mef, "use_postgres", lambda: False)
     monkeypatch.setattr(mef, "logical_trading_date", lambda: "2026-08-14")
     conn = _db()
+    monkeypatch.setattr(mef, "use_postgres", lambda: _use_pg(conn))
     cur = conn.cursor()
     cur.execute("INSERT INTO mc_pricefeed_daily VALUES ('TESTSYM', 'SID2', '2026-08-14')")
+    cur.execute("INSERT INTO nse_stocks VALUES ('TESTSYM', 'SID2')")
     cur.execute("INSERT INTO technical_signals (symbol, date) VALUES ('TESTSYM', '2026-08-14')")
     cur.execute("""INSERT INTO mc_earnings_rapid
         (scid, sub_type, category, result_date, np_growth, category_score)
@@ -89,7 +103,7 @@ def test_same_day_tie_falls_back_to_strongest_score(monkeypatch):
     assert row["earnings_category_yoy"] == 1
 
 
-def test_NEGATIVE_CONTROL_pg_date_regex_matches_sqlite_glob_day_width():
+def test_NEGATIVE_CONTROL_pg_date_regex_matches_sqlite_glob_day_width(tmp_path):
     """PG_RESULT_DATE_RE (used to guard Postgres's TO_DATE) and the SQLite branch's GLOB pattern
     ('[0-9][0-9]' for the day) must accept/reject the same inputs -- otherwise an unpadded
     single-digit day ("August 6, 2026") parses fine on Postgres but silently degrades to NULL
@@ -103,7 +117,9 @@ def test_NEGATIVE_CONTROL_pg_date_regex_matches_sqlite_glob_day_width():
     double_digit = "August 06, 2026"
 
     pg_re = re.compile(mef.PG_RESULT_DATE_RE)
-    conn = sqlite3.connect(":memory:")
+    # A temp FILE, not ':memory:' -- this test's whole point is comparing against real SQLite
+    # GLOB semantics, and conftest's decommission shim redirects ':memory:' onto Postgres.
+    conn = sqlite3.connect(str(tmp_path / "glob.db"))
     sqlite_glob = "SELECT ? GLOB '[A-Za-z]* [0-9][0-9], [0-9][0-9][0-9][0-9]'"
 
     pg_single = bool(pg_re.match(single_digit))
@@ -119,11 +135,12 @@ def test_NEGATIVE_CONTROL_pg_date_regex_matches_sqlite_glob_day_width():
 
 
 def test_undated_row_never_beats_a_dated_row(monkeypatch):
-    monkeypatch.setattr(mef, "use_postgres", lambda: False)
     monkeypatch.setattr(mef, "logical_trading_date", lambda: "2026-08-14")
     conn = _db()
+    monkeypatch.setattr(mef, "use_postgres", lambda: _use_pg(conn))
     cur = conn.cursor()
     cur.execute("INSERT INTO mc_pricefeed_daily VALUES ('TESTSYM2', 'SID3', '2026-08-14')")
+    cur.execute("INSERT INTO nse_stocks VALUES ('TESTSYM2', 'SID3')")
     cur.execute("INSERT INTO technical_signals (symbol, date) VALUES ('TESTSYM2', '2026-08-14')")
     # Undated row has the stronger score, but must still lose to any dated row.
     cur.execute("""INSERT INTO mc_earnings_rapid

@@ -13,6 +13,41 @@ on:
 jobs:
   build-test:
     runs-on: ubuntu-latest
+    # The unit lane needs Postgres since SQLITE_DECOMMISSION_PLAN Phase 2. It used to run with no
+    # services at all -- vitest got an in-memory SQLite DB, which was the one thing SQLite was
+    # genuinely buying: a zero-dependency test lane. The trade was never neutral, because a
+    # SQLite-backed suite is structurally incapable of catching a dialect bug, and this repo ships
+    # them regularly. The conversion immediately proved it: three live production bugs that the
+    # green SQLite suite had passed over for their whole life --
+    #   * scoringService wrote timeframe_scores.updated_at, a column production has never had
+    #     (real column: computed_at), so the live table held 0 rows;
+    #   * its ON CONFLICT(symbol, timeframe) matched no constraint (live PK is 3-column);
+    #   * backtestRunner called .slice() on screener_runs.run_ts, a TIMESTAMPTZ that
+    #     node-postgres returns as a Date, crashing every runId-scoped backtest.
+    # Mirrors smoke-test's service block below, same image and health check.
+    services:
+      postgres:
+        image: timescale/timescaledb:latest-pg16
+        env:
+          POSTGRES_USER: bharat
+          POSTGRES_PASSWORD: bharat
+          POSTGRES_DB: bharat_intel
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      # PGTEST_*, not POSTGRES_* — vitest.globalSetup.ts reads only these, deliberately, so a
+      # stray production URL in the environment can never redirect a schema-creating test run at
+      # it. Same rule and same variable names as src/server/tests/conftest.py's _pg_dsn().
+      PGTEST_HOST: 127.0.0.1
+      PGTEST_PORT: 5432
+      PGTEST_USER: bharat
+      PGTEST_PASSWORD: bharat
+      PGTEST_DB: bharat_intel
     steps:
       - uses: actions/checkout@v4
 
@@ -32,6 +67,35 @@ jobs:
 
   python-tests:
     runs-on: ubuntu-latest
+    # Postgres for SQLITE_DECOMMISSION_PLAN Phase 2's python half, and it IS load-bearing as of
+    # 2026-08-16: the conftest shim is now unconditional, so this job's pytest run genuinely
+    # executes ~37 files against Postgres that used to run on SQLite. Removing this service does
+    # not turn the job red -- conftest's shim calls pytest.skip("live Postgres not reachable"),
+    # so a service-less runner would turn those 37 files GREEN-BY-SKIPPING instead.
+    # That is this repo's single most-repeated failure shape (recurring-bugs.md's
+    # skip-path-stamped-as-success), and it must not be how the migration lands.
+    # Same image, env and health check as build-test above; PGTEST_*, never POSTGRES_*, so a
+    # stray production URL can never redirect a schema-creating run -- see conftest.py's _pg_dsn.
+    services:
+      postgres:
+        image: timescale/timescaledb:latest-pg16
+        env:
+          POSTGRES_USER: bharat
+          POSTGRES_PASSWORD: bharat
+          POSTGRES_DB: bharat_intel
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      PGTEST_HOST: 127.0.0.1
+      PGTEST_PORT: 5432
+      PGTEST_USER: bharat
+      PGTEST_PASSWORD: bharat
+      PGTEST_DB: bharat_intel
     steps:
       - uses: actions/checkout@v4
 

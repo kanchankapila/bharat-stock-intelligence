@@ -16,6 +16,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 sys.path.insert(0, os.path.dirname(__file__))
 import insider_transactions_fetcher as itf
 from live_datasource_helpers import assert_looks_like_ticker, assert_stored_row_ml_usable
+from conftest import conn_is_postgres
 
 REAL_SYMBOL = "RELIANCE"
 NSE_DATE_FMT = "%d-%m-%Y"
@@ -92,9 +93,9 @@ class TestInsiderTransactionsLiveDataSource:
     def test_real_fetch_stores_ml_usable_rows_and_computes_features(self, monkeypatch):
         """Step 4-5: write through the fetcher's own upsert_transactions()/
         compute_and_write_features() into a throwaway in-memory SQLite DB, then read back and
-        validate. Forces the sqlite code path via use_postgres()=False regardless of this
-        environment's real USE_POSTGRES setting, since the throwaway DB here is always sqlite3."""
-        monkeypatch.setattr(itf, "use_postgres", lambda: False)
+        validate. The dialect branch is keyed on the CONNECTION, not hardcoded: under the
+        decommission shim the throwaway DB is Postgres, and a pinned False builds
+        `INSERT OR REPLACE` and fires it at Postgres (translate() rejects it outright)."""
 
         sess = itf._nse_session()
         today = date.today()
@@ -107,6 +108,7 @@ class TestInsiderTransactionsLiveDataSource:
                         f"— nothing to round-trip through storage")
 
         conn = _make_test_conn()
+        monkeypatch.setattr(itf, "use_postgres", lambda: conn_is_postgres(conn))
         n = itf.upsert_transactions(conn, parsed)
         assert n == len(parsed)
 

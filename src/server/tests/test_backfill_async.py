@@ -123,6 +123,10 @@ class TestGapFillAsync:
             "adjustment_basis TEXT, "
             "PRIMARY KEY (symbol, date))"
         )
+        # _upsert -> filter_holiday_records -> _load_holidays reads this. Its `except Exception`
+        # hides a missing table on SQLite, but on Postgres the failed SELECT aborts the whole
+        # transaction and every later statement fails, so the table has to actually exist.
+        conn.execute("CREATE TABLE market_holidays (date TEXT, exchange TEXT)")
         conn.commit()
 
         existing = {"INFY": {"2024-01-02"}}  # jan2 already present

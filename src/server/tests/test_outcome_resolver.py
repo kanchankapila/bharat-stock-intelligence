@@ -16,7 +16,7 @@ def make_db():
             PRIMARY KEY (symbol, date)
         );
         CREATE TABLE stock_ohlcv (
-            symbol TEXT, date TEXT, open REAL, high REAL,
+            symbol TEXT, date DATE, open REAL, high REAL,
             low REAL, close REAL, volume INTEGER, is_suspect INTEGER DEFAULT 0,
             PRIMARY KEY (symbol, date)
         );
@@ -230,7 +230,7 @@ def make_unified_db():
             PRIMARY KEY (unified_signal_id, horizon_days)
         );
         CREATE TABLE stock_ohlcv (
-            symbol TEXT, date TEXT, open REAL, high REAL, low REAL, close REAL,
+            symbol TEXT, date DATE, open REAL, high REAL, low REAL, close REAL,
             volume INTEGER, is_suspect INTEGER DEFAULT 0, PRIMARY KEY (symbol, date)
         );
     """)
@@ -322,10 +322,10 @@ def make_reclog_db():
             id INTEGER PRIMARY KEY AUTOINCREMENT, symbol TEXT, signal_date TEXT,
             entry_price REAL, stop_loss REAL, target_1 REAL, horizon_days INTEGER,
             outcome TEXT, actual_exit_price REAL, actual_return_pct REAL,
-            status TEXT, resolved_at TEXT
+            status TEXT, resolved_at TIMESTAMPTZ
         );
         CREATE TABLE stock_ohlcv (
-            symbol TEXT, date TEXT, open REAL, high REAL, low REAL, close REAL,
+            symbol TEXT, date DATE, open REAL, high REAL, low REAL, close REAL,
             volume INTEGER, is_suspect INTEGER DEFAULT 0, PRIMARY KEY (symbol, date)
         );
     """)
@@ -399,7 +399,7 @@ def make_multi_horizon_db():
             PRIMARY KEY (symbol, date)
         );
         CREATE TABLE stock_ohlcv (
-            symbol TEXT, date TEXT, open REAL, high REAL,
+            symbol TEXT, date DATE, open REAL, high REAL,
             low REAL, close REAL, volume INTEGER, is_suspect INTEGER DEFAULT 0,
             PRIMARY KEY (symbol, date)
         );

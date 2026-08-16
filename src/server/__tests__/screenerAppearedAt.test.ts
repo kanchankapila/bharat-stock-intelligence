@@ -61,11 +61,14 @@ describe('screener_appearances.appeared_at', () => {
     expect(writers.sort()).toEqual(SYNCS.map(([f]) => f).sort());
   });
 
-  it('the column is in the Postgres schema snapshot and the SQLite schema-of-record', () => {
+  // Only the Postgres snapshot is asserted now. This used to also check db.ts's SQLite
+  // schema-of-record; that file was renamed to db.sqlite-legacy.ts and unwired by
+  // SQLITE_DECOMMISSION_PLAN Phase 3, and asserting a retired file still declares a column is
+  // exactly the kind of stale guard this suite exists to avoid -- db/schema.postgres.sql is
+  // generated from live and is the only authoritative schema.
+  it('the column is in the Postgres schema snapshot', () => {
     const pg = readFileSync(join(__dirname, '..', '..', '..', 'db', 'schema.postgres.sql'), 'utf8');
     expect(pg).toContain('"appeared_at" TIMESTAMPTZ');
-    const dbTs = read('db.ts');
-    expect(dbTs).toContain('079_screener_appearances_appeared_at');
   });
 
   it('appeared_at is NOT part of the primary key', () => {

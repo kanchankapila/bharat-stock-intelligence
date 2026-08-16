@@ -588,14 +588,33 @@ describe('win-probability-scored-in-time', () => {
 
   it('is registered', () => expect(check).toBeDefined());
 
-  it('NEGATIVE CONTROL: fails on the real weekly-scoring lag that caused the retraction', () => {
-    // ml_ensemble --score runs only in the WEEKLY retrain, so a Monday row is typically scored
-    // the following weekend. That is the exact condition that made the 2026-08-15 grading
-    // look-ahead (IC +0.0364, t=+2.58, retracted). If this check cannot fail here, the defect
-    // can recur silently exactly as it did before.
+  it('NEGATIVE CONTROL: fails on a multi-day scoring lag, whatever the cadence turns out to be', () => {
+    // A value written days after its signal date cannot have been traded on at the next open.
+    // That property is about the LAG, not about how often the scorer runs -- an earlier version
+    // of this comment asserted `--score` runs only in the weekly retrain, which measurement.md
+    // withdrew on 2026-08-15 (it runs daily via queues.ts:1037 `pythonApi.scorePending()`).
+    // The scenario below is valid either way; only the explanation was wrong.
     const r = check.evaluate!({ scored: 2192, avg_lag_days: 5.2, max_lag_days: 8.9 }, now);
     expect(r.status).toBe('fail');
     expect(r.detail).toContain('look-ahead');
+  });
+
+  it('NEGATIVE CONTROL: refuses to render a verdict from a single manual write', () => {
+    // Live on 2026-08-16 exactly ONE row carried a stamp, at 1.41d -- which measurement.md
+    // records as "an artifact of a manual test write, NOT the real cadence". Without the
+    // minimum-sample floor this row alone drove a WARN on 36/36 consecutive runs, which is what
+    // put this check on the unvarying-verdict meta-check's list. Same shape as measurement.md's
+    // "dramatic number from a small filtered subsample" (t=-3.44 -> -1.28 once re-anchored).
+    // Pre-fix this returned 'warn'; it must now decline to judge.
+    const r = check.evaluate!({ scored: 1, avg_lag_days: 1.41, max_lag_days: 1.41 }, now);
+    expect(r.status).toBe('pass');
+    expect(r.detail).toMatch(/too thin to judge/i);
+  });
+
+  it('still judges normally once a real batch has been stamped', () => {
+    // The floor must not swallow a genuine defect: 2,192 rows at a 5.2d lag is a full batch.
+    const r = check.evaluate!({ scored: 2192, avg_lag_days: 5.2, max_lag_days: 8.9 }, now);
+    expect(r.status).toBe('fail');
   });
 
   it('warns when the write lands after the next open but is not yet a backfilled label', () => {
@@ -613,6 +632,10 @@ describe('win-probability-scored-in-time', () => {
   it('passes explicitly-uninformatively before the scorer has run at all', () => {
     const r = check.evaluate!({ scored: 0, avg_lag_days: null, max_lag_days: null }, now);
     expect(r.status).toBe('pass');
-    expect(r.detail).toContain('has not run');
+    // Assert the BEHAVIOUR (it names the migration and says nothing has landed yet), not a
+    // substring of one sentence -- the previous assertion pinned the phrase "has not run" from
+    // wording that encoded the withdrawn weekly-cadence claim, so correcting the claim broke a
+    // test that was never about cadence.
+    expect(r.detail).toContain('1787050000000');
   });
 });

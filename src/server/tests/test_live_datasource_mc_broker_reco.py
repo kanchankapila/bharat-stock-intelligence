@@ -19,12 +19,15 @@ import pytest
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 sys.path.insert(0, os.path.dirname(__file__))
 import sql_translate
+from conftest import conn_is_postgres
 import mc_broker_reco_fetcher as mbr
 from live_datasource_helpers import assert_non_empty_response, assert_stored_row_ml_usable
 
 
 def _install_shims(monkeypatch, conn):
-    monkeypatch.setattr(sql_translate, "use_postgres", lambda: False)
+    # Keyed on the connection, not hardcoded False: the decommission shim makes this
+    # ":memory:" handle a Postgres ConnWrapper, and SQLite-only SQL then reaches Postgres.
+    monkeypatch.setattr(sql_translate, "use_postgres", lambda: conn_is_postgres(conn))
 
     def shim_executemany(sql, seq_of_params):
         conn.executemany(sql, seq_of_params)

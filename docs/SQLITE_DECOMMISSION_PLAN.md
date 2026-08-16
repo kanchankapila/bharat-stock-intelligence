@@ -1,5 +1,129 @@
 # SQLite decommission — making Postgres the only database
 
+> ## STATUS 2026-08-16 — TypeScript done, Python is the only thing left
+>
+> **Goal, restated by the project owner: one database, Postgres, so that no future session ever
+> has to reason about which dialect it is on.** Treat any new `sqlite3.connect` /
+> `better-sqlite3` / `USE_POSTGRES` read as a regression.
+>
+> | | state |
+> |---|---|
+> | Phase 1 (dead code) | **done** (2026-08-15) |
+> | Phase 2 TS (27 vitest files) | **done** — `unit` project runs on a throwaway Postgres schema |
+> | Phase 3 TS (branches, `db.ts`) | **done** — `dbAsync.ts` has no SQLite arm; `db.ts` renamed to `db.sqlite-legacy.ts`, imported by nothing |
+> | CI unit lane | **done** — `build-test` runs a `timescale/timescaledb:latest-pg16` service |
+> | Phase 2 Python (~100 files) | **Dialect bugs fixed and the shim is now DEFAULT-ON** (flag deleted 2026-08-16). Plain `python -m pytest` runs the whole suite on Postgres. Trail was 51 → 46 → 0; re-measured directly at **2,025 passed / 230 skipped / 0 failed** (12m50s). Remaining: 37 files still lean on the shim and need converting to the `pg_conn` fixtures, then the shim itself is deleted |
+> | Phase 3 Python (`sql_translate.py`) | blocked on the above |
+> | Phase 4 (`database.sqlite`) | blocked on the above. **Rename aside, do not delete** (owner's call) |
+>
+> Verified at this point: `tsc --noEmit` clean · `vitest run` 963 passed/0 failed ·
+> `pytest` 2,024 passed/0 failed · `npm run schema:drift` clean (212 tables).
+>
+> ### What the TS conversion found — why this is worth finishing
+>
+> Three **live production bugs**, all green under SQLite for their entire lives:
+> `timeframe_scores` held 0 rows because `scoringService` wrote an `updated_at` column production
+> never had; that upsert's `ON CONFLICT(symbol, timeframe)` matched no constraint (live PK is
+> 3-column); and `backtestRunner` called `.slice()` on a TIMESTAMPTZ, crashing every
+> `runId`-scoped backtest. All three were mis-declared in `db.ts`.
+>
+> ### The strategy changed 2026-08-16 — do NOT convert file by file
+>
+> Editing ~100 fixtures one at a time was tried and abandoned twice (see the codemod warning
+> below). The files are not uniform enough to automate and 100 hand edits leaves half the suite on
+> the wrong dialect for days.
+>
+> **Instead, the one call they all share is redirected.** Inside pytest,
+> `sqlite3.connect(':memory:')` returns a `db_compat.ConnWrapper` over a private, empty Postgres
+> schema (autouse fixture in `src/server/tests/conftest.py`). The tests' own `CREATE TABLE`
+> statements then run against real Postgres unchanged, and every dialect bug surfaces at once.
+> `ConnWrapper.executescript()` was added for this (it was the single largest blocker — 18 of 44
+> otherwise-unconvertible files used it and nothing else).
+>
+> ```
+> SQLITE_SHIM_POSTGRES=1 python -m pytest src/server/__tests__/ src/server/tests/ tests/chatbot/
+> ```
+>
+> ### ✅ Re-measured 2026-08-16 — the dialect failures are GONE. **2,023 passed / 231 skipped / 0 failed.**
+>
+> Full command, run end to end (13m06s), shim confirmed active by conftest's own terminal line:
+> `[sqlite-decommission] 37 test files still reach Postgres through the sqlite3.connect shim`.
+>
+> Trail: 51 fail → 46 fail → **0 fail**. Earlier revisions of this section said "51" in three
+> places after the count had already dropped to 46, and said "46" after it had reached 0. **This
+> number is the one thing in this document that moves — re-run the command before quoting it.**
+>
+> **What this does and does not mean.** It means the genuine dialect bugs (SQLite-only fixture
+> DDL — `INTEGER PRIMARY KEY AUTOINCREMENT`, `INSERT OR REPLACE`, NOT NULL columns the real schema
+> enforces and SQLite did not, date/type coercions) are fixed, and the blocking reason for keeping
+> the flag opt-in is gone. It does **not** mean Phase 2 Python is finished: **37 files still
+> contain `sqlite3.connect` and are only working because the shim redirects them.** Converting
+> those to the `pg_conn`/`pg_db_conn` fixtures directly is the remaining work, and that counter
+> must only go down.
+>
+> **Next step is now a decision, not a bug hunt:** flip `SQLITE_SHIM_POSTGRES` to default-on (the
+> "don't ship a red default suite" objection no longer applies at 0 failures), then convert the 37,
+> then delete the flag, the shim, and `sql_translate.py`'s pytest branch together.
+>
+> ⚠ Measured against the **working tree**, which carries uncommitted Phase 2 work. Re-confirm after
+> it lands.
+>
+> ### Fix SQLite-only DDL in `sql_translate.py`, NOT in the test files
+>
+> The obvious fix for `syntax error at or near "AUTOINCREMENT"` is to sweep
+> `INTEGER PRIMARY KEY AUTOINCREMENT` → `BIGSERIAL PRIMARY KEY` across the fixtures. **That is
+> wrong and was reverted**: BIGSERIAL is not valid SQLite, so it breaks those same files on the
+> default path, and there is no single spelling that auto-increments on both engines.
+>
+> Add a `map_sqlite_functions()` entry instead. It runs only on the Postgres path, leaves the
+> SQLite path untouched, and no test file has to know which dialect it is on — which is what the
+> translator is for. Done for the AUTOINCREMENT family 2026-08-16: **51 → 46 failures, zero test
+> files edited, default suite unaffected.** Apply the same reasoning to whatever DDL the remaining
+> 46 trip over before reaching for a file edit.
+>
+> The exception is `INSERT OR REPLACE`, which `translate()` rejects loudly on purpose — an
+> ON CONFLICT target cannot be inferred. Those call sites need a real per-file decision.
+>
+> ### The fixtures, for tests you are writing fresh
+>
+> `src/server/tests/conftest.py` now offers two fixtures, both isolated in a throwaway schema and
+> pinned by `test_pg_db_fixture.py` (5 tests, including "an unqualified write must be invisible to
+> `public`"):
+>
+> - **`pg_conn`** — empty schema; the test keeps its own narrow DDL. **This is the right one for
+>   most conversions**, because the existing fixtures do bare `INSERT ... VALUES (?, ?, ?)` with no
+>   column list, which only lines up against a table of exactly the width the test declared.
+> - **`pg_db` / `pg_db_conn`** — the *full* production schema from `db/schema.postgres.sql`,
+>   applied once per session, truncated per test. `pg_db` also rewrites `POSTGRES_URL` with an
+>   `options=-c search_path=…`, so production code under test reaches the same schema without
+>   knowing it is under test. Use when a test can drop its DDL entirely.
+>
+> Worked example: `test_delivery_trend_anchor.py` (`sqlite3.connect(':memory:')` → `pg_conn`,
+> helper takes the conn as a parameter, `monkeypatch.setattr(..., use_postgres, lambda: False)`
+> deleted). 2 tests, 0.97s.
+>
+> ### `src/server/__tests__/` holds TypeScript tests, not Python ones
+>
+> The name reads like the Python sibling of `src/server/tests/`, and it is not: it is the **vitest**
+> suite. A `git checkout -- src/server/tests src/server/__tests__ tests`, intended to back out a
+> bad Python codemod, discarded ~38 unstaged TypeScript conversions along with it — unrecoverable,
+> since `git checkout --` throws away working-tree changes. Only `test_delivery_trend_anchor.py`
+> survived, because it happened to have been `git add`ed.
+>
+> **Before any bulk revert during this migration: `git add -A` the work you intend to keep, or
+> revert by explicit file list.** The repo's own convention already says commit by explicit path;
+> the same discipline applies to undo.
+>
+> ### Do NOT bulk-codemod this. Tried 2026-08-16, reverted.
+>
+> A regex pass over all 47 non-live files did real damage and was backed out:
+> a `REAL` → `DOUBLE PRECISION` substitution rewrote the word inside prose comments, and the
+> "drop the `sqlite3.connect` line" rule mangled files whose fixture uses a temp **file** DB
+> (`sqlite3.connect(path)`) rather than `:memory:`. Convert in small batches with `pytest` after
+> each. Split of the 101: **54 are `live_datasource`** (skipped by default — lowest risk, convert
+> last), **47 regular**, and 4 of those drive the DB through `DATABASE_URL` env injection rather
+> than a passed connection.
+
 Scope: remove SQLite as a supported dialect. **Not** the greenfield rebuild —
 `MIGRATION_AND_CUTOVER_PLAN.md` covers standing up a new Postgres instance and re-deriving
 history. This document is narrower and independent: the live Postgres stays exactly as it is,
@@ -40,19 +164,24 @@ substrate half is the expensive part, and it is where the whole cost sits.
 
 ## 1. What actually carries the second dialect
 
-| Surface | Measured size |
-|---|---|
-| `src/server/db.ts` — SQLite schema-of-record | 3,296 lines, 147 `CREATE TABLE` |
-| `src/server/db_compat.py` — Python dual-dialect facade | 460 lines, **222 importers** |
-| `src/server/sqlTranslate.ts` — TS `?`→`$n` + dialect fixups | 211 lines, 11 importers |
-| `USE_POSTGRES` conditional branches | 32 `.ts` files, 26 `.py` files |
-| Direct `sqlite3` usage (Python) | 122 files |
-| `better-sqlite3` usage (TS) | 4 files |
-| Test files touching SQLite | **251 Python, 27 TypeScript** |
+**Two columns: what this looked like when the plan was written (2026-08-15), and what is actually
+left now.** The right-hand column is the one to act on; the left is kept so the size of the
+remaining job is legible.
 
-Live Postgres holds **211 tables**; `db.ts` describes **147**; `db/schema.postgres.sql` describes
-**145**. The SQLite schema-of-record has not described production for a long time — which is the
-strongest argument for this work, independent of tidiness.
+| Surface | At plan time (08-15) | **Now (08-16, measured)** |
+|---|---|---|
+| `src/server/db.ts` — SQLite schema-of-record | 3,296 lines, 147 `CREATE TABLE` | **gone** — renamed `db.sqlite-legacy.ts`, imported by nothing |
+| `src/server/db_compat.py` — Python dual-dialect facade | 460 lines, 222 importers | unchanged — and **it survives the migration**; only the branching goes |
+| `src/server/sqlTranslate.ts` — TS `?`→`$n` + dialect fixups | 211 lines, 11 importers | unchanged, same reason |
+| `USE_POSTGRES` branches | 32 `.ts`, 26 `.py` | **9 `.ts` files, and none of them is a live routing branch** — 4 are the `postgresOnly`-style tests pinning the guarantee, 3 are explanatory comments, 1 is the retired legacy file. The 9th (`envConfig.ts`) is a stale *validator* — see AF-20260816-09 |
+| Direct `sqlite3` usage (Python) | 122 files | **101 files call `sqlite3.connect` under `src/`** — 100 are test fixtures, plus `explore_mc_tl.py`, which is a deliberate permanent exclusion (it owns its own standalone exploration DB) |
+| `better-sqlite3` usage (TS) | 4 files | 4 — but only `db.sqlite-legacy.ts` (retired), `portfolio.router.ts`, `dbAsync.ts`'s comment, and a `.ts` test helper |
+| Test files touching SQLite | 251 Python, 27 TypeScript | **~100 Python. TypeScript is 0** |
+
+Live Postgres holds **212 tables** and `db/schema.postgres.sql` now describes exactly those 212
+(`npm run schema:drift` → "Schema clean", verified 2026-08-16). The old line here — "`db.ts`
+describes 147, the schema file 145, neither has described production for a long time" — is the
+argument that won this work; it is now historical.
 
 **`db_compat` and `sqlTranslate` do not disappear.** They also translate `?` placeholders to
 `$n` and normalise casts — that job survives Postgres-only. What gets deleted is the *branching*,

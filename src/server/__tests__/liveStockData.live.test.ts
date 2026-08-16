@@ -7,6 +7,15 @@
  * fetch+parse+persist chain. No cleanup: writes genuine, correct today's-bar rows into
  * stock_ohlcv, identical to what the real job would write.
  *
+ * "Identical to what the real job would write" was FALSE on a non-trading day, and the gap wrote
+ * fabricated bars into production (2026-08-16). fetchAndPersistOHLCVData() stamps `new Date()`
+ * unconditionally (liveStockData.ts:621); the weekday/holiday guard lives one level up in the
+ * CALLER -- queues.ts's processStockRefresh() calls shouldSkipOnTradingHoliday() first,
+ * deliberately, because a blanket weekend refusal inside the service would also block NSE's real
+ * Saturday sessions (Budget day, Muhurat -- stock_ohlcv holds five of them). This test bypassed
+ * that caller, so running it on a Saturday persisted 2,148 rows dated 2026-08-16, 2,141 of them
+ * byte-identical to the 08-14 close. Now gated on the same guard the real caller uses.
+ *
  *   RUN_LIVE_DATASOURCE_TESTS=1 npx vitest run src/server/__tests__/liveStockData.live.test.ts
  */
 import { describe, it, expect } from 'vitest';
@@ -24,8 +33,14 @@ const { fetchAndPersistOHLCVData } = await import('../liveStockData');
 const { dbGet } = await import('../dbAsync');
 const TEST_SYMBOL = 'RELIANCE';
 
+// The same guard processStockRefresh() applies before calling fetchAndPersistOHLCVData(), not a
+// reimplementation of it -- a hand-rolled `getDay() in (0,6)` here would drift from the real
+// caller and would miss weekday trading holidays entirely.
+const { shouldSkipOnTradingHoliday } = await import('../marketStatusService');
+const IS_TRADING_DAY = RUN_LIVE ? !(await shouldSkipOnTradingHoliday()) : false;
+
 describe.runIf(RUN_LIVE)('liveStockData [live]', () => {
-  it('fetches real live quotes for the tracked universe and persists ML-usable OHLCV rows', async () => {
+  it.runIf(IS_TRADING_DAY)('fetches real live quotes for the tracked universe and persists ML-usable OHLCV rows', async () => {
     const { count, persisted } = await fetchAndPersistOHLCVData();
     expect(count, 'fetchAllLiveStocks returned zero quotes').toBeGreaterThan(0);
     expect(persisted, 'persistTodayOHLCVData wrote zero rows').toBeGreaterThan(0);

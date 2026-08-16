@@ -1,4 +1,3 @@
-import sqlite3
 import sys
 import os
 from datetime import date, timedelta
@@ -7,16 +6,21 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 from delivery_trend_fetcher import compute_delivery_trend
 
 
-def _throwaway_db():
-    conn = sqlite3.connect(":memory:")
-    conn.row_factory = sqlite3.Row
+def _throwaway_db(conn):
+    """Create just the two tables this test needs inside the fixture's throwaway schema.
+
+    Deliberately narrow rather than the full production shape: the inserts below use bare
+    `VALUES (?, ?, ?)` with no column list, which only lines up against a table of exactly this
+    width. Converted from sqlite3.connect(':memory:') by SQLITE_DECOMMISSION_PLAN Phase 2 -- the
+    DDL is unchanged apart from being run through real Postgres, which is the point.
+    """
     conn.execute("""
         CREATE TABLE stock_delivery_volume (
-            symbol TEXT NOT NULL, date TEXT NOT NULL, delivery_pct REAL,
+            symbol TEXT NOT NULL, date TEXT NOT NULL, delivery_pct DOUBLE PRECISION,
             PRIMARY KEY (symbol, date)
         )
     """)
-    conn.execute("CREATE TABLE technical_signals (symbol TEXT, date TEXT, delivery_trend_30d REAL)")
+    conn.execute("CREATE TABLE technical_signals (symbol TEXT, date TEXT, delivery_trend_30d DOUBLE PRECISION)")
     return conn
 
 
@@ -30,10 +34,8 @@ class TestDeliveryTrendAnchor:
     the test's synthetic "latest data" isn't today (the realistic case, since delivery data is
     always at least a day old by the time this runs)."""
 
-    def test_anchors_to_source_tables_own_latest_date(self, monkeypatch):
-        import delivery_trend_fetcher as dtf
-        monkeypatch.setattr(dtf, "use_postgres", lambda: False)
-        con = _throwaway_db()
+    def test_anchors_to_source_tables_own_latest_date(self, pg_conn):
+        con = _throwaway_db(pg_conn)
         # Synthetic delivery data as of an OLD date, deliberately not date.today() -- matches
         # real production shape (delivery % is always at least a day stale).
         stale_date = "2020-01-15"
@@ -56,12 +58,8 @@ class TestDeliveryTrendAnchor:
             "delivery_trend_30d wasn't written -- anchor must have used date.today() instead "
             "of stock_delivery_volume's own latest date"
         )
-        con.close()
 
-    def test_empty_source_table_updates_nothing_without_crashing(self, monkeypatch):
-        import delivery_trend_fetcher as dtf
-        monkeypatch.setattr(dtf, "use_postgres", lambda: False)
-        con = _throwaway_db()
+    def test_empty_source_table_updates_nothing_without_crashing(self, pg_conn):
+        con = _throwaway_db(pg_conn)
         n = compute_delivery_trend(con)
         assert n == 0
-        con.close()

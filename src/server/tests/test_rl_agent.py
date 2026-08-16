@@ -15,7 +15,7 @@ def _make_test_conn():
     conn = sqlite3.connect(':memory:')
     conn.execute("""
         CREATE TABLE stock_ohlcv (
-            symbol TEXT, date TEXT, open REAL, high REAL, low REAL, close REAL, volume INTEGER
+            symbol TEXT, date DATE, open REAL, high REAL, low REAL, close REAL, volume INTEGER
         )
     """)
     conn.execute("""
@@ -51,7 +51,9 @@ def _make_test_conn():
             cmp REAL, stop_loss REAL, signals_json TEXT, adx REAL
         )
     """)
-    conn.execute("CREATE TABLE app_settings (key TEXT PRIMARY KEY, value TEXT, updatedAt TEXT)")
+    # "updatedAt" quoted: production's column is mixed-case, and rl_agent.py's INSERT quotes it.
+    # Unquoted here, Postgres folds it to `updatedat` and that INSERT can never find it.
+    conn.execute('CREATE TABLE app_settings (key TEXT PRIMARY KEY, value TEXT, "updatedAt" TIMESTAMPTZ)')
     # Populate 25 days of Nifty OHLCV starting 2024-01-25
     # close on day i = 21000 + i*10
     from datetime import date, timedelta
@@ -94,7 +96,7 @@ class TestNextStateTransition:
     def test_next_state_reflects_resolution_regime(self):
         conn = _make_test_conn()
         # sig_date 2024-01-31 + 15 days = 2024-02-15
-        conn.execute("INSERT OR REPLACE INTO market_regimes VALUES (?,?,?,?,?,?,?)",
+        conn.execute("INSERT INTO market_regimes VALUES (?,?,?,?,?,?,?)",
                      ('2024-02-15', 'BEAR', 0.85, 3, '[]', '{}', '2024-02-15'))
         conn.commit()
 
@@ -105,7 +107,7 @@ class TestNextStateTransition:
 
     def test_next_state_keeps_sector_and_score_bucket(self):
         conn = _make_test_conn()
-        conn.execute("INSERT OR REPLACE INTO market_regimes VALUES (?,?,?,?,?,?,?)",
+        conn.execute("INSERT INTO market_regimes VALUES (?,?,?,?,?,?,?)",
                      ('2024-02-15', 'SIDEWAYS', 0.7, 1, '[]', '{}', '2024-02-15'))
         conn.commit()
 
@@ -122,7 +124,7 @@ class TestNextStateTransition:
 
     def test_malformed_state_key_returns_unchanged(self):
         conn = _make_test_conn()
-        conn.execute("INSERT OR REPLACE INTO market_regimes VALUES (?,?,?,?,?,?,?)",
+        conn.execute("INSERT INTO market_regimes VALUES (?,?,?,?,?,?,?)",
                      ('2024-02-15', 'BEAR', 0.85, 3, '[]', '{}', '2024-02-15'))
         conn.commit()
         result = _get_next_state_key(conn, 'BULL', '2024-01-31', horizon_days=15)

@@ -112,6 +112,19 @@ class Row(dict):
     def __iter__(self):
         return iter(self._values)
 
+    def __eq__(self, other):
+        # sqlite3.Row compares equal to a plain tuple of its values, and ~10 pytest files
+        # assert `row == ('SYM', 1416.5)`. Without this they see a dict and fail on a
+        # difference that is purely how the row is spelled, not what it holds.
+        if isinstance(other, (tuple, list)):
+            return self._values == tuple(other)
+        return super().__eq__(other)
+
+    def __ne__(self, other):
+        return not self.__eq__(other)
+
+    __hash__ = None  # matches dict: unhashable
+
 
 def _rows(result):
     cols = list(result.keys())
@@ -170,6 +183,18 @@ class CursorWrapper:
     def fetchall(self):
         return _rows(self._result) if self._result is not None else []
 
+    def __iter__(self):
+        # sqlite3.Cursor is iterable, and call sites rely on it: `for r in conn.execute(...)`.
+        return iter(self.fetchall())
+
+    @property
+    def description(self):
+        # DB-API 2.0 7-tuple per column; pandas.read_sql_query reads col[0] (the name) off this
+        # when handed a raw DBAPI connection rather than a SQLAlchemy connectable.
+        if self._result is None:
+            return None
+        return [(k, None, None, None, None, None, None) for k in self._result.keys()]
+
     @property
     def rowcount(self):
         return self._result.rowcount if self._result is not None else -1
@@ -195,6 +220,49 @@ class ConnWrapper:
 
     def executemany(self, sql, seq_of_params):
         return CursorWrapper(self._conn).executemany(sql, seq_of_params)
+
+    def executescript(self, script: str):
+        """Run a multi-statement script, mirroring sqlite3.Connection.executescript.
+
+        SQLAlchemy/psycopg2 accept only one statement per execute(), so a script has to be
+        split. Added 2026-08-16 for SQLITE_DECOMMISSION_PLAN Phase 2: it was the single
+        largest blocker to moving the pytest suite off SQLite (18 of 44 unconvertible files
+        used it and nothing else).
+
+        The split is naive on purpose -- semicolons outside quotes, comments stripped -- which
+        is sufficient for the schema-setup scripts this is used for and is NOT a SQL parser.
+        Do not feed it statements containing a semicolon inside a dollar-quoted body
+        (PL/pgSQL, DO blocks); those need conn.execute() one at a time.
+        """
+        import re as _re
+
+        cleaned = _re.sub(r"--[^\n]*", "", script)
+        out, buf, quote = [], [], None
+        for ch in cleaned:
+            if quote:
+                buf.append(ch)
+                if ch == quote:
+                    quote = None
+                continue
+            if ch in ("'", '"'):
+                quote = ch
+                buf.append(ch)
+                continue
+            if ch == ";":
+                stmt = "".join(buf).strip()
+                if stmt:
+                    out.append(stmt)
+                buf = []
+                continue
+            buf.append(ch)
+        tail = "".join(buf).strip()
+        if tail:
+            out.append(tail)
+
+        cur = CursorWrapper(self._conn)
+        for stmt in out:
+            cur.execute(stmt)
+        return cur
 
     def cursor(self):
         return CursorWrapper(self._conn)

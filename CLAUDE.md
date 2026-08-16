@@ -46,7 +46,9 @@ $PY = Get-Content "graphify-out/.graphify_python"
 & $PY -m graphify update .               # after significant changes
 ```
 
-~13.2k nodes / 21.3k edges over ~1029 files. Check `graphify-out/GRAPH_REPORT.md`'s freshness hash against `git rev-parse HEAD` before trusting it.
+~16.1k nodes / 25.5k edges over ~1359 files (rebuilt 2026-08-16 at `e7d77006`). Check `graphify-out/GRAPH_REPORT.md`'s freshness hash against `git rev-parse HEAD` before trusting it — it drifted 330 files behind in five days.
+
+Updating is **free** (local AST extraction, 0 tokens) — run it, don't ration it. `graph.html` is no longer emitted: 16.1k nodes is over the 5,000-node viz cap, which is expected and exits 0. `query`/`path`/`explain` are the interface.
 
 ## Services
 
@@ -74,7 +76,8 @@ src/
 src/server/
   router.ts          ALL tRPC procedures — check here before searching elsewhere
   routers/*.ts       domain-split procedure modules
-  db.ts              SQLite schema-of-record + dev fallback (NOT the live Postgres shape)
+  db.sqlite-legacy.ts  RETIRED SQLite schema. Imported by nothing — do not reintroduce it.
+                       Schema-of-record is db/schema.postgres.sql (generated from live).
   dbAsync.ts         → pgClient.ts   the live Postgres facade
   queues.ts          BullMQ definitions + all cron schedules
   jobs/*.jobs.ts     decomposed job registrations
@@ -104,7 +107,9 @@ Nothing is deprecated. Before trusting any "fix applied to the nav/shell" claim,
 - **Canonical ranking is `unified_recommendations`** (`unified_ranker.py`). `stock_scores` and `quant_scores` are its *inputs*, not duplicates. Never write a parallel "final" score. Details: `.claude/rules/scoring-authority.md`.
 - **Four signal tables, and that's the ceiling**: `unified_signals`, `technical_signals`, `signal_outcomes`, `unified_signal_outcomes`. Do not add a fifth. The merges you might consider have been investigated and rejected on their merits — see the rule file before re-proposing one.
 - **NSE symbol is the only canonical identifier.** Every provider id derives from it, never the reverse, and is never constructed by convention.
-- **Live DB is Postgres/TimescaleDB** (`USE_POSTGRES=true`, :5433). Several tables are compressed hypertables where a predicate-wide `UPDATE`/`ADD CONSTRAINT` will fail or destroy compression.
+- **Postgres/TimescaleDB (:5433) is the ONLY database. There is no second dialect to reason about.** `usePostgres()` / `use_postgres()` take no environment variable for any real process — a missing `.env` can no longer reroute anything, it can only fail to connect, loudly. Several tables are compressed hypertables where a predicate-wide `UPDATE`/`ADD CONSTRAINT` will fail or destroy compression.
+  - **TypeScript is fully migrated.** `npx vitest run`'s `unit` project runs against a private throwaway Postgres schema built from `db/schema.postgres.sql` (`vitest.globalSetup.ts`); its `live` project talks to real production on purpose. There is no SQLite path left in any `.ts`.
+  - **Python is mid-migration, but further along than it looks** — `sql_translate.use_postgres()` still honours `USE_POSTGRES` *inside pytest only*, because pytest files still build their own `sqlite3` fixtures. As of 2026-08-16 the **whole** suite runs green on Postgres through the shim (`SQLITE_SHIM_POSTGRES=1` → 2,023 passed / 0 failed); **37 files still call `sqlite3.connect`** and pass only because it redirects them. Use the `pg_conn` (empty schema, bring your own DDL) or `pg_db_conn` (full production schema) fixtures in `src/server/tests/conftest.py` for anything new, and never add another `sqlite3.connect`. Status and recipe: `docs/SQLITE_DECOMMISSION_PLAN.md` — **re-run its command before quoting its number, it has gone stale twice.**
 - **Measured state of the edge**: the ranker has no demonstrated forward-return edge, and most factors tested are null-to-negative. Read `.claude/rules/measurement.md` before proposing a reweighting — it is very likely the wrong fix.
 
 ## Conventions

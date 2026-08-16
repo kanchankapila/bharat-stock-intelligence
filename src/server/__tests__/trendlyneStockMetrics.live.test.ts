@@ -24,8 +24,17 @@ const { getTrendlyneMetricSymbols, extractMetricValues, saveStockMetricsToDB } =
 const { fetchTrendlyneStockMetrics } = await import('../trendlyneService');
 const { dbGet } = await import('../dbAsync');
 
+// saveStockMetricsToDB writes `date = today` into trendlyne_stock_metrics_history, and the real
+// caller never runs on a non-trading day -- QUEUE_TRENDLYNE_DAILY_FETCH's cron is '30 4 * * 1-5'.
+// Ungated, a weekend run of this test files a Sunday-dated row carrying Friday's market cap:
+// the same phantom-clone shape that put 2,148 fabricated bars in stock_ohlcv on 2026-08-16, and
+// it inflates the per-symbol distinct-date counts measurement.md's panel spec relies on.
+// shouldSkipOnTradingHoliday(), not a hand-rolled getDay() check, so weekday holidays count too.
+const { shouldSkipOnTradingHoliday } = await import('../marketStatusService');
+const IS_TRADING_DAY = RUN_LIVE ? !(await shouldSkipOnTradingHoliday()) : false;
+
 describe.runIf(RUN_LIVE)('trendlyneDailyFetchService stock metrics [live]', () => {
-  it('fetches real Stock Metrics for a real top-market-cap symbol, parses via the real ' +
+  it.runIf(IS_TRADING_DAY)('fetches real Stock Metrics for a real top-market-cap symbol, parses via the real ' +
      'extractor, and persists ML-usable numeric values', async () => {
     const symbols = await getTrendlyneMetricSymbols(5);
     expect(symbols.length, 'getTrendlyneMetricSymbols returned zero symbols').toBeGreaterThan(0);

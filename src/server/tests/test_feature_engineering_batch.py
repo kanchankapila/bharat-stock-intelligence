@@ -69,7 +69,7 @@ CREATE TABLE IF NOT EXISTS feature_store (
 
 _OHLCV_DDL = """
 CREATE TABLE IF NOT EXISTS stock_ohlcv (
-    symbol TEXT, date TEXT, open REAL, high REAL, low REAL, close REAL, volume REAL,
+    symbol TEXT, date DATE, open REAL, high REAL, low REAL, close REAL, volume REAL,
     is_suspect INTEGER DEFAULT 0
 )
 """
@@ -240,7 +240,7 @@ class TestZeroRowsGuard:
         fe = _stub_fe()
         con = sqlite3.connect(":memory:")
         con.row_factory = sqlite3.Row
-        con.execute("CREATE TABLE stock_ohlcv (symbol TEXT, date TEXT)")
+        con.execute("CREATE TABLE stock_ohlcv (symbol TEXT, date DATE)")
         con.commit()
         fe._con = MagicMock(return_value=con)
 

@@ -1,11 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-process.env.DATABASE_URL = ':memory:';
-// Isolates this test from the host environment's USE_POSTGRES -- see backtestRunner.test.ts
-// for the full explanation of why this must be set before any dbAsync.ts import.
-process.env.USE_POSTGRES = 'false';
-const { default: db } = await import('../db');
-
+const { dbExec, dbRun, dbGet, dbAll } = await import('../dbAsync');
 const { getTrendlyneMetricSymbols } = await import('../trendlyneDailyFetchService');
 
 /**
@@ -17,33 +12,29 @@ const { getTrendlyneMetricSymbols } = await import('../trendlyneDailyFetchServic
  */
 describe('getTrendlyneMetricSymbols (top-N by market cap)', () => {
   it('ranks by market_cap DESC and respects the limit', async () => {
-    db.exec('DELETE FROM nse_stocks');
-    const insert = db.prepare(
-      "INSERT INTO nse_stocks (symbol, name, status, market_cap) VALUES (?, ?, 'ACTIVE', ?)"
-    );
-    insert.run('SMALLCO', 'Small Co', 1000);
-    insert.run('BIGCO', 'Big Co', 500000);
-    insert.run('MIDCO', 'Mid Co', 50000);
+    await dbExec('DELETE FROM nse_stocks');
+    const insert = "INSERT INTO nse_stocks (symbol, name, status, market_cap) VALUES (?, ?, 'ACTIVE', ?)";
+    await dbRun(insert, ['SMALLCO', 'Small Co', 1000]);
+    await dbRun(insert, ['BIGCO', 'Big Co', 500000]);
+    await dbRun(insert, ['MIDCO', 'Mid Co', 50000]);
 
     const symbols = await getTrendlyneMetricSymbols(2);
     expect(symbols).toEqual(['BIGCO', 'MIDCO']);
   });
 
   it('excludes rows with no market_cap and inactive symbols', async () => {
-    db.exec('DELETE FROM nse_stocks');
-    const insert = db.prepare(
-      "INSERT INTO nse_stocks (symbol, name, status, market_cap) VALUES (?, ?, ?, ?)"
-    );
-    insert.run('NOCAP', 'No Cap Co', 'ACTIVE', null);
-    insert.run('DELISTED', 'Delisted Co', 'DELISTED', 999999);
-    insert.run('REALCO', 'Real Co', 'ACTIVE', 1000);
+    await dbExec('DELETE FROM nse_stocks');
+    const insert = "INSERT INTO nse_stocks (symbol, name, status, market_cap) VALUES (?, ?, ?, ?)";
+    await dbRun(insert, ['NOCAP', 'No Cap Co', 'ACTIVE', null]);
+    await dbRun(insert, ['DELISTED', 'Delisted Co', 'DELISTED', 999999]);
+    await dbRun(insert, ['REALCO', 'Real Co', 'ACTIVE', 1000]);
 
     const symbols = await getTrendlyneMetricSymbols(10);
     expect(symbols).toEqual(['REALCO']);
   });
 
   it('falls back to the full universe when nse_stocks has no market-cap-ranked rows', async () => {
-    db.exec('DELETE FROM nse_stocks');
+    await dbExec('DELETE FROM nse_stocks');
     const symbols = await getTrendlyneMetricSymbols(5);
     // Falls back to stockData (stocklist.ts) — real symbols, not empty.
     expect(symbols.length).toBeGreaterThan(0);

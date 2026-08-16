@@ -128,7 +128,7 @@ class TestDateAnchoredFeatures:
         conn = sqlite3.connect(':memory:')
         conn.execute("""
             CREATE TABLE stock_ohlcv (
-                symbol TEXT, date TEXT, open REAL, high REAL, low REAL, close REAL, volume INTEGER
+                symbol TEXT, date DATE, open REAL, high REAL, low REAL, close REAL, volume INTEGER
             )
         """)
         conn.execute("CREATE TABLE fii_dii_flow (date TEXT, fii_net REAL)")
@@ -137,7 +137,7 @@ class TestDateAnchoredFeatures:
                 snapshot_at TEXT, overall_score REAL
             )
         """)
-        conn.execute("CREATE TABLE macro_asset_prices (symbol TEXT, date TEXT, close REAL, ret_5d REAL)")
+        conn.execute("CREATE TABLE macro_asset_prices (symbol TEXT, date DATE, close REAL, ret_5d REAL)")
         conn.execute("CREATE TABLE market_breadth (date TEXT PRIMARY KEY, adv_decline_ratio REAL)")
         for d in dates:
             conn.execute("INSERT INTO stock_ohlcv VALUES (?,?,?,?,?,?,?)",

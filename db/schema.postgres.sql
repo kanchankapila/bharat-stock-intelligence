@@ -1645,7 +1645,7 @@ CREATE INDEX idx_mc_swot_history_symbol ON public.mc_swot_history USING btree (s
 
 -- ── mf_portfolio_holdings ─────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS "mf_portfolio_holdings" (
-  "id" INTEGER NOT NULL DEFAULT nextval('mf_portfolio_holdings_id_seq'::regclass) PRIMARY KEY,
+  "id" SERIAL PRIMARY KEY,
   "userId" TEXT NOT NULL,
   "schemeName" TEXT NOT NULL,
   "folioNumber" TEXT,
@@ -2015,7 +2015,7 @@ CREATE INDEX idx_ob_symbol_time ON public.order_book_snapshots USING btree (symb
 
 -- ── portfolio_holdings ─────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS "portfolio_holdings" (
-  "id" INTEGER NOT NULL DEFAULT nextval('portfolio_holdings_id_seq'::regclass) PRIMARY KEY,
+  "id" SERIAL PRIMARY KEY,
   "userId" TEXT NOT NULL,
   "symbol" TEXT NOT NULL,
   "quantity" DOUBLE PRECISION NOT NULL,
@@ -3822,6 +3822,31 @@ CREATE TABLE IF NOT EXISTS "trendlyne_screeners" (
 CREATE INDEX idx_screener_id ON public.trendlyne_screeners USING btree (screener_id);
 CREATE INDEX idx_screenpk ON public.trendlyne_screeners USING btree (screenpk);
 CREATE UNIQUE INDEX uq_trendlyne_screeners_screener_id ON public.trendlyne_screeners USING btree (screener_id);
+
+-- ── trendlyne_stock_metrics_history ─────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS "trendlyne_stock_metrics_history" (
+  "symbol" TEXT NOT NULL,
+  "date" TEXT NOT NULL,
+  "mcap_q" DOUBLE PRECISION,
+  "pe_ttm" DOUBLE PRECISION,
+  "peg_ttm" DOUBLE PRECISION,
+  "pbv_a" DOUBLE PRECISION,
+  "instihold_pct" DOUBLE PRECISION,
+  "rev_growth_qtr_yoy_pct" DOUBLE PRECISION,
+  "rev_growth_ttm_pct" DOUBLE PRECISION,
+  "np_growth_qtr_yoy_pct" DOUBLE PRECISION,
+  "np_growth_ttm_pct" DOUBLE PRECISION,
+  "op_margin_qtr_pct" DOUBLE PRECISION,
+  "op_margin_ttm_pct" DOUBLE PRECISION,
+  "piotroski_f" DOUBLE PRECISION,
+  "relp_nifty50_qtr_change_pct" DOUBLE PRECISION,
+  "relp_sector_qtr_change_pct" DOUBLE PRECISION,
+  "roe_a" DOUBLE PRECISION,
+  "roa_a" DOUBLE PRECISION,
+  "fetched_at" TIMESTAMPTZ NOT NULL DEFAULT now(),
+  PRIMARY KEY ("symbol", "date")
+);
+CREATE INDEX idx_tl_stock_metrics_date ON public.trendlyne_stock_metrics_history USING btree (date);
 
 -- ── trendlyne_stock_profile ─────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS "trendlyne_stock_profile" (

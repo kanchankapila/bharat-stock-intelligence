@@ -6,7 +6,7 @@
  * (and a health probe) lives in one place.
  */
 import { Pool, types, type PoolClient, type QueryResultRow } from 'pg';
-import { pgConnectionString } from './pgConfig';
+import { pgConnectionString, vitestSchema } from './pgConfig';
 
 // Parse Postgres BIGINT (INT8) as JavaScript numbers (safe up to 2^53 - 1)
 types.setTypeParser(types.builtins.INT8, (val) => parseInt(val, 10));
@@ -52,8 +52,16 @@ let pool: Pool | null = null;
 
 export function getPool(): Pool {
   if (!pool) {
+    // Inside the vitest `unit` project, vitest.globalSetup.ts has already created a private
+    // throwaway schema and applied db/schema.postgres.sql into it. Pinning search_path on the
+    // POOL (not per-query) is what makes the isolation unconditional: every unqualified name in
+    // every query, from any call site, resolves inside the throwaway schema first and can only
+    // shadow a production table, never write to one. `public` stays on the path so pg_trgm and
+    // timescaledb types still resolve. Mirrors conftest.py's pg_schema fixture exactly.
+    const schema = vitestSchema();
     pool = new Pool({
-      connectionString: pgConnectionString(),
+      connectionString: schema ? (process.env.VITEST_PG_URL || pgConnectionString()) : pgConnectionString(),
+      ...(schema ? { options: `-c search_path="${schema}",public` } : {}),
       // Budget: bharat-server 22 + alphaquant 5 + ml-api 5 + chatbot 3 + Python 10 = 45 / 60 max_connections
       max: Number(process.env.PG_POOL_MAX ?? 22),
       idleTimeoutMillis: 20_000,

@@ -25,6 +25,12 @@ async function getOhlcvOnOrAfter(symbol: string, targetDate: string) {
   );
 }
 
+/** 'YYYY-MM-DD' from a value that may be a Date (TIMESTAMPTZ column) or an ISO string. */
+function toIsoDate(v: unknown): string {
+  if (v instanceof Date) return v.toISOString().slice(0, 10);
+  return String(v).slice(0, 10);
+}
+
 export async function runBacktest(opts: BacktestOpts) {
   const timeframe = opts.timeframe || 'short';
   const horizon = opts.horizonDays ?? (timeframe === 'intraday' ? 0 : timeframe === 'short' ? 7 : timeframe === 'medium' ? 30 : 180);
@@ -41,9 +47,13 @@ export async function runBacktest(opts: BacktestOpts) {
   let runDate: string | null = null;
   if (opts.runId) {
     const r = await dbGet<any>('SELECT run_ts FROM screener_runs WHERE run_id = ?', [opts.runId]);
-    if (r) runDate = (r.run_ts || new Date().toISOString()).slice(0,10);
+    // screener_runs.run_ts is TIMESTAMPTZ in live Postgres, so node-postgres hands back a JS
+    // Date, not a string -- the old `(r.run_ts || ...).slice(0,10)` threw
+    // "(...).slice is not a function" on every runId-scoped backtest in production. It only ever
+    // looked correct because the suite ran on SQLite, where the same column is TEXT.
+    if (r?.run_ts) runDate = toIsoDate(r.run_ts);
   }
-  if (!runDate) runDate = new Date().toISOString().slice(0,10);
+  if (!runDate) runDate = new Date().toISOString().slice(0, 10);
 
   let totalPositive = 0;
   let totalNegative = 0;

@@ -1,33 +1,28 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 
-process.env.DATABASE_URL = ':memory:';
-// Isolates this test from the host environment's USE_POSTGRES -- see backtestRunner.test.ts
-// for the full explanation of why this must be set before any dbAsync.ts import.
-process.env.USE_POSTGRES = 'false';
-const { default: db } = await import('../db');
-
+const { dbExec, dbRun, dbGet, dbAll } = await import('../dbAsync');
 import { createCallerFactory } from '../trpc';
 
 const { appRouter } = await import('../router');
 const createCaller = createCallerFactory(appRouter);
 const caller = createCaller({} as any);
 
-beforeEach(() => {
-  db.exec('DELETE FROM unified_recommendations');
-  db.exec('DELETE FROM technical_signals');
+beforeEach(async () => {
+  await dbExec('DELETE FROM unified_recommendations');
+  await dbExec('DELETE FROM technical_signals');
 });
 
 describe('getUnifiedScoreForSymbol', () => {
   it('returns the latest unified_recommendations row merged with technical_signals features', async () => {
-    db.prepare(`
+    await dbRun(`
       INSERT INTO unified_recommendations (symbol, computed_at, regime, unified_score, conviction_level, timeframe, sector, classification)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-    `).run('TEST', '2026-08-01T07:30:00Z', 'BULL', 78.5, 'A_HIGH', 'swing', 'IT', 'Buy');
+    `, ['TEST', '2026-08-01T07:30:00Z', 'BULL', 78.5, 'A_HIGH', 'swing', 'IT', 'Buy']);
 
-    db.prepare(`
+    await dbRun(`
       INSERT INTO technical_signals (symbol, date, win_probability, rsi, is_nifty50, asm_flag)
       VALUES (?, ?, ?, ?, ?, ?)
-    `).run('TEST', '2026-08-01', 0.62, 71, 1, 0);
+    `, ['TEST', '2026-08-01', 0.62, 71, 1, 0]);
 
     const result = await caller.getUnifiedScoreForSymbol({ symbol: 'TEST' });
     expect(result).toBeTruthy();
@@ -44,14 +39,14 @@ describe('getUnifiedScoreForSymbol', () => {
   });
 
   it('only returns the latest computed_at snapshot, not stale older rows', async () => {
-    db.prepare(`
+    await dbRun(`
       INSERT INTO unified_recommendations (symbol, computed_at, regime, unified_score, conviction_level)
       VALUES (?, ?, ?, ?, ?)
-    `).run('TEST', '2026-07-30T07:30:00Z', 'BULL', 50, 'C_LOW');
-    db.prepare(`
+    `, ['TEST', '2026-07-30T07:30:00Z', 'BULL', 50, 'C_LOW']);
+    await dbRun(`
       INSERT INTO unified_recommendations (symbol, computed_at, regime, unified_score, conviction_level)
       VALUES (?, ?, ?, ?, ?)
-    `).run('TEST', '2026-08-01T07:30:00Z', 'BULL', 90, 'S_ELITE');
+    `, ['TEST', '2026-08-01T07:30:00Z', 'BULL', 90, 'S_ELITE']);
 
     const result = await caller.getUnifiedScoreForSymbol({ symbol: 'TEST' });
     expect(result.unified_score).toBe(90);
