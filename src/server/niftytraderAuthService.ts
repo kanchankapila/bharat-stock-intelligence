@@ -47,8 +47,6 @@
 import { dbGet, dbRun } from './dbAsync';
 
 const LOGIN_URL = process.env.NIFTYTRADER_LOGIN_URL || 'https://onboarding.niftytrader.in/webapi/Account/login';
-const EMAIL = process.env.NIFTYTRADER_EMAIL;
-const PASSWORD = process.env.NIFTYTRADER_PASSWORD;
 // Refresh proactively once the stored token has less than this much life left, not only once
 // it has fully expired -- avoids a request failing mid-flight right at the expiry boundary.
 const REFRESH_MARGIN_MS = Number(process.env.NIFTYTRADER_REFRESH_MARGIN_MS ?? 48 * 60 * 60 * 1000); // 48h
@@ -114,6 +112,9 @@ export function extractToken(body: any): string | null {
 }
 
 export async function loginNiftyTrader(): Promise<string | null> {
+  const EMAIL = process.env.NIFTYTRADER_EMAIL;
+  const PASSWORD = process.env.NIFTYTRADER_PASSWORD;
+
   if (!EMAIL || !PASSWORD) {
     console.warn('[NIFTYTRADER AUTH] Missing NIFTYTRADER_EMAIL or NIFTYTRADER_PASSWORD — cannot auto-refresh; falling back to whatever token is already stored (set via saveNiftyTraderToken, if any).');
     return null;

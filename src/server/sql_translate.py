@@ -221,6 +221,18 @@ def map_sqlite_functions(sql: str) -> str:
     s = re.sub(r"date\(\s*'now'\s*\)", "current_date", s, flags=re.I)
     s = re.sub(r"date\(\s*'now'\s*,\s*'([^']+)'\s*\)",
                r"((current_date + interval '\1')::date)", s, flags=re.I)
+    # TWO-ARGUMENT forms over a column or a date LITERAL, i.e. everything the 'now' rules above
+    # do not catch: date(d, '-30 days'), datetime(ts, '+1 day'), date('2026-01-01', '-30 days').
+    # Must run BEFORE the single-argument date() rule below, which would otherwise swallow the
+    # whole "d, '-30 days'" argument list and emit `(d,'-30 days')::date` -- a row-expression
+    # cast that is NOT a translation-time error and reads as plausible SQL, so it fails only at
+    # the server. The all-literal form was left untranslated entirely and arrived as
+    # `function date(unknown, unknown) does not exist`.
+    s = re.sub(r"\bdatetime\(\s*([^,()']+|'[^']*')\s*,\s*'([^']+)'\s*\)",
+               r"((\1)::timestamp + interval '\2')", s, flags=re.I)
+    s = re.sub(r"\bdate\(\s*([^,()']+|'[^']*')\s*,\s*'([^']+)'\s*\)",
+               r"(((\1)::date + interval '\2')::date)", s, flags=re.I)
+
     # date(<column/expr>) -> (<expr>)::date  (after the 'now' forms; skips quoted args)
     s = re.sub(r"\bdate\(\s*([^'\")][^)]*?)\s*\)", r"(\1)::date", s, flags=re.I)
 
@@ -255,7 +267,12 @@ def map_sqlite_functions(sql: str) -> str:
     if re.search(r"\bINSERT\s+OR\s+IGNORE\b", s, flags=re.I):
         s = re.sub(r"\bINSERT\s+OR\s+IGNORE\b", "INSERT", s, flags=re.I)
         if not re.search(r"ON\s+CONFLICT", s, flags=re.I):
-            s = re.sub(r";?\s*$", " ON CONFLICT DO NOTHING", s)
+            # count=1: `;?\s*$` matches TWICE on SQL with trailing whitespace -- once consuming
+            # it, then again as an empty match at end-of-string -- appending the clause twice
+            # and producing `... ON CONFLICT DO NOTHING ON CONFLICT DO NOTHING`, which Postgres
+            # rejects with `syntax error at or near "ON"`. Every multi-line INSERT OR IGNORE
+            # (i.e. every one written as a triple-quoted string) hit this.
+            s = re.sub(r";?\s*$", " ON CONFLICT DO NOTHING", s, count=1)
 
     return s
 

@@ -111,23 +111,39 @@ def upsert(conn, rows: list[tuple], overwrite: bool) -> int:
         sql = ("INSERT INTO stock_ohlcv (symbol, date, open, high, low, close, volume, adjustment_basis) "
                "VALUES %s ON CONFLICT (symbol, date) " + conflict)
         written = 0
-        # One transaction PER CHUNK (not one big commit): a chunk that trips a
-        # compressed-chunk ON CONFLICT error or a lock timeout must roll back ONLY itself
-        # and be logged LOUDLY — the original single-commit version swallowed such failures
-        # so whole symbols silently never landed (RELIANCE et al. showed only recent bars).
-        for i in range(0, len(rows), INSERT_CHUNK):
-            batch = rows[i:i + INSERT_CHUNK]
-            raw = get_engine().raw_connection()
-            try:
-                cur = raw.cursor()
-                execute_values(cur, sql, batch, page_size=INSERT_CHUNK)
-                raw.commit()
-                written += len(batch)
-            except Exception as e:
-                raw.rollback()
-                print(f"[MCBackfill] UPSERT ERROR on {len(batch)}-row batch "
-                      f"({batch[0][0]}..{batch[-1][0]}): {type(e).__name__}: {str(e)[:160]}")
-            finally:
+        # Write through the CALLER'S connection when it has one. This used to be an
+        # unconditional `get_engine().raw_connection()`, which ignored the `conn` argument
+        # entirely: get_engine() is a separate pool that does NOT carry the caller's
+        # search_path, so every row landed in `public` no matter which schema the caller was
+        # scoped to. Live-caught 2026-08-16 -- the mc_ohlcv_backfill live test wrote 252
+        # RELIANCE bars into the real stock_ohlcv while reading back through its own throwaway
+        # schema and seeing nothing ("upsert() reported success but wrote no row"). On a
+        # developer box that target is PRODUCTION. Same family as recurring-bugs.md's
+        # "writes through one engine, reads through another", but in production code, where it
+        # silently defeats any scoped caller rather than just a test.
+        inner = getattr(conn, "_conn", None)          # db_compat.ConnWrapper -> SA Connection
+        borrowed = inner is not None and hasattr(inner, "connection")
+        raw = inner.connection if borrowed else get_engine().raw_connection()
+        try:
+            # One transaction PER CHUNK (not one big commit): a chunk that trips a
+            # compressed-chunk ON CONFLICT error or a lock timeout must roll back ONLY itself
+            # and be logged LOUDLY — the original single-commit version swallowed such failures
+            # so whole symbols silently never landed (RELIANCE et al. showed only recent bars).
+            # Commit via the SQLAlchemy Connection when borrowed, so its transaction state
+            # stays consistent with what we just executed on its DBAPI handle.
+            for i in range(0, len(rows), INSERT_CHUNK):
+                batch = rows[i:i + INSERT_CHUNK]
+                try:
+                    cur = raw.cursor()
+                    execute_values(cur, sql, batch, page_size=INSERT_CHUNK)
+                    (inner if borrowed else raw).commit()
+                    written += len(batch)
+                except Exception as e:
+                    (inner if borrowed else raw).rollback()
+                    print(f"[MCBackfill] UPSERT ERROR on {len(batch)}-row batch "
+                          f"({batch[0][0]}..{batch[-1][0]}): {type(e).__name__}: {str(e)[:160]}")
+        finally:
+            if not borrowed:
                 raw.close()
         return written
     # SQLite fallback
