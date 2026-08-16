@@ -1744,8 +1744,24 @@ export const DATA_QUALITY_CHECKS: DataQualityCheck[] = [
       if (scored === 0) {
         return {
           status: 'pass',
-          detail: 'No rows scored since migration 1787050000000 yet — the weekly scorer has not run. ' +
-                  'Re-check after the next ml-ensemble-train run.',
+          detail: 'No rows scored since migration 1787050000000 yet. The daily ml-ensemble-score ' +
+                  'step (queues.ts:1037) stamps this on its next run against a fresh trading day.',
+        };
+      }
+      // Minimum-sample guard. A whole batch is ~2,200 rows; anything far below that is not the
+      // scorer's real cadence, it is a manual/partial write, and averaging over it produces a
+      // confident wrong verdict. Measured 2026-08-16: exactly ONE row carried a stamp (1.41d),
+      // which measurement.md itself records as "an artifact of a manual test write, NOT the real
+      // cadence" -- and this check reported warn on 36/36 runs off that single row, which is how
+      // it landed on the unvarying-verdict meta-check's list. Same family as measurement.md's
+      // "dramatic number from a small filtered subsample" (t=-3.44 -> -1.28 once re-anchored).
+      const MIN_SAMPLE = 100;
+      if (scored < MIN_SAMPLE) {
+        return {
+          status: 'pass',
+          detail: `Only ${scored} row(s) carry a scored-at stamp in the last 30d — below the ` +
+                  `${MIN_SAMPLE}-row floor needed to read a cadence. Too thin to judge, so no verdict ` +
+                  `is rendered rather than averaging a partial/manual write into a false alarm.`,
         };
       }
       const avg = Number(row?.avg_lag_days ?? 0);
@@ -1846,6 +1862,61 @@ export const DATA_QUALITY_CHECKS: DataQualityCheck[] = [
       const detail = `${dead}/${total} feature columns (${pct}%) are 100% NULL across all ${gridRows} rows of the last completed day (baseline 53 on 2026-08-13).`;
       if (dead > 65) return { status: 'fail', detail: `${detail} That is well above the baseline — a feature writer has stopped landing on the grid.` };
       if (dead > 55) return { status: 'warn', detail: `${detail} Up from the baseline — check which writer regressed.` };
+      return { status: 'pass', detail };
+    },
+  },
+
+  {
+    id: 'trendlyne-per-symbol-fetcher-coverage',
+    label: 'Trendlyne per-symbol fetchers cover the universe they claim to, not just a recent sliver',
+    category: 'reference',
+    critical: false,
+    // Hand-rolled, not a TABLE_FRESHNESS_CHECKS entry, and that is the entire point.
+    // data-sources.md's freshness mandate is satisfied for both these tables and is structurally
+    // blind here: makeFreshnessCheck() reads MAX(date), and ONE partial write keeps MAX(date)
+    // recent while ~93% of the universe is missing.
+    //
+    // Found live 2026-08-16. `trendlyne-midweek` had not succeeded since 2026-08-04 (26/33 runs
+    // failed) because Trendlyne began returning `405 Not Allowed` for EVERY id on both
+    // adv-technical-analysis and price-performance-analysis. Measured against 2,234 mapped
+    // numeric tlids: trendlyne_price_analysis held 165 symbols (7.4%) on its newest date and 357
+    // rows in its entire lifetime; trendlyne_adv_tech_daily held 1,350 (60%) on 08-14 but 139 and
+    // 125 on the two days before. Both freshness checks reported PASS throughout.
+    // recurring-bugs.md: "a fresh table is not a delivered feature."
+    //
+    // Thresholds are deliberately loose. These fetchers legitimately run mid-week rather than
+    // daily and legitimately skip symbols Trendlyne has no page for, so this is sized to catch
+    // "the endpoint is blocked / the job never completes", not to police normal partial runs.
+    sql: `WITH universe AS (
+            SELECT COUNT(*)::float AS n FROM nse_stocks
+             WHERE tlid IS NOT NULL AND tlid ~ '^[0-9]+$'
+          )
+          SELECT (SELECT n FROM universe) AS universe,
+                 (SELECT COUNT(DISTINCT symbol) FROM trendlyne_adv_tech_daily
+                   WHERE date = (SELECT MAX(date) FROM trendlyne_adv_tech_daily)) AS adv_tech,
+                 (SELECT COUNT(DISTINCT symbol) FROM trendlyne_price_analysis
+                   WHERE date = (SELECT MAX(date) FROM trendlyne_price_analysis)) AS price_analysis`,
+    evaluate: (row) => {
+      const universe = Number(row?.universe ?? 0);
+      if (universe === 0) return { status: 'fail', detail: 'No nse_stocks rows carry a numeric tlid — the mapping itself is broken.' };
+      const parts = [
+        { name: 'trendlyne_adv_tech_daily', n: Number(row?.adv_tech ?? 0) },
+        { name: 'trendlyne_price_analysis', n: Number(row?.price_analysis ?? 0) },
+      ].map(p => ({ ...p, pct: p.n / universe }));
+      const detail = parts.map(p => `${p.name} ${p.n}/${universe} (${(p.pct * 100).toFixed(1)}%)`).join('; ');
+      const dead = parts.filter(p => p.pct < 0.20);
+      const thin = parts.filter(p => p.pct >= 0.20 && p.pct < 0.50);
+      if (dead.length) {
+        return {
+          status: 'fail',
+          detail: `${detail}. ${dead.map(p => p.name).join(', ')} under 20% of the mapped universe on its ` +
+                  `own newest date — the fetcher is not completing (check job_heartbeat for trendlyne-midweek; ` +
+                  `a 405 on every id means the endpoint is blocked upstream, not a code fault).`,
+        };
+      }
+      if (thin.length) {
+        return { status: 'warn', detail: `${detail}. ${thin.map(p => p.name).join(', ')} between 20% and 50% — partial run.` };
+      }
       return { status: 'pass', detail };
     },
   },

@@ -150,18 +150,29 @@ def main():
             "WHERE table_schema='public' AND table_type='BASE TABLE' ORDER BY table_name"
         )["table_name"].tolist()
 
+    # Stream each finding as it is discovered, and flush. A full-universe sweep takes >40min
+    # against production (measured 2026-08-16: 0 bytes of output after 40min, run abandoned),
+    # and every print used to sit AFTER this loop -- so an interrupted or timed-out run threw
+    # away results for tables it had already swept. Same class as recurring-bugs.md's "a step at
+    # the end of a script that routinely gets killed never runs at all", in reporting form.
+    # The sorted summary below still prints in full on a clean run; this is additive.
     findings, swept = [], 0
-    for t in tables:
+    total = len(tables)
+    for i, t in enumerate(tables, 1):
         try:
             res = sweep_table(t, args.min_rows)
         except Exception as e:
-            print(f"  [skip] {t}: {e}")
+            print(f"  [skip] {t}: {e}", flush=True)
             continue
         if not res:
             continue
         swept += 1
         if res["dead"] or res["frozen"]:
             findings.append(res)
+            tag = "SCORING-CRITICAL" if t in PRIORITY else "informational"
+            print(f"[{i}/{total}] [{tag}] {t} (latest {res['date_col']}={res['latest']}, "
+                  f"{res['rows']} rows): {len(res['dead'])} dead, {len(res['frozen'])} frozen",
+                  flush=True)
 
     print(f"\n{'='*78}\nINTEGRITY SWEEP -- {swept} tables with a usable date key and >= {args.min_rows} rows\n{'='*78}")
     if not findings:
