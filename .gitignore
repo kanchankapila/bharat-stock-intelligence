@@ -11,6 +11,12 @@ dist/
 coverage/
 *.tsbuildinfo
 
+# Redirected tool output. `npx tsc --noEmit > tsc_output.txt` / vitest equivalents get
+# left behind by sessions that capture output to a file instead of a pipe; vitest's is
+# ~85KB of ANSI escapes. Never wanted in the repo, and easy to `git add -A` by mistake.
+tsc_output.txt
+vitest_output.txt
+
 # run-skill driver output (live-data screenshots, not fixtures)
 .claude/skills/*/screenshots/
 
