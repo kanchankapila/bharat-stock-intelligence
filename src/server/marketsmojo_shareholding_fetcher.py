@@ -129,8 +129,20 @@ def write_shareholding_history(conn, symbol: str, rows: list, fetched_at: str,
     written = 0
     for category, period_date, value in rows:
         since = (known or {}).get((symbol, category))
-        if since and period_date and period_date <= since:  # ISO dates, lexicographic == chronological
-            continue
+        # Both sides coerced to ISO text before comparing. They are NOT the same type:
+        # _flatten_blocks yields datetime.date (via _yyyymm_to_date), while
+        # load_known_max_dates deliberately returns ISO strings (MAX(period_date) comes back
+        # as a date from Postgres and is stringified there). The original
+        # `period_date <= since` therefore raised
+        #   TypeError: '<=' not supported between instances of 'datetime.date' and 'str'
+        # on every symbol that already had stored history -- i.e. the whole incremental path,
+        # which is the only path this guard exists for. Caught live in the pm2 logs 2026-08-16.
+        # Its own comment ("ISO dates, lexicographic == chronological") was right about the
+        # ordering and wrong about the types.
+        if since and period_date:
+            pd_iso = period_date.isoformat() if hasattr(period_date, "isoformat") else str(period_date)
+            if pd_iso <= since:
+                continue
         conn.execute(
             """
             INSERT INTO marketsmojo_shareholding_history

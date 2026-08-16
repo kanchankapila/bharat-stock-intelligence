@@ -633,7 +633,10 @@ export const miscRouter = router({
             SELECT symbol, signal_source, signal_type, entry_price, target_price, stop_loss,
                    confidence_score, signal_generated_at, reasoning
             FROM unified_signals
-            WHERE signal_type IN ('BUY', 'SELL') AND signal_generated_at >= ?
+            -- 'Bullish'/'Bearish' too: technical_analysis_engine.py (signal_source='technical')
+            -- is the LARGEST writer of this table (24,442 rows) and uses that spelling, so a
+            -- BUY/SELL-only filter excluded it from the activity feed entirely.
+            WHERE signal_type IN ('BUY', 'SELL', 'Bullish', 'Bearish') AND signal_generated_at >= ?
             ORDER BY signal_generated_at DESC
             LIMIT ?
           `, [cutoffIso, limit]).catch(() => []),
@@ -659,7 +662,15 @@ export const miscRouter = router({
           headline: `${s.signal_type} signal · ${s.symbol}`,
           detail: (s.reasoning as string) || (s.entry_price ? `Entry ₹${s.entry_price}${s.target_price ? ` · Target ₹${s.target_price}` : ''}${s.stop_loss ? ` · SL ₹${s.stop_loss}` : ''}` : null),
           tag: `${s.signal_source ?? 'SIGNAL'}`,
-          tagSentiment: s.signal_type === 'BUY' ? 'BULLISH' : 'BEARISH',
+          // Explicit 3-way, NOT `=== 'BUY' ? BULLISH : BEARISH`. A two-pole ternary on a column
+          // with more than two values labels everything it does not recognise as the opposite
+          // pole -- the same defect as scoring_engine.py's neutral-screener-tags-as-bearish bug
+          // in .claude/rules/recurring-bugs.md. With 'Bullish' now selected above, the old form
+          // would have rendered every one of them as BEARISH.
+          tagSentiment: ((t) =>
+            t === 'BUY' || t === 'Bullish' ? 'BULLISH'
+            : t === 'SELL' || t === 'Bearish' ? 'BEARISH'
+            : 'NEUTRAL')(s.signal_type as string),
           source: (s.signal_source as string) || 'Signal Engine',
           url: null,
         }));
