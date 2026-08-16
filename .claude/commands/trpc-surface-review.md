@@ -28,13 +28,13 @@ flag it either way per `/canonical-read-audit`.
   the hazard that was always the real one: a query failure behind a `.catch(() => null)` that
   disables a gate silently instead of erroring.
 - Any `ORDER BY <date_column>` — confirm that column actually exists on the queried table via
-  `information_schema.columns`, **not** from `db.ts`, which describes the SQLite test schema and
-  has been wrong about the tables it does describe. This has aborted whole queries (and nulled
-  every sibling column in the same `SELECT`) three separate times here.
+  `information_schema.columns`. This has aborted whole queries (and nulled every sibling column
+  in the same `SELECT`) three separate times here.
 
-⚠ **Corrected 2026-08-16:** an earlier revision claimed `dbAsync` had no SQLite arm and `db.ts`
-was retired. That described an in-flight branch that was later **discarded**. Verify against the
-files before trusting either claim.
+⚠ **Corrected 2026-08-17:** `db.ts` is **gone** on this branch (deleted by `a2a20d2`) and
+`dbAsync` has no SQLite arm. The 2026-08-16 correction said that described a branch "later
+discarded" — it did not; the branch was `sqlite-decommission` and is merged here. Verify against
+the files rather than trusting any revision of this note.
 
 ## 3. NaN/null checks (`recurring-bugs.md`'s "NaN & null" table)
 

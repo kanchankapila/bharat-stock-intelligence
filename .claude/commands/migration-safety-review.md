@@ -38,14 +38,15 @@ SELECT * FROM timescaledb_information.compression_settings WHERE hypertable_name
 
 ## 3. Schema drift against live
 
-**Do not read `db.ts` for a live column type.** It is the SQLite dev/test schema, not the live
-Postgres shape, and it has been wrong about the tables it does describe. The schema to trust is
-`db/schema.postgres.sql`, regenerated from live by `npm run schema:regen`.
+**The schema to trust is `db/schema.postgres.sql`**, regenerated from live by
+`npm run schema:regen`. It is the only schema of record.
 
-⚠ **Corrected 2026-08-16 (second time same day).** An earlier revision of this section said
-`db.ts` had been retired and renamed `db.sqlite-legacy.ts`. That was true of an in-flight branch
-that was subsequently **discarded** — `db.ts` is present and imported. Check the file exists
-before believing any claim here about it, including this one.
+⚠ **Corrected 2026-08-17 (third revision).** `src/server/db.ts` — the 3,316-line SQLite schema
+this section used to warn you away from — **no longer exists on this branch**; it was deleted by
+`a2a20d2` (SQLITE_DECOMMISSION_PLAN Phases 1-3). The previous correction said the retiring branch
+"was discarded"; it was not, it was `sqlite-decommission`, pushed to origin the whole time, and it
+is merged here. The standing instruction survives all three revisions: **verify the file exists
+before trusting any claim about it, including this one.**
 
 Confirm the migration's target table/columns match what's actually live
 (`information_schema.columns`) — that file is only as good as its last regeneration, and tables

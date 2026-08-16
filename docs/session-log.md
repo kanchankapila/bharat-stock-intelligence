@@ -4,6 +4,28 @@ Historical record, split out of CLAUDE.md on 2026-08-11 (it was 64% of that file
 
 **Not loaded automatically.** Read a specific entry when you need the history behind a decision. Durable lessons extracted from here live in `.claude/rules/`; if you find one that isn't there, add it.
 
+## 2026-08-17 — Correction: the Phase 2 decommission was never discarded, and is now merged
+
+Supersedes the 2026-08-16 entry that recorded it as discarded, and the doc corrections made on
+that basis (`d692aed`). Both were wrong, and wrong in the same way the entry above them warned
+about: a conclusion drawn from the working tree without checking the branch list.
+
+The work was on `sqlite-decommission`, committed as `a2a20d2` ("Make Postgres the only database:
+retire SQLite as a dialect") and **pushed to origin** the entire time. `git branch -a` and
+`git reflog` both showed it. What was "discarded" was only the copy staged in main's index.
+
+`9231a58` merges `main` into that branch, so one tree now holds the decommission AND the four
+fixes committed to main afterwards (two translator bugs, two production write-path bugs). The
+merge conflicts were resolved toward the wider-correct side: `sql_translate.py` kept the branch's
+full rule set, because the shim needs the DDL/introspection rules main had no reason to carry.
+
+Verified on the merged tree, not on either parent: `tsc --noEmit` exit 0; `vitest` 965 passed /
+41 skipped; `pytest` 2026 passed / 230 skipped; `test_sql_translate.py` 39 passed.
+
+**Lesson, third instance in two days:** "staged is not merged" was the right rule, but its
+corollary was missed — *absent from the working tree is not discarded either*. Check `git branch
+-a` and `git reflog` before recording anything as lost.
+
 ## Recent session notes
 
 ### 2026-08-15 — Postgres made unconditional; audit sweep across frontend/backend/DB; a "flaky" ranker test turned out to be a real snapshot-loss bug
