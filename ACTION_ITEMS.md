@@ -57,11 +57,17 @@ directly. Ranked by priority within each section.
    rows/run. The transaction-poisoning bug was fixed; the batching was not. Needs its own TDD'd
    session given `simulate_exit`'s chandelier-trailing complexity.
 
-4. **`portfolio.ts` `buildRiskParityWeights` / `getRecentCloses`** — `[verified 08-16, open]`
-   confirmed dead: only the definition (L29) and a re-export (L117), zero real callers. Either
-   wire in for real covariance-aware sizing (currently superseded by inverse-vol sizing in
-   `unified_ranker.py`) or delete it. Correlation-aware sizing + sector caps remain a genuine
-   open accuracy item if pursued for real.
+4. **`portfolio.ts` `buildRiskParityWeights` — NOT dead code. Corrected 2026-08-16.**
+   `[verified 08-16, open]` This row said "confirmed dead, zero callers" through several passes,
+   including one earlier the same day. **That is wrong.** It is live: `server.ts:458` calls
+   `portfolioModule.default.buildRiskParityWeights(symbols, 90)` on the picks-export endpoint
+   whenever `riskModel !== 'equal'`. A named-import grep (`import { buildRiskParityWeights }`)
+   misses it because the call goes through the **default-export namespace object** — the same
+   every-reader blind spot `recurring-bugs.md` records for table consumers, in module form.
+   **Do not delete it.** The genuine open item is narrower: the endpoint's risk-parity path is
+   unreached by the UI and untested, and correlation-aware sizing + sector caps (superseding
+   `unified_ranker.py`'s inverse-vol sizing) remain real accuracy work if pursued deliberately.
+   Before touching any "dead export" in this repo, grep the bare symbol name, not the import.
 
 5. **Extend the breakout model rather than promote it.** `[reframed 08-16]` The old "promote it
    from advisory" framing is done — it is a live ranker component. What remains is the second
@@ -108,9 +114,13 @@ git history.
 
 ## P3 — Correctness flags (need domain sign-off, not blind fix)
 
-14. **`insightService.ts:253` (`getIndexData`)** — `[verified 08-16, open]` on fetch failure falls
-    through to a **hardcoded fake index snapshot** (`NIFTY 50 @ 22450.30`) indistinguishable from
-    live data. Decide whether callers can tolerate `null`/throw, then delete the fake data.
+14. ~~**`insightService.ts` (`getIndexData`) fake index snapshot**~~ — **FIXED 2026-08-16.** It
+    returned a hardcoded `NIFTY 50 @ 22450.30` on every failure path, reachable from the live
+    `indices.getIndexDetails` tRPC procedure — so a failed *BANKNIFTY* lookup handed the caller a
+    plausible NIFTY 50 quote under the index they had asked for, indistinguishable from real data.
+    Now returns `null`, matching `getStockInsights`' existing convention in the same file, and logs
+    the error instead of swallowing it. No frontend consumer of that procedure exists, so the null
+    is unreached by UI today.
 15. **`scoring_engine.py:631`** — `[verified 08-16, open]` `news_sentiment_items` load falls back
     to legacy `news_articles` on *any* exception and sets `sentiment_score=1.0` (maximum bullish)
     for every article. Touches scoring math — decide the right fallback value + narrow the

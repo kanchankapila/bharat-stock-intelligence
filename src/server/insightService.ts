@@ -246,16 +246,15 @@ export async function getIndexData(indexId: string) {
           const json = await response.json();
           if (json.success === 1) return json.data;
       }
-  } catch (e) {}
+  } catch (e) {
+    console.error('Error fetching index data for', indexId, e);
+  }
 
-  return {
-    name: "NIFTY 50",
-    value: 22450.30,
-    change: 120.45,
-    percentChange: 0.54,
-    high: 22500,
-    low: 22300,
-    advances: 35,
-    declines: 15
-  };
+  // Returns null rather than a fallback snapshot. This used to return a hardcoded
+  // "NIFTY 50 @ 22450.30" on every failure path, which is reachable from the live
+  // indices.getIndexDetails tRPC procedure -- so a failed BANKNIFTY lookup handed the
+  // caller a plausible-looking NIFTY 50 quote under the index they actually asked for.
+  // Indistinguishable from real data at the call site, which is the whole problem.
+  // null matches getStockInsights above and is what the rest of this file already does.
+  return null;
 }

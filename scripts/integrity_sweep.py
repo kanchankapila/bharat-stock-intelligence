@@ -46,20 +46,64 @@ PRIORITY = {
 }
 
 
+def _enriched_through():
+    """The date through which ml-daily-ops has demonstrably had its chance to enrich.
+
+    Returns an ISO date string, or None if no heartbeat exists.
+    """
+    row = read_df(
+        "SELECT to_timestamp(MAX(last_success_at)/1000)::date::text AS d "
+        "FROM job_heartbeat WHERE job_name = 'ml-daily-ops'"
+    )
+    if not row.empty and row["d"][0] is not None:
+        return row["d"][0]
+    return None
+
+
 def latest_date_expr(table: str):
-    """Return (date_column, sql_literal_of_latest_value) or None if the table has no date-ish key."""
+    """Return (date_column, sql_literal_of_latest_value, cols) or None if no date-ish key.
+
+    Anchors on the newest date strictly OLDER than the last successful ml-daily-ops run,
+    NOT on raw MAX(date).
+
+    Why: enrichment columns are written in the EVENING against the previous completed
+    session, so the newest date in a table is always the one enrichment has not reached
+    yet. Anchoring on MAX(date) reads that one-day lag as death and reports ~25 false DEAD
+    columns on every run. This is recurring-bugs.md's "coverage ratio over a window that
+    includes today" class; 087f399 fixed it in dataQualityChecks.ts and its own message
+    noted it had been reintroduced in BOTH files -- this is the other one (AF-20260815-01).
+
+    Mirrors dataQualityChecks.ts's `ml-signal-columns-populated`, including its fallback:
+    if no heartbeat exists, step back to the second-newest date rather than silently
+    reverting to the same-day read that caused the bug.
+    """
     cols = read_df(
-        "SELECT column_name, data_type FROM information_schema.columns "
-        "WHERE table_schema='public' AND table_name=%(t)s" if False else
         f"SELECT column_name, data_type FROM information_schema.columns "
         f"WHERE table_schema='public' AND table_name='{table}'"
     )
     names = cols["column_name"].tolist()
+    cutoff = _enriched_through()
     for cand in ("date", "computed_at", "as_of_date", "signal_date", "eval_date", "fetched_at"):
-        if cand in names:
-            row = read_df(f'SELECT MAX("{cand}")::text AS m FROM "{table}"')
-            if not row.empty and row["m"][0] is not None:
-                return cand, row["m"][0], cols
+        if cand not in names:
+            continue
+        if cutoff:
+            row = read_df(
+                f'SELECT MAX("{cand}")::text AS m FROM "{table}" '
+                f"WHERE \"{cand}\"::date < '{cutoff}'"
+            )
+        else:
+            # No heartbeat: second-newest date, never the newest.
+            row = read_df(
+                f'SELECT MAX("{cand}")::text AS m FROM "{table}" '
+                f'WHERE "{cand}" < (SELECT MAX("{cand}") FROM "{table}")'
+            )
+        if not row.empty and row["m"][0] is not None:
+            return cand, row["m"][0], cols
+        # Table has no row older than the anchor (a brand-new or single-date table):
+        # fall back to its own newest date rather than skipping it entirely.
+        row = read_df(f'SELECT MAX("{cand}")::text AS m FROM "{table}"')
+        if not row.empty and row["m"][0] is not None:
+            return cand, row["m"][0], cols
     return None
 
 

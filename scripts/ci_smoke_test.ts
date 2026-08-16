@@ -10,8 +10,8 @@
  * jobs that hit live external APIs (Yahoo/MoneyControl/etc.), none of which belong in CI and
  * would make this flaky. Every procedure below is chosen because it only reads from Postgres.
  *
- * Run: tsx scripts/ci_smoke_test.ts   (requires USE_POSTGRES=true + POSTGRES_URL/POSTGRES_HOST
- * pointed at a migrated instance — see .github/workflows/ci.yml's smoke-test job)
+ * Run: tsx scripts/ci_smoke_test.ts   (requires POSTGRES_URL/POSTGRES_HOST pointed at a
+ * migrated instance — see .github/workflows/ci.yml's smoke-test job)
  */
 import "dotenv/config";
 import { appRouter } from "../src/server/router";
@@ -28,12 +28,9 @@ function withTimeout<T>(p: Promise<T>, ms: number, label: string): Promise<T> {
 }
 
 async function main() {
-  const { usePostgres } = await import("../src/server/pgConfig");
-  if (!usePostgres()) {
-    console.error("[SMOKE] USE_POSTGRES must be true for this smoke test — refusing to run against SQLite.");
-    process.exit(1);
-  }
-
+  // Dialect guard removed 2026-08-16 — usePostgres() is unconditionally true, so the
+  // check could never fire and its SQLite warning described a path that no longer
+  // exists. pgHealthy() below is the real gate.
   const { pgHealthy } = await import("../src/server/pgClient");
   for (let attempt = 1; attempt <= 15; attempt++) {
     if (await pgHealthy()) break;

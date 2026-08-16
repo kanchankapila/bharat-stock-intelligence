@@ -1,12 +1,23 @@
 /**
  * Fail-fast environment validation (P5 hardening).
  *
- * Run once at server bootstrap, after `dotenv/config`. Catches the misconfigurations
- * that fail *silently* — most importantly a mistyped USE_POSTGRES (e.g. "True", "1",
- * "yes") which would otherwise quietly route the whole app back onto SQLite instead of
- * the Postgres/TimescaleDB instance it was cut over to. Those get a hard exit; softer
- * gaps (missing AI keys) get a warning.
+ * Run once at server bootstrap, after `dotenv/config`. Catches misconfigurations that
+ * would otherwise fail *silently*. Hard exit for those; softer gaps (missing AI keys)
+ * get a warning.
+ *
+ * This used to validate the spelling of USE_POSTGRES and hard-exit on "True"/"1"/"yes",
+ * on the grounds that a bad value "silently routes the app onto SQLite". That stopped
+ * being true on 2026-08-15: `usePostgres()` consults no environment variable and there
+ * is no SQLite path to route onto. The check therefore could only ever produce a FALSE
+ * failure -- a stale `USE_POSTGRES=1` left in someone's .env would hard-crash the server
+ * at boot over a variable that no longer does anything, and blame a fallback that no
+ * longer exists. Removed 2026-08-16 (AF-20260816-09).
+ *
+ * What survives is the half that got MORE important, not less: with Postgres now
+ * unconditional, missing connection info is always a real misconfiguration, so it is no
+ * longer gated behind USE_POSTGRES=true being present.
  */
+import { isPostgresConfigured } from './pgConfig';
 
 const FATAL: string[] = [];
 const WARN: string[] = [];
@@ -19,18 +30,12 @@ export function validateEnv(): void {
   FATAL.length = 0;
   WARN.length = 0;
 
-  // ── DB routing: the silent-wrong-database trap ──────────────────────────────
-  const usePg = process.env.USE_POSTGRES;
-  if (usePg !== undefined && usePg !== 'true' && usePg !== 'false') {
+  // ── DB connection info ──────────────────────────────────────────────────────
+  // Postgres is the only database, so this is unconditional now (see the header note).
+  if (!isPostgresConfigured()) {
     FATAL.push(
-      `USE_POSTGRES must be exactly "true", "false", or unset — got "${usePg}". ` +
-      `Any other value silently routes the app onto SQLite.`,
-    );
-  }
-  if (usePg === 'true' && !process.env.POSTGRES_URL && !process.env.POSTGRES_HOST) {
-    FATAL.push(
-      `USE_POSTGRES=true but neither POSTGRES_URL nor POSTGRES_HOST is set — ` +
-      `the pg client would fall back to hardcoded localhost dev credentials.`,
+      `Neither POSTGRES_URL nor POSTGRES_HOST is set — the pg client would fall back to ` +
+      `hardcoded localhost dev credentials.`,
     );
   }
 
@@ -62,7 +67,8 @@ export function validateEnv(): void {
     process.exit(1);
   }
 
-  console.log(
-    `[ENV] Validated — DB engine: ${usePg === 'true' ? 'PostgreSQL/TimescaleDB' : 'SQLite'}.`,
-  );
+  // Was `${usePg === 'true' ? 'PostgreSQL/TimescaleDB' : 'SQLite'}` — a boot line that would
+  // have printed "SQLite" on a correctly-configured server, since USE_POSTGRES is now unset
+  // everywhere. Exactly the wrong thing to log while hunting a database problem.
+  console.log('[ENV] Validated — DB engine: PostgreSQL/TimescaleDB.');
 }

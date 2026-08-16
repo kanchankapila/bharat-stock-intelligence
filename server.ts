@@ -1,9 +1,10 @@
 import "dotenv/config";
 
 import { validateEnv } from "./src/server/envConfig";
-// Fail fast on misconfiguration (e.g. USE_POSTGRES unset/malformed) before anything else
-// touches the DB — this is what would have caught the AlphaQuant SQLite split-brain at
-// startup instead of silently writing to the wrong database for hours.
+// Fail fast on misconfiguration (e.g. missing POSTGRES_URL/POSTGRES_HOST) before anything
+// else touches the DB. The split-brain class this originally guarded is now closed at the
+// source -- the dialect reads no env var -- so what's left to catch is missing connection
+// info, which would otherwise silently use hardcoded localhost dev credentials.
 validateEnv();
 
 import { initSentry, sentryEnabled, Sentry } from "./src/server/sentry";

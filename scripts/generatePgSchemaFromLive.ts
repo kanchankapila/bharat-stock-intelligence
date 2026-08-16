@@ -13,8 +13,8 @@
  * The first `npm run schema:drift` run against real production found 45 tables and ~140 columns
  * live but missing from the file (plus 3 columns in the file that don't exist live) -- this script
  * closes that gap by making live Postgres itself the source of truth for this file, instead of the
- * SQLite dev-fallback mirror. db.ts/database.sqlite remain the source of truth for the SQLite dev
- * fallback path (`USE_POSTGRES=false`) -- this script does not touch either of them.
+ * SQLite dev-fallback mirror. (That fallback is gone as of 2026-08-16 -- `db.ts` is now
+ * `db.sqlite-legacy.ts` and imported by nothing, so live Postgres is the only source there is.)
  *
  * Emits output in the house style the checked-in snapshot already uses (CREATE TABLE IF NOT
  * EXISTS "name" (...) with inline PRIMARY KEY/UNIQUE, quoted identifiers, uppercase type keywords)
