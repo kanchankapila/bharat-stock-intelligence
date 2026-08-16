@@ -4,6 +4,45 @@ Historical record, split out of CLAUDE.md on 2026-08-11 (it was 64% of that file
 
 **Not loaded automatically.** Read a specific entry when you need the history behind a decision. Durable lessons extracted from here live in `.claude/rules/`; if you find one that isn't there, add it.
 
+## 2026-08-17 — Decommission merged to main, CI green for the first time in 13+ runs
+
+`main` is now the decommissioned tree (`01c8d59`), fast-forwarded from `sqlite-decommission`.
+
+**CI had been red on EVERY push for at least 13 runs, on both branches.** Root cause was not the
+decommission: `tests/chatbot/test_agent.py` and `test_price_tool.py` built a temp SQLite file and
+passed it as `db_path`, but every chatbot tool's `_connect()` ignores that argument and calls
+`db_compat.connect()`. The fixture DB was written and never read — locally that resolved to real
+Postgres so the tables existed and the tests "passed" **while asserting against production data**;
+in CI it resolved to a table-less SQLite file. Converted both to `pg_conn` + `patch_tool_connect`
+(the agent needs all FIVE tool modules patched — `build_graph` wires sql/price/news/screener/
+market, and one unpatched module falls straight back to production).
+
+**Five instances of one bug class, all pre-existing, all found by moving onto Postgres:**
+`except Exception: pass` around a failed statement aborts the whole transaction, so the real error
+is swallowed and a cascade surfaces elsewhere. Worst of them: `news_tool`'s `news_sentiment_items`
+→ `news_articles` fallback had **never once been reachable** on Postgres, and
+`mf_holdings.ensure_schema()` silently discarded its own `CREATE TABLE` on any fresh database.
+Now in `.claude/rules/recurring-bugs.md`.
+
+**A production write-path bug worth its own line:** `mc_ohlcv_backfill.upsert(conn, ...)` ignored
+its `conn` argument and used `get_engine().raw_connection()`, a pool that does not carry the
+caller's `search_path`. Its own live test wrote **252 real RELIANCE bars** into `stock_ohlcv` while
+reading back through a throwaway schema and seeing nothing. Caught only because the run was pointed
+at a 23 GB replica rather than production.
+
+**Two translator bugs**, both negative-controlled: two-argument `date(col,'-30 days')` produced
+`(col,'-30 days')::date` (a row-cast that is not a translation-time error), and `INSERT OR IGNORE`
+appended `ON CONFLICT DO NOTHING` **twice** on any multi-line statement. Measured against the
+replica: neither changes `ml_ensemble.load_training_data()` output by a single float — all four
+affected call sites sit on the dead SQLite branch. Recorded in `measurement.md`.
+
+**Security:** dependabot alert 57 (`nanoid < 3.3.18`, high) patched; 0 open alerts.
+
+**Method note that generalises:** a developer's Postgres IS production, and `pg_conn` puts `public`
+on the search_path, so a table a fixture forgot silently resolves to the real one. Three suites were
+green that way and red in CI. Verify against an EMPTY database (`PGTEST_DB=<empty> pytest ...`)
+before believing a green run.
+
 ## 2026-08-17 — Correction: the Phase 2 decommission was never discarded, and is now merged
 
 Supersedes the 2026-08-16 entry that recorded it as discarded, and the doc corrections made on

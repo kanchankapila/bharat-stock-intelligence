@@ -76,8 +76,8 @@ src/
 src/server/
   router.ts          ALL tRPC procedures — check here before searching elsewhere
   routers/*.ts       domain-split procedure modules
-  db.sqlite-legacy.ts  RETIRED SQLite schema. Imported by nothing — do not reintroduce it.
-                       Schema-of-record is db/schema.postgres.sql (generated from live).
+                     (there is NO db.ts / db.sqlite-legacy.ts — deleted 2026-08-16, a2a20d2.
+                      Schema-of-record is db/schema.postgres.sql, generated from live.)
   dbAsync.ts         → pgClient.ts   the live Postgres facade
   queues.ts          BullMQ definitions + all cron schedules
   jobs/*.jobs.ts     decomposed job registrations
@@ -109,7 +109,8 @@ Nothing is deprecated. Before trusting any "fix applied to the nav/shell" claim,
 - **NSE symbol is the only canonical identifier.** Every provider id derives from it, never the reverse, and is never constructed by convention.
 - **Postgres/TimescaleDB (:5433) is the ONLY database. There is no second dialect to reason about.** `usePostgres()` / `use_postgres()` take no environment variable for any real process — a missing `.env` can no longer reroute anything, it can only fail to connect, loudly. Several tables are compressed hypertables where a predicate-wide `UPDATE`/`ADD CONSTRAINT` will fail or destroy compression.
   - **TypeScript is fully migrated.** `npx vitest run`'s `unit` project runs against a private throwaway Postgres schema built from `db/schema.postgres.sql` (`vitest.globalSetup.ts`); its `live` project talks to real production on purpose. There is no SQLite path left in any `.ts`.
-  - **Python is mid-migration, but further along than it looks** — `sql_translate.use_postgres()` still honours `USE_POSTGRES` *inside pytest only*, because pytest files still build their own `sqlite3` fixtures. As of 2026-08-16 the **whole** suite runs green on Postgres through the shim (`SQLITE_SHIM_POSTGRES=1` → 2,023 passed / 0 failed); **37 files still call `sqlite3.connect`** and pass only because it redirects them. Use the `pg_conn` (empty schema, bring your own DDL) or `pg_db_conn` (full production schema) fixtures in `src/server/tests/conftest.py` for anything new, and never add another `sqlite3.connect`. Status and recipe: `docs/SQLITE_DECOMMISSION_PLAN.md` — **re-run its command before quoting its number, it has gone stale twice.**
+  - **Python runs on Postgres too, via a shim that is now UNCONDITIONAL** (no `SQLITE_SHIM_POSTGRES` flag any more): `conftest.py` redirects `sqlite3.connect(':memory:')` onto a schema-isolated Postgres connection. **37 files still call `sqlite3.connect` and pass only because of that redirect** — the count is printed at the end of every pytest run and must only go down. Only `':memory:'` is redirected; ~10 files use a temp-FILE path and stay on real SQLite. Use the `pg_conn` (empty schema, bring your own DDL) or `pg_db_conn` (full production schema) fixtures for anything new, and never add another `sqlite3.connect`. Status and recipe: `docs/SQLITE_DECOMMISSION_PLAN.md` — **re-run its command before quoting its number, it has gone stale twice.**
+  - **Test against an EMPTY database before believing a test passes.** A developer's Postgres IS production, and `pg_conn` puts `public` on the search_path, so a table the fixture forgot silently resolves to the real one. Three separate suites were green that way and red in CI. `PGTEST_DB=<empty db> pytest ...` is the check.
 - **Measured state of the edge**: the ranker has no demonstrated forward-return edge, and most factors tested are null-to-negative. Read `.claude/rules/measurement.md` before proposing a reweighting — it is very likely the wrong fix.
 
 ## Conventions
