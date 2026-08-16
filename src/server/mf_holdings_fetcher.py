@@ -88,6 +88,13 @@ def ensure_schema(con) -> None:
             PRIMARY KEY (symbol, date)
         )
     """)
+    # Commit the CREATE before the ALTERs below. Each of those fails once the column already
+    # exists, and on Postgres a failed statement ABORTS THE WHOLE TRANSACTION -- so the
+    # `except Exception: pass` swallows the error while the trailing commit() silently discards
+    # this CREATE TABLE along with it. Harmless on a database where the table already exists,
+    # which is why it survived; fatal on a fresh one, where stock_mf_holdings then never gets
+    # created at all (caught 2026-08-16 running the live suite against an empty database).
+    con.commit()
     # Columns on technical_signals
     for ddl in [
         "ALTER TABLE technical_signals ADD COLUMN mf_holding_pct REAL",

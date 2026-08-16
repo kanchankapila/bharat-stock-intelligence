@@ -1878,7 +1878,7 @@ export const DATA_QUALITY_CHECKS: DataQualityCheck[] = [
     critical: false,
     // Hand-rolled, not a TABLE_FRESHNESS_CHECKS entry, and that is the entire point.
     // data-sources.md's freshness mandate is satisfied for both these tables and is structurally
-    // blind here: `makeFreshnessCheck()` reads MAX(date), and ONE partial write keeps MAX(date)
+    // blind here: makeFreshnessCheck() reads MAX(date), and ONE partial write keeps MAX(date)
     // recent while ~93% of the universe is missing.
     //
     // Found live 2026-08-16. `trendlyne-midweek` had not succeeded since 2026-08-04 (26/33 runs

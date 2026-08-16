@@ -38,10 +38,14 @@ SELECT * FROM timescaledb_information.compression_settings WHERE hypertable_name
 
 ## 3. Schema drift against live
 
-**There is no second dialect to mirror into.** `db.ts` was retired 2026-08-16 (renamed
-`db.sqlite-legacy.ts`, imported by nothing) — do NOT add a mirrored SQLite change, and do not read
-it for a column type. The schema-of-record is `db/schema.postgres.sql`, generated from live by
-`npm run schema:regen`.
+**Do not read `db.ts` for a live column type.** It is the SQLite dev/test schema, not the live
+Postgres shape, and it has been wrong about the tables it does describe. The schema to trust is
+`db/schema.postgres.sql`, regenerated from live by `npm run schema:regen`.
+
+⚠ **Corrected 2026-08-16 (second time same day).** An earlier revision of this section said
+`db.ts` had been retired and renamed `db.sqlite-legacy.ts`. That was true of an in-flight branch
+that was subsequently **discarded** — `db.ts` is present and imported. Check the file exists
+before believing any claim here about it, including this one.
 
 Confirm the migration's target table/columns match what's actually live
 (`information_schema.columns`) — that file is only as good as its last regeneration, and tables

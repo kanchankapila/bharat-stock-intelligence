@@ -22,14 +22,19 @@ flag it either way per `/canonical-read-audit`.
 - Raw `%s` placeholders in a Postgres branch instead of `?` through `translate()`.
 - Multi-word casts (`::double precision`) — use `::float8`; `stripPgCasts` only matches
   single-token type names.
-- `STDDEV`, `DISTINCT ON`, `NOW()`, `ANY(ARRAY[])` — these are now **fine in `.ts`**; there is no
-  SQLite arm in `dbAsync` to fall back to (2026-08-16). The hazard that remains is the one that
-  was always the real one: a query failure sitting behind a `.catch(() => null)` that disables a
-  gate silently instead of erroring.
+- `STDDEV`, `DISTINCT ON`, `NOW()`, `ANY(ARRAY[])` — Postgres-only. Every *real* process is on
+  Postgres (`usePostgres()` reads no env var outside a test runner), so these are safe in
+  production; the risk is the **vitest** path, where `dbAsync` still has a SQLite arm. Also watch
+  the hazard that was always the real one: a query failure behind a `.catch(() => null)` that
+  disables a gate silently instead of erroring.
 - Any `ORDER BY <date_column>` — confirm that column actually exists on the queried table via
-  `information_schema.columns`. Do **not** read `db.sqlite-legacy.ts` for this; it is retired,
-  imported by nothing, and was wrong about the tables it did describe. This has aborted whole
-  queries (and nulled every sibling column in the same `SELECT`) three separate times here.
+  `information_schema.columns`, **not** from `db.ts`, which describes the SQLite test schema and
+  has been wrong about the tables it does describe. This has aborted whole queries (and nulled
+  every sibling column in the same `SELECT`) three separate times here.
+
+⚠ **Corrected 2026-08-16:** an earlier revision claimed `dbAsync` had no SQLite arm and `db.ts`
+was retired. That described an in-flight branch that was later **discarded**. Verify against the
+files before trusting either claim.
 
 ## 3. NaN/null checks (`recurring-bugs.md`'s "NaN & null" table)
 

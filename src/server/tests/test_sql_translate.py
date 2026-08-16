@@ -84,7 +84,7 @@ def test_maps_two_arg_date_and_datetime_over_a_column_or_literal():
     argument list and produced `(d,'-30 days')::date` -- a row-expression cast that is not a
     translation-time error and reads as plausible SQL. The all-literal form was left completely
     untranslated and reached the server as `function date(unknown, unknown) does not exist`.
-    Negative control: against the pre-fix module all four of these assertions fail.
+    Negative control: all four of these fail against the pre-fix module.
     """
     assert _pg("SELECT date(d, '-30 days') FROM t") == \
         "SELECT (((d)::date + interval '-30 days')::date) FROM t"
@@ -92,11 +92,27 @@ def test_maps_two_arg_date_and_datetime_over_a_column_or_literal():
         "SELECT ((('2026-01-01')::date + interval '-30 days')::date)"
     assert _pg("SELECT datetime(ts, '+1 day') FROM t") == \
         "SELECT ((ts)::timestamp + interval '+1 day') FROM t"
-    # and the pre-existing forms must be unchanged by the new rules
+    # the pre-existing forms must be unchanged by the new rules
     assert _pg("SELECT date('now', '-30 days')") == \
         "SELECT ((current_date + interval '-30 days')::date)"
     assert _pg("SELECT datetime('now', '-1 hour')") == "SELECT (now() + interval '-1 hour')"
     assert _pg("SELECT date(cs.computed_at) FROM t") == "SELECT (cs.computed_at)::date FROM t"
+
+
+def test_insert_or_ignore_appends_on_conflict_exactly_once():
+    """`;?\\s*$` matches twice on SQL with trailing whitespace -- once consuming it, then again
+    as an empty match at end-of-string -- so a multi-line INSERT OR IGNORE (i.e. any written as
+    a triple-quoted string) got `ON CONFLICT DO NOTHING ON CONFLICT DO NOTHING` and Postgres
+    rejected it with `syntax error at or near "ON"`. Fails against the pre-fix module."""
+    # A REAL trailing newline + indentation is the trigger; a single-line string never was.
+    # Written as a triple-quoted literal so the whitespace cannot be lost to escaping -- the
+    # first version of this test used "\\n" (a literal backslash-n), had no trailing whitespace,
+    # and therefore passed against the unfixed module.
+    sql = """
+        INSERT OR IGNORE INTO t (a) VALUES (?)
+    """
+    out = translate(sql, use_pg=True)
+    assert out.count("ON CONFLICT DO NOTHING") == 1, out
 
 
 def test_maps_julianday_difference():

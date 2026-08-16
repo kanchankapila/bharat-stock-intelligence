@@ -611,8 +611,8 @@ describe('win-probability-scored-in-time', () => {
     expect(r.detail).toMatch(/too thin to judge/i);
   });
 
-  it('still judges normally once a real batch has been stamped', () => {
-    // The floor must not swallow a genuine defect: 2,192 rows at a 5.2d lag is a full batch.
+  it('the minimum-sample floor does not swallow a real defect once a full batch lands', () => {
+    // 2,192 rows at a 5.2d lag is a genuine batch and must still FAIL, not be excused as thin.
     const r = check.evaluate!({ scored: 2192, avg_lag_days: 5.2, max_lag_days: 8.9 }, now);
     expect(r.status).toBe('fail');
   });
