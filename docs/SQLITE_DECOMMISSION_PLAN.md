@@ -10,9 +10,9 @@
 > |---|---|
 > | Phase 1 (dead code) | **done** (2026-08-15) |
 > | Phase 2 TS (27 vitest files) | **done** — `unit` project runs on a throwaway Postgres schema |
-> | Phase 3 TS (branches, `db.ts`) | **done** — `dbAsync.ts` has no SQLite arm; `db.ts` renamed to `db.sqlite-legacy.ts`, imported by nothing |
+> | Phase 3 TS (branches, `db.ts`) | **done** — `dbAsync.ts` has no SQLite arm; `db.ts` was **deleted outright** in `a2a20d2`. There is no `db.sqlite-legacy.ts` either (an earlier revision of this row said it was renamed; the rename was superseded by the delete) |
 > | CI unit lane | **done** — `build-test` runs a `timescale/timescaledb:latest-pg16` service |
-> | Phase 2 Python | **done** (2026-08-17) — 93 files converted from `sqlite3.connect(':memory:')` to an explicit `pg_memory_conn()`; the monkeypatch shim is **gone**. `grep -r "sqlite3.connect(':memory:')"` returns **0** hits repo-wide |
+> | Phase 2 Python | **done** (2026-08-17) — 93 files converted from `sqlite3.connect(':memory:')` to an explicit `pg_memory_conn()`; the monkeypatch shim is **gone**. ⚠ The verification command this row used to give (`grep -r "sqlite3.connect(':memory:')"` "returns **0** hits repo-wide") is **wrong and was never true** — corrected 2026-08-17. It returns **8** under `src/`, all of them comments/docstrings naming the retired pattern (6 in `pg_test_support.py`/`conftest.py` explaining what replaced it), and run from the repo root it descends into gitignored `.claude/worktrees/` (12 stale copies) and returns dozens more. **Zero live CALL SITES** is the real claim. The verified command is the assignment form, which ignores prose: `grep -rnE "=\s*sqlite3\.connect\(':memory:'\)" --include=*.py src/ tests/` → **0**. Negative-controlled rather than assumed — the same command against `.claude/worktrees/ai-signals-20microns-value-9595c0/` returns **21**, so it is not silently matching nothing |
 > | Phase 3 Python (`sql_translate.py`'s pytest branch) | **6 files block it** — see "What is left" below |
 > | Phase 4 (`database.sqlite`) | blocked on Phase 3. **Rename aside, do not delete** (owner's call) |
 >

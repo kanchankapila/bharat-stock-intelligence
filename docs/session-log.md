@@ -4,6 +4,96 @@ Historical record, split out of CLAUDE.md on 2026-08-11 (it was 64% of that file
 
 **Not loaded automatically.** Read a specific entry when you need the history behind a decision. Durable lessons extracted from here live in `.claude/rules/`; if you find one that isn't there, add it.
 
+## 2026-08-17 (cont. 2) — Backfilling the log for six commits that shipped without an entry
+
+Recorded after the fact by a separate (read-only) session. Ten commits landed on 08-17; four
+updated this file as they went, **six did not**. Reconstructed from the commit messages and
+verified against the tree, not from memory. Every claim below is the committing session's own
+measured evidence unless marked otherwise.
+
+**`51eea04` — skip-as-success, sixth recurrence, this time on the SHARED handler.** The five
+recorded on 2026-08-12 were hand-rolled handlers inside `queues.ts`; this one is
+`jobs/registerJob.ts`'s shared `.on('completed')`, so every job routed through that helper was
+missing the guard simultaneously. `check_skip_not_success` could not see it — that check only
+fires when processor and handler live in the same file, and here they are split across
+`jobs/*.jobs.ts` and `jobs/registerJob.ts`. `confluence-compute` is the reason it mattered: it
+no-ops ~9 hours a day, so a genuine in-window failure was overwritten by the next out-of-window
+skip within 30 minutes, on a `critical` job. Both its skip paths now return `{ skipped: true }`,
+and it gained `lateDeadlineCronPatterns` covering only the UTC slots where it does real work, so
+declining the heartbeat cannot produce the phantom-late alerts this repo has recorded six times.
+
+**Negative-controlling that deadline test found a second, unrelated bug**: the `everyMs` lateness
+branch anchored on the *current* cadence boundary, so `now - boundary` is by construction
+`< everyMs`, and any `graceMinutes` larger than the cadence put the deadline permanently in the
+future. **All three `everyMs` entries were in that state** — `news-sentiment` and
+`trendlyne-intraday` (15-min cadence, 45-min grace), `confluence-compute` (30). Proven, not
+argued: a heartbeat seeded **7 months stale** still reported `late=false` for `news-sentiment`,
+which is `critical`. Now anchored on the most recent boundary whose grace has already expired.
+`processConfluenceOutcomes` deliberately does **not** adopt the marker — `HOLIDAY_SKIP_NOTE` at
+the foot of `confluence.jobs.ts` records why piecemeal conversion of the holiday-skip family
+would trade one recurring bug for another, and that `getLateJobs()` needs holiday awareness first.
+
+**`d2ae4c8` — FinBERT was round-tripping to the Hub on every process start.** Both loaders
+resolved `ProsusAI/finbert` remotely despite a complete 836MB local cache (revision `4556d13`),
+which is why every `runPython()` of `finbert_news_sentiment.py` logged as "finished successfully
+with warnings/stderr output". `HF_HUB_OFFLINE`/`HF_HUB_DISABLE_PROGRESS_BARS` are snapshotted
+into module constants **at import**, so they had to move to module top, via `setdefault` so a
+cold-cache box can still download. Measured on the exact script from the log: stderr 268 → 0
+bytes, predictions unchanged and decisive. The guard test asserts
+`huggingface_hub.constants.HF_HUB_OFFLINE`, **not** `os.environ` — `setdefault` sets the env var
+either way, so an `os.environ` assertion passes against the broken ordering too.
+
+**`bf3073c` — `.get(key, {})` does not defend against a present-but-null key.** Trendlyne sends
+`volume_analysis` present with an explicit JSON `null`, so `.get` returned `None` and the next
+call raised. It killed `trendlyne-midweek` **every Tuesday since 2026-08-04** while the
+heartbeat's truncated error text blamed unrelated upstream 405s. Eight sibling keys across two
+fetchers shared the shape and were all converted to `.get(k) or {}` / `or []`. Tests null each
+section individually plus all at once, calling the real `extract_features`/`_fetch`;
+negative-controlled by reverting each `or {}`.
+
+**`cd1391a` — live tests must declare how they avoid fabricating a trading date.** A
+`live_datasource` test writes real production rows on purpose; that is fine until the row is
+keyed on a DATE the test stamps as "today". `liveStockData.live.test.ts` called
+`fetchAndPersistOHLCVData()` directly, bypassing the weekday guard that lives one level up in
+`processStockRefresh()`, and wrote **2,148 Saturday-dated rows, 2,141 byte-identical to the
+Thursday close**. An earlier batch (2026-07-11, 2,152 rows) is still in production, unexplained.
+The guard cannot be pushed into the shared service — a blanket weekend refusal would block NSE's
+genuine Saturday sessions, of which `stock_ohlcv` holds five — so it must be mirrored per caller,
+and that shape needs a test that fails when a caller forgets. All 10 live files were checked
+first: **8 need no guard at all** (anchored on `MAX(date)`, on the provider's own payload date,
+keyed on symbol alone, no date column, or writing only `fetched_at`). So the requirement is a
+*declaration*: gate on the real caller's `shouldSkipOnTradingHoliday()` **or** carry a
+`LIVE_DATE_SAFE` comment naming why fabrication is impossible. Claiming both is an error. The
+suite asserts it found ≥10 files, so a rename cannot silently empty it.
+
+**`f498061` — the Trendlyne WAF allowance is a cumulative per-session REQUEST COUNT, and the
+universe is ~15× it.** Measured against the real endpoint rather than guessed. Full derivation
+and the numbers are in the memory entry `trendlyne_waf_request_allowance_2026_08_17`; the
+summary is that concurrency (not volume) trips the bot rule, the old `BATCH_SIZE=15` poisoned the
+session on the very first batch, and a single full pass over 2,234 symbols is impossible at any
+pacing. Each run now takes a bounded slice and stops cleanly under the allowance; each fetcher's
+resume-from-DB skip makes successive runs converge, which is how `trendlyne_adv_tech_daily`
+reached 2234/2234 the same day. A new `trendlyne-catchup` job rotates one of the four fetchers
+every 20 minutes off the wall clock — one script per run, because they share a source IP and
+therefore one allowance. Fixed while verifying: a monkeypatched `_load_stocks` lambda whose
+hand-copied signature had drifted from the real one for the second time.
+
+**`19b82b2` — companion tests + `grafana/stock-explorer-dashboard.json`.** The committing session
+flagged these as **NOT independently verified**: they arrived after `f498061`'s gates had run and
+the covering run was declined. `f498061` itself is fully verified (tsc, vitest unit 988, pytest
+2,044, `check_recurring_bugs.py`). That caveat is carried here rather than dropped.
+
+**Doc corrections made while writing this entry** (all verified against the tree, not assumed):
+`CLAUDE.md` still described the pytest shim as live with "37 files still call `sqlite3.connect`";
+the shim was deleted in `793ab22` and `conftest.py` moved to `src/server/conftest.py`.
+`SQLITE_DECOMMISSION_PLAN.md` said `db.ts` was "renamed to `db.sqlite-legacy.ts`" — it was
+**deleted outright** in `a2a20d2` and neither file exists. Both that doc and `MEMORY.md` claimed
+`grep -r "sqlite3.connect(':memory:')"` "returns 0 hits repo-wide"; it returns **8** under `src/`
+(all prose) and dozens from the repo root, which descends into 12 gitignored
+`.claude/worktrees/` copies. Replaced with the assignment form
+`grep -rnE "=\s*sqlite3\.connect\(':memory:'\)" --include=*.py src/ tests/`, which returns 0 here
+and **21** against a stale worktree — negative-controlled, so it is not silently matching nothing.
+
 ## 2026-08-17 — Decommission merged to main, CI green for the first time in 13+ runs
 
 `main` is now the decommissioned tree (`01c8d59`), fast-forwarded from `sqlite-decommission`.
