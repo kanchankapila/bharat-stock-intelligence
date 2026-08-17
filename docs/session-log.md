@@ -4240,3 +4240,54 @@ nothing stopped the next one forgetting, which `recurring-bugs.md`'s own rule fo
 mirrored-at-every-caller guards says is required. Checked all 10 first: 8 need no guard (anchor
 on `MAX(date)` of a completed session, or write provider dates / `fetched_at` only), so the
 requirement is a `LIVE_DATE_SAFE:` declaration rather than blanket ceremony. Negative-controlled.
+
+## 2026-08-18 — end-to-end job/data audit, densify-feature-matrix schema-leak crash fixed
+
+Follow-up to the previous session's `multi_factor_scorer._pct_rank` fix (both findings in that
+report — the `_pct_rank` fix and the `technical_analysis_engine.confidence_score` decision — were
+already committed; re-verified rather than re-fixed). Ran the full check stack plus a genuine
+end-to-end audit of the DB and job layer, per the request that "all jobs scripts should work as
+expected and doing the purpose they were written for":
+
+- `tsc --noEmit`, `vitest run` (994 passed / 41 skipped), `pytest` (2,065 → 2,066 passed / 230
+  skipped after this session's new test), `schema:drift`, `check_recurring_bugs.py` — all clean.
+- DB-wide sweep for degenerate (near-zero-variance) score/rank/composite/confidence/probability
+  columns (177 candidates across every table) — no live sibling of the `_pct_rank` bug found.
+  11 flagged, all confirmed false positives: `news_sentiment_items.ai_scored` (a boolean),
+  `technical_composite_scores.{risk,support_resistance,trend_strength}_score` (genuinely binary
+  rule-based sub-scores whose `composite_score` has full granularity — 1,998/2,001 distinct), and
+  `quant_scores_history`'s pre-fix rows (correctly-immutable history of the actual bug, not new).
+- `npm run dq:check` — 151/155, 0 critical. 4 warns, all pre-existing/tracked (AMFI's
+  `mf_sector_allocation` break, AF-25's regime-edge trust floor, Trendlyne WAF-bounded coverage).
+- `job_heartbeat` swept for currently-failed / never-succeeded / high-fail-rate jobs — found one
+  live break: **`densify-feature-matrix`** (wrapped by `ml-daily-ops`) had been failing for 3 days
+  straight with `TypeError: arg must be a list, tuple, 1-d array, or Series` inside
+  `pd.to_numeric()`.
+
+**Root cause, traced not guessed:** `sparse_columns()` queried `information_schema.columns WHERE
+table_name='technical_signals'` with no `table_schema` filter. Two leaked throwaway test schemas
+(`pytest_158bd00b4038`, `vitest_5aabdd4c127f` — left behind by an interrupted run instead of being
+dropped on teardown) each independently define a `technical_signals` table, so the query returned
+every column name three times over — feeding a `pd.DataFrame` with duplicate column labels, and
+`df[c]` on a duplicate label returns a DataFrame instead of a Series, which `pd.to_numeric()`
+rejects. Fixed with `AND table_schema = current_schema()`, matching the convention
+`sql_translate.py`'s own `PRAGMA table_info()` emulation already uses (not a hardcoded `'public'`,
+which would break inside the `pg_conn`/`pg_schema` test fixtures). Grepped for the same unfiltered
+shape and found 3 more instances (`ml_ensemble._table_columns()`, `backfill_sectors._has_column()`,
+`data_integrity_repair.py`) — none had crashed yet (their callers only do membership checks, which
+tolerate duplicates), fixed anyway since it's the identical root cause. New
+`test_densify_feature_matrix.py` reproduces the leaked-schema condition and negative-controlled
+(fails against the pre-fix code — on a *different*, worse column, confirming the query really was
+scanning every schema including production's own `public.technical_signals`). Live-verified: ran
+`densify_feature_matrix.py` against production after the fix — 829,225 → 863,321 non-null cells,
+4,164 rows updated, clean exit. Full pytest suite re-run clean (2,066 passed). Signature added to
+`recurring-bugs.md`'s Testing section.
+
+`job_heartbeat`'s `densify-feature-matrix`/`ml-daily-ops` rows still show the pre-fix failure —
+heartbeat is stamped by the queue orchestrator, not a standalone script run, so it self-corrects
+on the next scheduled 23:00 IST run rather than being force-written here.
+
+Other high-fail-rate `job_heartbeat` rows (`trendlyne-midweek` 78.9%, `nse-bhavcopy-fetcher`
+41.2%, `screener-performance` 33.3%, `stock-scoring` 30.7%) were all currently `success` at audit
+time — not chased further; `trendlyne-midweek`'s history is the already-tracked WAF-throttling
+issue (AF-12).
