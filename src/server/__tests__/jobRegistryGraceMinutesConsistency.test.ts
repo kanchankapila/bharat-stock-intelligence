@@ -147,6 +147,7 @@ describe('JOB_REGISTRY.graceMinutes consistency', () => {
     'closed-day-early-batch': "'closed-day-early-batch'",
     'confluence-compute': "jobName: 'confluence-compute'",
     'confluence-outcomes': "jobName: 'confluence-outcomes-daily'",
+    'trendlyne-catchup': "jobName: 'trendlyne-catchup-slice'",
     'agent-data-scientist': "jobName: 'agent-ds-daily'",
     'agent-strategist': "jobName: 'agent-strat-daily'",
     'agent-auditor': "jobName: 'agent-audit-daily'",
