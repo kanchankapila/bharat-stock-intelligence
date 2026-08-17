@@ -1445,9 +1445,15 @@ export const DATA_QUALITY_CHECKS: DataQualityCheck[] = [
       if (readyCount === 0) {
         return { status: 'pass', detail: 'No regime has accumulated enough history yet to evaluate live win-probability edge — expected while history builds.' };
       }
-      const stale = daysStale(row?.latest_computed_at, now);
+      // ml_calibration.py only runs weekdays (ml-daily-ops, '20 13 * * 1-5' = 18:50 IST) —
+      // tradingDaysStale, not daysStale, or a Monday-afternoon check reads Friday's snapshot as
+      // stale purely from the Sat/Sun gap before today's own run has had its scheduled slot.
+      // Found live 2026-08-17: this was the raw-daysStale form, reading 3.1d on a Monday for a
+      // Friday snapshot that hadn't missed anything — recurring-bugs.md's "Raw daysStale() on a
+      // freshness check" class, in a hand-rolled 'ML state' check the factory doesn't cover.
+      const stale = tradingDaysStale(row?.latest_computed_at, now);
       if (stale != null && stale > 3) {
-        return { status: 'warn', detail: `regime_edge_status hasn't refreshed in ${fmtDays(stale)} — ml_calibration.py's nightly snapshot may not be running.` };
+        return { status: 'warn', detail: `regime_edge_status hasn't refreshed in ${fmtDays(stale)} trading day(s) — ml_calibration.py's nightly snapshot may not be running.` };
       }
       if (breachedCount > 0) {
         // Not critical: this doesn't mean anything is broken, just that a regime's live
@@ -1605,9 +1611,14 @@ export const DATA_QUALITY_CHECKS: DataQualityCheck[] = [
     // this same session passed only vacuously. Previously this could only be found by manually
     // replaying one detector over history; now it surfaces on its own.
     //
-    // Needs >= 10 runs before judging, so a newly-added check is not flagged for being new.
-    // Permanently-green is reported separately from permanently-red: green-forever is usually a
-    // too-loose threshold, red-forever is usually a real defect nobody is acting on.
+    // Needs >= 10 runs before judging non-pass stuck verdicts, so a newly-added check is not
+    // flagged for being new. Permanently-green needs a MUCH higher bar (>= 200 runs, roughly
+    // 4+ days at this check's own ~30-min cadence): a check that has simply been healthy for a
+    // day or two is indistinguishable from one that is structurally incapable of ever failing,
+    // and reporting the former as the latter is exactly the false-alarm noise that makes a real
+    // monitor stop being read. Found live 2026-08-17 (`/threshold-calibration-audit`): the
+    // original SQL only ever computed stuck_bad (`only_status <> 'pass'`) despite this comment
+    // already describing the green-forever half as intended — it was documented, never wired up.
     sql: `WITH agg AS (
             SELECT check_id, COUNT(*) AS runs, COUNT(DISTINCT status) AS distinct_status,
                    MIN(status) AS only_status
@@ -1617,7 +1628,9 @@ export const DATA_QUALITY_CHECKS: DataQualityCheck[] = [
           )
           SELECT COUNT(*) FILTER (WHERE runs >= 10) AS judged,
                  COUNT(*) FILTER (WHERE runs >= 10 AND distinct_status = 1 AND only_status <> 'pass') AS stuck_bad,
-                 COALESCE(string_agg(check_id, ', ') FILTER (WHERE runs >= 10 AND distinct_status = 1 AND only_status <> 'pass'), '') AS stuck_bad_ids
+                 COALESCE(string_agg(check_id, ', ') FILTER (WHERE runs >= 10 AND distinct_status = 1 AND only_status <> 'pass'), '') AS stuck_bad_ids,
+                 COUNT(*) FILTER (WHERE runs >= 200 AND distinct_status = 1 AND only_status = 'pass') AS stuck_good,
+                 COALESCE(string_agg(check_id, ', ') FILTER (WHERE runs >= 200 AND distinct_status = 1 AND only_status = 'pass'), '') AS stuck_good_ids
             FROM agg`,
     evaluate: (row) => {
       const judged = Number(row?.judged ?? 0);
@@ -1625,15 +1638,25 @@ export const DATA_QUALITY_CHECKS: DataQualityCheck[] = [
         return { status: 'pass', detail: 'Not enough verdict history yet (needs 10+ runs per check) — re-check in a few days.' };
       }
       const bad = Number(row?.stuck_bad ?? 0);
+      const good = Number(row?.stuck_good ?? 0);
       if (bad > 0) {
         return {
           status: 'warn',
           detail: `${bad} check(s) have returned the SAME non-pass verdict on every one of their last 10+ runs: ` +
                   `${row?.stuck_bad_ids}. Either the defect is real and unactioned, or the check cannot pass — ` +
-                  `both mean it is currently providing no signal.`,
+                  `both mean it is currently providing no signal.` +
+                  (good > 0 ? ` Also, ${good} check(s) have passed on every one of their last 200+ runs (candidate for a too-loose threshold, not proof of one): ${row?.stuck_good_ids}.` : ''),
         };
       }
-      return { status: 'pass', detail: `${judged} checks judged over 10+ runs; none stuck on a single non-pass verdict.` };
+      if (good > 0) {
+        return {
+          status: 'warn',
+          detail: `${good} check(s) have passed on EVERY one of their last 200+ runs: ${row?.stuck_good_ids}. ` +
+                  `A verdict that can never vary carries no information either direction — this is a candidate ` +
+                  `list for a too-loose threshold, not proof of one; review whether each could ever actually fire.`,
+        };
+      }
+      return { status: 'pass', detail: `${judged} checks judged over 10+ runs; none stuck on a single verdict either direction.` };
     },
   },
 

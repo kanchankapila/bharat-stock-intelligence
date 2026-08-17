@@ -196,6 +196,23 @@ describe('individual evaluate() functions', () => {
     expect(r.detail).toMatch(/refresh/);
   });
 
+  it('NEGATIVE CONTROL: regime-edge-trust-floor does not false-positive on a Friday snapshot checked Monday evening', () => {
+    // ml_calibration.py only runs weekdays (ml-daily-ops, '20 13 * * 1-5'). Friday 18:00 UTC to
+    // Monday 20:00 UTC is 3.083 RAW calendar days -- pre-fix (plain daysStale) that alone clears
+    // the >3 bar and prints the false "hasn't refreshed" warning purely off the Sat/Sun gap, even
+    // though only Monday's own not-yet-arrived run is missing. tradingDaysStale subtracts the
+    // 2 weekend days, giving ~1.08 -- correctly not stale. Live-caught 2026-08-17: this check's
+    // own message read "3.1d" on a Monday for a Friday snapshot that hadn't missed anything.
+    const fridaySnapshot = new Date('2026-08-14T18:00:00Z');
+    const mondayEvening = new Date('2026-08-17T20:00:00Z');
+    const r = byId('regime-edge-trust-floor').evaluate(
+      { breached_count: 1, ready_count: 2, latest_computed_at: fridaySnapshot.toISOString() }, mondayEvening);
+    // Must fall through to the breach-count branch (real signal), not the stale-refresh branch
+    // (false alarm) -- the tell is which message comes back.
+    expect(r.detail).toMatch(/1 of 2/);
+    expect(r.detail).not.toMatch(/hasn't refreshed/);
+  });
+
   it('technical-signals-freshness-coverage fails on the exact silent-collapse regression (low coverage, job still "fresh")', () => {
     const r = byId('technical-signals-freshness-coverage').evaluate(
       { total: 2000, scored: 40, last_date: '2026-07-19T00:00:00Z' }, now,
@@ -637,5 +654,43 @@ describe('win-probability-scored-in-time', () => {
     // wording that encoded the withdrawn weekly-cadence claim, so correcting the claim broke a
     // test that was never about cadence.
     expect(r.detail).toContain('1787050000000');
+  });
+});
+
+describe('dq-uninformative-checks', () => {
+  const check = DATA_QUALITY_CHECKS.find(c => c.id === 'dq-uninformative-checks')!;
+  const now = new Date('2026-08-17T12:00:00Z');
+
+  it('is registered', () => expect(check).toBeDefined());
+
+  it('NEGATIVE CONTROL: an always-PASS check with 200+ runs is now flagged (was invisible pre-fix)', () => {
+    // Found live 2026-08-17 (/threshold-calibration-audit): the SQL only ever computed
+    // stuck_bad, so a check that is structurally incapable of ever failing had no way to
+    // surface here no matter how much history accumulated. This is the "candidate list", not
+    // proof any one of them is broken -- status is 'warn', matching stuck_bad's severity.
+    const r = check.evaluate!({ judged: 50, stuck_bad: 0, stuck_bad_ids: '', stuck_good: 3, stuck_good_ids: 'foo, bar, baz' }, now);
+    expect(r.status).toBe('warn');
+    expect(r.detail).toContain('passed on EVERY one of their last 200+ runs');
+    expect(r.detail).toContain('foo, bar, baz');
+  });
+
+  it('does not flag stuck-good below the 200-run bar, even if the same check would clear the 10-run stuck-bad bar', () => {
+    // A check that has simply been healthy for a day or two must not read the same as one that
+    // can never fail -- that distinction is the entire point of the higher bar.
+    const r = check.evaluate!({ judged: 5, stuck_bad: 0, stuck_bad_ids: '', stuck_good: 0, stuck_good_ids: '' }, now);
+    expect(r.status).toBe('pass');
+  });
+
+  it('reports stuck-bad and stuck-good together when both fire in the same run', () => {
+    const r = check.evaluate!({ judged: 50, stuck_bad: 1, stuck_bad_ids: 'dead-check', stuck_good: 2, stuck_good_ids: 'a, b' }, now);
+    expect(r.status).toBe('warn');
+    expect(r.detail).toContain('dead-check');
+    expect(r.detail).toContain('a, b');
+  });
+
+  it('passes when nothing is stuck either direction', () => {
+    const r = check.evaluate!({ judged: 120, stuck_bad: 0, stuck_bad_ids: '', stuck_good: 0, stuck_good_ids: '' }, now);
+    expect(r.status).toBe('pass');
+    expect(r.detail).toContain('none stuck on a single verdict either direction');
   });
 });
