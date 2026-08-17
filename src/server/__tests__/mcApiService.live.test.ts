@@ -14,7 +14,10 @@
  * other half -- real data in). No cleanup: writes genuine production-shaped rows.
  *
  *   RUN_LIVE_DATASOURCE_TESTS=1 npx vitest run src/server/__tests__/mcApiService.live.test.ts
- */
+  *
+ * LIVE_DATE_SAFE: writes mc_general_metrics / mc_swot_history, both fetched_at-stamped with no trading-date key.
+ * (Declared for liveTestTradingDayGuard.test.ts -- see it for why this must be stated.)
+*/
 import { describe, it, expect, beforeAll } from 'vitest';
 
 // Gated behind RUN_LIVE, not a static top-level `import 'dotenv/config'` -- that would load

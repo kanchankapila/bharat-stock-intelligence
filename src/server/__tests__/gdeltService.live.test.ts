@@ -16,7 +16,10 @@
  * would defeat the entire purpose of a live_datasource test.
  *
  *   RUN_LIVE_DATASOURCE_TESTS=1 npx vitest run src/server/__tests__/gdeltService.live.test.ts
- */
+  *
+ * LIVE_DATE_SAFE: gdelt_sentiment.date comes from GDELT's own payload (pt.date), not the clock -- and world news genuinely happens at weekends.
+ * (Declared for liveTestTradingDayGuard.test.ts -- see it for why this must be stated.)
+*/
 import { describe, it, expect } from 'vitest';
 
 // Gated behind RUN_LIVE, not a static top-level `import 'dotenv/config'` -- that would load

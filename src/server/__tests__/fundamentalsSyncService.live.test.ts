@@ -10,7 +10,10 @@
  * production-shaped fundamentals row for the symbol, identical to what the real sync writes.
  *
  *   RUN_LIVE_DATASOURCE_TESTS=1 npx vitest run src/server/__tests__/fundamentalsSyncService.live.test.ts
- */
+  *
+ * LIVE_DATE_SAFE: writes stock_fundamentals, keyed on symbol alone -- a snapshot with no date dimension to fabricate.
+ * (Declared for liveTestTradingDayGuard.test.ts -- see it for why this must be stated.)
+*/
 import { describe, it, expect } from 'vitest';
 
 // Gated behind RUN_LIVE, not a static top-level `import 'dotenv/config'` -- that would load

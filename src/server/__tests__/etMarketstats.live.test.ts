@@ -12,7 +12,10 @@
  * nightly sync would write for this screener.
  *
  *   RUN_LIVE_DATASOURCE_TESTS=1 npx vitest run src/server/__tests__/etMarketstats.live.test.ts
- */
+  *
+ * LIVE_DATE_SAFE: writes mc_general_metrics, which has no trading-date key; only a fetched_at timestamp, and "fetched on a Saturday" is a true statement.
+ * (Declared for liveTestTradingDayGuard.test.ts -- see it for why this must be stated.)
+*/
 import { describe, it, expect, beforeAll } from 'vitest';
 import type { EtMarketstatsScreenerDef } from '../etMarketstats';
 
