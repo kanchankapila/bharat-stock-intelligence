@@ -6,6 +6,7 @@ import time
 import urllib.parse
 import urllib.request
 
+from as_of import logical_trading_date
 from db_compat import execute, executemany
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
@@ -310,7 +311,7 @@ def _fetch_and_store(sc_id: str, expiry: str, date: str, fetched_at: str) -> int
 
 def run(sc_ids: list[str] | None = None, expiry_override: str | None = None):
     _ensure_tables()
-    date = datetime.date.today().isoformat()
+    date = logical_trading_date()
     fetched_at = datetime.datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ")
 
     targets = sc_ids if sc_ids else list(_get_mc_index_map().keys())

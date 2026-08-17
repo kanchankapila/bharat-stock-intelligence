@@ -102,7 +102,7 @@ export const V2Dashboard: React.FC = () => {
                 dashboardData.overall.alpha_vs_nifty >= 0 ? "text-emerald-400" : "text-rose-400"
             )}>
               {dashboardData?.overall?.alpha_vs_nifty != null
-                ? `${dashboardData.overall.alpha_vs_nifty >= 0 ? '+' : ''}${(dashboardData.overall.alpha_vs_nifty * 100).toFixed(2)}%`
+                ? `${dashboardData.overall.alpha_vs_nifty >= 0 ? '+' : ''}${dashboardData.overall.alpha_vs_nifty.toFixed(2)}%`
                 : '—'}
             </span>
             <span className="text-[9px] text-slate-400 font-bold uppercase">Excess Outperformance</span>

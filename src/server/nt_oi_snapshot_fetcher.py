@@ -25,10 +25,9 @@ Run:
 """
 
 import argparse
-from datetime import date as _date
-
 import requests
 
+from as_of import logical_trading_date
 from db_compat import execute, executemany, query_all
 from fetch_utils import retry_get
 
@@ -199,7 +198,7 @@ def run(target_index: str | None = None, snap_time: str = "15:20:00") -> None:
             print(f"[nt_oi_snap] Unknown index {target_index!r}. Known: {list(all_known)}")
             return
 
-    today = _date.today().isoformat()
+    today = logical_trading_date()
     print(f"[nt_oi_snap] Fetching EOD OI snapshot @{snap_time} for {list(nt_map)} ...")
     total = 0
     for index_name, (nt_symbol, exchange) in nt_map.items():
