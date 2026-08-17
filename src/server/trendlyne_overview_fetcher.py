@@ -42,7 +42,7 @@ from datetime import date, datetime, timedelta
 import requests
 
 from db_compat import connect
-from fetch_utils import filter_numeric_tlids
+from fetch_utils import filter_numeric_tlids, TRENDLYNE_MAX_CONCURRENT, cap_to_run_budget
 from as_of import logical_write_floor
 
 OVERVIEW_URL = "https://trendlyne.com/equity/overview-second-part/{tlid}/"
@@ -58,7 +58,9 @@ HEADERS = {
 }
 
 RATE_LIMIT_SEC = 0.5
-BATCH_SIZE     = 15
+# Was 15 -- AWS WAF returns 405/captcha for the rest of the run when more than 3
+# requests are in flight at once. Measured, see TRENDLYNE_MAX_CONCURRENT in fetch_utils.py.
+BATCH_SIZE = TRENDLYNE_MAX_CONCURRENT
 BATCH_GAP_SEC  = 0.5
 
 # SEBI LODR Reg 31: the shareholding pattern is filed within 21 days of each period end.
@@ -636,6 +638,7 @@ def main() -> None:
         print(f"[TLOverview] Shard {args.shard_index}/{args.shard_count}: "
               f"{len(stocks)}/{full_count} stocks this run.")
 
+    stocks = cap_to_run_budget(stocks, "TLOverview", requests_per_row=2)
     print(f"[TLOverview] Processing {len(stocks)} stocks in batches of {BATCH_SIZE} ({BATCH_GAP_SEC}s gap) - analyst + fundamentals...")
     session = requests.Session()
     session.headers.update(HEADERS)

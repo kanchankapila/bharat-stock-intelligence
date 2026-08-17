@@ -42,6 +42,7 @@ from requests.adapters import HTTPAdapter
 
 from db_compat import connect
 from as_of import logical_write_floor
+from fetch_utils import TRENDLYNE_MAX_CONCURRENT, cap_to_run_budget
 
 BASE_URL = "https://trendlyne.com/mapp/v1/stock/chart-data/{tlid}/{param}/"
 
@@ -55,7 +56,9 @@ HEADERS = {
 }
 
 RATE_LIMIT_SEC = 0.5
-BATCH_SIZE = 15
+# Was 15 -- AWS WAF returns 405/captcha for the rest of the run when more than 3
+# requests are in flight at once. Measured, see TRENDLYNE_MAX_CONCURRENT in fetch_utils.py.
+BATCH_SIZE = TRENDLYNE_MAX_CONCURRENT
 BATCH_GAP_SEC = 0.5
 STOCKLIST_PATH = os.path.join(os.path.dirname(__file__), "..", "..", "scripts", "stocklist.json")
 
@@ -321,7 +324,7 @@ def _backfill_technical_signals(symbol: str, today: str, features: dict, con) ->
 
 # â”€â”€ Stock list â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
-def _load_stocks(symbol_filter: str | None) -> list[tuple[str, str]]:
+def _load_stocks(symbol_filter: str | None, skip_done_for_date: str | None = None) -> list[tuple[str, str]]:
     """Return [(symbol, tlid), ...] from scripts/stocklist.json — the canonical
     provider-mapping table (2005 stocks) — instead of the much larger (7000+)
     trendlyne_screener_stocks fallback universe, which is why this fetcher used to
@@ -331,6 +334,22 @@ def _load_stocks(symbol_filter: str | None) -> list[tuple[str, str]]:
     rows = [(e["symbol"], str(e["tlid"])) for e in entries if e.get("symbol") and e.get("tlid")]
     if symbol_filter:
         rows = [(s, t) for s, t in rows if s.upper() == symbol_filter.upper()]
+    # Resume, same shape as trendlyne_adv_tech_fetcher.py's loader. Without it every run
+    # restarts at the same alphabetical position, so the leading slice is re-fetched forever and
+    # coverage never advances past one WAF allowance -- see cap_to_run_budget in fetch_utils.py.
+    if skip_done_for_date:
+        con = connect()
+        try:
+            cur = con.cursor()
+            cur.execute("SELECT symbol FROM trendlyne_dvm_scores WHERE date = ?", (skip_done_for_date,))
+            done = {r[0] for r in cur.fetchall()}
+        finally:
+            con.close()
+        if done:
+            before = len(rows)
+            rows = [(s, t) for s, t in rows if s not in done]
+            print(f"[TLFund] Resuming: {before - len(rows)} of {before} stocks already "
+                  f"fetched for {skip_done_for_date}, {len(rows)} remaining.")
     return rows
 
 
@@ -397,7 +416,8 @@ def main() -> None:
     today = logical_write_floor(con, fallback=date.today().isoformat())
     con.close()
 
-    stocks = _load_stocks(args.symbol)
+    stocks = _load_stocks(args.symbol, skip_done_for_date=None if args.symbol else today)
+    stocks = cap_to_run_budget(stocks, "TLFund", requests_per_row=2)
     if not stocks:
         print("[TLFund] No stocks with tlid found.")
         return

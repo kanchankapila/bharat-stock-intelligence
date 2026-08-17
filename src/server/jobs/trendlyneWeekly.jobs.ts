@@ -18,6 +18,41 @@ import { registerRepeatableJob } from './registerJob';
 
 export const QUEUE_TRENDLYNE_MIDWEEK = 'trendlyne-midweek';
 export const QUEUE_TRENDLYNE_RATIOS_MONTHLY = 'trendlyne-ratios-monthly';
+export const QUEUE_TRENDLYNE_CATCHUP = 'trendlyne-catchup';
+
+/**
+ * The four per-symbol trendlyne.com fetchers, in rotation order.
+ *
+ * Each takes a bounded slice per run (cap_to_run_budget in fetch_utils.py) because
+ * trendlyne.com's AWS WAF allowance is a per-session REQUEST COUNT (~131-150 measured
+ * 2026-08-17), not a rate — so a 2,234-symbol universe cannot be fetched in one pass at any
+ * pacing. Bounded slice + each fetcher's resume-from-DB skip converges instead; that is how
+ * trendlyne_adv_tech_daily reached 2234/2234 the same day, after a year of weekly failures.
+ *
+ * ONE script per run, not all four: they share a single source IP, so they share one
+ * allowance. Rotating by wall-clock (below) keeps that stateless.
+ */
+const CATCHUP_FETCHERS = [
+  'trendlyne_adv_tech_fetcher.py',
+  'trendlyne_price_analysis_fetcher.py',
+  'trendlyne_overview_fetcher.py',
+  'trendlyne_fundamentals_fetcher.py',
+];
+
+/** Rotate off the clock rather than stored state — a restart must not always replay index 0. */
+export function catchupFetcherFor(now = new Date()): string {
+  const slot = Math.floor(now.getTime() / (20 * 60_000));
+  return CATCHUP_FETCHERS[slot % CATCHUP_FETCHERS.length];
+}
+
+async function processTrendlyneCatchup(_job: Job): Promise<{ success: boolean; script: string }> {
+  const script = catchupFetcherFor();
+  // 10 min: a 110-request slice is ~2-4 min serially. Deliberately far below the 20-min cadence
+  // so two catch-up runs can never overlap and double-spend the shared WAF allowance.
+  await runPython(script, [], 10 * 60_000)
+    .catch(e => console.warn(`[QUEUE] trendlyne-catchup ${script} failed:`, (e as Error).message));
+  return { success: true, script };
+}
 
 async function processTrendlyneMidweek(_job: Job): Promise<{ success: boolean }> {
   // Both scripts must still run even if one fails (a broken adv-tech fetch shouldn't skip
@@ -181,5 +216,25 @@ export async function registerTrendlyneWeeklyJobs(connection: any) {
     monitorFn: updateMonitorState,
   });
 
-  return { midweek, ratiosMonthly };
+  const catchup = await registerRepeatableJob({
+    connection,
+    queueName: QUEUE_TRENDLYNE_CATCHUP,
+    jobName: 'trendlyne-catchup-slice',
+    // Every 20 min, all day: one fetcher per run, so each of the four gets a slice every 80
+    // min (~18 slices/day => ~1,980 symbols/day for the 1-request-per-symbol fetchers). That
+    // converges a 2,234-symbol universe in ~1-2 days, which is the cadence these near-static
+    // datasets need — and it mirrors the one Trendlyne job that has never failed
+    // (trendlyne-daily-fetch, 87,721 runs / 0 failures), which spreads its per-symbol requests
+    // across a 12-hour window instead of bursting them.
+    repeat: { pattern: '*/20 * * * *' },
+    jobId: 'trendlyne-catchup-slice',
+    removeOnComplete: 3,
+    removeOnFail: 3,
+    processor: processTrendlyneCatchup,
+    monitorName: 'trendlyne-catchup',
+    concurrency: 1,
+    lockDuration: 15 * 60 * 1000,
+  });
+
+  return { midweek, ratiosMonthly, catchup };
 }

@@ -114,6 +114,10 @@ export const JOB_REGISTRY: JobScheduleEntry[] = [
   { jobName: 'confluence-compute', label: 'Confluence Engine', everyMs: 30 * 60 * 1000, graceMinutes: 45, critical: true,
     lateDeadlineCronPatterns: ['30 0 * * *', '0,30 1 * * *', '0 2 * * *', '30 11 * * *', '*/30 12-17 * * *', '0 18 * * *'] },
   { jobName: 'confluence-outcomes', label: 'Confluence Outcomes', cronPattern: '0 18 * * 1-5', graceMinutes: 60, critical: false },
+  // Takes one bounded slice of one trendlyne.com fetcher per run (see trendlyneWeekly.jobs.ts).
+  // critical:false — a single missed slice is made up by the next one; only a sustained outage
+  // matters, which the 60min grace against a 20min cadence is what catches.
+  { jobName: 'trendlyne-catchup', label: 'Trendlyne Catch-up Slice', cronPattern: '*/20 * * * *', graceMinutes: 60, critical: false },
   { jobName: 'agent-data-scientist', label: 'Agent: Data Scientist', cronPattern: '30 1 * * 1-5', graceMinutes: 60, critical: false },
   { jobName: 'agent-strategist', label: 'Agent: Strategist', cronPattern: '20 3 * * 1-5', graceMinutes: 60, critical: false },
   { jobName: 'agent-auditor', label: 'Agent: Auditor', cronPattern: '0 11 * * 1-5', graceMinutes: 60, critical: false },

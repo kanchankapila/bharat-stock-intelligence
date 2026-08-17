@@ -2581,6 +2581,8 @@ export async function initQueues(): Promise<boolean> {
     const trendlyneWeeklyJobs = await registerTrendlyneWeeklyJobs(connection);
     ({ queue: trendlyneMidweekQueue, worker: trendlyneMidweekWorker } = trendlyneWeeklyJobs.midweek);
     ({ queue: trendlyneRatiosMonthlyQueue, worker: trendlyneRatiosMonthlyWorker } = trendlyneWeeklyJobs.ratiosMonthly);
+    // trendlyne-catchup owns its own Queue/Worker; nothing outside this module reads them, so
+    // unlike its siblings there is no module-level binding to assign here.
 
     // Ã¢â€â‚¬Ã¢â€â‚¬ Unified Ranker Ã¢â‚¬â€ daily at 15:45 IST (10:15 UTC) Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
     unifiedRankerQueue = new Queue(QUEUE_UNIFIED_RANKER, { connection });

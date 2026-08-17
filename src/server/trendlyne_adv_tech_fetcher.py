@@ -43,7 +43,8 @@ import requests
 
 from db_compat import connect
 from as_of import logical_write_floor
-from fetch_utils import retry_get, FetchTracker, filter_numeric_tlids
+from fetch_utils import (retry_get, FetchTracker, filter_numeric_tlids,
+                         TRENDLYNE_MAX_CONCURRENT, cap_to_run_budget)
 
 BASE_URL = (
     "https://trendlyne.com/equity/api/stock/adv-technical-analysis/{tlid}/24/"
@@ -59,7 +60,9 @@ HEADERS = {
 }
 
 RATE_LIMIT_SEC = 0.5
-BATCH_SIZE     = 15
+# Was 15 -- AWS WAF returns 405/captcha for the rest of the run when more than 3
+# requests are in flight at once. Measured, see TRENDLYNE_MAX_CONCURRENT in fetch_utils.py.
+BATCH_SIZE = TRENDLYNE_MAX_CONCURRENT
 BATCH_GAP_SEC  = 0.5
 
 # Total count of MA signals (8 SMA + 8 EMA = 16) and oscillator signals (9)
@@ -543,6 +546,7 @@ def main() -> None:
         print("[TLAdvTech] No stocks with tlid found (or all already fetched for today).")
         con.close()
         return
+    stocks = cap_to_run_budget(stocks, "TLAdvTech", requests_per_row=1)
     print(f"[TLAdvTech] Processing {len(stocks)} stocks in batches of {BATCH_SIZE} ({BATCH_GAP_SEC}s gap)...")
     session = requests.Session()
     session.headers.update(HEADERS)

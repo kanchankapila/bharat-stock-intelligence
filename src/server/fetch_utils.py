@@ -148,3 +148,72 @@ def filter_numeric_tlids(rows, label: str = "trendlyne"):
               f"{' ...' if len(dropped) > 10 else ''}. "
               f"Run resolve_trendlyne_tlids.py to recover them.")
     return kept, dropped
+
+
+# ── Trendlyne request concurrency ────────────────────────────────────────────────────────
+# trendlyne.com sits behind AWS WAF on CloudFront. When its bot rule fires it returns
+# HTTP 405 with `x-amzn-waf-action: captcha` and a "Human Verification" HTML body for EVERY
+# subsequent request (~10 min), so one trip fails the whole run, not just the request.
+#
+# The trigger is CONCURRENCY, not volume or sustained rate. Measured live 2026-08-17 against
+# the real endpoint, same session/headers/URL the fetchers use:
+#
+#   concurrency  1 (serial, 0.5s apart) -> 60/60 OK
+#   concurrency  2                      -> 16/16 OK
+#   concurrency  3                      -> 24/24 OK
+#   concurrency  5                      -> TRIPPED after 20 requests
+#   concurrency 15 (the old BATCH_SIZE) -> TRIPPED on the very FIRST batch, all 15
+#
+# 15 tripping on request 1 is why trendlyne-midweek failed every run since 2026-08-04: the
+# opening batch poisoned the session before any work happened. price_analysis's BATCH_SIZE=5
+# was over the line too, which is why it managed ~145 rows and then died every time.
+#
+# This matches the one Trendlyne job that has NEVER failed -- trendlyne-daily-fetch
+# (87,721 runs, 0 failures) -- which issues ONE request per symbol jittered across a 12-hour
+# window (`randomizeTrendlyneFetchDelay`, trendlyneAuthService.ts) and so is never concurrent.
+#
+# 3 is the highest measured-safe value. Raising it requires re-running the measurement above,
+# not a guess -- and note the safe level is a property of Trendlyne's WAF config, which can
+# change under us. ponytail: no adaptive concurrency controller; the FetchTracker abort plus
+# each fetcher's resume-from-DB means a trip degrades to "finish next run" rather than a loss.
+# Serial. Concurrency does not just risk a trip, it SHRINKS the allowance (below), so there is
+# nothing to buy by raising this: 1 -> ~131-150 requests, 3 -> ~84, 5 -> ~20, 15 -> 15.
+TRENDLYNE_MAX_CONCURRENT = 1
+
+# Per-RUN request budget.
+#
+# Follow-up measurement (2026-08-17) showed the WAF allowance is a cumulative REQUEST COUNT per
+# anonymous session, not a rate -- so no amount of slowing down buys a full-universe pass:
+#
+#   serial @ 55 req/min (1.0s spacing) -> tripped at request 131 (after 142s)
+#   serial @ 23 req/min (2.5s spacing) -> tripped at request 150 (after 386s)
+#
+# Halving the rate moved the trip point by 19 requests. A 2,234-symbol universe is ~15x the
+# allowance, so a single pass is IMPOSSIBLE at any pacing without solving the CAPTCHA.
+#
+# So each run takes a bounded slice and stops CLEANLY while still under the allowance, instead of
+# charging into it and burning the rest of the run on 405s. Combined with each fetcher's
+# resume-from-DB skip, successive runs converge on full coverage -- which is exactly how
+# trendlyne_adv_tech_daily went 1350 -> 2234/2234 (100%) on 2026-08-17.
+#
+# 110 leaves ~20 requests of headroom under the lowest observed trip point (131).
+TRENDLYNE_RUN_REQUEST_BUDGET = 110
+
+
+def cap_to_run_budget(rows, label: str, requests_per_row: int = 1,
+                      limit: int = TRENDLYNE_RUN_REQUEST_BUDGET):
+    """Trim a resumable work list to this run's WAF allowance, logging what was deferred.
+
+    Not a rate limiter -- the allowance is a request COUNT, so pacing is not the lever (see
+    TRENDLYNE_RUN_REQUEST_BUDGET). Callers MUST already skip rows completed for the current
+    date, or this would re-fetch the same leading slice forever and never converge, which is
+    exactly the bug that pinned trendlyne_price_analysis at 145/2234.
+    """
+    max_rows = max(1, limit // max(1, requests_per_row))
+    if len(rows) <= max_rows:
+        return rows
+    print(f"[{label}] Taking {max_rows} of {len(rows)} remaining this run "
+          f"({requests_per_row} request(s)/row against a ~{limit}-request allowance, which is a "
+          f"per-session COUNT (~131-150 observed), not a rate). The next scheduled run resumes "
+          f"from the DB; a partial run here is normal, not a failure.")
+    return rows[:max_rows]

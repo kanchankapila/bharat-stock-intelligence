@@ -35,7 +35,8 @@ import requests
 
 from db_compat import connect
 from as_of import logical_write_floor
-from fetch_utils import retry_get, FetchTracker, filter_numeric_tlids
+from fetch_utils import (retry_get, FetchTracker, filter_numeric_tlids,
+                         TRENDLYNE_MAX_CONCURRENT, cap_to_run_budget)
 
 ANALYSIS_URL = "https://trendlyne.com/share-price/price-performance-analysis/{tlid}/"
 
@@ -58,7 +59,9 @@ RATE_LIMIT_SEC = 0.5
 # ponytail: no adaptive backoff/proxy rotation -- if this still trips the WAF, the run now
 # fails loud (FetchTracker/job_heartbeat) instead of silently, so the next tightening is a
 # data-driven follow-up, not a guess made now.
-BATCH_SIZE     = 5
+# Was 5 -- AWS WAF returns 405/captcha for the rest of the run when more than 3
+# requests are in flight at once. Measured, see TRENDLYNE_MAX_CONCURRENT in fetch_utils.py.
+BATCH_SIZE = TRENDLYNE_MAX_CONCURRENT
 BATCH_GAP_SEC  = 2.0
 
 # Map period name from returnsComparison to column key
@@ -298,7 +301,7 @@ def backfill_technical_signals(symbol: str, today_str: str, f: dict, con) -> Non
     con.commit()
 
 
-def _load_stocks(symbol_filter: str | None, con) -> list[tuple[str, str]]:
+def _load_stocks(symbol_filter: str | None, con, skip_done_for_date=None) -> list[tuple[str, str]]:
     """Return [(symbol, tlid), ...] scoped to the NSE master list only (nse_stocks.tlid).
     No trendlyne_screener_stocks fallback — that table carries non-NSE-master symbols
     (junk/delisted/BSE-only tickers) which pulled the universe well past NSE coverage.
@@ -314,6 +317,22 @@ def _load_stocks(symbol_filter: str | None, con) -> list[tuple[str, str]]:
         rows = [(s, t) for s, t in rows if s.upper() == symbol_filter.upper()]
     # Same permanent-404 filter as trendlyne_adv_tech_fetcher.py's sibling loader.
     rows, _ = filter_numeric_tlids(rows, "TLPriceAnalysis")
+    # Resume, mirroring the sibling loader in trendlyne_adv_tech_fetcher.py. Without this the
+    # run always restarted at the same alphabetical position, so every run re-fetched the same
+    # leading ~100 symbols, tripped Trendlyne's WAF (see TRENDLYNE_MAX_CONCURRENT in
+    # fetch_utils.py) and aborted -- leaving coverage pinned at 145/2234 no matter how often it
+    # ran. The sibling, which already had this, reached 2234/2234 by resuming across runs.
+    if skip_done_for_date:
+        cur.execute(
+            "SELECT symbol FROM trendlyne_price_analysis WHERE date = ?",
+            (skip_done_for_date,),
+        )
+        done = {r[0] for r in cur.fetchall()}
+        if done:
+            before = len(rows)
+            rows = [(s, t) for s, t in rows if s not in done]
+            print(f"[TLPriceAnalysis] Resuming: {before - len(rows)} of {before} stocks already "
+                  f"fetched for {skip_done_for_date}, {len(rows)} remaining.")
     return rows
 
 
@@ -325,11 +344,18 @@ def main() -> None:
     con = connect()
     ensure_schema(con)
 
-    stocks = _load_stocks(args.symbol, con)
+    # Must be the ISO *string*, not a date object: trendlyne_price_analysis.date is TEXT in
+    # production (checked in information_schema, not assumed), and upsert_row writes today_str.
+    # Passing a date here raises `operator does not exist: text = date` on Postgres.
+    stocks = _load_stocks(
+        args.symbol, con,
+        skip_done_for_date=None if args.symbol else date.today().isoformat(),
+    )
     if not stocks:
         print("[TLPriceAnalysis] No stocks with tlid found.")
         return
 
+    stocks = cap_to_run_budget(stocks, "TLPriceAnalysis", requests_per_row=1)
     print(f"[TLPriceAnalysis] Fetching price-performance-analysis for {len(stocks)} stocks in batches of {BATCH_SIZE} ({BATCH_GAP_SEC}s gap)...")
     session = requests.Session()
     session.headers.update(HEADERS)
