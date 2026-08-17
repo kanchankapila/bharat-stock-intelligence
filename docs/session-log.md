@@ -4063,3 +4063,41 @@ committed its fix as `1a23b85`.
 produces the remaining `[transformers] You seem to be using the pipelines sequentially on GPU`
 notice under a GPU. Batching it is a real throughput win but a behaviour change to the scorer,
 out of scope for a load-path fix.
+
+### 2026-08-17 (cont. 2) — ran the 230 live_datasource tests by hand; 3 failures, only one an upstream blip
+
+The gate is right and stays (a third-party outage must never redden CI). But it means those
+files are never executed by pytest, vitest, CI or any hook — so they rot, invisibly. First
+by-hand run in an unknown while: **3 failed / 223 passed / 4 skipped** in 19m41s.
+
+1. **`test_live_datasource_nse_ipo_calendar.py` — my bug, same day.** It hand-rolled
+   `INSERT OR REPLACE`, which `translate()` rejects by design. Broken the moment its fixture
+   moved onto Postgres in this session's Phase 2 conversion; the conversion's own full-suite
+   verification could not see it, because the file is gated. Rewritten as `save()`'s real
+   `ON CONFLICT (symbol, phase) DO UPDATE`.
+
+2. **`sql_translate.py`'s new `DATETIME` → `TIMESTAMP` rule was too broad — also my bug, also
+   same day.** `intraday_ohlcv` has a COLUMN named `datetime`, and a bare `\bDATETIME\b` rewrote
+   `symbol TEXT, datetime TEXT` into `symbol TEXT, TIMESTAMP TEXT` — column silently renamed,
+   after which any `SELECT symbol, datetime` raises `KeyError` on the row dict. Now requires a
+   preceding identifier so only type position matches. **This is precisely the trap the plan doc
+   already recorded** about the reverted `REAL` → `DOUBLE PRECISION` codemod: a token rewrite
+   that never checks what position the token is in. I wrote the same bug into the translator
+   while citing that warning in the commit message.
+
+3. **`test_live_datasource_intraday_fetcher.py` — NOT mine, broken since 2026-08-10.** Its
+   `_CaptureDB.query_all` returned the same rows for every query regardless of SQL. That held
+   until `_known_open_days()` was added to `intraday_fetcher.py` (`e8aac43`) five days after the
+   stub was written, issuing a second, differently-shaped query; the stub handed it symbol rows
+   with no `datetime` key. Broken for 7 days, nothing noticed. Stub now dispatches on the table
+   name so a third query fails loudly instead of silently receiving someone else's rows.
+
+4. **`ndtv_fno_basis` — genuine upstream transient.** `load_fno_symbols()` returned an empty
+   list; passed on re-run minutes later with nothing changed. Exactly what the gate is for.
+
+**Also added: every `*.live.test.ts` must now declare how it avoids fabricating a trading date.**
+The 2026-08-16 incident (2,148 Saturday-dated `stock_ohlcv` rows) was fixed by hand on one file;
+nothing stopped the next one forgetting, which `recurring-bugs.md`'s own rule for
+mirrored-at-every-caller guards says is required. Checked all 10 first: 8 need no guard (anchor
+on `MAX(date)` of a completed session, or write provider dates / `fetched_at` only), so the
+requirement is a `LIVE_DATE_SAFE:` declaration rather than blanket ceremony. Negative-controlled.

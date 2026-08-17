@@ -59,16 +59,28 @@ class TestNseIpoCalendarLiveDataSource:
                 if row:
                     rows.append(row)
         assert rows, "expected at least one normalizable IPO row"
-        # INSERT OR REPLACE (sqlite upsert), mirroring save()'s real ON CONFLICT DO UPDATE --
+        # save()'s real ON CONFLICT (symbol, phase) DO UPDATE, copied rather than approximated --
         # NSE's own listPastIPO() live-verified 2026-07-30 to occasionally return the exact
         # same symbol twice in one response (CUBEINVIT/BAGMANE, byte-identical rows both
         # times), so a plain INSERT here would be stricter than production and fail on data
         # production's real upsert handles fine.
+        #
+        # This was `INSERT OR REPLACE` until 2026-08-17. That is SQLite-only, and translate()
+        # rejects it by design (no single conflict target can be inferred), so once the fixture
+        # moved from sqlite3.connect(':memory:') onto Postgres this raised. It survived the
+        # conversion's own verification because the file is live_datasource-gated and therefore
+        # never ran -- the gate that keeps third-party outages out of CI also keeps converted
+        # code from being executed. Found only by running the live suite by hand.
         conn.executemany("""
-            INSERT OR REPLACE INTO nse_ipo_calendar
+            INSERT INTO nse_ipo_calendar
                 (symbol, phase, company_name, issue_start_date, issue_end_date, price_range,
                  issue_size, series, status, subscription_times, listing_date)
             VALUES (?,?,?,?,?,?,?,?,?,?,?)
+            ON CONFLICT (symbol, phase) DO UPDATE SET
+                company_name=excluded.company_name, issue_start_date=excluded.issue_start_date,
+                issue_end_date=excluded.issue_end_date, price_range=excluded.price_range,
+                issue_size=excluded.issue_size, series=excluded.series, status=excluded.status,
+                subscription_times=excluded.subscription_times, listing_date=excluded.listing_date
         """, rows)
         conn.commit()
 

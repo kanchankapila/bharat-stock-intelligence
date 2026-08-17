@@ -28,6 +28,19 @@ class _CaptureDB:
         self.upserts = []
 
     def query_all(self, sql, params=()):
+        # Dispatch on the SQL. This used to return `symbol_rows` for EVERY query, which was
+        # correct while run() issued exactly one -- then _known_open_days() was added
+        # (e8aac43, 2026-08-10) reading `SELECT symbol, datetime FROM intraday_ohlcv`, got
+        # handed symbol rows with no `datetime` key, and raised KeyError. The test had been
+        # broken for 7 days and nothing noticed, because it is live_datasource-gated and so
+        # never runs by default: the gate that keeps third-party outages out of CI also stops
+        # anyone finding out when production code outgrows a stub.
+        #
+        # A stub that ignores its input answers questions it was never taught -- confidently
+        # and wrongly. Match on the table so a THIRD query fails loudly here instead of
+        # silently receiving someone else's rows.
+        if "intraday_ohlcv" in sql:
+            return []          # no prior bars: parse_bars then applies no known-open-day skip
         return self.symbol_rows
 
     def executemany(self, sql, rows):

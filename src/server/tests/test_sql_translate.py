@@ -77,6 +77,38 @@ def test_maps_date_column_to_cast():
         "WHERE (cs.computed_at)::date = :p0"
 
 
+class TestDdlTypeRewritesAreTypePositionOnly:
+    """DATETIME/BLOB are rewritten only where a TYPE can appear, never as a column name.
+
+    `intraday_ohlcv` has a column literally named `datetime`. A bare \bDATETIME\b rewrite
+    turned `symbol TEXT, datetime TEXT` into `symbol TEXT, TIMESTAMP TEXT` -- the column
+    silently renamed, so every later `SELECT symbol, datetime` raised KeyError on the row
+    dict. Shipped and caught the same day (2026-08-17) by the live_datasource suite, which
+    is the only place that fixture runs.
+
+    Same class as the REAL -> DOUBLE PRECISION codemod SQLITE_DECOMMISSION_PLAN.md records
+    as reverted: a token rewrite that never checks what position the token is in.
+    """
+
+    def test_a_column_named_datetime_is_not_rewritten(self):
+        out = _pg("CREATE TABLE intraday_ohlcv (symbol TEXT, datetime TEXT, close REAL)")
+        assert "datetime TEXT" in out
+        assert "TIMESTAMP TEXT" not in out
+
+    def test_datetime_in_type_position_still_becomes_timestamp(self):
+        out = _pg("CREATE TABLE t (symbol TEXT, computed_at DATETIME DEFAULT CURRENT_TIMESTAMP)")
+        assert "computed_at TIMESTAMP" in out
+
+    def test_a_column_named_datetime_typed_datetime_gets_both_right(self):
+        out = _pg("CREATE TABLE t (datetime DATETIME)")
+        assert "(datetime TIMESTAMP)" in out
+
+    def test_blob_follows_the_same_rule_in_both_positions(self):
+        out = _pg("CREATE TABLE t (payload BLOB, blob TEXT)")
+        assert "payload BYTEA" in out
+        assert "blob TEXT" in out
+
+
 def test_maps_two_arg_date_and_datetime_over_a_column_or_literal():
     """The 'now' forms were mapped; every other two-argument form was not.
 
