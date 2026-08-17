@@ -50,12 +50,22 @@ MIN_UNIVERSE   = 20   # skip run if fewer stocks have enough data
 # ── Percentile rank helper ─────────────────────────────────────────────────────
 
 def _pct_rank(series: pd.Series, higher_is_better: bool = True) -> pd.Series:
-    """Cross-sectional percentile rank 0-100. Ties → average rank."""
+    """Cross-sectional percentile rank 0-100. Ties → average rank.
+
+    Found live 2026-08-17: `series.map(ranked)` looks up each of `series`'s VALUES as a key
+    into `ranked`'s INDEX -- but `ranked` is indexed by symbol (same index as `series`, minus
+    the dropped-NaN rows), not by the raw factor value. A stock's ROE (e.g. 15.3) is never
+    equal to a stock symbol string, so the lookup missed on virtually every row and the
+    `.fillna(50.0)` silently masked it -- every factor for every one of 2,424 symbols came back
+    exactly the neutral default, composite pinned at 49.0 with zero variance across the whole
+    universe, indistinguishable from a healthy run (rows populated, `last_computed` fresh) at a
+    glance. `ranked` is already indexed by symbol, so a plain reindex is all this needs.
+    """
     valid = series.dropna()
     if valid.empty:
-        return series * np.nan
+        return pd.Series(np.nan, index=series.index)
     ranked = valid.rank(pct=True, ascending=higher_is_better) * 100
-    return series.map(ranked).fillna(50.0)   # missing → median (neutral)
+    return ranked.reindex(series.index).fillna(50.0)   # missing → median (neutral)
 
 
 # ── Factor builders ────────────────────────────────────────────────────────────
