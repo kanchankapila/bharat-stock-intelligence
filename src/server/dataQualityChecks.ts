@@ -1889,38 +1889,75 @@ export const DATA_QUALITY_CHECKS: DataQualityCheck[] = [
     // 125 on the two days before. Both freshness checks reported PASS throughout.
     // recurring-bugs.md: "a fresh table is not a delivered feature."
     //
-    // Thresholds are deliberately loose. These fetchers legitimately run mid-week rather than
-    // daily and legitimately skip symbols Trendlyne has no page for, so this is sized to catch
-    // "the endpoint is blocked / the job never completes", not to police normal partial runs.
+    // Measured over a ROLLING WINDOW on fetched_at, not "coverage on MAX(date)" -- the original
+    // shape of this check, which was wrong in BOTH directions once the fetchers moved (2026-08-17,
+    // f498061/19b82b2) from one full-universe pass per run to a bounded slice per run that
+    // converges across many runs:
+    //
+    //   * FALSE ALL-CLEAR. trendlyne_adv_tech_daily stamps its rows with logical_write_floor()
+    //     (= MAX(stock_ohlcv.date)), which only advances when a new session's OHLCV lands. Once
+    //     that date is fully covered the fetcher correctly no-ops -- _load_stocks returns [] and
+    //     main() exits 0. Live 2026-08-17: its newest date was 2026-08-14, three days old and at
+    //     2234/2234, and this check reported "100.0%" PASS. Had Trendlyne blocked the endpoint
+    //     permanently at that moment, MAX(date) would have stayed pinned there and the check
+    //     would have read 100% PASS forever. That is precisely the blind spot the comment above
+    //     claims this check exists to close, in mirror image: it caught partial coverage on a
+    //     fresh date and could not see full coverage on a dead one.
+    //   * FALSE ALARM. trendlyne_price_analysis keys its rows on the real calendar date, so its
+    //     coverage resets to zero at every midnight and climbs through the day at ~110 symbols
+    //     per 80-minute rotation slot. This check runs at 08:40 IST, ~6 slices in, so a perfectly
+    //     healthy fetcher could not read above ~30% at report time and fired FAIL/WARN every
+    //     single morning by construction -- which is why dq-unvarying-verdict independently
+    //     flagged this check as one that never returns a passing verdict.
+    //
+    // fetched_at is the honest column for both: it is a true last-write time (both upserts carry
+    // `fetched_at = CURRENT_TIMESTAMP` in their ON CONFLICT DO UPDATE list -- verified, not
+    // assumed, since a fetched_at absent from that list would silently be a first-seen time, cf.
+    // the signal_generated_at incident in recurring-bugs.md) and it is independent of the two
+    // fetchers' genuinely different date semantics. It is TEXT in production on both tables
+    // (information_schema, not assumed), hence the explicit cast.
+    //
+    // A 4-day window is wide enough that a healthy fetcher always contains at least one full
+    // pass -- including across a weekend, when adv_tech legitimately writes nothing from Saturday
+    // until the next session's OHLCV lands -- and narrow enough to notice a dead endpoint within
+    // 4 days, against the previous check's "never". That latency is the deliberate trade.
     sql: `WITH universe AS (
             SELECT COUNT(*)::float AS n FROM nse_stocks
              WHERE tlid IS NOT NULL AND tlid ~ '^[0-9]+$'
           )
           SELECT (SELECT n FROM universe) AS universe,
                  (SELECT COUNT(DISTINCT symbol) FROM trendlyne_adv_tech_daily
-                   WHERE date = (SELECT MAX(date) FROM trendlyne_adv_tech_daily)) AS adv_tech,
+                   WHERE fetched_at::timestamptz >= NOW() - INTERVAL '4 days') AS adv_tech,
+                 (SELECT ROUND((EXTRACT(EPOCH FROM (NOW() - MAX(fetched_at::timestamptz))) / 3600.0)::numeric, 1)
+                    FROM trendlyne_adv_tech_daily) AS adv_tech_hrs,
                  (SELECT COUNT(DISTINCT symbol) FROM trendlyne_price_analysis
-                   WHERE date = (SELECT MAX(date) FROM trendlyne_price_analysis)) AS price_analysis`,
+                   WHERE fetched_at::timestamptz >= NOW() - INTERVAL '4 days') AS price_analysis,
+                 (SELECT ROUND((EXTRACT(EPOCH FROM (NOW() - MAX(fetched_at::timestamptz))) / 3600.0)::numeric, 1)
+                    FROM trendlyne_price_analysis) AS price_analysis_hrs`,
     evaluate: (row) => {
       const universe = Number(row?.universe ?? 0);
       if (universe === 0) return { status: 'fail', detail: 'No nse_stocks rows carry a numeric tlid — the mapping itself is broken.' };
       const parts = [
-        { name: 'trendlyne_adv_tech_daily', n: Number(row?.adv_tech ?? 0) },
-        { name: 'trendlyne_price_analysis', n: Number(row?.price_analysis ?? 0) },
+        { name: 'trendlyne_adv_tech_daily', n: Number(row?.adv_tech ?? 0), hrs: row?.adv_tech_hrs },
+        { name: 'trendlyne_price_analysis', n: Number(row?.price_analysis ?? 0), hrs: row?.price_analysis_hrs },
       ].map(p => ({ ...p, pct: p.n / universe }));
-      const detail = parts.map(p => `${p.name} ${p.n}/${universe} (${(p.pct * 100).toFixed(1)}%)`).join('; ');
-      const dead = parts.filter(p => p.pct < 0.20);
-      const thin = parts.filter(p => p.pct >= 0.20 && p.pct < 0.50);
+      const detail = parts
+        .map(p => `${p.name} ${p.n}/${universe} (${(p.pct * 100).toFixed(1)}%) in the last 4d, ` +
+                  `last write ${p.hrs == null ? 'never' : `${Number(p.hrs).toFixed(1)}h ago`}`)
+        .join('; ');
+      const dead = parts.filter(p => p.pct < 0.50);
+      const thin = parts.filter(p => p.pct >= 0.50 && p.pct < 0.85);
       if (dead.length) {
         return {
           status: 'fail',
-          detail: `${detail}. ${dead.map(p => p.name).join(', ')} under 20% of the mapped universe on its ` +
-                  `own newest date — the fetcher is not completing (check job_heartbeat for trendlyne-midweek; ` +
-                  `a 405 on every id means the endpoint is blocked upstream, not a code fault).`,
+          detail: `${detail}. ${dead.map(p => p.name).join(', ')} reached under 50% of the mapped universe ` +
+                  `across a full 4-day rotation window — that is not a mid-convergence partial run, the ` +
+                  `fetcher is not getting through (check job_heartbeat for trendlyne-catchup and ` +
+                  `trendlyne-midweek; a 405 on every id means the endpoint is blocked upstream, not a code fault).`,
         };
       }
       if (thin.length) {
-        return { status: 'warn', detail: `${detail}. ${thin.map(p => p.name).join(', ')} between 20% and 50% — partial run.` };
+        return { status: 'warn', detail: `${detail}. ${thin.map(p => p.name).join(', ')} between 50% and 85% over 4 days — converging slower than the rotation should allow.` };
       }
       return { status: 'pass', detail };
     },

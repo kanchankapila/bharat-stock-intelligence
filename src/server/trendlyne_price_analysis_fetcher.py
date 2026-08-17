@@ -333,6 +333,26 @@ def _load_stocks(symbol_filter: str | None, con, skip_done_for_date=None) -> lis
             rows = [(s, t) for s, t in rows if s not in done]
             print(f"[TLPriceAnalysis] Resuming: {before - len(rows)} of {before} stocks already "
                   f"fetched for {skip_done_for_date}, {len(rows)} remaining.")
+        # Order the remaining work least-recently-fetched first, NOT alphabetically.
+        #
+        # Unlike the sibling loaders, this fetcher's skip key is the real calendar date (its
+        # `date` column is a calendar date -- extract_features needs it for the seasonal-month
+        # lookup), so `done` empties at every midnight and the run restarts from 'A'. Combined
+        # with a per-run budget below the universe size that starves a fixed tail forever:
+        # the catch-up rotation gives this script ~18 slices/day (one per 80 min) x 110 rows
+        # = 1,980 < 2,234 mapped tlids, so ranks ~1,981+ were re-cut from every run of every
+        # day and never fetched at all. Measured live 2026-08-17: the day's coverage was a
+        # contiguous alphabetical prefix, universe ranks 1-692 with a single gap inside it,
+        # and a rolling 3-day window held 691/2,234 distinct symbols.
+        #
+        # Sorting by each symbol's own last-fetched date (never-fetched sorts first, symbol
+        # breaks ties so the order stays deterministic) makes the shortfall rotate instead of
+        # falling on the same names, which is also what lets the rolling-window coverage check
+        # in dataQualityChecks.ts reach 100% -- under alphabetical order it was capped at
+        # 1,980/2,234 = 88.6% by construction, no matter how healthy the endpoint was.
+        cur.execute("SELECT symbol, MAX(date) AS last_date FROM trendlyne_price_analysis GROUP BY symbol")
+        last_fetched = {r[0]: (r[1] or "") for r in cur.fetchall()}
+        rows.sort(key=lambda row: (last_fetched.get(row[0], ""), row[0]))
     return rows
 
 
