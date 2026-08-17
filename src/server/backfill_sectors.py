@@ -23,7 +23,8 @@ MISSING = ('', 'Unknown', 'OTHER', 'NA', 'NaN')
 def _has_column(conn: ConnWrapper, table: str, col: str) -> bool:
     if use_postgres():
         rows = conn.execute(
-            "SELECT column_name FROM information_schema.columns WHERE table_name = ?",
+            "SELECT column_name FROM information_schema.columns "
+            "WHERE table_name = ? AND table_schema = current_schema()",
             (table,),
         ).fetchall()
         return any(r[0] == col for r in rows)

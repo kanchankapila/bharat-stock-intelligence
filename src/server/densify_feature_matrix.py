@@ -75,7 +75,7 @@ def trading_dates(conn, since: str) -> list:
 def sparse_columns(conn, probe_date: str) -> list:
     cols = conn.execute("""
         SELECT column_name, data_type FROM information_schema.columns
-        WHERE table_name='technical_signals'
+        WHERE table_name='technical_signals' AND table_schema = current_schema()
     """).fetchall()
     total = conn.execute(
         "SELECT count(*) FROM technical_signals WHERE date::text=?", (probe_date,)).fetchone()[0]

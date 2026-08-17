@@ -240,6 +240,7 @@ def repair_news_link(conn: ConnWrapper, dry: bool) -> None:
     wrong = conn.execute("""
         SELECT data_type FROM information_schema.columns
         WHERE table_name='news_symbol_link' AND column_name='news_id'
+          AND table_schema = current_schema()
     """).fetchone()
     if wrong and wrong[0] != 'text':
         _log(f"  news_id has type {wrong[0]}, expected text -- recreating table")

@@ -1021,7 +1021,8 @@ def _table_columns(conn: ConnWrapper, table: str) -> list:
     """Engine-aware column list (replaces sqlite-only PRAGMA table_info)."""
     if use_postgres():
         rows = conn.execute(
-            "SELECT column_name FROM information_schema.columns WHERE table_name = ?",
+            "SELECT column_name FROM information_schema.columns "
+            "WHERE table_name = ? AND table_schema = current_schema()",
             (table,),
         ).fetchall()
         return [r[0] for r in rows]
