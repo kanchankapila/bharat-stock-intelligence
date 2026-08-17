@@ -1,6 +1,17 @@
 import re
 import os
 from typing import Dict, Any, List
+
+# ProsusAI/finbert is already in the HF cache (~836MB, pinned revision 4556d13). Load it from
+# there instead of round-tripping to the Hub on every process start -- that call is what emits
+# the "unauthenticated requests to the HF Hub" warning on stderr and makes every runPython()
+# invocation log as "finished successfully with warnings". These MUST be set before
+# huggingface_hub is imported (it snapshots them into constants at import time), hence up here
+# rather than in FinBERTInference.__init__. setdefault, so HF_HUB_OFFLINE=0 still allows a
+# first-ever download on a box with a cold cache.
+os.environ.setdefault("HF_HUB_OFFLINE", "1")
+os.environ.setdefault("HF_HUB_DISABLE_PROGRESS_BARS", "1")
+
 try:
     from transformers import pipeline
 except ImportError:

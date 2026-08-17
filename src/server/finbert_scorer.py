@@ -20,6 +20,11 @@ import math
 
 from db_compat import connect, use_postgres, ConnWrapper
 
+# Same reason as nlp_engine.py's copy: load from the local HF cache, don't call the Hub.
+# Must precede the transformers import inside load_model().
+os.environ.setdefault("HF_HUB_OFFLINE", "1")
+os.environ.setdefault("HF_HUB_DISABLE_PROGRESS_BARS", "1")
+
 MODEL_NAME = "ProsusAI/finbert"
 BATCH_SIZE = 16
 MAX_LENGTH = 512   # FinBERT max tokens
