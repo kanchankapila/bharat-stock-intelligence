@@ -80,7 +80,13 @@ export const JOB_REGISTRY: JobScheduleEntry[] = [
   { jobName: 'quant-scoring', label: 'Quant Score Engine', cronPattern: '30 17 * * 1-5', graceMinutes: 45, critical: true },
   { jobName: 'signal-outcomes', label: 'Signal Outcome Tracker', cronPattern: '30 3 * * 1-5', graceMinutes: 45, critical: true },
   { jobName: 'news-sentiment', label: 'News Sentiment Refresh', everyMs: 15 * 60 * 1000, graceMinutes: 45, critical: true },
-  { jobName: 'trendlyne-intraday', label: 'Trendlyne Intraday Scan', everyMs: 15 * 60 * 1000, graceMinutes: 45, critical: false },
+  // Registered with `every: 15min` (24/7) but gated to market hours at runtime, where it returns
+  // { skipped: true } — same shape as its intraday-fetcher / market-regime-refresh /
+  // live-screener-collect siblings below, so it takes the identical deadline patterns. Needed as
+  // of the everyMs fix in jobHeartbeat.ts: until then this entry could never report late at all,
+  // so the absence of deadlines here was invisible rather than correct.
+  { jobName: 'trendlyne-intraday', label: 'Trendlyne Intraday Scan', everyMs: 15 * 60 * 1000, graceMinutes: 45, critical: false,
+    lateDeadlineCronPatterns: ['45 3 * * 1-5', '*/15 4-9 * * 1-5', '0 10 * * 1-5'] },
   { jobName: 'intraday-fetcher', label: 'Intraday Bar Fetcher', cronPattern: '*/15 3-10 * * 1-5', graceMinutes: 45, critical: false,
     lateDeadlineCronPatterns: ['45 3 * * 1-5', '*/15 4-9 * * 1-5', '0 10 * * 1-5'] },
   // 2026-08-13: gdeltService.ts existed with a working fetcher/parser but was never scheduled
@@ -98,7 +104,15 @@ export const JOB_REGISTRY: JobScheduleEntry[] = [
     lateDeadlineCronPatterns: ['45 3 * * 1-5', '*/15 4-9 * * 1-5', '0 10 * * 1-5'] },
   { jobName: 'closed-day-early-batch', label: 'Closed-Day Early Batch (holiday pipeline)', cronPattern: '40 1 * * 1-5', graceMinutes: 60, critical: false },
   { jobName: 'dl-retrain-emergency', label: 'DL Emergency Retrain (drift-triggered)', graceMinutes: 0, critical: false },
-  { jobName: 'confluence-compute', label: 'Confluence Engine', everyMs: 30 * 60 * 1000, graceMinutes: 45, critical: true },
+  // everyMs is its real cadence (30 min, 24/7) and stays the mirror of the registration, but the
+  // job only does WORK inside isConfluenceComputeWindow() -- IST hours 6-7 and 17-23 -- and now
+  // returns { skipped: true } outside it rather than faking a success. Without these deadlines the
+  // raw 30-min cadence would flag this critical job 'late' through every skip window (~9h a day),
+  // which is the phantom-alert failure mode the mc-screener-sync/quant-eod-sync grace bumps above
+  // were written for. Patterns are the window's real 30-min slots in UTC (IST minus 5:30):
+  // IST 06:00-07:30 -> UTC 00:30-02:00, IST 17:00-23:30 -> UTC 11:30-18:00.
+  { jobName: 'confluence-compute', label: 'Confluence Engine', everyMs: 30 * 60 * 1000, graceMinutes: 45, critical: true,
+    lateDeadlineCronPatterns: ['30 0 * * *', '0,30 1 * * *', '0 2 * * *', '30 11 * * *', '*/30 12-17 * * *', '0 18 * * *'] },
   { jobName: 'confluence-outcomes', label: 'Confluence Outcomes', cronPattern: '0 18 * * 1-5', graceMinutes: 60, critical: false },
   { jobName: 'agent-data-scientist', label: 'Agent: Data Scientist', cronPattern: '30 1 * * 1-5', graceMinutes: 60, critical: false },
   { jobName: 'agent-strategist', label: 'Agent: Strategist', cronPattern: '20 3 * * 1-5', graceMinutes: 60, critical: false },

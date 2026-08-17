@@ -179,10 +179,17 @@ export async function getLateJobs(now: Date = new Date()): Promise<Array<{
         if (now.getTime() < deadline) continue; // not late yet
         if ((lastSuccess ?? 0) >= expectedAt.getTime()) continue; // already succeeded for this occurrence
       } else if (entry.everyMs) {
-        const boundary = Math.floor(now.getTime() / entry.everyMs) * entry.everyMs;
+        // Anchor on the most recent boundary whose grace has ALREADY expired, not the current
+        // one. Anchoring on the current boundary made this branch VACUOUS whenever graceMinutes
+        // exceeded the cadence: `now - boundary` is by construction < everyMs, so a 45-minute
+        // grace against a 15- or 30-minute cadence put the deadline permanently in the future
+        // and `now < deadline` short-circuited on every call. Measured 2026-08-17: all three
+        // everyMs entries were in that state, and a heartbeat seeded 7 MONTHS stale still
+        // reported late=false for news-sentiment (critical) and trendlyne-intraday.
+        const boundary = Math.floor(
+          (now.getTime() - entry.graceMinutes * 60_000) / entry.everyMs,
+        ) * entry.everyMs;
         expectedAt = new Date(boundary);
-        const deadline = expectedAt.getTime() + entry.graceMinutes * 60_000;
-        if (now.getTime() < deadline) continue; // not late yet
         if ((lastSuccess ?? 0) >= expectedAt.getTime()) continue; // already succeeded for this occurrence
       } else {
         continue; // event-driven, no schedule to be late against

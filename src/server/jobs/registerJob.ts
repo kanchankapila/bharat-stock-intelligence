@@ -234,6 +234,11 @@ export async function registerRepeatableJob(
 
   worker.on('completed', (_job, result) => {
     console.log(`[QUEUE] ${cfg.monitorName} completed`);
+    // A skip is not a success: stamping one erases the day's real failures. The four jobs fixed
+    // for this in 2026-08-12 each hand-rolled this guard in queues.ts's own completed handlers;
+    // every job routed through THIS helper was still missing it. Skip paths return
+    // { skipped: true } and must leave the heartbeat (and onCompleted's result logging) alone.
+    if ((result as { skipped?: boolean } | null | undefined)?.skipped) return;
     monitor(cfg.monitorName, 'success');
     cfg.onCompleted?.(result);
   });

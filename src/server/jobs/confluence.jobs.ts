@@ -53,18 +53,24 @@ export function isConfluenceComputeWindow(now = new Date()): boolean {
   return (hour >= 17 && hour <= 23) || hour === 6 || hour === 7;
 }
 
-async function processConfluenceCompute(_job: Job): Promise<{ computed: number; elite: number; strong: number }> {
+async function processConfluenceCompute(_job: Job): Promise<{ computed: number; elite: number; strong: number; skipped?: boolean }> {
   // Positional signal (whole-universe, heavy). Skip during market hours so it doesn't compete with
   // the intraday pipeline for CPU/DB — its consumers (positional dashboards + the post-close
   // unified_ranker) don't need intraday freshness. The pre-open compute carries through the session
-  // and the 30-min cadence resumes after close. Returning normally keeps the heartbeat fresh.
+  // and the 30-min cadence resumes after close.
+  //
+  // These return `skipped: true` so registerJob.ts declines to stamp a heartbeat. They previously
+  // returned a bare zero-result to "keep the heartbeat fresh", which meant a genuine failure inside
+  // the work window was overwritten by the next out-of-window skip within 30 minutes — on a job
+  // marked critical. Lateness across the (long) skip window is handled by this job's
+  // lateDeadlineCronPatterns in jobRegistry.ts, not by faking a success here.
   if (await isMarketOpen()) {
     console.log('[QUEUE] confluence-compute skipped — market hours (positional signal runs off-hours)');
-    return { computed: 0, elite: 0, strong: 0 };
+    return { computed: 0, elite: 0, strong: 0, skipped: true };
   }
   if (!isConfluenceComputeWindow()) {
     console.log('[QUEUE] confluence-compute skipped — outside the evening-landing/pre-open window (inputs are static)');
-    return { computed: 0, elite: 0, strong: 0 };
+    return { computed: 0, elite: 0, strong: 0, skipped: true };
   }
   const { computeConfluenceSignals, runMLProbabilityOverlay } = await import('../confluenceEngine');
   const result = await computeConfluenceSignals();
@@ -78,6 +84,8 @@ async function processConfluenceOutcomes(job: Job): Promise<void> {
   // 2026-08-06: skip entirely on a trading holiday, no morning replacement -- confluence
   // outcomes/reliability are graded against price action that didn't happen (exchange never
   // opened), and confluence_ml_engine --train would just refit on an unchanged dataset.
+  // Deliberately does NOT return { skipped: true } (unlike processConfluenceCompute above):
+  // getLateJobs() is not holiday-aware, so see HOLIDAY_SKIP_NOTE at the foot of this file.
   if (await shouldSkipOnTradingHoliday(job)) {
     console.log('[QUEUE] confluence-outcomes skipped — trading holiday, nothing new to grade');
     return;
@@ -139,3 +147,24 @@ export async function registerConfluenceJobs() {
 
   return { compute, outcomes };
 }
+
+/**
+ * HOLIDAY_SKIP_NOTE — why processConfluenceOutcomes does NOT return { skipped: true }.
+ *
+ * registerJob.ts now declines to stamp a heartbeat for any processor returning that marker, so a
+ * skip can no longer erase a real failure. processConfluenceCompute uses it because it no-ops for
+ * ~9 hours EVERY day: a genuine failure inside its work window was being overwritten by the next
+ * out-of-window skip within 30 minutes, on a job marked critical.
+ *
+ * A trading-holiday skip is a different risk profile and must NOT be converted piecemeal.
+ * getLateJobs() has no holiday awareness, so declining the heartbeat on the ~10 NSE holidays a
+ * year would flag this job — and its identically-shaped siblings processStockScoring,
+ * processMcScreenerSync, processEtnowScreenerSync, processEtMarketstatsSync,
+ * processTrendlyneScreenerSync, processScreenerPerf, several of them critical — as 'late' on
+ * exactly the days they are correctly idle. That is the phantom-alert class recurring-bugs.md
+ * records 6 times, so it would trade one recurring bug for another.
+ *
+ * The correct order is: make getLateJobs() holiday-aware, THEN convert all of these together.
+ * Until then they stamp success on a holiday skip, which is a known, bounded inaccuracy — the
+ * erasure window is one holiday landing directly after a failed run, not 30 minutes every day.
+ */
