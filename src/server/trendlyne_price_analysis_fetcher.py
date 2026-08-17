@@ -146,9 +146,9 @@ def _fetch(tlid: str, session: requests.Session) -> dict | None:
     try:
         r = retry_get(session, url, params={"format": "json"}, timeout=15)
         data = r.json()
-        if data.get("head", {}).get("status") != "0":
+        if (data.get("head") or {}).get("status") != "0":
             return None
-        return data.get("body", {})
+        return data.get("body") or {}
     except Exception as e:
         print(f"  [{tlid}] price-analysis error: {e}")
         return None

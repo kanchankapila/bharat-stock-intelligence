@@ -165,7 +165,7 @@ def fetch_adv_tech(tlid: str, session: requests.Session) -> dict | None:
     try:
         r = retry_get(session, url, params={"format": "json"}, timeout=15)
         data = r.json()
-        body = data.get("body", {})
+        body = data.get("body") or {}
         params = body.get("parameters")
         if params is None:
             # Some responses wrap differently â€” try top-level body as params
@@ -207,12 +207,12 @@ def extract_features(params: dict) -> dict:
     feat: dict = {}
 
     # â”€â”€ MA signals â”€â”€
-    ma = params.get("ma_signal", {})
+    ma = params.get("ma_signal") or {}
     feat["ma_bull"] = int(ma.get("bullish", 0))
     feat["ma_bear"] = int(ma.get("bearish", 0))
 
     # â”€â”€ Oscillator signals â”€â”€
-    osc = params.get("oscillator_signal", {})
+    osc = params.get("oscillator_signal") or {}
     feat["osc_bull"] = int(osc.get("bullish", 0))
     feat["osc_bear"] = int(osc.get("bearish", 0))
 
@@ -232,7 +232,7 @@ def extract_features(params: dict) -> dict:
     feat["current_price"]  = _safe_float(params.get("current_price"))
 
     # â”€â”€ Pivot points â”€â”€
-    pivot_lvl = params.get("pivot_level", {})
+    pivot_lvl = params.get("pivot_level") or {}
     feat["pivot"] = _fval(pivot_lvl, "pivot_point")
     feat["r1"]    = _fval(pivot_lvl, "R1")
     feat["s1"]    = _fval(pivot_lvl, "S1")
@@ -257,7 +257,7 @@ def extract_features(params: dict) -> dict:
         "3 Year":   "ret_3y",
         "5 Year":   "ret_5y",
     }
-    for entry in params.get("price_analysis", []):
+    for entry in params.get("price_analysis") or []:
         col = ret_map.get(entry.get("name"))
         if col:
             feat[col] = _safe_float(entry.get("changePercent"))
@@ -270,7 +270,7 @@ def extract_features(params: dict) -> dict:
         "1 Month": ("vol_avg_1m",    "delivery_pct_1m"),
         "6 Month": ("delivery_pct_6m", None),          # only delivery_pct for 6m
     }
-    va = params.get("volume_analysis", {})
+    va = params.get("volume_analysis") or {}
     for row in va.get("tableData", []):
         if not isinstance(row, (list, tuple)) or len(row) < 3:
             continue
@@ -295,7 +295,7 @@ def extract_features(params: dict) -> dict:
         "1 Year":  "beta_1y",
         "3 Year":  "beta_3y",
     }
-    for entry in params.get("beta_analysis", []):
+    for entry in params.get("beta_analysis") or []:
         col = beta_map.get(entry.get("label"))
         if col:
             feat[col] = _safe_float(entry.get("data"))
