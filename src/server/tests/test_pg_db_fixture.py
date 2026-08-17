@@ -78,3 +78,46 @@ def test_production_code_reaches_the_same_schema_without_being_told(pg_db):
         from sqlalchemy import text
 
         assert c.execute(text("SELECT current_schema()")).scalar().startswith("pytest_")
+
+
+class TestUnreachablePostgresCannotExitZero:
+    """A run that skipped tests for want of a database must not report success.
+
+    The skip itself is right (a laptop with no container should say so rather than explode with
+    connection errors), but a printed WARNING is not a verdict: CI, git hooks and
+    verify-gate.mjs read the EXIT CODE. Before this, `pytest` skipped 90 files and exited 0 --
+    the "green while protecting nothing" failure recurring-bugs.md records over and over,
+    reintroduced by the mechanism meant to guard against it. vitest already fails here
+    (vitest.globalSetup.ts throws when it cannot reach Postgres); this pins the same answer for
+    pytest so the two runners cannot drift apart again.
+    """
+
+    def _finish(self, unavailable, exitstatus):
+        """Drive conftest's real hook, not a reimplementation of it."""
+        import conftest
+
+        class _Session:
+            pass
+
+        session = _Session()
+        session.exitstatus = exitstatus
+        original = set(conftest._PG_UNAVAILABLE)
+        conftest._PG_UNAVAILABLE.clear()
+        conftest._PG_UNAVAILABLE.update(unavailable)
+        try:
+            conftest.pytest_sessionfinish(session, exitstatus)
+            return session.exitstatus
+        finally:
+            conftest._PG_UNAVAILABLE.clear()
+            conftest._PG_UNAVAILABLE.update(original)
+
+    def test_skipped_for_unreachable_postgres_turns_a_green_run_red(self):
+        assert self._finish({"src/server/tests/test_anything.py"}, 0) == 1
+
+    def test_a_clean_run_is_left_alone(self):
+        assert self._finish(set(), 0) == 0
+
+    def test_an_already_failing_run_keeps_its_own_exit_code(self):
+        """Don't overwrite a real failure's status with our own -- 2 (interrupted), 3
+        (internal error) and 4 (usage error) all mean something specific to a CI reader."""
+        assert self._finish({"src/server/tests/test_anything.py"}, 3) == 3

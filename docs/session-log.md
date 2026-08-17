@@ -3973,3 +3973,35 @@ temp `.sqlite` file plus `DATABASE_URL` env injection and convert via `pg_db`'s 
 rewrite; 2 are deliberate (`test_mc_earnings_fetcher_stale_quarter.py` compares real SQLite `GLOB`
 semantics, `test_sql_translate.py` tests the translator's SQLite path) and go away with Phase 3.
 Only then can `use_postgres()`'s pytest branch — the last dialect fork in Python — be deleted.
+
+### 2026-08-17 (cont.) — a skipped pytest run exited 0, and vitest had already got it right
+
+`pg_memory_conn()` calls `pytest.skip` when Postgres is unreachable, which is correct for a
+laptop with no container — but the run then printed `WARNING: N test files were SKIPPED` and
+**exited 0**. CI, git hooks and `verify-gate.mjs` read the exit code, not the console, so the
+guard written specifically against "green while protecting nothing" was itself only advisory.
+
+**The tell was an asymmetry nobody had compared.** `vitest.globalSetup.ts` already THROWS when it
+cannot reach Postgres, so the TypeScript half could not silently degrade and the Python half
+could — same repo, same hard dependency, two different answers.
+
+Fixed in `pytest_sessionfinish`: individual tests still *skip* (the output stays readable), but
+the run's verdict flips to 1. Verified both directions live — `PGTEST_PORT=59999` gives exit 1
+with the message, a normal run gives exit 0. Pinned by `TestUnreachablePostgresCannotExitZero`
+(3 tests in `test_pg_db_fixture.py`), which drives conftest's real hook rather than
+reimplementing it, and includes the control that an already-failing run keeps its own exit code
+(2/3/4 each mean something specific to a CI reader). Negative-controlled: removing the
+`exitstatus == 0` guard fails exactly that control test.
+
+Also swept the stale pointers the shim's deletion left behind — `conn_is_postgres`'s docstring
+still explained "the decommission shim below", and the `postgres` marker still promised it
+"never breaks a laptop", which is now the opposite of true.
+
+**Full suite: 2,029 passed / 230 skipped / 0 failed, exit 0.**
+
+**SQL/SQLite status after this, measured not recalled:** `:memory:` fixtures 0 · file-based
+`sqlite3.connect` 5 test files (+2 permanent: `migrate_sqlite_to_pg.py`, `explore_mc_tl.py`) ·
+`better-sqlite3` in `.ts` 0 real imports (3 comment mentions) · **Phase 3 not started: 43
+`if use_postgres()` branches across 27 production `.py` files**, each carrying a dead SQLite
+arm (7 of them still containing `INSERT OR REPLACE`) · Phase 4 `database.sqlite` 3.49 GB, still
+present, owner says rename-don't-delete.

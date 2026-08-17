@@ -16,8 +16,9 @@ def pytest_configure(config):
     config.addinivalue_line(
         "markers",
         "postgres: needs a real Postgres instance (uses the `pg_schema` fixture's throwaway "
-        "schema). Auto-skipped when Postgres is unreachable, so it never breaks a laptop or "
-        "a CI lane without the service container.",
+        "schema). Skipped INDIVIDUALLY when Postgres is unreachable so the output stays "
+        "readable, but the RUN then exits non-zero -- see pytest_sessionfinish. A skipped "
+        "test is not a passed one.",
     )
 
 
@@ -46,18 +47,17 @@ from pg_test_support import (  # noqa: E402
 
 
 def conn_is_postgres(conn) -> bool:
-    """True when `conn` is Postgres-backed, whatever sqlite3.connect appeared to return.
+    """True when `conn` is Postgres-backed.
 
     Several fetchers dialect-branch on `use_postgres()`, and their tests pin it to False to
-    exercise the SQLite SQL. Under the decommission shim below, `sqlite3.connect(':memory:')`
-    hands back a Postgres ConnWrapper -- so a hardcoded False builds SQLite-only SQL
-    (`INSERT OR REPLACE`, `date(x, '-1 day')`) and fires it at Postgres. Keying the branch on
-    the CONNECTION instead keeps one test correct under both run modes. The shim is
-    unconditional as of 2026-08-16, but only ':memory:' is redirected, so both modes still
-    exist within a single run.
+    exercise the SQLite SQL -- but a `pg_memory_conn()` fixture hands back a Postgres
+    ConnWrapper, so a hardcoded False would build SQLite-only SQL (`INSERT OR REPLACE`,
+    `date(x, '-1 day')`) and fire it at Postgres. Keying the branch on the CONNECTION keeps
+    one test correct whichever fixture built it.
 
-    Do not replace this with an env-var read: the shim decides per-connection, not per-process
-    (only ':memory:' is redirected; a deliberate temp-file sqlite fixture stays SQLite).
+    Do not replace this with an env-var read: the answer is per-connection, not per-process --
+    five test files still use a deliberate temp-FILE sqlite fixture (see
+    docs/SQLITE_DECOMMISSION_PLAN.md's "What is left").
     """
     return type(conn).__name__ == "ConnWrapper"
 
@@ -264,10 +264,30 @@ def _pg_memory_lifecycle(request):
 def pytest_terminal_summary(terminalreporter, exitstatus, config):
     if _PG_UNAVAILABLE:
         terminalreporter.write_line(
-            f"[sqlite-decommission] WARNING: {len(_PG_UNAVAILABLE)} test files were SKIPPED "
-            f"because Postgres was unreachable. This run did not test them — a green result here "
-            f"means less than it looks. Start the container or set PGTEST_*."
+            f"[sqlite-decommission] FAILING THIS RUN: {len(_PG_UNAVAILABLE)} test files were "
+            f"SKIPPED because Postgres was unreachable, so this run did not test them. "
+            f"Start the container or set PGTEST_*."
         )
+
+
+def pytest_sessionfinish(session, exitstatus):
+    """Refuse to exit 0 when tests were skipped because Postgres was unreachable.
+
+    A printed WARNING is not enough. CI, git hooks, and `verify-gate.mjs` read the EXIT CODE,
+    so a run that skipped 90 files for want of a database still reported success -- the exact
+    "green while protecting nothing" failure this repo keeps paying for, reintroduced by the
+    very mechanism meant to guard against it.
+
+    vitest already gets this right: `vitest.globalSetup.ts` THROWS when it cannot reach
+    Postgres, so the unit project cannot silently degrade. pytest was the odd one out, and the
+    asymmetry was the bug -- same repo, same hard requirement, two different answers.
+
+    Deliberately keyed on `_PG_UNAVAILABLE` (populated only when a test actually asked for a
+    connection and could not get one) rather than probing at session start: a run of tests that
+    never touch a database should still pass on a machine with no container.
+    """
+    if _PG_UNAVAILABLE and exitstatus == 0:
+        session.exitstatus = 1
 
 
 def pytest_collection_modifyitems(config, items):

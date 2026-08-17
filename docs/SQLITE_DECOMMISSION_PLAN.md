@@ -16,6 +16,13 @@
 > | Phase 3 Python (`sql_translate.py`'s pytest branch) | **6 files block it** — see "What is left" below |
 > | Phase 4 (`database.sqlite`) | blocked on Phase 3. **Rename aside, do not delete** (owner's call) |
 >
+> **A skipped run now exits non-zero (2026-08-17).** `pg_memory_conn()` skips when Postgres is
+> unreachable, which is right for a laptop — but it also printed a WARNING and **exited 0**, so
+> the guard against "green while protecting nothing" was itself only advisory to anything
+> reading the exit code. `pytest_sessionfinish` now fails the run. vitest already did this
+> (`vitest.globalSetup.ts` throws); the asymmetry was the bug. Pinned by
+> `TestUnreachablePostgresCannotExitZero`.
+>
 > Verified 2026-08-17: `tsc --noEmit` clean · `pytest` **2,026 passed / 230 skipped / 0 failed**
 > (2m57s, down from 4m05s) — bit-identical pass/skip counts to the pre-conversion baseline ·
 > `scripts/check_recurring_bugs.py` clean. `vitest run` has 1 unrelated failure from a
