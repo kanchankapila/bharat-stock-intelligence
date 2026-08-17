@@ -204,8 +204,8 @@
     {
       "id": 30,
       "type": "stat",
-      "title": "technical_signals columns 100% NULL",
-      "description": "A fresh table is not a delivered feature. These columns are fed to every model as a hardcoded default. Measured on the last COMPLETED day, so enrichment columns that lag the scan by one day are not counted as dead.",
+      "title": "technical_signals columns NEVER written",
+      "description": "Counts columns with zero non-NULL values in ALL HISTORY — not merely NULL today. Judging on a single day is a false-positive generator: on 2026-08-17 that reading was 31 columns, 20 of which were a brand-new mc_* enrichment first populated that very day, and others were the documented one-day enrichment lag. Only 'never written in any history' is evidence of a dead writer.",
       "gridPos": { "h": 4, "w": 6, "x": 0, "y": 28 },
       "datasource": { "type": "grafana-postgresql-datasource", "uid": "${DS_POSTGRES}" },
       "fieldConfig": {
@@ -220,7 +220,7 @@
           "refId": "A",
           "format": "table",
           "rawQuery": true,
-          "rawSql": "SELECT count(*) AS \"all-NULL columns\" FROM (\n  SELECT e.k\n  FROM technical_signals t, LATERAL jsonb_each_text(to_jsonb(t)) e(k, v)\n  WHERE t.date = (SELECT max(date) FROM technical_signals\n                  WHERE date < (SELECT max(date) FROM technical_signals))\n  GROUP BY 1\n  HAVING count(*) FILTER (WHERE e.v IS NOT NULL) = 0\n) s",
+          "rawSql": "SELECT count(*) AS \"never written\"\nFROM pg_stats\nWHERE schemaname = 'public' AND tablename = 'technical_signals' AND null_frac >= 1.0",
           "datasource": { "type": "grafana-postgresql-datasource", "uid": "${DS_POSTGRES}" }
         }
       ]
@@ -276,7 +276,7 @@
           "refId": "A",
           "format": "table",
           "rawQuery": true,
-          "rawSql": "SELECT e.k AS \"Column\",\n       count(*) FILTER (WHERE e.v IS NOT NULL) AS \"Populated rows\",\n       count(*) AS \"Total rows\",\n       round(100.0 * count(*) FILTER (WHERE e.v IS NOT NULL) / count(*), 1) AS \"Populated %\"\nFROM technical_signals t, LATERAL jsonb_each_text(to_jsonb(t)) e(k, v)\nWHERE t.date = (SELECT max(date) FROM technical_signals\n                WHERE date < (SELECT max(date) FROM technical_signals))\nGROUP BY 1\nORDER BY 4, 1",
+          "rawSql": "WITH lastday AS (\n  SELECT e.k,\n         count(*) AS n,\n         count(*) FILTER (WHERE e.v IS NOT NULL) AS pop\n  FROM technical_signals t, LATERAL jsonb_each_text(to_jsonb(t)) e(k, v)\n  WHERE t.date = (SELECT max(date) FROM technical_signals\n                  WHERE date < (SELECT max(date) FROM technical_signals))\n  GROUP BY 1\n)\nSELECT d.k AS \"Column\",\n       round(100.0 * d.pop / d.n, 1) AS \"Populated % (last completed day)\",\n       round((100.0 * (1 - s.null_frac))::numeric, 1) AS \"Populated % (whole table)\",\n       CASE WHEN s.null_frac >= 1.0 THEN 'NEVER WRITTEN'\n            WHEN d.pop = 0 THEN 'lagging / producer did not run that day'\n            ELSE 'ok' END AS \"Verdict\"\nFROM lastday d\nLEFT JOIN pg_stats s\n  ON s.schemaname = 'public' AND s.tablename = 'technical_signals' AND s.attname = d.k\nORDER BY s.null_frac DESC NULLS LAST, 2, 1",
           "datasource": { "type": "grafana-postgresql-datasource", "uid": "${DS_POSTGRES}" }
         }
       ]
