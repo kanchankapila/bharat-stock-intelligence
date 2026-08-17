@@ -8,7 +8,13 @@ Finds config maximising Sharpe ratio subject to constraints:
 Writes optimal params to app_settings:
   optimal_min_score, optimal_horizon_days, optimal_stop_loss_pct, optimal_max_positions
 
-Only updates app_settings if new Sharpe >= current x 1.05.
+Promotion (2026-08-17 redesign, see docs/audit-findings.md AF-29): the holdout window is split
+into up to N_HOLDOUT_FOLDS_MAX walk-forward folds; both the challenger and the current live
+champion config are re-scored on each fold (apples-to-apples, never a stale stored number), and
+app_settings only updates if the challenger clears UPDATE_THRESHOLD (1.05x) on a MAJORITY of
+folds with enough trades to vote. A single fixed config's Sharpe was measured to swing 691.8% of
+its mean across 3 non-overlapping windows of the available history -- one point estimate cannot
+tell a real improvement from window luck.
 Uses the most recent `--window` days of data (default 365).
 
 Run:  python backtest_optimizer.py
@@ -64,6 +70,139 @@ def _get_current_sharpe(conn: ConnWrapper) -> float:
         "SELECT value FROM app_settings WHERE key='optimal_sharpe'"
     ).fetchone()
     return float(row[0]) if row else 0.0
+
+
+def _get_current_config(conn: ConnWrapper) -> Optional[dict]:
+    """Reads the currently-live champion config from app_settings, or None if nothing has ever
+    been promoted (the actual state of this gate, confirmed live 2026-08-17: app_settings has
+    never held an optimal_sharpe row at all -- see docs/audit-findings.md AF-29)."""
+    keys = ('optimal_min_score', 'optimal_horizon_days', 'optimal_stop_loss_pct', 'optimal_max_positions')
+    values = {}
+    for key in keys:
+        row = conn.execute("SELECT value FROM app_settings WHERE key=?", (key,)).fetchone()
+        if row is None:
+            return None
+        values[key] = row[0]
+    return {
+        'min_score':     int(values['optimal_min_score']),
+        'horizon_days':  int(values['optimal_horizon_days']),
+        'stop_loss_pct': float(values['optimal_stop_loss_pct']),
+        'max_positions': int(values['optimal_max_positions']),
+    }
+
+
+# ── Multi-fold promotion (2026-08-17 redesign) ──────────────────────────────────────
+# Measured live (docs/audit-findings.md AF-29): a SINGLE fixed config's holdout Sharpe swung
+# 691.8% of its mean across just 3 non-overlapping 45-day slices of the available history,
+# sign-flipping between them -- a single point estimate cannot tell a genuine improvement from
+# window luck. Compounding that, the old should_update() compared a FRESH holdout Sharpe
+# against a STORED current_sharpe from a different, older run -- the two numbers were never
+# measured on the same data, a second, separate confound on top of the noise itself.
+#
+# Both are fixed the way regime_detector.py's train_hmm() fixes single-EM-restart noise: take
+# several independent looks and require them to agree, with the champion and challenger always
+# scored on the IDENTICAL window so the comparison is apples-to-apples. The difference from the
+# HMM case is the noise source -- there it's EM's local optimum (fixed by trying several random
+# seeds and keeping the best by TRAIN objective); here it's which slice of the market the
+# holdout happens to land on (fixed by splitting the holdout into several folds and requiring a
+# MAJORITY, not picking the best -- there is no "best" fold to cherry-pick from without gaming
+# the gate the same way selecting EM restarts by holdout score would).
+N_HOLDOUT_FOLDS_MAX = 5
+MIN_FOLD_DAYS        = 15   # a fold shorter than this can't hold a meaningful signal sample
+MIN_FOLD_TRADES      = 5    # a fold with fewer trades than this doesn't cast a vote either way
+
+
+def _split_holdout_folds(holdout_start: str, holdout_end: str,
+                          max_folds: int = N_HOLDOUT_FOLDS_MAX,
+                          min_fold_days: int = MIN_FOLD_DAYS) -> list:
+    """Walk-forward split of the holdout window into up to max_folds contiguous,
+    non-overlapping sub-windows, each at least min_fold_days long. Falls back to a single fold
+    spanning the whole holdout window when it is too short to split -- same "degrade gracefully
+    as history accumulates" pattern _effective_window_days already uses above. Pure function,
+    directly unit-testable.
+    """
+    start_d = datetime.date.fromisoformat(holdout_start)
+    end_d   = datetime.date.fromisoformat(holdout_end)
+    total_days = (end_d - start_d).days
+    if total_days < min_fold_days:
+        return [(holdout_start, holdout_end)]
+
+    n_folds   = max(1, min(max_folds, total_days // min_fold_days))
+    fold_days = total_days // n_folds
+    folds = []
+    cursor = start_d
+    for i in range(n_folds):
+        fold_end = end_d if i == n_folds - 1 else cursor + datetime.timedelta(days=fold_days)
+        folds.append((cursor.isoformat(), fold_end.isoformat()))
+        cursor = fold_end
+    return folds
+
+
+def should_update_multi_fold(fold_results: list, min_fold_trades: int = MIN_FOLD_TRADES) -> tuple:
+    """Pure decision function -- given per-fold stats already measured (challenger and, where a
+    champion exists, champion, both on the SAME window), decide whether a MAJORITY of folds
+    with enough trades favour the challenger. No counted folds -> do not promote (fail closed,
+    same philosophy as find_best_config returning None when nothing clears constraints).
+
+    Each element of fold_results: {'fold': (start, end), 'challenger_sharpe': float|None,
+    'challenger_trades': int, 'champion_sharpe': float|None, 'champion_trades': int}.
+    champion_sharpe is None for the bootstrap case (nothing promoted yet) -- that fold votes
+    for the challenger under should_update()'s existing current<=0 rule (positive Sharpe wins),
+    mirroring the single-window bootstrap behaviour this replaces.
+
+    Returns (promote: bool, votes: list) -- votes annotates each fold with whether it was
+    counted and, if so, which way it voted, for the caller to log.
+    """
+    votes = []
+    for fr in fold_results:
+        has_champion = fr.get('champion_sharpe') is not None
+        c_trades = fr.get('challenger_trades', 0)
+        m_trades = fr.get('champion_trades', 0)
+        enough = c_trades >= min_fold_trades and (not has_champion or m_trades >= min_fold_trades)
+        if not enough or fr.get('challenger_sharpe') is None:
+            votes.append({**fr, 'counted': False})
+            continue
+        champion_sharpe = fr['champion_sharpe'] if has_champion else 0.0
+        wins = should_update(champion_sharpe, fr['challenger_sharpe'])
+        votes.append({**fr, 'counted': True, 'challenger_wins': wins})
+
+    counted = [v for v in votes if v['counted']]
+    if not counted:
+        return False, votes
+    win_count = sum(1 for v in counted if v['challenger_wins'])
+    return win_count > len(counted) / 2, votes
+
+
+def _run_config_on_window(bt, cfg: dict, start: str, end: str, run_name: str) -> Optional[dict]:
+    """One Backtester.run() call for a given config/window -- used identically for the
+    challenger and the champion so every fold comparison is scored on the same data."""
+    return bt.run(
+        start=start, end=end,
+        horizon_days=cfg['horizon_days'], min_score=cfg['min_score'],
+        max_positions=cfg['max_positions'], stop_loss_pct=cfg['stop_loss_pct'],
+        run_name=run_name,
+    )
+
+
+def _score_folds(bt, challenger_cfg: dict, champion_cfg: Optional[dict], folds: list,
+                  run_prefix: str = 'fold') -> list:
+    """Runs the challenger (and, if one exists, the champion) on each fold. Not unit-tested
+    directly -- it only orchestrates Backtester calls, matching run_grid_search's own existing
+    precedent of staying out of the pure-function unit tests; should_update_multi_fold is the
+    tested decision logic this feeds."""
+    fold_results = []
+    for i, (f_start, f_end) in enumerate(folds):
+        c_stats = _run_config_on_window(bt, challenger_cfg, f_start, f_end, f"{run_prefix}_{i}_challenger")
+        m_stats = (_run_config_on_window(bt, champion_cfg, f_start, f_end, f"{run_prefix}_{i}_champion")
+                   if champion_cfg is not None else None)
+        fold_results.append({
+            'fold': (f_start, f_end),
+            'challenger_sharpe': c_stats.get('sharpe_ratio') if c_stats else None,
+            'challenger_trades': c_stats.get('total_trades', 0) if c_stats else 0,
+            'champion_sharpe': m_stats.get('sharpe_ratio') if m_stats else None,
+            'champion_trades': m_stats.get('total_trades', 0) if m_stats else 0,
+        })
+    return fold_results
 
 
 def _write_optimal_params(conn: ConnWrapper, config: dict, sharpe: float):
@@ -244,21 +383,48 @@ def run_grid_search(
               "likely overfit to the train window. Not updating app_settings.")
         return best
 
-    current_sharpe = _get_current_sharpe(conn)
-    new_sharpe     = holdout_stats['sharpe_ratio']  # promotion decision uses the OUT-OF-SAMPLE sharpe
+    new_sharpe = holdout_stats['sharpe_ratio']  # stored/reported Sharpe: full aggregate holdout, unchanged
+
+    # Promotion decision: multi-fold, same-window champion/challenger comparison (see the
+    # "Multi-fold promotion" block above for why). _get_current_sharpe is now informational
+    # only -- logged for continuity, no longer the promotion input.
+    stored_sharpe = _get_current_sharpe(conn)
+    champion_cfg = _get_current_config(conn)
+    folds = _split_holdout_folds(holdout_start, holdout_end)
+    print(f"[BtOptimizer] Promotion check: {len(folds)} holdout fold(s), "
+          f"champion={'none (bootstrap)' if champion_cfg is None else champion_cfg} "
+          f"(last stored optimal_sharpe={stored_sharpe:.4f}, informational only -- the "
+          f"champion below is re-scored fresh on THIS holdout's own folds, not read from storage)")
+
+    fold_bt = Backtester()
+    try:
+        fold_results = _score_folds(fold_bt, best['config'], champion_cfg, folds)
+    finally:
+        fold_bt.close()
+    conn.execute("DELETE FROM backtesting_runs WHERE run_name LIKE 'fold_%'")
+    conn.commit()
+
+    promote, votes = should_update_multi_fold(fold_results)
+    for v in votes:
+        tag = 'SKIP (too few trades)' if not v.get('counted') else ('WIN' if v['challenger_wins'] else 'LOSS')
+        c_s = f"{v['challenger_sharpe']:.4f}" if v.get('challenger_sharpe') is not None else 'n/a'
+        m_s = f"{v['champion_sharpe']:.4f}" if v.get('champion_sharpe') is not None else 'n/a'
+        print(f"    fold {v['fold'][0]}->{v['fold'][1]}: challenger={c_s}  champion={m_s}  [{tag}]")
+    counted = sum(1 for v in votes if v.get('counted'))
+    won = sum(1 for v in votes if v.get('counted') and v.get('challenger_wins'))
 
     if dry_run:
-        print(f"[BtOptimizer] [DRY] Would update app_settings using HOLDOUT Sharpe "
-              f"(current={current_sharpe:.4f}, new={new_sharpe:.4f})")
+        print(f"[BtOptimizer] [DRY] Would {'update' if promote else 'NOT update'} app_settings "
+              f"(aggregate holdout Sharpe={new_sharpe:.4f}, won {won}/{counted} counted fold(s))")
         return best
 
-    if should_update(current_sharpe, new_sharpe):
+    if promote:
         _write_optimal_params(conn, best['config'], new_sharpe)
-        print(f"[BtOptimizer] app_settings updated. "
-              f"Sharpe {current_sharpe:.4f} -> {new_sharpe:.4f} (holdout)")
+        print(f"[BtOptimizer] app_settings updated. Aggregate holdout Sharpe={new_sharpe:.4f}, "
+              f"won {won}/{counted} counted fold(s) against the champion")
     else:
-        print(f"[BtOptimizer] No update: new holdout Sharpe {new_sharpe:.4f} < "
-              f"current {current_sharpe:.4f} x {UPDATE_THRESHOLD}")
+        print(f"[BtOptimizer] No update: challenger won only {won}/{counted} counted fold(s) "
+              f"against the champion (majority required).")
 
     return best
 
