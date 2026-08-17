@@ -1,0 +1,331 @@
+{
+  "__inputs": [
+    {
+      "name": "DS_POSTGRES",
+      "label": "Postgres",
+      "description": "The bharat_intel Postgres/TimescaleDB instance (127.0.0.1:5433)",
+      "type": "datasource",
+      "pluginId": "grafana-postgresql-datasource",
+      "pluginName": "PostgreSQL"
+    }
+  ],
+  "__requires": [
+    { "type": "grafana", "id": "grafana", "name": "Grafana", "version": "10.4.0" },
+    { "type": "datasource", "id": "grafana-postgresql-datasource", "name": "PostgreSQL", "version": "1.0.0" },
+    { "type": "panel", "id": "timeseries", "name": "Time series", "version": "" },
+    { "type": "panel", "id": "table", "name": "Table", "version": "" },
+    { "type": "panel", "id": "stat", "name": "Stat", "version": "" }
+  ],
+  "annotations": { "list": [] },
+  "editable": true,
+  "graphTooltip": 1,
+  "id": null,
+  "links": [],
+  "refresh": "1m",
+  "schemaVersion": 39,
+  "tags": ["bharat", "ops", "health"],
+  "templating": { "list": [] },
+  "time": { "from": "now-24h", "to": "now" },
+  "timepicker": {},
+  "timezone": "Asia/Kolkata",
+  "title": "Platform Health",
+  "uid": "bharat-platform-health",
+  "version": 1,
+  "weekStart": "",
+  "panels": [
+    {
+      "id": 1,
+      "type": "stat",
+      "title": "Checks failing",
+      "gridPos": { "h": 4, "w": 3, "x": 0, "y": 0 },
+      "datasource": { "type": "grafana-postgresql-datasource", "uid": "${DS_POSTGRES}" },
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }, { "color": "red", "value": 1 }] }
+        },
+        "overrides": []
+      },
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "graphMode": "none", "textMode": "auto", "colorMode": "background" },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT count(*) AS \"fail\"\nFROM (SELECT DISTINCT ON (check_id) check_id, status FROM data_quality_history ORDER BY check_id, checked_at DESC) t\nWHERE status = 'fail'",
+          "datasource": { "type": "grafana-postgresql-datasource", "uid": "${DS_POSTGRES}" }
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "type": "stat",
+      "title": "Checks warning",
+      "gridPos": { "h": 4, "w": 3, "x": 3, "y": 0 },
+      "datasource": { "type": "grafana-postgresql-datasource", "uid": "${DS_POSTGRES}" },
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }, { "color": "orange", "value": 1 }] }
+        },
+        "overrides": []
+      },
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "graphMode": "none", "textMode": "auto", "colorMode": "background" },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT count(*) AS \"warn\"\nFROM (SELECT DISTINCT ON (check_id) check_id, status FROM data_quality_history ORDER BY check_id, checked_at DESC) t\nWHERE status = 'warn'",
+          "datasource": { "type": "grafana-postgresql-datasource", "uid": "${DS_POSTGRES}" }
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "type": "stat",
+      "title": "Checks passing",
+      "gridPos": { "h": 4, "w": 3, "x": 6, "y": 0 },
+      "datasource": { "type": "grafana-postgresql-datasource", "uid": "${DS_POSTGRES}" },
+      "fieldConfig": { "defaults": { "color": { "mode": "fixed", "fixedColor": "green" } }, "overrides": [] },
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "graphMode": "none", "textMode": "auto", "colorMode": "value" },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT count(*) AS \"pass\"\nFROM (SELECT DISTINCT ON (check_id) check_id, status FROM data_quality_history ORDER BY check_id, checked_at DESC) t\nWHERE status = 'pass'",
+          "datasource": { "type": "grafana-postgresql-datasource", "uid": "${DS_POSTGRES}" }
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "type": "stat",
+      "title": "Last quality run",
+      "description": "Age of the most recent dataQualityChecks.ts sweep. If this itself goes stale, every other number on this dashboard is stale too.",
+      "gridPos": { "h": 4, "w": 4, "x": 9, "y": 0 },
+      "datasource": { "type": "grafana-postgresql-datasource", "uid": "${DS_POSTGRES}" },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }, { "color": "orange", "value": 7200 }, { "color": "red", "value": 86400 }] }
+        },
+        "overrides": []
+      },
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "graphMode": "none", "textMode": "auto", "colorMode": "value" },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT round(extract(epoch FROM now()) - max(checked_at) / 1000.0) AS \"age\" FROM data_quality_history",
+          "datasource": { "type": "grafana-postgresql-datasource", "uid": "${DS_POSTGRES}" }
+        }
+      ]
+    },
+    {
+      "id": 5,
+      "type": "stat",
+      "title": "Jobs with no success in 48h",
+      "gridPos": { "h": 4, "w": 5, "x": 13, "y": 0 },
+      "datasource": { "type": "grafana-postgresql-datasource", "uid": "${DS_POSTGRES}" },
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }, { "color": "orange", "value": 1 }, { "color": "red", "value": 5 }] }
+        },
+        "overrides": []
+      },
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "graphMode": "none", "textMode": "auto", "colorMode": "background" },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT count(*) AS \"stale jobs\"\nFROM job_heartbeat\nWHERE last_success_at IS NULL OR last_success_at < (extract(epoch FROM now()) - 172800) * 1000",
+          "datasource": { "type": "grafana-postgresql-datasource", "uid": "${DS_POSTGRES}" }
+        }
+      ]
+    },
+    {
+      "id": 6,
+      "type": "stat",
+      "title": "Uninformative monitors",
+      "description": "Checks that have returned the SAME non-pass verdict on every run ever recorded. recurring-bugs.md: a monitor that fires on every run carries no information.",
+      "gridPos": { "h": 4, "w": 6, "x": 18, "y": 0 },
+      "datasource": { "type": "grafana-postgresql-datasource", "uid": "${DS_POSTGRES}" },
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }, { "color": "orange", "value": 1 }] }
+        },
+        "overrides": []
+      },
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "graphMode": "none", "textMode": "auto", "colorMode": "background" },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT count(*) AS \"never varied\" FROM (\n  SELECT check_id FROM data_quality_history\n  GROUP BY 1\n  HAVING count(DISTINCT status) = 1 AND max(status) <> 'pass' AND count(*) >= 10\n) t",
+          "datasource": { "type": "grafana-postgresql-datasource", "uid": "${DS_POSTGRES}" }
+        }
+      ]
+    },
+
+    {
+      "id": 10,
+      "type": "table",
+      "title": "Checks not passing right now",
+      "description": "Latest verdict per check_id from data_quality_history (dataQualityChecks.ts, ~155 checks).",
+      "gridPos": { "h": 11, "w": 24, "x": 0, "y": 4 },
+      "datasource": { "type": "grafana-postgresql-datasource", "uid": "${DS_POSTGRES}" },
+      "fieldConfig": {
+        "defaults": { "custom": { "align": "auto" } },
+        "overrides": [
+          {
+            "matcher": { "id": "byName", "options": "Status" },
+            "properties": [
+              { "id": "custom.cellOptions", "value": { "type": "color-background" } },
+              { "id": "mappings", "value": [{ "type": "value", "options": { "fail": { "color": "red", "index": 0 }, "warn": { "color": "orange", "index": 1 } } }] },
+              { "id": "custom.width", "value": 90 }
+            ]
+          },
+          { "matcher": { "id": "byName", "options": "Check" }, "properties": [{ "id": "custom.width", "value": 300 }] }
+        ]
+      },
+      "options": { "showHeader": true, "footer": { "show": false }, "sortBy": [{ "displayName": "Status", "desc": false }] },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT check_id AS \"Check\",\n       status AS \"Status\",\n       detail AS \"Detail\",\n       to_timestamp(checked_at / 1000) AS \"Checked at\"\nFROM (SELECT DISTINCT ON (check_id) check_id, status, detail, checked_at\n      FROM data_quality_history ORDER BY check_id, checked_at DESC) t\nWHERE status <> 'pass'\nORDER BY (status = 'fail') DESC, check_id",
+          "datasource": { "type": "grafana-postgresql-datasource", "uid": "${DS_POSTGRES}" }
+        }
+      ]
+    },
+
+    {
+      "id": 20,
+      "type": "timeseries",
+      "title": "Quality check verdicts over time",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 15 },
+      "datasource": { "type": "grafana-postgresql-datasource", "uid": "${DS_POSTGRES}" },
+      "fieldConfig": {
+        "defaults": { "custom": { "drawStyle": "line", "lineWidth": 2, "fillOpacity": 20, "stacking": { "mode": "normal", "group": "A" }, "spanNulls": true } },
+        "overrides": [
+          { "matcher": { "id": "byName", "options": "fail" }, "properties": [{ "id": "color", "value": { "mode": "fixed", "fixedColor": "red" } }] },
+          { "matcher": { "id": "byName", "options": "warn" }, "properties": [{ "id": "color", "value": { "mode": "fixed", "fixedColor": "orange" } }] },
+          { "matcher": { "id": "byName", "options": "pass" }, "properties": [{ "id": "color", "value": { "mode": "fixed", "fixedColor": "green" } }] }
+        ]
+      },
+      "options": { "legend": { "displayMode": "list", "placement": "bottom", "showLegend": true }, "tooltip": { "mode": "multi", "sort": "none" } },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT to_timestamp((checked_at / 300000) * 300) AS \"time\",\n       count(*) FILTER (WHERE status = 'fail') AS \"fail\",\n       count(*) FILTER (WHERE status = 'warn') AS \"warn\",\n       count(*) FILTER (WHERE status = 'pass') AS \"pass\"\nFROM data_quality_history\nWHERE $__timeFilter(to_timestamp(checked_at / 1000))\nGROUP BY 1 ORDER BY 1",
+          "datasource": { "type": "grafana-postgresql-datasource", "uid": "${DS_POSTGRES}" }
+        }
+      ]
+    },
+    {
+      "id": 21,
+      "type": "table",
+      "title": "Checks that flipped status in the selected window",
+      "description": "A check that changes verdict is carrying information. Cross-reference with the 'never varied' list below.",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 15 },
+      "datasource": { "type": "grafana-postgresql-datasource", "uid": "${DS_POSTGRES}" },
+      "fieldConfig": { "defaults": { "custom": { "align": "auto" } }, "overrides": [] },
+      "options": { "showHeader": true, "footer": { "show": false } },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT check_id AS \"Check\",\n       string_agg(DISTINCT status, ' / ') AS \"Statuses seen\",\n       count(*) AS \"Runs\",\n       max(to_timestamp(checked_at / 1000)) AS \"Last checked\"\nFROM data_quality_history\nWHERE $__timeFilter(to_timestamp(checked_at / 1000))\nGROUP BY 1\nHAVING count(DISTINCT status) > 1\nORDER BY 3 DESC",
+          "datasource": { "type": "grafana-postgresql-datasource", "uid": "${DS_POSTGRES}" }
+        }
+      ]
+    },
+
+    {
+      "id": 30,
+      "type": "table",
+      "title": "Job heartbeats — sorted by time since last success",
+      "description": "job_heartbeat. Note last_run_at and last_success_at are currently identical for every row, which is what a skip-path-stamped-as-success bug looks like — treat 'success' here as 'did not throw', not 'did work'.",
+      "gridPos": { "h": 16, "w": 24, "x": 0, "y": 23 },
+      "datasource": { "type": "grafana-postgresql-datasource", "uid": "${DS_POSTGRES}" },
+      "fieldConfig": {
+        "defaults": { "custom": { "align": "auto" } },
+        "overrides": [
+          {
+            "matcher": { "id": "byName", "options": "Hours since success" },
+            "properties": [
+              { "id": "custom.cellOptions", "value": { "type": "color-background" } },
+              { "id": "thresholds", "value": { "mode": "absolute", "steps": [{ "color": "green", "value": null }, { "color": "yellow", "value": 26 }, { "color": "orange", "value": 50 }, { "color": "red", "value": 168 }] } },
+              { "id": "custom.width", "value": 150 }
+            ]
+          },
+          {
+            "matcher": { "id": "byName", "options": "Fail %" },
+            "properties": [
+              { "id": "unit", "value": "percent" },
+              { "id": "custom.cellOptions", "value": { "type": "color-text" } },
+              { "id": "thresholds", "value": { "mode": "absolute", "steps": [{ "color": "green", "value": null }, { "color": "orange", "value": 10 }, { "color": "red", "value": 30 }] } }
+            ]
+          },
+          { "matcher": { "id": "byName", "options": "Job" }, "properties": [{ "id": "custom.width", "value": 230 }] }
+        ]
+      },
+      "options": { "showHeader": true, "footer": { "show": false } },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT job_name AS \"Job\",\n       last_status AS \"Status\",\n       to_timestamp(last_run_at / 1000) AS \"Last run\",\n       to_timestamp(last_success_at / 1000) AS \"Last success\",\n       round(((extract(epoch FROM now()) - last_success_at / 1000.0) / 3600.0)::numeric, 1) AS \"Hours since success\",\n       run_count AS \"Runs\",\n       fail_count AS \"Fails\",\n       round((100.0 * fail_count / NULLIF(run_count, 0))::numeric, 1) AS \"Fail %\",\n       left(coalesce(last_error, ''), 220) AS \"Last error\"\nFROM job_heartbeat\nORDER BY 5 DESC NULLS FIRST",
+          "datasource": { "type": "grafana-postgresql-datasource", "uid": "${DS_POSTGRES}" }
+        }
+      ]
+    },
+
+    {
+      "id": 40,
+      "type": "table",
+      "title": "Monitors that have never varied (candidates for recalibration or deletion)",
+      "description": "Same non-pass verdict on every run ever recorded. Either the underlying problem is real and permanent (fix it or downgrade the check), or the threshold sits below the data's own noise floor.",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 39 },
+      "datasource": { "type": "grafana-postgresql-datasource", "uid": "${DS_POSTGRES}" },
+      "fieldConfig": { "defaults": { "custom": { "align": "auto" } }, "overrides": [] },
+      "options": { "showHeader": true, "footer": { "show": false } },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT check_id AS \"Check\",\n       max(status) AS \"Always\",\n       count(*) AS \"Runs\",\n       left(max(detail), 200) AS \"Detail\"\nFROM data_quality_history\nGROUP BY 1\nHAVING count(DISTINCT status) = 1 AND max(status) <> 'pass' AND count(*) >= 10\nORDER BY 3 DESC",
+          "datasource": { "type": "grafana-postgresql-datasource", "uid": "${DS_POSTGRES}" }
+        }
+      ]
+    },
+    {
+      "id": 41,
+      "type": "table",
+      "title": "Model registry",
+      "description": "AUC can be excellent and useless — flyer_classifier holds AUC 0.81 with IC -0.041. Treat these as artifact bookkeeping, not evidence of edge.",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 39 },
+      "datasource": { "type": "grafana-postgresql-datasource", "uid": "${DS_POSTGRES}" },
+      "fieldConfig": { "defaults": { "custom": { "align": "auto" }, "decimals": 3 }, "overrides": [] },
+      "options": { "showHeader": true, "footer": { "show": false } },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT model_name AS \"Model\",\n       model_version AS \"Version\",\n       trained_at AS \"Trained\",\n       training_samples AS \"Samples\",\n       cv_roc_auc AS \"CV AUC\",\n       test_roc_auc AS \"Test AUC\",\n       horizon_days AS \"Horizon\",\n       is_active AS \"Active\"\nFROM model_registry\nORDER BY trained_at DESC NULLS LAST\nLIMIT 40",
+          "datasource": { "type": "grafana-postgresql-datasource", "uid": "${DS_POSTGRES}" }
+        }
+      ]
+    }
+  ]
+}

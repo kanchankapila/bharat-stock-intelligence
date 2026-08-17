@@ -1,0 +1,396 @@
+{
+  "__inputs": [
+    {
+      "name": "DS_POSTGRES",
+      "label": "Postgres",
+      "description": "The bharat_intel Postgres/TimescaleDB instance (127.0.0.1:5433)",
+      "type": "datasource",
+      "pluginId": "grafana-postgresql-datasource",
+      "pluginName": "PostgreSQL"
+    }
+  ],
+  "__requires": [
+    { "type": "grafana", "id": "grafana", "name": "Grafana", "version": "10.4.0" },
+    { "type": "datasource", "id": "grafana-postgresql-datasource", "name": "PostgreSQL", "version": "1.0.0" },
+    { "type": "panel", "id": "timeseries", "name": "Time series", "version": "" },
+    { "type": "panel", "id": "table", "name": "Table", "version": "" },
+    { "type": "panel", "id": "stat", "name": "Stat", "version": "" },
+    { "type": "panel", "id": "barchart", "name": "Bar chart", "version": "" }
+  ],
+  "annotations": { "list": [] },
+  "description": "What the platform said vs what the market did. Standing measured state: unified_score 5d rank IC is ~0.0001 (t=0.02) and no factor tested clears multiple-testing correction — read these panels as diagnostics, not as a trade signal.",
+  "editable": true,
+  "graphTooltip": 1,
+  "id": null,
+  "links": [],
+  "refresh": "",
+  "schemaVersion": 39,
+  "tags": ["bharat", "measurement", "signals"],
+  "templating": {
+    "list": [
+      {
+        "name": "minturnover",
+        "label": "Min turnover (₹ cr)",
+        "type": "custom",
+        "query": "1,5,25,100",
+        "current": { "selected": true, "text": "1", "value": "1" },
+        "options": [
+          { "selected": true, "text": "1", "value": "1" },
+          { "selected": false, "text": "5", "value": "5" },
+          { "selected": false, "text": "25", "value": "25" },
+          { "selected": false, "text": "100", "value": "100" }
+        ],
+        "includeAll": false,
+        "multi": false,
+        "hide": 0,
+        "skipUrlSync": false
+      }
+    ]
+  },
+  "time": { "from": "now-90d", "to": "now" },
+  "timepicker": {},
+  "timezone": "Asia/Kolkata",
+  "title": "Signal Accuracy & Movers",
+  "uid": "bharat-signal-accuracy",
+  "version": 1,
+  "weekStart": "",
+  "panels": [
+    {
+      "id": 1,
+      "type": "stat",
+      "title": "Directional hit rate on the day's 40 biggest movers",
+      "description": "Of the top-20 gainers and top-20 losers on the latest session that carried a non-Hold unified_recommendations call, the share where the direction was right. Chance is ~50%. Liquidity floor from the dropdown.",
+      "gridPos": { "h": 5, "w": 6, "x": 0, "y": 0 },
+      "datasource": { "type": "grafana-postgresql-datasource", "uid": "${DS_POSTGRES}" },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "decimals": 1,
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "red", "value": null }, { "color": "orange", "value": 45 }, { "color": "green", "value": 55 }] }
+        },
+        "overrides": []
+      },
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "graphMode": "none", "textMode": "auto", "colorMode": "background" },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "WITH w AS (\n  SELECT symbol, date, close, volume,\n         lag(close) OVER (PARTITION BY symbol ORDER BY date) AS prev\n  FROM stock_ohlcv\n  WHERE date >= (SELECT max(date) - 14 FROM stock_ohlcv) AND coalesce(is_suspect, 0) = 0\n),\nl AS (\n  SELECT * FROM w\n  WHERE date = (SELECT max(date) FROM w) AND prev > 0\n    AND close * volume >= $minturnover * 10000000\n),\nm AS (\n  SELECT l.symbol, 100.0 * (l.close - l.prev) / l.prev AS chg,\n         (SELECT classification FROM unified_recommendations r\n          WHERE r.symbol = l.symbol ORDER BY r.computed_at DESC LIMIT 1) AS cls\n  FROM l\n),\ntop AS (\n  (SELECT * FROM m ORDER BY chg DESC LIMIT 20)\n  UNION ALL\n  (SELECT * FROM m ORDER BY chg ASC LIMIT 20)\n)\nSELECT round(100.0 * count(*) FILTER (\n         WHERE (cls LIKE '%Buy%' AND chg > 0) OR (cls LIKE '%Sell%' AND chg < 0))\n       / NULLIF(count(*) FILTER (WHERE cls LIKE '%Buy%' OR cls LIKE '%Sell%'), 0), 1) AS \"hit rate\"\nFROM top",
+          "datasource": { "type": "grafana-postgresql-datasource", "uid": "${DS_POSTGRES}" }
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "type": "stat",
+      "title": "Sell : Buy ratio (latest ranker run)",
+      "description": "The platform's standing skew. Measured 2026-08-14 at ~32:1 across the full universe; the neutral-tag scoring bug explained only ~1% of it, so a large residual is unexplained.",
+      "gridPos": { "h": 5, "w": 6, "x": 6, "y": 0 },
+      "datasource": { "type": "grafana-postgresql-datasource", "uid": "${DS_POSTGRES}" },
+      "fieldConfig": { "defaults": { "decimals": 1, "color": { "mode": "fixed", "fixedColor": "orange" } }, "overrides": [] },
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "graphMode": "none", "textMode": "auto", "colorMode": "value" },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT round((count(*) FILTER (WHERE classification LIKE '%Sell%')::numeric\n              / NULLIF(count(*) FILTER (WHERE classification LIKE '%Buy%'), 0)), 1) AS \"sell:buy\"\nFROM unified_recommendations\nWHERE computed_at = (SELECT max(computed_at) FROM unified_recommendations)",
+          "datasource": { "type": "grafana-postgresql-datasource", "uid": "${DS_POSTGRES}" }
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "type": "stat",
+      "title": "Gradable pre-market ranker dates",
+      "description": "unified_recommendations_history sessions whose FIRST run landed before 03:45 UTC (pre-open). ~30 are needed before a t-stat on ranker accuracy means anything. Anything computed off the live unified_recommendations table alone is grading a post-close re-run against its own day.",
+      "gridPos": { "h": 5, "w": 6, "x": 12, "y": 0 },
+      "datasource": { "type": "grafana-postgresql-datasource", "uid": "${DS_POSTGRES}" },
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "red", "value": null }, { "color": "orange", "value": 15 }, { "color": "green", "value": 30 }] }
+        },
+        "overrides": []
+      },
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "graphMode": "none", "textMode": "auto", "colorMode": "background" },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT count(*) AS \"pre-market dates\" FROM (\n  SELECT computed_at FROM unified_recommendations_history\n  GROUP BY 1 HAVING bool_or(generated_at::time < time '03:45')\n) t",
+          "datasource": { "type": "grafana-postgresql-datasource", "uid": "${DS_POSTGRES}" }
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "type": "stat",
+      "title": "Decisive graded outcomes",
+      "gridPos": { "h": 5, "w": 6, "x": 18, "y": 0 },
+      "datasource": { "type": "grafana-postgresql-datasource", "uid": "${DS_POSTGRES}" },
+      "fieldConfig": { "defaults": { "color": { "mode": "fixed", "fixedColor": "text" } }, "overrides": [] },
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "graphMode": "none", "textMode": "auto", "colorMode": "value" },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT count(*) AS \"WIN + LOSS rows\" FROM signal_outcomes WHERE outcome IN ('WIN', 'LOSS')",
+          "datasource": { "type": "grafana-postgresql-datasource", "uid": "${DS_POSTGRES}" }
+        }
+      ]
+    },
+
+    {
+      "id": 10,
+      "type": "table",
+      "title": "Latest session — top gainers vs the system's call",
+      "description": "Reverse-engineering pass: real movers first, then what the platform said about them beforehand. A 'Strong Sell / S_ELITE' on a +20% name is the signature this dashboard exists to surface.",
+      "gridPos": { "h": 12, "w": 12, "x": 0, "y": 5 },
+      "datasource": { "type": "grafana-postgresql-datasource", "uid": "${DS_POSTGRES}" },
+      "fieldConfig": {
+        "defaults": { "custom": { "align": "auto" } },
+        "overrides": [
+          {
+            "matcher": { "id": "byName", "options": "Change %" },
+            "properties": [
+              { "id": "unit", "value": "percent" },
+              { "id": "custom.cellOptions", "value": { "type": "color-text" } },
+              { "id": "thresholds", "value": { "mode": "absolute", "steps": [{ "color": "red", "value": null }, { "color": "green", "value": 0 }] } }
+            ]
+          },
+          {
+            "matcher": { "id": "byName", "options": "System call" },
+            "properties": [
+              { "id": "custom.cellOptions", "value": { "type": "color-background" } },
+              { "id": "mappings", "value": [{ "type": "value", "options": { "Strong Sell": { "color": "dark-red", "index": 0 }, "Sell": { "color": "semi-dark-orange", "index": 1 }, "Hold": { "color": "transparent", "index": 2 }, "Buy": { "color": "semi-dark-green", "index": 3 }, "Strong Buy": { "color": "dark-green", "index": 4 } } }] }
+            ]
+          }
+        ]
+      },
+      "options": { "showHeader": true, "footer": { "show": false } },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "WITH w AS (\n  SELECT symbol, date, close, volume,\n         lag(close) OVER (PARTITION BY symbol ORDER BY date) AS prev\n  FROM stock_ohlcv\n  WHERE date >= (SELECT max(date) - 14 FROM stock_ohlcv) AND coalesce(is_suspect, 0) = 0\n),\nl AS (\n  SELECT * FROM w\n  WHERE date = (SELECT max(date) FROM w) AND prev > 0\n    AND close * volume >= $minturnover * 10000000\n)\nSELECT l.symbol AS \"Symbol\",\n       round((100.0 * (l.close - l.prev) / l.prev)::numeric, 2) AS \"Change %\",\n       round((l.close * l.volume / 1e7)::numeric, 1) AS \"Turnover (cr)\",\n       coalesce(u.classification, '(no call)') AS \"System call\",\n       u.conviction_level AS \"Conviction\",\n       round(u.unified_score::numeric, 1) AS \"Score\",\n       u.sector AS \"Sector\"\nFROM l\nLEFT JOIN LATERAL (\n  SELECT classification, conviction_level, unified_score, sector\n  FROM unified_recommendations r WHERE r.symbol = l.symbol\n  ORDER BY r.computed_at DESC LIMIT 1\n) u ON true\nORDER BY 2 DESC\nLIMIT 25",
+          "datasource": { "type": "grafana-postgresql-datasource", "uid": "${DS_POSTGRES}" }
+        }
+      ]
+    },
+    {
+      "id": 11,
+      "type": "table",
+      "title": "Latest session — top losers vs the system's call",
+      "gridPos": { "h": 12, "w": 12, "x": 12, "y": 5 },
+      "datasource": { "type": "grafana-postgresql-datasource", "uid": "${DS_POSTGRES}" },
+      "fieldConfig": {
+        "defaults": { "custom": { "align": "auto" } },
+        "overrides": [
+          {
+            "matcher": { "id": "byName", "options": "Change %" },
+            "properties": [
+              { "id": "unit", "value": "percent" },
+              { "id": "custom.cellOptions", "value": { "type": "color-text" } },
+              { "id": "thresholds", "value": { "mode": "absolute", "steps": [{ "color": "red", "value": null }, { "color": "green", "value": 0 }] } }
+            ]
+          },
+          {
+            "matcher": { "id": "byName", "options": "System call" },
+            "properties": [
+              { "id": "custom.cellOptions", "value": { "type": "color-background" } },
+              { "id": "mappings", "value": [{ "type": "value", "options": { "Strong Sell": { "color": "dark-green", "index": 0 }, "Sell": { "color": "semi-dark-green", "index": 1 }, "Hold": { "color": "transparent", "index": 2 }, "Buy": { "color": "semi-dark-orange", "index": 3 }, "Strong Buy": { "color": "dark-red", "index": 4 } } }] }
+            ]
+          }
+        ]
+      },
+      "options": { "showHeader": true, "footer": { "show": false } },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "WITH w AS (\n  SELECT symbol, date, close, volume,\n         lag(close) OVER (PARTITION BY symbol ORDER BY date) AS prev\n  FROM stock_ohlcv\n  WHERE date >= (SELECT max(date) - 14 FROM stock_ohlcv) AND coalesce(is_suspect, 0) = 0\n),\nl AS (\n  SELECT * FROM w\n  WHERE date = (SELECT max(date) FROM w) AND prev > 0\n    AND close * volume >= $minturnover * 10000000\n)\nSELECT l.symbol AS \"Symbol\",\n       round((100.0 * (l.close - l.prev) / l.prev)::numeric, 2) AS \"Change %\",\n       round((l.close * l.volume / 1e7)::numeric, 1) AS \"Turnover (cr)\",\n       coalesce(u.classification, '(no call)') AS \"System call\",\n       u.conviction_level AS \"Conviction\",\n       round(u.unified_score::numeric, 1) AS \"Score\",\n       u.sector AS \"Sector\"\nFROM l\nLEFT JOIN LATERAL (\n  SELECT classification, conviction_level, unified_score, sector\n  FROM unified_recommendations r WHERE r.symbol = l.symbol\n  ORDER BY r.computed_at DESC LIMIT 1\n) u ON true\nORDER BY 2 ASC\nLIMIT 25",
+          "datasource": { "type": "grafana-postgresql-datasource", "uid": "${DS_POSTGRES}" }
+        }
+      ]
+    },
+
+    {
+      "id": 20,
+      "type": "table",
+      "title": "⚠ Win rate by source × label definition × horizon — DO NOT compare rows across label definitions",
+      "description": "terminal_pct2 (fixed ±2% terminal return) and path_barrier (path-based max favourable excursion) are structurally different rules. Live-measured on the same calendar window they read 41-44% vs 88-91%, and the gap is almost entirely the label, not skill. Compare only within a label definition.",
+      "gridPos": { "h": 10, "w": 12, "x": 0, "y": 17 },
+      "datasource": { "type": "grafana-postgresql-datasource", "uid": "${DS_POSTGRES}" },
+      "fieldConfig": {
+        "defaults": { "custom": { "align": "auto" } },
+        "overrides": [
+          {
+            "matcher": { "id": "byName", "options": "Win rate %" },
+            "properties": [
+              { "id": "unit", "value": "percent" },
+              { "id": "custom.cellOptions", "value": { "type": "gauge", "mode": "gradient" } },
+              { "id": "min", "value": 0 },
+              { "id": "max", "value": 100 }
+            ]
+          },
+          {
+            "matcher": { "id": "byName", "options": "Label definition" },
+            "properties": [{ "id": "custom.cellOptions", "value": { "type": "color-background", "mode": "basic" } }, { "id": "custom.width", "value": 150 }]
+          }
+        ]
+      },
+      "options": { "showHeader": true, "footer": { "show": false } },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT signal_source AS \"Source\",\n       coalesce(nullif(label_definition, ''), '(unlabelled)') AS \"Label definition\",\n       horizon_days AS \"Horizon (d)\",\n       count(*) AS \"Graded\",\n       count(*) FILTER (WHERE outcome IN ('WIN', 'LOSS')) AS \"Decisive\",\n       round(100.0 * count(*) FILTER (WHERE outcome = 'WIN')\n             / NULLIF(count(*) FILTER (WHERE outcome IN ('WIN', 'LOSS')), 0), 1) AS \"Win rate %\",\n       round(avg(return_pct)::numeric, 3) AS \"Avg return %\"\nFROM signal_outcomes\nGROUP BY 1, 2, 3\nORDER BY 1, 2, 3",
+          "datasource": { "type": "grafana-postgresql-datasource", "uid": "${DS_POSTGRES}" }
+        }
+      ]
+    },
+    {
+      "id": 21,
+      "type": "timeseries",
+      "title": "Win rate over time, by source (separate label definitions — read each line alone)",
+      "gridPos": { "h": 10, "w": 12, "x": 12, "y": 17 },
+      "datasource": { "type": "grafana-postgresql-datasource", "uid": "${DS_POSTGRES}" },
+      "fieldConfig": {
+        "defaults": { "unit": "percent", "min": 0, "max": 100, "custom": { "drawStyle": "line", "lineWidth": 2, "fillOpacity": 0, "spanNulls": true, "showPoints": "auto" } },
+        "overrides": []
+      },
+      "options": { "legend": { "displayMode": "list", "placement": "bottom", "showLegend": true }, "tooltip": { "mode": "multi", "sort": "none" } },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT d AS \"time\",\n       round(100.0 * count(*) FILTER (WHERE outcome = 'WIN' AND src = 'technical')\n             / NULLIF(count(*) FILTER (WHERE outcome IN ('WIN','LOSS') AND src = 'technical'), 0), 1)\n         AS \"technical (path_barrier)\",\n       round(100.0 * count(*) FILTER (WHERE outcome = 'WIN' AND src = 'confluence')\n             / NULLIF(count(*) FILTER (WHERE outcome IN ('WIN','LOSS') AND src = 'confluence'), 0), 1)\n         AS \"confluence (terminal_pct2)\"\nFROM (\n  SELECT left(signal_date, 10)::date AS d, signal_source AS src, outcome\n  FROM signal_outcomes WHERE signal_date ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}'\n) t\nWHERE $__timeFilter(d)\nGROUP BY 1 ORDER BY 1",
+          "datasource": { "type": "grafana-postgresql-datasource", "uid": "${DS_POSTGRES}" }
+        }
+      ]
+    },
+
+    {
+      "id": 30,
+      "type": "timeseries",
+      "title": "Ranker output distribution over time",
+      "description": "unified_recommendations_history. A structural drift in the Buy/Sell/Hold mix that is not matched by a change in the market is a scoring bug, not a market call.",
+      "gridPos": { "h": 9, "w": 12, "x": 0, "y": 27 },
+      "datasource": { "type": "grafana-postgresql-datasource", "uid": "${DS_POSTGRES}" },
+      "fieldConfig": {
+        "defaults": { "custom": { "drawStyle": "line", "lineWidth": 2, "fillOpacity": 15, "stacking": { "mode": "normal", "group": "A" }, "spanNulls": true } },
+        "overrides": [
+          { "matcher": { "id": "byName", "options": "Sell" }, "properties": [{ "id": "color", "value": { "mode": "fixed", "fixedColor": "red" } }] },
+          { "matcher": { "id": "byName", "options": "Buy" }, "properties": [{ "id": "color", "value": { "mode": "fixed", "fixedColor": "green" } }] },
+          { "matcher": { "id": "byName", "options": "Hold" }, "properties": [{ "id": "color", "value": { "mode": "fixed", "fixedColor": "blue" } }] }
+        ]
+      },
+      "options": { "legend": { "displayMode": "list", "placement": "bottom", "showLegend": true }, "tooltip": { "mode": "multi", "sort": "none" } },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT computed_at::date AS \"time\",\n       count(*) FILTER (WHERE classification LIKE '%Buy%') AS \"Buy\",\n       count(*) FILTER (WHERE classification LIKE '%Sell%') AS \"Sell\",\n       count(*) FILTER (WHERE classification = 'Hold') AS \"Hold\"\nFROM unified_recommendations_history\nWHERE $__timeFilter(computed_at::date)\nGROUP BY 1 ORDER BY 1",
+          "datasource": { "type": "grafana-postgresql-datasource", "uid": "${DS_POSTGRES}" }
+        }
+      ]
+    },
+    {
+      "id": 31,
+      "type": "barchart",
+      "title": "Conviction ladder — latest ranker run",
+      "description": "Strong Sell (S_ELITE) has measured WORSE than plain Sell (A_HIGH) on both graded dates so far — the opposite of what conviction should mean.",
+      "gridPos": { "h": 9, "w": 12, "x": 12, "y": 27 },
+      "datasource": { "type": "grafana-postgresql-datasource", "uid": "${DS_POSTGRES}" },
+      "fieldConfig": { "defaults": { "custom": { "axisPlacement": "auto", "fillOpacity": 80, "lineWidth": 1 } }, "overrides": [] },
+      "options": {
+        "orientation": "horizontal",
+        "xTickLabelRotation": 0,
+        "showValue": "auto",
+        "stacking": "none",
+        "legend": { "displayMode": "list", "placement": "bottom", "showLegend": true }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT coalesce(conviction_level, '(none)') || ' · ' || coalesce(classification, '(none)') AS \"Bucket\",\n       count(*) AS \"Symbols\",\n       round(avg(unified_score)::numeric, 1) AS \"Avg score\"\nFROM unified_recommendations\nWHERE computed_at = (SELECT max(computed_at) FROM unified_recommendations)\nGROUP BY 1 ORDER BY 2 DESC",
+          "datasource": { "type": "grafana-postgresql-datasource", "uid": "${DS_POSTGRES}" }
+        }
+      ]
+    },
+
+    {
+      "id": 40,
+      "type": "table",
+      "title": "Ranker provenance — is each session gradable?",
+      "description": "A session is only gradable as a forward signal if its first run landed before the open. Runs stamped after 03:45 UTC are grading a post-close re-run against its own day.",
+      "gridPos": { "h": 11, "w": 12, "x": 0, "y": 36 },
+      "datasource": { "type": "grafana-postgresql-datasource", "uid": "${DS_POSTGRES}" },
+      "fieldConfig": {
+        "defaults": { "custom": { "align": "auto" } },
+        "overrides": [
+          {
+            "matcher": { "id": "byName", "options": "Pre-market?" },
+            "properties": [
+              { "id": "custom.cellOptions", "value": { "type": "color-background" } },
+              { "id": "mappings", "value": [{ "type": "value", "options": { "true": { "color": "green", "index": 0 }, "false": { "color": "red", "index": 1 } } }] }
+            ]
+          }
+        ]
+      },
+      "options": { "showHeader": true, "footer": { "show": false } },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT computed_at AS \"Session\",\n       count(DISTINCT generated_at) AS \"Runs\",\n       min(generated_at) AS \"First run (UTC)\",\n       max(generated_at) AS \"Last run (UTC)\",\n       count(DISTINCT symbol) AS \"Symbols\",\n       bool_or(generated_at::time < time '03:45') AS \"Pre-market?\"\nFROM unified_recommendations_history\nGROUP BY 1\nORDER BY 1 DESC\nLIMIT 60",
+          "datasource": { "type": "grafana-postgresql-datasource", "uid": "${DS_POSTGRES}" }
+        }
+      ]
+    },
+    {
+      "id": 41,
+      "type": "table",
+      "title": "Trade geometry — excursion stats by horizon",
+      "description": "signal_excursions. 'MFE before MAE %' is the share of signals that reached their best point before their worst — below 50% means the stop is hit first more often than not, which destroys a real gross edge regardless of the terminal return.",
+      "gridPos": { "h": 11, "w": 12, "x": 12, "y": 36 },
+      "datasource": { "type": "grafana-postgresql-datasource", "uid": "${DS_POSTGRES}" },
+      "fieldConfig": {
+        "defaults": { "custom": { "align": "auto" } },
+        "overrides": [
+          {
+            "matcher": { "id": "byName", "options": "MFE before MAE %" },
+            "properties": [
+              { "id": "unit", "value": "percent" },
+              { "id": "custom.cellOptions", "value": { "type": "gauge", "mode": "gradient" } },
+              { "id": "min", "value": 0 },
+              { "id": "max", "value": 100 },
+              { "id": "thresholds", "value": { "mode": "absolute", "steps": [{ "color": "red", "value": null }, { "color": "green", "value": 50 }] } }
+            ]
+          }
+        ]
+      },
+      "options": { "showHeader": true, "footer": { "show": false } },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT horizon_days AS \"Horizon (d)\",\n       count(*) AS \"Signals\",\n       round(avg(mfe_pct)::numeric, 2) AS \"Avg MFE %\",\n       round(avg(mae_pct)::numeric, 2) AS \"Avg MAE %\",\n       round(avg(horizon_close_pct)::numeric, 2) AS \"Avg terminal %\",\n       round(avg(days_to_mfe)::numeric, 1) AS \"Avg days to MFE\",\n       round((100.0 * avg(mfe_before_mae))::numeric, 1) AS \"MFE before MAE %\"\nFROM signal_excursions\nGROUP BY 1 ORDER BY 1",
+          "datasource": { "type": "grafana-postgresql-datasource", "uid": "${DS_POSTGRES}" }
+        }
+      ]
+    }
+  ]
+}

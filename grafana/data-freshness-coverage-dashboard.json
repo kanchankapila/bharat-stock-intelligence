@@ -1,0 +1,304 @@
+{
+  "__inputs": [
+    {
+      "name": "DS_POSTGRES",
+      "label": "Postgres",
+      "description": "The bharat_intel Postgres/TimescaleDB instance (127.0.0.1:5433)",
+      "type": "datasource",
+      "pluginId": "grafana-postgresql-datasource",
+      "pluginName": "PostgreSQL"
+    }
+  ],
+  "__requires": [
+    { "type": "grafana", "id": "grafana", "name": "Grafana", "version": "10.4.0" },
+    { "type": "datasource", "id": "grafana-postgresql-datasource", "name": "PostgreSQL", "version": "1.0.0" },
+    { "type": "panel", "id": "timeseries", "name": "Time series", "version": "" },
+    { "type": "panel", "id": "table", "name": "Table", "version": "" },
+    { "type": "panel", "id": "stat", "name": "Stat", "version": "" }
+  ],
+  "annotations": { "list": [] },
+  "description": "Data-audit dashboard. Encodes measurement.md's panel-shape rule: judge a datasource by distinct dates PER SYMBOL and by its DENSE span, never by raw min(date) or a row count.",
+  "editable": true,
+  "graphTooltip": 1,
+  "id": null,
+  "links": [],
+  "refresh": "",
+  "schemaVersion": 39,
+  "tags": ["bharat", "audit", "data-quality"],
+  "templating": {
+    "list": [
+      {
+        "name": "table",
+        "label": "Table",
+        "type": "query",
+        "datasource": { "type": "grafana-postgresql-datasource", "uid": "${DS_POSTGRES}" },
+        "definition": "tables with both a date and a symbol column",
+        "query": "SELECT c.table_name FROM information_schema.columns c JOIN information_schema.columns c2 ON c2.table_schema = 'public' AND c2.table_name = c.table_name AND c2.column_name = 'symbol' JOIN pg_stat_user_tables s ON s.relname = c.table_name AND s.schemaname = 'public' WHERE c.table_schema = 'public' AND c.column_name = 'date' AND s.n_live_tup > 1000 ORDER BY 1",
+        "refresh": 1,
+        "sort": 1,
+        "includeAll": false,
+        "multi": false,
+        "current": { "selected": true, "text": "technical_signals", "value": "technical_signals" },
+        "options": [],
+        "hide": 0,
+        "skipUrlSync": false
+      }
+    ]
+  },
+  "time": { "from": "now-1y", "to": "now" },
+  "timepicker": {},
+  "timezone": "Asia/Kolkata",
+  "title": "Data Freshness & Coverage",
+  "uid": "bharat-data-freshness",
+  "version": 1,
+  "weekStart": "",
+  "panels": [
+    {
+      "id": 1,
+      "type": "table",
+      "title": "Freshness of every dated table",
+      "description": "max(date) per table for every public table with a `date` column and >1000 rows, computed live via query_to_xml. Takes ~7s. 'Days stale' is only computed when the value parses as ISO — a non-ISO value in this column is itself a finding (insider_trades stores '31 Oct, 2025').",
+      "gridPos": { "h": 14, "w": 12, "x": 0, "y": 0 },
+      "datasource": { "type": "grafana-postgresql-datasource", "uid": "${DS_POSTGRES}" },
+      "fieldConfig": {
+        "defaults": { "custom": { "align": "auto" } },
+        "overrides": [
+          {
+            "matcher": { "id": "byName", "options": "Days stale" },
+            "properties": [
+              { "id": "custom.cellOptions", "value": { "type": "color-background" } },
+              { "id": "thresholds", "value": { "mode": "absolute", "steps": [{ "color": "green", "value": null }, { "color": "yellow", "value": 4 }, { "color": "orange", "value": 8 }, { "color": "red", "value": 30 }] } }
+            ]
+          }
+        ]
+      },
+      "options": { "showHeader": true, "footer": { "show": false }, "sortBy": [{ "displayName": "Days stale", "desc": true }] },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "WITH f AS (\n  SELECT c.table_name, s.n_live_tup,\n         (xpath('/row/m/text()', query_to_xml(\n            format('select max(%I)::text as m from public.%I', c.column_name, c.table_name),\n            true, true, '')))[1]::text AS max_val\n  FROM information_schema.columns c\n  JOIN pg_stat_user_tables s ON s.relname = c.table_name AND s.schemaname = 'public'\n  WHERE c.table_schema = 'public' AND c.column_name = 'date' AND s.n_live_tup > 1000\n)\nSELECT table_name AS \"Table\",\n       n_live_tup AS \"Rows\",\n       coalesce(max_val, '(empty)') AS \"Latest date\",\n       CASE WHEN max_val ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}'\n            THEN CURRENT_DATE - left(max_val, 10)::date END AS \"Days stale\"\nFROM f\nORDER BY 4 DESC NULLS FIRST",
+          "datasource": { "type": "grafana-postgresql-datasource", "uid": "${DS_POSTGRES}" }
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "type": "table",
+      "title": "Largest tables on disk",
+      "description": "TimescaleDB hypertables report the parent relation at ~0 bytes because the data lives in chunks — stock_ohlcv and friends will look small here. Row counts come from the planner's estimate.",
+      "gridPos": { "h": 14, "w": 12, "x": 12, "y": 0 },
+      "datasource": { "type": "grafana-postgresql-datasource", "uid": "${DS_POSTGRES}" },
+      "fieldConfig": {
+        "defaults": { "custom": { "align": "auto" } },
+        "overrides": [{ "matcher": { "id": "byName", "options": "Bytes" }, "properties": [{ "id": "unit", "value": "bytes" }, { "id": "custom.hidden", "value": true }] }]
+      },
+      "options": { "showHeader": true, "footer": { "show": false } },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT relname AS \"Table\",\n       n_live_tup AS \"Rows\",\n       pg_size_pretty(pg_total_relation_size(relid)) AS \"Size\",\n       pg_total_relation_size(relid) AS \"Bytes\",\n       coalesce(last_autovacuum, last_vacuum) AS \"Last vacuum\",\n       coalesce(last_autoanalyze, last_analyze) AS \"Last analyze\"\nFROM pg_stat_user_tables\nWHERE schemaname = 'public' AND n_live_tup > 0\nORDER BY 4 DESC\nLIMIT 40",
+          "datasource": { "type": "grafana-postgresql-datasource", "uid": "${DS_POSTGRES}" }
+        }
+      ]
+    },
+
+    {
+      "id": 10,
+      "type": "table",
+      "title": "$table — per-symbol depth (NOT a row count)",
+      "description": "measurement.md: a table can report years of span while holding 4-5 rows per symbol. Min/median/max distinct dates PER SYMBOL is the honest measure of whether this datasource can support a backtest.",
+      "gridPos": { "h": 5, "w": 8, "x": 0, "y": 14 },
+      "datasource": { "type": "grafana-postgresql-datasource", "uid": "${DS_POSTGRES}" },
+      "fieldConfig": { "defaults": { "custom": { "align": "auto" }, "decimals": 0 }, "overrides": [] },
+      "options": { "showHeader": true, "footer": { "show": false } },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT count(*) AS \"Symbols\",\n       min(n) AS \"Min dates/symbol\",\n       percentile_cont(0.5) WITHIN GROUP (ORDER BY n) AS \"Median dates/symbol\",\n       max(n) AS \"Max dates/symbol\"\nFROM (SELECT symbol, count(DISTINCT date) AS n FROM $table GROUP BY 1) t",
+          "datasource": { "type": "grafana-postgresql-datasource", "uid": "${DS_POSTGRES}" }
+        }
+      ]
+    },
+    {
+      "id": 11,
+      "type": "table",
+      "title": "$table — dense span by year",
+      "description": "Distinct dates per calendar year. A table can claim '5 years' while dense coverage only starts 2 years in — this is the panel that shows it.",
+      "gridPos": { "h": 5, "w": 8, "x": 8, "y": 14 },
+      "datasource": { "type": "grafana-postgresql-datasource", "uid": "${DS_POSTGRES}" },
+      "fieldConfig": { "defaults": { "custom": { "align": "auto" } }, "overrides": [] },
+      "options": { "showHeader": true, "footer": { "show": false } },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT left(date::text, 4) AS \"Year\",\n       count(DISTINCT date) AS \"Distinct dates\",\n       count(*) AS \"Rows\",\n       count(DISTINCT symbol) AS \"Symbols\"\nFROM $table\nWHERE date::text ~ '^[0-9]{4}-'\nGROUP BY 1 ORDER BY 1",
+          "datasource": { "type": "grafana-postgresql-datasource", "uid": "${DS_POSTGRES}" }
+        }
+      ]
+    },
+    {
+      "id": 12,
+      "type": "stat",
+      "title": "$table — latest date",
+      "gridPos": { "h": 5, "w": 8, "x": 16, "y": 14 },
+      "datasource": { "type": "grafana-postgresql-datasource", "uid": "${DS_POSTGRES}" },
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }, { "color": "yellow", "value": 4 }, { "color": "orange", "value": 8 }, { "color": "red", "value": 30 }] }
+        },
+        "overrides": []
+      },
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "graphMode": "none", "textMode": "value_and_name", "colorMode": "background" },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT CURRENT_DATE - max(left(date::text, 10)::date) AS \"days stale\"\nFROM $table WHERE date::text ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}'",
+          "datasource": { "type": "grafana-postgresql-datasource", "uid": "${DS_POSTGRES}" }
+        }
+      ]
+    },
+
+    {
+      "id": 20,
+      "type": "timeseries",
+      "title": "$table — update frequency (rows and symbols per date)",
+      "description": "Gaps here are missed runs. A collapse in 'Symbols' with 'Rows' holding up means the universe shrank, not that the job died.",
+      "gridPos": { "h": 9, "w": 24, "x": 0, "y": 19 },
+      "datasource": { "type": "grafana-postgresql-datasource", "uid": "${DS_POSTGRES}" },
+      "fieldConfig": {
+        "defaults": { "custom": { "drawStyle": "bars", "fillOpacity": 70, "lineWidth": 0 } },
+        "overrides": [
+          {
+            "matcher": { "id": "byName", "options": "Symbols" },
+            "properties": [
+              { "id": "custom.drawStyle", "value": "line" },
+              { "id": "custom.lineWidth", "value": 2 },
+              { "id": "custom.fillOpacity", "value": 0 },
+              { "id": "custom.axisPlacement", "value": "right" }
+            ]
+          }
+        ]
+      },
+      "options": { "legend": { "displayMode": "list", "placement": "bottom", "showLegend": true }, "tooltip": { "mode": "multi", "sort": "none" } },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT d AS \"time\", count(*) AS \"Rows\", count(DISTINCT sym) AS \"Symbols\"\nFROM (\n  SELECT left(date::text, 10)::date AS d, symbol AS sym\n  FROM $table WHERE date::text ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}'\n) t\nWHERE $__timeFilter(d)\nGROUP BY 1 ORDER BY 1",
+          "datasource": { "type": "grafana-postgresql-datasource", "uid": "${DS_POSTGRES}" }
+        }
+      ]
+    },
+
+    {
+      "id": 30,
+      "type": "stat",
+      "title": "technical_signals columns 100% NULL",
+      "description": "A fresh table is not a delivered feature. These columns are fed to every model as a hardcoded default. Measured on the last COMPLETED day, so enrichment columns that lag the scan by one day are not counted as dead.",
+      "gridPos": { "h": 4, "w": 6, "x": 0, "y": 28 },
+      "datasource": { "type": "grafana-postgresql-datasource", "uid": "${DS_POSTGRES}" },
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }, { "color": "orange", "value": 1 }, { "color": "red", "value": 20 }] }
+        },
+        "overrides": []
+      },
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "graphMode": "none", "textMode": "auto", "colorMode": "background" },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT count(*) AS \"all-NULL columns\" FROM (\n  SELECT e.k\n  FROM technical_signals t, LATERAL jsonb_each_text(to_jsonb(t)) e(k, v)\n  WHERE t.date = (SELECT max(date) FROM technical_signals\n                  WHERE date < (SELECT max(date) FROM technical_signals))\n  GROUP BY 1\n  HAVING count(*) FILTER (WHERE e.v IS NOT NULL) = 0\n) s",
+          "datasource": { "type": "grafana-postgresql-datasource", "uid": "${DS_POSTGRES}" }
+        }
+      ]
+    },
+    {
+      "id": 31,
+      "type": "stat",
+      "title": "technical_signals columns under 50% populated",
+      "gridPos": { "h": 4, "w": 6, "x": 6, "y": 28 },
+      "datasource": { "type": "grafana-postgresql-datasource", "uid": "${DS_POSTGRES}" },
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }, { "color": "orange", "value": 20 }, { "color": "red", "value": 80 }] }
+        },
+        "overrides": []
+      },
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "graphMode": "none", "textMode": "auto", "colorMode": "background" },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT count(*) AS \"sparse columns\" FROM (\n  SELECT e.k\n  FROM technical_signals t, LATERAL jsonb_each_text(to_jsonb(t)) e(k, v)\n  WHERE t.date = (SELECT max(date) FROM technical_signals\n                  WHERE date < (SELECT max(date) FROM technical_signals))\n  GROUP BY 1\n  HAVING 100.0 * count(*) FILTER (WHERE e.v IS NOT NULL) / count(*) < 50\n) s",
+          "datasource": { "type": "grafana-postgresql-datasource", "uid": "${DS_POSTGRES}" }
+        }
+      ]
+    },
+    {
+      "id": 32,
+      "type": "table",
+      "title": "technical_signals — feature coverage, worst first",
+      "description": "Every column of the ML feature table with its populated %, on the last completed trading day. This is the check a per-table freshness monitor structurally cannot make.",
+      "gridPos": { "h": 16, "w": 12, "x": 12, "y": 28 },
+      "datasource": { "type": "grafana-postgresql-datasource", "uid": "${DS_POSTGRES}" },
+      "fieldConfig": {
+        "defaults": { "custom": { "align": "auto" } },
+        "overrides": [
+          {
+            "matcher": { "id": "byName", "options": "Populated %" },
+            "properties": [
+              { "id": "unit", "value": "percent" },
+              { "id": "custom.cellOptions", "value": { "type": "gauge", "mode": "gradient" } },
+              { "id": "min", "value": 0 },
+              { "id": "max", "value": 100 },
+              { "id": "thresholds", "value": { "mode": "absolute", "steps": [{ "color": "red", "value": null }, { "color": "orange", "value": 50 }, { "color": "green", "value": 95 }] } }
+            ]
+          }
+        ]
+      },
+      "options": { "showHeader": true, "footer": { "show": false } },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT e.k AS \"Column\",\n       count(*) FILTER (WHERE e.v IS NOT NULL) AS \"Populated rows\",\n       count(*) AS \"Total rows\",\n       round(100.0 * count(*) FILTER (WHERE e.v IS NOT NULL) / count(*), 1) AS \"Populated %\"\nFROM technical_signals t, LATERAL jsonb_each_text(to_jsonb(t)) e(k, v)\nWHERE t.date = (SELECT max(date) FROM technical_signals\n                WHERE date < (SELECT max(date) FROM technical_signals))\nGROUP BY 1\nORDER BY 4, 1",
+          "datasource": { "type": "grafana-postgresql-datasource", "uid": "${DS_POSTGRES}" }
+        }
+      ]
+    },
+    {
+      "id": 33,
+      "type": "table",
+      "title": "Provider-id integrity — tlid that is not numeric",
+      "description": "data-sources.md: a provider-issued id column holding the SYMBOL instead of the provider's id is a permanent, self-concealing 404. 412 of 2,234 nse_stocks rows had exactly this. Any non-empty row here is a live gap.",
+      "gridPos": { "h": 12, "w": 12, "x": 0, "y": 32 },
+      "datasource": { "type": "grafana-postgresql-datasource", "uid": "${DS_POSTGRES}" },
+      "fieldConfig": { "defaults": { "custom": { "align": "auto" } }, "overrides": [] },
+      "options": { "showHeader": true, "footer": { "show": false } },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT 'tlid (Trendlyne)' AS \"Column\",\n       count(*) FILTER (WHERE tlid IS NOT NULL AND tlid !~ '^[0-9]+$') AS \"Malformed\",\n       count(*) FILTER (WHERE tlid IS NULL) AS \"Missing\",\n       count(*) AS \"Rows\"\nFROM nse_stocks WHERE status = 'ACTIVE'\nUNION ALL\nSELECT 'stockid (MoneyControl/MarketsMojo)',\n       count(*) FILTER (WHERE stockid IS NOT NULL AND stockid !~ '^[0-9]+$'),\n       count(*) FILTER (WHERE stockid IS NULL), count(*)\nFROM nse_stocks WHERE status = 'ACTIVE'\nUNION ALL\nSELECT 'companyid (ET)',\n       count(*) FILTER (WHERE companyid IS NOT NULL AND companyid !~ '^[0-9]+$'),\n       count(*) FILTER (WHERE companyid IS NULL), count(*)\nFROM nse_stocks WHERE status = 'ACTIVE'\nUNION ALL\nSELECT 'isin',\n       count(*) FILTER (WHERE isin IS NOT NULL AND isin !~ '^[A-Z]{2}[A-Z0-9]{10}$'),\n       count(*) FILTER (WHERE isin IS NULL), count(*)\nFROM nse_stocks WHERE status = 'ACTIVE'",
+          "datasource": { "type": "grafana-postgresql-datasource", "uid": "${DS_POSTGRES}" }
+        }
+      ]
+    }
+  ]
+}
