@@ -215,8 +215,17 @@ const TABLE_FRESHNESS_CHECKS: TableFreshnessConfig[] = [
     category: 'options', critical: false, table: 'so_stock_oi_summary', dateColumn: 'date', warnDays: 3, failDays: 5 },
 
   // flows
-  { id: 'insider-transactions-recency', label: 'insider_transactions (NSE PIT filings)',
-    category: 'flows', critical: false, table: 'insider_transactions', dateColumn: 'transaction_date', warnDays: 14 },
+  // Watches insider_trades (Tickertape), NOT insider_transactions (NSE corporates-pit).
+  // insider_transactions is superseded and NO consumer reads it: factor_backtest.py's
+  // insider_net factor and insider_features.py both read insider_trades.date_iso. Its NSE
+  // source is also broken upstream -- live-probed 2026-08-17, corporates-pit ignores its own
+  // from/to params entirely (four different windows, including "2024 only", return byte-identical
+  // rows) and serves a stale most-recent-20 page per symbol, so the table has been frozen at
+  // 2026-05-02 while this check warned every run for 114 runs. That is a monitor guarding an
+  // abandoned table, which reads as a real gap forever. date_iso, NOT date: insider_trades.date
+  // is TEXT holding the vendor's display format ('31 Oct, 2025') -- see insider_features.py:40.
+  { id: 'insider-transactions-recency', label: 'insider_trades (Tickertape insider filings)',
+    category: 'flows', critical: false, table: 'insider_trades', dateColumn: 'date_iso', warnDays: 14 },
   { id: 'bulk-block-deals-recency', label: 'bulk_block_deals (delivery-trend NSE bulk/block feed)',
     category: 'flows', critical: false, table: 'bulk_block_deals', dateColumn: 'deal_date', warnDays: 14 },
   { id: 'stock-delivery-volume-freshness', label: 'stock_delivery_volume (MTO delivery %)',
