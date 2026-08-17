@@ -4,6 +4,55 @@ Historical record, split out of CLAUDE.md on 2026-08-11 (it was 64% of that file
 
 **Not loaded automatically.** Read a specific entry when you need the history behind a decision. Durable lessons extracted from here live in `.claude/rules/`; if you find one that isn't there, add it.
 
+## 2026-08-17 (cont. 3) — `/weekend-audit`, week 34 rotation group 4, first real Lane 5 drive
+
+Ran the full 8-lane sweep. Lanes 0-4 came back clean/known (build, tests, services, DB all green;
+`bharat-server` 1 commit behind `HEAD` at start, same recurring AF-14 shape; `trendlyne-midweek`
+had its first success since 08-04). Lane 5 was the first pass in this ledger's history to actually
+drive a browser rather than report "skipped" or "partial" — and it is what found the session's
+real bug.
+
+**`AF-20260817-21` — the v2/v3 dashboard shells rendered `alpha_vs_nifty` 100x too large.**
+`performance_tracker.py`'s `alpha_vs_nifty()` already returns a percentage-point value
+(`signal_ret - nifty_cum`, both already ×100 inside the function), but `V2Dashboard.tsx` and
+`V3Dashboard.tsx` both multiplied by 100 again on render — `win_rate` in the same row genuinely
+*is* a 0-1 fraction needing that `*100`, `alpha_vs_nifty` is not. Live DB value 14.923 rendered
+on-screen as "+1492.30% EXCESS OUTPERFORMANCE". Found via a screenshot, not a code read — the
+number was implausible enough to look wrong at a glance, then traced back through
+`ml.router.ts` → `strategy_performance` → `performance_tracker.py` to the actual unit mismatch.
+Fixed by dropping the stray `* 100` in both files; re-screenshotted the live (Vite-served) app
+to confirm "+14.92%" now matches the DB value exactly. Pure display arithmetic, no
+score/weight/threshold touched, so no backtest evidence needed under `verify-gate.mjs`'s rule.
+**Not resolved, flagged separately**: whether `strategy_performance`'s own win_rate/Sharpe
+methodology (no cost/turnover accounting, not per-date-then-averaged) would survive contact with
+an independent measurement the way `screener_reliability` didn't (`measurement.md`) — that's a
+`/measurement-integrity-review` question, not a display fix.
+
+**`AF-20260817-22` — two more `date.today()` write-anchor bugs, same job, same fix as 11 priors.**
+`/temporal-correctness-audit` (this week's rotation group) found `mc_index_oi_fetcher.py:313` and
+`nt_oi_snapshot_fetcher.py:202` both stamping `index_max_pain.date` from a raw `date.today()`
+inside `processMlDailyOps` — the job independently documented elsewhere (`block_deal_fetcher.py`,
+`as_of.py`'s own docstring) as regularly finishing after midnight IST. Swapped both to
+`as_of.logical_trading_date()`, matching every sibling fetcher in the same job. `ast.parse` clean,
+the two fetchers' own tests pass, full pytest (2,048 passed / 230 skipped) and
+`check_recurring_bugs.py` clean afterward.
+
+**Rotation group 4 (temporal / test-integrity / threshold-calibration) ran via three background
+agents; the first attempt hit this session's own API rate limit and failed cleanly mid-run**
+(reported as failed, not faked — re-ran after the 4:10pm IST reset and all three completed).
+Test-integrity came back with **zero new findings** — every sampled file (mirror-consistency
+suites, the one new test file this week, monkeypatch/dotenv/split-engine grep hits) was either
+already clean or a previously-documented bug already fixed by an earlier session.
+Threshold-calibration surfaced three EVIDENCE/INVESTIGATE items, left open rather than
+mechanically fixed: `dq-uninformative-checks` structurally only watches stuck-BAD verdicts, never
+stuck-GOOD; `unified_ranker.py`'s `CORRELATION_CLUSTER_THRESHOLD`/`FACTOR_CROWDING_THRESHOLD` gate
+live demotions with no measured-null derivation (same shape `PSI_CRIT` was in before its own
+fix); `regime_edge_status` is a static snapshot last recomputed 2026-08-14, un-tracked by the
+freshness mandate, sitting under a currently-correct-but-unverified-as-still-live warn verdict.
+
+Full detail, ledger IDs, and the run-log table: `docs/audit-findings.md`'s
+"2026-08-17 — week 34, rotation group 4" entry. Committed as `a998ba3`.
+
 ## 2026-08-17 (cont. 2) — Backfilling the log for six commits that shipped without an entry
 
 Recorded after the fact by a separate (read-only) session. Ten commits landed on 08-17; four
