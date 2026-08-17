@@ -4005,3 +4005,61 @@ still explained "the decommission shim below", and the `postgres` marker still p
 `if use_postgres()` branches across 27 production `.py` files**, each carrying a dead SQLite
 arm (7 of them still containing `INSERT OR REPLACE`) · Phase 4 `database.sqlite` 3.49 GB, still
 present, owner says rename-don't-delete.
+
+### 2026-08-17 (cont. 2) — FinBERT called the HF Hub on every start, and the obvious test for it protects nothing
+
+`bharat-server` logged every `finbert_news_sentiment.py` run as *"finished successfully with
+warnings/stderr output"*. The stderr was `You are sending unauthenticated requests to the HF
+Hub. Please set a HF_TOKEN...` plus a tqdm weight-loading bar — both from `pipeline(...,
+model="ProsusAI/finbert")` resolving the repo against the Hub on **every process start**,
+despite the model already sitting in the local cache. Measured before changing anything:
+`~/.cache/huggingface/hub/models--ProsusAI--finbert` is **836 MB**, `refs/main` →
+`4556d13015211d73dccd3fdd39d39232506f3e43`, and that snapshot is complete (`config.json`,
+`pytorch_model.bin`, `vocab.txt`, tokenizer files). Nothing needed downloading; the call was
+pure latency and log noise on a per-invocation Python subprocess.
+
+**`local_files_only=True` does not fix it** — tried first, empirically: transformers 5.9.0's
+`pipeline()` has no such parameter in its signature (`inspect.signature` → False), it lands in
+`**kwargs`, and the run still emitted all 268 bytes of stderr. `HF_HUB_OFFLINE=1` does fix it,
+and also kills the progress bar with `HF_HUB_DISABLE_PROGRESS_BARS=1`.
+
+Fixed at the two shared loaders rather than at the caller — `nlp_engine.py`'s `FinBERTInference`
+(`nlp_engine.py:5-15`) and `finbert_scorer.py`'s `load_model()` (`finbert_scorer.py:23-26`) are
+the only two `from_pretrained`/`pipeline` sites in `src/server/`, so every consumer routes
+through one of them. `os.environ.setdefault`, not a hard set, so `HF_HUB_OFFLINE=0` still allows
+a first-ever download on a cold-cache box.
+
+**These MUST sit above the `transformers` import**, which is the whole finding: `huggingface_hub`
+snapshots `HF_HUB_OFFLINE` into `huggingface_hub.constants` at *import* time, so setting it
+afterwards is a silent no-op that **fails open** — FinBERT still works, it just quietly goes back
+to calling the Hub.
+
+**The obvious test for that would have protected nothing, and the first version I wrote was it.**
+Asserting `os.environ['HF_HUB_OFFLINE'] == '1'` after importing the module passes *identically*
+against the broken ordering, because `setdefault` sets the variable whether it runs before or
+after the import — the env var is not the thing that matters, the resolved constant is.
+`test_finbert_offline_load.py` therefore imports each module in a clean subprocess (with the var
+popped) and asserts `huggingface_hub.constants.HF_HUB_OFFLINE`. Negative-controlled:
+`import transformers` then `os.environ.setdefault(...)` leaves the constant `False`, so the
+assertion discriminates; the `os.environ` version could not.
+
+**Measured, on the exact script from the log with two real headlines from it:** stderr **268
+bytes → 0 bytes**; predictions unchanged and decisive — Rallis *"Q1 Profit Jumps 31%"* BULLISH
+0.928, Meesho *"shares fall 6%"* BEARISH −0.969. Negative control the other way:
+`HF_HUB_OFFLINE=0 HF_HUB_DISABLE_PROGRESS_BARS=0` restores all 268 bytes.
+
+**Not a scoring change.** No score, weight, threshold or classification formula is touched — this
+changes *where the identical model's weights are loaded from*, and the byte-identical predictions
+above are the applicable evidence. No `factor_backtest.py` run applies (it operates on the price
+panel and has no code path reading `news_sentiment_items`), same reasoning as `measurement.md`'s
+`seed_screener_catalog` and news-sentiment-fallback entries.
+
+**Verified.** `tsc --noEmit` exit 0 · `vitest` **970 passed / 41 skipped / 0 failed** · `pytest`
+**2,040 passed / 230 skipped / 0 failed**, exit 0, no unreachable-DB skip warning. The
+`holidayJobSkip.test.ts` failure recorded in the entry above is **gone** — the concurrent session
+committed its fix as `1a23b85`.
+
+**Left alone, deliberately:** `score_batch()` calls `predict()` one item at a time, which is what
+produces the remaining `[transformers] You seem to be using the pipelines sequentially on GPU`
+notice under a GPU. Batching it is a real throughput win but a behaviour change to the scorer,
+out of scope for a load-path fix.
