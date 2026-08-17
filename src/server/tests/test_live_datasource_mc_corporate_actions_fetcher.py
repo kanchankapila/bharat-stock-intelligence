@@ -12,6 +12,7 @@ import requests
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 sys.path.insert(0, os.path.dirname(__file__))
+from pg_test_support import pg_memory_conn  # noqa: E402
 
 import mc_corporate_actions_fetcher as mca
 from live_datasource_helpers import assert_non_empty_response, assert_numeric_and_finite
@@ -55,7 +56,7 @@ class TestMcCorporateActionsLiveDataSource:
         rows = mca.parse_payload("RELIANCE", data)
         assert_non_empty_response(rows, "parsed RELIANCE rows")
 
-        con = sqlite3.connect(":memory:")
+        con = pg_memory_conn()
         mca.ensure_schema(con)
         stored = mca.store(con, rows)
         assert stored == len(rows)

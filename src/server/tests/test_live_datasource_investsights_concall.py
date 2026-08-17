@@ -12,6 +12,7 @@ import requests
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 sys.path.insert(0, os.path.dirname(__file__))
+from pg_test_support import pg_memory_conn  # noqa: E402
 
 import investsights_concall_fetcher as cc
 from live_datasource_helpers import assert_non_empty_response
@@ -46,7 +47,7 @@ class TestInvestsightsConcallLiveDataSource:
         rows = [r for r in (cc.parse_item(i, universe) for i in items) if r is not None]
         assert rows, "no usable (NSE-tickered) concall rows in the recent window"
 
-        con = sqlite3.connect(":memory:")
+        con = pg_memory_conn()
         cc.ensure_schema(con)
         assert cc.store(con, rows) == len(rows)
 

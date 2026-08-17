@@ -17,6 +17,7 @@ import requests
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 sys.path.insert(0, os.path.dirname(__file__))
+from pg_test_support import pg_memory_conn  # noqa: E402
 
 import investsights_investor_activity_fetcher as isa
 from live_datasource_helpers import assert_looks_like_ticker, assert_non_empty_response
@@ -89,7 +90,7 @@ class TestInvestsightsInvestorActivityLiveDataSource:
                 break
         assert rows, "no usable (NSE-tickered) activity rows found across the sample"
 
-        con = sqlite3.connect(":memory:")
+        con = pg_memory_conn()
         isa.ensure_schema(con)
         assert isa.store(con, rows) == len(rows)
 

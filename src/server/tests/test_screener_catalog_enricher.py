@@ -11,12 +11,13 @@ import os
 import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+from pg_test_support import pg_memory_conn  # noqa: E402
 import screener_catalog_enricher as sce  # noqa: E402
 
 
 def _make_db():
     import sqlite3
-    conn = sqlite3.connect(":memory:")
+    conn = pg_memory_conn()
     conn.executescript("""
         CREATE TABLE screener_master (
             scan_id TEXT, source TEXT, name TEXT,
@@ -127,7 +128,7 @@ class TestExistingCorruptedRowsBackfilled:
 
     def _make_db(self):
         import sqlite3
-        conn = sqlite3.connect(":memory:")
+        conn = pg_memory_conn()
         conn.executescript("""
             CREATE TABLE screener_master (scan_id TEXT, source TEXT, inferred_category TEXT);
             CREATE TABLE screener_catalog (screener_id TEXT, source TEXT, category TEXT);

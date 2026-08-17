@@ -6,6 +6,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 import src.server.backfill_ohlcv as mod
+from pg_test_support import pg_memory_conn  # noqa: E402
 
 
 # ---------------------------------------------------------------------------
@@ -116,7 +117,7 @@ class TestGapFillAsync:
         mock_response.status_code = 200
         mock_response.json.return_value = payload
 
-        conn = sqlite3.connect(":memory:")
+        conn = pg_memory_conn()
         conn.execute(
             "CREATE TABLE stock_ohlcv "
             "(symbol TEXT, date TEXT, open REAL, high REAL, low REAL, close REAL, volume INTEGER, "

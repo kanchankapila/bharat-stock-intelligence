@@ -11,6 +11,7 @@ import pytest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 sys.path.insert(0, os.path.dirname(__file__))
+from pg_test_support import pg_memory_conn  # noqa: E402
 
 import trendlyne_market_insight_fetcher as tmi
 from live_datasource_helpers import assert_looks_like_ticker, assert_non_empty_response
@@ -33,7 +34,7 @@ class TestTrendlyneMarketInsightLiveDataSource:
         rows = [r for r in (tmi.parse_insight(i, universe) for i in raw) if r is not None]
         assert rows, "no usable (resolved-symbol, parseable-timestamp) rows in today's live sample"
 
-        con = sqlite3.connect(":memory:")
+        con = pg_memory_conn()
         tmi.ensure_schema(con)
         assert tmi.store(con, rows) == len(rows)
 

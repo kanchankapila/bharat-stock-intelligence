@@ -18,13 +18,14 @@ import pytest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 sys.path.insert(0, os.path.dirname(__file__))
+from pg_test_support import pg_memory_conn  # noqa: E402
 
 import nse_ipo_calendar_fetcher as ipo
 from live_datasource_helpers import assert_looks_like_ticker, assert_non_empty_response
 
 
 def _make_test_db():
-    conn = sqlite3.connect(":memory:")
+    conn = pg_memory_conn()
     conn.row_factory = sqlite3.Row
     ipo.ensure_schema(conn)
     return conn

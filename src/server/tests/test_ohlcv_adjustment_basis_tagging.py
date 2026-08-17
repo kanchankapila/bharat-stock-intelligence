@@ -14,6 +14,7 @@ import sys
 import pandas as pd
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+from pg_test_support import pg_memory_conn  # noqa: E402
 import backfill_ohlcv as bo
 
 
@@ -35,7 +36,7 @@ class TestExtractRecordsTagging:
 class TestMcOhlcvBackfillTagging:
     def test_ensure_adjustment_basis_column_is_idempotent(self):
         import sqlite3
-        con = sqlite3.connect(":memory:")
+        con = pg_memory_conn()
         con.execute("CREATE TABLE stock_ohlcv (symbol TEXT, date TEXT, open REAL, high REAL, low REAL, close REAL, volume INTEGER)")
         con.commit()
 

@@ -21,7 +21,7 @@ def pytest_configure(config):
     )
 
 
-# ─── Throwaway Postgres schema ────────────────────────────────────────────────
+# ─── Throwaway Postgres schema ──────────────────────────────
 #
 # Phase 2 of docs/SQLITE_DECOMMISSION_PLAN.md needs tests to run against real Postgres rather
 # than SQLite, because the SQLite path is structurally incapable of reproducing whole classes of
@@ -29,53 +29,20 @@ def pytest_configure(config):
 # against unfixed code), and STDDEV/DISTINCT ON/NOW() silently fail the entire query instead of
 # erroring. Both are recorded in .claude/rules/recurring-bugs.md.
 #
-# The pattern below already existed, hand-copied into test_nan_recommendation_purge.py and
-# test_live_datasource_mc_corporate_calendar.py. This is that pattern made reusable -- a
-# conversion should not mean pasting 40 lines of schema plumbing into a third, fourth and
-# hundredth file.
-#
-# ISOLATION IS THE POINT, not convenience. A test pointed at Postgres WITHOUT a private schema
-# is pointed at LIVE PRODUCTION -- measured 2026-08-15 when a Postgres-by-default change briefly
-# aimed ~100 fixture-building test files at the real database. Nothing was written that time,
-# which was luck. Every schema here is uniquely named per test and dropped CASCADE afterwards,
-# so a test cannot touch a production table even by accident: an unqualified name resolves
-# inside the throwaway schema first.
+# The connection plumbing lives in pg_test_support (a UNIQUE module name -- see its docstring
+# for why `from conftest import ...` is not safe here); this file owns the pytest surface.
 
-PG = dict(host="127.0.0.1", port=5433, user="bharat", password="bharat", dbname="bharat_intel")
-
-
-def _pg_dsn() -> dict:
-    """Connection settings, env-overridable so CI's service container works unchanged.
-
-    Deliberately NOT read from POSTGRES_URL: these tests must target whatever instance the
-    runner provides, and a stray production URL in the environment should not silently redirect
-    a schema-creating test at it.
-    """
-    return dict(
-        host=os.environ.get("PGTEST_HOST", PG["host"]),
-        port=int(os.environ.get("PGTEST_PORT", PG["port"])),
-        user=os.environ.get("PGTEST_USER", PG["user"]),
-        password=os.environ.get("PGTEST_PASSWORD", PG["password"]),
-        dbname=os.environ.get("PGTEST_DB", PG["dbname"]),
-    )
-
-
-SCHEMA_SQL = pathlib.Path(__file__).resolve().parents[3] / "db" / "schema.postgres.sql"
-
-
-def _sa_url(schema: str | None = None) -> str:
-    """SQLAlchemy URL for the test instance, optionally pinned to a throwaway schema.
-
-    The `options=-c search_path=...` form is what makes the Phase 2 conversion cheap: it pins the
-    path on the CONNECTION, so every unqualified name in production code -- not just in the test
-    -- resolves inside the throwaway schema. No fetcher or engine needs to know it is under test.
-    Exactly what pgClient.getPool() does on the TypeScript side.
-    """
-    d = _pg_dsn()
-    url = f"postgresql+psycopg2://{d['user']}:{quote_plus(d['password'])}@{d['host']}:{d['port']}/{d['dbname']}"
-    if schema:
-        url += "?options=" + quote_plus(f"-c search_path={schema},public")
-    return url
+from pg_test_support import (  # noqa: E402
+    PG,
+    SCHEMA_SQL,
+    _MEM_NODE,
+    _PG_UNAVAILABLE,
+    _pg_dsn,
+    _sa_url,
+    drain_memory_conns,
+    pg_available,
+    pg_memory_conn,  # noqa: F401  -- re-exported for tests that import it from conftest
+)
 
 
 def conn_is_postgres(conn) -> bool:
@@ -93,18 +60,6 @@ def conn_is_postgres(conn) -> bool:
     (only ':memory:' is redirected; a deliberate temp-file sqlite fixture stays SQLite).
     """
     return type(conn).__name__ == "ConnWrapper"
-
-
-def pg_available() -> bool:
-    try:
-        import psycopg2
-    except ImportError:
-        return False
-    try:
-        psycopg2.connect(connect_timeout=3, **_pg_dsn()).close()
-        return True
-    except Exception:
-        return False
 
 
 @pytest.fixture
@@ -298,108 +253,18 @@ def pg_db_conn(pg_db):
             pass
 
 
-# ─── The transitional shim: sqlite3.connect(':memory:') IS Postgres inside pytest ──────────
-#
-# READ THIS BEFORE TRUSTING ANY `sqlite3` CALL IN A TEST.
-#
-# The project's standing goal is ONE database. Production code and the entire TypeScript suite are
-# already Postgres-only. What remained was ~100 pytest files whose fixtures call
-# `sqlite3.connect(':memory:')` and then build their own tables.
-#
-# Converting them one at a time was tried twice and abandoned both times: the files are not
-# uniform enough for a codemod, and 100 hand edits is days during which half the suite is still on
-# the wrong dialect. So instead of editing 100 call sites, the ONE call they share is redirected:
-# inside pytest, `sqlite3.connect(':memory:')` returns a db_compat.ConnWrapper over a private,
-# empty Postgres schema. The tests' own CREATE TABLE statements then run against real Postgres,
-# unchanged, and every dialect bug those suites were structurally incapable of catching surfaces
-# -- which is the point, and is how the TypeScript half found three live production bugs.
-#
-# WHAT MAKES IT SAFE:
-#   * pytest-only. Installed by an autouse fixture here; no real process can reach it.
-#   * Schema-isolated. Each test gets its own `t_<uuid>` schema, dropped CASCADE afterwards, so an
-#     unqualified write can only shadow a production table, never reach one.
-#   * Only ':memory:' is redirected. A deliberate temp-FILE sqlite fixture keeps working.
-#
-# ALWAYS ON since 2026-08-16. It was gated behind `SQLITE_SHIM_POSTGRES=1` while the dialect bugs
-# it surfaced were being fixed -- shipping a red default suite is what data-sources.md warns turns
-# CI into noise. That trail closed: 51 -> 46 -> 0 failures, re-measured directly at
-# **2,025 passed / 230 skipped / 0 failed** (12m50s), so the flag had no reason to exist and is
-# gone. `python -m pytest` now runs the whole suite on Postgres with no opt-in.
-#
-# WHY IT MUST NOT BECOME PERMANENT: a `sqlite3.connect` that does not return SQLite is surprising,
-# and surprising is what this migration exists to end. `pytest_terminal_summary` below prints how
-# many files still lean on it (37 at the flip); that number must only go DOWN. At zero, delete
-# this block and sql_translate.py's `_in_pytest()` branch together -- at which point
-# `postgresOnly.test.ts` and `test_the_two_decision_points_agree_where_they_still_can` both fail
-# by design and get updated to assert real parity.
-
-_SHIM_USERS: set = set()
-_SHIM_UNAVAILABLE: set = set()
-
-
 @pytest.fixture(autouse=True)
-def _sqlite_is_postgres(request, monkeypatch):
-    """Redirect in-memory sqlite3 fixtures onto a throwaway Postgres schema."""
-    import sqlite3 as _sqlite3
-
-    real_connect = _sqlite3.connect
-    opened: list = []
-
-    def _connect(database=":memory:", *args, **kwargs):
-        if str(database) != ":memory:":
-            return real_connect(database, *args, **kwargs)
-        if not pg_available():
-            # Skipping is right for a laptop with no container, but a SILENT skip is the
-            # "green while protecting nothing" failure this repo keeps paying for -- so it is
-            # counted and reported loudly in the summary below.
-            _SHIM_UNAVAILABLE.add(request.node.nodeid.split("::")[0])
-            pytest.skip("live Postgres not reachable — set PGTEST_* or start the container")
-
-        _SHIM_USERS.add(request.node.nodeid.split("::")[0])
-
-        import psycopg2
-        from sqlalchemy import create_engine, text
-        from db_compat import ConnWrapper
-
-        schema = f"t_{uuid.uuid4().hex[:12]}"
-        admin = psycopg2.connect(**_pg_dsn())
-        admin.autocommit = True
-        admin.cursor().execute(f'CREATE SCHEMA "{schema}"')
-
-        engine = create_engine(_sa_url(schema), future=True)
-        sa_conn = engine.connect()
-        # NO `public` on the path. With it, a table the test never created falls through to
-        # the PRODUCTION one -- which is how test_load_regime_edge_status_missing_table_
-        # returns_empty_dict read real regime_edge_status rows, and is a write hazard for any
-        # test that forgets a CREATE TABLE. Unqualified names now resolve in the throwaway
-        # schema or nowhere.
-        sa_conn.execute(text(f'SET search_path TO "{schema}"'))
-        # translate() consults use_postgres(); this connection IS Postgres regardless of the
-        # ambient env var, so force the branch or `?` placeholders reach psycopg2 untranslated.
-        monkeypatch.setenv("USE_POSTGRES", "true")
-        opened.append((admin, engine, sa_conn, schema))
-        return ConnWrapper(sa_conn)
-
-    monkeypatch.setattr(_sqlite3, "connect", _connect)
+def _pg_memory_lifecycle(request):
+    """Name the current test for skip reporting, and drop every schema it opened."""
+    _MEM_NODE["id"] = request.node.nodeid.split("::")[0]
     yield
-    for admin, engine, sa_conn, schema in opened:
-        try:
-            sa_conn.close()
-            engine.dispose()
-            admin.cursor().execute(f'DROP SCHEMA IF EXISTS "{schema}" CASCADE')
-        finally:
-            admin.close()
+    drain_memory_conns()
 
 
 def pytest_terminal_summary(terminalreporter, exitstatus, config):
-    if _SHIM_USERS:
+    if _PG_UNAVAILABLE:
         terminalreporter.write_line(
-            f"[sqlite-decommission] {len(_SHIM_USERS)} test files still reach Postgres through "
-            f"the sqlite3.connect shim (see conftest.py). This number must only go down."
-        )
-    if _SHIM_UNAVAILABLE:
-        terminalreporter.write_line(
-            f"[sqlite-decommission] WARNING: {len(_SHIM_UNAVAILABLE)} test files were SKIPPED "
+            f"[sqlite-decommission] WARNING: {len(_PG_UNAVAILABLE)} test files were SKIPPED "
             f"because Postgres was unreachable. This run did not test them — a green result here "
             f"means less than it looks. Start the container or set PGTEST_*."
         )

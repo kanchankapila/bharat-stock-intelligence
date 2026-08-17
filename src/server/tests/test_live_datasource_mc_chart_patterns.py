@@ -18,6 +18,7 @@ import pytest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 sys.path.insert(0, os.path.dirname(__file__))
+from pg_test_support import pg_memory_conn  # noqa: E402
 import mc_chart_patterns_fetcher as mcp
 from live_datasource_helpers import assert_looks_like_ticker, assert_numeric_and_finite
 
@@ -26,7 +27,7 @@ REAL_MCSYMBOL = "RI"
 
 
 def _make_test_conn():
-    conn = sqlite3.connect(":memory:")
+    conn = pg_memory_conn()
     conn.row_factory = sqlite3.Row
     conn.execute("""CREATE TABLE technical_signals (
         symbol TEXT, date TEXT,

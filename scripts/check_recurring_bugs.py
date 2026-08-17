@@ -204,7 +204,12 @@ def check_raw_percent_s(path: Path, text: str) -> list[str]:
     paren-depth to that one statement, not a fixed line window, so it can't cross into an
     unrelated adjacent execute() call or a nearby log.info("...%s...", x) statement (both
     produced false positives with a naive N-line lookahead)."""
-    if "tests" in path.parts:
+    # Test plumbing is exempt: its `%s` are raw psycopg2 placeholders on a real cursor, not
+    # db_compat-mediated calls. `conftest.py`/`pg_test_support.py` are named explicitly because
+    # they sit in `src/server/`, not `src/server/tests/` -- moved there 2026-08-17 so the
+    # fixtures also cover `src/server/__tests__/`, which promptly made this check fire on two
+    # correct pre-existing lines.
+    if "tests" in path.parts or path.name in ("conftest.py", "pg_test_support.py"):
         return []
     findings = []
     lines = text.splitlines()

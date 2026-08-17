@@ -11,6 +11,7 @@ import pytest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 sys.path.insert(0, os.path.dirname(__file__))
+from pg_test_support import pg_memory_conn  # noqa: E402
 
 import stockedge_high_delivery_fetcher as sef
 from live_datasource_helpers import assert_looks_like_ticker, assert_non_empty_response, assert_numeric_and_finite
@@ -33,7 +34,7 @@ class TestStockEdgeHighDeliveryLiveDataSource:
         rows = [r for r in (sef.parse_alert(a, universe) for a in raw) if r is not None]
         assert rows, "no usable (NSE-tickered) alert rows found in today's live sample"
 
-        con = sqlite3.connect(":memory:")
+        con = pg_memory_conn()
         sef.ensure_schema(con)
         assert sef.store(con, rows) == len(rows)
 

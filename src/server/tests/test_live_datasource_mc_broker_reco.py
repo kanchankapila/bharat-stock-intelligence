@@ -18,6 +18,7 @@ import pytest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 sys.path.insert(0, os.path.dirname(__file__))
+from pg_test_support import pg_memory_conn  # noqa: E402
 import sql_translate
 from conftest import conn_is_postgres
 import mc_broker_reco_fetcher as mbr
@@ -60,7 +61,7 @@ class TestMcBrokerRecoLiveDataSource:
         nse_stocks row) purely to exercise the real join/aggregation logic in
         backfill_technical_signals() -- the mapping itself doesn't need to be the real-world
         correct one, only present."""
-        conn = sqlite3.connect(":memory:")
+        conn = pg_memory_conn()
         conn.row_factory = sqlite3.Row
         _install_shims(monkeypatch, conn)
 

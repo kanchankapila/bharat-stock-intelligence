@@ -15,6 +15,7 @@ import pytest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 sys.path.insert(0, os.path.dirname(__file__))
+from pg_test_support import pg_memory_conn  # noqa: E402
 import mc_global_macro_fetcher as gmm
 from live_datasource_helpers import assert_looks_like_ticker, assert_numeric_and_finite
 
@@ -40,7 +41,7 @@ class TestMcGlobalMacroFetcherLiveDataSource:
         records = gmm.parse_indices(ov, tch)
         assert records, "parse_indices() produced zero records from a real non-empty response"
 
-        conn = sqlite3.connect(":memory:")
+        conn = pg_memory_conn()
         conn.execute("""CREATE TABLE macro_asset_prices (
             date TEXT, symbol TEXT, close REAL, ret_1d REAL, ret_5d REAL, fetched_at TEXT,
             PRIMARY KEY (date, symbol)

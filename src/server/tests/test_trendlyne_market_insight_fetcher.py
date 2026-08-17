@@ -8,6 +8,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+from pg_test_support import pg_memory_conn  # noqa: E402
 
 import trendlyne_market_insight_fetcher as tmi
 
@@ -84,7 +85,7 @@ class TestParseInsight:
 
 class TestSchemaAndStorage:
     def test_ensure_schema_and_upsert_round_trip(self):
-        con = sqlite3.connect(":memory:")
+        con = pg_memory_conn()
         tmi.ensure_schema(con)
         row = tmi.parse_insight(REAL_ROW, UNIVERSE)
         assert tmi.store(con, [row]) == 1
@@ -94,7 +95,7 @@ class TestSchemaAndStorage:
         assert result == ("KPIL", "Order Win", "2026-08-14 15:31:00")
 
     def test_upsert_is_idempotent(self):
-        con = sqlite3.connect(":memory:")
+        con = pg_memory_conn()
         tmi.ensure_schema(con)
         row = tmi.parse_insight(REAL_ROW, UNIVERSE)
         assert tmi.store(con, [row]) == 1
@@ -103,6 +104,6 @@ class TestSchemaAndStorage:
         assert count == 1
 
     def test_store_empty_list_is_a_noop(self):
-        con = sqlite3.connect(":memory:")
+        con = pg_memory_conn()
         tmi.ensure_schema(con)
         assert tmi.store(con, []) == 0

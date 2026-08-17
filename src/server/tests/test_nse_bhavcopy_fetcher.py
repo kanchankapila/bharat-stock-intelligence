@@ -10,6 +10,7 @@ import sys
 import pytest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
+from pg_test_support import pg_memory_conn  # noqa: E402
 
 import nse_bhavcopy_fetcher as bhav
 
@@ -95,7 +96,7 @@ class TestUrl:
 class TestStore:
     def _conn(self):
         class C:
-            def __init__(s): s._c = sqlite3.connect(':memory:')
+            def __init__(s): s._c = pg_memory_conn()
             def execute(s, q, p=()): return s._c.execute(q, p)
             def commit(s): s._c.commit()
             def close(s): s._c.close()

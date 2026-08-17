@@ -15,6 +15,7 @@ import pytest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 sys.path.insert(0, os.path.dirname(__file__))
+from pg_test_support import pg_memory_conn  # noqa: E402
 
 import ndtv_fno_basis_fetcher as nfb
 from live_datasource_helpers import assert_looks_like_ticker, assert_numeric_and_finite, assert_non_empty_response
@@ -76,7 +77,7 @@ class TestNdtvFnoBasisLiveDataSource:
         row["date"] = "2026-08-07"
 
         import sqlite3
-        con = sqlite3.connect(":memory:")
+        con = pg_memory_conn()
         nfb.ensure_schema(con)
         assert nfb.store(con, [row]) == 1
 

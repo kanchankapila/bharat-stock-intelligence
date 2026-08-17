@@ -1,6 +1,7 @@
 import sqlite3, sys, os, datetime
 import pytest
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
+from pg_test_support import pg_memory_conn  # noqa: E402
 
 # Signals must be older than the resolver's 30-day cutoff (ts.date <= today-30).
 SIGNAL_DATE = (datetime.date.today() - datetime.timedelta(days=40)).isoformat()
@@ -8,7 +9,7 @@ EXIT_DATE   = (datetime.date.today() - datetime.timedelta(days=39)).isoformat() 
 
 
 def make_db():
-    conn = sqlite3.connect(':memory:')
+    conn = pg_memory_conn()
     conn.executescript("""
         CREATE TABLE technical_signals (
             symbol TEXT, date TEXT, cmp REAL, signal_score INTEGER,
@@ -214,7 +215,7 @@ def test_stop_loss_return_also_net_of_costs():
 # ─── unified resolver exit policy (#2): target capture + trailing instead of horizon-close ──
 
 def make_unified_db():
-    conn = sqlite3.connect(':memory:')
+    conn = pg_memory_conn()
     conn.executescript("""
         CREATE TABLE unified_signals (
             id INTEGER PRIMARY KEY AUTOINCREMENT, symbol TEXT, signal_date TEXT,
@@ -316,7 +317,7 @@ def test_unified_outcomes_populates_signal_score_and_mfe_mae():
 
 
 def make_reclog_db():
-    conn = sqlite3.connect(':memory:')
+    conn = pg_memory_conn()
     conn.executescript("""
         CREATE TABLE recommendation_log (
             id INTEGER PRIMARY KEY AUTOINCREMENT, symbol TEXT, signal_date TEXT,
@@ -391,7 +392,7 @@ def test_unified_resolution_excludes_suspect_bars():
 
 def make_multi_horizon_db():
     """Schema for both bugs: technical_signals + signal_outcomes + unified tables."""
-    conn = sqlite3.connect(':memory:')
+    conn = pg_memory_conn()
     conn.executescript("""
         CREATE TABLE technical_signals (
             symbol TEXT, date TEXT, cmp REAL, signal_score INTEGER,

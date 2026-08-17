@@ -16,6 +16,7 @@ import sys
 import pytest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
+from pg_test_support import pg_memory_conn  # noqa: E402
 
 import screener_performance as sp
 
@@ -27,7 +28,7 @@ class FakeConn:
     """Minimal ConnWrapper stand-in over sqlite3 (the module only needs execute/commit)."""
 
     def __init__(self):
-        self._c = sqlite3.connect(':memory:')
+        self._c = pg_memory_conn()
         self._c.execute("""
             CREATE TABLE screener_appearances (
                 screener_id TEXT, source TEXT, symbol TEXT, appeared_date TEXT,

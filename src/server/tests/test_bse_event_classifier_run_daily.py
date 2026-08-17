@@ -12,12 +12,13 @@ import sqlite3
 import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
+from pg_test_support import pg_memory_conn  # noqa: E402
 
 import bse_event_classifier as bec
 
 
 def _make_conn():
-    conn = sqlite3.connect(':memory:')
+    conn = pg_memory_conn()
     conn.row_factory = sqlite3.Row
     conn.execute("CREATE TABLE nse_stocks (symbol TEXT)")
     conn.execute("""

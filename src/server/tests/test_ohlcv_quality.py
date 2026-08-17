@@ -2,6 +2,7 @@ import sys, os, sqlite3
 import pandas as pd
 import pytest
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
+from pg_test_support import pg_memory_conn  # noqa: E402
 
 from ohlcv_quality import (  # noqa: E402
     parse_split_actions,
@@ -61,7 +62,7 @@ def test_boundary_bar_without_a_neighbour_is_not_flagged():
 # ── integration: flag suspect bars in stock_ohlcv ───────────────────────────────
 
 def make_db():
-    conn = sqlite3.connect(':memory:')
+    conn = pg_memory_conn()
     conn.executescript("""
         CREATE TABLE stock_ohlcv (
             symbol TEXT, date TEXT, open REAL, high REAL, low REAL, close REAL, volume INTEGER,

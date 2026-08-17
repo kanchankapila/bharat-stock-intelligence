@@ -9,6 +9,7 @@ from unittest.mock import MagicMock, patch
 from datetime import datetime, timedelta
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..', '..'))
+from pg_test_support import pg_memory_conn  # noqa: E402
 import src.server.regime_detector as regime_detector
 from src.server.regime_detector import _assign_state_labels, _load_hmm_features
 
@@ -125,7 +126,7 @@ class TestLabelAssignment:
 
 class TestDateAnchoredFeatures:
     def _make_nifty_conn(self, dates):
-        conn = sqlite3.connect(':memory:')
+        conn = pg_memory_conn()
         conn.execute("""
             CREATE TABLE stock_ohlcv (
                 symbol TEXT, date DATE, open REAL, high REAL, low REAL, close REAL, volume INTEGER

@@ -1,6 +1,7 @@
 import sys, os, sqlite3
 import pytest
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
+from pg_test_support import pg_memory_conn  # noqa: E402
 
 from ml_calibration import (  # noqa: E402
     fit_calibrator,
@@ -58,7 +59,7 @@ def test_calibrator_clips_out_of_range():
 # ── DB job: write calibrated_win_probability ────────────────────────────────────
 
 def make_db():
-    conn = sqlite3.connect(':memory:')
+    conn = pg_memory_conn()
     conn.row_factory = sqlite3.Row
     conn.executescript("""
         CREATE TABLE technical_signals (

@@ -19,6 +19,7 @@ Conversion notes for P3f:
   - SQLite-only SQL (INSERT OR REPLACE, strftime, PRAGMA table_info) must be hand-converted.
 """
 import os
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 from urllib.parse import quote_plus
@@ -156,6 +157,59 @@ class _EmptyResult:
         return []
 
 
+def _transaction_is_aborted(conn) -> bool:
+    """True only when Postgres has put this connection's transaction in the error state.
+
+    Asking the driver rather than inferring it from the exception is what keeps the rollback
+    below safe. A statement can fail WITHOUT aborting anything -- translate() rejecting
+    `INSERT OR REPLACE`, build_params() choking on a bad argument, any Python-side error before
+    the server is reached. In those cases the caller's pending work is still perfectly
+    committable, and rolling back would destroy it.
+    """
+    try:
+        import psycopg2.extensions as _ext
+
+        raw = conn.connection.dbapi_connection
+        return raw.info.transaction_status == _ext.TRANSACTION_STATUS_INERROR
+    except Exception:                                            # noqa: BLE001
+        return False
+
+
+@contextmanager
+def _usable_after_failure(conn):
+    """Roll back an ABORTED transaction so the connection survives it, then re-raise.
+
+    sqlite3 -- the API this module mimics, and the API every engine here was written against --
+    leaves a connection perfectly usable after a statement errors. Postgres does not: ONE failed
+    statement aborts the whole transaction, and every subsequent query returns
+    InFailedSqlTransaction until someone rolls back.
+
+    That difference silently breaks the `try: ... except Exception: print(...)` degrade-gracefully
+    pattern this codebase uses everywhere (unified_ranker.py alone has 33). On SQLite each
+    swallowed error is local, and the run continues with partial data exactly as the surrounding
+    docstrings promise. On Postgres the FIRST one kills the connection, so every later read fails
+    too -- and because those are swallowed as well, the job reports success having read almost
+    nothing. Measured 2026-08-17: one missing advisory table made unified_ranker classify its
+    entire universe as Hold with 0 bull/bear counts, printing 10 "unavailable" lines and exit 0.
+
+    `recurring-bugs.md` warns that a rollback inside a SHARED helper can discard a caller's
+    pending work. That warning is why this is gated on `_transaction_is_aborted()` rather than on
+    "an exception happened": once Postgres has aborted the transaction, the earlier statements in
+    it can never commit, so the rollback destroys nothing that was not already lost -- and when
+    the transaction is NOT aborted, nothing happens at all. It never suppresses the error either;
+    the caller still sees it.
+    """
+    try:
+        yield
+    except Exception:
+        if _transaction_is_aborted(conn):
+            try:
+                conn.rollback()
+            except Exception:                                    # noqa: BLE001
+                pass
+        raise
+
+
 class CursorWrapper:
     """Mimics the subset of sqlite3.Cursor the engines use: execute/executemany +
     fetchone/fetchall + rowcount/lastrowid."""
@@ -165,16 +219,18 @@ class CursorWrapper:
         self._result = None
 
     def execute(self, sql, params=()):
-        self._result = self._conn.execute(text(translate(sql)), build_params(params))
+        with _usable_after_failure(self._conn):
+            self._result = self._conn.execute(text(translate(sql)), build_params(params))
         return self
 
     def executemany(self, sql, seq_of_params):
         if not seq_of_params:
             self._result = _EmptyResult()
             return self
-        self._result = self._conn.execute(
-            text(translate(sql)), [build_params(p) for p in seq_of_params]
-        )
+        with _usable_after_failure(self._conn):
+            self._result = self._conn.execute(
+                text(translate(sql)), [build_params(p) for p in seq_of_params]
+            )
         return self
 
     def fetchone(self):

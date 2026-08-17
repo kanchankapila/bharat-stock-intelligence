@@ -4,6 +4,7 @@ Tests for ml_ensemble.py
 import sqlite3
 import datetime
 import pytest
+from pg_test_support import pg_memory_conn  # noqa: E402
 
 
 def test_load_training_data_includes_stop_loss(monkeypatch):
@@ -69,7 +70,7 @@ def test_regime_threshold_varies_by_regime(monkeypatch):
 # ── recommendation_log propagation + expiry gate ────────────────────────────────
 
 def _make_gate_db():
-    conn = sqlite3.connect(':memory:')
+    conn = pg_memory_conn()
     conn.row_factory = sqlite3.Row
     conn.executescript("""
         CREATE TABLE technical_signals (

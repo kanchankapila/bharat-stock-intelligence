@@ -5,6 +5,7 @@ import datetime
 import pytest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..', '..'))
+from pg_test_support import pg_memory_conn  # noqa: E402
 from src.server.rl_agent import (
     _get_nifty_return, _get_nifty_horizon_return,
     _get_next_state_key, daily_update, REGIMES,
@@ -12,7 +13,7 @@ from src.server.rl_agent import (
 
 
 def _make_test_conn():
-    conn = sqlite3.connect(':memory:')
+    conn = pg_memory_conn()
     conn.execute("""
         CREATE TABLE stock_ohlcv (
             symbol TEXT, date DATE, open REAL, high REAL, low REAL, close REAL, volume INTEGER

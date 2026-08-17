@@ -7,6 +7,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+from pg_test_support import pg_memory_conn  # noqa: E402
 
 import stockedge_high_delivery_fetcher as sef
 
@@ -58,7 +59,7 @@ class TestParseAlert:
 
 class TestSchemaAndStorage:
     def test_ensure_schema_and_upsert_round_trip(self):
-        con = sqlite3.connect(":memory:")
+        con = pg_memory_conn()
         sef.ensure_schema(con)
         row = sef.parse_alert(REAL_ROW, UNIVERSE)
         assert sef.store(con, [row]) == 1
@@ -68,7 +69,7 @@ class TestSchemaAndStorage:
         assert result == ("LGEINDIA", "2026-08-14", 19.41680852073002)
 
     def test_upsert_is_idempotent(self):
-        con = sqlite3.connect(":memory:")
+        con = pg_memory_conn()
         sef.ensure_schema(con)
         row = sef.parse_alert(REAL_ROW, UNIVERSE)
         assert sef.store(con, [row]) == 1
@@ -77,6 +78,6 @@ class TestSchemaAndStorage:
         assert count == 1
 
     def test_store_empty_list_is_a_noop(self):
-        con = sqlite3.connect(":memory:")
+        con = pg_memory_conn()
         sef.ensure_schema(con)
         assert sef.store(con, []) == 0

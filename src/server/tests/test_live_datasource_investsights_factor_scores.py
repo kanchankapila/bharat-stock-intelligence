@@ -12,6 +12,7 @@ import requests
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 sys.path.insert(0, os.path.dirname(__file__))
+from pg_test_support import pg_memory_conn  # noqa: E402
 
 import investsights_factor_scores_fetcher as fs
 from live_datasource_helpers import assert_non_empty_response, assert_stored_row_ml_usable
@@ -50,7 +51,7 @@ class TestInvestsightsFactorScoresLiveDataSource:
         parsed = [r for r in parsed if r]
         assert parsed
 
-        con = sqlite3.connect(":memory:")
+        con = pg_memory_conn()
         fs.ensure_schema(con)
         assert fs.store_rows(con, parsed) == len(parsed)
 

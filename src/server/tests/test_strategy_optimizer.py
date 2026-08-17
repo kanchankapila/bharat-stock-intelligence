@@ -5,6 +5,7 @@ import numpy as np
 import pytest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..', '..'))
+from pg_test_support import pg_memory_conn  # noqa: E402
 from src.server.strategy_optimizer import StrategyOptimizer, CATEGORIES, SOURCES
 
 
@@ -58,7 +59,7 @@ class TestTemporalSplit:
         # method to capture what train/test dataframes are passed to it.
         import sqlite3
 
-        conn = sqlite3.connect(':memory:')
+        conn = pg_memory_conn()
         # StrategyOptimizer._read_df() builds DataFrames via dict(row), which needs a mapping
         # row type (matches the row_factory convention every other test file in this suite
         # already uses for connections passed into production code) -- a plain tuple isn't one.

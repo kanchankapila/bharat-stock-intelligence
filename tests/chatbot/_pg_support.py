@@ -2,14 +2,14 @@
 
 Why this file exists at all, rather than living in conftest.py: `from conftest import ...`
 is AMBIGUOUS once more than one test directory is collected in the same run. Both this
-directory and src/server/tests/ contain a conftest.py, and every test file inserts its own
+directory and src/server/ contain a conftest.py, and every test file inserts its own
 directory onto sys.path -- so `import conftest` resolves to whichever ran first. Collecting
 `src/server/__tests__/ src/server/tests/ tests/chatbot/` together (the CI command) made it
-resolve to src/server/tests/conftest.py and fail with "cannot import name
+resolve to src/server/conftest.py and fail with "cannot import name
 patch_tool_connect". `_pg_support` is a name no other module in the repo uses, so it resolves
 to this file no matter the sys.path order.
 
-What it provides: the throwaway-schema Postgres fixtures from src/server/tests/conftest.py
+What it provides: the throwaway-schema Postgres fixtures from src/server/conftest.py
 (Phase 2 of docs/SQLITE_DECOMMISSION_PLAN.md), loaded by explicit file path so no module-name
 collision is possible, plus the helper that redirects a chatbot tool away from production.
 """
@@ -27,7 +27,7 @@ for _p in (str(_SERVER), str(_SERVER / "chatbot")):
         sys.path.insert(0, _p)
 
 _spec = importlib.util.spec_from_file_location(
-    "_server_tests_conftest", _SERVER / "tests" / "conftest.py"
+    "_server_tests_conftest", _SERVER / "conftest.py"
 )
 _server_conftest = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(_server_conftest)

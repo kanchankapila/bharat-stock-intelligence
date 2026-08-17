@@ -11,6 +11,7 @@ import pytest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 sys.path.insert(0, os.path.dirname(__file__))
+from pg_test_support import pg_memory_conn  # noqa: E402
 
 import trading80_call_alerts_fetcher as tca
 from live_datasource_helpers import assert_looks_like_ticker, assert_non_empty_response, assert_numeric_and_finite
@@ -36,7 +37,7 @@ class TestTrading80CallAlertsLiveDataSource:
             rows.extend(r for r in (tca.parse_call(list_name, c, sid_map) for c in raw_rows) if r is not None)
         assert rows, "no usable (resolved-symbol) call rows found in today's live sample"
 
-        con = sqlite3.connect(":memory:")
+        con = pg_memory_conn()
         tca.ensure_schema(con)
         assert tca.store(con, rows) == len(rows)
 

@@ -13,6 +13,7 @@ import sqlite3
 import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+from pg_test_support import pg_memory_conn  # noqa: E402
 import extra_features_parser as efp
 
 
@@ -30,7 +31,7 @@ class _NoCloseConn:
 
 
 def _make_db():
-    real = sqlite3.connect(":memory:")
+    real = pg_memory_conn()
     real.row_factory = sqlite3.Row
     con = _NoCloseConn(real)
     con.execute("""

@@ -10,12 +10,13 @@ import sqlite3
 import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+from pg_test_support import pg_memory_conn  # noqa: E402
 
 import ohlcv_adjust as oa
 
 
 def _make_db():
-    con = sqlite3.connect(":memory:")
+    con = pg_memory_conn()
     con.execute("""
         CREATE TABLE ohlcv_adjustment_factors (
             symbol TEXT, ex_date TEXT, factor REAL, source TEXT DEFAULT 'bhavcopy_prev_close',

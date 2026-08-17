@@ -7,11 +7,12 @@ import pytest
 
 # Add src/server to path so we can import unified_ranker
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
+from pg_test_support import pg_memory_conn  # noqa: E402
 
 
 def make_db():
     """Create in-memory SQLite with required tables."""
-    conn = sqlite3.connect(':memory:')
+    conn = pg_memory_conn()
     conn.row_factory = sqlite3.Row
     conn.executescript('''
         CREATE TABLE screener_catalog (

@@ -14,6 +14,7 @@ import pytest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 sys.path.insert(0, os.path.dirname(__file__))
+from pg_test_support import pg_memory_conn  # noqa: E402
 import insider_transactions_fetcher as itf
 from live_datasource_helpers import assert_looks_like_ticker, assert_stored_row_ml_usable
 from conftest import conn_is_postgres
@@ -23,7 +24,7 @@ NSE_DATE_FMT = "%d-%m-%Y"
 
 
 def _make_test_conn():
-    conn = sqlite3.connect(":memory:")
+    conn = pg_memory_conn()
     conn.row_factory = sqlite3.Row
     itf.ensure_schema(conn)
     conn.execute("CREATE TABLE nse_stocks (symbol TEXT, status TEXT)")

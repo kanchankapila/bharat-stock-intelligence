@@ -19,6 +19,7 @@ import requests
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 sys.path.insert(0, os.path.dirname(__file__))
+from pg_test_support import pg_memory_conn  # noqa: E402
 
 import tickertape_deals_fetcher as ttd
 from live_datasource_helpers import (
@@ -97,7 +98,7 @@ class TestTickertapeDealsLiveDataSource:
     def test_stored_rows_are_ml_usable(self):
         items = ttd.fetch_page(_session(), offset=0, count=50)
         rows = [d for d in (ttd.parse_deal(i) for i in items) if d]
-        con = sqlite3.connect(":memory:")
+        con = pg_memory_conn()
         ttd.ensure_schema(con)
         assert ttd.store(con, rows) == len(rows)
 

@@ -16,12 +16,13 @@ import pytest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 sys.path.insert(0, os.path.dirname(__file__))
+from pg_test_support import pg_memory_conn  # noqa: E402
 import index_membership_fetcher as imf
 from live_datasource_helpers import assert_looks_like_ticker
 
 
 def _make_test_conn():
-    conn = sqlite3.connect(":memory:")
+    conn = pg_memory_conn()
     conn.row_factory = sqlite3.Row
     conn.execute("CREATE TABLE nse_stocks (symbol TEXT PRIMARY KEY)")
     conn.execute("CREATE TABLE stock_ohlcv (symbol TEXT, date TEXT)")

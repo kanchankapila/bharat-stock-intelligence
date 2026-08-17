@@ -1,6 +1,7 @@
 import sqlite3, sys, os, datetime
 from unittest.mock import patch
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
+from pg_test_support import pg_memory_conn  # noqa: E402
 
 import screener_performance as sp  # noqa: E402
 from screener_performance import (  # noqa: E402
@@ -28,7 +29,7 @@ class CastStrippingConn:
 
 
 def make_db():
-    conn = sqlite3.connect(':memory:')
+    conn = pg_memory_conn()
     conn.row_factory = sqlite3.Row
     conn.executescript("""
         CREATE TABLE stock_ohlcv (

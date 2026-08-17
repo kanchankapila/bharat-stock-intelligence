@@ -12,6 +12,7 @@ import pytest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 sys.path.insert(0, os.path.dirname(__file__))
+from pg_test_support import pg_memory_conn  # noqa: E402
 from marketsmojo_technical_fetcher import HEADERS, load_sid_map  # noqa: E402
 from marketsmojo_fintrend_fetcher import (  # noqa: E402
     fetch_fintrend_history,
@@ -27,7 +28,7 @@ REAL_SYMBOL = "HDFCBANK"
 
 
 def _make_test_db():
-    conn = sqlite3.connect(':memory:')
+    conn = pg_memory_conn()
     conn.row_factory = sqlite3.Row
     conn.executescript("""
         CREATE TABLE marketsmojo_fintrend_history (

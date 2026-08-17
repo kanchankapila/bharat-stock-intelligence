@@ -7,6 +7,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+from pg_test_support import pg_memory_conn  # noqa: E402
 
 import trading80_call_alerts_fetcher as tca
 
@@ -68,7 +69,7 @@ class TestParseCall:
 
 class TestSchemaAndStorage:
     def test_ensure_schema_and_upsert_round_trip(self):
-        con = sqlite3.connect(":memory:")
+        con = pg_memory_conn()
         tca.ensure_schema(con)
         row = tca.parse_call("new", REAL_ROW, SID_MAP)
         assert tca.store(con, [row]) == 1
@@ -78,7 +79,7 @@ class TestSchemaAndStorage:
         assert result == ("SHK", "new", 184.58)
 
     def test_upsert_is_idempotent(self):
-        con = sqlite3.connect(":memory:")
+        con = pg_memory_conn()
         tca.ensure_schema(con)
         row = tca.parse_call("new", REAL_ROW, SID_MAP)
         assert tca.store(con, [row]) == 1
@@ -87,6 +88,6 @@ class TestSchemaAndStorage:
         assert count == 1
 
     def test_store_empty_list_is_a_noop(self):
-        con = sqlite3.connect(":memory:")
+        con = pg_memory_conn()
         tca.ensure_schema(con)
         assert tca.store(con, []) == 0

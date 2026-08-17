@@ -7,6 +7,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+from pg_test_support import pg_memory_conn  # noqa: E402
 
 import marketsmojo_stock_picks_fetcher as msp
 
@@ -58,7 +59,7 @@ class TestParsePick:
 
 class TestSchemaAndStorage:
     def test_ensure_schema_and_upsert_round_trip(self):
-        con = sqlite3.connect(":memory:")
+        con = pg_memory_conn()
         msp.ensure_schema(con)
         row = msp.parse_pick("activestocks", REAL_ROW, SID_MAP)
         assert msp.store(con, [row]) == 1
@@ -68,7 +69,7 @@ class TestSchemaAndStorage:
         assert result == ("GEVERNOVA", 1, 1647.70)
 
     def test_upsert_is_idempotent(self):
-        con = sqlite3.connect(":memory:")
+        con = pg_memory_conn()
         msp.ensure_schema(con)
         row = msp.parse_pick("activestocks", REAL_ROW, SID_MAP)
         assert msp.store(con, [row]) == 1
@@ -77,6 +78,6 @@ class TestSchemaAndStorage:
         assert count == 1
 
     def test_store_empty_list_is_a_noop(self):
-        con = sqlite3.connect(":memory:")
+        con = pg_memory_conn()
         msp.ensure_schema(con)
         assert msp.store(con, []) == 0

@@ -12,6 +12,7 @@ import sys
 import pytest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+from pg_test_support import pg_memory_conn  # noqa: E402
 
 import tickertape_deals_fetcher as ttd
 
@@ -77,7 +78,7 @@ class TestParseDeal:
 
 
 def _mem():
-    con = sqlite3.connect(":memory:")
+    con = pg_memory_conn()
     ttd.ensure_schema(con)
     return con
 

@@ -9,6 +9,7 @@ import sys
 import pytest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+from pg_test_support import pg_memory_conn  # noqa: E402
 
 import ndtv_fno_basis_fetcher as nfb
 
@@ -87,7 +88,7 @@ class TestFetchOne:
 
 class TestSchemaAndStorage:
     def test_ensure_schema_and_store_round_trip(self):
-        con = sqlite3.connect(":memory:")
+        con = pg_memory_conn()
         nfb.ensure_schema(con)
         row = nfb.parse_summary("RELIANCE", REAL_PAYLOAD)
         row["date"] = "2026-08-07"
@@ -100,7 +101,7 @@ class TestSchemaAndStorage:
         assert basis == pytest.approx(5.2)
 
     def test_upsert_is_idempotent(self):
-        con = sqlite3.connect(":memory:")
+        con = pg_memory_conn()
         nfb.ensure_schema(con)
         row = nfb.parse_summary("RELIANCE", REAL_PAYLOAD)
         row["date"] = "2026-08-07"
@@ -112,7 +113,7 @@ class TestSchemaAndStorage:
     def test_upsert_updates_on_new_broadcast(self):
         """Same (symbol, date) re-fetched later the same day (e.g. a job retry) must UPDATE
         the row with the newer broadcast, not duplicate it."""
-        con = sqlite3.connect(":memory:")
+        con = pg_memory_conn()
         nfb.ensure_schema(con)
         row1 = nfb.parse_summary("RELIANCE", REAL_PAYLOAD)
         row1["date"] = "2026-08-07"
@@ -128,6 +129,6 @@ class TestSchemaAndStorage:
         assert basis == pytest.approx(8.9)
 
     def test_store_empty_list_is_a_noop(self):
-        con = sqlite3.connect(":memory:")
+        con = pg_memory_conn()
         nfb.ensure_schema(con)
         assert nfb.store(con, []) == 0

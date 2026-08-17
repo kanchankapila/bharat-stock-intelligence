@@ -15,6 +15,7 @@ import pytest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 sys.path.insert(0, os.path.dirname(__file__))   # live_datasource_helpers lives here
+from pg_test_support import pg_memory_conn  # noqa: E402
 
 from live_datasource_helpers import (  # noqa: E402
     assert_looks_like_ticker,
@@ -36,7 +37,7 @@ class FakeConn:
     """Throwaway in-memory DB so the test never touches production."""
 
     def __init__(self):
-        self._c = sqlite3.connect(':memory:')
+        self._c = pg_memory_conn()
 
     def execute(self, sql, params=()):
         return self._c.execute(sql, params)

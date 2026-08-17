@@ -1,5 +1,6 @@
 import sqlite3, sys, os, datetime
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
+from pg_test_support import pg_memory_conn  # noqa: E402
 
 # update_weights() filters signal_date >= now() - DEFAULT_WINDOW_DAYS (180). The hardcoded
 # 2024-01-0X dates this file used to insert are now (2026) far outside that window, so every
@@ -11,7 +12,7 @@ def _d(days_ago: int) -> str:
     return (datetime.date.today() - datetime.timedelta(days=days_ago)).isoformat()
 
 def make_db():
-    conn = sqlite3.connect(':memory:')
+    conn = pg_memory_conn()
     conn.executescript("""
         CREATE TABLE signal_outcomes (
             symbol TEXT, signal_date TEXT, horizon_days INTEGER,

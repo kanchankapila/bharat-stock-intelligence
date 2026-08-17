@@ -3913,3 +3913,63 @@ merged.** Anything read out of another session's index is a snapshot of an inten
 repo — cite it as provisional or verify it against `HEAD` before writing it into a rule file.
 This is the third distinct instance of the class in one day, which is what earns it a rule entry
 rather than another paragraph.
+
+---
+
+## 2026-08-17 — SQLite decommission: Phase 2 Python closed, the shim deleted, two real bugs out of it
+
+**Starting point.** `docs/SQLITE_DECOMMISSION_PLAN.md` said the remaining work was "37 files still
+lean on the shim". Baseline measured before touching anything: **2,026 passed / 230 skipped / 0
+failed** in 4m05s, shim counter 37.
+
+**What was done.** The 2026-08-16 strategy — monkeypatch `sqlite3.connect(':memory:')` to return a
+Postgres `ConnWrapper` — was replaced rather than extended. A narrow codemod (one expression, one
+import, nothing else) converted **93 files** to an explicit `pg_memory_conn()`; the monkeypatch is
+deleted. `grep -r "sqlite3.connect(':memory:')"` now returns **0** hits repo-wide.
+
+The 2026-08-16 codemod had to be reverted because it also rewrote `REAL` → `DOUBLE PRECISION`
+(hitting the word inside prose comments) and deleted connect lines (mangling temp-FILE fixtures).
+Restricting the rewrite to the single `:memory:` expression removed both failure modes — 93 files
+in one pass, zero manual repair. Type mapping went into `sql_translate.py` instead, where the
+plan's own guidance already said it belongs.
+
+**Two real bugs, neither of which SQLite could have surfaced.**
+
+1. **`db_compat.ConnWrapper` did not survive a failed statement on Postgres** — a 6th instance of
+   a class `recurring-bugs.md` already documented on 2026-08-16 with five. sqlite3 leaves a
+   connection usable after an error; Postgres aborts the transaction. So this codebase's ubiquitous
+   `except Exception: print(...)` degrade-gracefully pattern (33 instances in `unified_ranker.py`
+   alone) is graceful on SQLite and a kill switch on Postgres: the first swallowed error poisons the
+   connection, every later read fails, those failures are swallowed too, and the job exits 0.
+   Reproduced — one missing advisory table made `unified_ranker` classify the **entire universe as
+   Hold with 0 bull/bear counts** while printing 10 "unavailable" lines and reporting success.
+   Fixed once in the shared wrapper (`_usable_after_failure`), not 33 times at the call sites.
+   Negative-controlled: 15 tests fail with the guard removed, 0 with it. **The first version of
+   that fix was wrong** — the existing rule entry warns that a rollback inside a shared helper
+   can discard a caller's pending work, and an unconditional rollback does exactly that when the
+   statement failed Python-side (a `translate()` rejection) without aborting anything. It now
+   gates on psycopg2's `TRANSACTION_STATUS_INERROR`. Read the rule before fixing the class it
+   already covers.
+2. **`src/server/__tests__/` had no `conftest.py`.** Its ~20 Python test files were never shimmed,
+   ran on real in-memory SQLite for their entire lives, and were invisible to the shim's own "37
+   files" counter — so the documented remaining-work figure was measuring a set it structurally
+   could not see. Fixed by moving `conftest.py` up to `src/server/`, covering both directories.
+   Moving them onto Postgres produced 50 failures on the spot, all one cause (`DATETIME`).
+
+**Also:** `DATETIME`→`TIMESTAMP` and `BLOB`→`BYTEA` added to `sql_translate.py`'s DDL-only branch
+(380 and 14 occurrences in fixtures). `pg_test_support.py` is a new module rather than more code in
+conftest, because `from conftest import ...` is ambiguous once two test directories are collected
+together — `tests/chatbot/_pg_support.py` already documents that exact trap.
+`check_recurring_bugs.py`'s raw-`%s` check gained a `conftest.py`/`pg_test_support.py` exemption:
+moving conftest out of `tests/` made it fire on two correct pre-existing psycopg2 lines.
+
+**Verified.** `pytest` **2,026 passed / 230 skipped / 0 failed** in 2m57s — identical counts to
+baseline, 68s faster. `tsc --noEmit` clean. `check_recurring_bugs.py` clean. `vitest` has one
+failure in `holidayJobSkip.test.ts`, from a **concurrent session's** uncommitted `confluence.jobs.ts`
+skip-path work — untouched here, not caused by this change.
+
+**What is left** (enumerated in the plan doc, not left vague): 6 files still need SQLite — 4 use a
+temp `.sqlite` file plus `DATABASE_URL` env injection and convert via `pg_db`'s `POSTGRES_URL`
+rewrite; 2 are deliberate (`test_mc_earnings_fetcher_stale_quarter.py` compares real SQLite `GLOB`
+semantics, `test_sql_translate.py` tests the translator's SQLite path) and go away with Phase 3.
+Only then can `use_postgres()`'s pytest branch — the last dialect fork in Python — be deleted.

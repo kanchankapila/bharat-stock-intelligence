@@ -12,6 +12,7 @@ import sqlite3
 import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+from pg_test_support import pg_memory_conn  # noqa: E402
 import mc_earnings_fetcher as mef
 
 
@@ -25,7 +26,7 @@ def _use_pg(conn):
 
 
 def _db():
-    conn = sqlite3.connect(":memory:")
+    conn = pg_memory_conn()
     conn.row_factory = sqlite3.Row
     conn.executescript("""
         CREATE TABLE mc_earnings_rapid (

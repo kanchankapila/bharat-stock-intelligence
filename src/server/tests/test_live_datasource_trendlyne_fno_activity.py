@@ -18,6 +18,7 @@ import pytest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 sys.path.insert(0, os.path.dirname(__file__))
+from pg_test_support import pg_memory_conn  # noqa: E402
 
 import trendlyne_fno_activity_fetcher as fno_activity
 from live_datasource_helpers import (
@@ -28,7 +29,7 @@ from live_datasource_helpers import (
 
 
 def _make_test_db():
-    conn = sqlite3.connect(":memory:")
+    conn = pg_memory_conn()
     conn.row_factory = sqlite3.Row
     fno_activity.ensure_schema(conn)
     return conn

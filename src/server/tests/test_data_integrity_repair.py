@@ -11,6 +11,7 @@ import pandas as pd
 import pytest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
+from pg_test_support import pg_memory_conn  # noqa: E402
 
 import data_integrity_repair as dir_mod
 import densify_feature_matrix as densify
@@ -97,7 +98,7 @@ class _SkipAddColumnIfExists:
 class TestSignalSourceBackfill:
     def _make_db(self):
         import sqlite3
-        conn = sqlite3.connect(':memory:')
+        conn = pg_memory_conn()
         conn.row_factory = sqlite3.Row
         conn.executescript("""
             CREATE TABLE signal_outcomes (

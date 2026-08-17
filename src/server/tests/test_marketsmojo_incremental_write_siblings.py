@@ -11,6 +11,7 @@ import sqlite3
 import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
+from pg_test_support import pg_memory_conn  # noqa: E402
 from marketsmojo_fintrend_fetcher import (  # noqa: E402
     load_known_max_dates as fintrend_known,
     write_fintrend_history,
@@ -30,7 +31,7 @@ from marketsmojo_financials_fetcher import (  # noqa: E402
 
 
 def _fintrend_db():
-    conn = sqlite3.connect(':memory:')
+    conn = pg_memory_conn()
     conn.row_factory = sqlite3.Row
     conn.executescript("""
         CREATE TABLE marketsmojo_fintrend_history (
@@ -53,7 +54,7 @@ def test_fintrend_skips_dates_already_stored():
 
 
 def _shareholding_db():
-    conn = sqlite3.connect(':memory:')
+    conn = pg_memory_conn()
     conn.row_factory = sqlite3.Row
     conn.executescript("""
         CREATE TABLE marketsmojo_shareholding_history (
@@ -75,7 +76,7 @@ def test_shareholding_skips_periods_already_stored():
 
 
 def _index_db():
-    conn = sqlite3.connect(':memory:')
+    conn = pg_memory_conn()
     conn.row_factory = sqlite3.Row
     conn.executescript("""
         CREATE TABLE marketsmojo_index_history (
@@ -96,7 +97,7 @@ def test_index_skips_dates_already_stored():
 
 
 def _financials_db():
-    conn = sqlite3.connect(':memory:')
+    conn = pg_memory_conn()
     conn.row_factory = sqlite3.Row
     conn.executescript("""
         CREATE TABLE marketsmojo_financials_history (

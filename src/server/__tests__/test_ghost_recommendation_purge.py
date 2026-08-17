@@ -16,6 +16,7 @@ from pathlib import Path
 import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from pg_test_support import pg_memory_conn  # noqa: E402
 import data_integrity_repair as dir_  # noqa: E402
 
 
@@ -37,7 +38,7 @@ class Conn:
 
 @pytest.fixture
 def conn():
-    c = sqlite3.connect(":memory:")
+    c = pg_memory_conn()
     c.execute("CREATE TABLE unified_recommendations "
               "(symbol TEXT, computed_at TEXT, classification TEXT, unified_score REAL)")
     c.execute("CREATE TABLE stock_ohlcv (symbol TEXT, date TEXT, close REAL)")
@@ -105,7 +106,7 @@ class TestWeekendPurge:
 
     @pytest.fixture
     def wconn(self):
-        c = sqlite3.connect(":memory:")
+        c = pg_memory_conn()
         c.execute("CREATE TABLE unified_recommendations "
                   "(symbol TEXT, computed_at TEXT, classification TEXT, unified_score REAL)")
         c.executemany("INSERT INTO unified_recommendations VALUES (?,?,?,?)", [
@@ -157,7 +158,7 @@ class TestDeliveryTradesRepair:
 
     @pytest.fixture
     def dconn(self):
-        c = sqlite3.connect(":memory:")
+        c = pg_memory_conn()
         c.execute("CREATE TABLE stock_delivery_data (symbol TEXT, date TEXT, delivery_pct REAL,"
                   " delivery_qty REAL, traded_qty REAL, trades REAL)")
         c.executemany("INSERT INTO stock_delivery_data VALUES (?,?,?,?,?,?)", [

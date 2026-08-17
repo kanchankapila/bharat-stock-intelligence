@@ -11,6 +11,7 @@ import pytest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 sys.path.insert(0, os.path.dirname(__file__))
+from pg_test_support import pg_memory_conn  # noqa: E402
 import global_macro_fetcher as gmf
 from live_datasource_helpers import assert_numeric_and_finite
 
@@ -32,7 +33,7 @@ class _UnclosableConn:
 
 def _make_conn():
     import sqlite3
-    conn = sqlite3.connect(":memory:")
+    conn = pg_memory_conn()
     conn.execute("""CREATE TABLE macro_asset_prices (
         date TEXT, symbol TEXT, close REAL, ret_1d REAL, ret_5d REAL, fetched_at TEXT,
         PRIMARY KEY (date, symbol)

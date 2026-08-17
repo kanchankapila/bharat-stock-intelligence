@@ -18,6 +18,7 @@ import pytest
 _TMP_SCALER = Path(tempfile.gettempdir()) / "test_feature_scaler_v1.pkl"
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", ".."))
+from pg_test_support import pg_memory_conn  # noqa: E402
 from src.server.feature_engineering import FeatureEngineer
 
 
@@ -90,7 +91,7 @@ def _make_in_memory_db(symbol: str = None, ohlcv_rows: int = 60) -> sqlite3.Conn
     through the passed-in `con` (see feature_engineering.py's process_symbol), not a
     mockable global pandas.read_sql call, so the row-count guard (len(ohlcv) < 60) needs
     real rows here rather than a `patch("pandas.read_sql", ...)`."""
-    con = sqlite3.connect(":memory:")
+    con = pg_memory_conn()
     con.row_factory = sqlite3.Row
     con.execute(_FEATURE_STORE_DDL)
     con.execute(_OHLCV_DDL)
@@ -238,7 +239,7 @@ class TestZeroRowsGuard:
     def test_empty_symbol_list_raises(self):
         """symbols=None resolving to zero rows from stock_ohlcv must not exit 0 silently."""
         fe = _stub_fe()
-        con = sqlite3.connect(":memory:")
+        con = pg_memory_conn()
         con.row_factory = sqlite3.Row
         con.execute("CREATE TABLE stock_ohlcv (symbol TEXT, date DATE)")
         con.commit()

@@ -3,6 +3,7 @@ import os
 from datetime import date, timedelta
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+from pg_test_support import pg_memory_conn  # noqa: E402
 from delivery_trend_fetcher import compute_delivery_trend
 
 
@@ -11,7 +12,7 @@ def _throwaway_db(conn):
 
     Deliberately narrow rather than the full production shape: the inserts below use bare
     `VALUES (?, ?, ?)` with no column list, which only lines up against a table of exactly this
-    width. Converted from sqlite3.connect(':memory:') by SQLITE_DECOMMISSION_PLAN Phase 2 -- the
+    width. Converted from pg_memory_conn() by SQLITE_DECOMMISSION_PLAN Phase 2 -- the
     DDL is unchanged apart from being run through real Postgres, which is the point.
     """
     conn.execute("""

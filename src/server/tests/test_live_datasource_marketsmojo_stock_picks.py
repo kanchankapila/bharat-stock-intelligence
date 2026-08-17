@@ -11,6 +11,7 @@ import pytest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 sys.path.insert(0, os.path.dirname(__file__))
+from pg_test_support import pg_memory_conn  # noqa: E402
 
 import marketsmojo_stock_picks_fetcher as msp
 from live_datasource_helpers import assert_looks_like_ticker, assert_non_empty_response, assert_numeric_and_finite
@@ -36,7 +37,7 @@ class TestMarketsMojoStockPicksLiveDataSource:
             rows.extend(r for r in (msp.parse_pick(list_name, p, sid_map) for p in raw_rows) if r is not None)
         assert rows, "no usable (resolved-symbol) pick rows found in today's live sample"
 
-        con = sqlite3.connect(":memory:")
+        con = pg_memory_conn()
         msp.ensure_schema(con)
         assert msp.store(con, rows) == len(rows)
 
