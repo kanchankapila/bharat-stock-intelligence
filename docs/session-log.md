@@ -4485,3 +4485,77 @@ values on all 20 picks — previously SL always read NaN and targets never rende
 `recurring-bugs.md` gained a new entry for the class (a value formatted for one display consumer
 silently becoming the stored value every other numeric reader chokes on). Commits `c9267a0`,
 `6d1928e`.
+
+## 2026-08-18 (cont. 3) — asked "what else needs improvement", fixed the 4 that were real bugs
+
+Reviewed CLAUDE.md/rule files/memory for standing gaps, live-checked each candidate before
+touching anything (one candidate — intraday/swing timeframes bypassing `unified_recommendations`
+— turned out to be a deliberate, already-documented decision, not a gap; retracted rather than
+"fixed").
+
+**`win_probability_scored_at` never stamped by its actual writer (`5d4f973`).** Investigating why
+a `technical_signals` feature-coverage query showed near-zero population for several columns
+surfaced a genuine bug, not just structural sparsity: `ml_ensemble.py`'s `do_score` pass stamps
+this column correctly, but `online_learner.py` runs earlier in the daily `ml-daily-ops` chain and
+fills `win_probability` for the whole universe first — so `do_score`'s own `WHERE win_probability
+IS NULL` candidate query finds nothing left to score, and its stamp never fires. Live-confirmed:
+0% populated on 7 of the last 9 trading days, 100% on the one day the writers didn't race this
+way. Fixed by stamping the column in `online_learner.py`'s write too. Negative-controlled.
+
+**`trendlyne_screener_pk_history` (`9c8a239`).** `recurring-bugs.md`'s screener-pk-collision entry
+(2026-08-13) was left deliberately unfixed pending "track pk history, neither implemented" — this
+is that implementation. `trendlyne_screeners.screener_id` is a name-derived slug, so when
+Trendlyne reassigns a screener a new numeric `screenpk`, the old one is silently overwritten with
+no error. Added an additive history table (migration `1787100000000`) recording every pk ever
+seen per `screener_id`, so the old one stays discoverable without changing what
+`trendlyne_screeners.screenpk` means to downstream fetchers. Migration applied to production,
+schema regenerated, `schema:drift` clean, negative-controlled test passing.
+
+**`unified_ranker.py`'s ~32 silently-swallowed exceptions now report (`21fb9f0`).** Every degraded
+read/write in `UnifiedRanker` correctly falls back to an empty/default result (a missing table
+must not crash the nightly ranker) but printed the failure to **stdout**, which
+`pythonRunner.ts`'s `runPython()` never inspects — only stderr content triggers its existing
+`log.warn('... finished successfully with warnings/stderr output')` hook, the one thing that
+would have made the 2026-08-17 "missing `stock_event_triggers` collapsed the whole universe to
+Hold" incident visible without someone reading the raw log by hand. Added `self._degraded()`
+(stderr + a counter; `run()`'s JSON output now carries `degraded_count` plus one summary line),
+routed all ~30 existing messages through it, and gave the ~9 previously fully-silent blocks a
+message too. Two module-level helper functions (no `self`) print to stderr directly instead.
+Also added a missing `self.conn.rollback()` in `_effective_regime_for_weights`'s except block
+that the mechanical print→`self._degraded` swap exposed as broken against a real test fixture —
+fixed the fixture, not the code (a real conn always has `.rollback()`). Not a scoring change:
+every fallback value and control-flow path is unchanged. Negative-controlled; full
+`unified_ranker` test family (241 tests, 8 files) green.
+
+**`check_recurring_bugs.py` gained a 7th static check (`7e0f35f`).** `recurring-bugs.md`'s own
+text asked for this by name: an `information_schema.columns`/`.tables` query with no
+`table_schema` filter silently resolves whatever schema sits first on the search_path — a test
+fixture's throwaway schema, or a leaked interrupted-run schema that skipped its `DROP SCHEMA`
+teardown — instead of the real table. All 4 known live sites were already fixed before this
+commit; this only adds the regression guard. Deliberately does not reuse the existing
+`_code_lines()` docstring-skip helper the sibling SQL-dialect checks use, since every real
+occurrence of this bug is itself a triple-quoted SQL block passed to `.execute()`, which
+`_code_lines()` would misread as a Python docstring and skip entirely. Verified it catches the
+real historical `densify_feature_matrix.py` pre-fix shape; full-tree run is clean (490 py + 135
+ts files).
+
+**`smart_money` corrected from "never backtested" to "measured, LOW-DATA" (`180d207`).**
+Live-checked rather than trusted: `queues.ts`'s `factor_edge.py` job already measures
+`unified_recommendations.smart_money_score` on schedule (rank_ic=+0.0671 as of 2026-08-17, but
+only 1 distinct date, verdict `LOW-DATA`) — it was never actually unmeasured, `measurement.md`'s
+claim was stale. Corrected the row instead of running a redundant ad hoc backtest or leaving the
+stale claim standing.
+
+**Explicitly NOT fixed, flagged for a product/modeling decision rather than forced:**
+`timeframe_scores`/`computeTimeframeScores` is a still-live, still-unmeasured parallel score
+(currently 0 rows, dormant but not deleted) — `scoring-authority.md` already says removing it
+needs a decision on whether `/screener-intelligence`'s "compute rankings" interaction has a real
+user, which nothing this session did established either way. `ml_ensemble.incremental_update()`
+(LGBM warm-start) is confirmed dead code, but making it functional is a real modeling decision
+requiring `factor_backtest.py` evidence per this repo's own gate — not something to force through
+as a mechanical fix.
+
+Full check stack clean after all five: `tsc --noEmit`, `vitest` 999/0/41, `pytest` 2130/0/230,
+`check_recurring_bugs.py`, `schema:drift`. No `pm2 restart` needed — nothing touched is hot-path
+TypeScript served by `bharat-server`; `unified_ranker.py`/`online_learner.py`/
+`trendlyne_screener_discovery.py` all take effect on their next scheduled `runPython()` invocation.
