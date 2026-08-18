@@ -4,7 +4,7 @@ import {
   Crosshair, Search, History, PieChart, Bookmark, Users, Globe, CheckCircle2,
   Star, TrendingUp, Radio, Settings2, Briefcase, Calendar, Sparkles,
   FlaskConical, Layers, MonitorDot, MessageSquare, Gauge,
-  Settings, Flame, BookOpen, BarChart3, Cpu,
+  Settings, Flame, BookOpen, BarChart3, Cpu, FileDown,
 } from 'lucide-react';
 
 // V6Shell's nav render passes `style` (theme-token colors) alongside `className` -- lucide-react
@@ -92,6 +92,8 @@ export const NAV_GROUPS: NavGroup[] = [
       // SignalReviewPage consolidates Signal Ledger + Report Card + Queue stats
       { icon: Radio,      label: 'Signal Review',   id: 'signal-tracking'       },
       { icon: History,    label: 'Backtest',        id: 'backtest'              },
+      { icon: Zap,        label: "Today's Picks",   id: 'todays-picks'          },
+      { icon: Zap,        label: 'Early Spotter',   id: 'early-spotter'         },
     ],
   },
   {
@@ -101,6 +103,7 @@ export const NAV_GROUPS: NavGroup[] = [
       { icon: Bookmark,   label: 'Watchlist',  id: 'watchlist'  },
       { icon: TrendingUp, label: 'Risk',       id: 'risk'       },
       { icon: Users,      label: 'Superstars', id: 'superstars' },
+      { icon: FileDown,   label: 'Export Portfolio', id: 'export-picks' },
     ],
   },
   {
@@ -110,6 +113,9 @@ export const NAV_GROUPS: NavGroup[] = [
       { icon: Cpu,           label: 'Data Scientist', id: 'agent-data-scientist' },
       { icon: Target,        label: 'Strategist',    id: 'agent-strategist'     },
       { icon: FlaskConical,  label: 'Research',      id: 'research'             },
+      { icon: Activity,      label: 'Auditor',       id: 'agent-auditor'        },
+      { icon: Settings2,     label: 'Optimizer',     id: 'agent-optimizer'      },
+      { icon: Settings2,     label: 'ML Builder',    id: 'builder'              },
     ],
   },
   {
@@ -118,6 +124,7 @@ export const NAV_GROUPS: NavGroup[] = [
       { icon: Globe,         label: 'Economics',       id: 'economics'    },
       { icon: CheckCircle2,  label: 'ToDo',            id: 'todo'         },
       { icon: MonitorDot,    label: 'System Monitor',  id: 'monitor'      },
+      { icon: Calendar,      label: 'Job Console',     id: 'jobs'         },
       { icon: Settings,      label: 'Settings',        id: 'settings'     },
       { icon: Star,          label: 'My Profile',      id: 'profile'      },
     ],

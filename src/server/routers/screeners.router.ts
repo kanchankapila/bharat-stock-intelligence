@@ -247,11 +247,11 @@ export const screenersRouter = router({
 
   // ── Screener Intelligence (Sub-project A) ─────────────────────────────────
 
-  // Both validated standalone paper screens, strongest first. value_book_to_price beats
-  // momentum_12_1 on every measured axis (t 2.67 vs 2.08, Sharpe 1.47 vs 1.10, turnover 0.28
-  // vs 0.35, max DD -17.9% vs -19.5%) but was unwired until 2026-08-10, so this endpoint
-  // could only ever show the weaker one. Shape kept backward compatible: the top-level fields
-  // still describe momentum_12_1 for any existing caller, with `factors` added alongside.
+  // RETRACTED 2026-08-12 (measurement.md's top banner): both factors' significance depended on
+  // factor_backtest.py's exit-pricing bug, now fixed -- neither clears significance any more
+  // (value_book_to_price t 2.67->1.99, momentum_12_1 t 2.08->1.10). Kept as paper screens for
+  // visibility, not as validated edges (AF-20260818-37). Shape kept backward compatible: the
+  // top-level fields still describe momentum_12_1 for any existing caller, `factors` alongside.
   getFactorPaperPicks: publicProcedure.query(async () => {
     const keys = ['value_book_to_price', 'momentum_12_1'] as const;
     const rows = await Promise.all(keys.map(f =>

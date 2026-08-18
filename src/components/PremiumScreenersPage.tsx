@@ -4,6 +4,7 @@ import { trpc } from '../lib/trpc';
 import { cn } from '../lib/utils';
 import stockData from '../data/stocklist';
 import { PREMIUM_TRENDLYNE_SCREENERS, PREMIUM_TRENDLYNE_SCREENPK_SET } from '../data/premiumTrendlyneScreeners';
+import { LegacyScoreBanner } from './CanonicalSourceNote';
 
 interface TrendlyneStock {
   stockId: string;
@@ -152,6 +153,7 @@ const PremiumScreenersPage: React.FC<PremiumScreenersPageProps> = ({ onSelectSto
 
   return (
     <div className="space-y-6 p-4 md:p-6">
+      <LegacyScoreBanner note="Bullish/bearish tags here are keyword-classified off the screener's name, never validated against a realized outcome -- measured sentiment consensus is significantly negative and inverted (bullish minus bearish -0.11pp, t=-4.61). Treat as directional context, not a signal. Check Alpha / Buy Recs for the canonical view." />
       <div className="glass rounded-2xl border border-slate-700/50 p-5 md:p-6">
         <div className="flex items-center gap-3">
           <div className="p-2 rounded-xl bg-amber-500/15 border border-amber-400/20">

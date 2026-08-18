@@ -6,6 +6,7 @@ import {
 import { cn } from '../lib/utils';
 import { trpc } from '../lib/trpc';
 import stockData from '../data/stocklist';
+import { LegacyScoreBanner } from './CanonicalSourceNote';
 
 interface TrendlyneStock {
   stockId: string;
@@ -145,6 +146,7 @@ const TrendlyneScreenerPanel: React.FC<TrendlyneScreenerPanelProps> = ({ onSelec
 
   return (
     <div className="space-y-6">
+      <LegacyScoreBanner note="Bullish/bearish tags here are keyword-classified off the screener's name, never validated against a realized outcome -- measured sentiment consensus is significantly negative and inverted (bullish minus bearish -0.11pp, t=-4.61). Treat as directional context, not a signal. Check Alpha / Buy Recs for the canonical view." />
       {/* Header */}
       <div className="bg-gradient-to-r from-slate-900 via-slate-800 to-slate-900 rounded-lg border border-slate-800/30 p-6 shadow-2xl">
         <div className="flex flex-col md:flex-row items-start justify-between gap-4">

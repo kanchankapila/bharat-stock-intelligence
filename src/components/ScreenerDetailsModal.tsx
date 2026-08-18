@@ -104,6 +104,9 @@ const ScreenerDetailsModal: React.FC<ScreenerDetailsModalProps> = ({
                       {screener.sentiment}
                     </span>
                   </div>
+                  <p className="text-[10px] text-amber-300/70 mt-1.5">
+                    Keyword-classified, unvalidated -- measured sentiment consensus is inverted (t=-4.61)
+                  </p>
                 </div>
               </div>
               {screener.description && (

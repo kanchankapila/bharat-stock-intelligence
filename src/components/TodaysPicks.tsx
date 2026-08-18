@@ -2,6 +2,7 @@ import React from 'react';
 import { TrendingUp, TrendingDown, AlertCircle, Target, ShieldAlert, Zap } from 'lucide-react';
 import { trpc } from '../lib/trpc';
 import { cn } from '../lib/utils';
+import { LegacyScoreBanner } from './CanonicalSourceNote';
 
 interface TodaysPicksProps {
   onSelectStock?: (symbol: string) => void;
@@ -51,6 +52,7 @@ export function TodaysPicks({ onSelectStock }: TodaysPicksProps) {
 
   return (
     <div className="p-6 space-y-4">
+      <LegacyScoreBanner note="Computes its own ad-hoc blend (0.4x signal score + 0.4x win probability + 0.2x confluence), unrelated to unified_recommendations -- despite this page's name, it does not read the canonical unified_score. Check Alpha / Buy Recs for the canonical, regime-aware view." />
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-lg font-semibold text-white flex items-center gap-2">
@@ -70,13 +72,13 @@ export function TodaysPicks({ onSelectStock }: TodaysPicksProps) {
         <div className="flex flex-col items-center justify-center h-48 gap-3 text-slate-500">
           <AlertCircle className="w-8 h-8" />
           <p className="text-sm">No high-conviction picks for today</p>
-          <p className="text-xs">Criteria: unified ≥ 0.55 AND confluence ≥ 40</p>
+          <p className="text-xs">Criteria: composite score ≥ 0.55 AND confluence ≥ 40</p>
         </div>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
           {picks.map((pick) => {
             const cv = conviction(pick.conviction_level);
-            const unifiedPct = Math.round((pick.unified_score ?? 0) * 100);
+            const unifiedPct = Math.round((pick.confluence_composite_score ?? 0) * 100);
             const winPct = pick.win_probability != null ? Math.round(pick.win_probability * 100) : null;
             const targets = (() => {
               try {

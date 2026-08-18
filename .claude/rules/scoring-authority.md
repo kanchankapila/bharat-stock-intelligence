@@ -17,8 +17,11 @@ ranking/UI surfaces should read:
 `unified_ranker.py` reads both as component scores, so they cannot be physically merged into the
 table they feed. "Consolidation" here means keeping UI reads from bypassing the canonical table,
 not deleting the input tables. Both closed 2026-08: `getTopRatedStocks` (`scoringService.ts`) reads
-`unified_recommendations` first, falling back to `stock_scores` only when UR has no rows yet
-(cold start); `getStrategyStocks` (`quantScoringService.ts`) surfaces UR's `unified_score`/
+`unified_recommendations` first for `timeframe === 'long_term'` — falling back to `stock_scores`
+only when UR has no rows yet (cold start) — but goes straight to `stock_scores` for `intraday`/
+`swing` without checking UR at all (found by the 2026-08-18 canonical-read-audit, AF-20260818-40;
+not a live gap, `TopRatedStocks.tsx` already carries a `LegacyScoreBanner` disclosing non-canonical
+status regardless of timeframe); `getStrategyStocks` (`quantScoringService.ts`) surfaces UR's `unified_score`/
 `classification`/`conviction_level` as read-only context columns on every row, plus an opt-in
 `requireUnifiedCoverage` filter, with the same cold-start fallback. Any new engine should still
 write a *component* score the ranker ingests — never a parallel "final" score.

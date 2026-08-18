@@ -30,20 +30,19 @@ function fmtNum(n: number | null | undefined, digits = 2): string {
   return n.toFixed(digits);
 }
 
-// Both validated standalone paper screens. value_book_to_price is rendered FIRST because it
-// is the stronger of the two on every measured axis (t 2.67 vs 2.08, Sharpe 1.47 vs 1.10,
-// turnover 0.28 vs 0.35, max DD -17.9% vs -19.5%) -- it was validated but unwired until
-// 2026-08-10, so this panel could previously only show the weaker factor.
+// RETRACTED 2026-08-12 (see measurement.md's top banner) -- both factors read as significant
+// before factor_backtest.py's exit-pricing bug was fixed; neither survives with the corrected
+// harness. Kept as paper screens for visibility, not as validated edges (AF-20260818-37).
 const FACTOR_META: Record<string, { title: string; scoreLabel: string; blurb: string }> = {
   value_book_to_price: {
     title: 'Book-to-Price Value Screen',
     scoreLabel: 'B/P',
-    blurb: 'Fama-French HML book-to-market. Strongest factor measured here: +0.93%/mo excess over 65 monthly rebalances (t=2.67), Sharpe 1.47, lowest turnover of anything that works. Valuation history is a vendor backfill, so treat the t-stat as provisional.',
+    blurb: 'Fama-French HML book-to-market. +0.78%/mo excess, t=1.99 (post exit-pricing-bug fix) -- not significant. No factor in this harness currently clears significance; treat as a paper screen, not a validated edge.',
   },
   momentum_12_1: {
     title: '12-1 Momentum Paper Screen',
     scoreLabel: '12-1 Return',
-    blurb: 'Twelve-month return skipping the last month. +0.86%/mo excess (t=2.08), positive in all 9 cost x size configurations tested.',
+    blurb: 'Twelve-month return skipping the last month. +0.53%/mo excess, t=1.10 (post exit-pricing-bug fix) -- not significant.',
   },
 };
 
@@ -374,8 +373,8 @@ const ScreenerBrowser: React.FC<{ onSelectStock?: (symbol: string) => void }> = 
                       )}>{r.tier ?? '—'}</span>
                     </td>
                     <td className="text-right py-2.5 px-3 font-mono text-slate-300">{fmtPct(r.win_rate)}</td>
-                    <td className={cn('text-right py-2.5 px-3 font-mono', (r.avg_return ?? 0) >= 0 ? 'text-emerald-400' : 'text-rose-400')}>{fmtNum(r.avg_return)}%</td>
-                    <td className={cn('text-right py-2.5 px-3 font-mono', (r.alpha ?? 0) >= 0 ? 'text-emerald-400' : 'text-rose-400')}>{fmtNum(r.alpha)}%</td>
+                    <td className={cn('text-right py-2.5 px-3 font-mono', r.avg_return == null ? 'text-slate-500' : r.avg_return >= 0 ? 'text-emerald-400' : 'text-rose-400')}>{fmtNum(r.avg_return)}%</td>
+                    <td className={cn('text-right py-2.5 px-3 font-mono', r.alpha == null ? 'text-slate-500' : r.alpha >= 0 ? 'text-emerald-400' : 'text-rose-400')}>{fmtNum(r.alpha)}%</td>
                     <td className="text-right py-2.5 pl-3 font-mono text-slate-500">{r.total_appearances ?? '—'}</td>
                   </tr>
                 ))}

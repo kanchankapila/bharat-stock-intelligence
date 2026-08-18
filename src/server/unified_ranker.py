@@ -2268,14 +2268,23 @@ class UnifiedRanker:
                 'conviction_level':        _conviction(unified, classification),
                 'classification':          classification,
                 'screener_names_json':     json.dumps(screener_names_payload),
-                'screener_stock_score':    round(engine_scores['screener'], 2),
-                'ml_score':                round(engine_scores['ml'], 2),
-                'confluence_score':        round(engine_scores['confluence'], 2),
-                'technical_score':         round(engine_scores['technical'], 2),
-                'dl_score':                round(engine_scores['dl'], 2),
                 # has_data (not present): report what the engine said even if it was excluded
                 # from the blend for zero dispersion — otherwise the column silently goes NULL
                 # and the collapse becomes invisible in the very table you'd debug it from.
+                # These 5 were missing the `has_data` guard the 3 below already use, so a
+                # symbol with genuinely NO row from an engine (e.g. dl_score for a stock the DL
+                # model never scored) was written as a literal 0.0 instead of NULL --
+                # indistinguishable from a real score of 0, and the frontend's "n/a" vs "0"
+                # display fix (AF-20260818-31) had nothing to key off. Fixed 2026-08-18
+                # (AF-20260818-31, escalated from a frontend-only finding once traced here).
+                # engine_scores[e] itself is untouched, and `unified` above was already computed
+                # from `present`/`_blend()` before this dict is built -- this only changes what
+                # gets WRITTEN to the reporting columns, not any score, weight, or classification.
+                'screener_stock_score':    round(engine_scores['screener'], 2) if 'screener' in has_data else None,
+                'ml_score':                round(engine_scores['ml'], 2) if 'ml' in has_data else None,
+                'confluence_score':        round(engine_scores['confluence'], 2) if 'confluence' in has_data else None,
+                'technical_score':         round(engine_scores['technical'], 2) if 'technical' in has_data else None,
+                'dl_score':                round(engine_scores['dl'], 2) if 'dl' in has_data else None,
                 'cs_score':                round(engine_scores['cs'], 2) if 'cs' in has_data else None,
                 'breakout_score':          round(engine_scores['breakout'], 2) if 'breakout' in has_data else None,
                 'smart_money_score':       round(engine_scores['smart_money'], 2) if 'smart_money' in has_data else None,

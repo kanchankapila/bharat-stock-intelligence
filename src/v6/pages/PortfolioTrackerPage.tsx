@@ -28,6 +28,12 @@ function toneClass(n: number | null | undefined): string {
   if (n == null || !Number.isFinite(n)) return 'text-slate-400';
   return n >= 0 ? 'text-emerald-400' : 'text-rose-400';
 }
+// Same null-safety as toneClass(), for KpiCard's tone enum -- an undefined/errored `totals` must
+// render neutral, not a false "up" (see AF-20260818-32: `(n ?? 0) >= 0` always reads as "up").
+function pnlTone(n: number | null | undefined): 'up' | 'down' | 'neutral' {
+  if (n == null || !Number.isFinite(n)) return 'neutral';
+  return n >= 0 ? 'up' : 'down';
+}
 
 // ─── Shared bits ────────────────────────────────────────────────────────────
 
@@ -200,8 +206,8 @@ const StocksTab: React.FC<{ onSelectStock?: (symbol: string) => void }> = ({ onS
       <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
         <KpiCard label="Invested" value={fmtINR(totals?.investedOpen)} />
         <KpiCard label="Current Value" value={fmtINR(totals?.currentValue)} />
-        <KpiCard label="Unrealized P&L" value={`${fmtINR(totals?.unrealizedPnl)} (${fmtPct(totals?.unrealizedPnlPct)})`} tone={((totals?.unrealizedPnl ?? 0) >= 0) ? 'up' : 'down'} />
-        <KpiCard label="Realized P&L" value={`${fmtINR(totals?.realizedPnl)} (${fmtPct(totals?.realizedPnlPct)})`} tone={((totals?.realizedPnl ?? 0) >= 0) ? 'up' : 'down'} />
+        <KpiCard label="Unrealized P&L" value={`${fmtINR(totals?.unrealizedPnl)} (${fmtPct(totals?.unrealizedPnlPct)})`} tone={pnlTone(totals?.unrealizedPnl)} />
+        <KpiCard label="Realized P&L" value={`${fmtINR(totals?.realizedPnl)} (${fmtPct(totals?.realizedPnlPct)})`} tone={pnlTone(totals?.realizedPnl)} />
         <KpiCard label="Positions" value={`${totals?.openPositions ?? 0} open`} sub={`${totals?.closedPositions ?? 0} closed`} />
       </div>
 
@@ -482,8 +488,8 @@ const MfTab: React.FC = () => {
       <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
         <KpiCard label="Invested" value={fmtINR(totals?.investedOpen)} />
         <KpiCard label="Current Value" value={fmtINR(totals?.currentValue)} />
-        <KpiCard label="Unrealized P&L" value={`${fmtINR(totals?.unrealizedPnl)} (${fmtPct(totals?.unrealizedPnlPct)})`} tone={((totals?.unrealizedPnl ?? 0) >= 0) ? 'up' : 'down'} />
-        <KpiCard label="Realized P&L" value={`${fmtINR(totals?.realizedPnl)} (${fmtPct(totals?.realizedPnlPct)})`} tone={((totals?.realizedPnl ?? 0) >= 0) ? 'up' : 'down'} />
+        <KpiCard label="Unrealized P&L" value={`${fmtINR(totals?.unrealizedPnl)} (${fmtPct(totals?.unrealizedPnlPct)})`} tone={pnlTone(totals?.unrealizedPnl)} />
+        <KpiCard label="Realized P&L" value={`${fmtINR(totals?.realizedPnl)} (${fmtPct(totals?.realizedPnlPct)})`} tone={pnlTone(totals?.realizedPnl)} />
         <KpiCard label="Holdings" value={`${totals?.openPositions ?? 0} open`} sub={`${totals?.closedPositions ?? 0} redeemed`} />
       </div>
 

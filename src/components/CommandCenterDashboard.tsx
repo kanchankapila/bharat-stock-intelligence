@@ -24,6 +24,7 @@ const CONVICTION_STYLE: Record<string, { bg: string; border: string; text: strin
 const REGIME_STYLE: Record<string, { color: string; icon: string; bg: string }> = {
   BULL:     { color: 'text-emerald-400', icon: '▲', bg: 'bg-emerald-500/10 border-emerald-500/30' },
   BEAR:     { color: 'text-rose-400',    icon: '▼', bg: 'bg-rose-500/10 border-rose-500/30'       },
+  SIDEWAYS: { color: 'text-amber-400',   icon: '↔', bg: 'bg-amber-500/10 border-amber-500/30'    },
   HIGH_VOL: { color: 'text-amber-400',   icon: '⚡', bg: 'bg-amber-500/10 border-amber-500/30'    },
   CRASH:    { color: 'text-red-400',     icon: '☠', bg: 'bg-red-500/10 border-red-500/30'         },
 };
@@ -53,8 +54,19 @@ function pickExplanation(pick: any): { label: string; text: string } | null {
 }
 
 function ScoreBar({ label, value, color = 'bg-sky-500' }: {
-  label: string; value: number; color?: string;
+  label: string; value: number | null | undefined; color?: string;
 }) {
+  // null/undefined means the engine had no data for this stock -- not the same as a real 0,
+  // and must not render as an identical zero-width bar (see AF-20260818-31).
+  if (value == null) {
+    return (
+      <div className="flex items-center gap-2 text-[10px]">
+        <span className="w-16 text-slate-500 truncate">{label}</span>
+        <div className="flex-1 h-1 bg-slate-800 rounded-full overflow-hidden" />
+        <span className="w-7 text-right text-slate-600">n/a</span>
+      </div>
+    );
+  }
   const w = Math.max(0, Math.min(100, value));
   return (
     <div className="flex items-center gap-2 text-[10px]">
@@ -153,11 +165,11 @@ function EodPickCard({ pick, onSelect }: { pick: any; onSelect: (sym: string) =>
       )}
 
       <div className="space-y-1 mb-2">
-        <ScoreBar label="Screener"   value={pick.screener_stock_score ?? 0} color="bg-violet-500" />
-        <ScoreBar label="ML"         value={pick.ml_score ?? 0}             color="bg-sky-500"    />
-        <ScoreBar label="Confluence" value={pick.confluence_score ?? 0}     color="bg-emerald-500" />
-        <ScoreBar label="Technical"  value={pick.technical_score ?? 0}      color="bg-amber-500"  />
-        <ScoreBar label="DL"         value={pick.dl_score ?? 0}             color="bg-pink-500"   />
+        <ScoreBar label="Screener"   value={pick.screener_stock_score} color="bg-violet-500" />
+        <ScoreBar label="ML"         value={pick.ml_score}             color="bg-sky-500"    />
+        <ScoreBar label="Confluence" value={pick.confluence_score}     color="bg-emerald-500" />
+        <ScoreBar label="Technical"  value={pick.technical_score}      color="bg-amber-500"  />
+        <ScoreBar label="DL"         value={pick.dl_score}             color="bg-pink-500"   />
       </div>
 
       {explanation && (

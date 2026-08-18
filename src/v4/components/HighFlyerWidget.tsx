@@ -39,6 +39,10 @@ export const HighFlyerWidget: React.FC<{ onSelectStock?: (symbol: string) => voi
           <div className="flex items-center gap-1.5 text-[9px] text-slate-500 uppercase tracking-widest mb-1.5">
             <Target className="w-3 h-3" /> Today's Candidates
           </div>
+          {/* Measured IC -0.041 (t=-9.02, recurring-bugs.md) despite AUC 0.81 -- the classifier
+              identifies who resembles a past flyer, not that today is the day. Never treat this
+              list as a trading signal (AF-20260818-36). */}
+          <div className="text-[9px] text-slate-600 mb-1.5">Similarity match, not a timing signal — measured IC is negative</div>
           <div className="flex flex-wrap gap-1.5">
             {candidates.slice(0, 8).map((c: any) => (
               <button

@@ -273,6 +273,28 @@ class TestUnifiedRankerRun:
         assert len(rows) > 0
         os.unlink(csv_path)
 
+    def test_engine_score_columns_null_not_zero_when_engine_has_no_row(self):
+        """AF-20260818-31/39 (unified_ranker.py has_data guard). INFY has a technical_signals
+        row (feeds ml_score/technical_score) but no confluence_signals row and no dl-feeding
+        data at all in this fixture -- confluence_score/dl_score must be NULL, not the engine's
+        absent-default 0.0, or the frontend's null-vs-zero display fix has nothing to key off
+        and a genuinely-uncovered engine looks identical to a real score of 0."""
+        import os
+        ranker, conn, csv_path = self._setup()
+        try:
+            results = ranker.run()
+            by_sym = {r['symbol']: r for r in results}
+            assert 'INFY' in by_sym
+            row = by_sym['INFY']
+            assert row['confluence_score'] is None, row['confluence_score']
+            assert row['dl_score'] is None, row['dl_score']
+            # sanity: engines that DO have a row for INFY must still be populated, not blanked
+            assert row['ml_score'] is not None
+            assert row['technical_score'] is not None
+            assert row['screener_stock_score'] is not None
+        finally:
+            os.unlink(csv_path)
+
     def test_history_snapshot_is_append_only_across_reruns(self):
         """A re-run must ADD a snapshot, never replace the previous run's.
 

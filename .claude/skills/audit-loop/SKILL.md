@@ -1,6 +1,6 @@
 ---
 name: audit-loop
-description: The remediation loop that turns audit output into closed issues — triage findings into auto-fixable vs. evidence-required, fix and verify each against live production, carry the unfixed ones forward in docs/audit-findings.md with a stable ID, and immunize the repo with a static check so the class cannot silently recur. Use after any audit or review produces findings, or when asked to fix / resolve / close out audit findings.
+description: The remediation loop that turns audit output into closed issues — scope the sweep across every feature, script, database table and job before triaging, triage findings into auto-fixable vs. evidence-required, fix and verify each against live production, carry the unfixed ones forward in docs/audit-findings.md with a stable ID, immunize the repo with a static check so the class cannot silently recur, and close only once the full check stack runs end-to-end with zero errors. Use after any audit or review produces findings, or when asked to fix / resolve / close out audit findings, or to sweep and close out everything pending across the system.
 ---
 
 # Audit loop
@@ -16,6 +16,40 @@ Two hard constraints from this repo's own history govern everything below:
    unmeasured ranker changes on a green test suite that all had to be reverted later.
 2. **A fix is not done when it is committed.** `tsc --noEmit` and a green suite do not tell you a
    fetcher wrote the right rows. Written ≠ applied, committed ≠ deployed, declared ≠ installed.
+
+## 0. Scope the sweep — five inventories, not just the findings you were handed
+
+Before triaging, confirm coverage against what actually exists, not what the input audit happened
+to touch. Grep-derived, not remembered — this repo's history is full of "complete" reviews that
+stopped at N instances when a static check immediately found N+4 more.
+
+- **Features** — every dashboard shell (v1/v2/v3/v4/v5/v6) and every scoring/ranking-shaped tRPC
+  procedure in `router.ts`/`routers/*.ts`. Run `canonical-read-audit` and `shell-parity-audit` if
+  the input audit didn't already cover them.
+- **Scripts** — every fetcher (`*_fetcher.py`), every engine/scorer/ranker (`*_engine.py`,
+  `*_scorer.py`, `*_ranker.py`), every one-shot script under `scripts/`. `data-coverage-audit` and
+  `fetcher-accuracy-review` cover fetchers; cross-check the rest against `git ls-files '*.py'` —
+  nothing in this repo enumerates non-fetcher scripts automatically.
+- **Database** — every table has a freshness check in `dataQualityChecks.ts`'s
+  `TABLE_FRESHNESS_CHECKS` and the live schema matches `db/schema.postgres.sql`
+  (`npm run schema:drift`). Cross-check `information_schema.tables` against the check list; an
+  uncovered table is a blind spot, not evidence of health.
+- **Jobs** — every BullMQ registration in `queues.ts`/`jobs/*.jobs.ts` and every cron mirror has a
+  `job_heartbeat` row with `last_success_at` recent relative to its own cadence, and its skip path
+  (if any) does not fall through to the same "completed" handler a real run uses
+  (`recurring-bugs.md`'s skip-as-success class — recurred 6 times, once on the *shared*
+  `registerJob.ts` handler a per-file static check structurally couldn't see).
+
+- **Pending-work trackers** — "complete pending items" only means something if every existing
+  backlog is actually read, not just the findings this run was handed. Pull open rows from
+  `docs/audit-findings.md` itself (step 5's own ledger, reconciled first per that step), every
+  `ponytail:` debt comment (`ponytail:ponytail-debt` skill), a repo-wide `TODO`/`FIXME` grep, and any
+  named-file backlog called out in a plan doc (e.g. `docs/SQLITE_DECOMMISSION_PLAN.md`'s remaining
+  files). Fold whatever's still open into this run's triage — a pending item nobody re-reads is
+  indistinguishable from a closed one.
+
+A gap in any of the five is itself a finding — give it its own ledger row rather than silently
+narrowing the sweep to whatever the input audit happened to include.
 
 ## 1. Normalize the findings
 
@@ -70,6 +104,10 @@ Then the three this repo added because the above were not enough:
   code path, then `SELECT` the rows and confirm they are what you claimed. The 2026-08-13
   `recommendation_log` fix is only known to have worked because the count went 0/1,584 →
   1,492/1,584 in a live query.
+- **If live verification shows regression, revert — don't leave it half-applied.** Undo the
+  change, re-run this step's check stack to confirm the revert itself is clean, and reopen the
+  ledger row as still-open with what was tried and why it made things worse. A fix that is
+  committed but demonstrably wrong live is worse than the original finding: it reads as closed.
 
 Commit **by explicit path**, never `git add -A` — multiple sessions edit this repo concurrently.
 Re-check `git status` immediately before committing.
@@ -117,7 +155,48 @@ Rules that make the ledger worth keeping:
 - Reconcile at the start of every run: re-check each open row before hunting new ones. Closing a
   known issue beats discovering a new one.
 
-## 6. Close out
+## 6. Run the core end-to-end, zero errors
+
+"Tests pass" is not "done" — this repo's own gate criterion (`verify-gate.mjs` exists because a
+green suite has merged unmeasured ranker changes before). Before closing the session, run the full
+Definition-of-Done stack against the state after every FIX-lane item has landed, not per-commit:
+
+```bash
+npx tsc --noEmit
+npx vitest run
+backend-python/venv/Scripts/python.exe -m pytest src/server/__tests__/ src/server/tests/ tests/chatbot/
+npm run schema:drift
+```
+
+All four must exit **0** — a skipped-Postgres-file warning counts as failure, not a pass
+(`recurring-bugs.md`'s pytest exit-code fix: a run that skipped every DB-dependent test used to
+print a loud warning and still exit 0; it no longer does, so a nonzero exit here is real). Then
+confirm live, not just green locally, per step 3's third bullet: the affected pm2 process is
+restarted (`deploy-and-verify`), any migration ran against the real `POSTGRES_URL`, and the
+changed code path is queried back against production.
+
+Code compiling and tests passing is not the same claim as the system running. Also check:
+
+- **All four services are actually up.** `pm2 jlist` (or the platform equivalent) shows
+  `bharat-server`, `ml-api`, `chatbot`, `alphaquant-api` all `online`, not `errored`/`stopped`, and
+  `pm_uptime` postdates the fix commit — "committed ≠ deployed" from CLAUDE.md, checked mechanically
+  rather than assumed.
+- **A log sweep for the failure modes tests can't see.** `recurring-bugs.md`'s swallowed-exception
+  and skip-as-success classes produce no red test — they show up only as `InFailedSqlTransaction`,
+  a truncated stderr, or a "finished successfully with warnings" line in pm2/job logs. Grep recent
+  logs for these signatures before calling the run clean; a green exit code on its own has missed
+  this exact class before.
+- **Declared vs. installed.** `package.json` vs `npm ls`, `requirements.txt` vs the
+  `backend-python/venv` install — this repo's own "declared ≠ installed" class has silently broken
+  a live job for days more than once. A quick diff here is cheap; a live outage from a missing
+  package is not.
+
+"Zero errors" describes the FIX lane, not the whole ledger — an EVIDENCE-gated item stays open
+until its measurement lands, and that's correct, not incomplete. What must not happen is a FIX-lane
+item left half-done while the session reports success; if step 5's ledger has an open FIX row, this
+step isn't finished yet.
+
+## 7. Close out
 
 Per CLAUDE.md's "Closing a session": append `docs/session-log.md`, update the memory index, and
 add the rule entry if a genuinely new class surfaced. The `session-close` skill runs that

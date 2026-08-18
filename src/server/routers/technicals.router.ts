@@ -91,7 +91,11 @@ export const technicalsRouter = router({
 
   // Renamed from getUnifiedSignals (2026-08) -- despite the old name, this has never read the
   // unified_signals table. It reads technical_signals LEFT JOIN confluence_signals and computes
-  // its own ad-hoc unified_score, unrelated to unified_signals or unified_recommendations.
+  // its own ad-hoc blend, unrelated to unified_signals or unified_recommendations. The blended
+  // column is named confluence_composite_score (not unified_score) specifically to avoid
+  // colliding with unified_recommendations.unified_score, the real canonical column
+  // (AF-20260818-39) -- the 0.4/0.4/0.2 weighting itself is unchanged, this is a naming/
+  // disclosure fix only; changing the weights needs verify-gate.mjs's backtest-evidence bar.
   getTechnicalConfluenceSignals: publicProcedure
     .input(z.object({
       date:          z.string().optional(),
@@ -122,7 +126,7 @@ export const technicalsRouter = router({
               + 0.4 * COALESCE(ts.win_probability, 0.5)
               + 0.2 * (COALESCE(cs.confluence_score, 0) / 100.0),
               3
-            ) AS unified_score
+            ) AS confluence_composite_score
           FROM technical_signals ts
           LEFT JOIN nse_stocks ns ON ns.symbol = ts.symbol
           -- Was date(cs.computed_at) = ? -- wrapping confluence_signals' TimescaleDB
@@ -136,8 +140,8 @@ export const technicalsRouter = router({
             AND COALESCE(cs.confluence_score, 0) >= ?
         )
         SELECT * FROM scored
-        WHERE unified_score >= ?
-        ORDER BY NULLIF(unified_score, 'NaN'::float8) DESC
+        WHERE confluence_composite_score >= ?
+        ORDER BY NULLIF(confluence_composite_score, 'NaN'::float8) DESC
         LIMIT ?
       `, [d, dExclusive, d, input.minConfluence, input.minUnified, input.limit]);
     }),

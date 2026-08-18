@@ -56,8 +56,9 @@ export const V2AppShell: React.FC<V2AppShellProps> = ({
   // 2026-08-07: this file's own header comment previously claimed the 2026-08-04 nav-consolidation
   // (Top Picks / Alternative Screens / Signal Tools, see AppShell.tsx's matching note) had already
   // been mirrored here — it hadn't; the array below still had the old flat 14-item "Intelligence"
-  // group. Since dashboardVersion defaults to 'v3' (App.tsx), THIS shell is what most users actually
-  // see, not v1's AppShell.tsx — so the fix that shipped there never reached the majority of users.
+  // group. At the time dashboardVersion defaulted to 'v3' (App.tsx), so this shell was what most
+  // users actually saw. That default changed to 'v6' on 2026-08-09 (fe56250, V6Shell.tsx +
+  // navGroups.ts) — the primary UX surface to prioritize is now v6, not this file (AF-20260818-35).
   // Mirrored for real this time, keeping V2-only items (Live Screener, EOD Screener, Intraday,
   // Today's Picks, Money Flow, Export Portfolio) that v1 either doesn't route or doesn't nav-link.
   const tabGroups: { label: string; items: { label: string; id: string; icon: any }[] }[] = [
