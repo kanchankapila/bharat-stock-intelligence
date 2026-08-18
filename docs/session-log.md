@@ -4291,3 +4291,59 @@ Other high-fail-rate `job_heartbeat` rows (`trendlyne-midweek` 78.9%, `nse-bhavc
 41.2%, `screener-performance` 33.3%, `stock-scoring` 30.7%) were all currently `success` at audit
 time — not chased further; `trendlyne-midweek`'s history is the already-tracked WAF-throttling
 issue (AF-12).
+
+## 2026-08-18 — audit-loop hardened, then run for real: 5-inventory sweep, 12 findings, 11 fixed
+
+Two-part session, user-requested. Part 1: `.claude/skills/audit-loop/SKILL.md` was extended —
+step 0 grew from restating input findings into a 5-inventory pre-triage sweep (features, scripts,
+database, jobs, **pending-work trackers** — a new addition so "complete pending items" pulls from
+`audit-findings.md`'s own open rows, `ponytail:` debt, TODO/FIXME, plan-doc backlogs, not just
+what an input audit happened to include); a new step 6 zero-errors gate (full check stack +
+service liveness + log sweep for the swallowed-exception/skip-as-success classes tests can't see +
+declared-vs-installed dependency drift); step 3 gained a revert-and-reverify rule. Every reference
+in the doc was verified to actually exist before trusting it (one fixed: `ponytail-debt` →
+`ponytail:ponytail-debt`, its real plugin-qualified name).
+
+Part 2: ran the hardened loop for real — all 8 lanes, not a dry run. Full detail and every finding
+is in `docs/audit-findings.md`'s 2026-08-18 run-log entry; summary here:
+
+- **Lanes 0-5 (repo/build/services/jobs/DB/frontend): clean.** `tsc`/`vitest`/`pytest`
+  (2067/230/0)/`check_recurring_bugs.py`/`schema:drift`/`build` all green; 2 vitest "failures"
+  confirmed self-inflicted DB contention from running the full stack concurrently (pass in
+  isolation, re-ran clean standalone). 0 jobs at 100% fail. Trendlyne coverage visibly recovered
+  since last week (`adv_tech_daily` 60%→100%, `price_analysis` 7.4%→79.5%). One new watch item:
+  `marketsmojo_financials_history` bloat worsened 7.3%→16.3% (AF-42, ties to the still-open AF-20).
+- **Lane 6 (rotation group 3 — deliberately not the mechanical week%5 pick, since that group had
+  already run yesterday):** `canonical-read-audit`, `shell-parity-audit`, `data-honesty-review` run
+  as 3 parallel background agents, live against the running app. 12 real findings, all traced with
+  evidence (screenshots against real production rows, not code-reading alone).
+- **Lane 8 remediation, and the one worth reading closely:** AF-20260818-31 (canonical `/alpha`
+  score bars showing "no data" identically to "scored 0") looked like a pure frontend fix until
+  live-verification proved the frontend patch was **inert** — a direct DB query showed
+  `ml_score`/`technical_score`/`dl_score` stored as literal `0.0`, not `NULL`, so the frontend's
+  null-check had nothing to key off. Traced into `unified_ranker.py:2271-2275`: 5 reporting columns
+  were missing the `has_data` guard 3 sibling columns (`cs_score`/`breakout_score`/
+  `smart_money_score`) already had, per an existing in-place comment explaining exactly why. Fixed
+  both layers, added a negative-controlled test (`test_engine_score_columns_null_not_zero_when_
+  engine_has_no_row`, confirmed failing pre-fix via `git stash`). `engine_scores`/`unified` (the
+  actual blend) are computed before this dict and untouched — no `verify-gate.mjs` backtest
+  requirement, same shape as this file's prior `_log_recommendations`/`seed_screener_catalog`
+  entries. **The lesson: a frontend display fix that hasn't been checked against the real data it
+  renders can be confidently wrong** — the fix compiled, passed `tsc`, and would have shipped as
+  "fixed" without the live DB check.
+  10 more FIX-lane items landed clean: missing SIDEWAYS regime style, 7 missing v6 nav items, a
+  stale "v3 is default" comment, a measured-negative model shown with no caveat, retracted backtest
+  t-stats still quoted live, 3 missing sentiment-disclosure banners, an ad-hoc score renamed off a
+  collision with the canonical `unified_score` column, a portfolio KPI tone bypass, a screener
+  reliability color/null mismatch.
+- **Found live-verifying the rename above, not part of any planned lane:** `/todays-picks` renders
+  exact duplicate cards per symbol (3× `BIL`, 3× `RISHABH`, 3× `RAYMOND`) — a React duplicate-key
+  console error led back to `getTechnicalConfluenceSignals`'s date-range `LEFT JOIN
+  confluence_signals`, which fans out if that table ever carries >1 row per symbol per day. Not
+  root-caused this pass (AF-46, open).
+- **Ledger reconciled**, not just added to: closed AF-05 (survived 5 runs — all three sub-issues
+  independently resolved by other work landed this week) and AF-16 (superseded by the Phase 2
+  SQLite decommission docs), downgraded AF-15 (0 recurrence of the libuv crash in 2 days).
+
+`bharat-server` restarted post-fix (picks up the 2 backend router changes; frontend `.tsx` changes
+were already live via Vite HMR). Full check stack re-run clean after the restart. Commit `76b39e7`.
