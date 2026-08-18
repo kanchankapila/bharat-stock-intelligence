@@ -134,8 +134,18 @@ export const technicalsRouter = router({
           -- Timescale's own chunk-exclusion pruning (same bug class already fixed for
           -- ml.router.ts's getSignalReportCard). A half-open range on the bare column is
           -- sargable and lets Timescale skip every chunk outside [d, d+1).
-          LEFT JOIN confluence_signals cs
-                 ON cs.symbol = ts.symbol AND cs.computed_at >= ?::timestamptz AND cs.computed_at < ?::timestamptz
+          -- LATERAL + LIMIT 1, not a plain LEFT JOIN (AF-20260818-46): confluence_signals
+          -- recomputes every ~30min year-round (confluence-compute, 24/7 cadence), so a plain
+          -- join on the day range matched ~20 rows/symbol/day and fanned out into 20 duplicate
+          -- output rows per symbol -- live-confirmed for BIL/RISHABH/RAYMOND, 08-17. This keeps
+          -- the same sargable half-open range, just takes the latest row inside it per symbol.
+          LEFT JOIN LATERAL (
+            SELECT confluence_score, conviction_level
+            FROM confluence_signals cs2
+            WHERE cs2.symbol = ts.symbol AND cs2.computed_at >= ?::timestamptz AND cs2.computed_at < ?::timestamptz
+            ORDER BY cs2.computed_at DESC
+            LIMIT 1
+          ) cs ON true
           WHERE ts.date = ?
             AND COALESCE(cs.confluence_score, 0) >= ?
         )

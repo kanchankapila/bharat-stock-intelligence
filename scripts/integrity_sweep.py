@@ -107,6 +107,14 @@ def latest_date_expr(table: str):
     return None
 
 
+def _classify(nn: int, nd: int, n: int, dt: str) -> str | None:
+    if nn == 0:
+        return "dead"
+    if nd == 1 and nn == n and dt in ("double precision", "real", "numeric", "integer", "bigint"):
+        return "frozen"
+    return None
+
+
 def sweep_table(table: str, min_rows: int):
     info = latest_date_expr(table)
     if not info:
@@ -116,22 +124,41 @@ def sweep_table(table: str, min_rows: int):
     if n < min_rows:
         return None
 
+    check_cols = [(c["column_name"], c["data_type"]) for _, c in cols.iterrows() if c["column_name"] != datecol]
     dead, frozen = [], []
-    for _, c in cols.iterrows():
-        col, dt = c["column_name"], c["data_type"]
-        if col == datecol:
-            continue
+    if check_cols:
+        # ONE query for every column in the table, not one query PER column. The original
+        # per-column round trip made a full-repo sweep take 20+ minutes before the first
+        # finding could even print (AF-20260818-45) -- 8s for technical_signals alone
+        # (303 columns), which is fast in isolation but adds up over ~400 tables. Conditional
+        # aggregation collapses that into one round trip per table (still one full scan of
+        # the day's rows, just not repeated once per column).
+        select_parts = ", ".join(
+            f'COUNT("{col}") AS "{col}__nn", COUNT(DISTINCT "{col}") AS "{col}__nd"'
+            for col, _ in check_cols
+        )
         try:
-            q = (f'SELECT COUNT("{col}") AS nn, COUNT(DISTINCT "{col}") AS nd '
-                 f'FROM "{table}" WHERE "{datecol}"::text = \'{latest}\'')
-            r = read_df(q)
-            nn, nd = int(r["nn"][0]), int(r["nd"][0])
+            row = read_df(f'SELECT {select_parts} FROM "{table}" WHERE "{datecol}"::text = \'{latest}\'').iloc[0]
+            for col, dt in check_cols:
+                kind = _classify(int(row[f"{col}__nn"]), int(row[f"{col}__nd"]), n, dt)
+                if kind == "dead":
+                    dead.append(col)
+                elif kind == "frozen":
+                    frozen.append(col)
         except Exception:
-            continue  # unorderable/exotic type -- not worth failing the sweep over
-        if nn == 0:
-            dead.append(col)
-        elif nd == 1 and nn == n and dt in ("double precision", "real", "numeric", "integer", "bigint"):
-            frozen.append(col)
+            # Fall back to one-query-per-column for this table only -- an exotic/unorderable
+            # type in one column must not silently drop every other column's check.
+            for col, dt in check_cols:
+                try:
+                    r = read_df(f'SELECT COUNT("{col}") AS nn, COUNT(DISTINCT "{col}") AS nd '
+                                f'FROM "{table}" WHERE "{datecol}"::text = \'{latest}\'')
+                    kind = _classify(int(r["nn"][0]), int(r["nd"][0]), n, dt)
+                except Exception:
+                    continue
+                if kind == "dead":
+                    dead.append(col)
+                elif kind == "frozen":
+                    frozen.append(col)
     return {"table": table, "date_col": datecol, "latest": latest, "rows": int(n),
             "dead": dead, "frozen": frozen, "total_cols": len(cols)}
 
