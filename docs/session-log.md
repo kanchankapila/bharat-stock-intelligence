@@ -4372,3 +4372,47 @@ measurement.md's documented calendar-dead/superseded set, not a new gap).
 No code changed this session — the fix was already committed; the gap was between "committed"
 and "the next thing that reads it actually ran." See
 [[densify_schema_leak_and_e2e_audit_2026_08_18]] for the full trace.
+
+## 2026-08-18 (cont.) — closed the 4 remaining audit-loop findings, each root-caused past a first guess
+
+User asked to close out the run's own "found, not fixed" list: AF-41 (8 orphaned procedures),
+AF-42 (marketsmojo bloat), AF-45 (integrity_sweep hang), AF-46 (todays-picks duplicates). All
+four closed; three of the four had a real root cause one level deeper than the first hypothesis
+written down when they were found — worth reading `docs/audit-findings.md`'s updated rows in
+full, not just this summary.
+
+- **AF-46**: confirmed live that `confluence_signals` carries ~20 rows/symbol/day
+  (`confluence-compute`'s 24/7 30-min cadence) — the original day-range `LEFT JOIN` in
+  `getTechnicalConfluenceSignals` matched all of them, not one. Fixed with
+  `LEFT JOIN LATERAL (... ORDER BY computed_at DESC LIMIT 1) cs ON true`, same sargable range.
+  New negative-controlled test. Live-verified: 4 duplicate `BIL`/`RISHABH`/`RAYMOND` cards
+  collapsed to 1 each, React's duplicate-key console error gone.
+- **AF-45**: the buffering hypothesis from the original finding was wrong. Real cause:
+  `sweep_table()` ran one query PER COLUMN (303 round trips for `technical_signals` alone,
+  8.07s measured). Rewrote to one batched query per table via conditional aggregation
+  (`COUNT(col)`/`COUNT(DISTINCT col)` for every column in one `SELECT`), per-column fallback
+  kept for a table where the batch itself errors. Full-repo run: never completed before →
+  **9m05s** now. Verified byte-identical dead/frozen output on 6 tables before/after.
+- **AF-42**: also wrong on the first pass — re-checked `n_dead_tup` twice ~40 min apart and it
+  was static, not growing, ruling out the AF-20 fetch-ordering theory. Real cause: the table's
+  default 20%-of-size `autovacuum_vacuum_scale_factor` (813,411 dead ≈ the 836K trigger point
+  on a 4.18M-row table) — exactly the ANALYZE-side problem migration `1787030000000` already
+  fixed for these same 8 tables, just the VACUUM half. Manually vacuumed (813,411 → 0 dead
+  tuples) and shipped `1787080000000` extending the same flat-threshold treatment to VACUUM,
+  applied via `migrate:up` against real `POSTGRES_URL`.
+- **AF-41**: investigated per-procedure instead of forcing a wire-up-or-delete. One correction
+  (`getMLModelRegistry` is used by `scripts/ci_smoke_test.ts` — the original sweep's search
+  scope missed `scripts/`). The other 7 are real, table-backed analytics features (checked row
+  counts directly: 247/40/477/1,243 on their backing tables) with a live writer already wired
+  to a UI on one side (`saveSignalAction` ← `AlphaCockpit.tsx`) and simply no reader UI yet —
+  not the "parallel final score" pattern `scoring-authority.md` warns about. Closed with the
+  evidence, no code deleted or added.
+
+Full check stack re-run clean after all four: `tsc`, `vitest` 995/0/41, `pytest` 2072/0/230,
+`check_recurring_bugs.py`, `schema:drift`. `bharat-server` restarted for the router change,
+live-verified via screenshot. Commit `6043334`.
+
+**Noticed but not fixed, out of the requested scope, flagged for a future session**: an
+`outcome_resolver` crash on a rupee-symbol string (`"₹60.33"`) hitting a numeric Postgres
+column, and a `SL ₹NaN` render on `/todays-picks` — both surfaced incidentally in pm2 logs and
+a live screenshot while verifying the above, neither investigated.
