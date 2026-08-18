@@ -64,5 +64,8 @@ class TestEffectiveRegimeForWeights:
             def execute(self, sql, params=()):
                 raise RuntimeError("no macro_asset_prices table")
 
+            def rollback(self):  # every real conn supports this; the failed
+                pass            # SELECT above must not poison the connection.
+
         r = UnifiedRanker(conn=_BrokenConn())
         assert r._effective_regime_for_weights("HIGH_VOL") == "HIGH_VOL"

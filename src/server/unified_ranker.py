@@ -6,6 +6,7 @@ Run after market close: python unified_ranker.py
 import json
 import csv
 import math
+import sys
 from pathlib import Path
 from datetime import date, datetime, timedelta, timezone
 
@@ -190,7 +191,10 @@ def regime_tilt_fit_readiness(conn, min_days: int = 60, min_episodes: int = 20) 
         ).fetchall()}
         rows = conn.execute("SELECT date, regime FROM market_regimes ORDER BY date").fetchall()
     except Exception as e:
-        print(f"[UnifiedRanker] regime_tilt_fit_readiness unavailable: {e}")
+        # Module-level function, no self -- route to stderr directly (see UnifiedRanker._degraded
+        # for why stderr, not stdout: it's the one stream pythonRunner.ts's runPython() surfaces
+        # as a log.warn() on an otherwise "successful" run).
+        print(f"[UnifiedRanker] regime_tilt_fit_readiness unavailable: {e}", file=sys.stderr)
         return {}
 
     episodes, prev = {}, None
@@ -243,7 +247,9 @@ def _load_regime_tilt_override():
         ).fetchone()
         _regime_tilt_override = json.loads(row['value']) if row and row['value'] else {}
     except Exception as e:
-        print(f"[UnifiedRanker] Could not load optimal_regime_cat_tilt override: {e}")
+        # Module-level function, no self -- see the matching comment in
+        # regime_tilt_fit_readiness() above.
+        print(f"[UnifiedRanker] Could not load optimal_regime_cat_tilt override: {e}", file=sys.stderr)
         _regime_tilt_override = {}
     return _regime_tilt_override
 
@@ -690,7 +696,9 @@ def is_engine_edge_adjustment_enabled(conn) -> bool:
         ).fetchone()
         return bool(row) and row['value'] == 'true'
     except Exception as e:
-        print(f"[UnifiedRanker] is_engine_edge_adjustment_enabled unavailable: {e}")
+        # Module-level function, no self -- see the matching comment in
+        # regime_tilt_fit_readiness() above.
+        print(f"[UnifiedRanker] is_engine_edge_adjustment_enabled unavailable: {e}", file=sys.stderr)
         return False
 
 
@@ -719,7 +727,9 @@ def load_engine_edge_verdicts(conn, regime: str, horizon: int = ENGINE_EDGE_HORI
             out[engine] = r['verdict'] if r else None
         return out
     except Exception as e:
-        print(f"[UnifiedRanker] load_engine_edge_verdicts unavailable: {e}")
+        # Module-level function, no self -- see the matching comment in
+        # regime_tilt_fit_readiness() above.
+        print(f"[UnifiedRanker] load_engine_edge_verdicts unavailable: {e}", file=sys.stderr)
         return {}
 
 
@@ -1051,6 +1061,22 @@ class UnifiedRanker:
         self.conn = conn or connect()
         self.csv_path = Path(csv_path) if csv_path else CSV_PATH
         self.corrections_path = Path(corrections_path) if corrections_path else CORRECTIONS_PATH
+        self._degraded_count = 0
+
+    def _degraded(self, msg: str) -> None:
+        """Report a query that degraded to an empty/fallback result instead of raising.
+        Every one of ~30 read methods in this class does this by design (a missing/renamed
+        table must not crash the nightly ranker), but until now they all printed to STDOUT,
+        which pythonRunner.ts's runPython() never inspects -- only STDERR content triggers its
+        '[PY] <script> finished successfully with warnings/stderr output' log.warn(), the one
+        existing hook that makes a degraded-but-"successful" run visible without a human
+        reading the raw log. Routes through that hook instead of adding new alerting.
+        See recurring-bugs.md's "except Exception: pass does NOT contain the failure" and
+        "A UNION half that supplies NULL... is inert, and its row count hides that" entries --
+        same family: this run reported success while quietly producing less than it should.
+        """
+        self._degraded_count += 1
+        print(msg, file=sys.stderr)
 
     def seed_screener_catalog(self):
         """Load screener_scoring_v2.csv into screener_catalog + apply corrections. Idempotent."""
@@ -1157,7 +1183,12 @@ class UnifiedRanker:
                 "SELECT close FROM macro_asset_prices WHERE symbol = 'INDIAVIX' "
                 "ORDER BY date DESC LIMIT 1"
             ).fetchone()
-        except Exception:
+        except Exception as e:
+            # Missing the rollback every sibling except block has here would poison the
+            # connection for every later read in this run (recurring-bugs.md: "except
+            # Exception: pass does NOT contain the failure on Postgres").
+            self.conn.rollback()
+            self._degraded(f"[UnifiedRanker] VIX regime downgrade check unavailable: {e}")
             return regime
         vix = float(row['close']) if row and row['close'] is not None else None
         if vix is None:
@@ -1185,7 +1216,7 @@ class UnifiedRanker:
             ).fetchall():
                 out[r['symbol']] = r['triggers']
         except Exception as e:                                   # noqa: BLE001
-            print(f"[UnifiedRanker] event triggers unavailable ({str(e)[:60]}); "
+            self._degraded(f"[UnifiedRanker] event triggers unavailable ({str(e)[:60]}); "
                   "recommendations will carry no event disclosure today.")
         if out:
             print(f"[UnifiedRanker] event triggers on {len(out):,} symbols")
@@ -1266,7 +1297,7 @@ class UnifiedRanker:
             ).fetchall():
                 master_bias[(str(r['scan_id']), (r['source'] or '').lower())] = r['inferred_sentiment']
         except Exception as e:                                   # noqa: BLE001
-            print(f"[UnifiedRanker] screener_master fallback unavailable ({str(e)[:60]}); "
+            self._degraded(f"[UnifiedRanker] screener_master fallback unavailable ({str(e)[:60]}); "
                   "uncatalogued screeners will contribute with a neutral bias.")
 
         def _add(sym, bias, conf, cat, subcat, horizon, name=None, sid=None, src=None):
@@ -1310,11 +1341,11 @@ class UnifiedRanker:
                 # falls back to Hold/0-bull/0-bear with no error surfaced anywhere — the
                 # ranker looks like it's running fine while producing no directional signal
                 # at all. Log so a monitoring pass can catch it.
-                print(f"[UnifiedRanker] Screener membership query failed: {e}")
+                self._degraded(f"[UnifiedRanker] Screener membership query failed: {e}")
                 self.conn.rollback()
 
         if not membership:
-            print("[UnifiedRanker] WARNING: screener membership is completely empty — "
+            self._degraded("[UnifiedRanker] WARNING: screener membership is completely empty — "
                   "every symbol will classify as Hold with 0 bull/bear counts.")
 
         return membership
@@ -1337,7 +1368,8 @@ class UnifiedRanker:
                 if sym not in result or val > result[sym]:
                     result[sym] = val
             return result
-        except Exception:
+        except Exception as e:
+            self._degraded(f"[UnifiedRanker] _get_screener_momentum_scores failed: {e}")
             self.conn.rollback()
             return {}
 
@@ -1386,7 +1418,7 @@ class UnifiedRanker:
                 acc.setdefault(r['symbol'], []).append(p)
             return {sym: (sum(v) / len(v)) * 100 for sym, v in acc.items() if v}
         except Exception as e:
-            print(f"[UnifiedRanker] _get_ml_scores failed: {e}")
+            self._degraded(f"[UnifiedRanker] _get_ml_scores failed: {e}")
             self.conn.rollback()
             return {}
 
@@ -1411,7 +1443,7 @@ class UnifiedRanker:
             ).fetchall()
             return {r['symbol']: float(r['hv_20d']) for r in rows}
         except Exception as e:
-            print(f"[UnifiedRanker] _get_realized_vol failed: {e}")
+            self._degraded(f"[UnifiedRanker] _get_realized_vol failed: {e}")
             self.conn.rollback()
             return {}
 
@@ -1425,7 +1457,7 @@ class UnifiedRanker:
             ).fetchall()
             return _normalize_to_100({r['symbol']: float(r['s'] or 0) for r in rows})
         except Exception as e:
-            print(f"[UnifiedRanker] _get_cs_scores failed: {e}")
+            self._degraded(f"[UnifiedRanker] _get_cs_scores failed: {e}")
             self.conn.rollback()
             return {}
 
@@ -1454,11 +1486,11 @@ class UnifiedRanker:
                 self.conn.rollback()
             except Exception:
                 pass
-            print(f"[UnifiedRanker] universe restriction unavailable ({e}); ranking unfiltered")
+            self._degraded(f"[UnifiedRanker] universe restriction unavailable ({e}); ranking unfiltered")
             return symbols
 
         if not master or not priced:
-            print("[UnifiedRanker] empty master/price universe; ranking unfiltered")
+            self._degraded("[UnifiedRanker] empty master/price universe; ranking unfiltered")
             return symbols
 
         keep = {s for s in symbols if s in master and s in priced}
@@ -1504,7 +1536,7 @@ class UnifiedRanker:
             raw = {r['symbol']: float(r['non_screener_score'] or 0) for r in rows}
             return _normalize_to_100(raw)
         except Exception as e:
-            print(f"[UnifiedRanker] _get_confluence_scores failed: {e}")
+            self._degraded(f"[UnifiedRanker] _get_confluence_scores failed: {e}")
             self.conn.rollback()
             return {}
 
@@ -1519,7 +1551,7 @@ class UnifiedRanker:
             # same scale as the other engines before blending.
             return _normalize_to_100({r['symbol']: float(r['s'] or 0) for r in rows})
         except Exception as e:
-            print(f"[UnifiedRanker] _get_technical_scores failed: {e}")
+            self._degraded(f"[UnifiedRanker] _get_technical_scores failed: {e}")
             self.conn.rollback()
             return {}
 
@@ -1532,7 +1564,7 @@ class UnifiedRanker:
             ).fetchall()
             return {r['symbol']: float(r['probability'] or 0) * 100 for r in rows}
         except Exception as e:
-            print(f"[UnifiedRanker] _get_dl_scores failed: {e}")
+            self._degraded(f"[UnifiedRanker] _get_dl_scores failed: {e}")
             self.conn.rollback()
             return {}
 
@@ -1555,7 +1587,7 @@ class UnifiedRanker:
                     result[sym] = float(r['breakout_probability'] or 0) * 100
             return result
         except Exception as e:
-            print(f"[UnifiedRanker] _get_breakout_scores failed: {e}")
+            self._degraded(f"[UnifiedRanker] _get_breakout_scores failed: {e}")
             self.conn.rollback()
             return {}
 
@@ -1581,7 +1613,7 @@ class UnifiedRanker:
                 if sym not in insider_scores:
                     insider_scores[sym] = float(r['insider_buy_pct_90d'] or 0) * 100
         except Exception as e:
-            print(f"[UnifiedRanker] _get_smart_money_scores (insider) failed: {e}")
+            self._degraded(f"[UnifiedRanker] _get_smart_money_scores (insider) failed: {e}")
             self.conn.rollback()
 
         # 2. Block/Bulk deal accumulation (90-day window)
@@ -1598,7 +1630,7 @@ class UnifiedRanker:
                 # 10% of float bought over 90d -> 100; scaled linearly, capped at 100.
                 block_scores[r['symbol']] = min(100.0, float(r['total_pct'] or 0) * 10.0)
         except Exception as e:
-            print(f"[UnifiedRanker] _get_smart_money_scores (block deals) failed: {e}")
+            self._degraded(f"[UnifiedRanker] _get_smart_money_scores (block deals) failed: {e}")
             self.conn.rollback()
 
         # 3. Ranked Institutional Insights (MoneyControl ranked feed)
@@ -1615,7 +1647,7 @@ class UnifiedRanker:
                 # 500Cr+ in 2 weeks -> 100; scaled linearly, capped at 100.
                 inst_scores[r['symbol']] = min(100.0, float(r['total_value'] or 0) / 5.0)
         except Exception as e:
-            print(f"[UnifiedRanker] _get_smart_money_scores (inst insights) failed: {e}")
+            self._degraded(f"[UnifiedRanker] _get_smart_money_scores (inst insights) failed: {e}")
             self.conn.rollback()
 
         result = {}
@@ -1633,7 +1665,8 @@ class UnifiedRanker:
                 (cutoff,),
             ).fetchone()
             return float(row['avg_r'] or 0)
-        except Exception:
+        except Exception as e:
+            self._degraded(f"[UnifiedRanker] _get_avg_track_record failed: {e}")
             self.conn.rollback()
             return 0.0
 
@@ -1699,7 +1732,7 @@ class UnifiedRanker:
                 out[r['symbol']] = (mean, cnt, sd)
             return out
         except Exception as e:
-            print(f"[UnifiedRanker] _get_rl_gate_map failed: {e}")
+            self._degraded(f"[UnifiedRanker] _get_rl_gate_map failed: {e}")
             self.conn.rollback()
             return {}
 
@@ -1755,7 +1788,8 @@ class UnifiedRanker:
                 ) t WHERE rn = 1
             """).fetchall()
             return {r['symbol']: r for r in rows}
-        except Exception:
+        except Exception as e:
+            self._degraded(f"[UnifiedRanker] _get_confluence_latest_map failed: {e}")
             self.conn.rollback()
             return {}
 
@@ -1770,7 +1804,8 @@ class UnifiedRanker:
                 ) t WHERE rn = 1
             """).fetchall()
             return {r['symbol']: r for r in rows}
-        except Exception:
+        except Exception as e:
+            self._degraded(f"[UnifiedRanker] _get_rec_log_latest_map failed: {e}")
             self.conn.rollback()
             return {}
 
@@ -1813,7 +1848,8 @@ class UnifiedRanker:
                 ) t WHERE rn = 1
             """).fetchall()
             return {r['symbol']: r for r in rows}
-        except Exception:
+        except Exception as e:
+            self._degraded(f"[UnifiedRanker] _get_unified_signals_latest_map failed: {e}")
             self.conn.rollback()
             return {}
 
@@ -1821,7 +1857,8 @@ class UnifiedRanker:
         try:
             rows = self.conn.execute("SELECT symbol, sector FROM nse_stocks").fetchall()
             return {r['symbol']: r['sector'] for r in rows}
-        except Exception:
+        except Exception as e:
+            self._degraded(f"[UnifiedRanker] _get_sector_map failed: {e}")
             self.conn.rollback()
             return {}
 
@@ -1836,7 +1873,8 @@ class UnifiedRanker:
                    FROM quant_scores WHERE mf_composite_score IS NOT NULL"""
             ).fetchall()
             return {r['symbol']: dict(r) for r in rows}
-        except Exception:
+        except Exception as e:
+            self._degraded(f"[UnifiedRanker] _get_multi_factor_map failed: {e}")
             self.conn.rollback()
             return {}
 
@@ -1863,7 +1901,7 @@ class UnifiedRanker:
                 tuple(symbols) + (cutoff,),
             ).fetchall()
         except Exception as e:
-            print(f"[UnifiedRanker] _get_recent_returns failed: {e}")
+            self._degraded(f"[UnifiedRanker] _get_recent_returns failed: {e}")
             self.conn.rollback()
             return {}
 
@@ -2341,7 +2379,7 @@ class UnifiedRanker:
                     print(f"[UnifiedRanker] correlation cap applied to "
                           f"{len(set(clusters.values()))} cluster(s) covering {len(clusters)} symbols.")
         except Exception as e:
-            print(f"[UnifiedRanker] correlation-cluster cap skipped: {e}")
+            self._degraded(f"[UnifiedRanker] correlation-cluster cap skipped: {e}")
 
         for r in results:
             r['position_size_pct'] = round(position_sizes.get(r['symbol'], 0.0) * 100, 2)
@@ -2441,7 +2479,7 @@ class UnifiedRanker:
                           f"(scored by an earlier run, not by this one).")
                 self.conn.commit()
         except Exception as e:
-            print(f"[UnifiedRanker] stale-row purge failed: {e}")
+            self._degraded(f"[UnifiedRanker] stale-row purge failed: {e}")
             self.conn.rollback()
 
         # Backfill sector from nse_stocks for any row still NULL/Unknown
@@ -2457,7 +2495,8 @@ class UnifiedRanker:
                   AND ns.sector NOT IN ('Unknown', '', 'OTHER', 'NA')
             """, (today,))
             self.conn.commit()
-        except Exception:
+        except Exception as e:
+            self._degraded(f"[UnifiedRanker] sector backfill failed: {e}")
             self.conn.rollback()
 
         breakdown = {}
@@ -2465,8 +2504,18 @@ class UnifiedRanker:
             c = r['conviction_level']
             breakdown[c] = breakdown.get(c, 0) + 1
 
+        if self._degraded_count:
+            # One unmissable line beyond the individual self._degraded() calls above --
+            # someone skimming pm2 logs for "did tonight's run work" should not have to
+            # notice N scattered stderr lines to learn the run degraded.
+            self._degraded(
+                f"[UnifiedRanker] SUMMARY: {self._degraded_count} read(s)/write(s) degraded "
+                f"to an empty/fallback result this run -- see the lines above for which."
+            )
+
         output = {'success': True, 'stocks_scored': len(results),
-                  'conviction_breakdown': breakdown, 'regime': regime}
+                  'conviction_breakdown': breakdown, 'regime': regime,
+                  'degraded_count': self._degraded_count}
         print(json.dumps(output))
         return results
 
