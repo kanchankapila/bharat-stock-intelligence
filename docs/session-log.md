@@ -4559,3 +4559,95 @@ Full check stack clean after all five: `tsc --noEmit`, `vitest` 999/0/41, `pytes
 `check_recurring_bugs.py`, `schema:drift`. No `pm2 restart` needed — nothing touched is hot-path
 TypeScript served by `bharat-server`; `unified_ranker.py`/`online_learner.py`/
 `trendlyne_screener_discovery.py` all take effect on their next scheduled `runPython()` invocation.
+
+## 2026-08-17→19 — Grafana dashboards, and tracing the Sell:Buy skew to a degenerate multiplier input
+
+Built four importable Grafana dashboards (`grafana/`), then used the third one to reverse-engineer
+the platform's standing Sell-heavy skew. Every query in all four was executed against live Postgres
+before commit — 57 queries, 0 failures — because a dashboard that ships a broken panel is exactly
+the "evidence-shaped but meaningless output" `recurring-bugs.md` warns about.
+
+**The dashboards (`3b8d203`, plus `stock-explorer-dashboard.json` earlier).** Platform Health reads
+`data_quality_history` (155 checks) and `job_heartbeat` (84 jobs). Data Freshness & Coverage does
+the per-table audit with `measurement.md`'s panel-shape rule baked in — distinct dates PER SYMBOL
+and dense span by year, never a raw row count. Signal Accuracy & Movers grades the platform against
+what the market actually did. Several `.claude/commands/` skills are now standing panels rather than
+things to re-run by hand (`data-coverage-audit`, `signal-accuracy-review`, the never-varying-monitor
+query from `threshold-calibration-audit`). What a dashboard **cannot** replace, and this is worth
+recording: `temporal-correctness-audit`, `test-integrity-audit`, `cross-writer-collision-audit` and
+`fetcher-accuracy-review` all read SOURCE, not the DB — no panel can see a `date.today()` write
+anchor or a hand-copied monkeypatch signature.
+
+**The main finding: `Sell:Buy` was 24.4:1 because `factor_crowding_multiplier` fired on 98.6% of the
+universe.** Traced from the symptom (`unified_recommendations` calling +20% gainers Strong Sell) to
+arithmetic that could not be a blend: BI carried components `screener 98.7 / ml 73.4 / tech 44.9 /
+conf 61.4 / fund 78.5` yet a `unified_score` of **24.6 — below its own minimum component**. The
+cause is three multipliers applied to the blend at `unified_ranker.py:2133/2149/2180`
+(`RED_FLAG_VETO_MULT 0.5`, `HIGH_VOL_VETO_MULT 0.7`, `FACTOR_CROWDING_DISCOUNT 0.9`). BI: 70 × 0.35
+= 24.5 (observed 24.6). PAKKA: 26.6 × 0.35 = 9.3 (observed 9.3).
+
+Root cause was one level further up and is **not** in `unified_ranker.py` at all: every one of the
+five `mf_*` columns in `quant_scores` was a CONSTANT across all 2,424 symbols — `quality`,
+`momentum`, `value`, `risk_adj` all pinned at the neutral default 50.0, `mf_macro_score` at 63.0 for
+everyone. So one "factor" carried 100% of the weighted deviation for every symbol (measured
+dominant-share = 1.000 at p10 through p90) and the crowding check — which exists precisely to catch
+an undiversified score — was correctly reporting a degenerate input. The effect was a **uniform ×0.9
+on the entire universe**, which cannot change any ranking; it only shifts everyone against the
+ABSOLUTE thresholds (`DIRECTIONLESS_BUY_FLOOR=70`, `STRONG_BUY=80`). This is the "something else
+dominant remains unfound" that `measurement.md`'s neutral-tag entry left open.
+
+A concurrent session fixed the producer (`99a7cfe`, `_pct_rank` collapsing every factor to the
+neutral default). Measured before/after on the live snapshot, same script both times:
+
+| | before `99a7cfe` | after |
+|---|---|---|
+| Buy / Sell counts | 27 / 659 | **112 / 503** |
+| Sell : Buy | **24.4** | **4.5** |
+| FACTOR-CROWDED prevalence | 98.6% | **4.8%** |
+| removing crowding moves Sell:Buy | 24.4 → 4.3 | 4.5 → 4.2 |
+
+Note the last row: the crowding discount has stopped being a lever at all, which is the confirmation
+that its input — not its threshold — was the defect.
+
+**The vetoes were NOT removed, and the evidence says they should not be.** `high_vol` backtested
+directly as a criterion over 55 dates of `hv_20d` (per-date then averaged, winsorised 1/99,
+`is_suspect` excluded, ≥₹1cr ADT20, next-day OPEN entry): 1d t=−0.83, 5d t=−0.81, 21d t=+0.18 —
+not significant at any horizon. And the decisive check was the **both-tails control** `measurement.md`
+mandates: removing all multipliers yields 3 extra Buy calls among the day's top-20 gainers and **5**
+among the bottom-20 losers. Grading only against the winning tail would have read "7 gainers
+recovered!" and been backwards. `unified_ranker.py` was left untouched.
+
+**`insider-transactions-recency` repointed (`651ae44`) — it was guarding an abandoned table.** It
+watched `insider_transactions.transaction_date` and had warned on all 114 runs it ever made. No
+consumer reads that table: `factor_backtest.py`'s `insider_net` and `insider_features.py` both read
+`insider_trades.date_iso` (Tickertape, 57,957 rows / 1,318 symbols, fresh daily). Its NSE source is
+also broken upstream — live-probed with the fetcher's own functions, `corporates-pit` **ignores its
+from/to params entirely** (four windows including "2024 only" return byte-identical rows) and serves
+a stale most-recent-20 page per symbol, so no sweep can advance it. The fetcher is not at fault and
+was left alone. Post-fix the check reads `pass — Latest insider_trades row 1.8d old`, and
+`dq-uninformative-checks` correctly dropped from 3 never-varying checks to 2.
+
+**A panel that generated its own false positive, fixed (`504825a`).** The feature-coverage panel
+measured 100%-NULL columns on a single day and reported 31 for `technical_signals`. None was a
+defect: 20 were a brand-new `mc_*` enrichment first populated that very day, several were the
+documented one-day enrichment lag, two are `NEVER_FILL` model outputs. It now reports whole-table
+coverage beside the single-day number via **`pg_stats.null_frac`** — the equivalent
+`jsonb_each_text` scan over 73,563 rows × 303 columns takes **4m17s**, while `pg_stats` returns the
+identical answer (6 columns, exactly `measurement.md`'s documented calendar-blocked/superseded set)
+in **0.6s**. ANALYZE already maintains this; a full scan for a whole-table NULL census is wasted work.
+
+**Three findings this session reported were wrong, and are retracted here so they are not
+rediscovered as real.** (1) `job_heartbeat.last_run_at == last_success_at` on all 84 rows is NOT
+skip-as-success — the upsert at `jobHeartbeat.ts:61` only advances `last_success_at` on success,
+`'failed'` is recorded from 20 call sites, and `run_ahead = 0` merely means every job's last call
+succeeded. (2) `trendlyne_eps_history`/`div_yield_history` "frozen at 2026-06-29" are **quarterly**
+series whose dates are exact quarter-ends; 2026-06-29 is the current quarter, and the same fetcher's
+daily `trendlyne_dvm_scores` is current. (3) `insider_trades` "max date 31 Oct, 2025" was the raw
+vendor display column — `date_iso` is the real one, as `insider_features.py:40` already warns.
+
+Final state, re-verified 2026-08-19 after the scheduled runs: `quant_scores.last_computed`
+2026-08-18 17:32 UTC with 1,950–2,422 distinct values per factor (the **scheduled** job path, not
+just the manual verification run); 83/84 jobs succeeding (`trendlyne-midweek` failing on an upstream
+405); data quality 152 pass / 3 warn / 0 fail. `tsc --noEmit` clean, `vitest` 994/0/41, `pytest`
+2067/0/230, 57/57 dashboard queries green. Grafana's datasource Max query time needs raising to 60s
+— the freshness panel runs 25.1s against a 30s default.
