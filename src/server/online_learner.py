@@ -299,8 +299,14 @@ def score_pending_with_ensemble_blend(
         probs = sgd_probs
 
     cur = conn.cursor()
+    # Stamp win_probability_scored_at here too (migration 1787050000000) -- this writer runs
+    # before ml_ensemble.py's do_score pass in the daily job chain (queues.ts) and fills
+    # win_probability for the whole universe, so do_score's own `WHERE win_probability IS
+    # NULL` candidate query finds nothing left to score and its stamp never fires. Confirmed
+    # live: win_probability_scored_at was 0% populated on 7 of the last 9 trading days.
     cur.executemany(
-        "UPDATE technical_signals SET win_probability = ? WHERE symbol = ? AND date = ?",
+        "UPDATE technical_signals SET win_probability = ?, win_probability_scored_at = CURRENT_TIMESTAMP "
+        "WHERE symbol = ? AND date = ?",
         [(round(float(prob), 4), row['symbol'], row['signal_date'])
          for (_, row), prob in zip(df.iterrows(), probs)],
     )
