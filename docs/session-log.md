@@ -4449,3 +4449,39 @@ pattern/dividend/insider-event rarity, and two already-documented dead ends (`pe
 on the known-100%-NULL `eps_growth_yoy`/`eps_growth_qoq`; `mf_sector_flow_pct` blocked by AMFI's
 changed endpoint shape, already flagged as the `mf-sector-allocation-recency` WARN). None
 force-filled — see [[densify_schema_leak_and_e2e_audit_2026_08_18]] for the full breakdown.
+
+## 2026-08-18 (cont. 2) — fixed the 2 issues noticed incidentally during the AF-41/42/45/46 closeout
+
+Both flagged-not-fixed at the end of the previous entry, closed on request (AF-20260818-47):
+`technical_signals.stop_loss`/`targets` were storing a ₹-formatted display string
+(`getTradingSetup()`'s Telegram-digest formatting, e.g. `"₹1239.39"`) instead of a raw number —
+and two independent readers added later both expect a number: `outcome_resolver.py`'s
+`CAST(ts.stop_loss AS REAL)` (crashing live on every row since 2026-08-13) and the frontend's
+`Number(pick.stop_loss)` (rendering `SL ₹NaN`). `targets` was worse: the frontend expects a JSON
+array, a bare `"₹65.00"` string always fails `JSON.parse`, so targets silently never rendered
+once, ever, since the feature shipped — no error, just permanently empty, invisible to every
+existing check.
+
+The fix pattern already existed three lines away in the same function — `unifiedUpsertSql`'s
+`slNumeric` regex-extracted a clean number from the identical formatted string for
+`unified_signals.stop_loss`, for this exact reason. Extracted into a shared, exported
+`parseMoneyToNumber()` and applied to the `technical_signals` write too; `targets` now written
+as `JSON.stringify([extracted number])`, matching the shape the frontend already expects.
+`entryZone` untouched — it's a genuine formatted range, nothing downstream parses it numerically.
+
+**Repaired the 32 existing poisoned rows live**, not just the writer: read-only query first to
+confirm the exact count and shape (`WHERE stop_loss !~ '^[0-9.]+$'` → 32, all dated 2026-08-18,
+values like `'₹1239.39'`), then a targeted `regexp_replace` UPDATE — `stop_loss` stripped to
+clean numeric text, `targets` wrapped into a JSON array. Re-ran `outcome_resolver.py`'s exact
+`CAST` query after: 0 errors, real values back (`GOODLUCK` 1239.39, `SATIN` 210.52, ...).
+
+Frontend hardened too (`TodaysPicks.tsx`): SL only renders when `Number.isFinite`, so a future
+malformed value degrades silently instead of showing `NaN`. 4 new tests on `parseMoneyToNumber`
+(money string, thousands separator, null/undefined/empty, already-bare number).
+
+Full check stack clean (`tsc`, `vitest` 999/0/41, `check_recurring_bugs.py`). `bharat-server`
+restarted, live-verified post-restart: `/todays-picks` shows real `SL ₹796.12`/`T1 ₹952.86`-style
+values on all 20 picks — previously SL always read NaN and targets never rendered at all.
+`recurring-bugs.md` gained a new entry for the class (a value formatted for one display consumer
+silently becoming the stored value every other numeric reader chokes on). Commits `c9267a0`,
+`6d1928e`.
