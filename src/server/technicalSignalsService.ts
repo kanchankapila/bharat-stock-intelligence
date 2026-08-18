@@ -1069,6 +1069,21 @@ export function deriveTimeHorizon(signals: TechSignal[]): 'Positional (2-4W)' | 
   return signals.some(s => TREND_SIGNAL_TYPES.has(s.type)) ? 'Positional (2-4W)' : 'Swing (3-7D)';
 }
 
+// AF: technical_signals.stop_loss/targets are read back as NUMBERS by two different
+// consumers -- outcome_resolver.py's `CAST(ts.stop_loss AS REAL)` and the frontend's
+// `Number(pick.stop_loss)` (TodaysPicks.tsx) -- but getTradingSetup() below returns a
+// money-formatted display string ("₹60.33") for the Telegram digest. Writing that same
+// formatted string straight into the DB broke both readers: the SQL cast threw
+// `invalid input syntax for type double precision: "₹60.33"` and the frontend rendered
+// "SL ₹NaN" (Number() can't parse a string that already has a ₹ prefix baked in).
+// unifiedUpsertSql already regex-extracted a clean number for THIS reason (slNumeric,
+// below) -- this is that same extraction, shared, and applied to technical_signals too.
+export function parseMoneyToNumber(s: string | undefined | null): number | null {
+  if (!s) return null;
+  const m = s.match(/[\d,]+(?:\.\d+)?/);
+  return m ? parseFloat(m[0].replace(/,/g, '')) : null;
+}
+
 export async function getTradingSetup(r: SignalResult): Promise<{
   aiInsight: string; entryZone: string; stopLoss: string;
   targets: string; setupQuality: string; timeHorizon: string;
@@ -1583,8 +1598,12 @@ export async function runTechnicalSignalScan(options: {
           sector_ret_21d,
           r.aiInsight    ?? null,
           r.entryZone    ?? null,
-          r.stopLoss     ?? null,
-          r.targets      ?? null,
+          // stop_loss/targets are read back as NUMBERS downstream (outcome_resolver.py's
+          // CAST(... AS REAL), the frontend's Number()) -- store the clean value, not the
+          // ₹-formatted display string. entryZone stays a formatted range; nothing parses
+          // it numerically.
+          parseMoneyToNumber(r.stopLoss) ?? null,
+          parseMoneyToNumber(r.targets) != null ? JSON.stringify([parseMoneyToNumber(r.targets)]) : null,
           r.setupQuality ?? null,
           r.timeHorizon  ?? null,
         ]);
@@ -1592,9 +1611,7 @@ export async function runTechnicalSignalScan(options: {
         // Mirror actionable signals to unified_signals for cross-source tracking
         if (r.signalScore > 0) {
           const signalTs = new Date().toISOString();
-          const slNumeric = r.stopLoss
-            ? (() => { const m = r.stopLoss!.match(/[\d,]+(?:\.\d+)?/); return m ? parseFloat(m[0].replace(/,/g, '')) : null; })()
-            : null;
+          const slNumeric = parseMoneyToNumber(r.stopLoss);
           await tx.run(unifiedUpsertSql, [
             r.symbol,
             r.cmp ?? null,

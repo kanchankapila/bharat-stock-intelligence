@@ -151,7 +151,7 @@ export function TodaysPicks({ onSelectStock }: TodaysPicksProps) {
                 {/* Stop loss / targets */}
                 {(pick.stop_loss || targets.length > 0) && (
                   <div className="flex items-center gap-3 text-[10px]">
-                    {pick.stop_loss && (
+                    {pick.stop_loss != null && Number.isFinite(Number(pick.stop_loss)) && (
                       <span className="flex items-center gap-1 text-rose-400">
                         <ShieldAlert className="w-3 h-3" />
                         SL ₹{Number(pick.stop_loss).toLocaleString('en-IN')}
