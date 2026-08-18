@@ -22,7 +22,7 @@ import argparse
 import json
 import sys
 import time
-from datetime import date
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
 import requests
@@ -34,6 +34,13 @@ from marketsmojo_technical_fetcher import HEADERS, load_sid_map  # noqa: E402
 BASE_URL = "https://frapi.marketsmojo.com/apiv1/financials/get-financials"
 RATE_LIMIT_SEC = 0.5
 MAX_PAGES = 8  # confirmed real data through page 5 for HDFCBANK; page 6 already empty
+
+# AF-20260816-20: this is quarterly-cadence data (queues.ts's own comment: "the vendor only
+# restates these on results/filing days") fetched by a WEEKLY job -- a symbol checked earlier
+# this week doesn't need re-fetching before next week's run. See marketsmojo_financials_checked
+# (migration 1787090000000) for why this can't be answered from marketsmojo_financials_history
+# alone.
+STALENESS_DAYS = 7
 
 
 def _flatten_statement(stmt_key: str, rows: list, period_keys: list) -> list[tuple[str, str, str]]:
@@ -110,6 +117,27 @@ def fetch_financials_history(
     return out or None
 
 
+def load_recently_checked(conn, staleness_days: int = STALENESS_DAYS) -> set[str]:
+    """Symbols checked within the staleness window -- see marketsmojo_financials_checked's own
+    migration comment for why this can't be derived from marketsmojo_financials_history."""
+    cutoff = (datetime.now(timezone.utc) - timedelta(days=staleness_days)).isoformat()
+    rows = conn.execute(
+        "SELECT symbol FROM marketsmojo_financials_checked WHERE checked_at >= ?", (cutoff,)
+    ).fetchall()
+    return {r[0] for r in rows}
+
+
+def mark_checked(conn, symbol: str) -> None:
+    conn.execute(
+        """
+        INSERT INTO marketsmojo_financials_checked (symbol, checked_at) VALUES (?, ?)
+        ON CONFLICT(symbol) DO UPDATE SET checked_at = excluded.checked_at
+        """,
+        (symbol, datetime.now(timezone.utc).isoformat()),
+    )
+    conn.commit()
+
+
 def load_known_values(conn, symbol: str) -> dict[tuple[str, str, str], float | None]:
     """(statement, period_label, line_item) -> stored value, for one symbol.
 
@@ -158,20 +186,34 @@ def write_financials_history(conn, symbol: str, rows: list, fetched_at: str,
 
 def run(symbols: list[str] | None = None, full: bool = False) -> None:
     sid_map = load_sid_map()
+    explicit_symbols = bool(symbols)
     symbols = [s.upper() for s in symbols] if symbols else sorted(sid_map.keys())
     session = requests.Session()
     session.headers.update(HEADERS)
     conn = connect()
     fetched_at = date.today().isoformat()
 
+    # AF-20260816-20: skip a symbol checked within STALENESS_DAYS without paying its HTTP
+    # round-trip -- only for the default full-universe sweep. --full (explicit re-upsert) and an
+    # explicit --symbols list both mean "I want these checked now regardless of when we last
+    # asked", so neither is filtered.
+    recently_checked = (
+        set() if full or explicit_symbols else load_recently_checked(conn)
+    )
+    skipped_fresh = 0
+
     total_rows = 0
     ok = 0
     for symbol in symbols:
+        if symbol in recently_checked:
+            skipped_fresh += 1
+            continue
         sid = sid_map.get(symbol)
         if not sid:
             print(f"  [marketsmojo financials] {symbol}: no stockid mapping, skipped")
             continue
         rows = fetch_financials_history(sid, session)
+        mark_checked(conn, symbol)
         if not rows:
             print(f"  [marketsmojo financials] {symbol}: empty response")
             continue
@@ -182,7 +224,10 @@ def run(symbols: list[str] | None = None, full: bool = False) -> None:
         print(f"  [marketsmojo financials] {symbol}: {n} cells")
 
     conn.close()
-    print(f"[marketsmojo financials] done -- {total_rows} cells, {ok}/{len(symbols)} symbols succeeded")
+    print(
+        f"[marketsmojo financials] done -- {total_rows} cells, {ok}/{len(symbols)} symbols "
+        f"succeeded, {skipped_fresh} skipped (checked within {STALENESS_DAYS}d)"
+    )
 
 
 if __name__ == "__main__":

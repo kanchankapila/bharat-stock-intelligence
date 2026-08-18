@@ -1261,6 +1261,12 @@ CREATE TABLE IF NOT EXISTS "market_sentiment_snapshots" (
 );
 CREATE INDEX idx_mss_at ON public.market_sentiment_snapshots USING btree (snapshot_at DESC);
 
+-- ── marketsmojo_financials_checked ─────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS "marketsmojo_financials_checked" (
+  "symbol" TEXT NOT NULL PRIMARY KEY,
+  "checked_at" TIMESTAMPTZ NOT NULL
+);
+
 -- ── marketsmojo_financials_history ─────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS "marketsmojo_financials_history" (
   "symbol" TEXT NOT NULL,
@@ -1645,7 +1651,7 @@ CREATE INDEX idx_mc_swot_history_symbol ON public.mc_swot_history USING btree (s
 
 -- ── mf_portfolio_holdings ─────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS "mf_portfolio_holdings" (
-  "id" SERIAL PRIMARY KEY,
+  "id" INTEGER NOT NULL DEFAULT nextval('mf_portfolio_holdings_id_seq'::regclass) PRIMARY KEY,
   "userId" TEXT NOT NULL,
   "schemeName" TEXT NOT NULL,
   "folioNumber" TEXT,
@@ -2015,7 +2021,7 @@ CREATE INDEX idx_ob_symbol_time ON public.order_book_snapshots USING btree (symb
 
 -- ── portfolio_holdings ─────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS "portfolio_holdings" (
-  "id" SERIAL PRIMARY KEY,
+  "id" INTEGER NOT NULL DEFAULT nextval('portfolio_holdings_id_seq'::regclass) PRIMARY KEY,
   "userId" TEXT NOT NULL,
   "symbol" TEXT NOT NULL,
   "quantity" DOUBLE PRECISION NOT NULL,
