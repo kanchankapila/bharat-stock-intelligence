@@ -41,6 +41,22 @@ recurrence count for each):
      failures behind a green heartbeat for two sessions; the other 3 were found live, in
      the same shape, while building this check. `.ts` only (BullMQ workers are all
      TypeScript); see check_skip_not_success.
+  7. An `information_schema.columns`/`information_schema.tables` query with no
+     `table_schema` filter. Every test fixture in this repo (`pg_conn`/`pg_schema`) scopes
+     production-shaped tables into their own throwaway schema and puts it FIRST on the
+     search_path -- an unqualified introspection query then silently resolves a leaked
+     interrupted-run schema (`pytest_<hash>`/`vitest_<hash>`, left behind when a killed
+     run skips its `DROP SCHEMA ... CASCADE` teardown) as if it were the real table.
+     Found 2026-08-18 in 4 files at once (`densify_feature_matrix.sparse_columns()`,
+     `ml_ensemble._table_columns()`, `backfill_sectors._has_column()`, plus one bare
+     `.fetchone()` type check) after one instance killed `ml-daily-ops` for 3 days with a
+     traceback naming no real table -- `pd.DataFrame` built from a triple-duplicated
+     column list raised on a duplicate label with no context pointing at the schema leak.
+     All 4 were fixed with `AND table_schema = current_schema()`, not a hardcoded
+     `'public'` (hardcoding would break the same query run through the test fixtures,
+     which deliberately scope OUT of public). recurring-bugs.md's own text asks for this
+     check by name: "grep for it whenever this class recurs, the same way
+     check_recurring_bugs.py does for the other SQL-dialect signatures."
 
 Deliberately NOT checked: `float(x or 0)` / `int(x or 0)` on a possibly-NaN column. It is a
 real bug class (NaN is truthy, so `nan or 0` is `nan`), but measured against this repo it
@@ -443,6 +459,47 @@ def check_skip_not_success(path: Path, text: str) -> list[str]:
     return findings
 
 
+_INFO_SCHEMA_RE = re.compile(r"\binformation_schema\.(columns|tables)\b", re.IGNORECASE)
+_TABLE_SCHEMA_RE = re.compile(r"\btable_schema\b", re.IGNORECASE)
+
+
+def check_information_schema_missing_table_schema(path: Path, text: str) -> list[str]:
+    """See class 7 in the module docstring. A window, not a statement-span parser (like
+    check_nan_self_inequality/check_multiword_pg_cast above) -- every real occurrence in this
+    repo puts `table_schema = current_schema()` within a few lines of the FROM, so a wide
+    window catches all of them without needing to track paren/quote depth across a
+    triple-quoted multi-line query.
+
+    Deliberately does NOT use _code_lines()'s triple-quote skip like the two checks above --
+    every real query this class matters for is itself written as a triple-quoted SQL block
+    passed to .execute(), which _code_lines() would misread as a Python docstring and skip
+    entirely, blinding the check to the exact shape it exists to catch. Only bare '#' comment
+    lines are skipped (checked live: zero prose mentions of information_schema.columns/.tables
+    exist in src/server/*.py today outside real queries, so this trade costs nothing right
+    now)."""
+    if "tests" in path.parts:
+        return []
+    findings = []
+    lines = text.splitlines()
+    for i, line in enumerate(lines):
+        if line.strip().startswith("#"):
+            continue
+        if not _INFO_SCHEMA_RE.search(line):
+            continue
+        window = "\n".join(lines[max(0, i - 4):i + 8])
+        if _TABLE_SCHEMA_RE.search(window):
+            continue
+        findings.append(
+            f"{_display_path(path)}:{i + 1}: information_schema query with no `table_schema` "
+            f"filter -- a test fixture's throwaway schema (pg_conn/pg_schema, or a leaked "
+            f"interrupted-run schema like pytest_<hash>) sits first on the search_path, so "
+            f"this can silently resolve a DIFFERENT copy of the table than the one you mean. "
+            f"Add `AND table_schema = current_schema()`, not a hardcoded 'public' (that would "
+            f"break the same query run through the test fixtures)."
+        )
+    return findings
+
+
 def check_missing_live_datasource_test(fetcher_files: list[Path]) -> list[str]:
     tests_dir = SERVER_DIR / "tests"
     existing = {p.name for p in tests_dir.glob("test_live_datasource_*.py")} if tests_dir.exists() else set()
@@ -512,6 +569,7 @@ def main() -> int:
         all_findings.extend(check_raw_percent_s(path, text))
         all_findings.extend(check_nan_self_inequality(path, text))
         all_findings.extend(check_multiword_pg_cast(path, text))
+        all_findings.extend(check_information_schema_missing_table_schema(path, text))
 
     for path in ts_files:
         all_findings.extend(check_skip_not_success(path, path.read_text(encoding="utf-8", errors="ignore")))

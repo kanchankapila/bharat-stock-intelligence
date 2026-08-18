@@ -225,6 +225,55 @@ class TestMultiwordPgCast:
         assert crb.check_multiword_pg_cast(_p(), text) == []
 
 
+class TestInformationSchemaMissingTableSchema:
+    def test_fires_on_unqualified_columns_query(self):
+        text = (
+            '    cols = conn.execute("""\n'
+            "        SELECT column_name FROM information_schema.columns\n"
+            "        WHERE table_name='technical_signals'\n"
+            '    """).fetchall()\n'
+        )
+        findings = crb.check_information_schema_missing_table_schema(_p(), text)
+        assert len(findings) == 1
+        assert "table_schema" in findings[0]
+
+    def test_fires_on_unqualified_tables_query(self):
+        text = '    conn.execute("SELECT 1 FROM information_schema.tables WHERE table_name=?")\n'
+        findings = crb.check_information_schema_missing_table_schema(_p(), text)
+        assert len(findings) == 1
+
+    def test_qualified_query_is_fine(self):
+        text = (
+            '    cols = conn.execute("""\n'
+            "        SELECT column_name FROM information_schema.columns\n"
+            "        WHERE table_name='technical_signals' AND table_schema = current_schema()\n"
+            '    """).fetchall()\n'
+        )
+        assert crb.check_information_schema_missing_table_schema(_p(), text) == []
+
+    def test_table_schema_filter_after_the_from_is_also_fine(self):
+        """Real repo shape (densify_feature_matrix.py): table_schema can appear on the SAME
+        line as the FROM, not just a separate WHERE line further down."""
+        text = (
+            "    cols = conn.execute(\"\"\"\n"
+            "        SELECT column_name, data_type FROM information_schema.columns\n"
+            "        WHERE table_name='technical_signals' AND table_schema = current_schema()\n"
+            "    \"\"\").fetchall()\n"
+        )
+        assert crb.check_information_schema_missing_table_schema(_p(), text) == []
+
+    def test_prose_describing_the_bug_is_not_flagged(self):
+        text = "# an unqualified information_schema.columns query is the bug this fixes\n"
+        assert crb.check_information_schema_missing_table_schema(_p(), text) == []
+
+    def test_test_files_are_exempt(self):
+        text = 'conn.execute("SELECT 1 FROM information_schema.columns WHERE table_name=?")\n'
+        findings = crb.check_information_schema_missing_table_schema(
+            crb.REPO_ROOT / "src" / "server" / "tests" / "test_something.py", text
+        )
+        assert findings == []
+
+
 class TestMissingLiveDatasourceTest:
     # The mandate applies to fetchers that actually call an external endpoint, so every
     # fixture here must carry an HTTP client import — without one the file is a derived-feature
