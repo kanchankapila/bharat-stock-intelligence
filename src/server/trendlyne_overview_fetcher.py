@@ -68,6 +68,11 @@ BATCH_GAP_SEC  = 0.5
 # predate it (same anti-look-ahead discipline as the MF + ET_Stats fetchers).
 SHAREHOLDING_DISCLOSURE_LAG_DAYS = 30
 
+# How stale a trendlyne_stock_profile row must be before its symbol is due for re-sync.
+# 7 days, not longer: matches the docstring's stated "weekly" cadence and the 7-way shard
+# below, so a symbol becomes due again right as its shard day rolls back around.
+REFRESH_AFTER_DAYS = 7
+
 
 # â”€â”€ Schema â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
@@ -562,23 +567,39 @@ def backfill_technical_signals(symbol: str, today: str, profile: dict, con) -> N
 
 # â”€â”€ Stock list â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
-def _load_stocks(symbol_filter: str | None, con, only_unsynced: bool = True) -> list[tuple[str, str]]:
+def _load_stocks(symbol_filter: str | None, con, only_unsynced: bool = True,
+                  refresh_cutoff: str | None = None) -> list[tuple[str, str]]:
     """Return [(symbol, tlid), ...] scoped to the NSE master list only (nse_stocks.tlid).
     No trendlyne_screener_stocks fallback — that table carries non-NSE-master symbols
     (junk/delisted/BSE-only tickers) which pulled the universe well past NSE coverage.
 
-    Company profile/description/fundamentals data is near-static — there's no reason to
-    re-scrape the same NSE stock over and over. With only_unsynced=True (the default), a
-    symbol that already has ANY row in trendlyne_stock_profile (any date) is excluded, so
-    each NSE stock gets scraped once, ever; subsequent runs only pick up stocks that have
-    never been synced (new listings). --resync-all bypasses this to force a full refresh
-    of the whole universe when one is genuinely needed.
+    company_description is near-static; analyst_upside_pct/roe_annual/promoter_pct/etc are
+    NOT (this file's own docstring says "weekly") -- so "already has a row" can't be the gate
+    forever, only until the initial backlog is cleared. With only_unsynced=True (the default)
+    a symbol is due when it has no trendlyne_stock_profile row at all, OR its most recent row
+    predates `refresh_cutoff`. Once due, it stays due until the DAILY shard rotation (7-way,
+    see _shard()) reaches its shard again -- so in steady state this converges to the ~weekly
+    cadence the docstring always claimed, instead of syncing every stock once, ever.
+    Was unconditional "ANY row excludes forever" until 2026-08-18: measured live, the initial
+    backlog finished weeks ago (trendlyne_stock_profile stopped gaining rows entirely), which
+    left analyst_upside_pct/roe_annual/promoter_pct/... frozen at 0-3% of technical_signals
+    populated site-wide -- this fetcher's own 19 columns accounted for the bulk of the
+    under-50%-populated column list. --resync-all bypasses refresh_cutoff entirely (ignores
+    staleness, re-fetches everyone every run) for when a full forced refresh is genuinely needed.
     """
     cur = con.cursor()
-    unsynced_clause = (
-        "AND NOT EXISTS (SELECT 1 FROM trendlyne_stock_profile tsp WHERE tsp.symbol = symbol)"
-        if only_unsynced else ""
-    )
+    if only_unsynced and refresh_cutoff:
+        unsynced_clause = (
+            "AND NOT EXISTS (SELECT 1 FROM trendlyne_stock_profile tsp "
+            "WHERE tsp.symbol = symbol AND tsp.date >= ?)"
+        )
+        params: tuple = (refresh_cutoff,)
+    elif only_unsynced:
+        unsynced_clause = "AND NOT EXISTS (SELECT 1 FROM trendlyne_stock_profile tsp WHERE tsp.symbol = symbol)"
+        params = ()
+    else:
+        unsynced_clause = ""
+        params = ()
     cur.execute(f"""
         SELECT symbol, tlid FROM (
             SELECT symbol, tlid::TEXT AS tlid FROM nse_stocks
@@ -586,7 +607,7 @@ def _load_stocks(symbol_filter: str | None, con, only_unsynced: bool = True) -> 
         ) universe(symbol, tlid)
         WHERE 1=1 {unsynced_clause}
         ORDER BY symbol
-    """)
+    """, params)
     rows = [(r[0], str(r[1])) for r in cur.fetchall() if r[0]]
     if symbol_filter:
         rows = [(s, t) for s, t in rows if s.upper() == symbol_filter.upper()]
@@ -626,9 +647,14 @@ def main() -> None:
     con = connect()
     ensure_schema(con)
 
-    stocks = _load_stocks(args.symbol, con, only_unsynced=not args.resync_all)
+    # 7 days: matches this file's own docstring ("Two calls per stock (weekly)") and the
+    # 7-way shard cycle below -- a symbol becomes due again right around when its shard day
+    # comes back around, so this reads as a steady weekly refresh rather than a burst.
+    refresh_cutoff = (date.today() - timedelta(days=REFRESH_AFTER_DAYS)).isoformat()
+    stocks = _load_stocks(args.symbol, con, only_unsynced=not args.resync_all,
+                           refresh_cutoff=refresh_cutoff)
     if not stocks:
-        print("[TLOverview] No stocks with tlid found (or the whole universe is already synced — "
+        print(f"[TLOverview] No stocks due (none unsynced or stale past {refresh_cutoff} — "
               "pass --resync-all to force a full refresh).")
         return
 

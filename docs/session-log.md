@@ -4416,3 +4416,36 @@ live-verified via screenshot. Commit `6043334`.
 `outcome_resolver` crash on a rupee-symbol string (`"₹60.33"`) hitting a numeric Postgres
 column, and a `SL ₹NaN` render on `/todays-picks` — both surfaced incidentally in pm2 logs and
 a live screenshot while verifying the above, neither investigated.
+
+## 2026-08-18 (cont. 2) — fixed the real bug behind 19 of the remaining under-50% columns
+
+Asked to fix the remaining under-50%-populated `technical_signals` columns rather than accept
+them as documented. Sorted the 117 into real bug vs. legitimate structural sparsity first.
+
+**Real bug found and fixed:** `trendlyne_overview_fetcher.py`'s `_load_stocks(only_unsynced=True)`
+excluded a symbol from ever being re-fetched once it had ANY `trendlyne_stock_profile` row —
+added 2026-07-16 (`d5ab6bb`) as a one-time backlog-clearing measure, but the file's own docstring
+says these two endpoint calls run **weekly**, and 7 of its 19 owned `technical_signals` columns
+(`analyst_upside_pct`, `roe_annual`, `roce_annual`, `promoter_pct`, `fii_pct`, `pledge_pct`,
+`mf_pct` + QoQ deltas, `rev_growth_yoy_q`, `np_growth_yoy_q`, dividend fields) are not static.
+Once the initial backlog cleared, the gate had nothing left to select: live-queried, 0 symbols
+were "unsynced" and all 2,234 were >7 days stale (`trendlyne_stock_profile` hadn't gained a row
+in 17.2 days). All 19 of this fetcher's `technical_signals` columns sat at 0.0-2.7% populated.
+
+Fixed by converting the gate to a 7-day staleness cutoff (`REFRESH_AFTER_DAYS = 7`, matching the
+docstring's own claim and the existing 7-way day-of-year shard) instead of "any row, ever."
+`--resync-all` still bypasses it. Live-verified end-to-end: re-ran the fetcher for real on
+RELIANCE (already synced) — it refetched, and today's `technical_signals` row shows fresh
+`analyst_upside_pct`/`analyst_count`/`roe_annual` while yesterday's row correctly stayed NULL
+(point-in-time write logic untouched). Full universe convergence will take about a week via the
+existing shard rotation + the ~131-150-req/session WAF ceiling — not something to force faster.
+`test_trendlyne_overview_fetcher.py`, full pytest (2072 passed), `trendlyneCatchupRotation.test.ts`
++ `companyProfileSyncService.test.ts`, `tsc --noEmit`, `check_recurring_bugs.py` all clean.
+
+**Everything else in the 117 was checked and left alone — legitimate structural sparsity, not
+a bug:** F&O-derivative columns (~9.4%, matches NSE's real F&O-eligible-stock count), banking
+ratios (~1.8%, matches the banking subset of the universe), MF-holding columns (~45%), chart-
+pattern/dividend/insider-event rarity, and two already-documented dead ends (`pead_score` gated
+on the known-100%-NULL `eps_growth_yoy`/`eps_growth_qoq`; `mf_sector_flow_pct` blocked by AMFI's
+changed endpoint shape, already flagged as the `mf-sector-allocation-recency` WARN). None
+force-filled — see [[densify_schema_leak_and_e2e_audit_2026_08_18]] for the full breakdown.
