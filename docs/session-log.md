@@ -4347,3 +4347,28 @@ is in `docs/audit-findings.md`'s 2026-08-18 run-log entry; summary here:
 
 `bharat-server` restarted post-fix (picks up the 2 backend router changes; frontend `.tsx` changes
 were already live via Vite HMR). Full check stack re-run clean after the restart. Commit `76b39e7`.
+
+## 2026-08-18 (cont.) — densify-feature-matrix: fix was on disk, never exercised in prod
+
+Investigated a report of "intraday features stopped" + `technical_signals` columns under 50%
+populated. Ran `dq:check`-equivalent (`scripts/run_data_quality_checks.ts`): 152/155, 0 critical.
+
+**"Intraday features stopped" did not reproduce.** `intraday_features.py`
+(opening_range_break/vwap_deviation_pct/first_hour_vol_share) was ~97% populated through
+2026-08-17; today's zero rows are the normal post-close lag. `job_heartbeat` for
+intraday-fetcher/intraday-ranker/intraday-breadth-capture/trendlyne-intraday all showed
+same-morning success, 0 recent fails.
+
+**The real bug: `densify-feature-matrix` was fixed on disk this morning (`9006cfb`,
+02:55 IST) but `job_heartbeat` still read `'failed'`, because the scheduled `ml-daily-ops` run
+that would exercise the fix hadn't fired yet (last attempt 20:16 IST the previous evening,
+~6h before the fix landed; next one ~19:30 IST tonight).** Confirmed the fix is good (two dry
+runs, no error), then ran it for real by hand rather than waiting: 127,246 cells backfilled
+across 26,311 rows. `technical_signals` columns under 50% populated (latest completed day):
+**148/301 → 117/301**. 100%-NULL columns: **24/303 → 7/303** (the remaining 7 match
+measurement.md's documented calendar-dead/superseded set, not a new gap).
+`test_densify_feature_matrix.py` still passes. Re-ran `dq:check`: 152/155, 0 critical, clean.
+
+No code changed this session — the fix was already committed; the gap was between "committed"
+and "the next thing that reads it actually ran." See
+[[densify_schema_leak_and_e2e_audit_2026_08_18]] for the full trace.
