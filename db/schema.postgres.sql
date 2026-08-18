@@ -3796,6 +3796,16 @@ CREATE TABLE IF NOT EXISTS "trendlyne_price_analysis" (
 );
 CREATE INDEX idx_tlpa_sym ON public.trendlyne_price_analysis USING btree (symbol, date DESC);
 
+-- ── trendlyne_screener_pk_history ─────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS "trendlyne_screener_pk_history" (
+  "screener_id" TEXT NOT NULL,
+  "screenpk" TEXT NOT NULL,
+  "first_seen" TIMESTAMPTZ NOT NULL DEFAULT now(),
+  "last_seen" TIMESTAMPTZ NOT NULL DEFAULT now(),
+  PRIMARY KEY ("screener_id", "screenpk")
+);
+CREATE INDEX idx_trendlyne_screener_pk_history_screenpk ON public.trendlyne_screener_pk_history USING btree (screenpk);
+
 -- ── trendlyne_screener_stocks ─────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS "trendlyne_screener_stocks" (
   "screener_id" TEXT NOT NULL,

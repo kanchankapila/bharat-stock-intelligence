@@ -143,6 +143,10 @@ def _throwaway_db():
             screener_id TEXT, stock_id TEXT, symbol TEXT, first_seen TEXT, last_seen TEXT,
             PRIMARY KEY (screener_id, stock_id)
         );
+        CREATE TABLE trendlyne_screener_pk_history (
+            screener_id TEXT, screenpk TEXT, first_seen TEXT, last_seen TEXT,
+            PRIMARY KEY (screener_id, screenpk)
+        );
     """)
     return conn
 
@@ -188,4 +192,34 @@ class TestScreenerMasterLastUpdatedTracksRealSyncs:
         assert row["last_updated"] != '2020-01-01 00:00:00', (
             "last_updated must advance on every real re-sync, not freeze at first insert -- "
             "a freshness check reads this column as evidence the crawl is still alive"
+        )
+
+
+class TestScreenerPkHistorySurvivesReassignment:
+    """screener_id is a slug derived from the screener NAME, and Trendlyne periodically
+    reassigns a screener a new numeric pk -- both pks resolve to the identical screener_id, so
+    trendlyne_screeners.screenpk (a single column) silently loses whichever pk it isn't holding.
+    trendlyne_screener_pk_history (migration 1787100000000) must keep BOTH discoverable.
+    Negative control: this fails before the history INSERT is added to upsert_screener()."""
+
+    def test_old_pk_stays_discoverable_after_reassignment(self):
+        conn = _throwaway_db()
+        upsert_screener(conn, _info(pk=16, screener_id="all-stars"))
+        conn.commit()
+        upsert_screener(conn, _info(pk=82476, screener_id="all-stars"))
+        conn.commit()
+
+        current = conn.execute(
+            "SELECT screenpk FROM trendlyne_screeners WHERE screener_id='all-stars'"
+        ).fetchone()
+        assert str(current["screenpk"]) == "82476", "current pk column reflects the latest sync"
+
+        history_pks = {
+            r["screenpk"] for r in conn.execute(
+                "SELECT screenpk FROM trendlyne_screener_pk_history WHERE screener_id='all-stars'"
+            ).fetchall()
+        }
+        assert history_pks == {"16", "82476"}, (
+            "both the old and the reassigned pk must remain discoverable in history, even "
+            "though only the newest one survives in trendlyne_screeners.screenpk"
         )

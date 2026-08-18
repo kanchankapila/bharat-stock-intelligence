@@ -414,6 +414,16 @@ def upsert_screener(con, info: dict):
         len(info["stocks"]),
     ))
 
+    # trendlyne_screener_pk_history (migration 1787100000000) -- trendlyne_screeners.screenpk
+    # above just got overwritten with THIS pk if screener_id already existed under a different
+    # one. Record every pk ever seen for this screener_id so the old one stays discoverable
+    # instead of silently vanishing (recurring-bugs.md's screener-pk-collision entry).
+    con.execute("""
+        INSERT INTO trendlyne_screener_pk_history (screener_id, screenpk, first_seen, last_seen)
+        VALUES (?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+        ON CONFLICT(screener_id, screenpk) DO UPDATE SET last_seen = CURRENT_TIMESTAMP
+    """, (info["screener_id"], str(info["pk"])))
+
     # screener_master (sync). ON CONFLICT target is (source, scan_id) -- screener_master's real
     # PK, not scan_id alone; scan_id collides across providers (2026-08-04 memory) and, after
     # that PK migration, ON CONFLICT(scan_id) no longer matches any unique constraint.
