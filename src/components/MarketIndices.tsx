@@ -25,11 +25,14 @@ export const MarketIndices: React.FC<{ onSelect?: (id: string, name: string) => 
     </div>
   );
 
+  // The backend's stale-fetch fallback is a truthy object with null value/change/changePct
+  // (see market.router.ts's getMarketOverview) -- object presence alone doesn't mean real data.
   const defaultIndex = { value: 0, change: 0, changePct: 0 };
+  const hasRealData = (idx: { value: number | null } | null | undefined): boolean => !!idx && idx.value != null;
   const displayItems = [
-    { name: 'NIFTY 50',   ...(indices.nifty50   || defaultIndex) },
-    { name: 'SENSEX',     ...(indices.sensex     || defaultIndex) },
-    { name: 'BANK NIFTY', ...(indices.bankNifty  || defaultIndex) },
+    { name: 'NIFTY 50',   hasData: hasRealData(indices.nifty50),   ...(indices.nifty50   || defaultIndex) },
+    { name: 'SENSEX',     hasData: hasRealData(indices.sensex),     ...(indices.sensex     || defaultIndex) },
+    { name: 'BANK NIFTY', hasData: hasRealData(indices.bankNifty),  ...(indices.bankNifty  || defaultIndex) },
   ];
 
   const getIndexId = (name: string) => {
@@ -48,7 +51,7 @@ export const MarketIndices: React.FC<{ onSelect?: (id: string, name: string) => 
       )}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-2">
       {displayItems.map((item, idx) => {
-        const isUp = item.change >= 0;
+        const isUp = item.hasData && item.change >= 0;
 
         return (
           <motion.div
@@ -60,23 +63,27 @@ export const MarketIndices: React.FC<{ onSelect?: (id: string, name: string) => 
             className={cn(
               'relative rounded-2xl overflow-hidden transition-all duration-300 cursor-pointer group',
               'bg-slate-900/60 backdrop-blur-xl',
-              isUp
-                ? 'border border-emerald-500/20 hover:border-emerald-500/35 shadow-[0_4px_24px_rgba(0,0,0,0.4)]'
-                : 'border border-rose-500/20 hover:border-rose-500/35 shadow-[0_4px_24px_rgba(0,0,0,0.4)]'
+              !item.hasData
+                ? 'border border-slate-700/30 shadow-[0_4px_24px_rgba(0,0,0,0.4)]'
+                : isUp
+                  ? 'border border-emerald-500/20 hover:border-emerald-500/35 shadow-[0_4px_24px_rgba(0,0,0,0.4)]'
+                  : 'border border-rose-500/20 hover:border-rose-500/35 shadow-[0_4px_24px_rgba(0,0,0,0.4)]'
             )}
           >
             {/* Colored top accent bar */}
             <div className={cn(
               'absolute top-0 left-0 right-0 h-[2px]',
-              isUp
-                ? 'bg-gradient-to-r from-emerald-500 via-emerald-400 to-emerald-500/0'
-                : 'bg-gradient-to-r from-rose-500 via-rose-400 to-rose-500/0'
+              !item.hasData
+                ? 'bg-slate-700/40'
+                : isUp
+                  ? 'bg-gradient-to-r from-emerald-500 via-emerald-400 to-emerald-500/0'
+                  : 'bg-gradient-to-r from-rose-500 via-rose-400 to-rose-500/0'
             )} />
 
             {/* Ambient glow blob */}
             <div className={cn(
               'absolute -top-10 -right-10 w-36 h-36 rounded-full opacity-[0.04] blur-3xl pointer-events-none transition-opacity duration-500 group-hover:opacity-[0.08]',
-              isUp ? 'bg-emerald-400' : 'bg-rose-400'
+              !item.hasData ? 'bg-slate-500' : isUp ? 'bg-emerald-400' : 'bg-rose-400'
             )} />
 
             <div className="relative z-10 p-5">
@@ -84,39 +91,48 @@ export const MarketIndices: React.FC<{ onSelect?: (id: string, name: string) => 
               <div className="flex items-center justify-between mb-4">
                 <div className="flex items-center gap-2">
                   <div className={cn(
-                    'w-1.5 h-1.5 rounded-full animate-pulse',
-                    isUp ? 'bg-emerald-400' : 'bg-rose-400'
+                    'w-1.5 h-1.5 rounded-full',
+                    item.hasData && 'animate-pulse',
+                    !item.hasData ? 'bg-slate-500' : isUp ? 'bg-emerald-400' : 'bg-rose-400'
                   )} />
                   <span className="text-[10px] font-semibold text-slate-400 uppercase tracking-widest">{item.name}</span>
                 </div>
                 <span className={cn(
                   'text-[9px] font-semibold px-2 py-0.5 rounded-full uppercase tracking-wider border',
-                  isUp
-                    ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20'
-                    : 'bg-rose-500/10 text-rose-400 border-rose-500/20'
+                  !item.hasData
+                    ? 'bg-slate-700/20 text-slate-400 border-slate-600/30'
+                    : isUp
+                      ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20'
+                      : 'bg-rose-500/10 text-rose-400 border-rose-500/20'
                 )}>
-                  {isUp ? '↑ Bull' : '↓ Bear'}
+                  {!item.hasData ? 'No data' : isUp ? '↑ Bull' : '↓ Bear'}
                 </span>
               </div>
 
               {/* Price */}
               <div className="mb-4">
                 <h2 className="text-2xl font-bold text-white tabular-nums tracking-tight">
-                  {item.value.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+                  {item.hasData ? item.value.toLocaleString('en-IN', { minimumFractionDigits: 2 }) : '—'}
                 </h2>
                 <div className={cn(
                   'flex items-center gap-1.5 mt-1',
-                  isUp ? 'text-emerald-400' : 'text-rose-400'
+                  !item.hasData ? 'text-slate-500' : isUp ? 'text-emerald-400' : 'text-rose-400'
                 )}>
-                  {isUp
+                  {item.hasData && (isUp
                     ? <ArrowUpRight className="w-3.5 h-3.5" />
-                    : <ArrowDownRight className="w-3.5 h-3.5" />}
-                  <span className="text-sm font-semibold tabular-nums">
-                    {item.change >= 0 ? '+' : ''}{item.change.toFixed(2)}
-                  </span>
-                  <span className="text-[11px] opacity-60 tabular-nums">
-                    ({item.changePct >= 0 ? '+' : ''}{item.changePct.toFixed(2)}%)
-                  </span>
+                    : <ArrowDownRight className="w-3.5 h-3.5" />)}
+                  {item.hasData ? (
+                    <>
+                      <span className="text-sm font-semibold tabular-nums">
+                        {item.change >= 0 ? '+' : ''}{item.change.toFixed(2)}
+                      </span>
+                      <span className="text-[11px] opacity-60 tabular-nums">
+                        ({item.changePct >= 0 ? '+' : ''}{item.changePct.toFixed(2)}%)
+                      </span>
+                    </>
+                  ) : (
+                    <span className="text-sm font-semibold">Unavailable</span>
+                  )}
                 </div>
               </div>
 
@@ -129,9 +145,11 @@ export const MarketIndices: React.FC<{ onSelect?: (id: string, name: string) => 
                     transition={{ delay: 0.35 + idx * 0.1, duration: 0.9, ease: 'easeOut' }}
                     className={cn(
                       'h-full rounded-full',
-                      isUp
-                        ? 'bg-gradient-to-r from-emerald-700 to-emerald-400'
-                        : 'bg-gradient-to-r from-rose-700 to-rose-400'
+                      !item.hasData
+                        ? 'bg-slate-700'
+                        : isUp
+                          ? 'bg-gradient-to-r from-emerald-700 to-emerald-400'
+                          : 'bg-gradient-to-r from-rose-700 to-rose-400'
                     )}
                   />
                 </div>

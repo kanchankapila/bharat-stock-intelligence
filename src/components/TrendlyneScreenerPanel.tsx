@@ -364,9 +364,9 @@ const TrendlyneScreenerPanel: React.FC<TrendlyneScreenerPanelProps> = ({ onSelec
                         )}
                         <div className={cn(
                           "p-1.5 rounded-lg border flex items-center justify-center w-7 h-7",
-                          stock.changePercent >= 0 ? "bg-emerald-500/5 border-emerald-500/10 text-emerald-500" : "bg-rose-500/5 border-rose-500/10 text-rose-500"
+                          stock.changePercent == null ? "bg-slate-700/10 border-slate-600/10 text-slate-500" : stock.changePercent >= 0 ? "bg-emerald-500/5 border-emerald-500/10 text-emerald-500" : "bg-rose-500/5 border-rose-500/10 text-rose-500"
                         )}>
-                          {stock.changePercent >= 0 ? <TrendingUp className="w-3 h-3" /> : <TrendingDown className="w-3 h-3" />}
+                          {stock.changePercent == null ? null : stock.changePercent >= 0 ? <TrendingUp className="w-3 h-3" /> : <TrendingDown className="w-3 h-3" />}
                         </div>
                       </div>
                     </div>
@@ -376,10 +376,10 @@ const TrendlyneScreenerPanel: React.FC<TrendlyneScreenerPanelProps> = ({ onSelec
                         <p className="text-[6px] font-black text-slate-400 uppercase mb-0.5 tracking-widest">LTP</p>
                         <p className="text-[12px] font-black text-white italic leading-none">₹{stock.ltp.toLocaleString()}</p>
                       </div>
-                      <div className={cn("p-2 rounded-lg border border-slate-800/20", stock.changePercent >= 0 ? "bg-emerald-500/5" : "bg-rose-500/5")}>
+                      <div className={cn("p-2 rounded-lg border border-slate-800/20", stock.changePercent == null ? "bg-slate-700/5" : stock.changePercent >= 0 ? "bg-emerald-500/5" : "bg-rose-500/5")}>
                         <p className="text-[6px] font-black text-slate-400 uppercase mb-0.5 tracking-widest">24H</p>
-                        <p className={cn("text-[12px] font-black italic leading-none", stock.changePercent >= 0 ? "text-emerald-400" : "text-rose-400")}>
-                          {stock.changePercent >= 0 ? '+' : ''}{stock.changePercent.toFixed(2)}%
+                        <p className={cn("text-[12px] font-black italic leading-none", stock.changePercent == null ? "text-slate-500" : stock.changePercent >= 0 ? "text-emerald-400" : "text-rose-400")}>
+                          {stock.changePercent == null ? '—' : `${stock.changePercent >= 0 ? '+' : ''}${stock.changePercent.toFixed(2)}%`}
                         </p>
                       </div>
                     </div>

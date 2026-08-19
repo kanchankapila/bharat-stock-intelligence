@@ -32,8 +32,13 @@ export const MarketDashboard = () => {
             <span className="text-sm font-medium">FII/DII Flow (Today)</span>
             <TrendingUp className="h-4 w-4 text-green-500" />
           </div>
-          <div className={`text-2xl font-bold ${fiiDiiFlow?.fii_net > 0 ? 'text-green-500' : 'text-red-500'}`}>{fiiDiiFlow?.fii_net > 0 ? '+' : ''}₹{fiiDiiFlow?.fii_net?.toLocaleString('en-IN')} Cr</div>
-          <p className="text-xs text-slate-500">FII: {fiiDiiFlow?.fii_net > 0 ? '+' : ''}₹{fiiDiiFlow?.fii_net?.toLocaleString('en-IN')} Cr, DII: {fiiDiiFlow?.dii_net > 0 ? '+' : ''}₹{fiiDiiFlow?.dii_net?.toLocaleString('en-IN')} Cr</p>
+          <div className={`text-2xl font-bold ${fiiDiiFlow?.fii_net == null ? 'text-slate-400' : fiiDiiFlow.fii_net >= 0 ? 'text-green-500' : 'text-red-500'}`}>
+            {fiiDiiFlow?.fii_net == null ? '—' : `${fiiDiiFlow.fii_net > 0 ? '+' : ''}₹${fiiDiiFlow.fii_net.toLocaleString('en-IN')} Cr`}
+          </div>
+          <p className="text-xs text-slate-500">
+            FII: {fiiDiiFlow?.fii_net == null ? '—' : `${fiiDiiFlow.fii_net > 0 ? '+' : ''}₹${fiiDiiFlow.fii_net.toLocaleString('en-IN')} Cr`},
+            {' '}DII: {fiiDiiFlow?.dii_net == null ? '—' : `${fiiDiiFlow.dii_net > 0 ? '+' : ''}₹${fiiDiiFlow.dii_net.toLocaleString('en-IN')} Cr`}
+          </p>
         </Card>
 
         {/* Market Regime */}

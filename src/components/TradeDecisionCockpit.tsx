@@ -289,6 +289,13 @@ export const TradeDecisionCockpit: React.FC<{ onSelectStock: (symbol: string) =>
                                 : 'bg-amber-500')}
                                 style={{ width: `${Math.min(100, c.compositeScore)}%` }} />
                             </div>
+                            {/* Canonical unified_recommendations rank, read-only context per
+                                LegacyScoreBanner above -- not a second verdict, just a cross-check. */}
+                            {c.unifiedScore != null && (
+                              <span className="text-[8px] text-slate-500 tabular-nums" title="Canonical unified_recommendations score/classification">
+                                UR {Math.round(c.unifiedScore)}{c.unifiedClassification ? ` · ${c.unifiedClassification}` : ''}
+                              </span>
+                            )}
                           </div>
                         </td>
 

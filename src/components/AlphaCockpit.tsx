@@ -354,8 +354,8 @@ export const AlphaCockpit: React.FC = () => {
               <Users className="w-4 h-4 text-sky-400" />
               <div>
                 <span className="text-[8px] text-slate-500 font-mono block font-bold uppercase tracking-widest">FII Net Flow (Daily)</span>
-                <span className={cn("text-xs font-black font-mono", latestFlow.fii_net >= 0 ? "text-emerald-400" : "text-rose-400")}>
-                  {latestFlow.fii_net >= 0 ? 'Buy +' : 'Sell '}₹{Math.abs(latestFlow.fii_net).toFixed(0)} Cr
+                <span className={cn("text-xs font-black font-mono", latestFlow.fii_net == null ? "text-slate-500" : latestFlow.fii_net >= 0 ? "text-emerald-400" : "text-rose-400")}>
+                  {latestFlow.fii_net == null ? '—' : `${latestFlow.fii_net >= 0 ? 'Buy +' : 'Sell '}₹${Math.abs(latestFlow.fii_net).toFixed(0)} Cr`}
                 </span>
               </div>
             </div>
@@ -475,7 +475,7 @@ export const AlphaCockpit: React.FC = () => {
                         </div>
                         <div className="text-[8px] text-slate-500 font-mono mt-0.5 uppercase tracking-wide">
                           ₹{p.livePrice?.toFixed(0) || p.cmp?.toFixed(0) || '—'}
-                          <span className={cn("ml-1 font-bold", p.changePercent >= 0 ? "text-emerald-500" : "text-rose-500")}>
+                          <span className={cn("ml-1 font-bold", p.changePercent == null ? "text-slate-500" : p.changePercent >= 0 ? "text-emerald-500" : "text-rose-500")}>
                             {formatPct(p.changePercent, 1)}
                           </span>
                         </div>
@@ -537,7 +537,7 @@ export const AlphaCockpit: React.FC = () => {
                       <span className="text-2xl font-black text-slate-200 font-mono">
                         {formatAmount(selectedPick.livePrice || selectedPick.cmp)}
                       </span>
-                      <span className={cn("text-xs font-bold font-mono", selectedPick.changePercent >= 0 ? "text-emerald-400" : "text-rose-400")}>
+                      <span className={cn("text-xs font-bold font-mono", selectedPick.changePercent == null ? "text-slate-500" : selectedPick.changePercent >= 0 ? "text-emerald-400" : "text-rose-400")}>
                         {formatPct(selectedPick.changePercent)}
                       </span>
                     </div>

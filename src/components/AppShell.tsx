@@ -233,8 +233,8 @@ const SidebarInner = React.memo(function SidebarInner({ collapsed, setCollapsed,
   }, []);
 
   const stockPriceMap = useMemo(() => {
-    const m = new Map<string, number>();
-    for (const s of stocks) m.set(s.symbol, s.changePct ?? 0);
+    const m = new Map<string, number | null>();
+    for (const s of stocks) m.set(s.symbol, s.changePct ?? null);
     return m;
   }, [stocks]);
 
@@ -249,7 +249,7 @@ const SidebarInner = React.memo(function SidebarInner({ collapsed, setCollapsed,
       .map(s => ({
         symbol: s.symbol,
         name: s.name,
-        changePct: stockPriceMap.get(s.symbol) ?? 0,
+        changePct: stockPriceMap.get(s.symbol) ?? null,
       }));
   }, [searchQuery, stockPriceMap]);
 
@@ -366,8 +366,8 @@ const SidebarInner = React.memo(function SidebarInner({ collapsed, setCollapsed,
                         <div className="text-[11px] font-bold text-slate-200">{s.symbol}</div>
                         <div className="text-[9px] text-slate-400 truncate">{s.name}</div>
                       </div>
-                      <span className={cn('text-[10px] font-bold tabular-nums shrink-0 ml-2', s.changePct >= 0 ? 'text-emerald-400' : 'text-rose-400')}>
-                        {s.changePct > 0 ? '+' : ''}{s.changePct.toFixed(2)}%
+                      <span className={cn('text-[10px] font-bold tabular-nums shrink-0 ml-2', s.changePct == null ? 'text-slate-500' : s.changePct >= 0 ? 'text-emerald-400' : 'text-rose-400')}>
+                        {s.changePct == null ? '—' : `${s.changePct > 0 ? '+' : ''}${s.changePct.toFixed(2)}%`}
                       </span>
                     </button>
                   ))}

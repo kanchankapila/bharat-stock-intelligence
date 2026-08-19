@@ -18,6 +18,20 @@ import {
 } from "../marketIntelService";
 import { router, publicProcedure, expensiveProcedure } from "../trpc";
 
+// TTL cache for MAX(computed_at), same pattern as commandCenter.router.ts/scoring.router.ts --
+// each router keeps its own local copy rather than sharing a module, matching this codebase's
+// existing convention for this helper.
+let _urLatestAtMisc: string | null = null;
+let _urLatestAtMiscExp = 0;
+async function urLatestAtMisc(): Promise<string | null> {
+  if (!_urLatestAtMisc || Date.now() > _urLatestAtMiscExp) {
+    const row = await dbGet<{ ts: string }>('SELECT CAST(MAX(computed_at) AS TEXT) AS ts FROM unified_recommendations');
+    _urLatestAtMisc = row?.ts ?? null;
+    _urLatestAtMiscExp = Date.now() + 5 * 60_000;
+  }
+  return _urLatestAtMisc;
+}
+
 export const miscRouter = router({
   getAIAnalysis: expensiveProcedure
     .input(z.object({ symbol: z.string(), data: z.record(z.string(), z.unknown()) }))
@@ -464,6 +478,25 @@ export const miscRouter = router({
         const quantMap = new Map<string, Record<string, unknown>>();
         for (const q of quantRows) quantMap.set(q.symbol as string, q);
 
+        // canonical-read-audit (2026-08-19): this endpoint computes its own compositeScore/
+        // actionAdvice below -- a legitimate desk-specific position-sizing calculation, not a
+        // duplicate of unified_recommendations (different inputs, different question: "what
+        // size/entry/stop" vs. "what's the platform's cross-source rank"). Per scoring-authority.md,
+        // a component engine may keep its own score AS LONG AS the canonical rank is also surfaced
+        // as read-only context so the UI never presents this as if it were the platform's final
+        // call. Mirrors getStrategyStocks' unifiedScore/unifiedClassification columns.
+        let unifiedMap = new Map<string, { unified_score: number | null; classification: string | null; conviction_level: string | null }>();
+        try {
+          const urAt = await urLatestAtMisc();
+          if (urAt) {
+            const urRows = await dbAll<{ symbol: string; unified_score: number | null; classification: string | null; conviction_level: string | null }>(
+              `SELECT symbol, unified_score, classification, conviction_level FROM unified_recommendations WHERE CAST(computed_at AS TEXT) = ?`,
+              [urAt]
+            );
+            unifiedMap = new Map(urRows.map(r => [r.symbol, r]));
+          }
+        } catch { /* unified_recommendations not yet populated -- cockpit still works on its own inputs */ }
+
         let newsSentiment: Array<Record<string, unknown>> = [];
         try {
           newsSentiment = await dbAll<any>(`SELECT symbol, sentiment_score FROM news_sentiment_items WHERE published_at >= datetime('now', '-7 days') ORDER BY published_at DESC`);
@@ -551,10 +584,17 @@ export const miscRouter = router({
             : compositeScore >= 50 ? 'WATCH'
             : 'HOLD';
 
+          // Canonical cross-source rank, read-only context alongside this desk's own
+          // compositeScore -- see the comment above unifiedMap's query.
+          const ur = unifiedMap.get(symbol);
+
           return {
             symbol, name: getStockMapping(symbol)?.name || symbol, sector: data.sector,
             advice: actionAdvice, actionAdvice,
             compositeScore: parseFloat(compositeScore.toFixed(1)),
+            unifiedScore: ur?.unified_score ?? null,
+            unifiedClassification: ur?.classification ?? null,
+            unifiedConvictionLevel: ur?.conviction_level ?? null,
             mlWinProbability: parseFloat((winProb * 100).toFixed(1)),
             mlProbability:    parseFloat((winProb * 100).toFixed(1)),
             techSignalCount: 1,

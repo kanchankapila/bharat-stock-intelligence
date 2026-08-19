@@ -10,7 +10,7 @@ interface NavGroup { label: string; items: NavItem[]; }
 
 type PaletteResult =
   | { kind: 'nav'; id: string; label: string; group: string; icon: React.ElementType }
-  | { kind: 'stock'; symbol: string; name: string; changePct: number };
+  | { kind: 'stock'; symbol: string; name: string; changePct: number | null };
 
 interface CommandPaletteProps {
   navGroups: NavGroup[];
@@ -50,8 +50,8 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({ navGroups, onNav
   }, [open]);
 
   const stockPriceMap = useMemo(() => {
-    const m = new Map<string, number>();
-    for (const s of stocks) m.set(s.symbol, s.changePct ?? 0);
+    const m = new Map<string, number | null>();
+    for (const s of stocks) m.set(s.symbol, s.changePct ?? null);
     return m;
   }, [stocks]);
 
@@ -66,7 +66,7 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({ navGroups, onNav
     const stockResults: PaletteResult[] = q.length < 2 ? [] : nseStocksData
       .filter(s => s.symbol?.toLowerCase().includes(q) || s.name?.toLowerCase().includes(q))
       .slice(0, 6)
-      .map(s => ({ kind: 'stock' as const, symbol: s.symbol, name: s.name, changePct: stockPriceMap.get(s.symbol) ?? 0 }));
+      .map(s => ({ kind: 'stock' as const, symbol: s.symbol, name: s.name, changePct: stockPriceMap.get(s.symbol) ?? null }));
 
     // Pages first (most common intent: "get me to a screen"), then stocks -- and cap pages
     // to a sane count once a query narrows things down, so the list doesn't dwarf the stock
@@ -146,8 +146,8 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({ navGroups, onNav
                             <span className="text-xs font-bold text-slate-200">{r.symbol}</span>
                             <span className="text-[10px] text-slate-500 ml-2 truncate">{r.name}</span>
                           </span>
-                          <span className={cn('text-[10px] font-bold tabular-nums shrink-0', r.changePct >= 0 ? 'text-emerald-400' : 'text-rose-400')}>
-                            {r.changePct > 0 ? '+' : ''}{r.changePct.toFixed(2)}%
+                          <span className={cn('text-[10px] font-bold tabular-nums shrink-0', r.changePct == null ? 'text-slate-500' : r.changePct >= 0 ? 'text-emerald-400' : 'text-rose-400')}>
+                            {r.changePct == null ? '—' : `${r.changePct > 0 ? '+' : ''}${r.changePct.toFixed(2)}%`}
                           </span>
                         </>
                       )}

@@ -223,10 +223,10 @@ const ScreenerDetailsModal: React.FC<ScreenerDetailsModalProps> = ({
                         <p className="text-[6px] font-black text-slate-600 uppercase mb-0.5">Price</p>
                         <p className="text-[10px] font-black text-white italic leading-none">₹{stock.ltp.toLocaleString()}</p>
                       </div>
-                      <div className={cn("p-1.5 rounded-lg border border-slate-800/30", stock.changePercent >= 0 ? "bg-emerald-500/5" : "bg-rose-500/5")}>
+                      <div className={cn("p-1.5 rounded-lg border border-slate-800/30", stock.changePercent == null ? "bg-slate-700/5" : stock.changePercent >= 0 ? "bg-emerald-500/5" : "bg-rose-500/5")}>
                         <p className="text-[6px] font-black text-slate-600 uppercase mb-0.5">Change</p>
-                        <p className={cn("text-[10px] font-black italic leading-none", stock.changePercent >= 0 ? "text-emerald-400" : "text-rose-400")}>
-                          {stock.changePercent >= 0 ? '+' : ''}{stock.changePercent.toFixed(2)}%
+                        <p className={cn("text-[10px] font-black italic leading-none", stock.changePercent == null ? "text-slate-500" : stock.changePercent >= 0 ? "text-emerald-400" : "text-rose-400")}>
+                          {stock.changePercent == null ? '—' : `${stock.changePercent >= 0 ? '+' : ''}${stock.changePercent.toFixed(2)}%`}
                         </p>
                       </div>
                     </div>
