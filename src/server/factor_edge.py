@@ -181,7 +181,7 @@ def run(table, scores, symbol_col, date_col, horizons, by_regime, min_per_date, 
                 print(f"  top-minus-bottom spread: {spread:+.2f}%  "
                       f"(positive => high {score} outperformed)")
         except Exception as e:
-            print(f"  quantile view unavailable: {e}")
+            print(f"  quantile view unavailable: {e}", file=sys.stderr)
     con.close()
 
 

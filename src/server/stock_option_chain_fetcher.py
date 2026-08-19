@@ -197,7 +197,7 @@ def get_fno_symbols(engine, limit=None):
             symbols = symbols[:limit]
         return symbols
     except Exception as e:
-        print(f"[StockOptionChain] Could not load symbols from nt_fno_dashboard: {e}")
+        print(f"[StockOptionChain] Could not load symbols from nt_fno_dashboard: {e}", file=sys.stderr)
         return []
 
 
@@ -214,7 +214,7 @@ def fetch_chain(session: requests.Session, symbol: str, expiry: str | None = Non
         resp.raise_for_status()
         data = resp.json()
     except Exception as e:
-        print(f"[StockOptionChain] {symbol}: fetch error — {e}")
+        print(f"[StockOptionChain] {symbol}: fetch error — {e}", file=sys.stderr)
         return None
 
     if data.get("result") != 1 or not data.get("resultData"):
@@ -545,7 +545,7 @@ def main():
                         move_pcts.append(pct)
                     successes += 1
                 except Exception as e:
-                    print(f"[StockOptionChain] {symbol}: DB write error — {e}")
+                    print(f"[StockOptionChain] {symbol}: DB write error — {e}", file=sys.stderr)
                     failures += 1
         time.sleep(BATCH_GAP_SEC)
 

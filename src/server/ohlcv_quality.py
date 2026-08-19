@@ -19,6 +19,7 @@ import datetime
 
 from db_compat import connect, ConnWrapper
 from hypertable_safe_write import safe_keyed_update
+import sys
 
 BAD_PRINT_THRESHOLD = 0.35   # > 35% day-over-day vs BOTH neighbours = suspect spike
 ACTION_WINDOW_DAYS = 3       # don't flag within ±3d of a known ex-date
@@ -93,7 +94,7 @@ def ingest_corporate_actions(conn: ConnWrapper, symbols) -> dict:
             splits = parse_split_actions(t.splits)
             divs = parse_dividend_actions(t.dividends)
         except Exception as e:
-            print(f"[OHLCVQuality] {sym}: action fetch failed: {e}")
+            print(f"[OHLCVQuality] {sym}: action fetch failed: {e}", file=sys.stderr)
             continue
         for ex_date, ratio in splits:
             conn.execute(

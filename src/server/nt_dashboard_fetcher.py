@@ -39,6 +39,7 @@ import requests
 
 from db_compat import connect, translate
 from as_of import logical_write_floor
+import sys
 
 DASHBOARD_URL = "https://webapi.niftytrader.in/webapi/Option/dashboard-data"
 
@@ -112,7 +113,7 @@ def _fetch_all() -> dict | None:
             return None
         return payload.get("resultData", {})
     except Exception as e:
-        print(f"[NTDashboard] fetch error: {e}")
+        print(f"[NTDashboard] fetch error: {e}", file=sys.stderr)
         return None
 
 

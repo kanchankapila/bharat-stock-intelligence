@@ -83,7 +83,7 @@ def fetch_index_history(index_id: int, session: requests.Session, period: str = 
             return None
         chart_data = payload.get("data", {}).get("chart_data", [])
     except Exception as e:
-        print(f"  [marketsmojo index] id={index_id} error: {e}")
+        print(f"  [marketsmojo index] id={index_id} error: {e}", file=sys.stderr)
         return None
     finally:
         time.sleep(RATE_LIMIT_SEC)

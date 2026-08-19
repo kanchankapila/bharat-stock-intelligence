@@ -44,6 +44,7 @@ import requests
 from db_compat import connect
 from fetch_utils import filter_numeric_tlids, TRENDLYNE_MAX_CONCURRENT, cap_to_run_budget
 from as_of import logical_write_floor
+import sys
 
 OVERVIEW_URL = "https://trendlyne.com/equity/overview-second-part/{tlid}/"
 PROFILE_URL  = "https://trendlyne.com/equity/chart/fundamental-profile/{tlid}/"
@@ -187,7 +188,7 @@ def _fetch(url: str, session: requests.Session) -> dict | None:
         body = data.get("body") if isinstance(data, dict) else None
         return body
     except Exception as e:
-        print(f"  fetch error {url}: {e}")
+        print(f"  fetch error {url}: {e}", file=sys.stderr)
         return None
 
 

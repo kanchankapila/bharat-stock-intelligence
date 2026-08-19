@@ -42,8 +42,8 @@ def load_model():
         print(f"[FinBERT] Model loaded on {device}")
         return tokenizer, model, device
     except ImportError:
-        print("[FinBERT] ERROR: transformers/torch not installed.")
-        print("  Run: pip install transformers torch sentencepiece")
+        print("[FinBERT] ERROR: transformers/torch not installed.", file=sys.stderr)
+        print("  Run: pip install transformers torch sentencepiece", file=sys.stderr)
         sys.exit(1)
 
 
@@ -195,7 +195,7 @@ def run(limit: int = 500, days: int = 7, dry_run: bool = False):
                 for art, score in zip(batch_arts, scores):
                     scored.append({**art, **score})
             except Exception as e:
-                print(f"[FinBERT] Batch {batch_num} error: {e}")
+                print(f"[FinBERT] Batch {batch_num} error: {e}", file=sys.stderr)
                 continue
 
         print(f"[FinBERT] Scored {len(scored)} articles.")

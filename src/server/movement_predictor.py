@@ -49,6 +49,7 @@ import pandas as pd
 from db_compat import connect, read_df, translate
 from breakout_classifier import compute_ohlcv_features, FEATURE_COLS as OHLCV_FEATURE_COLS
 from model_promotion import decide_promotion_with_nan_guard, file_staleness_override_applies
+import sys
 
 TOP_PCT = 0.90            # top decile of day-range = "high movement"
 MIN_PRICE = 20.0
@@ -381,7 +382,7 @@ def _load_baseline_test_auc(model_path: str) -> float | None:
         return existing.get("test_auc")
     except Exception as e:
         print(f"[Movement] Could not read existing model at {model_path} for comparison "
-              f"({e}) -- treating as no baseline.")
+              f"({e}) -- treating as no baseline.", file=sys.stderr)
         return None
 
 

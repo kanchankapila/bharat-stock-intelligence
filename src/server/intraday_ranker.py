@@ -28,6 +28,7 @@ from unified_ranker import (
     _conviction,
     VOL_FLOOR_PCT,
 )
+import sys
 
 # Intraday-scaled ATR barriers — tighter than the positional 2.5×/1.5× (an intraday move plays out
 # in hours, not the 5-15 day positional horizon).
@@ -228,7 +229,7 @@ class IntradayRanker:
                     add(r["symbol"], r["signal_bias"], r["confidence"],
                         r["category"], r["subcategory"], r["sname"])
             except Exception as e:
-                print(f"[IntradayRanker] membership query skipped: {str(e)[:80]}")
+                print(f"[IntradayRanker] membership query skipped: {str(e)[:80]}", file=sys.stderr)
         return membership
 
     def _restricted_symbols(self) -> set:
@@ -245,7 +246,7 @@ class IntradayRanker:
             ).fetchall()
             return {r["symbol"] for r in rows}
         except Exception as e:
-            print(f"[IntradayRanker] surveillance filter skipped: {str(e)[:80]}")
+            print(f"[IntradayRanker] surveillance filter skipped: {str(e)[:80]}", file=sys.stderr)
             return set()
 
     def _liquid_symbols(self, symbols: set) -> set:
@@ -315,7 +316,7 @@ class IntradayRanker:
                    ORDER BY symbol, datetime""", (today + "T00:00:00+05:30",)
             ).fetchall()
         except Exception as e:
-            print(f"[IntradayRanker] reversal scores skipped: {str(e)[:80]}")
+            print(f"[IntradayRanker] reversal scores skipped: {str(e)[:80]}", file=sys.stderr)
             return {}
 
         acc: dict = {}
@@ -386,7 +387,7 @@ class IntradayRanker:
                 (cutoff, direction)
             ).fetchone()
         except Exception as e:
-            print(f"[IntradayRanker] emission-edge lookup failed ({direction}): {str(e)[:80]}")
+            print(f"[IntradayRanker] emission-edge lookup failed ({direction}): {str(e)[:80]}", file=sys.stderr)
             return None, 0
         if not row or not row["n"]:
             return None, 0
@@ -429,7 +430,7 @@ class IntradayRanker:
                 (EMISSION_GATE_STATUS_KEY, payload)
             )
         except Exception as e:
-            print(f"[IntradayRanker] gate-status persist failed: {str(e)[:80]}")
+            print(f"[IntradayRanker] gate-status persist failed: {str(e)[:80]}", file=sys.stderr)
 
     def _news_sentiment(self, days: int = 2):
         """Avg recent news sentiment per symbol in [-1, +1] (mirrors technicalSignalsService's
@@ -444,7 +445,7 @@ class IntradayRanker:
                 "AND symbols_json != '' AND symbols_json != '[]'", (cutoff, upper)
             ).fetchall()
         except Exception as e:
-            print(f"[IntradayRanker] news sentiment skipped: {str(e)[:80]}")
+            print(f"[IntradayRanker] news sentiment skipped: {str(e)[:80]}", file=sys.stderr)
             return {}
         acc = {}
         for r in rows:
@@ -503,7 +504,7 @@ class IntradayRanker:
                 f"WHERE t2.symbol = technical_signals.symbol)", tuple(symbols)
             ).fetchall()
         except Exception as e:
-            print(f"[IntradayRanker] event-risk lookup skipped: {str(e)[:80]}")
+            print(f"[IntradayRanker] event-risk lookup skipped: {str(e)[:80]}", file=sys.stderr)
             return {}
         return {
             r["symbol"]: (

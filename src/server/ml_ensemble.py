@@ -2739,7 +2739,7 @@ def promote_or_register(conn: ConnWrapper, ensemble: dict) -> int:
             with open(CANDIDATE_PATH, 'wb') as f:
                 pickle.dump(ensemble, f, protocol=pickle.HIGHEST_PROTOCOL)
         except Exception as e:
-            print(f"[Ensemble] Could not save candidate: {e}")
+            print(f"[Ensemble] Could not save candidate: {e}", file=sys.stderr)
         reasons = []
         if not clears_cv_bar:
             reasons.append(f"cv_auc={new_cv_auc:.4f} < active {baseline['cv_auc']:.4f}+{PROMOTION_MARGIN}")
@@ -2758,7 +2758,7 @@ def promote_or_register(conn: ConnWrapper, ensemble: dict) -> int:
             shutil.copy2(ENSEMBLE_PATH, backup)
             print(f"[Ensemble] Backed up current model to {backup}")
         except Exception as e:
-            print(f"[Ensemble] Backup failed (continuing): {e}")
+            print(f"[Ensemble] Backup failed (continuing): {e}", file=sys.stderr)
     save_ensemble(ensemble)
     if baseline is None:
         reason = "bootstrap (no active baseline)"
@@ -3120,7 +3120,7 @@ def run(do_train: bool = True, do_score: bool = True,
     try:
         from lightgbm import LGBMClassifier  # noqa: F401 — verify dependency at startup
     except ImportError:
-        print("[Ensemble] lightgbm not installed. Run: pip install lightgbm")
+        print("[Ensemble] lightgbm not installed. Run: pip install lightgbm", file=sys.stderr)
         sys.exit(1)
 
     conn = connect()
@@ -3195,7 +3195,7 @@ def run(do_train: bool = True, do_score: bool = True,
                     try:
                         tuned_params = tune_hyperparameters(X_tune, y_tune, weights_tune, spw, embargo, n_trials=30)
                     except Exception as e:
-                        print(f"[Ensemble] Tuning failed: {e}. Falling back to default parameters.")
+                        print(f"[Ensemble] Tuning failed: {e}. Falling back to default parameters.", file=sys.stderr)
 
                 ensemble = train_ensemble(X, y, dates=df['signal_date'],
                                           horizon_days=_hz, min_samples=min_samples,
@@ -3274,7 +3274,7 @@ def incremental_update(n_days: int = 3, n_rounds: int = 20, dry_run: bool = Fals
     try:
         import lightgbm as lgb
     except ImportError:
-        print("[Ensemble] lightgbm not installed.")
+        print("[Ensemble] lightgbm not installed.", file=sys.stderr)
         return False
 
     cutoff = (datetime.datetime.now() - datetime.timedelta(days=n_days)).strftime('%Y-%m-%d')
@@ -3437,7 +3437,7 @@ def incremental_update(n_days: int = 3, n_rounds: int = 20, dry_run: bool = Fals
             shutil.copy2(ENSEMBLE_PATH, backup)
             print(f"[Ensemble] Backed up current model to {backup}")
         except Exception as e:
-            print(f"[Ensemble] Backup failed (continuing): {e}")
+            print(f"[Ensemble] Backup failed (continuing): {e}", file=sys.stderr)
 
     with open(ENSEMBLE_PATH, 'wb') as f:
         pickle.dump(ensemble, f, protocol=pickle.HIGHEST_PROTOCOL)

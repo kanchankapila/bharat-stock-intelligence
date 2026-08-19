@@ -342,7 +342,8 @@ def _finite_engine_map(name, raw):
     dropped = len(raw) - len(clean)
     if dropped:
         print(f"[UnifiedRanker] WARNING: engine '{name}' returned {dropped}/{len(raw)} "
-              f"non-finite scores - those symbols are treated as having no {name} signal.")
+              f"non-finite scores - those symbols are treated as having no {name} signal.",
+              file=sys.stderr)
     return clean
 
 
@@ -779,12 +780,13 @@ def _report_buy_floor_selectivity(results, band=BUY_FLOOR_EXPECTED_SELECTIVITY):
     frac = buys / total
     lo, hi = band
     print(f'[UnifiedRanker] buy-floor selectivity: {buys}/{total} ({frac*100:.1f}%) cleared '
-          f'DIRECTIONLESS_BUY_FLOOR={DIRECTIONLESS_BUY_FLOOR}')
+          f'DIRECTIONLESS_BUY_FLOOR={DIRECTIONLESS_BUY_FLOOR}', file=sys.stderr)
     if frac < lo or frac > hi:
         print(f'[UnifiedRanker] WARNING: buy-floor selectivity {frac*100:.1f}% is outside the '
               f'expected {lo*100:.0f}-{hi*100:.0f}% band. The floor is an ABSOLUTE cut on a '
               f'non-stationary score scale -- check whether an engine was fixed, rolled back, '
-              f'or dropped for zero dispersion before reading this as a change in the market.')
+              f'or dropped for zero dispersion before reading this as a change in the market.',
+              file=sys.stderr)
     return frac
 
 
@@ -1195,11 +1197,13 @@ class UnifiedRanker:
             return regime  # nothing to second-guess the label with -- trust it
         if regime == 'HIGH_VOL' and vix < self._HIGH_VOL_VIX_FLOOR:
             print(f"[UnifiedRanker] Regime 'HIGH_VOL' downgraded to 'SIDEWAYS' for weight "
-                  f"selection -- real VIX={vix:.2f} < {self._HIGH_VOL_VIX_FLOOR} historical-median floor.")
+                  f"selection -- real VIX={vix:.2f} < {self._HIGH_VOL_VIX_FLOOR} historical-median floor.",
+                  file=sys.stderr)
             return 'SIDEWAYS'
         if regime == 'CRASH' and vix < self._CRASH_VIX_FLOOR:
             print(f"[UnifiedRanker] Regime 'CRASH' downgraded to 'BEAR' for weight selection "
-                  f"-- real VIX={vix:.2f} < {self._CRASH_VIX_FLOOR} historical-p75 floor.")
+                  f"-- real VIX={vix:.2f} < {self._CRASH_VIX_FLOOR} historical-p75 floor.",
+                  file=sys.stderr)
             return 'BEAR'
         return regime
 
@@ -1219,7 +1223,7 @@ class UnifiedRanker:
             self._degraded(f"[UnifiedRanker] event triggers unavailable ({str(e)[:60]}); "
                   "recommendations will carry no event disclosure today.")
         if out:
-            print(f"[UnifiedRanker] event triggers on {len(out):,} symbols")
+            print(f"[UnifiedRanker] event triggers on {len(out):,} symbols", file=sys.stderr)
         return out
 
     def _get_fundamental_scores(self):
@@ -1498,7 +1502,7 @@ class UnifiedRanker:
         if dropped:
             sample = sorted(s for s in symbols if s not in keep)[:5]
             print(f"[UnifiedRanker] universe filter: kept {len(keep)}, dropped {dropped} "
-                  f"non-tradeable/unpriced symbols (e.g. {sample})")
+                  f"non-tradeable/unpriced symbols (e.g. {sample})", file=sys.stderr)
         return keep
 
     def _get_confluence_scores(self):
@@ -1768,7 +1772,8 @@ class UnifiedRanker:
         else:
             t_stat = float('-inf')
         print(f"[UnifiedRanker] RL gate excluded {symbol}: "
-              f"avg_return={avg_r:.2f}% over {cnt} resolved outcomes (90d), t={t_stat:.2f}")
+              f"avg_return={avg_r:.2f}% over {cnt} resolved outcomes (90d), t={t_stat:.2f}",
+              file=sys.stderr)
         return False
 
     def _get_confluence_latest_map(self):
@@ -2036,7 +2041,7 @@ class UnifiedRanker:
         if is_engine_edge_adjustment_enabled(self.conn):
             verdicts = load_engine_edge_verdicts(self.conn, regime_for_weights)
             base_weights = edge_adjusted_weights(base_weights, verdicts)
-            print(f"[UnifiedRanker] engine edge adjustment applied: {verdicts}")
+            print(f"[UnifiedRanker] engine edge adjustment applied: {verdicts}", file=sys.stderr)
         event_triggers_map = self._get_event_triggers(today)
         fund_scores       = self._get_fundamental_scores()
         quality_metrics   = self._get_quality_metrics()
@@ -2108,7 +2113,7 @@ class UnifiedRanker:
         engine_maps, _flat = drop_zero_dispersion_engines(engine_maps)
         if _flat:
             print(f"[UnifiedRanker] engines with ZERO cross-sectional dispersion dropped from "
-                  f"the blend (weight redistributed): {', '.join(sorted(_flat))}")
+                  f"the blend (weight redistributed): {', '.join(sorted(_flat))}", file=sys.stderr)
 
         results = []
         raw_sizes = {}   # symbol -> conviction×inverse-vol (normalized into weights after the loop)
@@ -2124,7 +2129,8 @@ class UnifiedRanker:
         hv_cut = high_vol_cutoff(realized_vol.values())
         if hv_cut is None:
             print(f"[UnifiedRanker] high-vol veto INACTIVE (only {len(realized_vol)} symbols "
-                  f"with hv_20d; need 50+). Buy pool is unfiltered for volatility today.")
+                  f"with hv_20d; need 50+). Buy pool is unfiltered for volatility today.",
+                  file=sys.stderr)
         # How often each filter/multiplier actually fires. This exists because "the ranker has
         # too many layers" is an opinion until you can say which of them touch anything: a layer
         # that never fires is removable at zero risk, and one that fires constantly deserves
@@ -2358,10 +2364,12 @@ class UnifiedRanker:
             print(f'[UnifiedRanker] win_probability spread {_lo:.4f}..{_hi:.4f} '
                   f'({len(set(round(v, 4) for v in _wp))} distinct) -> mean ML bet {_mlb:.3f}; '
                   f'breakout tilt caps at {BREAKOUT_SIZE_P90} so it can '
-                  f'{"BIND" if BREAKOUT_SIZE_P90 > _mlb else "NEVER BIND"} under max().')
+                  f'{"BIND" if BREAKOUT_SIZE_P90 > _mlb else "NEVER BIND"} under max().',
+                  file=sys.stderr)
         _tot = len(all_symbols)
         print('[UnifiedRanker] layer firing counts over %d candidates: %s' % (
-            _tot, ', '.join(f'{k}={v} ({v/max(1,_tot)*100:.1f}%)' for k, v in fired.items())))
+            _tot, ', '.join(f'{k}={v} ({v/max(1,_tot)*100:.1f}%)' for k, v in fired.items())),
+            file=sys.stderr)
         _report_buy_floor_selectivity(results)
         position_sizes = normalize_position_sizes(raw_sizes, sectors=sector_map)
 
@@ -2377,7 +2385,8 @@ class UnifiedRanker:
                 if clusters:
                     position_sizes = apply_correlation_cap(position_sizes, clusters)
                     print(f"[UnifiedRanker] correlation cap applied to "
-                          f"{len(set(clusters.values()))} cluster(s) covering {len(clusters)} symbols.")
+                          f"{len(set(clusters.values()))} cluster(s) covering {len(clusters)} symbols.",
+                          file=sys.stderr)
         except Exception as e:
             self._degraded(f"[UnifiedRanker] correlation-cluster cap skipped: {e}")
 
@@ -2476,7 +2485,7 @@ class UnifiedRanker:
                 )
                 if cur.rowcount:
                     print(f"[UnifiedRanker] purged {cur.rowcount} stale rows for {today} "
-                          f"(scored by an earlier run, not by this one).")
+                          f"(scored by an earlier run, not by this one).", file=sys.stderr)
                 self.conn.commit()
         except Exception as e:
             self._degraded(f"[UnifiedRanker] stale-row purge failed: {e}")

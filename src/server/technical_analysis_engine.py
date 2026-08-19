@@ -10,6 +10,7 @@ import numpy as np
 
 from db_compat import get_engine
 from as_of import logical_write_floor
+import sys
 
 
 # ── ATR-based barriers ──────────────────────────────────────────────────────────
@@ -207,7 +208,7 @@ class TechnicalAnalysisEngine:
                 if analysis:
                     results.append(analysis)
             except Exception as e:
-                print(f"Error analyzing {symbol}: {e}")
+                print(f"Error analyzing {symbol}: {e}", file=sys.stderr)
 
         if results:
             # Anchored to the last real session in stock_ohlcv (2026-08-13), not wall-clock: a

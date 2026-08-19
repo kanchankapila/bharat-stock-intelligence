@@ -30,6 +30,7 @@ import requests
 from as_of import logical_trading_date
 from db_compat import execute, executemany, query_all
 from fetch_utils import retry_get
+import sys
 
 SOURCE = "niftytrader"
 
@@ -76,7 +77,7 @@ def _get_nt_index_map() -> dict[str, tuple[str, str]]:
             for r in rows:
                 result[r["index_name"]] = (r["provider_id"], exchange)
     except Exception as e:
-        print(f"[nt_oi_snap] WARN: index map lookup failed ({e}), using fallback")
+        print(f"[nt_oi_snap] WARN: index map lookup failed ({e}), using fallback", file=sys.stderr)
     return result or _FALLBACK
 
 
@@ -97,7 +98,7 @@ def fetch_oi_snapshot(nt_symbol: str, snap_time: str, exchange: str = "nse") -> 
             return []
         return d.get("resultData") or []
     except Exception as e:
-        print(f"  [OI] fetch error for {nt_symbol} after retries: {e}")
+        print(f"  [OI] fetch error for {nt_symbol} after retries: {e}", file=sys.stderr)
         return []
 
 

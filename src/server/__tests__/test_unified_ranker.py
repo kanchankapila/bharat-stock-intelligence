@@ -1597,26 +1597,31 @@ class TestBuyFloorSelectivityReporting:
     def test_reports_fraction_and_warns_when_far_too_few_buys(self, capsys):
         # The real 2026-08-10 shape: 22 of 1842 cleared the floor.
         frac = self._ur()._report_buy_floor_selectivity(self._rows(22, 1820))
-        out = capsys.readouterr().out
+        # stderr, not stdout -- pythonRunner.ts's runPython() only inspects stderr for its
+        # "finished successfully with warnings" log.warn(); see recurring-bugs.md's
+        # "A degraded-read message printed to the wrong stream defeats the one hook..." entry.
+        err = capsys.readouterr().err
         assert abs(frac - 22 / 1842) < 1e-9
-        assert 'buy-floor selectivity' in out
-        assert 'WARNING' in out, "a 1.2% selectivity must trip the tripwire"
+        assert 'buy-floor selectivity' in err
+        assert 'WARNING' in err, "a 1.2% selectivity must trip the tripwire"
 
     def test_no_warning_inside_the_expected_band(self, capsys):
         # The pre-drift shape: ~33% of the universe actionable.
         frac = self._ur()._report_buy_floor_selectivity(self._rows(600, 1200))
-        out = capsys.readouterr().out
+        err = capsys.readouterr().err
         assert 0.32 < frac < 0.34
-        assert 'buy-floor selectivity' in out
-        assert 'WARNING' not in out
+        assert 'buy-floor selectivity' in err
+        assert 'WARNING' not in err
 
     def test_warns_when_far_too_many_buys(self, capsys):
         self._ur()._report_buy_floor_selectivity(self._rows(900, 100))
-        assert 'WARNING' in capsys.readouterr().out
+        assert 'WARNING' in capsys.readouterr().err
 
     def test_empty_result_set_is_a_clean_no_op(self, capsys):
         assert self._ur()._report_buy_floor_selectivity([]) is None
-        assert capsys.readouterr().out == ''
+        out = capsys.readouterr()
+        assert out.out == ''
+        assert out.err == ''
 
     def test_is_pure_reporting_and_never_mutates_rows(self):
         rows = self._rows(5, 5)

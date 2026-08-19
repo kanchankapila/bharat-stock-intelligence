@@ -19,6 +19,7 @@ import time
 import requests
 
 from db_compat import execute, executemany, query_all
+import sys
 
 # ── Index mapping: loaded from DB (index_provider_map provider='mc_ohlc') ─────
 # Fallback used only if the table is missing (first-run bootstrap).
@@ -111,7 +112,7 @@ def fetch_index_ohlc(session: requests.Session, ind_id: int, range_: str) -> lis
         resp.raise_for_status()
         data = resp.json()
     except Exception as e:
-        print(f"[MC-OHLC] HTTP error ind_id={ind_id}: {e}")
+        print(f"[MC-OHLC] HTTP error ind_id={ind_id}: {e}", file=sys.stderr)
         return []
 
     # MC appfeeds graph response: {"graph": {"values": [{"_time": "29 May 2026",

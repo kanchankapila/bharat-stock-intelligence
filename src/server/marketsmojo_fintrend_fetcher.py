@@ -50,7 +50,7 @@ def fetch_fintrend_history(sid: str, session: requests.Session, exchange: int = 
             return None
         fin_graph = payload.get("data", {}).get("fin_graph", {})
     except Exception as e:
-        print(f"  [marketsmojo fintrend] sid={sid} error: {e}")
+        print(f"  [marketsmojo fintrend] sid={sid} error: {e}", file=sys.stderr)
         return None
     finally:
         time.sleep(RATE_LIMIT_SEC)

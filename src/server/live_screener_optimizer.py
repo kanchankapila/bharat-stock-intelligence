@@ -152,7 +152,7 @@ def _optimize_for_horizon(df: pd.DataFrame, target_col: str, settings_key: str, 
         combinations = sorted(combinations, key=lambda x: x['avg_return'], reverse=True)
 
     except ImportError:
-        print("[LiveScreenerOptimizer] sklearn not installed. Falling back to single-filter rankings.")
+        print("[LiveScreenerOptimizer] sklearn not installed. Falling back to single-filter rankings.", file=sys.stderr)
         combinations = []
 
     # Calculate single filter baseline metrics on the held-out set (same reasoning as above)

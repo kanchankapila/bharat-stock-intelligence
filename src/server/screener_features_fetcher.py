@@ -24,6 +24,7 @@ import datetime
 from collections import defaultdict
 from db_compat import connect
 from as_of import logical_trading_date
+import sys
 
 # ── NLP keyword mappings for screener names ──────────────────────────────────
 
@@ -121,7 +122,7 @@ def load_screener_meta(con, as_of: str | None = None) -> dict:
                 pit[(source, sid)] = (score, tier, alpha)
         except Exception as e:
             print(f"[ScreenerFeatures] PIT scores unavailable ({e}); "
-                  f"falling back to full-sample bayesian_score")
+                  f"falling back to full-sample bayesian_score", file=sys.stderr)
 
     # sm.source is required on both joins: MC and ETnow independently hand out overlapping
     # small-integer scan_ids (see the 2026-08-04 screener_master memory) -- an unscoped join
@@ -342,7 +343,7 @@ def stamp_features(con, features_by_symbol: dict, streaks: dict):
             ))
             updated += 1
         except Exception as e:
-            print(f"  [WARN] {symbol}: {e}")
+            print(f"  [WARN] {symbol}: {e}", file=sys.stderr)
     return updated
 
 
@@ -370,7 +371,7 @@ def run():
             print(f"[ScreenerFeatures] snapshotted {n_snap} (symbol, screener) memberships "
                   f"for {as_of}")
         except Exception as e:
-            print(f"[ScreenerFeatures] membership snapshot failed: {e}")
+            print(f"[ScreenerFeatures] membership snapshot failed: {e}", file=sys.stderr)
 
         print(f"[ScreenerFeatures] Loading streaks...")
         streaks = load_streaks(con)

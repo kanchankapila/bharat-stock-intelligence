@@ -18,6 +18,7 @@ import requests
 from curl_cffi import requests as cffi_req
 
 from db_compat import connect, translate, use_postgres
+import sys
 
 MC_HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
@@ -162,7 +163,7 @@ def _fetch_nse_preopen_url(sess: requests.Session, url: str) -> list[dict]:
         data = r.json()
         return data.get("data") or []
     except Exception as e:
-        print(f"[NSE PreOpen] Warning: fetch failed for {url}: {e}")
+        print(f"[NSE PreOpen] Warning: fetch failed for {url}: {e}", file=sys.stderr)
         return []
 
 

@@ -18,6 +18,7 @@ import time
 import requests
 
 from db_compat import execute, executemany
+import sys
 
 BASE_URL = "https://api.moneycontrol.com/mcapi/v1/indices/chart/exchange-advdec"
 
@@ -76,7 +77,7 @@ def _parse_mc_date(raw: str) -> str:
         dt = datetime.datetime.strptime(raw.strip(), "%b %d, %Y")
         return dt.strftime("%Y-%m-%d")
     except Exception:
-        print(f"[A/D] WARN: unparseable date '{raw}', defaulting to today")
+        print(f"[A/D] WARN: unparseable date '{raw}', defaulting to today", file=sys.stderr)
         return datetime.date.today().isoformat()
 
 
@@ -89,7 +90,7 @@ def fetch_adv_dec(session: requests.Session, ex_code: str) -> dict | None:
         resp.raise_for_status()
         payload = resp.json()
     except Exception as e:
-        print(f"[A/D] HTTP error ex={ex_code}: {e}")
+        print(f"[A/D] HTTP error ex={ex_code}: {e}", file=sys.stderr)
         return None
 
     data = payload.get("data", {})

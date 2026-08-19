@@ -13,6 +13,7 @@ Run: python screener_catalog_enricher.py
 """
 import re
 from db_compat import connect
+import sys
 
 # ── Signal keyword patterns (same as trendlyne_screener_discovery.py) ────────
 SIGNAL_KEYWORD_PATTERNS = [
@@ -306,7 +307,7 @@ def run():
             """, (scan_id, name, source, bias, cat_norm, horizon, confidence, kw, url, scan_id, source))
             inserted += 1
         except Exception as e:
-            print(f"  [WARN] Cannot insert {scan_id}: {e}")
+            print(f"  [WARN] Cannot insert {scan_id}: {e}", file=sys.stderr)
             con.rollback()
 
     con.commit()

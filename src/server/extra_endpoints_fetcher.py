@@ -152,7 +152,7 @@ def main():
             data = fetch_url(url)
             save_response(cur, "MARKET", name, data)
         except Exception as e:
-            print(f"Error fetching market-wide endpoint {endpoint.name}: {e}")
+            print(f"Error fetching market-wide endpoint {endpoint.name}: {e}", file=sys.stderr)
     con.commit()
 
     # Build the full request list up front, skipping rows missing the id a template needs.
@@ -181,7 +181,7 @@ def main():
                 data = fut.result()
                 save_response(cur, symbol, name, data)
             except Exception as e:
-                print(f"  Error fetching {name} for {symbol}: {e}")
+                print(f"  Error fetching {name} for {symbol}: {e}", file=sys.stderr)
             done += 1
             if done % 500 == 0:
                 con.commit()

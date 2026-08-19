@@ -128,7 +128,7 @@ def _fetch_actual_events(days: int) -> list[dict]:
         resp.raise_for_status()
         payload = resp.json()
     except Exception as exc:
-        print(f"[IndiaMacro] WARN eco-calendar fetch error: {exc}")
+        print(f"[IndiaMacro] WARN eco-calendar fetch error: {exc}", file=sys.stderr)
         return events
 
     if not payload.get("success"):
@@ -267,7 +267,7 @@ def _fetch_repo_from_eco_calendar() -> float | None:
         if rows:
             return _parse_numeric(rows[0]["actual"] or rows[0][0])
     except Exception as exc:
-        print(f"[IndiaMacro] WARN eco_calendar repo fallback error: {exc}")
+        print(f"[IndiaMacro] WARN eco_calendar repo fallback error: {exc}", file=sys.stderr)
     return None
 
 

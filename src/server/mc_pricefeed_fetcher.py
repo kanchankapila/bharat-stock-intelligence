@@ -42,6 +42,7 @@ from curl_cffi import requests
 
 from db_compat import connect
 from as_of import logical_write_floor
+import sys
 
 PRICEFEED_URL = "https://priceapi.moneycontrol.com/pricefeed/nse/equitycash/{scid}"
 
@@ -211,7 +212,7 @@ def _fetch(mcsymbol: str, session) -> dict | None:
             return None
         return payload.get("data", {})
     except Exception as e:
-        print(f"  [{mcsymbol}] pricefeed error: {e}")
+        print(f"  [{mcsymbol}] pricefeed error: {e}", file=sys.stderr)
         return None
 
 

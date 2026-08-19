@@ -12,6 +12,7 @@ import requests
 import pandas as pd
 from db_compat import connect, use_postgres
 from as_of import logical_write_floor
+import sys
 
 HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
@@ -64,7 +65,7 @@ def fetch_index_symbols(sess: requests.Session, index_name: str, url: str) -> se
         symbols.discard("")
         return symbols
     except Exception as e:
-        print(f"[IndexMembership] {index_name}: fetch failed — {e}")
+        print(f"[IndexMembership] {index_name}: fetch failed — {e}", file=sys.stderr)
         return set()
 
 

@@ -25,6 +25,7 @@ from sqlalchemy import text
 
 from db_compat import get_engine
 from fetch_utils import retry_get, FetchTracker
+import sys
 
 # MoneyControl Nifty index OI endpoints
 MC_EXPIRY_DATES_URL = (
@@ -200,7 +201,7 @@ class PCRFetcher:
             resp = retry_get(self.session, url, timeout=15)
             data = resp.json()
         except Exception as e:
-            print(f"[PCR] {symbol}: fetch error after retries — {e}")
+            print(f"[PCR] {symbol}: fetch error after retries — {e}", file=sys.stderr)
             return None
         if data.get("result") != 1 or not data.get("resultData"):
             return None
@@ -215,7 +216,7 @@ class PCRFetcher:
             resp = retry_get(self.session, url, timeout=15)
             data = resp.json()
         except Exception as e:
-            print(f"[PCR] {symbol}: fetch error after retries — {e}")
+            print(f"[PCR] {symbol}: fetch error after retries — {e}", file=sys.stderr)
             return None
 
         try:
@@ -302,7 +303,7 @@ class PCRFetcher:
                 "max_pain":      max_pain,
             }
         except Exception as e:
-            print(f"[PCR] {symbol}: parse error — {e}")
+            print(f"[PCR] {symbol}: parse error — {e}", file=sys.stderr)
             return None
 
     def save(self, records: list[dict]) -> int:
@@ -377,7 +378,7 @@ class PCRFetcher:
             resp.raise_for_status()
             return resp.json()
         except Exception as e:
-            print(f"[GEX] HTTP error fetching {url}: {e}")
+            print(f"[GEX] HTTP error fetching {url}: {e}", file=sys.stderr)
             return None
 
     def _fetch_nearest_expiry(self) -> str | None:
@@ -432,7 +433,7 @@ class PCRFetcher:
             resp.raise_for_status()
             data = resp.json()
         except Exception as e:
-            print(f"[GEX] Failed to fetch Nifty option chain from NiftyTrader: {e}")
+            print(f"[GEX] Failed to fetch Nifty option chain from NiftyTrader: {e}", file=sys.stderr)
             return None
 
         rd      = data.get("resultData") or {}

@@ -44,6 +44,7 @@ import requests
 
 from db_compat import connect
 from et_stats_client import HEADERS, load_companyid_map
+import sys
 
 RATE_LIMIT_SEC = 0.3
 SHAREHOLDING_URL = "https://marketservices.indiatimes.com/marketservices/shareholding?companyid={cid}"
@@ -71,7 +72,7 @@ def fetch_mf_holding(symbol: str, company_id: str, session: requests.Session) ->
             "as_of_date": as_of_date,
         }
     except Exception as e:
-        print(f"[MF] {symbol}: {e}")
+        print(f"[MF] {symbol}: {e}", file=sys.stderr)
         return None
 
 

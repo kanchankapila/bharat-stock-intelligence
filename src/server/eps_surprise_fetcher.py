@@ -163,12 +163,12 @@ def fetch_bulk(mc_to_symbol: dict[str, str]) -> tuple[dict[str, dict], list[tupl
     try:
         r = retry_get(cffi_req, BULK_URL, headers=MC_HEADERS, impersonate="chrome110", timeout=30)
     except Exception as e:
-        print(f"[EPSSurprise] Bulk endpoint fetch failed after retries: {e}")
+        print(f"[EPSSurprise] Bulk endpoint fetch failed after retries: {e}", file=sys.stderr)
         return {}, []
     try:
         rows = r.json()["data"]["list"]
     except (ValueError, KeyError, TypeError) as e:
-        print(f"[EPSSurprise] Bulk endpoint returned no usable data (status={r.status_code}): {e}")
+        print(f"[EPSSurprise] Bulk endpoint returned no usable data (status={r.status_code}): {e}", file=sys.stderr)
         return {}, []
 
     features_by_symbol: dict[str, dict] = {}

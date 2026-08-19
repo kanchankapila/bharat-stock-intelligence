@@ -21,6 +21,7 @@ import json
 import datetime
 from collections import defaultdict
 from db_compat import connect
+import sys
 
 TODAY = datetime.date.today().isoformat()
 BAYESIAN_THRESHOLD = 0.38   # Bayesian shrinkage pulls to 0.40 with <30d data; use relative cutoff
@@ -209,7 +210,7 @@ def generate_signals(con, qualifying: dict, entries: dict) -> int:
             if sector:
                 sector_signals[sector].append(symbol)
         except Exception as e:
-            print(f"  [WARN] {symbol}: {e}")
+            print(f"  [WARN] {symbol}: {e}", file=sys.stderr)
             con.rollback()
 
     con.commit()

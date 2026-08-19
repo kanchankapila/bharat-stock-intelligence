@@ -29,6 +29,7 @@ import time
 import requests
 
 from db_compat import execute, executemany, load_index_map, load_index_map_inv
+import sys
 
 MC_HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:124.0) Gecko/20100101 Firefox/124.0",
@@ -137,7 +138,7 @@ def fetch_mc_pe_pb(ind_id: int, days: int = 365) -> dict[str, dict]:
             for date_str, val in _parse_mc_graph(r.json()):
                 combined.setdefault(date_str, {})[key] = val
         except Exception as e:
-            print(f"[PE] MC {metric} fetch error for indId={ind_id}: {e}")
+            print(f"[PE] MC {metric} fetch error for indId={ind_id}: {e}", file=sys.stderr)
         time.sleep(0.4)
 
     # Also fetch overview for latest EPS / div yield
@@ -191,7 +192,7 @@ def fetch_trendlyne(tlid: int, metric: str) -> list[tuple[str, float]]:
                 continue
         return result
     except Exception as e:
-        print(f"[PE] Trendlyne {metric} fetch error for tlid={tlid}: {e}")
+        print(f"[PE] Trendlyne {metric} fetch error for tlid={tlid}: {e}", file=sys.stderr)
         return []
 
 

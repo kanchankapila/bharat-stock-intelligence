@@ -47,6 +47,7 @@ import requests
 from db_compat import connect
 from as_of import logical_write_floor
 from et_stats_client import HEADERS, fetch_et_stats, load_companyid_map, as_of_floor
+import sys
 
 DETERIORATING_THRESHOLD_DAYS = 5
 IMPROVING_THRESHOLD_DAYS = -5
@@ -327,7 +328,7 @@ def main() -> None:
             print(f"  [{i}/{len(stocks)}] {symbol}: {ccc_str} | {trend_str}{flag}")
 
         except Exception as e:
-            print(f"  [{i}/{len(stocks)}] {symbol}: ERROR — {e}")
+            print(f"  [{i}/{len(stocks)}] {symbol}: ERROR — {e}", file=sys.stderr)
 
     ccc_avg = round(ccc_sum / ccc_count, 1) if ccc_count else 0
     print(

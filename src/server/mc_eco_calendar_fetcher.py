@@ -50,7 +50,7 @@ def ensure_schema() -> None:
             )
         """)
     except Exception as exc:
-        print(f"[EcoCalendar] WARN ensure_schema eco_calendar: {exc}")
+        print(f"[EcoCalendar] WARN ensure_schema eco_calendar: {exc}", file=sys.stderr)
 
 
 # ─── Fetch ────────────────────────────────────────────────────────────────────
@@ -75,7 +75,7 @@ def fetch_events() -> list[dict]:
             resp.raise_for_status()
             payload = resp.json()
         except Exception as exc:
-            print(f"[EcoCalendar] WARN page {page} fetch error: {exc}")
+            print(f"[EcoCalendar] WARN page {page} fetch error: {exc}", file=sys.stderr)
             break
 
         if not payload.get("success"):

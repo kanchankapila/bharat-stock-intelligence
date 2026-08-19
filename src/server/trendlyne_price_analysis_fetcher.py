@@ -37,6 +37,7 @@ from db_compat import connect
 from as_of import logical_write_floor
 from fetch_utils import (retry_get, FetchTracker, filter_numeric_tlids,
                          TRENDLYNE_MAX_CONCURRENT, cap_to_run_budget)
+import sys
 
 ANALYSIS_URL = "https://trendlyne.com/share-price/price-performance-analysis/{tlid}/"
 
@@ -153,7 +154,7 @@ def _fetch(tlid: str, session: requests.Session) -> dict | None:
             return None
         return data.get("body") or {}
     except Exception as e:
-        print(f"  [{tlid}] price-analysis error: {e}")
+        print(f"  [{tlid}] price-analysis error: {e}", file=sys.stderr)
         return None
 
 

@@ -27,6 +27,7 @@ import requests
 
 from db_compat import connect
 from as_of import logical_write_floor
+import sys
 
 HEADERS = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Gecko/20100101 Firefox/124.0"}
 SCAN_URL = "https://api.moneycontrol.com/mcapi/v1/techscanner/scanner-detail"
@@ -66,7 +67,7 @@ def _fetch_scan(session, cat_id: int, scan_id: str) -> set[str]:
         rows = (r.json().get("data") or {}).get("list", {}).get("scannerDetails") or []
         return {row["stkId"] for row in rows if row.get("stkId")}
     except Exception as e:
-        print(f"[MC_TECHSCANNER] scan catId={cat_id} scanId={scan_id} failed: {e} — treating as 0 matches")
+        print(f"[MC_TECHSCANNER] scan catId={cat_id} scanId={scan_id} failed: {e} — treating as 0 matches", file=sys.stderr)
         return set()
 
 
@@ -83,7 +84,7 @@ def _fetch_trend(session, path: str) -> set[str]:
                 break
             out.update(row["scId"] for row in rows if row.get("scId"))
         except Exception as e:
-            print(f"[MC_TECHSCANNER] trend path={path} page={page} failed: {e} — stopping pagination, {len(out)} collected so far")
+            print(f"[MC_TECHSCANNER] trend path={path} page={page} failed: {e} — stopping pagination, {len(out)} collected so far", file=sys.stderr)
             break
     return out
 

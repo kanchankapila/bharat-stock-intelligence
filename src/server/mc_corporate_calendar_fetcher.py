@@ -285,7 +285,7 @@ def _refresh_historical_div(con, symbols: set[str], today: date) -> int:
             try:
                 last_ex_date = date.fromisoformat(str(last_ex).strip().split()[0])
             except (ValueError, IndexError) as e:
-                print(f"[CorpCalendar] Skipping {sym}: unparseable ex_date {last_ex!r} ({e})")
+                print(f"[CorpCalendar] Skipping {sym}: unparseable ex_date {last_ex!r} ({e})", file=sys.stderr)
                 continue
         days_since = (today - last_ex_date).days
         # date = :date guard (2026-07-19) instead of MAX(date) -- same fix as above.

@@ -27,6 +27,7 @@ import requests
 
 from db_compat import connect, executemany, load_index_map_inv, query_all, translate
 from fetch_utils import retry_get
+import sys
 
 NT_HEADERS = {
     "User-Agent": (
@@ -68,7 +69,7 @@ def _get_nt_index_map() -> dict[str, tuple[str, str]]:
             for r in rows:
                 result[r["index_name"]] = (r["provider_id"], req_type)
     except Exception as e:
-        print(f"[nt_pcr_ts] WARN: index map lookup failed ({e}), using fallback")
+        print(f"[nt_pcr_ts] WARN: index map lookup failed ({e}), using fallback", file=sys.stderr)
     return result or _FALLBACK
 
 

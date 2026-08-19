@@ -85,7 +85,7 @@ def _get(session, url: str) -> dict | None:
             if attempt < MAX_RETRIES - 1:
                 time.sleep(RETRY_DELAY_SEC)
             else:
-                print(f"  [WARN] fetch failed ({url[:60]}…): {e}")
+                print(f"  [WARN] fetch failed ({url[:60]}…): {e}", file=sys.stderr)
     return None
 
 

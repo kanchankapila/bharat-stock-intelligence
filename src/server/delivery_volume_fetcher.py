@@ -33,6 +33,7 @@ import requests
 
 from db_compat import connect, safe_alter
 from fetch_utils import retry_get
+import sys
 
 MTO_URL = "https://nsearchives.nseindia.com/archives/equities/mto/MTO_{date}.DAT"
 
@@ -98,7 +99,7 @@ def fetch_mto(trade_date: date, session: requests.Session) -> list[dict] | None:
             # holidays -- the same silent-partial-failure contract bug fixed in
             # insider_transactions_fetcher.py.
             return []
-        print(f"[Delivery] {trade_date}: download failed after retries — {e}")
+        print(f"[Delivery] {trade_date}: download failed after retries — {e}", file=sys.stderr)
         return None
 
     rows = []

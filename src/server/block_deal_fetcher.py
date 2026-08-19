@@ -37,6 +37,7 @@ import requests
 from as_of import logical_trading_date, trading_days_back
 from db_compat import connect
 from fetch_utils import retry_get
+import sys
 
 LIVE_URL  = "https://www.nseindia.com/api/block-deal"
 HIST_URL  = "https://www.nseindia.com/api/historical/block-deals"
@@ -115,7 +116,7 @@ def fetch_live(session: requests.Session) -> list[dict]:
         data = r.json()
         return data.get("data", [])
     except Exception as e:
-        print(f"[Block] Live fetch error after retries: {e}")
+        print(f"[Block] Live fetch error after retries: {e}", file=sys.stderr)
         return []
 
 
@@ -127,9 +128,9 @@ def fetch_historical(trade_date: date, session: requests.Session) -> list[dict]:
     except Exception as e:
         status = getattr(getattr(e, 'response', None), 'status_code', None)
         if status in (401, 403):
-            print(f"[Block] {trade_date}: auth required for historical API")
+            print(f"[Block] {trade_date}: auth required for historical API", file=sys.stderr)
         else:
-            print(f"[Block] {trade_date}: historical fetch error after retries: {e}")
+            print(f"[Block] {trade_date}: historical fetch error after retries: {e}", file=sys.stderr)
         return []
     try:
         data = r.json()
@@ -138,7 +139,7 @@ def fetch_historical(trade_date: date, session: requests.Session) -> list[dict]:
             return data.get("data", [])
         return data if isinstance(data, list) else []
     except Exception as e:
-        print(f"[Block] {trade_date}: historical parse error: {e}")
+        print(f"[Block] {trade_date}: historical parse error: {e}", file=sys.stderr)
         return []
 
 

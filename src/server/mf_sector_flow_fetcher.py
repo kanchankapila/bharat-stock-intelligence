@@ -454,7 +454,7 @@ def run(month_str: str | None = None) -> None:
             prior_alloc = _aggregate_by_sector(holdings_prior, sector_map)
             _save_sector_allocation(prior_str, prior_alloc)
         except Exception as e:
-            print(f"[MFSectorFlow] Could not fetch prior month ({prior_str}): {e}")
+            print(f"[MFSectorFlow] Could not fetch prior month ({prior_str}): {e}", file=sys.stderr)
             prior_alloc = pd.DataFrame(columns=["sector", "aum_pct"])
     else:
         prior_alloc = prior_saved

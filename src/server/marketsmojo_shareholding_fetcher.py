@@ -99,7 +99,7 @@ def fetch_shareholding_history(sid: str, session: requests.Session, exchange: st
             return None
         blocks = payload.get("data", {}).get("shareholding_graphs", {}).get("data", [])
     except Exception as e:
-        print(f"  [marketsmojo shareholding] sid={sid} error: {e}")
+        print(f"  [marketsmojo shareholding] sid={sid} error: {e}", file=sys.stderr)
         return None
     finally:
         time.sleep(RATE_LIMIT_SEC)
