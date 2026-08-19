@@ -4,6 +4,33 @@ Historical record, split out of CLAUDE.md on 2026-08-11 (it was 64% of that file
 
 **Not loaded automatically.** Read a specific entry when you need the history behind a decision. Durable lessons extracted from here live in `.claude/rules/`; if you find one that isn't there, add it.
 
+## 2026-08-20 (cont.) — `/production-grade-hardening` skill created
+
+Committed the pg-backup/deploy-drift work (previous entry) as `35b287d`. Then created
+`.claude/skills/production-grade-hardening/SKILL.md`, a multi-session roadmap for the remaining
+production-readiness gaps identified this session, deliberately **not** implemented all at once:
+
+- **Done, tracked in the skill's §0**: pg-backup verification + deploy-drift detection.
+- **Safe to implement next**: containerizing the 4 services (additive Dockerfiles, does not
+  remove the pm2 bare-metal path) — needs a real Docker build to verify, not attempted this
+  session (no Docker daemon on this machine).
+- **Needs the production Postgres instance**: cost-aware validation of the two live measurement
+  leads (`live_capitulation_screener`'s capitulation triple, `win_probability`) — cannot be run
+  from a dev machine with no `pandas`/`psycopg2`.
+- **Needs explicit owner sign-off, not implemented blind**: the `knowable_at` point-in-time
+  schema migration (200+ tables incl. compressed hypertables) and consolidating six dashboard
+  shells to one (a product decision about which shell has real users). The skill explicitly
+  tags both "do not implement without sign-off" rather than leaving that constraint to be
+  remembered.
+- **Large refactor, propose a pilot first**: a declarative `FetcherSpec` framework across ~140
+  fetchers — the skill says pilot on one fetcher, verify it live, then decide on a wider rollout,
+  rather than a repo-wide rewrite in one session.
+
+The skill's own §1 tells future sessions to re-derive the gap list via the 4 review commands
+(`/production-debug`, `/security-audit`, `/performance-audit`, `/deploy-reliability-review`)
+rather than trusting this file's dates — the same "a rule file is a claim with a date on it"
+discipline `recurring-bugs.md` already states, applied to a skill file this time.
+
 ## 2026-08-20 — Deploy-drift check: "server N commits behind HEAD" now monitored, not just noticed
 
 Continuing the production-readiness pass (backup monitoring, previous entry): the other verified
