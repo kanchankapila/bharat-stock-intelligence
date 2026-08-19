@@ -935,37 +935,51 @@ export const DATA_QUALITY_CHECKS: DataQualityCheck[] = [
       return { status: 'pass', detail: `${dates} session(s) recorded, latest ${fmtDays(stale)} old` };
     },
   },
-  {
-    id: 'model-registry-active-ensemble',
-    label: 'Active ensemble model exists and was retrained recently',
+  // ml-promotion-gate-review, 2026-08-19: 'ensemble' was the only model_registry model_name with
+  // a freshness check, despite cs_ranker/exit_policy/confluence_ml/online_sgd sharing the exact
+  // same "a row is written on EVERY run, promoted or rejected" property the comment below
+  // explains -- so a promotion gate correctly rejecting a bad retrain and one that has silently
+  // stopped running for weeks were indistinguishable everywhere in this platform's monitoring for
+  // 4 of 6 model_registry-backed engines. Confirmed live-relevant, not hypothetical: exit_policy's
+  // --train step timed out 2026-08-17 with nothing surfacing it beyond a console.warn in raw pm2
+  // logs. Factored into one function so the 5 entries share the exact same MAX(trained_at) logic
+  // instead of 5 near-identical hand-rolled blocks.
+  ...([
+    { modelName: 'ensemble', label: 'Ensemble' },
+    { modelName: 'cs_ranker', label: 'CS Ranker' },
+    { modelName: 'exit_policy', label: 'Exit Policy' },
+    { modelName: 'confluence_ml', label: 'Confluence ML' },
+    { modelName: 'online_sgd', label: 'Online SGD' },
+  ] as const).map(({ modelName, label }): DataQualityCheck => ({
+    id: `model-registry-active-${modelName}`,
+    label: `Active ${label} model exists and was retrained recently`,
     category: 'ml',
     critical: false,
-    // ml-promotion-gate-review, 2026-08-14: warning past 45 days since the ACTIVE row's own
-    // trained_at can misread a correctly-rejected challenger as a problem -- the weekly retrain
-    // can legitimately keep rejecting a stale-but-still-best baseline for up to
-    // DEFAULT_STALENESS_MAX_REJECTIONS (10) weekly runs (~70 days) before the staleness
-    // override self-heals it, same shape as monitorScripts.ts's already-fixed strategy-
-    // optimizer/screener_weight_history case ("a gated run is a successful run" -- see
+    // Warning past 45 days since the ACTIVE row's own trained_at can misread a correctly-
+    // rejected challenger as a problem -- a retrain can legitimately keep rejecting a
+    // stale-but-still-best baseline for up to DEFAULT_STALENESS_MAX_REJECTIONS (10) runs before
+    // the staleness override self-heals it, same shape as monitorScripts.ts's already-fixed
+    // strategy-optimizer/screener_weight_history case ("a gated run is a successful run" -- see
     // monitor.router.ts's LATEST-of-{output probe, stored _ran_at, job_heartbeat} comment).
-    // promote_or_register() writes a model_registry row on EVERY run, promoted or rejected
-    // (register_model(..., activate=False, ...) on the reject path) -- so unlike
-    // strategy-optimizer this doesn't need job_heartbeat/app_settings at all: MAX(trained_at)
-    // across every row (not just the active one) is already proof the job ran, whether or not
-    // it promoted.
+    // register_model()/_register_cs_model() etc. all write a model_registry row on EVERY run,
+    // promoted or rejected -- so unlike strategy-optimizer this doesn't need job_heartbeat/
+    // app_settings at all: MAX(trained_at) across every row (not just the active one) is already
+    // proof the job ran, whether or not it promoted.
     sql: `SELECT
-            (SELECT trained_at FROM model_registry WHERE model_name = 'ensemble' AND is_active = 1
+            (SELECT trained_at FROM model_registry WHERE model_name = ? AND is_active = 1
              ORDER BY id DESC LIMIT 1) AS active_trained_at,
-            (SELECT cv_roc_auc FROM model_registry WHERE model_name = 'ensemble' AND is_active = 1
+            (SELECT cv_roc_auc FROM model_registry WHERE model_name = ? AND is_active = 1
              ORDER BY id DESC LIMIT 1) AS active_auc,
-            (SELECT MAX(trained_at) FROM model_registry WHERE model_name = 'ensemble') AS last_run_at`,
+            (SELECT MAX(trained_at) FROM model_registry WHERE model_name = ?) AS last_run_at`,
+    params: [modelName, modelName, modelName],
     evaluate: (row, now) => {
-      if (!row || !row.active_trained_at) return { status: 'fail', detail: 'No active ensemble model in model_registry' };
+      if (!row || !row.active_trained_at) return { status: 'fail', detail: `No active ${label} model in model_registry` };
       const activeAge = daysStale(row.active_trained_at, now);
       const runAge = daysStale(row.last_run_at, now) ?? activeAge;
-      if (runAge != null && runAge > 45) return { status: 'warn', detail: `Ensemble retrain hasn't RUN in ${fmtDays(runAge)} (active model itself is ${fmtDays(activeAge)} old, AUC ${row.active_auc ?? 'n/a'})` };
-      return { status: 'pass', detail: `Ensemble retrain last ran ${fmtDays(runAge)} ago; active model is ${fmtDays(activeAge)} old, AUC ${row.active_auc ?? 'n/a'}` };
+      if (runAge != null && runAge > 45) return { status: 'warn', detail: `${label} retrain hasn't RUN in ${fmtDays(runAge)} (active model itself is ${fmtDays(activeAge)} old, AUC/rho ${row.active_auc ?? 'n/a'})` };
+      return { status: 'pass', detail: `${label} retrain last ran ${fmtDays(runAge)} ago; active model is ${fmtDays(activeAge)} old, AUC/rho ${row.active_auc ?? 'n/a'}` };
     },
-  },
+  })),
   {
     id: 'feature-store-freshness',
     label: 'feature_store freshness',

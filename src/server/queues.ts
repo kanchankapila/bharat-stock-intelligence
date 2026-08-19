@@ -1026,8 +1026,11 @@ async function processMlDailyOps(job: Job): Promise<{ success: boolean; failedSt
   // cycle. The audit's extra checks were merged into ohlcv_quality.flag_malformed_bars()
   // instead; data_integrity_repair.py --bad-bars remains available as a manual one-off.
 
-  await runPython('online_learner.py', ['--window', '180'], 120_000)
-    .catch(e => console.warn('[QUEUE] online_learner failed:', (e as Error).message));
+  // T.run (not a bare .catch), ml-promotion-gate-review 2026-08-19: online_learner writes a
+  // promotion decision to model_registry (model_name='online_sgd') on every run, but until now
+  // its failure was swallowed by console.warn alone -- indistinguishable from a healthy run in
+  // every monitor this platform has, same gap already fixed for its siblings in this function.
+  await T.run('online-learner', () => runPython('online_learner.py', ['--window', '180'], 120_000));
 
   // Warm-start LGBM ensemble on the last 3 days of newly-resolved outcomes (+20 boost rounds).
   // Runs after online_learner so SGD priors are already updated; keeps ensemble fresh daily
@@ -1089,14 +1092,17 @@ async function processMlDailyOps(job: Job): Promise<{ success: boolean; failedSt
   // Breakout classifier (Lever #4) -- moved here from the weekly retrain (2026-07-17): its
   // only training source, stock_ohlcv, updates once a day at EOD, so daily is the cadence
   // that actually tracks the data rather than going stale for most of the week.
-  await runPython('breakout_classifier.py', ['--train', '--score'], 30 * 60_000)
-    .catch(e => console.warn('[QUEUE] breakout_classifier train failed:', (e as Error).message));
+  // T.run (not a bare .catch), ml-promotion-gate-review 2026-08-19: same gap as cs_ranker/
+  // exit_policy/online_learner above -- breakout_classifier writes a promotion decision to its
+  // baseline pickle file (model_promotion.file_staleness_override_applies) but its failure was
+  // invisible to every monitor.
+  await T.run('breakout-classifier-train', () => runPython('breakout_classifier.py', ['--train', '--score'], 30 * 60_000));
   // Day-movement predictor: cross-sectional model for which stocks will have an outsized
   // intraday RANGE today (regardless of direction) -- purged-OOF AUC 0.76 on OHLCV alone
   // (2026-07-17). Advisory-only for now: writes technical_signals.movement_probability,
   // not yet blended into intraday_ranker.py's score or position sizing.
-  await runPython('movement_predictor.py', ['--train', '--score'], 30 * 60_000)
-    .catch(e => console.warn('[QUEUE] movement_predictor train failed:', (e as Error).message));
+  // T.run, same reason as breakout_classifier immediately above.
+  await T.run('movement-predictor-train', () => runPython('movement_predictor.py', ['--train', '--score'], 30 * 60_000));
 
   // Intraday feedback loop: paper-trade today's intraday recs vs the day's OHLC, then reverse-
   // engineer which signals preceded the winners → learned blend weights the ranker leans on.
@@ -1285,8 +1291,11 @@ async function processMlWeeklyRetrain(_job: Job): Promise<{ success: boolean; fa
   // fits 4 models (2 targets x split-fit + refit-all) at n_estimators=300, measured 703s
   // uncontended on 2026-07-26. Same growing-dataset timeout pattern already hit once before
   // by exit_labeler.py just above (bumped 10min -> 30min on 2026-07-19); mirrored here.
-  await runPython('exit_policy.py', ['--train'], 20 * 60_000)
-    .catch(e => console.warn('[QUEUE] exit_policy training failed:', (e as Error).message));
+  // T.run (not a bare .catch), ml-promotion-gate-review 2026-08-19: exit_policy writes a
+  // promotion decision to model_registry on every run, and this step's --train call has already
+  // timed out silently in production (2026-08-17) with nothing surfacing it beyond this log line
+  // -- same fix already applied to ml-ensemble-train/strategy-optimizer/backtest-optimizer below.
+  await T.run('exit-policy-train', () => runPython('exit_policy.py', ['--train'], 20 * 60_000));
   // --tune runs Optuna hyperparameter search (this is what took the model from AUC 0.70 to
   // 0.757 in the first place) — without it, every scheduled retrain silently falls back to
   // untuned defaults, which measured ~0.20 AUC worse on held-out test in one observed run.
@@ -1298,8 +1307,10 @@ async function processMlWeeklyRetrain(_job: Job): Promise<{ success: boolean; fa
   // breakout_classifier.py moved to daily ops (2026-07-17) -- its only training source,
   // stock_ohlcv, updates once a day at EOD, so a weekly cadence left it stale against data
   // that had already moved on for up to 6 of every 7 days.
-  await runPython('cs_ranker.py', ['--train', '--score'], 30 * 60_000)
-    .catch(e => console.warn('[QUEUE] cs_ranker retrain failed:', (e as Error).message));
+  // T.run (not a bare .catch), ml-promotion-gate-review 2026-08-19: same gap as exit_policy above
+  // -- cs_ranker writes a promotion decision to model_registry on every run but its failure was
+  // invisible to every monitor this platform has.
+  await T.run('cs-ranker-train', () => runPython('cs_ranker.py', ['--train', '--score'], 30 * 60_000));
   await T.run('strategy-optimizer', () => runPython('strategy_optimizer.py', [], 30 * 60_000));
   await runPython('backtester.py', ['--start', '2023-01-01'], 30 * 60_000)
     .catch(e => console.warn('[QUEUE] backtester failed:', (e as Error).message));

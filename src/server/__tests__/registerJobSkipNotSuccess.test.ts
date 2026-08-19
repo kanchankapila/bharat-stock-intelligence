@@ -39,6 +39,42 @@ describe('registerRepeatableJob: a skip must not be stamped as a success', () =>
     expect(guardIdx).toBeLessThan(stampIdx);              // and precedes the heartbeat stamp
   });
 
+  // Sibling fix (ml-promotion-gate-review, 2026-08-19), same shape: a processor that tracks its
+  // own steps via StepTracker and returns { success: false, failedSteps } must not have that
+  // overwritten by a blanket 'success' either -- the ACTION_ITEMS #16 bug this repo already fixed
+  // for ml-daily-ops/ml-weekly-retrain by hand-rolling their own worker outside this helper,
+  // generalized so a future job wired through registerRepeatableJob gets it for free.
+  // Negative control: deleting the `r?.success === false` branch fails this.
+  it('the shared completed handler stamps failed (not success) when the processor reports success:false', () => {
+    const handler = registerJobSrc.slice(
+      registerJobSrc.indexOf("worker.on('completed'"),
+      registerJobSrc.indexOf("worker.on('failed'"),
+    );
+    const successFalseIdx = handler.search(/success\s*===\s*false/);
+    const failedStampIdx = handler.indexOf("monitor(cfg.monitorName, 'failed'");
+    const blanketSuccessIdx = handler.lastIndexOf("monitor(cfg.monitorName, 'success')");
+    expect(successFalseIdx).toBeGreaterThanOrEqual(0);
+    expect(failedStampIdx).toBeGreaterThan(successFalseIdx);
+    // The success:false branch must itself return, so it never falls through to the blanket stamp.
+    const branchBody = handler.slice(successFalseIdx, handler.indexOf('return;', failedStampIdx));
+    expect(branchBody).not.toContain("monitor(cfg.monitorName, 'success')");
+    expect(blanketSuccessIdx).toBeGreaterThan(failedStampIdx);
+  });
+
+  // The consumer this fix exists for: live_screener_ml_ranker.py --train was a bare .catch,
+  // invisible to screener-performance-daily's monitor. Pins that it now reports through
+  // StepTracker instead of silently swallowing the failure.
+  it('processScreenerPerf tracks live_screener_ml_ranker --train and returns its StepTracker verdict', () => {
+    const src = readFileSync(resolve(__dirname, '../jobs/sync.jobs.ts'), 'utf-8');
+    const body = src.slice(
+      src.indexOf('async function processScreenerPerf'),
+      src.indexOf('async function processCompanyProfilesSync'),
+    );
+    expect(body).toContain("T.run('live-screener-ml-train'");
+    expect(body).toContain('T.finish()');
+    expect(body).toMatch(/return\s*\{\s*success:\s*verdict\.ok/);
+  });
+
   // confluence-compute is the reason this matters: it no-ops ~9h a day, so without the guard a
   // genuine failure inside its work window was overwritten by the next skip within 30 minutes.
   it('confluence-compute returns the skip marker from BOTH of its no-op paths', () => {

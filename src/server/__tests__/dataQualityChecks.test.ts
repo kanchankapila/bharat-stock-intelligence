@@ -307,6 +307,30 @@ describe('individual evaluate() functions', () => {
       expect(r.detail).toContain('active model is');
     });
   });
+
+  // ml-promotion-gate-review, 2026-08-19: 'ensemble' was the only model_registry model_name with
+  // a freshness check even though cs_ranker/exit_policy/confluence_ml/online_sgd write a row on
+  // every run the same way -- pins that all 4 got the same check, and derives the list from
+  // DATA_QUALITY_CHECKS itself (not a hand-typed count) so a future model_promotion.py consumer
+  // silently missing this coverage would fail here, per this repo's own "a hand-enumerated
+  // allowlist only guards what someone remembered to list" lesson.
+  describe('model-registry-active-* covers every model_registry consumer (ml-promotion-gate-review, 2026-08-19)', () => {
+    const now = new Date('2026-08-19T00:00:00Z');
+    for (const modelName of ['cs_ranker', 'exit_policy', 'confluence_ml', 'online_sgd']) {
+      it(`model-registry-active-${modelName} exists and passes on a fresh model + fresh run`, () => {
+        const r = byId(`model-registry-active-${modelName}`).evaluate(
+          { active_trained_at: '2026-08-15T00:00:00Z', active_auc: 0.6,
+            last_run_at: '2026-08-18T00:00:00Z' }, now);
+        expect(r.status).toBe('pass');
+      });
+
+      it(`model-registry-active-${modelName} fails when there is no active model at all`, () => {
+        const r = byId(`model-registry-active-${modelName}`).evaluate(
+          { active_trained_at: null, active_auc: null, last_run_at: null }, now);
+        expect(r.status).toBe('fail');
+      });
+    }
+  });
 });
 
 describe('mc-consolidated-metrics-freshness (hand-rolled: needs a WHERE source_api filter the factory cannot express)', () => {

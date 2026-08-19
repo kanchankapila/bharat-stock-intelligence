@@ -3248,6 +3248,13 @@ def incremental_gate_passes(pre_auc: float, post_auc: float,
     return post_auc >= pre_auc - tolerance
 
 
+def incremental_update_predictions_are_finite(preds) -> bool:
+    """True if every warm-started prediction is finite. Extracted from incremental_update() for
+    testability, same reason incremental_gate_passes() is a standalone function above -- the AUC
+    gate alone can't catch weight/output divergence (recurring-bugs.md's BiLSTM-NaN class)."""
+    return bool(np.isfinite(preds).all())
+
+
 def incremental_update(n_days: int = 3, n_rounds: int = 20, dry_run: bool = False) -> bool:
     """Warm-start LGBM on last `n_days` of new resolved outcomes. Returns True if applied.
 
@@ -3396,6 +3403,16 @@ def incremental_update(n_days: int = 3, n_rounds: int = 20, dry_run: bool = Fals
         init_model=lgbm_model.booster_,
         callbacks=[lgb.log_evaluation(period=-1)],
     )
+
+    # Artifact-level check (ml-promotion-gate-review, 2026-08-19): the AUC gate below only
+    # catches accuracy regression, not weight/output divergence -- the exact bug class that left
+    # 15 of 18 BiLSTM versions ~100% NaN in dl_trainer.py while its own metric-only gate stayed
+    # silent (see recurring-bugs.md, "a metric-based promotion gate cannot catch weight
+    # divergence or output saturation").
+    if not incremental_update_predictions_are_finite(new_booster.predict(X_aligned)):
+        print("[Ensemble] Incremental update REJECTED: warm-started booster produced "
+              "non-finite predictions. Live model left unchanged.")
+        return False
 
     if can_gate:
         post_auc = roc_auc_score(y_hold, new_booster.predict(X_hold))

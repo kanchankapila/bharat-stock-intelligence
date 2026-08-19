@@ -238,7 +238,22 @@ export async function registerRepeatableJob(
     // for this in 2026-08-12 each hand-rolled this guard in queues.ts's own completed handlers;
     // every job routed through THIS helper was still missing it. Skip paths return
     // { skipped: true } and must leave the heartbeat (and onCompleted's result logging) alone.
-    if ((result as { skipped?: boolean } | null | undefined)?.skipped) return;
+    const r = result as { skipped?: boolean; success?: boolean; failedSteps?: string[] } | null | undefined;
+    if (r?.skipped) return;
+    // Sibling bug, same shape (ml-promotion-gate-review, 2026-08-19): a processor that already
+    // tracks its own internal steps via StepTracker and returns { success, failedSteps } (the
+    // ml-daily-ops/ml-weekly-retrain pattern, hand-rolled outside this helper specifically to
+    // avoid this) must not have that verdict overwritten by a blanket 'success' either -- the
+    // exact ACTION_ITEMS #16 bug this repo already fixed once for those two jobs, generalized so
+    // any FUTURE job wired through this shared helper doesn't have to bypass it to get the fix.
+    // Strict `=== false` (not falsy) so a processor that never reports success/failedSteps at
+    // all -- every existing caller, today -- keeps behaving exactly as before.
+    if (r?.success === false) {
+      monitor(cfg.monitorName, 'failed',
+        r.failedSteps?.length ? `${r.failedSteps.length} step(s) failed: ${r.failedSteps.join(', ')}` : undefined);
+      cfg.onCompleted?.(result);
+      return;
+    }
     monitor(cfg.monitorName, 'success');
     cfg.onCompleted?.(result);
   });

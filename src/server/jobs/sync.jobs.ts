@@ -19,6 +19,7 @@ import { runPython } from '../pythonRunner';
 import { updateMonitorState } from '../monitoringService';
 import { registerRepeatableJob } from './registerJob';
 import { shouldSkipOnTradingHoliday } from '../marketStatusService';
+import { StepTracker } from '../jobSteps';
 
 export const QUEUE_SCREENER_PERFORMANCE = 'screener-performance';
 export const QUEUE_COMPANY_PROFILES_SYNC = 'company-profiles-sync';
@@ -44,7 +45,7 @@ async function processCorporateActionsIngest(_job: Job): Promise<{ success: bool
   return { success: true };
 }
 
-async function processScreenerPerf(job: Job): Promise<void> {
+async function processScreenerPerf(job: Job): Promise<{ success: boolean; failedSteps?: string[] } | void> {
   // 2026-08-07: skip entirely on a trading holiday -- every phase here (discovery/enrichment,
   // Bayesian tier scoring, PIT snapshot, live-screener train/backtest) re-derives from
   // screener_appearances/signal_outcomes/stock_ohlcv, none of which gained a new row on a day
@@ -53,6 +54,13 @@ async function processScreenerPerf(job: Job): Promise<void> {
     console.log('[QUEUE] screener-performance skipped — trading holiday, nothing new to re-derive');
     return;
   }
+  // T.run wraps ONLY step 8b below (ml-promotion-gate-review, 2026-08-19) -- this job's
+  // promotion-gated retrain step was a bare .catch(console.warn), same class already fixed for
+  // ml-daily-ops/ml-weekly-retrain's siblings, invisible to every monitor because this whole
+  // function otherwise never throws. Named to match this job's own monitorName ('screener-
+  // performance') so finish()'s job-level write agrees with (not duplicates) the one
+  // registerJob.ts's completed handler now also writes from this function's returned verdict.
+  const T = new StepTracker('screener-performance');
   // 1. Sync newly discovered Trendlyne screener PKs. "known" mode only re-fetches PKs
   // missing from the DB, but with ~612 known PKs and a 0.4s rate limit that can still
   // run 20+ minutes in practice — the old 10-min timeout routinely SIGTERM'd it mid-run
@@ -99,8 +107,7 @@ async function processScreenerPerf(job: Job): Promise<void> {
   // 8b. Retrain the ML win-probability classifier on the same freshly-resolved outcomes.
   // Gated behind a held-out-AUC promotion check inside the script itself, so a worse
   // retrain never silently replaces a better live model.
-  await runPython('live_screener_ml_ranker.py', ['--train'], 10 * 60_000)
-    .catch(e => console.warn('[QUEUE] live_screener_ml_ranker --train failed:', (e as Error).message));
+  await T.run('live-screener-ml-train', () => runPython('live_screener_ml_ranker.py', ['--train'], 10 * 60_000));
 
   // 9. Auto-backtest top combinations so frontend cockpit always has fresh performance data
   await runPython('backtest_live_screener.py', ['--auto-backtest-top', '5'], 10 * 60_000)
@@ -114,6 +121,9 @@ async function processScreenerPerf(job: Job): Promise<void> {
   } catch (e: unknown) {
     console.error('[QUEUE] screener classification failed:', (e as Error).message);
   }
+
+  const verdict = T.finish();
+  return { success: verdict.ok, failedSteps: verdict.failedSteps };
 }
 
 async function processCompanyProfilesSync(_job: Job): Promise<void> {
