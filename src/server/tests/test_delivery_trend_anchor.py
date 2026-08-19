@@ -4,7 +4,7 @@ from datetime import date, timedelta
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 from pg_test_support import pg_memory_conn  # noqa: E402
-from delivery_trend_fetcher import compute_delivery_trend
+from delivery_trend_fetcher import compute_delivery_trend, compute_short_proxy
 
 
 def _throwaway_db(conn):
@@ -63,4 +63,52 @@ class TestDeliveryTrendAnchor:
     def test_empty_source_table_updates_nothing_without_crashing(self, pg_conn):
         con = _throwaway_db(pg_conn)
         n = compute_delivery_trend(con)
+        assert n == 0
+
+
+def _throwaway_short_proxy_db(conn):
+    conn.execute("""
+        CREATE TABLE nt_fno_dashboard (
+            symbol TEXT NOT NULL, date TEXT NOT NULL,
+            total_calls_oi DOUBLE PRECISION, total_puts_oi DOUBLE PRECISION,
+            PRIMARY KEY (symbol, date)
+        )
+    """)
+    conn.execute("CREATE TABLE technical_signals (symbol TEXT, date TEXT, short_interest_proxy DOUBLE PRECISION)")
+    return conn
+
+
+class TestShortProxyAnchor:
+    """2026-08-19 (/temporal-correctness-audit): compute_short_proxy() had the identical bug
+    compute_delivery_trend() above was fixed for on 2026-08-13 -- raw date.today() as the exact-
+    match technical_signals.date write target, silently updating 0 rows whenever "today" doesn't
+    match a real grid row (a weekend/holiday, or a slow ml-daily-ops run crossing midnight IST).
+    Fixed to anchor on nt_fno_dashboard's own latest date instead, same pattern as the sibling
+    fix. Negative control: reverting to date.today() makes
+    test_anchors_to_source_tables_own_latest_date fail whenever the test's synthetic "latest
+    data" isn't today (the realistic case)."""
+
+    def test_anchors_to_source_tables_own_latest_date(self, pg_conn):
+        con = _throwaway_short_proxy_db(pg_conn)
+        stale_date = "2020-01-15"
+        con.execute("INSERT INTO nt_fno_dashboard VALUES (?, ?, ?, ?)", ("TEST", stale_date, 100.0, 50.0))
+        con.execute("INSERT INTO technical_signals VALUES (?, ?, NULL)", ("TEST", stale_date))
+        con.commit()
+
+        n = compute_short_proxy(con)
+        assert n == 1, f"expected 1 row updated (anchored to {stale_date}), got {n}"
+
+        row = con.execute(
+            "SELECT short_interest_proxy FROM technical_signals WHERE symbol='TEST' AND date=?",
+            (stale_date,),
+        ).fetchone()
+        assert row["short_interest_proxy"] is not None, (
+            "short_interest_proxy wasn't written -- anchor must have used date.today() instead "
+            "of nt_fno_dashboard's own latest date"
+        )
+        assert abs(row["short_interest_proxy"] - (50.0 / 150.0)) < 1e-9
+
+    def test_empty_source_table_updates_nothing_without_crashing(self, pg_conn):
+        con = _throwaway_short_proxy_db(pg_conn)
+        n = compute_short_proxy(con)
         assert n == 0

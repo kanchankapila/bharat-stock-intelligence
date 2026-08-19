@@ -2067,7 +2067,15 @@ export const DATA_QUALITY_CHECKS: DataQualityCheck[] = [
     category: 'reference', critical: false,
     sql: `SELECT MAX(fetched_at) AS last_date FROM news_sentiment_items WHERE source = 'MoneyControl Deals'`,
     evaluate: (row, now) => {
-      const stale = daysStale(row?.last_date, now);
+      // MC Deals only publishes on trading days (bulk/block deal news) -- unlike the market-wide
+      // RSS/Google News/GNews sources this table also holds, which is why the sibling
+      // news-sentiment-freshness check above is deliberately tradingDayAware:false but this
+      // source-scoped one isn't. Raw daysStale() read a stale Friday row as "stale" every
+      // weekend it was checked (found live 2026-08-19, /temporal-correctness-audit: warn on
+      // 18/74 sampled Sundays, 1/3 Saturdays, 0/0 any weekday) -- tradingDaysStale() removes
+      // the Sat/Sun gap the same way the ohlcv/fii-dii/market-regimes checks were fixed for
+      // Monday mornings on 2026-08-03.
+      const stale = tradingDaysStale(row?.last_date, now);
       if (stale == null) return { status: 'warn', detail: 'No MoneyControl Deals rows yet' };
       if (stale > 3) return { status: 'fail', detail: `Latest MoneyControl Deals row is ${fmtDays(stale)} old` };
       if (stale > 1) return { status: 'warn', detail: `Latest MoneyControl Deals row is ${fmtDays(stale)} old` };

@@ -233,6 +233,18 @@ describe('individual evaluate() functions', () => {
     expect(r.status).toBe('pass');
   });
 
+  it('NEGATIVE CONTROL: mc-deals-news-freshness does not false-warn on a Friday row checked over the weekend', () => {
+    // MoneyControl Deals only publishes on trading days. Raw daysStale() read a Friday row as
+    // stale on the very next Sunday it was checked (>1 raw calendar day) -- live-confirmed
+    // 2026-08-19 (/temporal-correctness-audit): warn on 18/74 sampled Sundays, 1/3 Saturdays,
+    // 0/0 any weekday. tradingDaysStale() subtracts the Sat/Sun gap, same fix as
+    // technical-signals-freshness-coverage above.
+    const fridayRow = new Date('2026-08-14T18:00:00Z');
+    const sunday = new Date('2026-08-16T20:00:00Z');
+    const r = byId('mc-deals-news-freshness').evaluate({ last_date: fridayRow.toISOString() }, sunday);
+    expect(r.status).toBe('pass');
+  });
+
   it('technical-signals-freshness-coverage still fails a real multi-weekday outage', () => {
     const aWeekLater = new Date('2026-08-14T12:00:00Z');
     const r = byId('technical-signals-freshness-coverage').evaluate(

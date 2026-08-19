@@ -395,8 +395,15 @@ def compute_short_proxy(con) -> int:
     Range 0–1. Higher = more put-heavy = bearish positioning proxy.
     Returns number of technical_signals rows updated.
     """
-    today = date.today().isoformat()
+    # Same bug class as compute_delivery_trend() above (fixed 2026-08-13, see its own comment):
+    # raw date.today() as the exact-match technical_signals.date write target fails silently
+    # (0 rows) whenever "today" doesn't match a real grid row -- weekends, or a slow
+    # ml-daily-ops run that crosses midnight IST. The correct floor is this function's OWN
+    # source table's actual latest date, not the wall clock.
     cur = con.cursor()
+    cur.execute(translate("SELECT MAX(date) FROM nt_fno_dashboard"))
+    row = cur.fetchone()
+    today = (row[0] if row else None) or date.today().isoformat()
 
     if use_postgres():
         cur.execute("""

@@ -34,7 +34,7 @@ from datetime import date, datetime, timedelta
 
 import requests
 
-from as_of import logical_trading_date
+from as_of import logical_trading_date, trading_days_back
 from db_compat import connect
 from fetch_utils import retry_get
 
@@ -257,8 +257,8 @@ def backfill_technical_signals(today: str, con) -> int:
     return updated
 
 
-def _calendar_days_back(n: int) -> list[date]:
-    """Return last n calendar days (weekdays only) INCLUDING today, most recent first.
+def _calendar_days_back(n: int, conn=None) -> list[date]:
+    """Return last n REAL trading sessions INCLUDING today, most recent first.
 
     Was anchored at today - 1 unconditionally -- with the live-endpoint branch below matching
     "trade_date >= today - 1", that made the --days 1 default (a single date: yesterday) fetch
@@ -275,14 +275,27 @@ def _calendar_days_back(n: int) -> list[date]:
     anchor on the NEXT calendar day, route to fetch_live() (which only ever reflects that day's
     still-empty pre-market session) and mislabel the day that just closed -- the same failure
     shape this function was written to fix, from the opposite direction.
+
+    The rest of the window used to be a hand-rolled "step back a day, keep it if weekday() < 5"
+    walk -- holiday-blind, so --days 90 silently covered fewer than 90 real sessions whenever a
+    holiday fell in range (found 2026-08-19, /temporal-correctness-audit). as_of.trading_days_back()
+    is the same fix already applied to delivery_volume_fetcher.py/fno_rollover_fetcher.py for
+    this exact shape; it reads the real session list from stock_ohlcv and excludes today itself,
+    so today is prepended separately here.
     """
-    days = []
-    d = date.fromisoformat(logical_trading_date())
-    while len(days) < n:
-        if d.weekday() < 5:
-            days.append(d)
-        d -= timedelta(days=1)
-    return days
+    if n <= 0:
+        return []
+    today = date.fromisoformat(logical_trading_date())
+    # logical_trading_date() should always resolve to a real trading session; this defensive
+    # walk-to-weekday is only for that assumption ever being wrong (mirrors the pre-fix code's
+    # own weekday() < 5 guard). The part that actually needed the real trading calendar was the
+    # N-1 days behind it, which trading_days_back() now supplies.
+    while today.weekday() >= 5:
+        today -= timedelta(days=1)
+    days = [today]
+    if n > 1:
+        days.extend(trading_days_back(n - 1, conn))
+    return days[:n]
 
 
 def main() -> None:
@@ -303,7 +316,7 @@ def main() -> None:
     if args.date:
         dates = [datetime.strptime(args.date, "%Y-%m-%d").date()]
     else:
-        dates = _calendar_days_back(args.days)
+        dates = _calendar_days_back(args.days, con)
 
     today = date.fromisoformat(logical_trading_date())
     total = 0
