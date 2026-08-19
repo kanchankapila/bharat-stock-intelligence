@@ -37,6 +37,12 @@
   --v6-accent: #6366f1;
   --v6-accent-ink: #a5b4fc;
   --v6-accent-soft: rgba(99, 102, 241, 0.15);
+  /* v1 AppShell's real accent system is two-tone, not pure indigo: indigo is the structural
+     brand color (logo, active-row wash, left bar) but amber is what actually reads as
+     "active/live/CTA" -- active nav label + icon, the Sign In button, the wordmark's second
+     word. v6 had drifted to indigo-only; this restores the highlight v1 actually uses. */
+  --v6-highlight: #fbbf24;
+  --v6-highlight-soft: rgba(251, 191, 36, 0.12);
   --v6-positive: #10b981;
   --v6-positive-soft: rgba(16, 185, 129, 0.12);
   --v6-negative: #f43f5e;
@@ -96,9 +102,15 @@
   font-feature-settings: "cv02", "cv03", "cv04", "cv11";
 }
 
+/* Matches v1 AppShell's actual brand type (its wordmark and header breadcrumb both set this
+   inline: `fontFamily: "'Rajdhani', sans-serif"`, uppercase, heavily tracked) -- v6 previously
+   used plain Inter here, which is why it didn't read as the same product as v1 despite the color
+   tokens claiming to match it. Rajdhani is already loaded (index.html, shared with v2/v3). */
 .v6-title {
-  font-family: 'Inter', ui-sans-serif, system-ui, sans-serif;
-  letter-spacing: -0.01em;
+  font-family: 'Rajdhani', ui-sans-serif, system-ui, sans-serif;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
 }
 
 .v6-mono {
@@ -117,6 +129,11 @@
   box-shadow: var(--v6-shadow-sm);
 }
 
+/* Self-review, 2026-08-19: v1 AppShell's real status chips (Live pill, version switchers) are
+   never a bare-background pill -- they always carry a neutral `border-slate-800/50` and a
+   `rounded-lg`/`rounded-md` (6-8px) radius, not a full pill. This class had neither, so the
+   Live/Health chips this session flattened to "colour only in the icon/dot" still didn't read
+   as the same chip v1 uses. */
 .v6-chip {
   display: inline-flex;
   align-items: center;
@@ -124,7 +141,8 @@
   font-size: 11px;
   font-weight: 600;
   padding: 3px 9px;
-  border-radius: 20px;
+  border-radius: 8px;
+  border: 1px solid var(--v6-border);
   background: var(--v6-bg-band);
   color: var(--v6-muted);
   white-space: nowrap;

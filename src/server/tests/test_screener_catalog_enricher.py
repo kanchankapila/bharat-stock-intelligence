@@ -24,7 +24,8 @@ def _make_db():
             signal_type_tag TEXT, screener_url TEXT
         );
         CREATE TABLE trendlyne_screeners (
-            id INTEGER PRIMARY KEY, screener_id TEXT, screenpk TEXT, screener_url TEXT
+            id INTEGER PRIMARY KEY, screener_id TEXT, screenpk TEXT, screener_url TEXT,
+            screener_name TEXT
         );
         CREATE TABLE screener_catalog (
             screener_id TEXT, source TEXT, screener_name TEXT,
@@ -81,6 +82,31 @@ def test_tl_screener_url_builds_a_real_trendlyne_url():
     assert url is not None
     assert "trendlyne.com" in url
     assert "9999" in url
+
+
+def test_step2_name_lookup_matches_capitalized_trendlyne_source():
+    """AF-20260816-19 (docs/audit-findings.md): screener_catalog.source holds both 'trendlyne'
+    and 'Trendlyne' live (343 rows capitalized, confirmed 2026-08-19). Step 2's name-lookup JOIN
+    used an exact-case `sc.source = 'trendlyne'`, so every capitalized row silently lost its
+    trendlyne_screeners enrichment (screenpk/screener_url/screener_name) -- not a crash, a quiet
+    gap, exactly the shape three OTHER joins in this same file already guard against with
+    LOWER(). Mirrors the real Step 2 query (screener_catalog_enricher.py's run()) rather than a
+    hand-copied version, so a regression in the source actually fails this test."""
+    conn = _make_db()
+    conn.execute(
+        "INSERT INTO screener_catalog (screener_id, source, screener_name, signal_keywords) "
+        "VALUES ('777', 'Trendlyne', 'Some Screen', NULL)"
+    )
+    conn.execute(
+        "INSERT INTO trendlyne_screeners (screener_id, screenpk, screener_url) "
+        "VALUES ('777', '5555', 'https://trendlyne.com/equity/screener/5555/')"
+    )
+    conn.commit()
+
+    rows = sce.load_catalog_rows_for_name_enrichment(conn)
+
+    assert len(rows) == 1
+    assert rows[0][3] == '5555', "capitalized 'Trendlyne' source must still match trendlyne_screeners"
 
 
 class TestCategoryNotCollapsedToOther:
