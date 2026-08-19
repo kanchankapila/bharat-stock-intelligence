@@ -388,13 +388,13 @@ const TrendlyneScreenerPanel: React.FC<TrendlyneScreenerPanelProps> = ({ onSelec
                        <div className="flex gap-3">
                           <div className="flex flex-col">
                             <span className="text-[6px] font-black text-slate-400 uppercase">1W</span>
-                            <span className={cn("text-[10px] font-black italic", (stock.return_1w || 0) >= 0 ? "text-emerald-500" : "text-rose-500")}>
+                            <span className={cn("text-[10px] font-black italic", stock.return_1w == null ? "text-slate-500" : stock.return_1w >= 0 ? "text-emerald-500" : "text-rose-500")}>
                               {stock.return_1w != null ? `${stock.return_1w.toFixed(1)}%` : '—'}
                             </span>
                           </div>
                           <div className="flex flex-col">
                             <span className="text-[6px] font-black text-slate-400 uppercase">1M</span>
-                            <span className={cn("text-[10px] font-black italic", (stock.return_1m || 0) >= 0 ? "text-emerald-500" : "text-rose-500")}>
+                            <span className={cn("text-[10px] font-black italic", stock.return_1m == null ? "text-slate-500" : stock.return_1m >= 0 ? "text-emerald-500" : "text-rose-500")}>
                               {stock.return_1m != null ? `${stock.return_1m.toFixed(1)}%` : '—'}
                             </span>
                           </div>

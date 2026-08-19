@@ -156,7 +156,7 @@ export function MoneyFlowPage() {
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
           <StatCard label="FII net (period)" value={crFmt(stats.fiiTotal)} color={stats.fiiTotal >= 0 ? 'text-emerald-400' : 'text-rose-400'} sub={`avg ${crFmt(stats.fiiAvg)}/day`} />
           <StatCard label="DII net (period)" value={crFmt(stats.diiTotal)} color={stats.diiTotal >= 0 ? 'text-emerald-400' : 'text-rose-400'} sub={`avg ${crFmt(stats.diiAvg)}/day`} />
-          <StatCard label="Latest FII day" value={crFmt(stats.latest?.fii_net)} color={(stats.latest?.fii_net ?? 0) >= 0 ? 'text-emerald-400' : 'text-rose-400'} sub={stats.latest?.date} />
+          <StatCard label="Latest FII day" value={crFmt(stats.latest?.fii_net)} color={stats.latest?.fii_net == null ? 'text-slate-400' : stats.latest.fii_net >= 0 ? 'text-emerald-400' : 'text-rose-400'} sub={stats.latest?.date} />
           <StatCard
             label="FII streak"
             value={stats.streak === 0 ? '—' : `${Math.abs(stats.streak)}d ${stats.streak > 0 ? 'buying' : 'selling'}`}

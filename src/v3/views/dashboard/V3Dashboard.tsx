@@ -35,6 +35,7 @@ const FONT_FAMILY_DISPLAY = "'Rajdhani', sans-serif";
 const FONT_FAMILY_MONO = "'Space Mono', monospace";
 const emerald = '#10b981';
 const rose = '#ef4444';
+const slateNeutral = '#64748b'; // null/unknown VIX change -- must not read as bullish or bearish
 const amber = '#f59e0b';
 const hold = '#eab308';
 
@@ -563,8 +564,9 @@ export const V3Dashboard: React.FC<V3DashboardProps> = ({
     }));
   }, [vixResult]);
 
+  const vixChangeKnown = vixResult?.change_per != null;
   const vixTrending = (vixResult?.change_per ?? 0) >= 0;
-  const vixColor = !vixTrending ? emerald : rose; // Falling VIX is bullish
+  const vixColor = !vixChangeKnown ? slateNeutral : !vixTrending ? emerald : rose; // Falling VIX is bullish
 
   // FII/DII Net Cash Flow Processing
   const flowChartData = useMemo(() => {
@@ -1077,7 +1079,7 @@ Based on the multi-factor scoring array and SWOT profiles, ${symbol} displays ${
                             {vixResult.last_trade_price?.toFixed(2)}
                           </span>
                         )}
-                        <span className={cn("text-[10px] font-black font-mono ml-2", vixColor === emerald ? "text-emerald-400" : "text-rose-400")}>
+                        <span className={cn("text-[10px] font-black font-mono ml-2", !vixChangeKnown ? "text-slate-400" : vixColor === emerald ? "text-emerald-400" : "text-rose-400")}>
                           {vixResult ? fmtPct(vixResult.change_per) : ''}
                         </span>
                       </div>
@@ -1556,8 +1558,8 @@ Based on the multi-factor scoring array and SWOT profiles, ${symbol} displays ${
                       </div>
                       <div>
                         <span className="text-[9px] text-slate-500 font-black block">CHANGE</span>
-                        <span className={cn("text-xs font-black block mt-1.5", (currentStockData?.changePct ?? 0) >= 0 ? "text-emerald-400" : "text-rose-400")}>
-                          {fmtPct(currentStockData?.changePct ?? 0)}
+                        <span className={cn("text-xs font-black block mt-1.5", currentStockData?.changePct == null ? "text-slate-400" : currentStockData.changePct >= 0 ? "text-emerald-400" : "text-rose-400")}>
+                          {currentStockData?.changePct == null ? '—' : fmtPct(currentStockData.changePct)}
                         </span>
                       </div>
                       <div className="hidden sm:block">

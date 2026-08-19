@@ -180,9 +180,9 @@ export const SmartMoneyMonitor: React.FC<Props> = ({ onSelectStock }) => {
             <AnimatePresence mode="popLayout">
               {filtered.map((stock, i) => {
                 const chartData = [
-                  { name: 'Promoter', value: stock.promoter ?? 0, fill: (stock.promoter ?? 0) >= 0 ? '#3b82f6' : '#f43f5e' },
-                  { name: 'FII', value: stock.fii ?? 0, fill: (stock.fii ?? 0) >= 0 ? '#10b981' : '#f43f5e' },
-                  { name: 'DII', value: stock.dii ?? 0, fill: (stock.dii ?? 0) >= 0 ? '#8b5cf6' : '#f43f5e' },
+                  { name: 'Promoter', value: stock.promoter ?? 0, fill: stock.promoter == null ? '#64748b' : stock.promoter >= 0 ? '#3b82f6' : '#f43f5e' },
+                  { name: 'FII', value: stock.fii ?? 0, fill: stock.fii == null ? '#64748b' : stock.fii >= 0 ? '#10b981' : '#f43f5e' },
+                  { name: 'DII', value: stock.dii ?? 0, fill: stock.dii == null ? '#64748b' : stock.dii >= 0 ? '#8b5cf6' : '#f43f5e' },
                 ];
 
                 return (

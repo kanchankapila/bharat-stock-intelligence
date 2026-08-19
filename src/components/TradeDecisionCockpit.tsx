@@ -223,7 +223,7 @@ export const TradeDecisionCockpit: React.FC<{ onSelectStock: (symbol: string) =>
                         <td className="px-3 py-3 min-w-[130px]">
                           <div className="flex items-center gap-1.5">
                             <span className={cn('w-1.5 h-1.5 rounded-full shrink-0',
-                              (c.changePct ?? 0) >= 0 ? 'bg-emerald-500' : 'bg-rose-500')} />
+                              c.changePct == null ? 'bg-slate-500' : c.changePct >= 0 ? 'bg-emerald-500' : 'bg-rose-500')} />
                             <div>
                               <p className="text-xs font-black text-white">{c.symbol}</p>
                               <p className="text-[9px] text-slate-500 truncate max-w-[100px]">{c.sector || c.name || ''}</p>

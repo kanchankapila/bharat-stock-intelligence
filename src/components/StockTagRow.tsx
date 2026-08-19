@@ -53,27 +53,33 @@ export interface TaggableStock {
   nifty_tier?: string | null;
 }
 
-export function StockTagRow({ p, className }: { p: TaggableStock; className?: string }) {
+/**
+ * Pure decision logic, exported so it's testable without rendering. `?? 0` was replaced with
+ * an explicit `!= null` guard throughout -- functionally identical against every threshold here
+ * (0 never clears a `> 0.5`/`> 3`/`> 5`/`>= 3` bar), but makes "missing data suppresses the
+ * badge" the visible intent rather than an accident of the fallback value.
+ */
+export function buildStockBadges(p: TaggableStock): Array<{ label: string; color: string }> {
   const badges: Array<{ label: string; color: string }> = [];
 
-  if ((p.eps_beat_streak ?? 0) >= 3) badges.push({ label: `EPS ×${p.eps_beat_streak}`, color: 'bg-emerald-500/20 text-emerald-300' });
-  else if ((p.eps_surprise_q1 ?? 0) > 5) badges.push({ label: 'EPS beat', color: 'bg-emerald-500/15 text-emerald-400' });
+  if (p.eps_beat_streak != null && p.eps_beat_streak >= 3) badges.push({ label: `EPS ×${p.eps_beat_streak}`, color: 'bg-emerald-500/20 text-emerald-300' });
+  else if (p.eps_surprise_q1 != null && p.eps_surprise_q1 > 5) badges.push({ label: 'EPS beat', color: 'bg-emerald-500/15 text-emerald-400' });
   if (p.eps_miss_after_streak) badges.push({ label: 'PEAD', color: 'bg-rose-500/20 text-rose-300' });
 
   if (p.insider_buy_flag) badges.push({ label: 'Insider buy', color: 'bg-violet-500/20 text-violet-300' });
   if (p.insider_sell_flag) badges.push({ label: 'Insider sell', color: 'bg-rose-500/15 text-rose-400' });
-  if ((p.promoter_net_90d ?? 0) > 0.5) badges.push({ label: 'Promoter ↑', color: 'bg-violet-500/15 text-violet-400' });
+  if (p.promoter_net_90d != null && p.promoter_net_90d > 0.5) badges.push({ label: 'Promoter ↑', color: 'bg-violet-500/15 text-violet-400' });
 
   if (p.rating_upgrade_180d) badges.push({ label: 'Rating ↑', color: 'bg-sky-500/20 text-sky-300' });
   if (p.rating_downgrade_180d) badges.push({ label: 'Rating ↓', color: 'bg-rose-500/15 text-rose-400' });
 
-  if (p.fcf_positive && (p.fcf_yield ?? 0) > 3) badges.push({ label: `FCF ${(p.fcf_yield ?? 0).toFixed(1)}%`, color: 'bg-teal-500/20 text-teal-300' });
+  if (p.fcf_positive && p.fcf_yield != null && p.fcf_yield > 3) badges.push({ label: `FCF ${p.fcf_yield.toFixed(1)}%`, color: 'bg-teal-500/20 text-teal-300' });
   if (p.debt_coverage_risk) badges.push({ label: 'Debt risk', color: 'bg-orange-500/20 text-orange-300' });
 
-  if (p.block_deal_flag && (p.block_deal_direction ?? 0) > 0) badges.push({ label: 'Block buy', color: 'bg-sky-500/15 text-sky-400' });
-  if (p.block_deal_flag && (p.block_deal_direction ?? 0) < 0) badges.push({ label: 'Block sell', color: 'bg-rose-500/15 text-rose-400' });
+  if (p.block_deal_flag && p.block_deal_direction != null && p.block_deal_direction > 0) badges.push({ label: 'Block buy', color: 'bg-sky-500/15 text-sky-400' });
+  if (p.block_deal_flag && p.block_deal_direction != null && p.block_deal_direction < 0) badges.push({ label: 'Block sell', color: 'bg-rose-500/15 text-rose-400' });
 
-  if ((p.mf_sector_flow_pct ?? 0) > 1) badges.push({ label: 'MF inflow', color: 'bg-indigo-500/20 text-indigo-300' });
+  if (p.mf_sector_flow_pct != null && p.mf_sector_flow_pct > 1) badges.push({ label: 'MF inflow', color: 'bg-indigo-500/20 text-indigo-300' });
 
   if (p.wc_improving) badges.push({ label: 'WC ↑', color: 'bg-teal-500/15 text-teal-400' });
   if (p.wc_deteriorating) badges.push({ label: 'WC ↓', color: 'bg-orange-500/15 text-orange-400' });
@@ -83,6 +89,12 @@ export function StockTagRow({ p, className }: { p: TaggableStock; className?: st
 
   if (p.is_nifty50) badges.push({ label: 'N50', color: 'bg-slate-600/60 text-slate-300' });
   else if (p.nifty_tier) badges.push({ label: p.nifty_tier, color: 'bg-slate-700/60 text-slate-300' });
+
+  return badges;
+}
+
+export function StockTagRow({ p, className }: { p: TaggableStock; className?: string }) {
+  const badges = buildStockBadges(p);
 
   if (badges.length === 0) return null;
 

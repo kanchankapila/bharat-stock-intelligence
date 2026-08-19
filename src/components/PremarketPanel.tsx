@@ -146,21 +146,25 @@ export const PremarketPanel: React.FC<PremarketPanelProps> = ({ onSelectStock })
               <div className="grid grid-cols-2 gap-2 mt-2">
                 <div className="text-center">
                   <div className="text-xs text-slate-500">FII Net</div>
-                  <div className={cn('text-sm font-bold',
-                    parseFloat(fllData.fii_net || 0) >= 0 ? 'text-emerald-400' : 'text-red-400'
-                  )}>
-                    {parseFloat(fllData.fii_net || 0) >= 0 ? '+' : ''}
-                    ₹{(parseFloat(fllData.fii_net || 0) / 100).toFixed(0)}Cr
-                  </div>
+                  {fllData.fii_net == null ? <div className="text-sm font-bold text-slate-500">—</div> : (() => {
+                    const fii = parseFloat(fllData.fii_net);
+                    return (
+                      <div className={cn('text-sm font-bold', fii >= 0 ? 'text-emerald-400' : 'text-red-400')}>
+                        {fii >= 0 ? '+' : ''}₹{(fii / 100).toFixed(0)}Cr
+                      </div>
+                    );
+                  })()}
                 </div>
                 <div className="text-center">
                   <div className="text-xs text-slate-500">DII Net</div>
-                  <div className={cn('text-sm font-bold',
-                    parseFloat(fllData.dii_net || 0) >= 0 ? 'text-emerald-400' : 'text-red-400'
-                  )}>
-                    {parseFloat(fllData.dii_net || 0) >= 0 ? '+' : ''}
-                    ₹{(parseFloat(fllData.dii_net || 0) / 100).toFixed(0)}Cr
-                  </div>
+                  {fllData.dii_net == null ? <div className="text-sm font-bold text-slate-500">—</div> : (() => {
+                    const dii = parseFloat(fllData.dii_net);
+                    return (
+                      <div className={cn('text-sm font-bold', dii >= 0 ? 'text-emerald-400' : 'text-red-400')}>
+                        {dii >= 0 ? '+' : ''}₹{(dii / 100).toFixed(0)}Cr
+                      </div>
+                    );
+                  })()}
                 </div>
               </div>
             )}
