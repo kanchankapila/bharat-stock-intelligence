@@ -4651,3 +4651,70 @@ just the manual verification run); 83/84 jobs succeeding (`trendlyne-midweek` fa
 405); data quality 152 pass / 3 warn / 0 fail. `tsc --noEmit` clean, `vitest` 994/0/41, `pytest`
 2067/0/230, 57/57 dashboard queries green. Grafana's datasource Max query time needs raising to 60s
 — the freshness panel runs 25.1s against a 30s default.
+
+## 2026-08-19 — job-runtime-audit: a shared catch-up guard had an active-run blind spot, fixed and made self-monitoring
+
+Ran the `job-runtime-audit` skill against the two named incidents in its own brief
+(`extra_endpoints_fetcher.py`/`extra_features_parser.py` budget-kill truncation,
+`marketsmojo_technical_fetcher.py` write-amplification) — both already fixed and verified live in
+the code (queues.ts:516-523, queues.ts:552-564), and `marketsmojo_shareholding_fetcher.py`/
+`marketsmojo_fintrend_fetcher.py`/`marketsmojo_financials_fetcher.py` all confirmed to carry the
+same incremental-write guard. No regression in any of the three.
+
+**The real finding was new: `registerJob.ts:113-114`'s "don't queue a duplicate catch-up" guard
+(added 2026-08-09 for a different bug) only recognizes ANOTHER catch-up as already pending — not
+the job's own currently-ACTIVE legitimate scheduled run.** `addJobWithCatchup()` re-evaluates
+"was the last occurrence missed" on every server restart, and a restart landing while a long job
+is still executing (routine here — 3 restarts/day in this dev environment, and any real deploy
+restart in production) sees no *catchup* in flight, concludes "missed," and queues a duplicate
+behind it at `concurrency: 1`.
+
+Confirmed live, not inferred: `job_heartbeat` showed `ml-daily-ops` at 44/89 failed runs (49%) —
+two runs recorded on 2026-08-18 alone, a success at 14:50 UTC and a failure at 22:05 UTC on
+`nse-bhavcopy-fetcher` (404 "not yet published" — the second run's ~120-step chain reached that
+step hours after the first run had already legitimately fetched the day's bhavcopy). pm2 logs
+show 129 "`ml-daily-ops` missed its scheduled run" catch-up events since 2026-07-25. Same shape,
+worse consequence, for `trendlyne-midweek` (Tuesday-only, `30 14 * * 2`): three separate catch-ups
+queued on a single Wednesday (2026-08-19), each burning into the finite per-session Trendlyne WAF
+request allowance (`trendlyne_waf_request_allowance_2026_08_17` memory) against the real weekly
+slice rather than the 405-block this table already has a dedicated coverage check for.
+
+**Fixed** (`registerJob.ts`): `alreadyPending` now also matches a currently-`active` job of the
+same name, regardless of `isCatchup`. One change protects every job registered through
+`addJobWithCatchup`/`registerRepeatableJob`, not just these two — the guard's own prior fix
+(2026-08-09) had exactly this "protects the class I was thinking about, not the whole class"
+shape, which `recurring-bugs.md`'s skip-not-success entry already names as a recurring pattern in
+this same file. Negative-controlled: reverting the fix makes the new
+`registerJob.test.ts` case fail (2 `queue.add` calls instead of 1); restored, all 5 pass. The test
+mock itself needed a real per-job `state` field — the old mock answered every `getJobs(['active',
+...])` call identically regardless of which state was actually requested, which would have hidden
+this exact bug from the test.
+
+**Made it self-monitoring rather than a one-off fix**, per the user's ask to run this daily and
+report to Telegram. Checked first whether `~/.claude/scheduled-tasks/signal-accuracy-review-weekly`
+(the pattern the user referenced) actually does this — it doesn't: no Telegram step in its
+`SKILL.md`, and no live trigger for it could be found on this machine (no matching Windows Task
+Scheduler entry). Rather than build a second thing on an unverified pattern, extended the real,
+already-live `job-digest-daily` BullMQ job (`digests.jobs.ts`, 00:15 IST nightly,
+`telegramService.sendMarkdownMessage`) with a new "Job-runtime health" section in
+`buildDailyDigest()` (`jobWatchdog.ts`): (1) flags any job with ≥5 runs and >25% failure rate from
+`job_heartbeat`, (2) flags any job with more than one genuine "Catch-up queued" log line (not the
+already-deduped "skipping duplicate" ones) in the last 24h of the winston app log — the exact
+signature of this bug class, so a recurrence on a job not covered here surfaces automatically
+instead of needing another manual audit. 5 new tests in `jobWatchdog.test.ts`, negative-controlled
+(2 fail against the pre-fix code, all pass restored).
+
+Verified: `npx tsc --noEmit` clean, `npx vitest run` 1029/0/41 (both changed files' suites
+individually negative-controlled, not just green overall), `pm2 restart bharat-server` clean boot
+(`exceptions-2026-08-19.log`/`rejections-2026-08-19.log` both 0 bytes post-restart). A manual
+standalone invocation of `buildDailyDigest()` to preview the message before tonight's real run
+timed out after 120s (cold-start `getSystemStatus()` scanning ~20 monitor scripts, unrelated to
+this change) and was killed rather than forced further; confirmed no orphaned query was left on
+Postgres afterward (`pg_stat_activity` clean). The real first live exercise is the 00:15 IST
+`job-digest-daily` run tonight — worth checking tomorrow morning's Telegram message.
+
+**Not fully closed**: the mid-run-collision fix doesn't explain `trendlyne-midweek`'s *serial*
+same-day re-triggering (3 catch-ups hours apart, each apparently completing/failing quickly enough
+to free the active slot before the next restart re-evaluates from scratch) — that's a different
+mechanism than the concurrency collision this fix targets, and is exactly what the new digest
+section's catch-up-count flag exists to keep visible rather than guessed at further this session.

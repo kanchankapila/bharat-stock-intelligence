@@ -12,7 +12,10 @@ import { addJobWithCatchup } from '../jobs/registerJob';
 
 function makeQueue(opts: {
   staleRepeatable?: boolean;   // getRepeatableJobs() returns an entry whose `next` is in the past
-  inFlight?: Array<{ name: string; data?: any }>; // active/waiting/delayed jobs already in the queue
+  // active/waiting/delayed jobs already in the queue -- `state` defaults to 'delayed' (the
+  // perpetual next-occurrence placeholder's real BullMQ state) so callers only need to set it
+  // when a test specifically cares about the 'active' vs 'waiting'/'delayed' distinction.
+  inFlight?: Array<{ name: string; data?: any; state?: 'active' | 'waiting' | 'delayed' }>;
 } = {}) {
   const { staleRepeatable = true, inFlight = [] } = opts;
   const add = vi.fn().mockResolvedValue({});
@@ -20,10 +23,12 @@ function makeQueue(opts: {
   const getRepeatableJobs = vi.fn().mockResolvedValue(
     staleRepeatable ? [{ id: 'test-job-id', key: 'key-1', next: Date.now() - 60_000 }] : [],
   );
+  // Filters by each job's real state, the way BullMQ's getJobs actually does -- a job sitting in
+  // 'delayed' must NOT show up in a getJobs(['active']) call, or the active-vs-catchup distinction
+  // the 2026-08-19 fix relies on can't be exercised.
   const getJobs = vi.fn(async (states: string[]) => {
     if (states.includes('completed')) return []; // no finished history -> lastRunTime null
-    if (states.includes('active')) return inFlight;
-    return [];
+    return inFlight.filter(j => states.includes(j.state ?? 'delayed'));
   });
   return { name: 'test-queue', add, removeRepeatableByKey, getRepeatableJobs, getJobs } as any;
 }
@@ -74,5 +79,22 @@ describe('addJobWithCatchup', () => {
       jobId: 'test-job-id',
     });
     expect(queue.add).toHaveBeenCalledTimes(1);
+  });
+
+  it('regression (2026-08-19): does NOT queue a duplicate when the LEGITIMATE scheduled run of ' +
+     'this job is still active (no isCatchup) -- a restart landing mid-run on a long job like ' +
+     'ml-daily-ops used to see no *catchup* pending, conclude "missed", and queue a second full ' +
+     'run behind it at concurrency:1', async () => {
+    const queue = makeQueue({
+      staleRepeatable: true,
+      inFlight: [{ name: 'test-job', state: 'active' /* no data.isCatchup -- the real run */ }],
+    });
+    await addJobWithCatchup(queue, 'test-job', {}, {
+      repeat: { pattern: '0 0 * * *' },
+      jobId: 'test-job-id',
+    });
+    // Only the normal repeatable registration -- no duplicate catchup queued behind the live run.
+    expect(queue.add).toHaveBeenCalledTimes(1);
+    expect(queue.add.mock.calls[0][1]).not.toMatchObject({ isCatchup: true });
   });
 });

@@ -7,12 +7,56 @@
  * appearing in the once-daily digest. Deliberately does not introduce a third job registry:
  * see docs/superpowers/specs/2026-07-02-job-monitoring-telegram-alerts-design.md.
  */
+import fs from 'fs';
+import path from 'path';
 import { getLateJobs, wasAlreadyAlerted, markAlerted } from './jobHeartbeat';
 import { JOB_REGISTRY } from './jobRegistry';
 import { getSystemStatus } from './routers/monitor.router';
 import { telegramService, sanitizeMarkdown } from './telegramService';
-import { dbGet, dbRun } from './dbAsync';
+import { dbGet, dbRun, dbAll } from './dbAsync';
 import { runDataQualityChecks, getLatestDataQualityResults } from './dataQualityChecks';
+
+// Needs a minimum sample so a job with 1 failure out of 2 runs doesn't false-positive.
+const FAIL_RATE_WARN = 0.25;
+const MIN_RUNS_FOR_FAIL_RATE = 5;
+
+/** job-runtime-audit (2026-08-19) found ml-daily-ops failing ~49% of runs and traced it to
+ *  addJobWithCatchup queuing a duplicate full pipeline run behind the still-active real one on
+ *  restart -- fixed in registerJob.ts, but nothing was watching for this SHAPE of problem
+ *  recurring (here or in any other job routed through the same helper). These two checks are
+ *  the deterministic, dailyable slice of that audit; the reasoning-heavy part (root-causing a
+ *  new pattern) still needs an actual /job-runtime-audit pass by hand. */
+async function getJobFailRateFlags(): Promise<string[]> {
+  const rows = await dbAll<{ job_name: string; run_count: number; fail_count: number }>(
+    'SELECT job_name, run_count, fail_count FROM job_heartbeat WHERE run_count >= ?',
+    [MIN_RUNS_FOR_FAIL_RATE],
+  );
+  return rows
+    .filter(r => r.fail_count / r.run_count > FAIL_RATE_WARN)
+    .map(r => `📉 \`${sanitizeMarkdown(r.job_name)}\` failing ${Math.round(100 * r.fail_count / r.run_count)}% of runs (${r.fail_count}/${r.run_count})`);
+}
+
+/** Counts REAL catch-up queuings (not the already-deduped "skipping duplicate" path — see
+ *  registerJob.ts's addJobWithCatchup) per job name from the last ~24h of the winston app log.
+ *  More than one real catch-up for the same job in a day means something keeps re-concluding
+ *  "missed" rather than one genuine outage being caught once. */
+function getRecentCatchupCounts(now: Date): Map<string, number> {
+  const logDir = path.join(process.cwd(), 'logs');
+  const counts = new Map<string, number>();
+  for (const d of [now, new Date(now.getTime() - 86_400_000)]) {
+    let text: string;
+    try {
+      text = fs.readFileSync(path.join(logDir, `app-${d.toISOString().slice(0, 10)}.log`), 'utf8');
+    } catch {
+      continue; // log rotated away or not yet created -- not an error
+    }
+    for (const line of text.split('\n')) {
+      const m = line.match(/Job (\S+) in \S+ missed its scheduled run\. Catch-up queued/);
+      if (m) counts.set(m[1], (counts.get(m[1]) ?? 0) + 1);
+    }
+  }
+  return counts;
+}
 
 export async function checkAndAlertLateJobs(now: Date = new Date()): Promise<void> {
   const late = await getLateJobs(now);
@@ -211,6 +255,17 @@ export async function buildDailyDigest(now: Date = new Date()): Promise<string> 
     lines.push('✅ Nothing changed since the last report — all jobs on schedule.', '');
   }
   lines.push(`_${unchangedHealthy} other job(s) healthy and unchanged._`);
+
+  const failRateFlags = await getJobFailRateFlags().catch(err => {
+    console.warn('[WATCHDOG] getJobFailRateFlags failed:', (err as Error).message);
+    return [] as string[];
+  });
+  const catchupFlags = [...getRecentCatchupCounts(now).entries()]
+    .filter(([, n]) => n > 1)
+    .map(([job, n]) => `🔁 \`${sanitizeMarkdown(job)}\` queued ${n} catch-ups in the last 24h — likely repeated missed-run detection, not one real outage`);
+  if (failRateFlags.length || catchupFlags.length) {
+    lines.push('', '*Job-runtime health:*', ...failRateFlags, ...catchupFlags);
+  }
 
   if (eventDriven.length) {
     lines.push('', '*Event-driven (no fixed schedule):*', ...eventDriven.map(j => `⏳ ${j.label}`));

@@ -110,8 +110,23 @@ export async function addJobWithCatchup(
       // Sunday placeholder. Only a job actually queued via the catch-up path below carries
       // isCatchup: true, so that's the correct signal for "a catch-up from an earlier restart
       // is still in flight" -- the thing this guard was actually built to detect.
+      //
+      // ALSO must match a currently-ACTIVE run of this jobName even without isCatchup: true --
+      // the legitimate scheduled occurrence counts too, not just a prior catch-up. Without this,
+      // a restart that lands while the real run is still executing (routine for a long job like
+      // ml-daily-ops, observed 13:20->22:05 UTC in production) sees no *catchup* pending, "missed"
+      // stays true, and queues a duplicate that -- since these queues run at concurrency:1 --
+      // waits behind the live run and then re-executes the entire chain a second time same-day.
+      // Confirmed live 2026-08-19: ml-daily-ops job_heartbeat showed two runs on 2026-08-18 (a
+      // success at 14:50 UTC, a failure at 22:05 UTC on nse-bhavcopy-fetcher -- the second run's
+      // late-night steps hit a bhavcopy date NSE hadn't published yet), and trendlyne-midweek (a
+      // Tuesday-only job) queued three separate catch-ups on a single Wednesday, each burning
+      // into its own finite per-session WAF request budget against the provider.
       const inFlight = await queue.getJobs(['active', 'waiting', 'delayed'], 0, -1, false);
-      const alreadyPending = inFlight.some(j => j.name === jobName && j.data?.isCatchup === true);
+      const activeNow = await queue.getJobs(['active'], 0, -1, false);
+      const alreadyPending =
+        activeNow.some(j => j.name === jobName) ||
+        inFlight.some(j => j.name === jobName && j.data?.isCatchup === true);
       if (alreadyPending) {
         console.log(
           `[QUEUE] Job ${jobName} in ${queue.name} missed its scheduled run, but an instance ` +
