@@ -4,6 +4,84 @@ Historical record, split out of CLAUDE.md on 2026-08-11 (it was 64% of that file
 
 **Not loaded automatically.** Read a specific entry when you need the history behind a decision. Durable lessons extracted from here live in `.claude/rules/`; if you find one that isn't there, add it.
 
+## 2026-08-20 — Deploy-drift check: "server N commits behind HEAD" now monitored, not just noticed
+
+Continuing the production-readiness pass (backup monitoring, previous entry): the other verified
+gap was that deploy drift — a merged fix that was never actually deployed — had **no executable
+check anywhere**. `pm_uptime`/`commits behind` appeared only in docs, rule files, and skill
+prompts (grepped across `.ts`/`.mjs`/`.py`/`.md`); nothing compared them. AF-14 ("server N
+commits behind HEAD") is a *recurring* audit finding precisely because it's always caught by a
+human noticing, never by a check.
+
+Added:
+
+1. **`scripts/check_deploy_drift.mjs`** — plain Node ESM (no TypeScript, deliberately, so the
+   check still runs even if a bad deploy broke the build). Compares `git log -1 --format=%ct`
+   (HEAD's committer time) against `bharat-server`'s pm2 process start time (`pm2 jlist` →
+   `pm2_env.pm_uptime`). If HEAD is newer than the process's last restart, `.ts` was never
+   hot-reloaded to pick it up — the exact class of bug this closes. Stamps
+   `job_heartbeat('deploy-drift')` via raw `pg` (not `src/server/pgClient.ts` — a plain `.mjs`
+   script can't resolve a bare TypeScript import without a loader; confirmed live, the first
+   version threw `ERR_MODULE_NOT_FOUND` importing `pgClient.js`, which doesn't exist as compiled
+   output. Rewritten to `import { Pool } from 'pg'` with the same connection-string precedence
+   as `pgConfig.ts`'s `pgConnectionString()`).
+2. **`ecosystem.config.cjs`** — `deploy-drift-check`, every 15 minutes, `autorestart: false`,
+   `interpreter: 'node'` (not `VENV_PY`/`tsx` — plain node script, no dependency on the app's own
+   build).
+3. **`dataQualityChecks.ts`** — `deploy-drift` (`infra` category, `critical: true`). Reads only
+   the heartbeat row the script stamps, matching `pg-backup-recency`'s split of concerns (script
+   does the real work, check reads the row). Distinguishes three failure shapes: never run /
+   the checker itself has stopped (>12h since ANY run, success or fail — worse than finding
+   drift, since nothing is watching at all) / found real drift (surfaces the script's own
+   `pm2 restart bharat-server` remediation string verbatim).
+4. **5 negative-controlled tests** in `dataQualityChecks.test.ts`, mirroring the `pg-backup-recency`
+   block's shape and rationale.
+
+**Verification — exactly what ran and what didn't, on this Mac (confirmed NOT the production
+host — see `/memories/repo/dev-vs-prod-machine.md`):**
+
+- ✅ `node --check scripts/check_deploy_drift.mjs` — syntax valid.
+- ✅ Actually **ran** the script's git+pm2 logic end-to-end (workaround needed for a sandbox
+  artifact: spawned subprocesses here can't read `~/.gitconfig`, `GIT_CONFIG_GLOBAL=/dev/null`
+  bypasses it — confirmed this is a sandbox quirk, not a script bug, since the same command
+  works unmodified in an interactive shell). Real output: correctly read HEAD's real commit +
+  committer timestamp, correctly reported `pm2 jlist failed: ENOENT` as a clean FAIL (pm2 isn't
+  installed here) rather than crashing.
+- ✅ `ecosystem.config.cjs` loads via `node -e require(...)` — 14 apps now, `deploy-drift-check`
+  resolves to the right script/cron/interpreter.
+- ✅ `python3 scripts/check_recurring_bugs.py` — clean, 490 py + 135 ts files (the one failure
+  seen mid-session, `git ls-files` raising `CalledProcessError`, was the same `.gitconfig`
+  sandbox artifact, reproduced and confirmed unrelated to any edit).
+- ❌ **The `job_heartbeat` write path (raw `pg` INSERT) was NOT executed end-to-end** — this
+  sandbox's `node_modules` is missing `pg` and `dotenv` entirely (declared in `package.json`,
+  absent on disk; `npm i` fails here on a corporate SSL intercept). Confirmed this is an
+  incomplete install, not a code defect, by checking `ls node_modules/{pg,dotenv}` is empty.
+- ❌ **`npx tsc --noEmit` / `npx vitest run` were NOT run** — same missing-binaries limitation
+  as the backup-monitoring work. The 5 new tests and the `dataQualityChecks.ts` edit are
+  **unverified** until run on the prod box.
+- ❌ **The check has never actually run in production.** Until `pm2 reload
+  ecosystem.config.cjs` happens on the real host, `deploy-drift` will (correctly) report `fail`
+  — "checker has never run."
+
+**Deliberately not attempted this session, and why** (raised when the user asked to "implement
+all" of an earlier architecture review):
+
+- **`knowable_at` point-in-time-correctness migration** — touches 200+ tables including
+  compressed hypertables (a predicate-wide `ADD CONSTRAINT` can fail or destroy compression on
+  those); needs an owner decision and a live per-table analysis, neither possible from this
+  machine. Writing it blind is exactly the "evidence-shaped but meaningless artifact" class
+  `recurring-bugs.md` warns about.
+- **Consolidating six dashboard shells to one** — a real product decision (which shell has real
+  users), not a mechanical refactor; `CLAUDE.md` explicitly warns against assuming.
+- **A declarative `FetcherSpec` framework across ~140 fetchers** — too large a blast radius for
+  a single session without the ability to run the fetchers' own tests against a real Postgres
+  instance here.
+- **Cost-aware backtest runs on the two live measurement leads** — needs live Postgres + pandas,
+  neither available on this machine; must run on the prod box.
+- **Containerizing the 4 app services (Dockerfiles)** — additive and lower-risk than the above,
+  but no Docker daemon here to validate a build; deferred rather than committing an unbuilt,
+  unverified Dockerfile.
+
 ## 2026-08-19 (cont.) — SQLite decommission Phase 3 Python: DONE
 
 `use_postgres()`'s pytest-only carve-out (`sql_translate.py`) is removed — it now returns `True`
@@ -47,8 +125,72 @@ lifecycle, `db_compat` reload-to-rebind). **Run the full suite
 Also from earlier in this session (greenfield Phase 2, prior to the migration work): added
 `transfer-analyst-estimates.ts` and `transfer-insider-activity.ts` data adapters
 (`greenfield/packages/ingestion/src/stage3/`) plus their `stage3-repo.ts`/`legacy-repo.ts`
-support functions. **Not yet wired into `ecosystem.config.cjs`** — no pm2 cron entries added for
-`gf-analyst-estimates-weekly`/`gf-insider-activity-weekly` this session; still pending.
+support functions. ⚠ **Correction:** an earlier revision of this entry said the pm2 cron entries
+were "still pending." That was wrong — `gf-analyst-estimates-weekly` (06:00 UTC Sat) and
+`gf-insider-activity-weekly` (06:30 UTC Sat) were already present in `ecosystem.config.cjs` and
+verified by loading the config (`node -e "require('./ecosystem.config.cjs')"`). The claim was
+repeated from a working note instead of checked against the file — the exact failure this repo's
+own MASTER RULE exists to prevent.
+
+## 2026-08-19 (cont. 2) — the Postgres backup had never run once; scheduled + verified + monitored
+
+**`scripts/backup_pg.py` was referenced by nothing.** Not `queues.ts`, not `jobRegistry.ts`, not
+`ecosystem.config.cjs` — verified by grep across `.ts`/`.cjs`/`.mjs`/`.json`. It shipped with P5
+hardening, is well-built (it correctly wraps `pg_restore` in
+`timescaledb_pre_restore()`/`_post_restore()`, without which hypertable chunk metadata is
+corrupted on restore), and had **never executed on a schedule**. For a single-box deployment that
+is the entire recovery story.
+
+**Why no existing check could have found it:** every one of the ~150 data-quality checks reads a
+data table. A backup that never runs leaves no trace in any table — it is invisible by
+construction, not by oversight. Same family as `recurring-bugs.md`'s "a fresh table is not a
+delivered feature," one level up: *an unscheduled script is indistinguishable from no script.*
+
+Three changes, one gap:
+
+1. **`scripts/backup_pg.py`** — now verifies the dump at WRITE time (`pg_restore --list` against
+   the file just written, plus a `TABLE DATA` presence assertion) and deletes it if unreadable.
+   `pg_dump` can exit 0 having produced a truncated file when the disk fills mid-write, and
+   restore day is the worst possible moment to discover that. Also stamps
+   `job_heartbeat('pg-backup')` — never raising, since a DB blip must not turn a successful dump
+   into a failed exit code. `BACKUP_DIR` is now `PG_BACKUP_DIR`-overridable with an in-file note
+   that a dump on the same disk as the database survives corruption and deletion but **not disk
+   or host loss**, which are the failure modes a single box actually faces.
+2. **`ecosystem.config.cjs`** — `pg-backup-nightly`, 20:00 UTC (01:30 IST) daily, after
+   ml-daily-ops' chain finishes writing; 1h `kill_timeout`, `autorestart: false`, `VENV_PY`.
+3. **`dataQualityChecks.ts`** — `pg-backup-recency` (new `infra` category, `critical: true`).
+   Deliberately **not** `tradingDaysStale`: the DB accumulates rows 24/7 and a Saturday disk loss
+   costs exactly as much as a Tuesday one. Distinguishes four states — never ran / ran but never
+   succeeded / stale / recent-success-but-latest-run-failed — because the last of those is the
+   dangerous middle state a simple freshness check reads as `pass`.
+
+**Verification — partial, and here is exactly what was and was not run.** This machine is **not
+the production host**: no Docker daemon, nothing listening on 5433, no `pm2`, no
+`backend-python/venv`, no `psycopg2`/`pandas`, and `node_modules` has no `tsc`/`vitest`
+(production is the Windows/WSL2 box per `ecosystem.config.cjs`'s `isWin` and the `.wslconfig`
+tuning in `docker-compose.yml`). So:
+
+- ✅ `python3 -m py_compile scripts/backup_pg.py` — passes.
+- ✅ `ecosystem.config.cjs` loaded via `node -e require(...)` — parses, 13 apps,
+  `pg-backup-nightly` resolves to the right script/cron/`autorestart:false`.
+- ✅ Checked the two existing assertions on the check list (`>= 55`, and `results.length ===
+  DATA_QUALITY_CHECKS.length`) — both safe with one more check added. Confirmed `category` is not
+  switched on exhaustively anywhere outside `dataQualityChecks.ts` before adding `infra`.
+- ❌ **`npx tsc --noEmit` and `npx vitest run` were NOT run.** The 7 new tests in
+  `dataQualityChecks.test.ts` are **unverified**, and so is the TS edit. **Run both on the prod
+  box before trusting any of this.**
+- ❌ **`backup_pg.py` has still never actually executed.** Until `pm2 reload ecosystem.config.cjs`
+  is run there and a first backup completes, `pg-backup-recency` will (correctly) report `fail`.
+  **An untested backup is a belief, not a backup** — do one real `--restore` drill into a
+  throwaway database before treating this as closed.
+
+**Stale-advice correction recorded here because it cost time this session:** a "make it
+production grade" review proposed inverting monitoring from table-freshness toward
+feature-delivery. That is **already implemented** — `technical-signals-feature-coverage` (generic,
+via `jsonb_each` over the row, so it cannot miss a column nobody remembered to enumerate) plus
+`trendlyne-per-symbol-fetcher-coverage`, whose comment already documents both false-alarm
+directions it was tuned through. The recommendation was made from absence of memory rather than
+a grep, and was wrong.
 
 ## 2026-08-17 (cont. 3) — `/weekend-audit`, week 34 rotation group 4, first real Lane 5 drive
 

@@ -509,6 +509,131 @@ describe('runDataQualityChecks (orchestration)', () => {
   });
 });
 
+// ── pg-backup-recency ────────────────────────────────────────────────────────────────
+// scripts/backup_pg.py existed since P5 hardening but was scheduled NOWHERE, so it had never
+// run — and no check could reveal that, because a backup leaves no trace in any data table.
+// The "never ran" case below is the one that was live until 2026-08-19; it must be a hard
+// fail, not a pass-by-absence, or this check reproduces the very blind spot it exists to close.
+describe('pg-backup-recency', () => {
+  const byId = (id: string) => DATA_QUALITY_CHECKS.find(c => c.id === id)!;
+  const now = new Date('2026-08-19T12:00:00Z');
+  const daysAgo = (n: number) => new Date(now.getTime() - n * 86_400_000).toISOString();
+
+  it('is critical — it is the only check watching whether the data still exists at all', () => {
+    expect(byId('pg-backup-recency').critical).toBe(true);
+  });
+
+  it('FAILS when no heartbeat row exists (the never-scheduled case, live until 2026-08-19)', () => {
+    const r = byId('pg-backup-recency').evaluate(undefined, now);
+    expect(r.status).toBe('fail');
+    expect(r.detail).toMatch(/never run/i);
+  });
+
+  it('FAILS when the job has run but never once succeeded', () => {
+    const r = byId('pg-backup-recency').evaluate(
+      { last_status: 'failed', last_run_at: daysAgo(0.5), last_success_at: null, last_error: 'disk full' },
+      now,
+    );
+    expect(r.status).toBe('fail');
+    expect(r.detail).toMatch(/NEVER succeeded/i);
+    expect(r.detail).toMatch(/disk full/);
+  });
+
+  it('passes on a fresh verified backup', () => {
+    const r = byId('pg-backup-recency').evaluate(
+      { last_status: 'success', last_run_at: daysAgo(0.4), last_success_at: daysAgo(0.4), last_error: null },
+      now,
+    );
+    expect(r.status).toBe('pass');
+  });
+
+  it('warns after one missed nightly run, fails after three', () => {
+    const check = byId('pg-backup-recency');
+    const at = (d: number) => check.evaluate(
+      { last_status: 'success', last_run_at: daysAgo(d), last_success_at: daysAgo(d), last_error: null },
+      now,
+    ).status;
+    expect(at(2.5)).toBe('warn');
+    expect(at(4)).toBe('fail');
+  });
+
+  it('warns when a verified backup is recent but the LATEST run failed', () => {
+    // The dangerous middle state: yesterday's dump is fine, tonight's silently broke. Without
+    // this branch the check reads 'pass' and the failure is invisible until the gap widens.
+    const r = byId('pg-backup-recency').evaluate(
+      { last_status: 'failed', last_run_at: daysAgo(0.2), last_success_at: daysAgo(1.2),
+        last_error: 'pg_restore --list failed (corrupt dump?)' },
+      now,
+    );
+    expect(r.status).toBe('warn');
+    expect(r.detail).toMatch(/MOST RECENT run failed/);
+  });
+
+  it('does NOT weekend-adjust — a Saturday disk loss costs as much as a Tuesday one', () => {
+    // Deliberately not tradingDaysStale(): the DB accumulates rows 24/7. If this ever gets
+    // "fixed" to be trading-day-aware, a Fri→Mon outage would read as ~1 day and pass.
+    const monday = new Date('2026-08-17T03:10:00Z');           // Monday
+    const r = byId('pg-backup-recency').evaluate(
+      { last_status: 'success', last_run_at: '2026-08-13T20:00:00Z',
+        last_success_at: '2026-08-13T20:00:00Z', last_error: null },
+      monday,
+    );
+    expect(r.status).toBe('fail');
+  });
+});
+
+// ── deploy-drift ─────────────────────────────────────────────────────────────────────
+// scripts/check_deploy_drift.mjs does the git/pm2 comparison and stamps job_heartbeat;
+// this check only reads that row. "server N commits behind HEAD" (AF-14) was always caught
+// by a human noticing, never by a check — these pin that a stale/missing heartbeat is
+// itself a failure, not a silent pass, since that's the exact shape the gap had.
+describe('deploy-drift', () => {
+  const byId = (id: string) => DATA_QUALITY_CHECKS.find(c => c.id === id)!;
+  const now = new Date('2026-08-20T12:00:00Z');
+  const minsAgo = (n: number) => new Date(now.getTime() - n * 60_000).toISOString();
+
+  it('is critical — a merged fix that was never deployed reads as resolved everywhere but production', () => {
+    expect(byId('deploy-drift').critical).toBe(true);
+  });
+
+  it('FAILS when the checker has never run (no heartbeat row)', () => {
+    const r = byId('deploy-drift').evaluate(undefined, now);
+    expect(r.status).toBe('fail');
+    expect(r.detail).toMatch(/never run/i);
+  });
+
+  it('FAILS when the checker itself has stopped running, not just found drift', () => {
+    // Scheduled every 15 min; a run from 2 days ago means the checker is dead, which is
+    // worse than a drift finding and must not be masked by a stale 'success' status.
+    const r = byId('deploy-drift').evaluate(
+      { last_status: 'success', last_run_at: minsAgo(2 * 24 * 60), last_success_at: minsAgo(2 * 24 * 60), last_error: null },
+      now,
+    );
+    expect(r.status).toBe('fail');
+    expect(r.detail).toMatch(/stopped/i);
+  });
+
+  it('FAILS with the recorded reason when the last run found real drift', () => {
+    const r = byId('deploy-drift').evaluate(
+      { last_status: 'failed', last_run_at: minsAgo(5), last_success_at: minsAgo(45),
+        last_error: 'HEAD (abc123def456, committed 2026-08-20T10:00:00.000Z) is newer than ' +
+                    'bharat-server\'s last restart (2026-08-19T18:00:00.000Z) by 16.0h. ' +
+                    'Run: pm2 restart bharat-server.' },
+      now,
+    );
+    expect(r.status).toBe('fail');
+    expect(r.detail).toMatch(/pm2 restart bharat-server/);
+  });
+
+  it('passes when the last run succeeded recently', () => {
+    const r = byId('deploy-drift').evaluate(
+      { last_status: 'success', last_run_at: minsAgo(5), last_success_at: minsAgo(5), last_error: null },
+      now,
+    );
+    expect(r.status).toBe('pass');
+  });
+});
+
 // ── Regression guards for the four defects the 2026-08-11 audit found live ────────────
 // Each was invisible for weeks because the table was fresh and full the whole time -- just
 // full of the wrong rows. Freshness checks cannot catch any of them, which is why these

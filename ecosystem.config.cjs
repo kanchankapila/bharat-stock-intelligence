@@ -186,5 +186,49 @@ module.exports = {
         OLD_DATABASE_URL: dotenvVars.DATABASE_URL,
       },
     },
+
+    // ------------------------------------------------------------------
+    // Postgres logical backup (one-shot nightly)
+    // ------------------------------------------------------------------
+    // scripts/backup_pg.py existed since P5 hardening but was referenced by NOTHING —
+    // not queues.ts, not jobRegistry.ts, not this file — so it had never run on a
+    // schedule. An unscheduled backup script is indistinguishable from no backup.
+    // It stamps job_heartbeat('pg-backup'), which dataQualityChecks' 'pg-backup-recency'
+    // watches, so a silently-failing backup now surfaces the same day rather than on
+    // restore day.
+    {
+      ...gfCron,
+      name: 'pg-backup-nightly',
+      // 20:00 UTC = 01:30 IST — after ml-daily-ops' chain has finished writing.
+      cron_restart: '0 20 * * *',
+      kill_timeout: 3_600_000,  // 1h — a full -Fc dump of a multi-GB TimescaleDB instance
+      interpreter: VENV_PY,
+      script: path.resolve(__dirname, 'scripts', 'backup_pg.py'),
+      args: '',
+      env: { ...dotenvVars, PYTHONUNBUFFERED: '1' },
+    },
+
+    // ------------------------------------------------------------------
+    // Deploy-drift check (every 15 min)
+    // ------------------------------------------------------------------
+    // "server N commits behind HEAD" is a recurring audit finding (AF-14) -- .ts is not
+    // hot-reloaded, so a `git pull` landing a fix does nothing until `pm2 restart
+    // bharat-server` runs, and nothing previously checked whether that step actually
+    // happened. Plain node, not tsx -- no TypeScript to compile, keeps this check able to
+    // run even if a bad deploy broke the build.
+    {
+      name: 'deploy-drift-check',
+      autorestart: false,
+      exec_mode: 'fork',
+      interpreter: 'node',
+      script: path.resolve(__dirname, 'scripts', 'check_deploy_drift.mjs'),
+      cron_restart: '*/15 * * * *',
+      kill_timeout: 30_000,
+      env: { ...dotenvVars },
+      out_file: path.resolve(__dirname, 'logs', 'pm2-out.log'),
+      error_file: path.resolve(__dirname, 'logs', 'pm2-err.log'),
+      merge_logs: true,
+      time: true,
+    },
   ],
 };

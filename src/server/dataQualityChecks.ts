@@ -29,7 +29,11 @@ export interface DataQualityCheck {
     | 'options' | 'flows' | 'outcomes' | 'reference' | 'macro'
     // 'meta' = checks ABOUT the check suite itself (new-failure transitions, unvarying
     // verdicts) rather than about a data table. Added 2026-08-15 with dq-new-failures.
-    | 'meta';
+    | 'meta'
+    // 'infra' = platform survivability rather than data correctness (backups, disk, deploy
+    // drift). Distinct from 'meta' because these are real operational facts, not statements
+    // about the checks. Added 2026-08-19 with pg-backup-recency.
+    | 'infra';
   critical: boolean;
   sql: string;
   params?: unknown[];
@@ -1922,6 +1926,121 @@ export const DATA_QUALITY_CHECKS: DataQualityCheck[] = [
       if (dead > 65) return { status: 'fail', detail: `${detail} That is well above the baseline — a feature writer has stopped landing on the grid.` };
       if (dead > 55) return { status: 'warn', detail: `${detail} Up from the baseline — check which writer regressed.` };
       return { status: 'pass', detail };
+    },
+  },
+
+  {
+    id: 'pg-backup-recency',
+    label: 'Postgres logical backup ran, and the dump it wrote was readable',
+    category: 'infra',
+    // critical: a single-box deployment's entire recovery story. Everything else in this file
+    // watches whether the data is CORRECT; this is the only one watching whether it still
+    // EXISTS after a disk loss.
+    critical: true,
+    // scripts/backup_pg.py shipped with P5 hardening and was then referenced by nothing --
+    // not queues.ts, not jobRegistry.ts, not ecosystem.config.cjs. It had never run on a
+    // schedule, and no check could have revealed that, because a backup leaves no trace in
+    // any data table. Scheduled 2026-08-19 as pm2's `pg-backup-nightly`; this check is the
+    // other half, since a scheduled-but-silently-failing backup is the same outcome.
+    //
+    // NOT tradingDaysStale: the database accumulates rows 24/7 (confluence_signals refreshes
+    // every 30 min year-round) and a weekend disk loss costs exactly as much as a weekday one.
+    // Backups are one of the few genuinely 7-day-cadence things here.
+    //
+    // backup_pg.py records success only AFTER verifying the dump's TOC with `pg_restore
+    // --list`, so last_success_at means "a readable dump exists", not merely "pg_dump exited
+    // 0" -- pg_dump can exit 0 having written a truncated file when the disk fills mid-write.
+    sql: `SELECT last_status, last_error,
+                 to_timestamp(last_run_at/1000)     AS last_run_at,
+                 to_timestamp(last_success_at/1000) AS last_success_at
+            FROM job_heartbeat
+           WHERE job_name = 'pg-backup'`,
+    evaluate: (row, now) => {
+      if (!row) {
+        return {
+          status: 'fail',
+          detail: 'No pg-backup heartbeat row has ever been written — the nightly backup has ' +
+                  'never run. Check that pm2 has `pg-backup-nightly` registered ' +
+                  '(`pm2 describe pg-backup-nightly`) and that ecosystem.config.cjs was reloaded.',
+        };
+      }
+      const sinceSuccess = daysStale(row.last_success_at, now);
+      if (sinceSuccess == null) {
+        return {
+          status: 'fail',
+          detail: `pg-backup has run (last_run_at ${row.last_run_at ?? 'unknown'}) but has NEVER ` +
+                  `succeeded. Last error: ${row.last_error ?? 'none recorded'}`,
+        };
+      }
+      const d = sinceSuccess.toFixed(1);
+      // The job is nightly, so >2d means at least one full run was missed or failed.
+      if (sinceSuccess > 3) {
+        return {
+          status: 'fail',
+          detail: `Last verified Postgres backup was ${d} days ago. Recovery point is now ${d} ` +
+                  `days of data. Last status '${row.last_status}'` +
+                  (row.last_error ? `: ${String(row.last_error).slice(0, 300)}` : '.'),
+        };
+      }
+      if (sinceSuccess > 2) {
+        return {
+          status: 'warn',
+          detail: `Last verified Postgres backup was ${d} days ago on a nightly schedule — one run ` +
+                  `was missed or failed. Last status '${row.last_status}'.`,
+        };
+      }
+      if (row.last_status !== 'success') {
+        return {
+          status: 'warn',
+          detail: `A verified backup exists from ${d} days ago, but the MOST RECENT run failed: ` +
+                  `${String(row.last_error ?? '').slice(0, 300)}`,
+        };
+      }
+      return { status: 'pass', detail: `Verified backup ${d} days old (TOC readable at write time).` };
+    },
+  },
+
+  {
+    id: 'deploy-drift',
+    label: 'bharat-server was restarted at or after the current git HEAD commit',
+    category: 'infra',
+    // critical: a merged fix that was never deployed is worse than no fix -- it reads as
+    // resolved everywhere except in the one place that matters.
+    critical: true,
+    // scripts/check_deploy_drift.mjs does the actual git/pm2 comparison (it needs `git log`
+    // and `pm2 jlist`, neither of which belongs behind a SQL query) and stamps this row.
+    // "server N commits behind HEAD" is a recurring audit finding (AF-14) -- always caught
+    // late by a human noticing, never by a check, because nothing compared the two before.
+    sql: `SELECT last_status, last_error,
+                 to_timestamp(last_run_at/1000)     AS last_run_at,
+                 to_timestamp(last_success_at/1000) AS last_success_at
+            FROM job_heartbeat
+           WHERE job_name = 'deploy-drift'`,
+    evaluate: (row, now) => {
+      if (!row) {
+        return {
+          status: 'fail',
+          detail: 'No deploy-drift heartbeat row has ever been written — the check has never run. ' +
+                  'Confirm pm2 has `deploy-drift-check` registered (`pm2 describe deploy-drift-check`).',
+        };
+      }
+      const sinceRun = daysStale(row.last_run_at, now);
+      if (sinceRun == null || sinceRun > 0.5) {
+        // Scheduled every 15 min; >12h since ANY run (success or fail) means the checker
+        // itself has stopped, which is worse than a drift finding — nothing is watching.
+        return {
+          status: 'fail',
+          detail: `deploy-drift-check has not run in ${sinceRun == null ? 'an unknown amount of time' : `${sinceRun.toFixed(1)} days`} ` +
+                  '— the checker itself appears to have stopped, not just found drift.',
+        };
+      }
+      if (row.last_status !== 'success') {
+        return {
+          status: 'fail',
+          detail: String(row.last_error ?? 'bharat-server is behind the current commit, or is not running.'),
+        };
+      }
+      return { status: 'pass', detail: 'bharat-server was last restarted at or after the current HEAD commit.' };
     },
   },
 
