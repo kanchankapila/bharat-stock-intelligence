@@ -46,9 +46,9 @@ $PY = Get-Content "graphify-out/.graphify_python"
 & $PY -m graphify update .               # after significant changes
 ```
 
-~16.1k nodes / 25.5k edges over ~1359 files (rebuilt 2026-08-16 at `e7d77006`). Check `graphify-out/GRAPH_REPORT.md`'s freshness hash against `git rev-parse HEAD` before trusting it — it drifted 330 files behind in five days.
+~16.3k nodes / 25.9k edges over ~1374 files (rebuilt 2026-08-19 at `5aa2270f`). Check `graphify-out/GRAPH_REPORT.md`'s freshness hash against `git rev-parse HEAD` before trusting it — it drifted 330 files behind in five days once already, and these counts themselves go stale the moment the graph is next rebuilt.
 
-Updating is **free** (local AST extraction, 0 tokens) — run it, don't ration it. `graph.html` is no longer emitted: 16.1k nodes is over the 5,000-node viz cap, which is expected and exits 0. `query`/`path`/`explain` are the interface.
+Updating is **free** (local AST extraction, 0 tokens) — run it, don't ration it. `graph.html` is no longer emitted: 16k+ nodes is over the 5,000-node viz cap, which is expected and exits 0. `query`/`path`/`explain` are the interface.
 
 ## Services
 
@@ -90,7 +90,7 @@ Component/procedure/table inventories are deliberately **not** listed here — t
 
 ## Frontend versions
 
-Six dashboards coexist in one app, no separate build. `App.tsx`'s `dashboardVersion` (localStorage) selects; **fallback is `v6`** — that's what a fresh visitor lands on.
+Six dashboards coexist in one app, no separate build. `App.tsx`'s `dashboardVersion` (localStorage) picks among **v1/v2/v3/v6 only** — fallback is `v6` (that's what a fresh visitor lands on). v4 and v5 aren't `dashboardVersion` values; see their rows below for how each is actually reached.
 
 | | Shell | Notes |
 |---|---|---|
