@@ -377,6 +377,7 @@
 
 .v5-mini-fill-teal { background: var(--v5-positive-bright); }
 .v5-mini-fill-rose { background: var(--v5-negative-bright); }
+.v5-mini-fill-neutral { background: var(--v5-muted, #64748b); }
 .v5-mini-fill-sky { background: var(--v5-sky); }
 .v5-mini-fill-indigo { background: var(--v5-indigo); }
 .v5-mini-fill-amber { background: var(--v5-amber-bright); }

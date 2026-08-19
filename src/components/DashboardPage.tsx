@@ -475,9 +475,10 @@ const DashboardPage: React.FC<DashboardPageProps> = ({
     }));
   }, [vixResult]);
 
+  const vixChangeKnown = vixResult?.change_per != null;
   const vixTrending = (vixResult?.change_per ?? 0) >= 0;
   // Falling VIX is bullish (emerald), Rising VIX is bearish (rose)
-  const vixColor = !vixTrending ? emerald : rose;
+  const vixColor = !vixChangeKnown ? '#64748b' : !vixTrending ? emerald : rose;
 
   const vixMin = vixGraphData.length ? Math.min(...vixGraphData.map(d => d.value)) * 0.98 : 'auto';
   const vixMax = vixGraphData.length ? Math.max(...vixGraphData.map(d => d.value)) * 1.02 : 'auto';

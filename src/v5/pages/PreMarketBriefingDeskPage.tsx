@@ -138,8 +138,8 @@ export function PreMarketBriefingDeskPage() {
   ];
 
   const flowBars = [
-    { label: 'FII Net', value: fii?.close ?? null, colorClass: (fii?.close ?? 0) >= 0 ? 'v5-mini-fill-teal' : 'v5-mini-fill-rose' },
-    { label: 'DII Net', value: dii?.close ?? null, colorClass: (dii?.close ?? 0) >= 0 ? 'v5-mini-fill-teal' : 'v5-mini-fill-rose' },
+    { label: 'FII Net', value: fii?.close ?? null, colorClass: fii?.close == null ? 'v5-mini-fill-neutral' : fii.close >= 0 ? 'v5-mini-fill-teal' : 'v5-mini-fill-rose' },
+    { label: 'DII Net', value: dii?.close ?? null, colorClass: dii?.close == null ? 'v5-mini-fill-neutral' : dii.close >= 0 ? 'v5-mini-fill-teal' : 'v5-mini-fill-rose' },
   ];
 
   const marketTiles = tiles.filter((t) => ['Pre-Open', 'Global Indices', 'Volatility', 'FX', 'Commodities', 'Flows'].includes(s(t.group)));

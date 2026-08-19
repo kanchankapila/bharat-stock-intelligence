@@ -48,16 +48,16 @@ export function InstitutionalFlowDeskPage() {
   }), [rows]);
 
   const bars = [
-    { label: 'FII Net', value: fiiNet, colorClass: fiiNet != null && fiiNet < 0 ? 'v5-mini-fill-rose' : 'v5-mini-fill-teal' },
-    { label: 'DII Net', value: diiNet, colorClass: diiNet != null && diiNet < 0 ? 'v5-mini-fill-rose' : 'v5-mini-fill-teal' },
-    { label: 'Net', value: net, colorClass: net < 0 ? 'v5-mini-fill-rose' : 'v5-mini-fill-teal' },
+    { label: 'FII Net', value: fiiNet, colorClass: fiiNet == null ? 'v5-mini-fill-neutral' : fiiNet < 0 ? 'v5-mini-fill-rose' : 'v5-mini-fill-teal' },
+    { label: 'DII Net', value: diiNet, colorClass: diiNet == null ? 'v5-mini-fill-neutral' : diiNet < 0 ? 'v5-mini-fill-rose' : 'v5-mini-fill-teal' },
+    { label: 'Net', value: net, colorClass: net == null ? 'v5-mini-fill-neutral' : net < 0 ? 'v5-mini-fill-rose' : 'v5-mini-fill-teal' },
   ];
 
   const kpis = [
     { label: 'Latest Date', value: s(latest?.date, '—') },
-    { label: 'FII Net', value: signedCr(fiiNet), tone: fiiNet != null && fiiNet < 0 ? 'negative' as const : 'positive' as const },
-    { label: 'DII Net', value: signedCr(diiNet), tone: diiNet != null && diiNet < 0 ? 'negative' as const : 'positive' as const },
-    { label: 'Combined Net', value: signedCr(net), tone: net < 0 ? 'negative' as const : 'positive' as const },
+    { label: 'FII Net', value: signedCr(fiiNet), tone: fiiNet == null ? 'neutral' as const : fiiNet < 0 ? 'negative' as const : 'positive' as const },
+    { label: 'DII Net', value: signedCr(diiNet), tone: diiNet == null ? 'neutral' as const : diiNet < 0 ? 'negative' as const : 'positive' as const },
+    { label: 'Combined Net', value: signedCr(net), tone: net == null ? 'neutral' as const : net < 0 ? 'negative' as const : 'positive' as const },
   ];
 
   const institutionalDetails = (detailsQ.data as any)?.data?.institutionalDetails ?? [];

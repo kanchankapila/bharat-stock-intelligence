@@ -236,7 +236,7 @@ const PremiumScreenersPage: React.FC<PremiumScreenersPageProps> = ({ onSelectSto
               {stocks.map((stock) => {
                 const nse = resolveNseSymbol(stock);
                 const returns = extractReturns(stock);
-                const positive = (stock.changePercent || 0) >= 0;
+                const positive = stock.changePercent == null ? null : stock.changePercent >= 0;
                 return (
                   <div
                     key={`${stock.stockId}-${stock.name}`}
@@ -251,8 +251,8 @@ const PremiumScreenersPage: React.FC<PremiumScreenersPageProps> = ({ onSelectSto
                         <div className="text-[12px] font-black text-white uppercase tracking-wide whitespace-normal break-words leading-tight">{stock.name}</div>
                         <div className="text-[10px] text-slate-400 font-mono mt-1">{nse || stock.stockId}</div>
                       </div>
-                      <div className={cn('text-[11px] font-black', positive ? 'text-emerald-400' : 'text-rose-400')}>
-                        {positive ? '+' : ''}{(stock.changePercent || 0).toFixed(2)}%
+                      <div className={cn('text-[11px] font-black', positive == null ? 'text-slate-400' : positive ? 'text-emerald-400' : 'text-rose-400')}>
+                        {stock.changePercent == null ? '—' : `${positive ? '+' : ''}${stock.changePercent.toFixed(2)}%`}
                       </div>
                     </div>
 
@@ -270,8 +270,8 @@ const PremiumScreenersPage: React.FC<PremiumScreenersPageProps> = ({ onSelectSto
                     <div className="mt-3 rounded-lg border border-slate-800/60 bg-slate-950/35 p-2">
                       <div className="text-[9px] text-slate-500 uppercase tracking-widest mb-1">Price Performance Durations</div>
                       <div className="flex flex-wrap gap-2">
-                        <span className={cn('text-[10px] font-bold', positive ? 'text-emerald-400' : 'text-rose-400')}>
-                          1D: {positive ? '+' : ''}{(stock.changePercent || 0).toFixed(2)}%
+                        <span className={cn('text-[10px] font-bold', positive == null ? 'text-slate-400' : positive ? 'text-emerald-400' : 'text-rose-400')}>
+                          1D: {stock.changePercent == null ? '—' : `${positive ? '+' : ''}${stock.changePercent.toFixed(2)}%`}
                         </span>
                         {returns.map((r) => (
                           <span key={r.label} className={cn('text-[10px] font-bold', r.value >= 0 ? 'text-emerald-400' : 'text-rose-400')}>

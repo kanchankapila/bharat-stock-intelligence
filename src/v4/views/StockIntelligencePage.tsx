@@ -1016,7 +1016,7 @@ const StockHeaderCard: React.FC<{
   const { data: fundamentals } = trpc.getStockFundamentals.useQuery({ symbol }, { enabled: !!symbol });
 
   const tagData = predictions ? { ...predictions, fcf_yield: (predictions as any).fcf_yield_approx } : {};
-  const isUp = (quote?.changePct ?? 0) >= 0;
+  const isUp = quote?.changePct == null ? null : quote.changePct >= 0;
 
   return (
     <div className="rounded-2xl border border-slate-800 bg-gradient-to-br from-slate-900/80 to-slate-950/60 p-4 space-y-3">
@@ -1043,8 +1043,8 @@ const StockHeaderCard: React.FC<{
           {quote?.price != null && (
             <div className="text-right">
               <div className="text-xl font-black font-mono text-slate-100">₹{fmt(quote.price, 2)}</div>
-              <div className={cn('flex items-center justify-end gap-1 text-xs font-bold', isUp ? 'text-emerald-400' : 'text-rose-400')}>
-                {isUp ? <ArrowUpRight className="w-3 h-3" /> : <ArrowDownRight className="w-3 h-3" />}
+              <div className={cn('flex items-center justify-end gap-1 text-xs font-bold', isUp == null ? 'text-slate-400' : isUp ? 'text-emerald-400' : 'text-rose-400')}>
+                {isUp != null && (isUp ? <ArrowUpRight className="w-3 h-3" /> : <ArrowDownRight className="w-3 h-3" />)}
                 {fmt(quote.change, 2)} ({fmt(quote.changePct, 2)}%)
               </div>
               <PriceFreshnessBadge updatedAt={quoteUpdatedAt} thresholdMs={90_000} label="price" className="block mt-0.5" />

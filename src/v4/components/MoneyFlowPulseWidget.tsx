@@ -44,13 +44,13 @@ export const MoneyFlowPulseWidget: React.FC = () => {
         <div className="flex items-center gap-4">
           <div className="flex-1 grid grid-cols-2 gap-3">
             <div>
-              <div className={cn('text-sm font-mono font-bold', (latest.fii_net ?? 0) >= 0 ? 'text-emerald-400' : 'text-rose-400')}>
+              <div className={cn('text-sm font-mono font-bold', latest.fii_net == null ? 'text-slate-400' : latest.fii_net >= 0 ? 'text-emerald-400' : 'text-rose-400')}>
                 {crFmt(latest.fii_net)}
               </div>
               <div className="text-[9px] text-slate-500 uppercase tracking-widest mt-0.5">FII Net (latest)</div>
             </div>
             <div>
-              <div className={cn('text-sm font-mono font-bold', (latest.dii_net ?? 0) >= 0 ? 'text-emerald-400' : 'text-rose-400')}>
+              <div className={cn('text-sm font-mono font-bold', latest.dii_net == null ? 'text-slate-400' : latest.dii_net >= 0 ? 'text-emerald-400' : 'text-rose-400')}>
                 {crFmt(latest.dii_net)}
               </div>
               <div className="text-[9px] text-slate-500 uppercase tracking-widest mt-0.5">DII Net (latest)</div>

@@ -224,10 +224,10 @@ export const V1StockDetails: React.FC<{
                       <span className="text-2xl font-black text-white tabular-nums">₹{stock?.price?.toLocaleString() ?? '—'}</span>
                       <span className={cn(
                         "font-bold text-sm flex items-center gap-1",
-                        (stock?.changePct ?? 0) >= 0 ? "text-emerald-400" : "text-rose-400"
+                        stock?.changePct == null ? "text-slate-400" : stock.changePct >= 0 ? "text-emerald-400" : "text-rose-400"
                       )}>
-                        {(stock?.changePct ?? 0) >= 0 ? <TrendingUp className="w-4 h-4" /> : <TrendingDown className="w-4 h-4" />}
-                        {(stock?.changePct ?? 0) >= 0 ? '+' : ''}{stock?.changePct ?? 0}%
+                        {stock?.changePct != null && (stock.changePct >= 0 ? <TrendingUp className="w-4 h-4" /> : <TrendingDown className="w-4 h-4" />)}
+                        {stock?.changePct == null ? '—' : `${stock.changePct >= 0 ? '+' : ''}${stock.changePct}%`}
                       </span>
                     </>
               }
@@ -334,7 +334,7 @@ export const V1StockDetails: React.FC<{
               <Card title="Market Sentiment Summary" icon={Info}>
                    <div className="space-y-4">
                       <p className="text-xs text-slate-400 leading-relaxed italic">
-                        {stock?.name ?? displayName} is currently showing a {(stock?.changePct ?? 0) > 0 ? 'bullish' : 'bearish'} bias. The technical rating stands at <span className="text-slate-200 font-bold">{(unifiedData as any)?.technicalRating?.text || 'Neutral'}</span> with high institutional interest observed in recent sessions.
+                        {stock?.name ?? displayName} is currently showing a {stock?.changePct == null ? 'neutral' : stock.changePct > 0 ? 'bullish' : 'bearish'} bias. The technical rating stands at <span className="text-slate-200 font-bold">{(unifiedData as any)?.technicalRating?.text || 'Neutral'}</span> with high institutional interest observed in recent sessions.
                       </p>
                       <div className="flex gap-4">
                          <div className="flex-1 p-3 glass-strong rounded-xl border border-slate-800/50">
@@ -633,13 +633,13 @@ export const V1StockDetails: React.FC<{
                             <>
                               <div className="flex justify-between items-center p-3 glass-strong rounded-xl border border-slate-800/50">
                                  <span className="text-xs font-bold text-slate-400">Net FII Position</span>
-                                 <span className={cn("font-black", (latest?.fii_net ?? 0) >= 0 ? "text-emerald-400" : "text-rose-400")}>
+                                 <span className={cn("font-black", latest?.fii_net == null ? "text-slate-400" : latest.fii_net >= 0 ? "text-emerald-400" : "text-rose-400")}>
                                    {fmtCr(latest?.fii_net)}
                                  </span>
                               </div>
                               <div className="flex justify-between items-center p-3 glass-strong rounded-xl border border-slate-800/50">
                                  <span className="text-xs font-bold text-slate-400">DII Activity</span>
-                                 <span className={cn("font-black", (latest?.dii_net ?? 0) >= 0 ? "text-emerald-400" : "text-rose-400")}>
+                                 <span className={cn("font-black", latest?.dii_net == null ? "text-slate-400" : latest.dii_net >= 0 ? "text-emerald-400" : "text-rose-400")}>
                                    {fmtCr(latest?.dii_net)}
                                  </span>
                               </div>

@@ -47,7 +47,7 @@ export function WorkstationPage({
 
   const symbolBars = [
     { label: 'Unified', value: unifiedScore, colorClass: 'v5-mini-fill-indigo' },
-    { label: 'Day Chg', value: dayChangePct, colorClass: dayChangePct != null && dayChangePct < 0 ? 'v5-mini-fill-rose' : 'v5-mini-fill-teal', suffix: '%' },
+    { label: 'Day Chg', value: dayChangePct, colorClass: dayChangePct == null ? 'v5-mini-fill-neutral' : dayChangePct < 0 ? 'v5-mini-fill-rose' : 'v5-mini-fill-teal', suffix: '%' },
     { label: 'Win Prob', value: convictionProb == null ? null : convictionProb * 100, colorClass: 'v5-mini-fill-sky', suffix: '%' },
   ];
   const workstationInsights = [

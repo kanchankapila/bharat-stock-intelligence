@@ -3753,7 +3753,7 @@ export const MCStockInfoPanel: React.FC<MCStockInfoPanelProps> = ({
                                   {formatBuildUp(c.built_up)}
                                 </div>
                               </td>
-                              <td className={cn("py-2 px-2 font-mono tabular-nums", isCallItm ? "bg-blue-500/[0.01]" : "", (c.oi_changeP ?? 0) >= 0 ? "text-emerald-400" : "text-rose-400")}>
+                              <td className={cn("py-2 px-2 font-mono tabular-nums", isCallItm ? "bg-blue-500/[0.01]" : "", c.oi_changeP == null ? "text-slate-500" : c.oi_changeP >= 0 ? "text-emerald-400" : "text-rose-400")}>
                                 {c.oi_changeP != null ? `${c.oi_changeP >= 0 ? '+' : ''}${c.oi_changeP.toFixed(1)}%` : '—'}
                               </td>
                               <td className={cn("py-2 px-2 text-right text-slate-500 font-mono", isCallItm ? "bg-blue-500/[0.01]" : "")}>
@@ -3778,7 +3778,7 @@ export const MCStockInfoPanel: React.FC<MCStockInfoPanelProps> = ({
                               <td className={cn("py-2 px-2 text-slate-500 font-mono", isPutItm ? "bg-blue-500/[0.01]" : "")}>
                                 {p.iv != null ? `${p.iv.toFixed(1)}%` : '—'}
                               </td>
-                              <td className={cn("py-2 px-2 text-right font-mono tabular-nums", isPutItm ? "bg-blue-500/[0.01]" : "", (p.oi_changeP ?? 0) >= 0 ? "text-emerald-400" : "text-rose-400")}>
+                              <td className={cn("py-2 px-2 text-right font-mono tabular-nums", isPutItm ? "bg-blue-500/[0.01]" : "", p.oi_changeP == null ? "text-slate-500" : p.oi_changeP >= 0 ? "text-emerald-400" : "text-rose-400")}>
                                 {p.oi_changeP != null ? `${p.oi_changeP >= 0 ? '+' : ''}${p.oi_changeP.toFixed(1)}%` : '—'}
                               </td>
                               <td className={cn("py-2 px-3 text-slate-300 font-mono", isPutItm ? "bg-blue-500/[0.01]" : "")}>

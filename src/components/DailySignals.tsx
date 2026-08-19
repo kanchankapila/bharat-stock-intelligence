@@ -868,8 +868,8 @@ export function DailySignals({ onSelectStock, watchlist = [], onToggleWatchlist 
                           )}
                         </div>
                         <div className="flex items-center gap-1 shrink-0">
-                          <span className={cn('text-[9px] font-bold', (s.changePct ?? 0) >= 0 ? 'text-emerald-400' : 'text-rose-400')}>
-                            {(s.changePct ?? 0) >= 0 ? '+' : ''}{(s.changePct ?? 0).toFixed(1)}%
+                          <span className={cn('text-[9px] font-bold', s.changePct == null ? 'text-slate-500' : s.changePct >= 0 ? 'text-emerald-400' : 'text-rose-400')}>
+                            {s.changePct == null ? '—' : `${s.changePct >= 0 ? '+' : ''}${s.changePct.toFixed(1)}%`}
                           </span>
                           <span className={cn('text-[9px] font-black px-1 py-0.5 rounded',
                             s.score >= 7 ? 'bg-emerald-500/20 text-emerald-400' :
