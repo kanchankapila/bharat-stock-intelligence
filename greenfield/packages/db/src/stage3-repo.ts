@@ -206,6 +206,34 @@ export async function upsertFundamentalFact(client: pg.ClientBase, input: Fundam
   return (rowCount ?? 0) > 0;
 }
 
+// --- analyst_estimate (Phase 2) ---
+export interface AnalystEstimateInput {
+  symbol: string;
+  metric: string;
+  periodEnd: string;
+  source: string;
+  consensus: number | null;
+  high: number | null;
+  low: number | null;
+  analysts: number | null;
+  availableAt: string;
+  provenanceQuality: 'recorded' | 'inferred';
+  runId: string;
+}
+
+export async function upsertAnalystEstimate(client: pg.ClientBase, input: AnalystEstimateInput): Promise<boolean> {
+  const { rowCount } = await client.query(
+    `INSERT INTO analyst_estimate (symbol, metric, period_end, source, consensus, high, low, analysts, available_at, provenance_quality, run_id)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+     ON CONFLICT (symbol, metric, period_end, source, available_at) DO NOTHING`,
+    [
+      input.symbol, input.metric, input.periodEnd, input.source, input.consensus, input.high, input.low,
+      input.analysts, input.availableAt, input.provenanceQuality, input.runId,
+    ],
+  );
+  return (rowCount ?? 0) > 0;
+}
+
 export async function queryFundamentalCoveragePct(pool: pg.Pool): Promise<number> {
   const { rows } = await pool.query<{ pct: string }>(
     `SELECT round(100.0 * count(DISTINCT ff.symbol) / NULLIF(count(DISTINCT s.symbol), 0), 2)::text pct

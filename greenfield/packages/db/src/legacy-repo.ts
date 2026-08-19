@@ -120,6 +120,69 @@ export interface LegacyUnifiedRecommendationRow {
  * says, not a guarantee -- Task 5.3's comparison is explicitly descriptive
  * only, never a promotion criterion, precisely because of gaps like this one
  * in the old system's own provenance. */
+// --- Phase 2 legacy sources ---
+
+export interface LegacyMcAnalystRatingRow {
+  symbol: string;
+  final_rating: string | null;
+  analyst_count: number | null;
+  buy_count: number | null;
+  outperform_count: number | null;
+  hold_count: number | null;
+  underperform_count: number | null;
+  sell_count: number | null;
+  fetched_at: string;
+}
+
+export async function queryLegacyMcAnalystRatings(connectionString: string): Promise<LegacyMcAnalystRatingRow[]> {
+  return queryOldDb<LegacyMcAnalystRatingRow>(
+    connectionString,
+    `SELECT symbol, final_rating, analyst_count, buy_count, outperform_count, hold_count,
+            underperform_count, sell_count, fetched_at
+     FROM mc_analyst_ratings ORDER BY fetched_at`,
+  );
+}
+
+export interface LegacyMcPriceForecastRow {
+  symbol: string;
+  high: number | null;
+  mean: number | null;
+  low: number | null;
+  fetched_at: string;
+}
+
+export async function queryLegacyMcPriceForecast(connectionString: string): Promise<LegacyMcPriceForecastRow[]> {
+  return queryOldDb<LegacyMcPriceForecastRow>(
+    connectionString,
+    `SELECT symbol, high, mean, low, fetched_at FROM mc_price_forecast ORDER BY fetched_at`,
+  );
+}
+
+export interface LegacyInsiderTradeRow {
+  id: number;
+  symbol: string;
+  acquirer_name: string;
+  category: string;
+  type_of_transaction: string;
+  quantity: number;
+  value_inr: number;
+  date_iso: string;
+}
+
+/** Only rows with a valid date_iso (the 2026-07-30 fix backfilled most; a
+ * small residual without a parseable date is deliberately excluded rather
+ * than guessed from the raw `date` text column). */
+export async function queryLegacyInsiderTrades(connectionString: string): Promise<LegacyInsiderTradeRow[]> {
+  return queryOldDb<LegacyInsiderTradeRow>(
+    connectionString,
+    `SELECT id, symbol, "acquirerName" AS acquirer_name, category,
+            "typeOfTransaction" AS type_of_transaction, quantity, "valueInr" AS value_inr, date_iso
+     FROM insider_trades
+     WHERE date_iso IS NOT NULL AND date_iso ~ '^\\d{4}-\\d{2}-\\d{2}'
+     ORDER BY date_iso`,
+  );
+}
+
 export async function queryLegacyUnifiedRecommendationsForSession(
   connectionString: string, computedAt: string,
 ): Promise<LegacyUnifiedRecommendationRow[]> {

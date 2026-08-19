@@ -5,7 +5,7 @@
 import { afterEach, beforeEach, expect, test } from 'vitest';
 import pg from 'pg';
 import { bulkInsertRecommendations, closeRun, createPool, insertAuditMetric, insertDivergenceMetrics, openRun } from '@greenfield/db';
-import { checkDualRunDivergenceSane, checkPromotionNotPremature, checkShadowRankVariance } from './dq-checks.js';
+import { checkDualRunDivergenceSane, checkPromotionNotPremature, checkShadowRankVariance, checkShadowRecommendationFreshness } from './dq-checks.js';
 
 try {
   process.loadEnvFile();
@@ -200,4 +200,23 @@ test('dual-run-divergence-sane: info with a real recorded reading', async () => 
   const outcome = await checkDualRunDivergenceSane(pool, RANKER_VERSION);
   expect(outcome.status).toBe('info');
   expect(outcome.observed.rankCorrelation).toBeCloseTo(0.42, 5);
+}, 30_000);
+
+// --- shadow-recommendation-freshness ---
+
+test('shadow-recommendation-freshness: info when no recommendation rows exist yet', async () => {
+  const outcome = await checkShadowRecommendationFreshness(pool, RANKER_VERSION);
+  expect(outcome.checkId).toBe('shadow-recommendation-freshness');
+  expect(outcome.status).toBe('info');
+});
+
+test('shadow-recommendation-freshness: FAILS when recommendation is multiple sessions stale', async () => {
+  // 2021-01-04 is deep in the past -- regardless of whether trading_session
+  // is populated, either sessionsStale >= 2 (→ 'fail') or the table is empty
+  // (→ 'warn' because we can't count sessions). Either way it must not be 'info'.
+  await insertRecRow('2021-01-04', false);
+  const outcome = await checkShadowRecommendationFreshness(pool, RANKER_VERSION);
+  expect(outcome.checkId).toBe('shadow-recommendation-freshness');
+  expect(['warn', 'fail']).toContain(outcome.status);
+  expect(outcome.detail).toMatch(/stale|stale|empty|behind/i);
 }, 30_000);

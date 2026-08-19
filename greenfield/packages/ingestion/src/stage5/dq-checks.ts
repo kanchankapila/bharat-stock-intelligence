@@ -5,7 +5,8 @@
 import type pg from 'pg';
 import {
   insertDqResult, queryDqCheckSpec, queryLatestSessionScores, queryRecentDivergenceMetrics,
-  queryShadowPreregistration, queryShadowProgress, queryShadowProgressByRanker,
+  queryRecommendationFreshness, queryShadowPreregistration, queryShadowProgress,
+  queryShadowProgressByRanker,
 } from '@greenfield/db';
 
 export interface DqOutcome {
@@ -140,11 +141,48 @@ export async function checkDualRunDivergenceSane(pool: pg.Pool, rankerVersion: s
   };
 }
 
+/** Task 5.6 `shadow-recommendation-freshness`: did the cron job actually run
+ * today? Fires WARN after 1 skipped trading session, FAIL after 2+. Degrades
+ * to WARN (not FAIL) if the trading_session table is empty -- the Stage 2
+ * bhavcopy backfill populates it, so an empty table means the scheduler was
+ * never bootstrapped at all, not that the ranker missed a day. */
+export async function checkShadowRecommendationFreshness(pool: pg.Pool, rankerVersion: string): Promise<DqOutcome> {
+  const { latestRecSession, expectedSession, sessionsStale } = await queryRecommendationFreshness(pool, rankerVersion);
+
+  if (latestRecSession === null) {
+    return { checkId: 'shadow-recommendation-freshness', status: 'info', detail: 'no recommendation rows written yet', observed: {} };
+  }
+
+  if (sessionsStale === null) {
+    return {
+      checkId: 'shadow-recommendation-freshness', status: 'warn',
+      detail: `trading_session table is empty -- cannot verify trading-day-aware freshness; latest recommendation session is ${latestRecSession}`,
+      observed: { latestRecSession },
+    };
+  }
+
+  if (sessionsStale === 0) {
+    return {
+      checkId: 'shadow-recommendation-freshness', status: 'info',
+      detail: `up to date: latest recommendation session ${latestRecSession} matches expected ${expectedSession}`,
+      observed: { latestRecSession, expectedSession, sessionsStale },
+    };
+  }
+
+  const status = sessionsStale === 1 ? 'warn' : 'fail';
+  return {
+    checkId: 'shadow-recommendation-freshness', status,
+    detail: `latest recommendation session ${latestRecSession} is ${sessionsStale} trading session(s) behind expected ${expectedSession} -- gf-ranker-daily may not be running`,
+    observed: { latestRecSession, expectedSession, sessionsStale },
+  };
+}
+
 export async function evaluateAllStage5Checks(pool: pg.Pool, rankerVersion: string): Promise<DqOutcome[]> {
   return Promise.all([
     checkPromotionNotPremature(pool),
     checkShadowRankVariance(pool, rankerVersion),
     checkDualRunDivergenceSane(pool, rankerVersion),
+    checkShadowRecommendationFreshness(pool, rankerVersion),
   ]);
 }
 

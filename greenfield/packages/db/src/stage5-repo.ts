@@ -448,6 +448,53 @@ export async function queryAnyPublishableRecommendationExists(pool: pg.Pool): Pr
   return rows[0]?.exists ?? false;
 }
 
+export interface RecommendationFreshness {
+  latestRecSession: string | null;
+  expectedSession: string | null;
+  /** null when trading_session is empty (Stage 2 not yet run) */
+  sessionsStale: number | null;
+}
+
+/** Task 5.6 `shadow-recommendation-freshness`: how many trading sessions have
+ * passed since the ranker last wrote a recommendation -- the concrete failure
+ * this guards against is a cron job that stops running silently and looks
+ * healthy from the ingestion_run ledger alone (the "skip path stamped as
+ * success" class in recurring-bugs.md). */
+export async function queryRecommendationFreshness(pool: pg.Pool, rankerVersion: string): Promise<RecommendationFreshness> {
+  const { rows } = await pool.query<{
+    latest_rec_session: string | null;
+    expected_session: string | null;
+    sessions_stale: number | null;
+  }>(
+    `WITH latest_rec AS (
+       SELECT max(as_of_session)::text AS session FROM recommendation WHERE ranker_version = $1
+     ),
+     latest_trading AS (
+       SELECT max(session_date)::text AS session FROM trading_session WHERE session_date <= CURRENT_DATE
+     )
+     SELECT
+       lr.session AS latest_rec_session,
+       lt.session AS expected_session,
+       CASE
+         WHEN lr.session IS NULL THEN NULL
+         WHEN lt.session IS NULL THEN NULL
+         ELSE (
+           SELECT count(*)::int FROM trading_session
+           WHERE session_date > lr.session::date
+             AND session_date <= lt.session::date
+         )
+       END AS sessions_stale
+     FROM latest_rec lr, latest_trading lt`,
+    [rankerVersion],
+  );
+  const r = rows[0];
+  return {
+    latestRecSession: r?.latest_rec_session ?? null,
+    expectedSession: r?.expected_session ?? null,
+    sessionsStale: r?.sessions_stale ?? null,
+  };
+}
+
 /** Task 5.4 (only the promotion decision itself flips this -- nothing else in
  * Stage 5 may). Sets is_publishable=true for every row of the given
  * ranker_version's LATEST scored session only -- not the ranker's entire
