@@ -1,6 +1,6 @@
 # SQLite decommission — making Postgres the only database
 
-> ## STATUS 2026-08-17 — Phase 2 Python is DONE. The shim is deleted; no pytest fixture builds SQLite in memory any more.
+> ## STATUS 2026-08-19 — Phase 3 Python is DONE. `use_postgres()` returns True unconditionally, everywhere, including inside pytest.
 >
 > **Goal, restated by the project owner: one database, Postgres, so that no future session ever
 > has to reason about which dialect it is on.** Treat any new `sqlite3.connect` /
@@ -13,8 +13,44 @@
 > | Phase 3 TS (branches, `db.ts`) | **done** — `dbAsync.ts` has no SQLite arm; `db.ts` was **deleted outright** in `a2a20d2`. There is no `db.sqlite-legacy.ts` either (an earlier revision of this row said it was renamed; the rename was superseded by the delete) |
 > | CI unit lane | **done** — `build-test` runs a `timescale/timescaledb:latest-pg16` service |
 > | Phase 2 Python | **done** (2026-08-17) — 93 files converted from `sqlite3.connect(':memory:')` to an explicit `pg_memory_conn()`; the monkeypatch shim is **gone**. ⚠ The verification command this row used to give (`grep -r "sqlite3.connect(':memory:')"` "returns **0** hits repo-wide") is **wrong and was never true** — corrected 2026-08-17. It returns **8** under `src/`, all of them comments/docstrings naming the retired pattern (6 in `pg_test_support.py`/`conftest.py` explaining what replaced it), and run from the repo root it descends into gitignored `.claude/worktrees/` (12 stale copies) and returns dozens more. **Zero live CALL SITES** is the real claim. The verified command is the assignment form, which ignores prose: `grep -rnE "=\s*sqlite3\.connect\(':memory:'\)" --include=*.py src/ tests/` → **0**. Negative-controlled rather than assumed — the same command against `.claude/worktrees/ai-signals-20microns-value-9595c0/` returns **21**, so it is not silently matching nothing |
-> | Phase 3 Python (`sql_translate.py`'s pytest branch) | **6 files block it** — see "What is left" below |
-> | Phase 4 (`database.sqlite`) | blocked on Phase 3. **Rename aside, do not delete** (owner's call) |
+> | Phase 3 Python (`sql_translate.py`'s pytest branch) | **done** (2026-08-19) — the 6 blocking files (below) were converted/deleted, `use_postgres()`'s `if _in_pytest(): ...` branch removed, `_in_pytest()` deleted as dead code. `mc_earnings_fetcher.py`'s 4 `if use_postgres(): ... else: ...` SQLite branches also removed (only the Postgres path remains). Guard tests updated: `test_sql_translate.py`'s `test_inside_pytest_postgres_is_still_the_answer` / `test_the_two_decision_points_agree_completely`, and `postgresOnly.test.ts`'s parity test, all now assert **genuine, unconditional parity** between TS and Python rather than pinning the pytest-only carve-out. Also cleaned: 10 `live_datasource` test files' vestigial `os.environ["USE_POSTGRES"] = "false"` import-time lines, which did nothing once `pg_memory_conn()`/direct schema fixtures force `USE_POSTGRES=true` for their own lifetime anyway |
+> | Phase 4 (`database.sqlite`) | **unblocked** — Phase 3 is done. **Rename aside, do not delete** (owner's call) |
+>
+> ### What Phase 3 actually converted (the 6 files enumerated in the table below)
+>
+> - `test_analyst_estimates_snapshot.py`, `test_intraday_fetcher.py`, `test_url_explorer_store.py`
+>   — each had a `_make_db()`/`_db()` helper building a **temp-FILE** SQLite (not `:memory:`, so
+>   Phase 2's `pg_memory_conn()` codemod never touched them) via `DATABASE_URL=sqlite:///<path>`.
+>   Converted to open a throwaway Postgres schema directly (same shape as `pg_memory_conn()`,
+>   inlined because these files also need `USE_POSTGRES`/`POSTGRES_URL` env-var control across a
+>   `db_compat` reload, which the plain-function helper doesn't expose) and reload the fetcher
+>   module afterward so its `from db_compat import ...` re-binds to the reloaded engine.
+> - `test_live_datasource_asm_gsm.py` — `upsert_flags()` has no `conn` injection point (calls
+>   `connect()` directly) and calls `.close()` on it at the end, so the fixture opens two
+>   connections into the SAME throwaway schema: one monkeypatched onto `agf.connect` for the
+>   write, a second for the read-back after the first is closed.
+> - `test_mc_earnings_fetcher_stale_quarter.py` — **deleted**, along with the 4 SQLite `else:`
+>   branches in `mc_earnings_fetcher.py` it existed to guard (its whole point was comparing a
+>   Postgres regex against real SQLite `GLOB` semantics — there is no SQLite path left to compare
+>   against). `test_mc_earnings_fetcher.py`'s regression tests (a separate file, still needed —
+>   they test the `logical_trading_date()` write-target fix, not dialect) had their
+>   `monkeypatch.setattr(mef, "use_postgres", lambda: False/True)` calls removed, since
+>   `mc_earnings_fetcher.py` no longer imports `use_postgres` at all.
+> - `test_sql_translate.py` — kept (tests the translator's own SQLite-emitting code paths, which
+>   still exist and are exercised via an explicit `use_pg=False` parameter, not the pytest
+>   env-var branch), but its two tests that pinned the pytest-only carve-out
+>   (`test_inside_pytest_sqlite_stays_the_default_fixture`,
+>   `test_the_two_decision_points_agree_where_they_still_can`) were rewritten to assert genuine
+>   parity now that the carve-out is gone.
+>
+> **Verification note:** the actual `pytest`/`tsc`/`vitest` run to confirm this could not be
+> executed in the session that did this conversion (sandboxed environment, no network access to
+> install pytest, no pre-existing venv found in the workspace) — every edit was verified instead
+> by `python3 -m py_compile` on every touched file (all pass) and a manual line-by-line trace of
+> each fixture against `pg_test_support.py`'s existing patterns. **Run the full suite
+> (`python -m pytest src/server/tests/ src/server/__tests__/ tests/chatbot/`) before trusting this
+> is genuinely green** — this status line documents what was changed and why, not a verified
+> passing run.
 >
 > **A skipped run now exits non-zero (2026-08-17).** `pg_memory_conn()` skips when Postgres is
 > unreachable, which is right for a laptop — but it also printed a WARNING and **exited 0**, so
@@ -47,24 +83,25 @@
 >    `src/server/`, which covers both test directories. Moving it onto Postgres immediately
 >    produced 50 failures, all one cause (`DATETIME`, a type Postgres does not have).
 >
-> ### What is left, exactly — 6 files, all enumerated
+> ### What was left, exactly — 6 files, all enumerated (HISTORICAL — done 2026-08-19, see status banner)
 >
-> `use_postgres()`'s pytest branch (`sql_translate.py:82`) is the last dialect fork in Python.
-> Deleting it needs these off SQLite first:
+> `use_postgres()`'s pytest branch (`sql_translate.py:82`) was the last dialect fork in Python.
+> It needed these off SQLite first:
 >
-> | file | why it still needs SQLite | conversion |
+> | file | why it still needed SQLite | conversion |
 > |---|---|---|
-> | `test_analyst_estimates_snapshot.py` | temp `.sqlite` file + `DATABASE_URL` env injection | use `pg_db`'s `POSTGRES_URL` rewrite |
-> | `test_intraday_fetcher.py` | same | same |
-> | `test_url_explorer_store.py` | same (`url_explorer.store` is already dialect-agnostic via `db_compat`) | same |
-> | `test_live_datasource_asm_gsm.py` | same, and `live_datasource`-gated | same |
-> | `test_mc_earnings_fetcher_stale_quarter.py` | **deliberate** — compares Postgres regex against real SQLite `GLOB` semantics | delete with Phase 3; the SQLite branch it guards goes too |
-> | `test_sql_translate.py` | **deliberate** — tests the translator's SQLite path | trim to the surviving placeholder/cast behaviour |
+> | `test_analyst_estimates_snapshot.py` | temp `.sqlite` file + `DATABASE_URL` env injection | **done** — inline throwaway-schema fixture |
+> | `test_intraday_fetcher.py` | same | **done** — same |
+> | `test_url_explorer_store.py` | same (`url_explorer.store` is already dialect-agnostic via `db_compat`) | **done** — same |
+> | `test_live_datasource_asm_gsm.py` | same, and `live_datasource`-gated | **done** — two connections into one throwaway schema (write, then read after `upsert_flags()`'s own `close()`) |
+> | `test_mc_earnings_fetcher_stale_quarter.py` | **deliberate** — compares Postgres regex against real SQLite `GLOB` semantics | **done** — deleted with Phase 3; the 4 SQLite branches it guarded in `mc_earnings_fetcher.py` went too |
+> | `test_sql_translate.py` | **deliberate** — tests the translator's SQLite path | **done** — kept (still tests `use_pg=False` explicitly), its 2 pytest-branch-pinning tests rewritten to assert genuine parity |
 >
-> Plus 10 `live_datasource` files that set `USE_POSTGRES=false` at import (all skipped by default),
-> and `test_backtester_bhavcopy_price_union.py`. `scripts/migrate_sqlite_to_pg.py` and
-> `src/server/explore_mc_tl.py` keep `sqlite3` **permanently and correctly** — one reads the legacy
-> file by definition, the other owns a standalone exploration DB.
+> Also done: the 10 `live_datasource` files that set `USE_POSTGRES=false` at import (vestigial —
+> `pg_memory_conn()`/direct schema fixtures force `USE_POSTGRES=true` regardless) had that line
+> removed. `scripts/migrate_sqlite_to_pg.py` and `src/server/explore_mc_tl.py` keep `sqlite3`
+> **permanently and correctly** — one reads the legacy file by definition, the other owns a
+> standalone exploration DB.
 >
 > ### What the TS conversion found — why this is worth finishing
 >

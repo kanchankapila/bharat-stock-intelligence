@@ -9,8 +9,9 @@ no technical_signals grid row whenever ml-daily-ops's step chain crosses midnigh
 happening live via job_heartbeat). All four must use as_of.logical_trading_date() instead (same
 fix as insider_features.py/bse_event_classifier.py).
 
-All tests force the SQLite branch (use_postgres() -> False) since it exercises the same `today`
-variable with a simpler statement shape; the Postgres branch shares the identical `today` local.
+mc_earnings_fetcher.py's SQLite branches were removed 2026-08 (Phase 3 of the SQLite
+decommission, see docs/SQLITE_DECOMMISSION_PLAN.md) -- these tests exercise the single
+remaining Postgres-only code path directly, no use_postgres() monkeypatch needed.
 """
 import os
 import sys
@@ -53,7 +54,6 @@ def _updates(conn):
 class TestBackfillDaysToResultsUsesLogicalTradingDate:
     def test_write_targets_logical_trading_date(self, monkeypatch):
         monkeypatch.setattr(mef, "logical_trading_date", lambda: "2026-07-31")
-        monkeypatch.setattr(mef, "use_postgres", lambda: False)
         conn = _FakeConn()
 
         mef._backfill_days_to_results(conn)
@@ -65,7 +65,6 @@ class TestBackfillDaysToResultsUsesLogicalTradingDate:
 
     def test_wrong_calendar_date_would_match_nothing_silently(self, monkeypatch):
         monkeypatch.setattr(mef, "logical_trading_date", lambda: "2026-08-01")
-        monkeypatch.setattr(mef, "use_postgres", lambda: False)
         conn = _FakeConn()
 
         mef._backfill_days_to_results(conn)
@@ -82,45 +81,27 @@ class TestBackfillDaysToResultsUsesLogicalTradingDate:
         2026-08-12, the exact morning its 2-day-out earnings date mattered. Negative control:
         reverting the fix (restoring 'now'/CURRENT_DATE) makes this fail."""
         monkeypatch.setattr(mef, "logical_trading_date", lambda: "2026-07-31")
-        monkeypatch.setattr(mef, "use_postgres", lambda: False)
-        conn = _FakeConn()
-
-        mef._backfill_days_to_results(conn)
-
-        sql, params = _updates(conn)[0]
-        assert "'now'" not in sql, "days computation must not anchor to SQLite's real-time now()"
-        assert params == ("2026-07-31", "2026-07-31", "2026-07-31"), (
-            "both the days-until-results calculation and the result_date filter must use the "
-            "same logical_trading_date() as the write target, not real wall-clock"
-        )
-
-    def test_postgres_days_computation_anchored_to_logical_trading_date(self, monkeypatch):
-        """Same regression, Postgres branch: CURRENT_DATE was a literal SQL keyword the test
-        harness can't mock, so this bug survived every existing test here (they all force the
-        SQLite branch and only checked the write target). Assert the PG SQL carries no
-        unparameterized CURRENT_DATE and binds logical_trading_date() throughout instead."""
-        monkeypatch.setattr(mef, "logical_trading_date", lambda: "2026-07-31")
-        monkeypatch.setattr(mef, "use_postgres", lambda: True)
         conn = _FakeConn()
 
         mef._backfill_days_to_results(conn)
 
         sql, params = _updates(conn)[0]
         assert "CURRENT_DATE" not in sql, "days computation must not anchor to Postgres's real CURRENT_DATE"
-        assert params == ("2026-07-31", "2026-07-31", "2026-07-31")
+        assert params == ("2026-07-31", "2026-07-31", "2026-07-31"), (
+            "both the days-until-results calculation and the result_date filter must use the "
+            "same logical_trading_date() as the write target, not real wall-clock"
+        )
 
 
 class TestBackfillRapidFeaturesUsesLogicalTradingDate:
     def test_write_targets_logical_trading_date(self, monkeypatch):
         monkeypatch.setattr(mef, "logical_trading_date", lambda: "2026-07-31")
-        monkeypatch.setattr(mef, "use_postgres", lambda: False)
         conn = _FakeConn()
 
         mef._backfill_rapid_features(conn)
 
         updates = _updates(conn)
-        # sqlite branch loops twice (yoy, qoq)
-        assert len(updates) == 2
+        assert len(updates) == 1
         for _, params in updates:
             assert params[-1] == "2026-07-31"
 
@@ -128,21 +109,19 @@ class TestBackfillRapidFeaturesUsesLogicalTradingDate:
 class TestBackfillShockersUsesLogicalTradingDate:
     def test_write_targets_logical_trading_date(self, monkeypatch):
         monkeypatch.setattr(mef, "logical_trading_date", lambda: "2026-07-31")
-        monkeypatch.setattr(mef, "use_postgres", lambda: False)
         conn = _FakeConn()
 
         mef._backfill_shockers(conn)
 
         updates = _updates(conn)
-        assert len(updates) == 1
-        _, params = updates[0]
-        assert params == ("2026-07-31",)
+        assert len(updates) == 2
+        for _, params in updates:
+            assert params[-1] == "2026-07-31"
 
 
 class TestFetchActualEstimateBeatsUsesLogicalTradingDate:
     def test_write_targets_logical_trading_date(self, monkeypatch):
         monkeypatch.setattr(mef, "logical_trading_date", lambda: "2026-07-31")
-        monkeypatch.setattr(mef, "use_postgres", lambda: False)
         monkeypatch.setattr(mef.time, "sleep", lambda *_: None)
         # One well-known scid -> symbol mapping, and one matching "Beats" row per API call.
         conn = _FakeConn(fetchall_results=[[("RI", "RELIANCE")]])
@@ -154,9 +133,8 @@ class TestFetchActualEstimateBeatsUsesLogicalTradingDate:
         updates = _updates(conn)
         assert len(updates) == 1
         _, params = updates[0]
-        # (lbl, pct, symbol, today)
-        assert params[-2] == "RELIANCE"
-        assert params[-1] == "2026-07-31", (
+        # (today,) is the only bound param; symbol/label/pct are inlined via VALUES
+        assert params == ("2026-07-31",), (
             "fetch_actual_estimate_beats() must write against logical_trading_date()'s "
             "value, not date.today()"
         )

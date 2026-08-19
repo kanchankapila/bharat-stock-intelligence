@@ -13,9 +13,7 @@ first to pick up cookies) but no stored auth token -- confirmed by reading `_nse
 before writing this.
 """
 import os
-import sqlite3
 import sys
-import tempfile
 
 import pytest
 
@@ -55,7 +53,7 @@ class TestAsmGsmLiveDataSource:
 
     def test_real_fetch_writes_ml_usable_flags(self):
         """Step 4-5: write through the fetcher's own upsert_flags() into a throwaway
-        in-memory sqlite DB (upsert_flags() has no `con` injection point -- it calls
+        Postgres schema (upsert_flags() has no `con` injection point -- it calls
         connect() directly -- so connect() itself is monkeypatched, matching the existing
         unit-test precedent in test_asm_gsm_fetcher.py's TestUpsertFlagsFailureIsolation),
         then read the row back and assert it's ML-usable: real flag values, not None/NaN."""
@@ -67,20 +65,34 @@ class TestAsmGsmLiveDataSource:
 
         probe_symbol = sorted(asm)[0]
 
-        # upsert_flags() calls con.close() itself at the end, so a shared ":memory:" handle
-        # would lose its data before we can read it back -- use a real temp file instead, and
-        # let connect() open a fresh connection to it each time (mirroring real DB semantics).
-        fd, db_path = tempfile.mkstemp(suffix=".sqlite3")
-        os.close(fd)
+        # upsert_flags() calls con.close() itself at the end, so a single shared connection
+        # can't be read back afterward -- open a second connection into the SAME throwaway
+        # schema for the readback, mirroring the old temp-file-sqlite fixture's "close then
+        # reconnect" pattern. Managed directly (not via pg_memory_conn) so the schema name is
+        # known up front rather than parsed back out of the connection.
+        import uuid
+        import psycopg2
+        from pg_test_support import _pg_dsn, _sa_url, pg_available
+        from sqlalchemy import create_engine
+        from db_compat import ConnWrapper
+
+        if not pg_available():
+            pytest.skip("live Postgres not reachable — set PGTEST_* or start the container")
+
+        schema = f"t_{uuid.uuid4().hex[:12]}"
+        admin = psycopg2.connect(**_pg_dsn())
+        admin.autocommit = True
+        admin.cursor().execute(f'CREATE SCHEMA "{schema}"')
         try:
-            seed_conn = sqlite3.connect(db_path)
-            seed_conn.execute("CREATE TABLE nse_stocks (symbol TEXT PRIMARY KEY)")
+            seed_engine = create_engine(_sa_url(schema), future=True)
+            seed_sa_conn = seed_engine.connect()
+            seed_conn = ConnWrapper(seed_sa_conn)
+            seed_conn.execute("CREATE TABLE nse_stocks (symbol TEXT PRIMARY KEY, is_asm INTEGER, gsm_stage INTEGER, surveillance_updated_at TEXT)")
             seed_conn.execute("INSERT INTO nse_stocks (symbol) VALUES (?)", (probe_symbol,))
             seed_conn.commit()
-            seed_conn.close()
 
             orig_connect = agf.connect
-            agf.connect = lambda: sqlite3.connect(db_path)
+            agf.connect = lambda: seed_conn
             try:
                 updated = agf.upsert_flags(asm, gsm)
             finally:
@@ -88,14 +100,19 @@ class TestAsmGsmLiveDataSource:
 
             assert updated >= 1, "upsert_flags() reported zero rows updated against a seeded symbol"
 
-            check_conn = sqlite3.connect(db_path)
+            check_engine = create_engine(_sa_url(schema), future=True)
+            check_conn = ConnWrapper(check_engine.connect())
             row = check_conn.execute(
                 "SELECT is_asm, gsm_stage, surveillance_updated_at FROM nse_stocks WHERE symbol = ?",
                 (probe_symbol,),
             ).fetchone()
             check_conn.close()
+            check_engine.dispose()
         finally:
-            os.remove(db_path)
+            try:
+                admin.cursor().execute(f'DROP SCHEMA IF EXISTS "{schema}" CASCADE')
+            finally:
+                admin.close()
 
         is_asm, gsm_stage, updated_at = row
         assert is_asm == 1, f"seeded ASM symbol {probe_symbol} did not get is_asm=1"

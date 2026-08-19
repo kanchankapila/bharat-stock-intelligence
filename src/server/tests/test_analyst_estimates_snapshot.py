@@ -8,9 +8,8 @@ No network calls: fetch_fn is injected via run(fetch_fn=...).
 
 import importlib
 import os
-import sqlite3
 import sys
-import tempfile
+import uuid
 
 import pytest
 
@@ -145,9 +144,24 @@ class TestParseEarningsForecast:
 
 @pytest.fixture(autouse=True)
 def _restore_db_env():
-    """Repoint DATABASE_URL at a temp SQLite per test; restore + invalidate engine cache after."""
-    saved = {k: os.environ.get(k) for k in ("DATABASE_URL", "USE_POSTGRES")}
+    """Repoint POSTGRES_URL at a throwaway Postgres schema per test; restore + invalidate engine cache after."""
+    import psycopg2
+    from pg_test_support import _pg_dsn, _sa_url, pg_available
+    if not pg_available():
+        pytest.skip("live Postgres not reachable — set PGTEST_* or start the container")
+    saved = {k: os.environ.get(k) for k in ("POSTGRES_URL", "USE_POSTGRES", "DATABASE_URL")}
+    schema = f"t_{uuid.uuid4().hex[:12]}"
+    admin = psycopg2.connect(**_pg_dsn())
+    admin.autocommit = True
+    admin.cursor().execute(f'CREATE SCHEMA "{schema}"')
+    os.environ["USE_POSTGRES"] = "true"
+    os.environ["POSTGRES_URL"] = _sa_url(schema)
+    os.environ.pop("DATABASE_URL", None)
     yield
+    try:
+        admin.cursor().execute(f'DROP SCHEMA IF EXISTS "{schema}" CASCADE')
+    finally:
+        admin.close()
     for k, v in saved.items():
         if v is None:
             os.environ.pop(k, None)
@@ -157,11 +171,13 @@ def _restore_db_env():
     importlib.reload(db_compat)
 
 
-def _make_db(symbols_with_mc: list) -> tuple:
-    """Create a temp SQLite with nse_stocks + analyst_estimates_history tables.
-    Returns (path, raw_sqlite3_con) for assertions."""
-    path = os.path.join(tempfile.mkdtemp(), "ae_test.sqlite")
-    con = sqlite3.connect(path)
+def _make_db(symbols_with_mc: list):
+    """Create nse_stocks + analyst_estimates_history in the throwaway Postgres schema.
+    Returns a ConnWrapper for assertions."""
+    import db_compat
+    importlib.reload(db_compat)
+    importlib.reload(aes)
+    con = db_compat.connect()
     con.executescript("""
         CREATE TABLE nse_stocks (
             symbol TEXT PRIMARY KEY, mcsymbol TEXT, name TEXT,
@@ -187,13 +203,7 @@ def _make_db(symbols_with_mc: list) -> tuple:
     for symbol, mcsymbol in symbols_with_mc:
         con.execute("INSERT INTO nse_stocks (symbol, mcsymbol) VALUES (?, ?)", (symbol, mcsymbol))
     con.commit()
-
-    os.environ.pop("USE_POSTGRES", None)
-    os.environ["DATABASE_URL"] = f"sqlite:///{path}"
-    import db_compat
-    importlib.reload(db_compat)
-    importlib.reload(aes)
-    return path, con
+    return con
 
 
 def _good_fetch(_mcsymbol):
@@ -213,13 +223,13 @@ def _empty_fetch(_mcsymbol):
 
 class TestRunDb:
     def test_writes_one_row_per_covered_symbol(self):
-        _, con = _make_db([("RELIANCE", "RL"), ("TCS", "TCS01")])
+        con = _make_db([("RELIANCE", "RL"), ("TCS", "TCS01")])
         n = aes.run(as_of="2026-06-22", fetch_fn=_good_fetch)
         assert n == 2
         assert con.execute("SELECT COUNT(*) FROM analyst_estimates_history").fetchone()[0] == 2
 
     def test_idempotent_same_date_overwrites(self):
-        _, con = _make_db([("RELIANCE", "RL")])
+        con = _make_db([("RELIANCE", "RL")])
         aes.run(as_of="2026-06-22", fetch_fn=_good_fetch)
         aes.run(as_of="2026-06-22", fetch_fn=_good_fetch)
         count = con.execute(
@@ -228,20 +238,20 @@ class TestRunDb:
         assert count == 1
 
     def test_different_dates_keep_separate_rows(self):
-        _, con = _make_db([("RELIANCE", "RL")])
+        con = _make_db([("RELIANCE", "RL")])
         aes.run(as_of="2026-06-21", fetch_fn=_good_fetch)
         aes.run(as_of="2026-06-22", fetch_fn=_good_fetch)
         count = con.execute("SELECT COUNT(*) FROM analyst_estimates_history").fetchone()[0]
         assert count == 2
 
     def test_skips_symbols_with_all_none_data(self):
-        _, con = _make_db([("NOCOVER", "NC01")])
+        con = _make_db([("NOCOVER", "NC01")])
         n = aes.run(as_of="2026-06-22", fetch_fn=_empty_fetch)
         assert n == 0
         assert con.execute("SELECT COUNT(*) FROM analyst_estimates_history").fetchone()[0] == 0
 
     def test_stores_correct_field_values(self):
-        _, con = _make_db([("RELIANCE", "RL")])
+        con = _make_db([("RELIANCE", "RL")])
         aes.run(as_of="2026-06-22", fetch_fn=_good_fetch)
         row = con.execute(
             "SELECT n_analysts, final_rating, buy_count, hold_count, sell_count, "
@@ -260,7 +270,7 @@ class TestRunDb:
         assert row[9] == pytest.approx(50000.0)
 
     def test_skips_symbol_without_mcsymbol(self):
-        _, con = _make_db([("RELIANCE", "RL"), ("UNKNOWN", None)])
+        con = _make_db([("RELIANCE", "RL"), ("UNKNOWN", None)])
         n = aes.run(as_of="2026-06-22", fetch_fn=_good_fetch)
         assert n == 1  # only RELIANCE has mcsymbol
 

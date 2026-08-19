@@ -4,6 +4,52 @@ Historical record, split out of CLAUDE.md on 2026-08-11 (it was 64% of that file
 
 **Not loaded automatically.** Read a specific entry when you need the history behind a decision. Durable lessons extracted from here live in `.claude/rules/`; if you find one that isn't there, add it.
 
+## 2026-08-19 (cont.) — SQLite decommission Phase 3 Python: DONE
+
+`use_postgres()`'s pytest-only carve-out (`sql_translate.py`) is removed — it now returns `True`
+unconditionally for every process, including pytest. The 6 files enumerated in
+`docs/SQLITE_DECOMMISSION_PLAN.md` as blocking this were converted/deleted:
+
+- `test_analyst_estimates_snapshot.py`, `test_intraday_fetcher.py`, `test_url_explorer_store.py`
+  — each had a temp-FILE SQLite fixture (not `:memory:`, so Phase 2's codemod never touched
+  them). Converted to open a throwaway Postgres schema directly, same shape as
+  `pg_test_support.pg_memory_conn()`, and reload the fetcher module afterward.
+- `test_live_datasource_asm_gsm.py` — `upsert_flags()` calls `connect()` directly (no `conn`
+  param) and closes it itself, so the fixture opens two connections into one throwaway schema:
+  one monkeypatched for the write, a second for the read-back.
+- `test_mc_earnings_fetcher_stale_quarter.py` — deleted (its whole point was comparing Postgres
+  regex against real SQLite GLOB semantics), along with the 4 `if use_postgres(): ... else: ...`
+  SQLite branches in `mc_earnings_fetcher.py` it existed to guard. `test_mc_earnings_fetcher.py`
+  (a separate, still-needed file testing the `logical_trading_date()` write-target fix) had its
+  `monkeypatch.setattr(mef, "use_postgres", ...)` calls removed since `mc_earnings_fetcher.py` no
+  longer imports `use_postgres` at all.
+- `test_sql_translate.py` — kept (still tests the translator's SQLite-emitting code via an
+  explicit `use_pg=False` param), but its two tests pinning the pytest-only carve-out were
+  rewritten to assert genuine, unconditional TS/Python parity instead.
+- `postgresOnly.test.ts` — same rewrite on the TS side, asserting the pytest branch is gone
+  rather than pinning its existence.
+- 10 `live_datasource` files' vestigial `os.environ["USE_POSTGRES"] = "false"` import-time lines
+  removed (dead once `pg_memory_conn()`/direct schema fixtures force `USE_POSTGRES=true` for
+  their own lifetime regardless).
+
+Phase 4 (`database.sqlite` file) is now unblocked; deletion is still an explicit owner decision
+per the plan doc, not done here.
+
+**Not verified by an actual test run.** This session's sandbox had no network access to install
+pytest and no pre-existing venv in the workspace, so `python -m pytest` could not be executed.
+Every edit was checked with `python3 -m py_compile` (all pass, no syntax errors) and a manual
+trace of each fixture against `pg_test_support.py`'s existing patterns (env var handling, schema
+lifecycle, `db_compat` reload-to-rebind). **Run the full suite
+(`python -m pytest src/server/tests/ src/server/__tests__/ tests/chatbot/`) and
+`scripts/check_recurring_bugs.py` before treating this as verified-green** — see
+`docs/SQLITE_DECOMMISSION_PLAN.md`'s updated status banner for the full list of what changed.
+
+Also from earlier in this session (greenfield Phase 2, prior to the migration work): added
+`transfer-analyst-estimates.ts` and `transfer-insider-activity.ts` data adapters
+(`greenfield/packages/ingestion/src/stage3/`) plus their `stage3-repo.ts`/`legacy-repo.ts`
+support functions. **Not yet wired into `ecosystem.config.cjs`** — no pm2 cron entries added for
+`gf-analyst-estimates-weekly`/`gf-insider-activity-weekly` this session; still pending.
+
 ## 2026-08-17 (cont. 3) — `/weekend-audit`, week 34 rotation group 4, first real Lane 5 drive
 
 Ran the full 8-lane sweep. Lanes 0-4 came back clean/known (build, tests, services, DB all green;

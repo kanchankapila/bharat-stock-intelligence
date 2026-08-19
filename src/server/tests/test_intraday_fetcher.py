@@ -8,9 +8,8 @@ No network calls: fetch_fn is injected via run(fetch_fn=...).
 
 import importlib
 import os
-import sqlite3
 import sys
-import tempfile
+import uuid
 
 import pytest
 
@@ -196,8 +195,24 @@ class TestSessionVwap:
 
 @pytest.fixture(autouse=True)
 def _restore_db_env():
-    saved = {k: os.environ.get(k) for k in ("DATABASE_URL", "USE_POSTGRES")}
+    """Repoint POSTGRES_URL at a throwaway Postgres schema per test; restore + invalidate engine cache after."""
+    import psycopg2
+    from pg_test_support import _pg_dsn, _sa_url, pg_available
+    if not pg_available():
+        pytest.skip("live Postgres not reachable — set PGTEST_* or start the container")
+    saved = {k: os.environ.get(k) for k in ("POSTGRES_URL", "USE_POSTGRES", "DATABASE_URL")}
+    schema = f"t_{uuid.uuid4().hex[:12]}"
+    admin = psycopg2.connect(**_pg_dsn())
+    admin.autocommit = True
+    admin.cursor().execute(f'CREATE SCHEMA "{schema}"')
+    os.environ["USE_POSTGRES"] = "true"
+    os.environ["POSTGRES_URL"] = _sa_url(schema)
+    os.environ.pop("DATABASE_URL", None)
     yield
+    try:
+        admin.cursor().execute(f'DROP SCHEMA IF EXISTS "{schema}" CASCADE')
+    finally:
+        admin.close()
     for k, v in saved.items():
         if v is None:
             os.environ.pop(k, None)
@@ -207,9 +222,13 @@ def _restore_db_env():
     importlib.reload(db_compat)
 
 
-def _make_db(symbols_with_mc: list) -> tuple:
-    path = os.path.join(tempfile.mkdtemp(), "intra_test.sqlite")
-    con = sqlite3.connect(path)
+def _make_db(symbols_with_mc: list):
+    """Create nse_stocks + intraday_ohlcv in the throwaway Postgres schema.
+    Returns a ConnWrapper for assertions."""
+    import db_compat
+    importlib.reload(db_compat)
+    importlib.reload(itf)
+    con = db_compat.connect()
     con.executescript("""
         CREATE TABLE nse_stocks (
             symbol TEXT PRIMARY KEY, mcsymbol TEXT, name TEXT, status TEXT
@@ -230,13 +249,7 @@ def _make_db(symbols_with_mc: list) -> tuple:
     for symbol, mcsymbol in symbols_with_mc:
         con.execute("INSERT INTO nse_stocks (symbol, mcsymbol, status) VALUES (?, ?, 'ACTIVE')", (symbol, mcsymbol))
     con.commit()
-
-    os.environ.pop("USE_POSTGRES", None)
-    os.environ["DATABASE_URL"] = f"sqlite:///{path}"
-    import db_compat
-    importlib.reload(db_compat)
-    importlib.reload(itf)
-    return path, con
+    return con
 
 
 def _good_fetch(mcsymbol, from_ts, to_ts):
@@ -258,13 +271,13 @@ def _empty_fetch(mcsymbol, from_ts, to_ts):
 
 class TestRunDb:
     def test_writes_bars_for_covered_symbols(self):
-        _, con = _make_db([("INFY", "IT"), ("TCS", "TCS01")])
+        con = _make_db([("INFY", "IT"), ("TCS", "TCS01")])
         n = itf.run(fetch_fn=_good_fetch)
         assert n == 6   # 3 bars × 2 symbols
         assert con.execute("SELECT COUNT(*) FROM intraday_ohlcv").fetchone()[0] == 6
 
     def test_upsert_same_bars_no_duplicate(self):
-        _, con = _make_db([("INFY", "IT")])
+        con = _make_db([("INFY", "IT")])
         itf.run(fetch_fn=_good_fetch)
         itf.run(fetch_fn=_good_fetch)
         assert con.execute("SELECT COUNT(*) FROM intraday_ohlcv").fetchone()[0] == 3
@@ -274,7 +287,7 @@ class TestRunDb:
         MoneyControl -- mcsymbol codes like RI/SBI/HDF01 return {"s":"error"} on this
         endpoint while the raw ticker works) -- a missing/blank mcsymbol must not exclude
         a stock from intraday fetching."""
-        _, con = _make_db([("INFY", "IT"), ("NOCOVER", None)])
+        con = _make_db([("INFY", "IT"), ("NOCOVER", None)])
         n = itf.run(fetch_fn=_good_fetch)
         assert n == 6   # both INFY and NOCOVER fetched by raw symbol
         assert con.execute("SELECT COUNT(*) FROM intraday_ohlcv WHERE symbol='NOCOVER'").fetchone()[0] == 3
@@ -294,19 +307,19 @@ class TestRunDb:
         assert seen == ["RELIANCE"]
 
     def test_skips_symbols_with_no_data(self):
-        _, con = _make_db([("INFY", "IT")])
+        con = _make_db([("INFY", "IT")])
         n = itf.run(fetch_fn=_empty_fetch)
         assert n == 0
 
     def test_stores_symbol_and_interval(self):
-        _, con = _make_db([("INFY", "IT")])
+        con = _make_db([("INFY", "IT")])
         itf.run(fetch_fn=_good_fetch)
         row = con.execute("SELECT symbol, interval FROM intraday_ohlcv LIMIT 1").fetchone()
         assert row[0] == "INFY"
         assert row[1] == "15m"
 
     def test_returns_total_bar_count(self):
-        _, con = _make_db([("INFY", "IT"), ("TCS", "TCS01"), ("HDFC", "HDF01")])
+        con = _make_db([("INFY", "IT"), ("TCS", "TCS01"), ("HDFC", "HDF01")])
         n = itf.run(fetch_fn=_good_fetch)
         assert n == 9   # 3 bars × 3 symbols
 
@@ -334,7 +347,7 @@ class TestKnownOpenDaysEndToEnd:
         }
 
     def test_db_known_open_bar_lets_a_later_cycle_still_compute_vwap(self):
-        _, con = _make_db([("INFY", "IT")])
+        con = _make_db([("INFY", "IT")])
         # Simulate an earlier cycle already having captured today's real 09:15 bar.
         open_dt = itf.datetime.datetime.fromtimestamp(self._today_session_open(), tz=itf._IST)
         open_str = open_dt.strftime("%Y-%m-%dT%H:%M:%S+05:30")
@@ -356,7 +369,7 @@ class TestKnownOpenDaysEndToEnd:
     def test_without_a_prior_open_bar_vwap_stays_null_as_before(self):
         """Negative control: no known-open hint exists anywhere -- behaviour must be unchanged
         from before this fix (NULL, not a guess)."""
-        _, con = _make_db([("INFY", "IT")])
+        con = _make_db([("INFY", "IT")])
         itf.run(fetch_fn=self._mid_session_fetch, lookback_days=1)
         rows = con.execute("SELECT vwap FROM intraday_ohlcv WHERE symbol='INFY'").fetchall()
         assert rows and all(r[0] is None for r in rows)
@@ -371,7 +384,7 @@ class TestDualSourceFetch:
     _fetch_yahoo functions _fetch_dual actually calls."""
 
     def test_falls_back_to_yahoo_when_mc_has_no_data(self, monkeypatch):
-        _, con = _make_db([("NOMCDATA", None)])
+        con = _make_db([("NOMCDATA", None)])
         monkeypatch.setattr(itf, "_fetch_live", lambda symbol, from_ts, to_ts, countback=500: None)
         monkeypatch.setattr(itf, "_fetch_yahoo", lambda symbol, from_ts, to_ts, countback=500: _good_fetch(symbol, from_ts, to_ts))
         n = itf.run()
@@ -379,7 +392,7 @@ class TestDualSourceFetch:
         assert con.execute("SELECT COUNT(*) FROM intraday_ohlcv WHERE symbol='NOMCDATA'").fetchone()[0] == 3
 
     def test_falls_back_to_mc_when_yahoo_has_no_data(self, monkeypatch):
-        _, con = _make_db([("NOYAHOODATA", None)])
+        con = _make_db([("NOYAHOODATA", None)])
         monkeypatch.setattr(itf, "_fetch_live", lambda symbol, from_ts, to_ts, countback=500: _good_fetch(symbol, from_ts, to_ts))
         monkeypatch.setattr(itf, "_fetch_yahoo", lambda symbol, from_ts, to_ts, countback=500: None)
         n = itf.run()
@@ -387,7 +400,7 @@ class TestDualSourceFetch:
         assert con.execute("SELECT COUNT(*) FROM intraday_ohlcv WHERE symbol='NOYAHOODATA'").fetchone()[0] == 3
 
     def test_both_sources_empty_counts_as_failed_not_written(self, monkeypatch):
-        _, con = _make_db([("NODATAANYWHERE", None)])
+        con = _make_db([("NODATAANYWHERE", None)])
         monkeypatch.setattr(itf, "_fetch_live", lambda *a, **k: None)
         monkeypatch.setattr(itf, "_fetch_yahoo", lambda *a, **k: None)
         n = itf.run()
@@ -398,7 +411,7 @@ class TestDualSourceFetch:
         """Regression guard for the load-distribution goal: with both sources healthy,
         neither source should end up handling 100% of the universe."""
         symbols = [(f"SYM{i}", None) for i in range(20)]
-        _, con = _make_db(symbols)
+        con = _make_db(symbols)
         mc_hits, yahoo_hits = [], []
 
         def fake_mc(symbol, from_ts, to_ts, countback=500):

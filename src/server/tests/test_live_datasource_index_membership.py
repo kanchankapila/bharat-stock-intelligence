@@ -6,7 +6,6 @@ on the last completed trading session instead of datetime.now().
 """
 import os
 
-os.environ["USE_POSTGRES"] = "false"
 
 import sqlite3
 import sys

@@ -9,7 +9,6 @@ parameter) -- same monkeypatch-the-module pattern as the nt_* fetchers.
 """
 import os
 
-os.environ["USE_POSTGRES"] = "false"
 
 import sys
 

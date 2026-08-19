@@ -6,7 +6,6 @@ test_live_datasource_trendlyne_adv_tech.py / test_live_datasource_trendlyne_pric
 """
 import os
 
-os.environ["USE_POSTGRES"] = "false"
 
 import sqlite3
 import sys

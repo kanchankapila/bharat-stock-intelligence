@@ -65,18 +65,13 @@ describe('Postgres is the only database', () => {
     expect(schema).not.toBe('public');
   });
 
-  // The two languages are DELIBERATELY not identical right now, and this test pins the
-  // difference rather than asserting it away. TS is Postgres-only everywhere (above); Python
-  // still honours USE_POSTGRES inside pytest, because ~100 pytest files build their own
-  // sqlite3 fixtures and flipping them all at once would point the Python suite at live
-  // production — the exact failure a 2026-08-15 attempt produced. That conversion is the
-  // remaining half of SQLITE_DECOMMISSION_PLAN Phase 2.
-  //
-  // When it lands, this test FAILS, which is the point: whoever removes the Python branch is
-  // forced to come here and re-assert genuine parity instead of leaving a stale claim behind.
-  it('pins the one place TS and Python still differ, so it cannot be forgotten', () => {
+  // TS and Python now agree completely: Postgres, no env var, no exceptions, including inside
+  // pytest. The Python pytest-only SQLite carve-out this test used to pin was removed in Phase 3
+  // of the SQLite decommission (2026-08) -- the 6 test files that structurally needed it were
+  // converted to `pg_memory_conn()` or deleted. See docs/SQLITE_DECOMMISSION_PLAN.md.
+  it('asserts genuine parity between TS and Python — no pytest-only carve-out remains', () => {
     const py = readFileSync(new URL('../sql_translate.py', import.meta.url), 'utf8');
-    expect(py).toContain('return True');            // real Python processes: Postgres, no env var
-    expect(py).toContain('if _in_pytest():');       // remove this and update this test
+    expect(py).toContain('return True');            // every process: Postgres, no env var
+    expect(py).not.toContain('if _in_pytest():');    // the pytest-only branch must not come back
   });
 });

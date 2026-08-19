@@ -317,50 +317,39 @@ def test_postgres_when_use_postgres_is_garbage():
     assert _resolve_in_clean_process({"USE_POSTGRES": "0"}) == "True"
 
 
-def test_inside_pytest_sqlite_stays_the_default_fixture():
-    """Inside the suite the historical rule still applies: SQLite unless USE_POSTGRES=true.
+def test_inside_pytest_postgres_is_still_the_answer():
+    """Phase 3 of the SQLite decommission (2026-08): the pytest-only carve-out (SQLite unless
+    USE_POSTGRES=true) is gone. use_postgres() now returns True unconditionally, INSIDE pytest
+    too -- the last 6 test files that structurally needed the SQLite default (temp-file
+    fixtures, or deliberately testing SQLite GLOB/AUTOINCREMENT semantics) were converted to
+    `pg_memory_conn()` or deleted. See docs/SQLITE_DECOMMISSION_PLAN.md.
 
-    This direction is load-bearing for SAFETY, not just compatibility. ~240 Python test files
-    build a throwaway SQLite fixture and never set the variable; defaulting them to Postgres
-    points the suite at the LIVE production database. Briefly tried 2026-08-15 -- suite went
-    115s -> 600s+ (it wrote nothing, confirmed, but that is not a thing to rely on twice).
+    A fixture that wants an isolated throwaway database still gets one -- via
+    `pg_memory_conn()`/`pg_conn`/`pg_db_conn` (src/server/pg_test_support.py), which open a
+    private Postgres schema, not via this function returning False.
     """
     probe = (
-        "import pytest;"  # puts 'pytest' in sys.modules, simulating a test process
+        "import pytest;"  # puts 'pytest' in sys.modules -- must no longer matter
         "from sql_translate import use_postgres; print(use_postgres())"
     )
     env = {k: v for k, v in os.environ.items() if k != "USE_POSTGRES"}
     out = subprocess.run([sys.executable, "-c", probe], cwd=str(SERVER_DIR), env=env,
                          capture_output=True, text=True, timeout=120)
     assert out.returncode == 0, out.stderr[:400]
-    assert out.stdout.strip() == "False", "a test process must default to the SQLite fixture"
+    assert out.stdout.strip() == "True", "pytest no longer gets a different answer than any other process"
 
-    env["USE_POSTGRES"] = "true"
+    env["USE_POSTGRES"] = "false"
     out2 = subprocess.run([sys.executable, "-c", probe], cwd=str(SERVER_DIR), env=env,
                           capture_output=True, text=True, timeout=120)
-    assert out2.stdout.strip() == "True", "a test must still be able to opt INTO Postgres"
+    assert out2.stdout.strip() == "True", "USE_POSTGRES=false must not reroute a test process either"
 
 
-def test_the_two_decision_points_agree_where_they_still_can():
-    """pgConfig.ts and sql_translate.py agree for every REAL process: Postgres, no env var.
-
-    They deliberately differ in ONE place, and this test pins that difference rather than
-    pretending it away. TypeScript went fully Postgres-only on 2026-08-16 (vitest's `unit` project
-    runs inside a throwaway schema built from db/schema.postgres.sql -- see
-    vitest.globalSetup.ts); Python still honours USE_POSTGRES inside pytest, because ~100 pytest
-    files build their own sqlite3 fixtures and flipping them together would aim the Python suite
-    at live production, which a 2026-08-15 attempt actually did.
-
-    Why TS could not keep the pytest-shaped rule: every `*.live.test.ts` calls
-    `await import('dotenv/config')`, `.env` sets USE_POSTGRES=true, and vitest's
-    `singleFork: true` shares one process.env -- so the first live file to load dotenv flipped
-    every later test file onto production. That wrote 2,148 fabricated Saturday stock_ohlcv bars
-    to production on 2026-08-16. pytest has no equivalent shared-mutation path today, which is
-    why the branch is survivable there and was not here.
-
-    Converting the pytest fixtures is the remaining half of SQLITE_DECOMMISSION_PLAN Phase 2.
-    When it lands this test fails, which is the point -- whoever removes the branch is forced
-    back here to re-assert real parity instead of leaving a stale claim behind.
+def test_the_two_decision_points_agree_completely():
+    """pgConfig.ts and sql_translate.py now agree for EVERY process, including pytest: Postgres,
+    no env var, no exceptions. The one deliberate difference this test used to pin (Python's
+    pytest-only SQLite default) was removed in Phase 3 of the SQLite decommission (2026-08) --
+    the 6 test files that structurally required it were converted to `pg_memory_conn()` or
+    deleted. See docs/SQLITE_DECOMMISSION_PLAN.md.
     """
     ts = (SERVER_DIR / "pgConfig.ts").read_text(encoding="utf-8")
     ts_body = ts.split("export function usePostgres")[1][:400]
@@ -371,10 +360,12 @@ def test_the_two_decision_points_agree_where_they_still_can():
     )
 
     py = (SERVER_DIR / "sql_translate.py").read_text(encoding="utf-8")
-    assert "if _in_pytest():" in py, (
-        "the Python pytest branch is gone -- Phase 2 is complete on both sides, so update this "
-        "test to assert genuine parity (neither side reads USE_POSTGRES at all)"
+    assert "if _in_pytest():" not in py, (
+        "the Python pytest branch is back -- re-derive why full parity was removed before "
+        "reintroducing it"
     )
+    py_body = py.split("def use_postgres")[1][:1600]
+    assert "return True" in py_body
 
 
 # ─── generated_at uniqueness (2026-08-15) ────────────────────────────────────

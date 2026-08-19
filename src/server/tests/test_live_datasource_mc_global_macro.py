@@ -6,7 +6,6 @@ ensure_schema()/write_all().
 """
 import os
 
-os.environ["USE_POSTGRES"] = "false"
 
 import sqlite3
 import sys

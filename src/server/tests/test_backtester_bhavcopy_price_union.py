@@ -16,7 +16,6 @@ import os
 import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
-os.environ.setdefault('USE_POSTGRES', 'false')
 
 import pandas as pd
 import pytest

@@ -6,7 +6,6 @@ happen to exist on the day the test runs.
 """
 import os
 
-os.environ["USE_POSTGRES"] = "false"
 
 import sqlite3
 import sys

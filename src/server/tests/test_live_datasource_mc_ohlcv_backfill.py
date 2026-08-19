@@ -4,7 +4,6 @@ a real external fetcher per the mandate. RELIANCE chosen -- guaranteed decades o
 """
 import os
 
-os.environ["USE_POSTGRES"] = "false"
 
 import sqlite3
 import sys

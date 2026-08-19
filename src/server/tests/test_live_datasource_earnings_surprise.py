@@ -6,7 +6,6 @@ this test (one-line: added the missing call parens).
 """
 import os
 
-os.environ["USE_POSTGRES"] = "false"
 
 import sys
 

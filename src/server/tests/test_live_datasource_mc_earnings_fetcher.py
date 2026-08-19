@@ -16,7 +16,6 @@ tickers will be in today's feed.
 """
 import os
 
-os.environ["USE_POSTGRES"] = "false"
 
 import sqlite3
 import sys

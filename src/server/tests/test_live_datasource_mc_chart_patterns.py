@@ -8,7 +8,6 @@ the correct shape. Fixed alongside this test.
 """
 import os
 
-os.environ["USE_POSTGRES"] = "false"
 
 import sqlite3
 import sys
