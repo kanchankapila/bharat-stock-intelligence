@@ -233,8 +233,18 @@ def train(report_only: bool = False) -> dict:
 
 
 def score() -> int:
-    """Compute OHLCV features for the latest session and write flyer_probability onto that
-    day's technical_signals rows. Advisory-only column — nothing reads it yet."""
+    """Compute OHLCV features as of the latest completed session and write flyer_probability
+    onto the FOLLOWING session's technical_signals rows. Advisory-only column — nothing
+    reads it yet.
+
+    Date-alignment fix (2026-08-19, found tracing an IC finding end-to-end): the model is
+    trained on features(feat_date) -> label(flew on the NEXT trading day, see
+    load_labeled_features's feat_date = prev_trading_day(label date)) -- so a prediction made
+    from today's close is a forecast for TOMORROW, not today. This used to write under `d`
+    (the feature date itself), mislabeling every live-scored row by one trading day. Fixed to
+    look up the real next technical_signals date from the DB (not a calendar computation --
+    NSE holidays make "d+1 calendar day" wrong) and write there instead; harmless today since
+    score() has zero consumers and was never scheduled."""
     if not os.path.exists(MODEL_PATH):
         print("[Flyer] no model; run --train first.")
         return 0
@@ -258,6 +268,16 @@ def score() -> int:
     if today.empty:
         print(f"[Flyer] no feature rows for {d}.")
         return 0
+
+    row = cur.execute(translate(
+        "SELECT MIN(date) FROM technical_signals WHERE date > ?"), (d,)).fetchone()
+    d_next = row[0] if row and row[0] else None
+    if not d_next:
+        print(f"[Flyer] no technical_signals row exists yet for the session after {d} -- "
+              f"a prediction from {d}'s close describes tomorrow, and tomorrow's row hasn't "
+              f"been created. Nothing to write to; skipping.")
+        return 0
+
     X = today[art["feature_names"]].replace([np.inf, -np.inf], np.nan).fillna(0.0).astype(np.float32)
     preds = np.zeros(len(X))
     for m in art["models"]:
@@ -265,11 +285,11 @@ def score() -> int:
     probs = preds / len(art["models"])
     cur.executemany(
         "UPDATE technical_signals SET flyer_probability = ? WHERE symbol = ? AND date = ?",
-        [(round(float(p), 4) if np.isfinite(p) else None, s, d)
+        [(round(float(p), 4) if np.isfinite(p) else None, s, d_next)
          for p, s in zip(probs, today["symbol"])],
     )
     conn.commit()
-    print(f"[Flyer] scored {len(today)} symbols for {d}.")
+    print(f"[Flyer] scored {len(today)} symbols for {d_next} (features as of {d}).")
     return len(today)
 
 
