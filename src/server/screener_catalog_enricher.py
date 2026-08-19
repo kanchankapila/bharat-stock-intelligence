@@ -136,6 +136,24 @@ def resolve_screener_defaults(category: str, sentiment: str | None, name: str) -
     return bias, cat_norm, horizon, confidence
 
 
+def load_catalog_rows_for_name_enrichment(con):
+    """Step 2's name-lookup: rows still missing signal_keywords, joined against
+    trendlyne_screeners/screener_master for a display name. Extracted so a regression in the
+    LOWER(sc.source) join condition (AF-20260816-19 -- screener_catalog.source holds both
+    'trendlyne' and 'Trendlyne' live) actually fails a test, rather than a hand-copied mirror of
+    the query passing regardless of what the real one says -- see resolve_screener_defaults()
+    above for the same reasoning applied to Step 5."""
+    return con.execute("""
+        SELECT sc.screener_id, sc.source, sc.screener_name,
+               ts.screenpk, ts.screener_url AS ts_url, ts.screener_name AS ts_name,
+               sm.name AS sm_name
+        FROM screener_catalog sc
+        LEFT JOIN trendlyne_screeners ts ON ts.screener_id = sc.screener_id AND LOWER(sc.source) = 'trendlyne'
+        LEFT JOIN screener_master sm ON sm.scan_id = sc.screener_id
+        WHERE sc.signal_keywords IS NULL OR sc.signal_keywords = ''
+    """).fetchall()
+
+
 def run():
     con = connect()
 
@@ -156,15 +174,7 @@ def run():
 
     # ── Step 2: Load screener names from all sources ──────────────────────────
     # screener_catalog: join on screener_master or trendlyne_screeners for name
-    rows = con.execute("""
-        SELECT sc.screener_id, sc.source, sc.screener_name,
-               ts.screenpk, ts.screener_url AS ts_url, ts.screener_name AS ts_name,
-               sm.name AS sm_name
-        FROM screener_catalog sc
-        LEFT JOIN trendlyne_screeners ts ON ts.screener_id = sc.screener_id AND sc.source = 'trendlyne'
-        LEFT JOIN screener_master sm ON sm.scan_id = sc.screener_id
-        WHERE sc.signal_keywords IS NULL OR sc.signal_keywords = ''
-    """).fetchall()
+    rows = load_catalog_rows_for_name_enrichment(con)
 
     print(f"[CatalogEnricher] {len(rows)} screener_catalog rows to enrich")
     catalog_updated = 0

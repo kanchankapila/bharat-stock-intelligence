@@ -307,3 +307,24 @@ after the migration, not stale).
 **Only 1 of the 4 items had actual code to write.** The other 3 not landing a code change this
 pass is the correct outcome, not an incomplete one — AF-12 has no action until its cron fires,
 AF-15 has no lead to chase, and AF-14 is a standing check that stays open by design.
+
+### 2026-08-19 — gap review, one item advanced (AF-19's sibling instance)
+
+User asked for a review of open items / gaps. Ledger reconciled first (per this skill's own
+step 5): the working tree had a large concurrent session mid-flight (~83 files, a repo-wide
+`print()` → `print(..., file=sys.stderr)` sweep, later found to be a branch-flip — safely
+committed to `fix/degraded-read-stderr-routing`, not lost) — waited for it to clear rather than
+touch overlapping files. Of the 6 genuinely-open items, 3 directly overlapped that session's
+files and were skipped; AF-11 was read in full and deliberately NOT force-fixed (a mechanical
+anchor swap was already tried for it and made the false-positive rate worse, per its own row —
+repeating that mistake under time pressure would be the "picked a threshold without measuring
+the null" class this repo's rules exist to prevent); AF-28/33/39 need a real `measurement.md`-
+grade backtest session, not a code edit in a gap-review pass.
+
+| ID | Found | Class | Finding | Lane | Status | Immunized | Closed |
+|---|---|---|---|---|---|---|---|
+| AF-20260819-48 | 2026-08-19 | data | **Second live instance of AF-20260816-19's casing bug, in a file the original finding didn't cover.** `screener_catalog_enricher.py`'s Step 2 name-enrichment query (`run()`, name lookup for rows missing `signal_keywords`) joined `trendlyne_screeners` on exact-case `sc.source = 'trendlyne'`, while 3 OTHER joins in the same file already correctly use `LOWER(sc.source)` for this exact reason (comment at :282 spells out why, for a sibling join). Live-confirmed before fixing: 343 `screener_catalog` rows carry `source='Trendlyne'` (capitalized), of which **170 were pending enrichment** (`signal_keywords IS NULL`) — every one of those 170 silently got `NULL` `screenpk`/`screener_url`/`screener_name` from the join, with no error. Found while assessing AF-19 for a "cheap immunization" static check; a broad `source =` regex would have been ~90% false-positive (checked live — `signal_source`, `psh.source='moneycontrol'`, and other unrelated tables' correctly-exact-case comparisons vastly outnumber real `screener_catalog` hits), so no static check was added — this one instance was fixed directly instead. | FIX | **fixed + live-verified + negative-controlled** 2026-08-19 — changed `sc.source = 'trendlyne'` → `LOWER(sc.source) = 'trendlyne'`, matching the file's own established pattern. Extracted the query into `load_catalog_rows_for_name_enrichment(con)` so a test could call the real function rather than mirror the SQL (the first draft of the test *did* mirror it and passed even with the bug reverted — caught and fixed before landing, see recurring-bugs.md's "test that reimplements the logic under test" entry). Live re-run against real production, read-only: **170/170** previously-orphaned capitalized-`Trendlyne` rows now correctly resolve `screenpk`/`screener_url`/`screener_name` | new test `test_step2_name_lookup_matches_capitalized_trendlyne_source`, negative-controlled (fails `AttributeError` against the pre-fix source via `git stash`, confirmed, restored). Full pytest re-run: 2090/0 failed (2089 + 1 new). `check_recurring_bugs.py` clean on both changed files | 2026-08-19 |
+
+**AF-20260816-19 itself stays open** — this fixes one reader, not the underlying 877 mixed-case
+rows in the table, and no static check was added (see reasoning above). A future reader written
+with exact-case `source =` on `screener_catalog` is still silently exposed to this.
