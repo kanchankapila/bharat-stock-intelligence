@@ -231,7 +231,10 @@ export const EarningsPage: React.FC<EarningsPageProps> = ({ onSelectStock }) => 
             </div>
             <div className="overflow-y-auto max-h-80">
               {actualEstimateList.slice(0, 15).map((item: any, i: number) => {
-                const beat = parseFloat(item.actual || 0) >= parseFloat(item.estimate || 0);
+                const actualNum = parseFloat(item.actual);
+                const estimateNum = parseFloat(item.estimate);
+                const hasBoth = Number.isFinite(actualNum) && Number.isFinite(estimateNum);
+                const beat = hasBoth ? actualNum >= estimateNum : null;
                 return (
                   <div key={i} className="flex items-center justify-between px-3 py-2 border-b border-slate-800/20 hover:bg-slate-700/20 cursor-pointer"
                        onClick={() => onSelectStock?.(item.symbol)}>
@@ -240,8 +243,8 @@ export const EarningsPage: React.FC<EarningsPageProps> = ({ onSelectStock }) => 
                       <div className="text-xs text-slate-400">{item.metric || 'Net Profit'}</div>
                     </div>
                     <div className="text-right">
-                      <div className={cn('text-xs font-bold', beat ? 'text-emerald-400' : 'text-red-400')}>
-                        {beat ? '✓ Beat' : '✗ Miss'}
+                      <div className={cn('text-xs font-bold', beat == null ? 'text-slate-500' : beat ? 'text-emerald-400' : 'text-red-400')}>
+                        {beat == null ? '—' : beat ? '✓ Beat' : '✗ Miss'}
                       </div>
                       <div className="text-xs text-slate-400">{item.actual} vs {item.estimate}</div>
                     </div>

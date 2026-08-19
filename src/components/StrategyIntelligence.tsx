@@ -420,8 +420,9 @@ export function StrategyIntelligence({ onSelectStock }: { onSelectStock: (symbol
                     <td className="py-2 px-3">
                       <span className={cn(
                         'font-bold tabular-nums',
-                        (s.piotroski_f_score ?? 0) >= 7 ? 'text-emerald-400' :
-                        (s.piotroski_f_score ?? 0) >= 4 ? 'text-amber-400' : 'text-rose-400'
+                        s.piotroski_f_score == null ? 'text-slate-500' :
+                        s.piotroski_f_score >= 7 ? 'text-emerald-400' :
+                        s.piotroski_f_score >= 4 ? 'text-amber-400' : 'text-rose-400'
                       )}>
                         {s.piotroski_f_score ?? '—'}
                       </span>

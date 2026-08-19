@@ -199,8 +199,9 @@ export const SlideOutDrawer: React.FC<SlideOutDrawerProps> = ({
                     <span className="font-semibold text-slate-400">Piotroski F-Score</span>
                     <span className={cn(
                       "font-black tabular-nums px-2 py-0.5 rounded",
-                      (quantScore?.piotroski_f_score ?? 0) >= 7 ? "bg-emerald-500/10 text-emerald-400" :
-                      (quantScore?.piotroski_f_score ?? 0) >= 5 ? "bg-amber-500/10 text-amber-400" :
+                      quantScore?.piotroski_f_score == null ? "bg-slate-700/30 text-slate-500" :
+                      quantScore.piotroski_f_score >= 7 ? "bg-emerald-500/10 text-emerald-400" :
+                      quantScore.piotroski_f_score >= 5 ? "bg-amber-500/10 text-amber-400" :
                       "bg-rose-500/10 text-rose-400"
                     )}>
                       {quantScore?.piotroski_f_score ?? '—'} / 9
