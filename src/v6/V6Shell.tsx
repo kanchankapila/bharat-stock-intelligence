@@ -86,18 +86,17 @@ const DataHealthChip: React.FC<{ onClick: () => void }> = ({ onClick }) => {
   // healthy system. isError must win over the derived-from-empty-array good state.
   const Icon = isError || failed ? ShieldAlert : ShieldCheck;
   const label = isError ? 'Health unknown' : isLoading ? 'Health …' : failed ? `Health ${criticalIssues} critical` : warn ? `Health ${degraded} degraded` : 'Health nominal';
-  const colors = isError || failed
-    ? { bg: 'var(--v6-negative-soft)', fg: 'var(--v6-negative)', border: 'rgba(244,63,94,0.24)' }
-    : warn
-      ? { bg: 'var(--v6-warning-soft)', fg: 'var(--v6-warning)', border: 'rgba(245,158,11,0.24)' }
-      : { bg: 'var(--v6-positive-soft)', fg: 'var(--v6-positive)', border: 'rgba(16,185,129,0.2)' };
+  // Flat chip, colour carried only by the icon/text -- matches v1 AppShell's status chips
+  // (bg-slate-900/60 border-slate-800/50, a neutral shell with only a dot or icon coloured),
+  // not the fully-tinted background pill this used to be.
+  const fg = isError || failed ? 'var(--v6-negative)' : warn ? 'var(--v6-warning)' : 'var(--v6-positive)';
 
   return (
     <button
       type="button"
       onClick={onClick}
       className="v6-chip hidden md:inline-flex items-center gap-1.5 text-[10px] font-bold"
-      style={{ background: colors.bg, color: colors.fg, border: `1px solid ${colors.border}` }}
+      style={{ color: fg }}
       title={isError ? 'System Monitor query failed -- open System Monitor to investigate' : 'Open System Monitor for pipeline freshness and job failures'}
       aria-label={`${label}. Open System Monitor`}
     >
@@ -162,13 +161,15 @@ export const V6Shell: React.FC<V6ShellProps> = ({
         <div className="flex items-center gap-2.5">
           <div
             className="w-8 h-8 rounded-lg flex items-center justify-center shrink-0"
-            style={{ background: 'var(--v6-accent)' }}
+            style={{ background: 'var(--v6-accent)', boxShadow: '0 0 10px rgba(99,102,241,0.3)' }}
           >
             <TrendingUp className="w-4 h-4" style={{ color: '#ffffff' }} />
           </div>
           <div>
-            <p className="v6-title text-[15px] font-bold leading-tight" style={{ color: 'var(--v6-ink)' }}>Workbench</p>
-            <p className="text-[10px] uppercase tracking-wider" style={{ color: 'var(--v6-faint)' }}>Bharat Stock Intelligence</p>
+            <p className="v6-title text-[16px] leading-tight" style={{ color: 'var(--v6-ink)' }}>Workbench</p>
+            {/* Amber second line, echoing v1 AppShell's own two-tone wordmark ("BHARAT" +
+                amber "STOCK") -- indigo carries the brand, amber carries "this is live". */}
+            <p className="v6-title text-[9px] leading-tight" style={{ color: 'var(--v6-highlight)' }}>Bharat Stock Intelligence</p>
           </div>
         </div>
         <button
@@ -198,18 +199,26 @@ export const V6Shell: React.FC<V6ShellProps> = ({
                   <button
                     key={item.id}
                     onClick={() => handleNav(item.id)}
-                    className="w-full flex items-center gap-2 px-2.5 py-1 rounded-lg text-left text-[12px] font-medium transition-colors"
+                    className="relative w-full flex items-center gap-2 px-2.5 py-1 rounded-lg text-left text-[12px] font-medium transition-colors"
                     aria-current={active ? 'page' : undefined}
                     title={item.label}
                     style={active ? {
                       background: 'var(--v6-accent-soft)',
-                      color: 'var(--v6-accent-ink)',
+                      color: 'var(--v6-highlight)',
                       fontWeight: 650,
                     } : { color: 'var(--v6-ink-soft)' }}
                     onMouseEnter={(e) => { if (!active) e.currentTarget.style.background = 'var(--v6-bg-band)'; }}
                     onMouseLeave={(e) => { if (!active) e.currentTarget.style.background = 'transparent'; }}
                   >
-                    <Icon className="w-3.5 h-3.5 shrink-0" style={{ color: active ? 'var(--v6-accent)' : 'var(--v6-muted)' }} />
+                    {/* Left accent bar on the active row -- v1 AppShell's own active-state
+                        marker (`absolute left-0 ... bg-indigo-500`), missing here before. */}
+                    {active && (
+                      <span
+                        className="absolute left-0 top-1/2 -translate-y-1/2 w-0.5 h-4 rounded-r-full"
+                        style={{ background: 'var(--v6-accent)' }}
+                      />
+                    )}
+                    <Icon className="w-3.5 h-3.5 shrink-0" style={{ color: active ? 'var(--v6-highlight)' : 'var(--v6-muted)' }} />
                     <span className="truncate">{item.label}</span>
                   </button>
                 );
@@ -340,12 +349,10 @@ export const V6Shell: React.FC<V6ShellProps> = ({
             )}
             <DataHealthChip onClick={() => handleNav('monitor')} />
             <RegimeChip />
-            <span
-              className="v6-chip hidden sm:inline-flex"
-              style={marketOpen
-                ? { background: 'var(--v6-positive-soft)', color: 'var(--v6-positive)', border: '1px solid rgba(16,185,129,0.2)' }
-                : { background: 'var(--v6-bg-band)', color: 'var(--v6-muted)' }}
-            >
+            {/* Flat neutral chip, colour carried only by the dot -- matches v1 AppShell's Live
+                pill (bg-slate-900/60 border-slate-800/50 regardless of state), not a fully-tinted
+                pill. */}
+            <span className="v6-chip hidden sm:inline-flex" style={{ color: marketOpen ? 'var(--v6-positive)' : 'var(--v6-muted)' }}>
               <span
                 className="w-1.5 h-1.5 rounded-full"
                 style={{ background: marketOpen ? 'var(--v6-positive)' : 'var(--v6-faint)', boxShadow: marketOpen ? '0 0 4px var(--v6-positive)' : 'none' }}
