@@ -18,6 +18,7 @@ from sqlalchemy import text
 
 from db_compat import get_engine
 from fetch_utils import retry_get
+import sys
 
 NSE_FII_DII_URL = "https://www.nseindia.com/api/fiidiiTradeReact"
 
@@ -47,7 +48,7 @@ class FiiDiiFetcher:
             self.session.get("https://www.nseindia.com", timeout=10)
             time.sleep(1)
         except Exception as e:
-            print(f"[FiiDii] Session prime warning: {e}")
+            print(f"[FiiDii] Session prime warning: {e}", file=sys.stderr)
 
     def fetch(self) -> list[dict]:
         """Fetch FII/DII data from NSE. Returns list of daily records.
@@ -60,7 +61,7 @@ class FiiDiiFetcher:
             resp = retry_get(self.session, NSE_FII_DII_URL, timeout=15)
             data = resp.json()
         except Exception as e:
-            print(f"[FiiDii] Fetch error after retries: {e}")
+            print(f"[FiiDii] Fetch error after retries: {e}", file=sys.stderr)
             return []
 
         # Group by date, then pivot FII/FPI and DII rows into one record per date
@@ -82,7 +83,7 @@ class FiiDiiFetcher:
                     by_date[date_str]["dii_sell"] = self._parse_float(row.get("sellValue"))
                     by_date[date_str]["dii_net"]  = self._parse_float(row.get("netValue"))
             except Exception as e:
-                print(f"[FiiDii] Row parse error: {e} — row={row}")
+                print(f"[FiiDii] Row parse error: {e} — row={row}", file=sys.stderr)
 
         records = []
         for date_str, vals in by_date.items():
@@ -190,7 +191,7 @@ class FiiDiiFetcher:
             resp.raise_for_status()
             data = resp.json()
         except Exception as e:
-            print(f"[FIIFetcher] Provisional fetch error: {e}")
+            print(f"[FIIFetcher] Provisional fetch error: {e}", file=sys.stderr)
             return
 
         # Find the row(s) whose date matches today

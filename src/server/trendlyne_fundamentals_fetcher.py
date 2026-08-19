@@ -43,6 +43,7 @@ from requests.adapters import HTTPAdapter
 from db_compat import connect
 from as_of import logical_write_floor
 from fetch_utils import TRENDLYNE_MAX_CONCURRENT, cap_to_run_budget
+import sys
 
 BASE_URL = "https://trendlyne.com/mapp/v1/stock/chart-data/{tlid}/{param}/"
 
@@ -149,7 +150,7 @@ def _fetch(tlid: str, param: str, session: requests.Session) -> dict | None:
             return None
         return data.get("body", {})
     except Exception as e:
-        print(f"  [{param}] error: {e}")
+        print(f"  [{param}] error: {e}", file=sys.stderr)
         return None
 
 

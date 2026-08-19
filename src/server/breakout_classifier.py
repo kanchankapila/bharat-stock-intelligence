@@ -29,6 +29,7 @@ import pandas as pd
 
 from db_compat import connect, read_df, translate, use_postgres
 from model_promotion import decide_promotion_with_nan_guard, file_staleness_override_applies
+import sys
 
 RET_THRESHOLD = 0.06     # +6% forward move = breakout
 HORIZON = 10             # within the next 10 trading days
@@ -190,7 +191,7 @@ def _load_ohlcv(cutoff: str) -> pd.DataFrame:
                       f"delisted symbols, +{len(extra)} bars")
     except Exception as e:
         print(f"[BreakoutClassifier] survivorship fill unavailable ({str(e)[:80]}); "
-              "training on stock_ohlcv's current-universe-only history")
+              "training on stock_ohlcv's current-universe-only history", file=sys.stderr)
 
     return ohlcv
 
@@ -370,7 +371,7 @@ def _load_baseline_test_auc(model_path: str) -> float | None:
         return existing.get("test_auc")
     except Exception as e:
         print(f"[Breakout] Could not read existing model at {model_path} for comparison "
-              f"({e}) -- treating as no baseline.")
+              f"({e}) -- treating as no baseline.", file=sys.stderr)
         return None
 
 

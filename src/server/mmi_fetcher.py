@@ -20,6 +20,7 @@ Run:  python mmi_fetcher.py
 import requests
 
 from db_compat import execute
+import sys
 
 MMI_URL = "https://api.tickertape.in/mmi/now"
 HEADERS = {
@@ -59,7 +60,7 @@ def fetch_mmi() -> dict | None:
             return None
         return d.get("data")
     except Exception as e:
-        print(f"[MMI] fetch error: {e}")
+        print(f"[MMI] fetch error: {e}", file=sys.stderr)
         return None
 
 

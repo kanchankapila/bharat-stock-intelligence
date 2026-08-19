@@ -28,6 +28,7 @@ import pandas as pd
 
 from db_compat import execute, executemany, query_one, read_df
 from model_promotion import clears_promotion_bar, file_staleness_override_applies
+import sys
 
 MODEL_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "ml_models", "live_screener_intraday_clf.pkl")
 CANDIDATE_PATH = MODEL_PATH.replace(".pkl", "_candidate.pkl")
@@ -71,7 +72,7 @@ def _live_auc() -> tuple:
             WHERE o.return_intraday IS NOT NULL AND s.win_probability IS NOT NULL
         """)
     except Exception as e:
-        print(f"[LiveScreenerMLRanker] live-AUC lookup failed: {str(e)[:100]}")
+        print(f"[LiveScreenerMLRanker] live-AUC lookup failed: {str(e)[:100]}", file=sys.stderr)
         return None, 0
     if df is None or df.empty or len(df) < LIVE_AUC_MIN_ROWS:
         return None, 0 if df is None or df.empty else len(df)
@@ -207,7 +208,7 @@ def _load_reversal_features(run_asof: pd.DataFrame) -> pd.DataFrame:
         try:
             bars = _load_intraday_bars_for_date(session_date)
         except Exception as e:
-            print(f"[LiveScreenerMLRanker] reversal features skipped for {session_date}: {str(e)[:100]}")
+            print(f"[LiveScreenerMLRanker] reversal features skipped for {session_date}: {str(e)[:100]}", file=sys.stderr)
             continue
         out.append(_asof_reversal_for_date(bars, day_asof[['run_id', 'symbol', 'ts']]))
     return pd.concat(out, ignore_index=True) if out else _empty_reversal_frame()

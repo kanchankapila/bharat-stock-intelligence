@@ -59,6 +59,7 @@ from curl_cffi import requests
 from db_compat import connect
 from et_stats_client import as_of_floor
 from as_of import logical_trading_date
+import sys
 
 HISTORY_URL = (
     "https://api.moneycontrol.com/swiftapi/v1/stockvitals/historical"
@@ -141,7 +142,7 @@ def _fetch_metric(mcsymbol: str, metric: str, session) -> list[dict] | None:
             return None
         return payload.get("data", {}).get("barData", []) or []
     except Exception as e:
-        print(f"  [{mcsymbol}] stockvitals history error ({metric}): {e}")
+        print(f"  [{mcsymbol}] stockvitals history error ({metric}): {e}", file=sys.stderr)
         return None
 
 

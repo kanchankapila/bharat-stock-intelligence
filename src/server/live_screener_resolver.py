@@ -215,7 +215,7 @@ def resolve_outcomes(dry_run=False):
             prune_old_appearances(conn)
 
     except Exception as e:
-        print(f"[LiveScreenerResolver] Error: {e}")
+        print(f"[LiveScreenerResolver] Error: {e}", file=sys.stderr)
         conn.rollback()
         raise
     finally:
@@ -262,7 +262,7 @@ def prune_old_appearances(conn, retention_days: int = RETENTION_DAYS) -> int:
     except Exception as e:
         # Retention must never fail the resolve run -- the outcomes it just wrote matter more.
         conn.rollback()
-        print(f"[LiveScreenerResolver] Retention skipped: {str(e)[:120]}")
+        print(f"[LiveScreenerResolver] Retention skipped: {str(e)[:120]}", file=sys.stderr)
         return 0
 
 

@@ -28,6 +28,7 @@ import requests
 
 from db_compat import connect
 from tickertape_client import HEADERS, fetch_scorecard, load_tickertape_sid_map
+import sys
 
 ORDINAL_MAP = {"low": 0, "avg": 1, "high": 2}
 
@@ -130,7 +131,7 @@ def main() -> None:
                 con.rollback()
             except Exception:
                 pass
-            print(f"  [{i}/{len(stocks)}] {symbol}: ERROR — {e}")
+            print(f"  [{i}/{len(stocks)}] {symbol}: ERROR — {e}", file=sys.stderr)
 
     print(f"[TickertapeScorecard] Done. {ok}/{len(stocks)} stocks with scores written.")
     con.close()

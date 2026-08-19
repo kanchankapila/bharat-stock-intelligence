@@ -308,7 +308,7 @@ def run_grid_search(
                 stop_loss_pct=cfg['stop_loss_pct'],
             )
         except Exception as e:
-            print(f"ERROR: {e}")
+            print(f"ERROR: {e}", file=sys.stderr)
             continue
 
         if not stats:

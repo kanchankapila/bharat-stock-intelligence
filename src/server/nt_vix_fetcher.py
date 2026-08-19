@@ -23,6 +23,7 @@ import requests
 
 from db_compat import execute, executemany
 from fetch_utils import retry_get
+import sys
 
 NT_HEADERS = {
     "User-Agent": (
@@ -59,7 +60,7 @@ def fetch_spot(nt_param: str) -> dict | None:
             return None
         return d.get("resultData")
     except Exception as e:
-        print(f"  [spot] fetch error for {nt_param} after retries: {e}")
+        print(f"  [spot] fetch error for {nt_param} after retries: {e}", file=sys.stderr)
         return None
 
 

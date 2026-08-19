@@ -91,7 +91,7 @@ def fetch_financials_history(
                 break
             snapshot = payload.get("data", {}).get("snapshot", {})
         except Exception as e:
-            print(f"  [marketsmojo financials] sid={sid} page={page} error: {e}")
+            print(f"  [marketsmojo financials] sid={sid} page={page} error: {e}", file=sys.stderr)
             break
         finally:
             time.sleep(RATE_LIMIT_SEC)

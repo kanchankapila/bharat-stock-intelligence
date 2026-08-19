@@ -52,6 +52,7 @@ import pandas as pd
 
 from as_of import logical_trading_date
 from db_compat import connect, read_df, safe_alter, use_postgres
+import sys
 
 # Windows. 5 days matches the horizon each signal was measured at; changing one means
 # re-running the measurement, not just editing the constant.
@@ -265,7 +266,7 @@ def run(as_of: str | None = None, dry_run: bool = False) -> dict:
                 print(f"[EventTriggers] universe filter dropped {before - len(df):,} "
                       f"of {before:,} symbols not in nse_stocks")
     except Exception as e:                                      # noqa: BLE001
-        print(f"[EventTriggers] universe restriction unavailable ({str(e)[:60]}); unfiltered")
+        print(f"[EventTriggers] universe restriction unavailable ({str(e)[:60]}); unfiltered", file=sys.stderr)
     if df.empty:
         print('[EventTriggers] nothing left after the universe filter for', as_of)
         return {'rows': 0}

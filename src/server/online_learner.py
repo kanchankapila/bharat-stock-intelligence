@@ -149,7 +149,7 @@ def load_or_init_sgd(expected_n_features: int | None = None) -> dict:
                     return _new_sgd_state()
             return state
         except Exception as e:
-            print(f"[OnlineLearner] Could not load SGD state ({e}) — reinitialising.")
+            print(f"[OnlineLearner] Could not load SGD state ({e}) — reinitialising.", file=sys.stderr)
     return _new_sgd_state()
 
 
@@ -332,7 +332,7 @@ def run(window_days: int = 180, min_new: int = 5, dry_run: bool = False):
     try:
         from sklearn.linear_model import SGDClassifier
     except ImportError:
-        print("[OnlineLearner] scikit-learn not installed.")
+        print("[OnlineLearner] scikit-learn not installed.", file=sys.stderr)
         sys.exit(1)
 
     print(f"[OnlineLearner] Starting at {datetime.datetime.now()}")
@@ -408,7 +408,7 @@ def run(window_days: int = 180, min_new: int = 5, dry_run: bool = False):
             update_priors_from_outcomes(df[['signals_json', 'outcome']])
             print(f"[OnlineLearner] Signal-type priors updated.")
         except Exception as e:
-            print(f"[OnlineLearner] Prior update skipped: {e}")
+            print(f"[OnlineLearner] Prior update skipped: {e}", file=sys.stderr)
 
         # Load ensemble for blended scoring
         ensemble = None

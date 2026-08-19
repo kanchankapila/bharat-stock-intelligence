@@ -22,6 +22,7 @@ from datetime import datetime
 import requests
 
 from db_compat import execute, executemany, query_all
+import sys
 
 NT_HEADERS = {
     "User-Agent": (
@@ -65,7 +66,7 @@ def _fetch(url: str) -> list | None:
             return None
         return d.get("resultData", [])
     except Exception as e:
-        print(f"[sync_nt_fno] fetch error for {url}: {e}")
+        print(f"[sync_nt_fno] fetch error for {url}: {e}", file=sys.stderr)
         return None
 
 

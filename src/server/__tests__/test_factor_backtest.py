@@ -266,7 +266,10 @@ class TestSurvivorshipHandling:
                            'open': [1.0], 'close': [1.0], 'volume': [1.0]})
         out = fb._fill_delisted(px, '2024-01-01', '2024-12-31')
         assert len(out) == 1                                  # degraded, not crashed
-        assert 'WARNING' in capsys.readouterr().out
+        # stderr, not stdout -- pythonRunner.ts's runPython() only inspects stderr for its
+        # "finished successfully with warnings" log.warn(); see recurring-bugs.md's
+        # "A degraded-read message printed to the wrong stream defeats the one hook..." entry.
+        assert 'WARNING' in capsys.readouterr().err
 
     def test_position_that_cannot_be_exited_is_flat_not_dropped(self):
         """A name going dark mid-period must not vanish from the P&L — that IS the bias."""
@@ -466,7 +469,7 @@ class TestScreenerBreadth:
         dates = [d.strftime('%Y-%m-%d') for d in pd.bdate_range('2026-06-01', periods=3)]
         out = fb._add_screener_breadth(self._px(['A'], dates))
         assert out['screener_breadth'].isna().all()
-        assert 'WARNING' in capsys.readouterr().out
+        assert 'WARNING' in capsys.readouterr().err
 
     def test_is_registered_in_factors(self):
         assert 'screener_breadth' in fb.FACTORS

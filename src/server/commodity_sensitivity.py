@@ -33,6 +33,7 @@ import numpy as np
 import pandas as pd
 
 from db_compat import connect, executemany, read_df, translate
+import sys
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -86,7 +87,7 @@ def load_macro_returns(cutoff: str) -> pd.DataFrame:
             (cutoff,),
         )
     except Exception as exc:
-        print(f"[CommoditySensitivity] Could not read macro_asset_prices: {exc}")
+        print(f"[CommoditySensitivity] Could not read macro_asset_prices: {exc}", file=sys.stderr)
         return pd.DataFrame()
 
     if raw.empty:

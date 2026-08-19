@@ -210,7 +210,7 @@ def ensure_tables_exist(engine):
             try:
                 conn.execute(text(ddl))
             except Exception as e:
-                print(f"[MC Fetcher] DDL Error: {e} - Query: {ddl[:80]}...")
+                print(f"[MC Fetcher] DDL Error: {e} - Query: {ddl[:80]}...", file=sys.stderr)
 
         # Create indexes
         indexes = [
@@ -350,7 +350,7 @@ class MoneyControlFetcher:
                     print(f"[MC Fetcher] Rate limited ({r.status_code}) fetching {url[:60]}, backing off...")
                     time.sleep(5.0 * (attempt + 1))
             except Exception as e:
-                print(f"[MC Fetcher] Exception fetching {url[:60]}: {e}")
+                print(f"[MC Fetcher] Exception fetching {url[:60]}: {e}", file=sys.stderr)
                 time.sleep(2.0)
         return None
 
@@ -420,7 +420,7 @@ class MoneyControlFetcher:
                     elif key == "hits_misses":
                         self._parse_hits_misses(symbol, payload)
             except Exception as e:
-                print(f"[MC Fetcher] Parse Error for {symbol} ({key}): {e}")
+                print(f"[MC Fetcher] Parse Error for {symbol} ({key}): {e}", file=sys.stderr)
 
     def _fetch_intraday(self, symbol: str):
         """Fetch 15-minute resolution intraday bars for the last 5 days."""
@@ -477,7 +477,7 @@ class MoneyControlFetcher:
                         """), r)
                 print(f"[MC Fetcher] Ingested {len(rows)} intraday 15m bars for {symbol}")
         except Exception as e:
-            print(f"[MC Fetcher] Intraday parse error for {symbol}: {e}")
+            print(f"[MC Fetcher] Intraday parse error for {symbol}: {e}", file=sys.stderr)
 
     def _parse_insider(self, symbol: str, html: str):
         soup = BeautifulSoup(html, "html.parser")
@@ -956,7 +956,7 @@ class MoneyControlFetcher:
                     sym = fut.result()
                     success_count += 1
                 except Exception as e:
-                    print(f"[MC Fetcher] Execution error: {e}")
+                    print(f"[MC Fetcher] Execution error: {e}", file=sys.stderr)
 
         print(f"[MC Fetcher] Finished crawling. Successfully processed {success_count}/{len(targets)} stocks.")
 

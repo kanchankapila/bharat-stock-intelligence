@@ -65,6 +65,19 @@ aggregates. A check that is ~90% false positive gets ignored within a week and t
 nothing while looking like it does. Catching it needs type information this script does not
 have.
 
+  8. A `print()` inside an `except Exception` block ("degraded read" -- a query that falls
+     back to an empty/default result instead of raising, because a missing/renamed table
+     must not crash a nightly job) with no `file=sys.stderr`. `pythonRunner.ts`'s
+     `runPython()` only inspects STDERR to decide whether to log '[PY] <script> finished
+     successfully with warnings/stderr output' -- the one hook that surfaces a degraded-
+     but-"successful" run without a human reading the raw log by hand. Found 2026-08-18 in
+     `unified_ranker.py` (~30 read methods, all printing to stdout) and only partially
+     fixed (5 of 21 `print()` calls routed to stderr) before this check existed -- see
+     recurring-bugs.md's "A degraded-read message printed to the wrong stream defeats the
+     one hook..." entry. Scoped to files actually invoked via `runPython()` somewhere in
+     the `.ts` codebase; a script that is never run that way has no reason to route
+     diagnostics to stderr.
+
 Also deliberately NOT checked: a market-hours/skip guard that returns early with no
 follow-on 'success' stamp anywhere nearby (most of them -- see confluence.jobs.ts's
 `isConfluenceComputeWindow`, which returns a zero-value result object on purpose and is
@@ -80,7 +93,8 @@ backlog.
 
 File scope is `src/server/*.py` for checks 1-5, plus `src/server/**/*.ts` (excluding tests)
 for check 6 only. The multi-word-cast class (check 5) also occurs in `.ts` (sqlTranslate is
-TypeScript); this script does not cover that side.
+TypeScript); this script does not cover that side. Check 8 covers `.py` files that appear
+as a `runPython('X.py', ...)` argument anywhere under `src/server/**/*.ts`.
 
 This is a standalone checker, not a git hook -- .git/hooks is shared across every worktree
 of this repository (confirmed: multiple concurrent Claude sessions each have their own
@@ -500,6 +514,56 @@ def check_information_schema_missing_table_schema(path: Path, text: str) -> list
     return findings
 
 
+def _runpython_invoked_scripts() -> set[str]:
+    """.py filenames passed as runPython()'s first argument anywhere under src/server/**/*.ts
+    -- the set of scripts whose stdout pythonRunner.ts never inspects, so a diagnostic printed
+    there is invisible to the one hook ('[PY] <script> finished successfully with warnings/
+    stderr output') that would otherwise surface it. See class 8 in the module docstring."""
+    pattern = re.compile(r"runPython\(\s*['\"]([\w.]+\.py)")
+    scripts: set[str] = set()
+    for ts_path in SERVER_DIR.rglob("*.ts"):
+        if "node_modules" in ts_path.parts:
+            continue
+        text = ts_path.read_text(encoding="utf-8", errors="ignore")
+        scripts.update(pattern.findall(text))
+    return scripts
+
+
+def check_degraded_print_to_stdout(path: Path, text: str, runpython_scripts: set[str]) -> list[str]:
+    """See class 8 in the module docstring. Walks each `except` block's own body (bounded by
+    the block's indentation returning to the `except` line's own level or shallower) looking
+    for a `print(` call, then checks a short window after it for `file=sys.stderr` -- wide
+    enough to cover a print() whose f-string/args span a few continuation lines (every real
+    instance in this repo does), without trying to track paren depth exactly."""
+    if path.name not in runpython_scripts or "tests" in path.parts:
+        return []
+    findings = []
+    lines = text.splitlines()
+    except_re = re.compile(r"^\s*except\b")
+    print_re = re.compile(r"\bprint\(")
+    for i, line in enumerate(lines):
+        if not except_re.match(line):
+            continue
+        except_indent = len(line) - len(line.lstrip())
+        j = i + 1
+        while j < len(lines) and j < i + 25:
+            body_line = lines[j]
+            if body_line.strip() and (len(body_line) - len(body_line.lstrip())) <= except_indent:
+                break
+            if not body_line.strip().startswith("#") and print_re.search(body_line):
+                window = "\n".join(lines[j:j + 5])
+                if "file=sys.stderr" not in window and "file = sys.stderr" not in window:
+                    findings.append(
+                        f"{_display_path(path)}:{j + 1}: print() inside an except block with "
+                        f"no `file=sys.stderr` -- pythonRunner.ts's runPython() only inspects "
+                        f"stderr to flag a degraded-but-'successful' run as such; this message "
+                        f"is invisible to it. Add `file=sys.stderr`, or route through an "
+                        f"existing self._degraded()-style helper if this class already has one."
+                    )
+            j += 1
+    return findings
+
+
 def check_missing_live_datasource_test(fetcher_files: list[Path]) -> list[str]:
     tests_dir = SERVER_DIR / "tests"
     existing = {p.name for p in tests_dir.glob("test_live_datasource_*.py")} if tests_dir.exists() else set()
@@ -562,6 +626,8 @@ def main() -> int:
         py_files = [f for f in _tracked_python_files() if f.exists()]
         ts_files = [f for f in _tracked_ts_files() if f.exists()]
 
+    runpython_scripts = _runpython_invoked_scripts()
+
     all_findings: list[str] = []
     for path in py_files:
         text = path.read_text(encoding="utf-8", errors="ignore")
@@ -570,6 +636,7 @@ def main() -> int:
         all_findings.extend(check_nan_self_inequality(path, text))
         all_findings.extend(check_multiword_pg_cast(path, text))
         all_findings.extend(check_information_schema_missing_table_schema(path, text))
+        all_findings.extend(check_degraded_print_to_stdout(path, text, runpython_scripts))
 
     for path in ts_files:
         all_findings.extend(check_skip_not_success(path, path.read_text(encoding="utf-8", errors="ignore")))

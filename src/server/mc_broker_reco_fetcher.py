@@ -83,7 +83,7 @@ def ensure_schema(con) -> None:
             con.rollback()
         except Exception:
             pass
-        print(f"[BrokerReco] WARN: could not create mc_broker_reco: {exc}")
+        print(f"[BrokerReco] WARN: could not create mc_broker_reco: {exc}", file=sys.stderr)
 
     # Feature columns on technical_signals
     feature_cols = [
@@ -139,7 +139,7 @@ def fetch_recos(lookback_days: int = FETCH_LOOKBACK_DAYS) -> list[dict]:
             resp = retry_get(cffi_req, url, headers=HEADERS, impersonate="chrome120", timeout=30)
             payload = resp.json()
         except Exception as exc:
-            print(f"[BrokerReco] WARN: page {page} fetch failed after retries: {exc}")
+            print(f"[BrokerReco] WARN: page {page} fetch failed after retries: {exc}", file=sys.stderr)
             break
 
         if not payload.get("success"):

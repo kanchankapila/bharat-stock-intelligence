@@ -123,6 +123,7 @@ import numpy as np
 import pandas as pd
 
 from db_compat import read_df, transaction
+import sys
 
 # -- Cost model -------------------------------------------------------------------
 DEFAULT_COST_BPS_PER_SIDE = 25.0     # see COST MODEL above; sweep this, don't trust one value
@@ -557,7 +558,7 @@ def _add_valuation(px: pd.DataFrame, start: str, end: str) -> pd.DataFrame:
             )
         except Exception as e:                                  # noqa: BLE001
             print(f"[FactorBacktest] WARNING: {tbl} unavailable ({str(e)[:80]}); "
-                  "value factors will be skipped.")
+                  "value factors will be skipped.", file=sys.stderr)
             px[col] = np.nan
             continue
         if df.empty:
@@ -627,7 +628,7 @@ def _add_mojo_indigraph(px: pd.DataFrame, start: str, end: str) -> pd.DataFrame:
         )
     except Exception as e:                                          # noqa: BLE001
         print(f"[FactorBacktest] WARNING: marketsmojo_technical_history unavailable "
-              f"({str(e)[:80]}); mojo factors will be skipped.")
+              f"({str(e)[:80]}); mojo factors will be skipped.", file=sys.stderr)
         px['mojo_indigraph'] = np.nan
         return px
     if df.empty:
@@ -676,7 +677,7 @@ def _add_sector(px: pd.DataFrame) -> pd.DataFrame:
         sec = read_df("SELECT symbol, sector FROM nse_stocks WHERE sector IS NOT NULL")
     except Exception as e:                                      # noqa: BLE001
         print(f"[FactorBacktest] WARNING: nse_stocks unavailable ({str(e)[:80]}); "
-              "sector-neutral factors will be skipped.")
+              "sector-neutral factors will be skipped.", file=sys.stderr)
         px['sector'] = np.nan
         return px
     if sec.empty:
@@ -732,7 +733,7 @@ def _add_insider(px: pd.DataFrame, start: str, end: str) -> pd.DataFrame:
             ((pd.Timestamp(start) - pd.Timedelta(days=INSIDER_WINDOW_DAYS + 30)).strftime('%Y-%m-%d'), end),
         )
     except Exception as e:                                      # noqa: BLE001
-        print(f"[FactorBacktest] WARNING: insider_trades unavailable ({str(e)[:80]}); skipped.")
+        print(f"[FactorBacktest] WARNING: insider_trades unavailable ({str(e)[:80]}); skipped.", file=sys.stderr)
         px['insider_net'] = np.nan
         return px
 
@@ -815,7 +816,7 @@ def _add_screener_breadth(px: pd.DataFrame) -> pd.DataFrame:
             'WHERE appeared_date IS NOT NULL'
         )
     except Exception as e:                                      # noqa: BLE001
-        print(f"[FactorBacktest] WARNING: screener_appearances unavailable ({str(e)[:80]}); skipped.")
+        print(f"[FactorBacktest] WARNING: screener_appearances unavailable ({str(e)[:80]}); skipped.", file=sys.stderr)
         px['screener_breadth'] = np.nan
         return px
     if ev.empty:
@@ -879,7 +880,7 @@ def _add_feature_store(px: pd.DataFrame, start: str, end: str) -> pd.DataFrame:
             (start, end),
         )
     except Exception as e:                                      # noqa: BLE001
-        print(f"[FactorBacktest] WARNING: feature_store unavailable ({str(e)[:80]}); skipped.")
+        print(f"[FactorBacktest] WARNING: feature_store unavailable ({str(e)[:80]}); skipped.", file=sys.stderr)
         for c in FEATURE_STORE_FACTORS:
             px[c] = np.nan
         return px
@@ -908,7 +909,7 @@ def _add_earnings_category(px: pd.DataFrame, start: str, end: str) -> pd.DataFra
             (start, end),
         )
     except Exception as e:                                      # noqa: BLE001
-        print(f"[FactorBacktest] WARNING: earnings_category unavailable ({str(e)[:80]}); skipped.")
+        print(f"[FactorBacktest] WARNING: earnings_category unavailable ({str(e)[:80]}); skipped.", file=sys.stderr)
         px['earnings_category_yoy'] = np.nan
         px['earnings_category_qoq'] = np.nan
         return px
@@ -994,7 +995,7 @@ def _fill_delisted(px: pd.DataFrame, start: str, end: str) -> pd.DataFrame:
     except Exception as e:                                  # noqa: BLE001
         print(f"[FactorBacktest] WARNING: survivorship fill FAILED ({str(e)[:110]}). "
               "Results are survivorship-biased and will read optimistic -- do not compare them "
-              "against a filled run.")
+              "against a filled run.", file=sys.stderr)
         return px
 
 
@@ -1490,7 +1491,7 @@ def main() -> None:
                              by_date=by_date, missing_exit_pct=a.missing_exit_pct,
                              exit_by_date=exit_by_date, last_alive=last_alive)
         except Exception as e:                              # noqa: BLE001
-            print(f"[FactorBacktest] {f}: FAILED -- {e}")
+            print(f"[FactorBacktest] {f}: FAILED -- {e}", file=sys.stderr)
             continue
         out.append(r)
         if not a.json:

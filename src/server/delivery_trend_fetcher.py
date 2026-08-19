@@ -43,6 +43,7 @@ import requests
 
 from db_compat import connect, translate, use_postgres
 from fetch_utils import retry_get
+import sys
 
 # ── NSE session headers ───────────────────────────────────────────────────────
 
@@ -198,7 +199,7 @@ def _fetch_json(session: requests.Session, url: str, params: dict | None = None)
             return data
         return data.get("data", [])
     except Exception as e:
-        print(f"[DeliveryTrend] Fetch error {url} after retries: {e}")
+        print(f"[DeliveryTrend] Fetch error {url} after retries: {e}", file=sys.stderr)
         return []
 
 

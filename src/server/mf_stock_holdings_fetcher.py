@@ -38,6 +38,7 @@ import requests
 
 from db_compat import connect
 from et_stats_client import HEADERS, load_companyid_map
+import sys
 
 MF_URL = ("https://mfapps.indiatimes.com/Ulip/mfsInvestingInStock.htm"
           "?pagesize=100&sortby=numberOfSharesHeld&companyid={cid}&marketcap=&callback=&pageno={page}")
@@ -280,7 +281,7 @@ def main() -> None:
             print(f"  [{i}/{len(stocks)}] {symbol}: {agg['num_funds']} funds | "
                   f"net {chg:+.2f}%" if chg is not None else f"  [{i}/{len(stocks)}] {symbol}: {agg['num_funds']} funds")
         except Exception as e:
-            print(f"  [{i}/{len(stocks)}] {symbol}: ERROR — {e}")
+            print(f"  [{i}/{len(stocks)}] {symbol}: ERROR — {e}", file=sys.stderr)
     print(f"[MFHoldings] Done. {ok} stocks; {accumulating} with net MF accumulation.")
     con.close()
 

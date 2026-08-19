@@ -167,7 +167,7 @@ def run(symbol: Optional[str] = None, window_days: int = WINDOW_LONG, test: bool
             processed += 1
 
         except Exception as e:
-            print(f"[RiskMetrics] ERROR {sym}: {e}")
+            print(f"[RiskMetrics] ERROR {sym}: {e}", file=sys.stderr)
             errors += 1
 
     # Batch write — update only the new columns in quant_scores

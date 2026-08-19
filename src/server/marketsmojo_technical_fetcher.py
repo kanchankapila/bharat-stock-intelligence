@@ -103,7 +103,7 @@ def fetch_technical_history(sid: str, session: requests.Session, exchange: str =
             return None
         data = payload.get("data", {})
     except Exception as e:
-        print(f"  [marketsmojo technical] sid={sid} error: {e}")
+        print(f"  [marketsmojo technical] sid={sid} error: {e}", file=sys.stderr)
         return None
     finally:
         time.sleep(RATE_LIMIT_SEC)

@@ -73,7 +73,7 @@ def fetch_asm_symbols(sess: requests.Session) -> set[str] | None:
                     symbols.add(sym)
         return symbols
     except Exception as e:
-        print(f"[ASM] NSE reportASM fetch failed: {e}")
+        print(f"[ASM] NSE reportASM fetch failed: {e}", file=sys.stderr)
         return None
 
 
@@ -93,7 +93,7 @@ def fetch_gsm_symbols(sess: requests.Session) -> dict[str, int] | None:
                 result[sym] = _parse_stage(item.get("survDesc"))
         return result
     except Exception as e:
-        print(f"[GSM] NSE reportGSM fetch failed: {e}")
+        print(f"[GSM] NSE reportGSM fetch failed: {e}", file=sys.stderr)
         return None
 
 

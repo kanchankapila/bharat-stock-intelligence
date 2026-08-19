@@ -33,6 +33,7 @@ from datetime import date as _date, timedelta
 import requests
 
 from db_compat import execute, executemany, query_all
+import sys
 
 SO_HEADERS = {
     "User-Agent": (
@@ -178,7 +179,7 @@ def fetch_chain(symbol: str, expiry: str) -> dict | None:
             return None
         return d.get("body")
     except Exception as e:
-        print(f"    [SO] fetch error {symbol}/{expiry}: {e}")
+        print(f"    [SO] fetch error {symbol}/{expiry}: {e}", file=sys.stderr)
         return None
 
 
@@ -348,7 +349,7 @@ def run(
                 # run -- Trendlyne almost certainly reordered the SAME way for every
                 # symbol, so this will likely repeat, but that's a loud, visible failure
                 # count, not a silent wrong-Greeks write for any of them.
-                print(f"SKIPPED: {e}")
+                print(f"SKIPPED: {e}", file=sys.stderr)
                 fail += 1
                 if delay > 0:
                     time.sleep(delay)

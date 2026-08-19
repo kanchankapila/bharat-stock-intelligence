@@ -43,6 +43,7 @@ from datetime import date as _date, datetime
 import requests
 
 from db_compat import execute, executemany, connect, query_all
+import sys
 
 FNO_ACTIVITY_HEADERS = {
     "User-Agent": (
@@ -160,7 +161,7 @@ def _get_nse_official_monthly_expiry() -> str | None:
             return None
         return datetime.strptime(dates[0], "%d-%b-%Y").date().isoformat()
     except Exception as e:
-        print(f"  [fno_activity] NSE official expiry lookup failed ({e}), falling back to nt_fno_expiry")
+        print(f"  [fno_activity] NSE official expiry lookup failed ({e}), falling back to nt_fno_expiry", file=sys.stderr)
         return None
 
 
@@ -208,7 +209,7 @@ def fetch_activity(expiry: str, screen_type: str) -> dict | None:
             return None
         return d.get("body")
     except Exception as e:
-        print(f"    [fno_activity] fetch error {screen_type}/{expiry}: {e}")
+        print(f"    [fno_activity] fetch error {screen_type}/{expiry}: {e}", file=sys.stderr)
         return None
 
 

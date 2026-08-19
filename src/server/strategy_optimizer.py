@@ -183,7 +183,7 @@ class StrategyOptimizer:
         try:
             from scipy.optimize import differential_evolution
         except ImportError:
-            print("[Optimizer] scipy not installed. Run: pip install scipy")
+            print("[Optimizer] scipy not installed. Run: pip install scipy", file=sys.stderr)
             sys.exit(1)
 
         df = self.load_signal_outcomes_with_factors(horizon_days)

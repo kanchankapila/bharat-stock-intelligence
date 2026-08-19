@@ -20,6 +20,7 @@ import pandas as pd
 from db_compat import connect, read_df, executemany, safe_alter, execute
 from fetch_utils import retry_get
 from as_of import logical_trading_date
+import sys
 
 # ---------------------------------------------------------------------------
 # NSE API
@@ -105,13 +106,13 @@ def fetch_nse_rating_announcements(from_date: str, to_date: str) -> list[dict]:
     try:
         session.get(NSE_HOME_URL, timeout=10)
     except Exception as e:
-        print(f"[CreditRating] NSE session prime warning: {e}")
+        print(f"[CreditRating] NSE session prime warning: {e}", file=sys.stderr)
 
     try:
         resp = retry_get(session, url, timeout=20)
         data = resp.json()
     except Exception as e:
-        print(f"[CreditRating] NSE API error: {e}")
+        print(f"[CreditRating] NSE API error: {e}", file=sys.stderr)
         return []
 
     return data if isinstance(data, list) else []
@@ -141,7 +142,7 @@ def build_bse_to_nse_map(conn) -> dict[str, dict]:
                     }
             print(f"[CreditRating] Loaded {len(mapping)} ISIN->NSE mappings from nse_stocks (fallback)")
     except Exception as e:
-        print(f"[CreditRating] nse_stocks isin fallback warning: {e}")
+        print(f"[CreditRating] nse_stocks isin fallback warning: {e}", file=sys.stderr)
 
     return mapping
 

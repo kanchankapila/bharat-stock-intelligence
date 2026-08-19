@@ -26,6 +26,7 @@ import requests
 
 from db_compat import execute, executemany, query_all
 from fetch_utils import retry_get
+import sys
 
 NT_HEADERS = {
     "User-Agent": (
@@ -65,7 +66,7 @@ def _get_nt_index_map() -> dict[str, tuple[str, str]]:
             for r in rows:
                 result[r["index_name"]] = (r["provider_id"], exchange)
     except Exception as e:
-        print(f"[nt_chg_oi] WARN: index map lookup failed ({e}), using fallback")
+        print(f"[nt_chg_oi] WARN: index map lookup failed ({e}), using fallback", file=sys.stderr)
     return result or _FALLBACK
 
 
@@ -86,7 +87,7 @@ def fetch_change_oi(nt_symbol: str, snap_time: str, exchange: str) -> list[dict]
             return []
         return d.get("resultData") or []
     except Exception as e:
-        print(f"  [chg-OI] fetch error for {nt_symbol} after retries: {e}")
+        print(f"  [chg-OI] fetch error for {nt_symbol} after retries: {e}", file=sys.stderr)
         return []
 
 

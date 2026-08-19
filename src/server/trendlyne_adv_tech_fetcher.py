@@ -45,6 +45,7 @@ from db_compat import connect
 from as_of import logical_write_floor
 from fetch_utils import (retry_get, FetchTracker, filter_numeric_tlids,
                          TRENDLYNE_MAX_CONCURRENT, cap_to_run_budget)
+import sys
 
 BASE_URL = (
     "https://trendlyne.com/equity/api/stock/adv-technical-analysis/{tlid}/24/"
@@ -175,7 +176,7 @@ def fetch_adv_tech(tlid: str, session: requests.Session) -> dict | None:
             params = body if body else None
         return params
     except Exception as e:
-        print(f"  fetch error (tlid={tlid}): {e}")
+        print(f"  fetch error (tlid={tlid}): {e}", file=sys.stderr)
         return None
 
 

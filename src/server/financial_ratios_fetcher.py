@@ -58,6 +58,7 @@ import requests
 from db_compat import connect
 from as_of import logical_write_floor
 from et_stats_client import HEADERS, fetch_et_stats, load_companyid_map, as_of_floor
+import sys
 
 DEBT_COVERAGE_RISK_THRESHOLD = 1.5
 
@@ -497,7 +498,7 @@ def main() -> None:
                 con.rollback()
             except Exception:
                 pass
-            print(f"  [{i}/{len(stocks)}] {symbol}: ERROR — {e}")
+            print(f"  [{i}/{len(stocks)}] {symbol}: ERROR — {e}", file=sys.stderr)
 
     fcf_pct = round(fcf_positive_count / ok * 100) if ok else 0
     print(

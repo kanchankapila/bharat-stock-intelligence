@@ -18,7 +18,7 @@ import sys
 try:
     import yfinance as yf
 except ImportError:
-    print("yfinance not installed. Run: pip install yfinance")
+    print("yfinance not installed. Run: pip install yfinance", file=sys.stderr)
     sys.exit(1)
 
 from db_compat import connect
@@ -57,7 +57,7 @@ def fetch_and_store(conn, symbols: list[str]) -> int:
             progress=False,
         )
     except Exception as e:
-        print(f"  [WARN] yfinance batch error: {e}")
+        print(f"  [WARN] yfinance batch error: {e}", file=sys.stderr)
         return 0
 
     stored = 0
@@ -93,7 +93,7 @@ def fetch_and_store(conn, symbols: list[str]) -> int:
                 except Exception:
                     pass
         except Exception as e:
-            print(f"  [WARN] {sym}: {e}")
+            print(f"  [WARN] {sym}: {e}", file=sys.stderr)
             continue
 
     conn.commit()

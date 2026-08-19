@@ -34,6 +34,7 @@ from curl_cffi import requests
 
 from db_compat import connect
 from as_of import logical_write_floor
+import sys
 
 PATTERNS_URL = (
     "https://api.moneycontrol.com/mcapi/technicalpicks/chart-patterns"
@@ -131,7 +132,7 @@ def _fetch(mcsymbol: str, session) -> list[dict]:
             return []
         return payload.get("list", {}).get("data", [])
     except Exception as e:
-        print(f"  [{mcsymbol}] chart patterns error: {e}")
+        print(f"  [{mcsymbol}] chart patterns error: {e}", file=sys.stderr)
         return []
 
 

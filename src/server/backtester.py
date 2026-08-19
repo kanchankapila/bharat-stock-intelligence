@@ -155,7 +155,7 @@ class Backtester:
                                        WHERE o.symbol = u.symbol))            AS missing
             """.replace('%(s)s', f"'{start}'").replace('%(e)s', f"'{end}'"))
         except Exception as e:
-            print(f"[Backtest] survivorship check unavailable: {e}")
+            print(f"[Backtest] survivorship check unavailable: {e}", file=sys.stderr)
             return {}
         if row.empty or not row.iloc[0]['traded']:
             print("[Backtest] nse_universe_history is empty -- run nse_bhavcopy_fetcher.py "
@@ -194,7 +194,7 @@ class Backtester:
             """)
         except Exception as e:
             print(f"[Backtester] traded-window lookup unavailable ({str(e)[:80]}) -- "
-                  "point-in-time universe filter skipped")
+                  "point-in-time universe filter skipped", file=sys.stderr)
             return {}
         if df.empty:
             return {}
@@ -285,7 +285,7 @@ class Backtester:
                 WHERE symbol IN ('{sym_list}')
             """)
         except Exception as e:
-            print(f"[Backtester] bhavcopy price fallback unavailable ({str(e)[:80]})")
+            print(f"[Backtester] bhavcopy price fallback unavailable ({str(e)[:80]})", file=sys.stderr)
             return pd.DataFrame()
         if df.empty:
             return df
@@ -426,7 +426,7 @@ class Backtester:
                         sym_d, ex_d, amt = r['symbol'], r['ex_date'], float(r['amount'] or 0.0)
                         dividends_dict[(sym_d, ex_d)] = amt
             except Exception as e:
-                print(f"[Backtest] Dividend pre-fetch error: {e}")
+                print(f"[Backtest] Dividend pre-fetch error: {e}", file=sys.stderr)
                 try:
                     self.conn.rollback()  # clear aborted-transaction state so save_run() can proceed
                 except Exception:
@@ -789,7 +789,7 @@ class Backtester:
             try:
                 from scipy.optimize import differential_evolution
             except ImportError:
-                print("[WalkForward] scipy not installed. Run: pip install scipy")
+                print("[WalkForward] scipy not installed. Run: pip install scipy", file=sys.stderr)
                 raise
         bounds_cfg = {**self.DEFAULT_WF_BOUNDS, **(param_bounds or {})}
         bounds = [bounds_cfg['min_score'], bounds_cfg['stop_loss_pct'], bounds_cfg['horizon_days']]
@@ -1191,6 +1191,7 @@ class Backtester:
 
 
 from pydantic import BaseModel
+import sys
 
 class BacktestRequest(BaseModel):
     start: str

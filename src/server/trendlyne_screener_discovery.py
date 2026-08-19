@@ -631,7 +631,7 @@ def run(mode: str = "known", single_pk: int | None = None):
             print(f"[Discovery] Logged run to screener_runs: {run_id} ({n_stocks} distinct stocks)")
         except Exception as e2:
             con.rollback()
-            print(f"[Discovery] Could not log to screener_runs: {e2}")
+            print(f"[Discovery] Could not log to screener_runs: {e2}", file=sys.stderr)
 
     finally:
         con.close()

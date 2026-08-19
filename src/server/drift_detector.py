@@ -38,6 +38,7 @@ import numpy as np
 import pandas as pd
 
 from db_compat import read_df, query_one, execute
+import sys
 
 # ── PSI thresholds, calibrated from THIS panel's measured null (2026-08-15) ────────────────
 # The previous values (PSI_WARN=0.20, PSI_CRIT=0.25) are the credit-scoring convention, which
@@ -245,7 +246,7 @@ def get_drift_multiplier() -> float:
             return 0.93
         return 1.0
     except Exception as e:
-        print(f"[DRIFT] get_drift_multiplier failed, defaulting to 1.0 (no haircut applied — drift status unknown): {e}")
+        print(f"[DRIFT] get_drift_multiplier failed, defaulting to 1.0 (no haircut applied — drift status unknown): {e}", file=sys.stderr)
         return 1.0
 
 

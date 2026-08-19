@@ -113,7 +113,7 @@ def fetch_bhavcopy(trade_date: date, session: requests.Session) -> pd.DataFrame 
         status = getattr(getattr(e, 'response', None), 'status_code', None)
         if status == 404:
             return None  # holiday / non-trading day
-        print(f"[Rollover] {trade_date}: download failed after retries — {e}")
+        print(f"[Rollover] {trade_date}: download failed after retries — {e}", file=sys.stderr)
         return None
     try:
         z = zipfile.ZipFile(io.BytesIO(r.content))
@@ -121,7 +121,7 @@ def fetch_bhavcopy(trade_date: date, session: requests.Session) -> pd.DataFrame 
             df = pd.read_csv(f, dtype=str)
         return df
     except Exception as e:
-        print(f"[Rollover] {trade_date}: parse failed — {e}")
+        print(f"[Rollover] {trade_date}: parse failed — {e}", file=sys.stderr)
         return None
 
 
