@@ -39,7 +39,7 @@ export const SectorRotationGraph: React.FC = () => {
                   <div className={cn('text-xs font-mono font-bold', r.sector_return == null ? 'text-slate-400' : r.sector_return >= 0 ? 'text-emerald-400' : 'text-rose-400')}>
                     {r.sector_return == null ? '—' : `${r.sector_return >= 0 ? '+' : ''}${Number(r.sector_return).toFixed(2)}%`}
                   </div>
-                  <div className="text-[9px] text-slate-500">RS {Number(r.rs_ratio ?? 0).toFixed(1)} / Mom {Number(r.rs_momentum ?? 0).toFixed(1)}</div>
+                  <div className="text-[9px] text-slate-500">RS {r.rs_ratio == null ? '—' : Number(r.rs_ratio).toFixed(1)} / Mom {r.rs_momentum == null ? '—' : Number(r.rs_momentum).toFixed(1)}</div>
                 </div>
               </div>
             );
