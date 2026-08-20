@@ -13,7 +13,11 @@ compressed, and restorable selectively with pg_restore.
 
 TimescaleDB note: hypertables (stock_ohlcv, feature_store, confluence_signals, ...) must
 be restored with the extension in restore-mode, or chunk metadata is corrupted. The
---restore path wraps pg_restore in timescaledb_pre_restore()/_post_restore() automatically.
+--restore path wraps pg_restore in timescaledb_pre_restore()/_post_restore() automatically,
+and drops+recreates the target database rather than using `pg_restore --clean` (the
+timescaledb image preloads the extension into every database via template1, and --clean's
+DROP EXTENSION + CREATE EXTENSION in one long pg_restore session always fails against a
+preloaded extension — see the comment in restore() for the live-verified failure mode).
 A plain `pg_restore` of this dump WILL break hypertables — use this script.
 
 Every backup() run is verified (`pg_restore --list` against the dump just written) and
@@ -172,20 +176,36 @@ def restore(path: str) -> None:
     if not p.exists():
         sys.exit(f"[BACKUP] no such file: {path}")
 
+    # Drop and recreate the database rather than `pg_restore --clean` on top of it. The
+    # timescaledb Docker image installs the extension into template1, so every database on
+    # this container -- fresh or existing -- already has it. --clean's DROP EXTENSION then
+    # CREATE EXTENSION run inside ONE long-lived pg_restore session, but TimescaleDB's .so is
+    # already loaded into that backend at fork time (shared_preload_libraries) and requires
+    # CREATE EXTENSION to be the literal first statement of a *fresh* session -- so the
+    # CREATE EXTENSION always fails ("already been loaded with another version"),
+    # _timescaledb_internal (just dropped by the CASCADE) is never recreated, and every
+    # compressed-hypertable chunk table restore fails with "schema does not exist".
+    # Live-verified 2026-08-20: the naive --clean restore aborted with 7-8 errors and
+    # post_restore() itself then failed non-zero. DROP+CREATE DATABASE (the new DB still gets
+    # the extension via template1) plus a plain pg_restore with no --clean restores cleanly:
+    # 215/215 tables, 24/24 hypertables, exact row-count match against the source. This is
+    # also just what "restore" should mean for a script already gated behind --yes as
+    # DESTRUCTIVE -- replace the database outright, not patch objects inside it.
+    maint = _docker_base(interactive=False) + ["psql", "-U", PG_USER, "-d", "postgres", "-c"]
+    print(f"[RESTORE] dropping and recreating database {PG_DB} ...")
+    subprocess.run(maint + [f"DROP DATABASE IF EXISTS {PG_DB} WITH (FORCE);"], check=True)
+    subprocess.run(maint + [f"CREATE DATABASE {PG_DB};"], check=True)
+
     psql = _docker_base(interactive=False) + ["psql", "-U", PG_USER, "-d", PG_DB, "-c"]
     print("[RESTORE] timescaledb_pre_restore() ...")
     subprocess.run(psql + ["SELECT timescaledb_pre_restore();"], check=True)
 
-    print(f"[RESTORE] pg_restore {p.name} (clean, if-exists) ...")
-    cmd = _docker_base(interactive=True) + [
-        "pg_restore", "-U", PG_USER, "-d", PG_DB, "--clean", "--if-exists", "--no-owner",
-    ]
+    print(f"[RESTORE] pg_restore {p.name} ...")
+    cmd = _docker_base(interactive=True) + ["pg_restore", "-U", PG_USER, "-d", PG_DB, "--no-owner"]
     with open(p, "rb") as fh:
         r = subprocess.run(cmd, stdin=fh, stderr=subprocess.PIPE)
-    # pg_restore returns non-zero on benign --clean DROP warnings; surface stderr but continue to post_restore.
     if r.returncode != 0:
-        print(f"[RESTORE] pg_restore reported issues (often benign DROP-IF-EXISTS warnings):\n"
-              f"{r.stderr.decode(errors='replace')[:2000]}")
+        print(f"[RESTORE] pg_restore reported issues:\n{r.stderr.decode(errors='replace')[:2000]}")
 
     print("[RESTORE] timescaledb_post_restore() ...")
     subprocess.run(psql + ["SELECT timescaledb_post_restore();"], check=True)

@@ -19,7 +19,13 @@ import { execFileSync } from 'node:child_process';
 import 'dotenv/config';
 
 function sh(cmd, args) {
-  return execFileSync(cmd, args, { encoding: 'utf8' }).trim();
+  // shell: true -- on Windows, pm2 resolves to pm2.cmd (a batch wrapper); .cmd files aren't
+  // real executables and Node's execFileSync can't run them without going through a shell,
+  // even naming "pm2.cmd" explicitly (EINVAL) -- only shell: true actually works. Safe here:
+  // args are hardcoded literals ('jlist'), never interpolated from external input, so the
+  // unescaped-arg risk the shell:true deprecation warning warns about doesn't apply. Confirmed
+  // live on the Windows prod host.
+  return execFileSync(cmd, args, { encoding: 'utf8', shell: true }).trim();
 }
 
 function gitHeadInfo() {
