@@ -2045,6 +2045,52 @@ export const DATA_QUALITY_CHECKS: DataQualityCheck[] = [
   },
 
   {
+    id: 'port-drift',
+    label: 'Every online pm2 app service actually owns the port it is supposed to be listening on',
+    category: 'infra',
+    // critical: this is the exact failure mode that took ml-api and alphaquant-api fully
+    // offline for over an hour on 2026-08-20 while pm2 reported both "online" -- an
+    // ancestry-unrelated process (leftover from a Docker Desktop crash) won the port race
+    // first, so the pm2-tracked process started clean but never actually served traffic.
+    critical: true,
+    // scripts/check_port_drift.mjs does the actual pm2/netstat/process-tree comparison
+    // (needs `pm2 jlist` and Windows process introspection, neither of which belongs
+    // behind a SQL query) and stamps this row. See that script's header for the full
+    // incident and why ancestry, not interpreter path, is the only reliable signal.
+    sql: `SELECT last_status, last_error,
+                 to_timestamp(last_run_at/1000)     AS last_run_at,
+                 to_timestamp(last_success_at/1000) AS last_success_at
+            FROM job_heartbeat
+           WHERE job_name = 'port-drift'`,
+    evaluate: (row, now) => {
+      if (!row) {
+        return {
+          status: 'fail',
+          detail: 'No port-drift heartbeat row has ever been written — the check has never run. ' +
+                  'Confirm pm2 has `port-drift-check` registered (`pm2 describe port-drift-check`).',
+        };
+      }
+      const sinceRun = daysStale(row.last_run_at, now);
+      if (sinceRun == null || sinceRun > 0.5) {
+        // Scheduled every 15 min; >12h since ANY run (success or fail) means the checker
+        // itself has stopped, which is worse than a drift finding — nothing is watching.
+        return {
+          status: 'fail',
+          detail: `port-drift-check has not run in ${sinceRun == null ? 'an unknown amount of time' : `${sinceRun.toFixed(1)} days`} ` +
+                  '— the checker itself appears to have stopped, not just found drift.',
+        };
+      }
+      if (row.last_status !== 'success') {
+        return {
+          status: 'fail',
+          detail: String(row.last_error ?? 'a service port is squatted by a process outside pm2\'s tracked tree.'),
+        };
+      }
+      return { status: 'pass', detail: 'every online pm2 app service owns its expected port.' };
+    },
+  },
+
+  {
     id: 'trendlyne-per-symbol-fetcher-coverage',
     label: 'Trendlyne per-symbol fetchers cover the universe they claim to, not just a recent sliver',
     category: 'reference',
