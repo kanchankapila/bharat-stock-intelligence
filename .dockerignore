@@ -1,0 +1,13 @@
+node_modules
+backend-python/venv
+.venv
+.git
+.claude
+greenfield
+logs
+backups
+dist
+*.dump
+*.log
+.env
+.env.local
