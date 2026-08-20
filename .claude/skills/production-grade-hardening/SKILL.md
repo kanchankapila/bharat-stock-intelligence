@@ -42,33 +42,30 @@ This file will go stale the moment the codebase moves. Before acting on any item
   presenting a `py_compile`/`node --check` pass as "verified." See
   `/memories/repo/dev-vs-prod-machine.md`.
 
-## 2. Containerize the 4 app services — additive, do this next
+## 2. Containerize the 4 app services — images built and verified 2026-08-20; one step left
 
-**Bucket: safe to implement, needs a real Docker build to verify.**
+**Written and building successfully as of 2026-08-20**: `docker/*.Dockerfile` (one per service +
+a shared `bharat-python-base`), `docker-compose.override.yml`, `.dockerignore` — all committed
+(`71f76d9`). Additive as required: `docker-compose.yml`'s original Redis+TimescaleDB services are
+untouched, pm2/`npm start` still works exactly as before.
 
-There is no `Dockerfile` anywhere; `docker-compose.yml` only containerizes Redis + TimescaleDB.
-The app itself runs bare-metal under pm2. This has already caused a real incident class:
-"declared ≠ installed" (`node-pg-migrate` in `package.json` but never `npm install`ed; `nse` in
-`requirements.txt` but not in the venv — both broke a live job for days).
+**Verified with real builds, not a syntax read**: all 5 images (`bharat-python-base`, `bharat-ml-api`,
+`bharat-chatbot`, `bharat-alphaquant-api`, `bharat-server-docker`) build successfully via
+`docker build`. `bharat-server`'s build (`npm ci` + a full Vite build inside the container) twice
+wedged Docker Desktop's WSL2 engine — root-caused (not to memory, an initial wrong diagnosis — see
+`infra_gotchas` memory's correction) to the C: drive running out of space, since Docker's own data
+disk lives there by default. Fixed by relocating Docker's data disk to D: via a directory junction;
+the same build then completed cleanly in ~9 minutes.
 
-Do this **additively** — it must not remove the pm2 bare-metal path, only offer a second,
-reproducible one:
-
-1. One `Dockerfile` per service (`bharat-server`, `ml-api`, `chatbot`, `alphaquant-api`), each
-   pinned to the exact runtime the corresponding `venv`/`node_modules` uses today. Read
-   `requirements.txt` (root, for `ml-api`/`chatbot`) and `backend-python/requirements.txt` (for
-   `alphaquant-api`) — do not assume they're identical.
-2. **Preserve the CPU-torch-first install order** from `.github/workflows/ci.yml` — the comment
-   there explains why: installing CPU torch first is what makes it the build everything else
-   (`transformers`, `sentence-transformers`) resolves against, or you silently get a multi-GB
-   CUDA wheel on a machine with no GPU.
-3. Add these as **new, additional** services in `docker-compose.yml` (or a
-   `docker-compose.override.yml`), not a replacement for the pm2 config. Anyone can still run
-   bare-metal.
-4. **Verify with a real build**, not a syntax read: `docker build` each image, `docker compose up`
-   the full stack, confirm all 4 services actually serve traffic and reach Postgres/Redis. If you
-   are not on a machine with a Docker daemon, say so and stop at "written, unbuilt" rather than
-   claiming this is done.
+**Not yet done — the one remaining step**: `docker compose up` running all 4 containers
+*simultaneously* against the real Postgres/Redis containers, confirming actual end-to-end traffic
+(not just that each image builds). Deferred because host memory was tight immediately after the
+build; individual `docker build` success is confirmed, full-stack integration is not. To finish:
+stop the pm2 app services (frees both the ports — the compose services bind the same 3000/8000/
+8001/8002 — and memory), `docker compose up -d`, health-check all 4 endpoints, confirm each reaches
+Postgres/Redis by container name (not `127.0.0.1`/`localhost` — see the compose file's own comment
+about `REDIS_HOST`/`POSTGRES_URL` needing container-network values), then stop the compose stack
+and restart pm2 to return to the live path.
 
 ## 3. ~~Deploy-drift and backup checks need a real production run~~ — DONE, see §0
 
