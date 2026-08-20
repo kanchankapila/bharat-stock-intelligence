@@ -262,6 +262,23 @@ FACTORS = {
     # above). See FEATURE_STORE_FACTORS / _add_feature_store for the exclusion rationale.
     **{f'fs_{c}': (lambda d, c=c: d[c]) for c in FEATURE_STORE_FACTORS},
 
+    # -- Mean-reversion composite (2026-08-20). The 14 fs_* columns above that clear Bonferroni
+    # are ALL negative long-only -- i.e. going long the highest readings on these
+    # overbought/high-momentum/high-volume indicators loses money. That's a real signal read
+    # backwards for a long-only portfolio, not "no signal" -- so test the natural long-only-
+    # compatible construction: go long the names with the LOWEST readings (oversold/calm)
+    # instead, sign-flipped, equal-weighted z-score sum of exactly the 14 Bonferroni-clearing
+    # columns (not all 23 -- the 9 that were never significant either way don't belong in a
+    # composite built to test THIS specific finding). No new short-selling infrastructure
+    # needed -- this is a standard long-only rank, same as every other factor in this file.
+    'mean_reversion_14': lambda d: -(
+        _z(d['stoch_d']) + _z(d['williams_r']) + _z(d['stoch_k']) + _z(d['cci'])
+        + _z(d['di_plus']) + _z(d['dist_sma20_pct']) + _z(d['vwap_dist_pct'])
+        + _z(d['volume_ratio_20d']) + _z(d['obv_slope']) + _z(d['atr_pct'])
+        + _z(d['volume_ratio_5d']) + _z(d['macd_hist']) + _z(d['mtf_alignment_score'])
+        + _z(d['bb_width'])
+    ),
+
     # -- PEAD (post-earnings-announcement drift), pre-registered (2026-08-13). Bernard/Thomas
     # (1989): stocks whose most recent result beat estimates continue drifting UP for weeks;
     # misses continue drifting down. pead_model.py's own compute_pead_score() is NOT usable --

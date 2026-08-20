@@ -555,8 +555,10 @@ class TestUnifiedRankerRun:
 
     def test_regime_weights_sum_to_one(self):
         from unified_ranker import REGIME_WEIGHTS
-        assert REGIME_WEIGHTS['BULL']['screener'] == 0.30
-        assert REGIME_WEIGHTS['CRASH']['screener'] == 0.40
+        # screener shrunk 0.5x 2026-08-20 (measurement.md: two independent measurements found
+        # it net-negative, the heaviest-weighted engine of all 8) -- was 0.30/0.40.
+        assert REGIME_WEIGHTS['BULL']['screener'] == 0.15
+        assert REGIME_WEIGHTS['CRASH']['screener'] == 0.20
         for regime, weights in REGIME_WEIGHTS.items():
             assert abs(sum(weights.values()) - 1.0) < 1e-9, f"{regime} weights don't sum to 1"
 
@@ -645,11 +647,28 @@ class TestSellRowGeometryBackstop:
         ranker, conn, csv_path = TestUnifiedRankerRun()._setup()
         conn.execute("""
             INSERT INTO confluence_signals
-            (symbol, computed_at, confluence_score, entry_zone_low, entry_zone_high,
+            (symbol, computed_at, confluence_score, trend_alignment_score, volume_score,
+             sector_strength_score, fundamental_score, entry_zone_low, entry_zone_high,
              stop_loss, target_1, target_2, target_3, risk_reward, suggested_timeframe,
              trade_reasoning, sector)
-            VALUES ('INFY', date('now'), 75, 1500.0, 1520.0, 1450.0, 1600.0, 1650.0, 1700.0,
-                    2.0, 'SWING', 'clean long setup', 'IT')
+            VALUES ('INFY', date('now'), 75, 14.0, 9.0, 7.0, 11.0, 1500.0, 1520.0, 1450.0,
+                    1600.0, 1650.0, 1700.0, 2.0, 'SWING', 'clean long setup', 'IT')
+        """)
+        # WEAK also needs a (weak) confluence row. _normalize_to_100 has an n==1 special case
+        # that returns a flat 50 regardless of magnitude -- with INFY as the ONLY symbol in
+        # confluence_scores, its genuinely-strong sub-scores above were silently discarded to
+        # a neutral default rather than differentiating it from WEAK. Populating both, INFY
+        # clearly above WEAK, lets INFY earn the same top-of-2 percentile on confluence as it
+        # already does on screener/ml/technical -- this is what actually made the row marginal
+        # enough to stop clearing DIRECTIONLESS_BUY_FLOOR once screener's weight was reduced
+        # 2026-08-20 (measurement.md), not a fixture that was ever meant to represent an
+        # unambiguous Buy candidate in the first place (it was riding a ~70.02 razor's edge
+        # even under the old weights).
+        conn.execute("""
+            INSERT INTO confluence_signals
+            (symbol, computed_at, confluence_score, trend_alignment_score, volume_score,
+             sector_strength_score, fundamental_score, sector)
+            VALUES ('WEAK', date('now'), 10, 1.0, 1.0, 1.0, 1.0, 'IT')
         """)
         conn.commit()
         results = ranker.run()

@@ -279,43 +279,52 @@ def _safe(v) -> float | None:
 
 # â”€â”€ Extract analyst data from overview-second-part â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
-def extract_analyst_data(body: dict, symbol: str, today: str, con) -> dict:
+def write_analyst_targets(symbol: str, recent: list, today: str, con) -> None:
+    """Persist per-broker report rows to trendlyne_analyst_targets. Must be called on the
+    main thread with a real connection -- see extract_analyst_data's docstring for why this
+    was split out of that function rather than writing inline."""
+    if not recent or con is None:
+        return
+    cur = con.cursor()
+    for r in recent:
+        try:
+            cur.execute("""
+                INSERT INTO trendlyne_analyst_targets
+                    (symbol, reco_date, broker, target_price, reco_price, rating)
+                VALUES (?,?,?,?,?,?)
+                ON CONFLICT(symbol, reco_date, broker) DO UPDATE SET
+                    target_price = excluded.target_price,
+                    reco_price   = excluded.reco_price,
+                    rating       = excluded.rating,
+                    fetched_at   = CURRENT_TIMESTAMP
+            """, (
+                symbol,
+                r.get("recoDate", today),
+                r.get("postAuthor", ""),
+                _safe(r.get("targetPrice")),
+                _safe(r.get("recoPrice")),
+                r.get("rec", ""),
+            ))
+        except Exception:
+            pass
+    con.commit()
+
+
+def extract_analyst_data(body: dict, symbol: str, today: str) -> dict:
     reports = body.get("researchReports", {}).get("tableData", [])
     cutoff  = date.today().replace(year=date.today().year - 1).isoformat()
     recent  = [r for r in reports if isinstance(r, dict) and r.get("recoDate", "") >= cutoff]
 
-    # Persist all reports. `con` is None when called from a worker thread (see main()'s
-    # comment: DB writes must happen on the main thread with a real connection) -- this used
-    # to call con.cursor() unconditionally, crashing _fetch_one (and the whole batch, since
-    # nothing catches the exception from fut.result()) for every stock with >=1 recent analyst
-    # report -- i.e. almost every actively-covered stock. That silently prevented this function
-    # from ever returning its extracted dict, which is what feeds analyst_upside_pct/
-    # analyst_count/analyst_buy_pct into backfill_technical_signals downstream.
-    if recent and con is not None:
-        cur = con.cursor()
-        for r in recent:
-            try:
-                cur.execute("""
-                    INSERT INTO trendlyne_analyst_targets
-                        (symbol, reco_date, broker, target_price, reco_price, rating)
-                    VALUES (?,?,?,?,?,?)
-                    ON CONFLICT(symbol, reco_date, broker) DO UPDATE SET
-                        target_price = excluded.target_price,
-                        reco_price   = excluded.reco_price,
-                        rating       = excluded.rating,
-                        fetched_at   = CURRENT_TIMESTAMP
-                """, (
-                    symbol,
-                    r.get("recoDate", today),
-                    r.get("postAuthor", ""),
-                    _safe(r.get("targetPrice")),
-                    _safe(r.get("recoPrice")),
-                    r.get("rec", ""),
-                ))
-            except Exception:
-                pass
-        con.commit()
-
+    # 2026-08-20 fix: this function is called from a worker thread with con=None (DB writes
+    # must happen on the main thread with a real connection -- see main()'s ThreadPoolExecutor
+    # loop). A prior fix (guard `con is not None`) stopped a crash here but, as an unintended
+    # side effect, meant the INSERT below NEVER ran from the real batch flow -- trendlyne_
+    # analyst_targets went 39 days stale despite trendlyne_stock_profile's own aggregate
+    # analyst_count/analyst_buy_pct/analyst_upside_pct columns (computed below, unaffected)
+    # continuing to populate correctly. Fixed properly this time: the raw per-broker report
+    # list is returned to the caller as "_analyst_reports" instead of written here, and the
+    # caller invokes write_analyst_targets() on the main thread, mirroring exactly how
+    # upsert_profile()/backfill_technical_signals() already handle their own DB writes.
     if not recent:
         return {}
 
@@ -338,6 +347,7 @@ def extract_analyst_data(body: dict, symbol: str, today: str, con) -> dict:
         "analyst_count":       len(recent),
         "analyst_buy_pct":     buy_pct,
         "analyst_upside_pct":  upside,
+        "_analyst_reports":    recent,
     }
 
 
@@ -684,7 +694,7 @@ def main() -> None:
         profile = {}
         overview_body = _fetch(OVERVIEW_URL.format(tlid=tlid), session)
         if overview_body is not None:
-            profile.update(extract_analyst_data(overview_body, symbol, today, None))
+            profile.update(extract_analyst_data(overview_body, symbol, today))
             profile.update(extract_event_data(overview_body))
             desc = extract_company_description(overview_body)
             if desc:
@@ -706,6 +716,7 @@ def main() -> None:
                     overview_body2 = None  # analyst_data already extracted in worker
                     upsert_profile(symbol, today, profile, con)
                     backfill_technical_signals(symbol, ts_anchor, profile, con)
+                    write_analyst_targets(symbol, profile.get("_analyst_reports", []), today, con)
                     ok += 1
                 upside_str = f"Upside={profile.get('analyst_upside_pct','?')}% n={profile.get('analyst_count','?')}"
                 margin_str = f"EBITDA={profile.get('ebitda_margin','?')}% ROE={profile.get('roe','?')}%"
