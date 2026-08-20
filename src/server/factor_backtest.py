@@ -275,6 +275,12 @@ FACTORS = {
     'earnings_beat_yoy': lambda d: d['earnings_category_yoy'],
     'earnings_beat_qoq': lambda d: d['earnings_category_qoq'],
 
+    # -- win_probability (2026-08-20), the cost/turnover-aware portfolio run measurement.md's
+    # win_probability section names as the still-open step. Raw score, no sign flip -- higher
+    # win_probability is the model's own claim of higher win odds, so top-K = highest score is
+    # the natural long side. See _add_win_probability for the point-in-time/coverage notes.
+    'win_probability': lambda d: d['win_probability'],
+
     # -- Contested SCREENER families, reconstructed from price so their direction is
     # MEASURED rather than read off the screener's wording. Each is signed so that a
     # POSITIVE net excess means "this screener family is bullish".
@@ -515,6 +521,7 @@ def load_price_panel(start: str = DEFAULT_START,
     px = _add_screener_breadth(px)
     px = _add_feature_store(px, start, end)
     px = _add_earnings_category(px, start, end)
+    px = _add_win_probability(px, start, end)
     px = px.drop(columns=['_dr', '_hi252', '_mkt', '_ticket'], errors='ignore')
 
     # TWO different eligibilities, and conflating them is what made the live screen stale:
@@ -919,6 +926,39 @@ def _add_earnings_category(px: pd.DataFrame, start: str, end: str) -> pd.DataFra
     print(f"[FactorBacktest] earnings_category: {len(ec):,} rows merged, {ec['date'].nunique()} "
           f"distinct dates. Coverage -- yoy={int(px['earnings_category_yoy'].notna().sum()):,}, "
           f"qoq={int(px['earnings_category_qoq'].notna().sum()):,}")
+    return px
+
+
+def _add_win_probability(px: pd.DataFrame, start: str, end: str) -> pd.DataFrame:
+    """Merge technical_signals.win_probability onto the panel -- the cost/turnover-aware
+    portfolio run measurement.md's win_probability section names as the still-open step
+    after its 2026-08-20 factor_edge.py re-measurement (real rank_IC, hit_AUC never clears
+    the 0.55 USABLE bar).
+
+    Same point-in-time convention as _add_earnings_category: technical_signals.date is the
+    trading day the row's win_probability describes. Write-timing verified live 2026-08-20
+    via win_probability_scored_at -- average ~14h after that date's UTC midnight, i.e. the
+    evening of the SAME IST calendar day, well before the next session's open this harness
+    enters at. win_probability_scored_at itself is only populated from 2026-08-15 onward
+    (added by migration 1787050000000), so it can't be used as a provenance FILTER over the
+    whole panel without discarding almost all history -- same tradeoff _add_earnings_category
+    already accepts for earnings_category_yoy/_qoq, not a new gap introduced here.
+    """
+    try:
+        wp = read_df(
+            "SELECT symbol, date, win_probability FROM technical_signals "
+            "WHERE win_probability IS NOT NULL AND date >= ? AND date <= ?",
+            (start, end),
+        )
+    except Exception as e:                                      # noqa: BLE001
+        print(f"[FactorBacktest] WARNING: win_probability unavailable ({str(e)[:80]}); skipped.", file=sys.stderr)
+        px['win_probability'] = np.nan
+        return px
+
+    wp['date'] = pd.to_datetime(wp['date']).dt.strftime('%Y-%m-%d')
+    px = px.merge(wp, on=['symbol', 'date'], how='left')
+    print(f"[FactorBacktest] win_probability: {len(wp):,} rows merged, {wp['date'].nunique()} "
+          f"distinct dates. Coverage -- {int(px['win_probability'].notna().sum()):,}")
     return px
 
 
