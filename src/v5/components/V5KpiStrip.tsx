@@ -2,6 +2,11 @@ type KpiItem = {
   label: string;
   value: string;
   tone?: 'neutral' | 'positive' | 'negative' | 'warning';
+  /** 0-100. Only pass this for a metric with a genuine bound (a probability, a rate, a
+      percentile) -- omit it rather than fabricate one for an unbounded figure (currency,
+      a raw count, a ratio that can exceed 1). See ScreenerBrowserPage's StatTile for the
+      same call made the same way this session. */
+  pct?: number;
 };
 
 // These map to CSS variables (v5.css) rather than hardcoded Tailwind text colors -- the
@@ -16,6 +21,13 @@ function toneClass(tone: KpiItem['tone']): string {
   return 'v5-kpi-value-neutral';
 }
 
+function toneVar(tone: KpiItem['tone']): string {
+  if (tone === 'positive') return 'positive';
+  if (tone === 'negative') return 'negative';
+  if (tone === 'warning') return 'warning';
+  return 'accent';
+}
+
 export function V5KpiStrip({ items }: { items: KpiItem[] }) {
   return (
     <div className="v5-kpi-strip">
@@ -23,6 +35,14 @@ export function V5KpiStrip({ items }: { items: KpiItem[] }) {
         <div key={item.label} className="v5-kpi-item">
           <div className="v5-kpi-label">{item.label}</div>
           <div className={`v5-kpi-value ${toneClass(item.tone)}`}>{item.value}</div>
+          {item.pct != null && (
+            <div className="v5-kpi-bar-track">
+              <div
+                className="v5-kpi-bar-fill"
+                style={{ width: `${Math.min(100, Math.max(0, item.pct))}%`, background: `var(--v5-${toneVar(item.tone)})` }}
+              />
+            </div>
+          )}
         </div>
       ))}
     </div>

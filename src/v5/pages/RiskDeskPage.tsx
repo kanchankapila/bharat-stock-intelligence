@@ -51,7 +51,7 @@ export function RiskDeskPage({ onSelectSymbol }: { onSelectSymbol?: (symbol: str
   const regimeProb = numOrNull((regimeQ.data?.current as any)?.prob);
   const kpis = [
     { label: 'Regime', value: regime, tone: regime === 'BULL' ? 'positive' as const : regime === 'BEAR' ? 'negative' as const : 'warning' as const },
-    { label: 'Regime Prob', value: regimeProb == null ? '—' : `${(regimeProb * 100).toFixed(1)}%` },
+    { label: 'Regime Prob', value: regimeProb == null ? '—' : `${(regimeProb * 100).toFixed(1)}%`, pct: regimeProb == null ? undefined : regimeProb * 100 },
     { label: 'Universe', value: String(n(distributionQ.data?.total)) },
     { label: 'MF Leaders', value: String((topQ.data ?? []).length) },
   ];

@@ -288,6 +288,13 @@
 .v5-kpi-value-negative { color: var(--v5-negative); }
 .v5-kpi-value-warning { color: var(--v5-warning); }
 
+/* Opt-in day-range/confidence bar for a KpiItem carrying a genuine 0-100 `pct` -- mirrors
+   v6-theme.css's .v6-bar-track/.v6-bar-fill idiom so the two visual languages read as the
+   same design system despite being separate CSS files (v5's must keep working under .v5-root
+   too, unlike v6-theme.css which is .v6-root-only -- see this file's header comment). */
+.v5-kpi-bar-track { margin-top: 6px; height: 4px; border-radius: 99px; background: var(--v5-border); overflow: hidden; }
+.v5-kpi-bar-fill { height: 100%; border-radius: 99px; transition: width 0.5s ease; }
+
 .v5-section-head {
   display: flex;
   align-items: center;

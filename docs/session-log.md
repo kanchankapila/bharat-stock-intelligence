@@ -5006,3 +5006,113 @@ host free memory from ~1GB to 0.08GB within a minute (the same threshold that ca
 above) and was aborted before it repeated the incident — this host does not have headroom to
 build 4 more images while pm2 and the DB containers are all up. Left for a session with the app
 services stopped first, or a host with more RAM.
+
+## 2026-08-20 (cont.) — V6 frontend redesign, one real BullMQ retention gap, pg_stat_statements enabled
+
+Continuation of the same day's earlier production-grade-hardening session, switching to a
+frontend-redesign request (ui-ux-pro-max skill), which surfaced two backend/infra fixes along
+the way once the user asked for a broader memory/performance sweep.
+
+**Frontend.** `src/v6/pages/ScreenerBrowserPage.tsx` and `PortfolioTrackerPage.tsx` were migrated
+off raw Tailwind `slate/emerald/rose/amber/indigo` classes onto the `--v6-*` CSS variables
+`v6-theme.css` already defined but neither page used (flagged in memory the previous session).
+`ScreenerBrowserPage.tsx` then got an actual visual redesign, not just a token swap: a 4-tile KPI
+strip (Categories/Screeners Tracked/Weighted Avg Win Rate/Top Category — computed honestly from
+the same `screener_performance_v2` aggregate the page already fetched for its category chips, not
+fabricated), a labeled filter toolbar (Search/Source/Category/Tier/Horizon each get a micro-label
+instead of five unlabeled `<select>`s in a row), and tier badges switched from padded pills to a
+dot+letter treatment matching the dot idiom already used elsewhere in the shell (`RegimeChip`,
+`LiveClock`). Also reused the pre-existing-but-unused `.v6-bar-track`/`.v6-bar-fill` CSS on
+`PortfolioTrackerPage.tsx`'s two allocation bars instead of hand-rolled divs.
+
+The user then asked why v6 "doesn't look even close to v1" — traced to a real, previously
+undocumented fact: v6's actual `/dashboard` and `/market-command` routes render
+`MarketCommandCenter` (`src/v4/views/MarketCommandCenter.tsx`), a "v4"-era page with a spacious
+regime-banner/index-tile layout, not v1's dense KPI-card+breadth-donut opening section — "v6
+matches v1" was only ever true for the shell chrome (`V6Shell.tsx`/`v6-theme.css`), never the page
+content. Two Explore agents mapped v1's actual widgets (`MarketIndices.tsx`'s KPI cards,
+`DashboardPage.tsx`'s private unexported `BreadthGauge`) and the full v6 route table (only 2 of 32
+nav routes are v6-native; 25 render the identical component v1/v2/v3 use and can't be touched
+without affecting those shells too). Built two new reusable widgets in `src/v6/components/`
+(`IndexKpiCard.tsx`/`IndexKpiRow`, `BreadthDonut.tsx`) rather than reusing v1's components
+directly (they hardcode v1's raw Tailwind, not `--v6-*` tokens) — `BreadthDonut` deliberately
+queries the same canonical `trpc.getAdvanceDecline` that `MarketBreadthIntraday` already uses on
+that page, instead of v1's page-local non-canonical recompute from a `stocks` prop, so the two
+widgets can never disagree with each other. Wired additively into `MarketCommandCenter.tsx`
+(nothing existing removed); confirmed via `App.tsx`'s routing that this file is v6-exclusive, so
+v1/v2/v3 are unaffected (screenshotted v1's `/dashboard` before and after — byte-identical). The
+`getMarketOverview` day-range bar renders a neutral 50% fill rather than fabricate a number
+(the backend doesn't capture day-low/high from NiftyTrader's payload) — same real limitation v1's
+own bar already silently has (`MarketIndices.tsx:144`'s `55 + idx*14%` fake width).
+
+User then approved (via `AskUserQuestion`) a smaller follow-on: retrofitted the same
+progress-bar idiom onto `V5KpiStrip` (`src/v5/components/V5KpiStrip.tsx`, used by the 5 v5-reuse
+desk pages under v6) as a new opt-in `pct` field, using `--v5-*` CSS vars so it renders correctly
+under both `.v6-root` (dark, bridged) and the standalone `/v5` light-theme route — verified live
+in both. Applied only to 3 tiles with a genuine 0-100 bound (`RiskDeskPage`'s Regime Prob,
+`SignalReviewPage`'s Avg Confidence, `EarningsPulseDeskPage`'s Beat, computed as beat-rate).
+Deliberately NOT applied to `OptionsDeskPage`'s PCR (unbounded ratio) or
+`InstitutionalFlowDeskPage`'s Rs cr flows (unbounded currency) — no honest bound to show.
+
+**Backend: one real BullMQ retention gap, found and fixed.** User asked for a memory/performance
+audit (`/performance-audit` skill). Checked 8 candidate leak patterns across `cacheService.ts`,
+`sse.ts`, `sqlTranslate.ts`, `scoringService.ts`, `websocketService.ts` — all 7 non-BullMQ ones
+were already correctly bounded (TTL sweeps, cleanup-on-disconnect, small finite key spaces).
+Bracket-matched every `addJobWithCatchup(`/`*Queue.add(` call across `src/server/jobs/*.jobs.ts`
++ `queues.ts` (39 real calls, not grep-counted) to check for `removeOnComplete`/`removeOnFail` --
+**1 of 39 was missing it**: `unified-ranker-daily` (`queues.ts:2643`). No `new Queue()` in this
+file sets a `defaultJobOptions` fallback either, so BullMQ's real default (keep job data in Redis
+forever) applied to this one job alone. Fixed to match the other 38 call sites' `{ age: 3d }`/
+`{ age: 3d, count: 20 }` shape. Could not get a live before/after byte count -- Redis had just
+been flushed by that morning's Docker Desktop crash-and-restart (confirmed: `used_memory` was
+17.83MB, consistent with a fresh instance) -- stated as a limitation rather than a fabricated
+number.
+
+**Database: 7 real never-analyzed tables found and fixed; two false leads corrected before acting
+on them.** A first pass found 199 of 215 `public`-schema tables with zero planner statistics --
+alarming-looking, but re-filtered to tables with >100 rows and it collapsed to **7 real ones**
+(`intraday_recommendations_history` 308MB, `live_screener_ml_scores` 65MB,
+`unified_signal_outcomes` 64MB, `data_quality_history`, and 3 small `trendlyne_*` tables) -- the
+other 192 are tiny/empty, where missing stats are inconsequential. Ran `ANALYZE` on all 7 (safe,
+`ACCESS SHARE` lock only), verified `last_analyze` populated on each. Second false lead:
+`confluence_signals` (10.2GB, ~43% of the 24GB DB) looked like a compression-policy bug (6 of 9
+chunks uncompressed) until checking the actual policy (`compress_after: 30 days`, running
+correctly every 12h) against real chunk ages -- the oldest uncompressed chunk is 28 days old, not
+overdue, and the table's full chunk history (9 weekly chunks) only goes back to late June, meaning
+it simply hasn't existed long enough to have a backlog. User then asked whether old signals should
+be deleted given the system "has improved a lot over time" -- checked against a specific prior
+2026-08-15 decision (`db_stats_and_retention_2026_08_15` memory) before answering rather than
+giving a fresh opinion: broad retention on the historical/fundamentals tables was explicitly
+rejected there because `factor_backtest.py` needs 5+ years and several factors are marked
+"too thin to verdict" pending 12+ months of accumulation -- that reasoning hasn't changed. But
+`confluence_signals` specifically already has exactly the retention being asked about
+(`drop_after: 90 days`, running successfully, last run that same morning) -- not a gap, just
+previously unverified against live Redis/Postgres state in this conversation.
+
+**Enabled `pg_stat_statements`.** No query-cost visibility existed at all (checked: extension not
+installed). Added `pg_stat_statements` to `shared_preload_libraries` in `docker-compose.yml`
+alongside `timescaledb` (overwriting instead of appending would have silently broken every
+hypertable) plus `.max=5000`/`.track=all`. Recreated the container (`docker compose up -d
+timescaledb`, ready in ~2s), created the extension, verified live that it's collecting real query
+data. Proactively restarted `bharat-server`/`ml-api`/`alphaquant-api` afterward rather than let
+them crash-loop discovering the DB bounced (matching the exact failure mode from that morning's
+Docker crash) -- confirmed both back to 200 after a brief startup race.
+
+Verified throughout: `npx tsc --noEmit` clean after every `.tsx`/`.ts` change; `npx vitest run`
+109/109 files, 1048/1048 tests, 0 failed (re-run after the Docker blip that crash-looped all 3
+core pm2 services mid-suite -- restarted them, re-ran the 2 files that failed on the DB-connection
+blip standalone to confirm it was transient not a regression, then re-ran the full suite clean);
+`python -m pytest src/server/__tests__/ src/server/tests/` via `backend-python/venv` (bare
+`python` produced silent empty output, the known interpreter trap) -- 2057 passed, 230 skipped, 0
+failed, unrelated to anything touched here. Live screenshots for every visual change, driven
+through `run-bharat-stock-intelligence`'s `driver.mjs`.
+
+**Not done, flagged rather than silently skipped**: the 25 shared-component v6 routes (would
+change v1/v2/v3 too, not requested); frontend duplicate-query auditing across the 6 shells
+(`/shell-parity-audit` is the right tool, not re-derived here); `ml_ensemble.py`'s DataFrame
+fragmentation warning (real, but in `verify-gate.mjs`'s scoring-file gate list, needs backtest
+evidence even for a pure perf refactor); `confluence_signals`'s `compress_after` interval (no
+bug found, a genuine tuning tradeoff left for the user's call, not changed unprompted). 21st.dev
+Magic MCP never connected this session -- confirmed twice via `ToolSearch`, and the API key saved
+in `~/.claude.json` is dead (`Old Magic keys were reset`, confirmed by running the package
+directly) -- needs a real new key from the user, not fixable from inside the session.

@@ -27,6 +27,8 @@ import { SectorCorrelationWidget } from '../components/SectorCorrelationWidget';
 import { InstitutionalDealFeed } from '../components/InstitutionalDealFeed';
 import { ConcallTakeawaysWidget } from '../components/ConcallTakeawaysWidget';
 import { SuperstarActivityFeed } from '../components/SuperstarActivityFeed';
+import { IndexKpiRow } from '../../v6/components/IndexKpiCard';
+import { BreadthDonut } from '../../v6/components/BreadthDonut';
 
 const REGIME_STYLE: Record<string, { color: string; bg: string; label: string }> = {
   BULL:     { color: 'text-emerald-400', bg: 'bg-emerald-500/10 border-emerald-500/25', label: 'BULL' },
@@ -108,6 +110,13 @@ export const MarketCommandCenter: React.FC<MarketCommandCenterProps> = ({ onSele
             <div className="flex-1 min-w-[220px] px-3 py-2 rounded-xl border border-slate-800 bg-slate-950/40">
               <MarketMoodGauge />
             </div>
+          </div>
+          {/* v1-style opening read: KPI cards (day-range bar, BULL/BEAR pill) + a breadth donut,
+              same visual language ScreenerBrowserPage/PortfolioTrackerPage already use this
+              session. Additive to the existing regime/mood/index-overview content below. */}
+          <div className="flex flex-wrap gap-3 items-stretch">
+            <IndexKpiRow onSelectIndex={onSelectIndex} />
+            <BreadthDonut />
           </div>
           <IndexOverview onSelectIndex={onSelectIndex} />
         </div>

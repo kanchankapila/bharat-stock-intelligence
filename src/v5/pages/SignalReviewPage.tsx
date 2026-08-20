@@ -55,7 +55,7 @@ export function SignalReviewPage({ onSelectSymbol }: { onSelectSymbol?: (symbol:
   const kpis = [
     { label: 'Total Signals', value: String(totalSignals) },
     { label: 'Active Signals', value: String(activeSignals) },
-    { label: 'Avg Confidence', value: `${avgConfidence.toFixed(1)}%`, tone: avgConfidence >= 60 ? 'positive' as const : 'warning' as const },
+    { label: 'Avg Confidence', value: `${avgConfidence.toFixed(1)}%`, tone: avgConfidence >= 60 ? 'positive' as const : 'warning' as const, pct: avgConfidence },
     { label: 'Queue Pending', value: queuePending == null ? '—' : String(queuePending) },
   ];
 

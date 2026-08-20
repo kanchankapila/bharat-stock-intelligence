@@ -73,6 +73,9 @@ services:
       -c checkpoint_completion_target=0.9
       -c effective_io_concurrency=200
       -c random_page_cost=1.1
+      -c shared_preload_libraries=timescaledb,pg_stat_statements
+      -c pg_stat_statements.max=5000
+      -c pg_stat_statements.track=all
     ports:
       - "${POSTGRES_PORT:-5433}:5432"
     volumes:
