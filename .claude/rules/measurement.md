@@ -273,7 +273,7 @@ Each of these was measured on the 5-year price panel with the spec above. Re-tes
 | `gap_down` (reconstructed from price, top-50/25bps/21d rebal.) | net excess −1.33%/period, t=−3.54, 1/6 years positive; at 5d/15bps: −0.73%/period, t=−9.0, 0/6 years | **significantly negative net of costs** — ~90-93% one-way turnover every rebalance (gap-movers barely persist) drives 5.6-13.7%/yr cost drag that eats the gross edge. Supersedes the "Gap Down is the one positive setup" screener-membership reading (same-day descriptive, not tradeable — see `measurement-history.md`) |
 | `gap_up` (same construction, control) | net excess −1.45%/period, t=−3.55, 0/6 years positive | **significantly negative net of costs**, same magnitude/sign as `gap_down` — both directions are a turnover trap, not an edge either way |
 | **`earnings_beat_yoy`/`earnings_beat_qoq`** (PEAD-style post-earnings drift, `earnings_category_yoy`/`_qoq` from `mc_earnings_fetcher.py`'s `_backfill_rapid_features`, BP=+2/PT=+1/LR=0/WP=-1/NT=-2, wired into `factor_backtest.py` 2026-08-13) | 21d rebalance: **0 completed periods** — no result, insufficient runway. 5d/top-50/15bps (the shortest feasible horizon): 3 periods (0.06 years), net excess −0.78%/period, t=−1.79. | **NOT significant, and severely underpowered** — 3 periods is worse than `screener_breadth`'s already-flagged-as-low-power 9. Calendar-constrained: `earnings_category_yoy` has only 19 trading days of real depth (2026-07-20→2026-08-13) — the column is a recent addition, not deep history. Re-test only once it has ~12+ months, same bar as `screener_breadth`. **Separately: `pead_model.py`'s own `compute_pead_score()` is unusable regardless of history depth** — its two required inputs (`eps_growth_yoy`/`eps_growth_qoq`) are ~100% NULL across the entire panel (measured live: populated on 0 symbols except the 2 most recent dates), dead schema, same shape as `feature_store`'s `rev_growth`/`eps_growth` pair above. `earnings_category_yoy`/`_qoq` are the only genuinely-populated earnings-surprise columns on this panel, which is why they're what got tested instead. |
-| **`screener_combo_finder.py --tier1`'s "capitulation" triple (`gap_down` AND `open_eq_low` AND `top_loser`, next-session open→close, single day, not a rebalanced hold)** | Reviewed 2026-08-13 (`/measurement-integrity-review`): reproduced live, 425 days / 651 signal-rows, spread +0.53%/day net of 15bps, t=+3.61, p=0.0003, clears the 41-combination Bonferroni bar. **Robust**: winsorizing at 1/2/5% *strengthens* it (t 3.69–3.94); dropping the single most extreme day still gives t=3.49; dropping the top 3 most extreme days still gives t=3.25, p=0.0013. **6/6 years positive** (2021–2026), 3 of 6 individually significant. | **Not a contradiction of the `gap_down`/`gap_up` rows above** — different construct entirely: those rank/hold the top-K gapped names for a 21d rebalance and eat turnover-drag costs; this is a same-next-session open→close return on a much narrower, rarer AND'd condition (real capitulation — gapped down, opened at the low, AND already among the day's biggest losers — not just "gapped down"). Reads as a genuine short-horizon reversal/bounce off a panic day, not a continuation trade. **Two real gaps found, neither changes the verdict**: (1) the script has no winsorization step despite the panel spec requiring one — checked live, doesn't matter here, but should still be added for consistency; (2) `run_tier1`'s verdict logic (`is_edge = spread_pct > 0`) only ever surfaces the best *positive*-direction combo — the single most significant combo in the full 41-row table is actually negative-direction (`gap_down,open_eq_high`, t=−4.12, spread=−0.53%, stronger than the "winning" positive one), which the console output/verdict never highlights. Low signal density (~1.5 signals/day when it fires, ~651 stock-days across 5.5y) means this is thin — narrow enough to watch, not yet enough to call it capacity-proven at scale. `live_capitulation_screener.py`'s docstring says "See measurement.md" — this row is that entry. |
+| **`screener_combo_finder.py --tier1`'s "capitulation" triple (`gap_down` AND `open_eq_low` AND `top_loser`, next-session open→close, single day, not a rebalanced hold)** | Reviewed 2026-08-13 (`/measurement-integrity-review`): reproduced live, 425 days / 651 signal-rows, spread +0.53%/day net of 15bps, t=+3.61, p=0.0003, clears the 41-combination Bonferroni bar. **Robust**: winsorizing at 1/2/5% *strengthens* it (t 3.69–3.94); dropping the single most extreme day still gives t=3.49; dropping the top 3 most extreme days still gives t=3.25, p=0.0013. **6/6 years positive** (2021–2026), 3 of 6 individually significant. | **Not a contradiction of the `gap_down`/`gap_up` rows above** — different construct entirely: those rank/hold the top-K gapped names for a 21d rebalance and eat turnover-drag costs; this is a same-next-session open→close return on a much narrower, rarer AND'd condition (real capitulation — gapped down, opened at the low, AND already among the day's biggest losers — not just "gapped down"). Reads as a genuine short-horizon reversal/bounce off a panic day, not a continuation trade. **Two real gaps found, neither changes the verdict**: (1) the script has no winsorization step despite the panel spec requiring one — checked live, doesn't matter here, but should still be added for consistency; (2) `run_tier1`'s verdict logic (`is_edge = spread_pct > 0`) only ever surfaces the best *positive*-direction combo — the single most significant combo in the full 41-row table is actually negative-direction (`gap_down,open_eq_high`, t=−4.12, spread=−0.53%, stronger than the "winning" positive one), which the console output/verdict never highlights. Low signal density (~1.5 signals/day when it fires, ~651 stock-days across 5.5y) means this is thin — narrow enough to watch, not yet enough to call it capacity-proven at scale. `live_capitulation_screener.py`'s docstring says "See measurement.md" — this row is that entry. **Re-confirmed 2026-08-20** (`screener_combo_finder.py --tier1` re-run live, production-grade-hardening §4): 430 days / 658 signal-rows (5 more days accumulated since the 2026-08-13 read), spread +0.5064%/day net of 0.15% round-trip cost, t=+3.48, p=0.0005 — same combo still wins, magnitude and significance essentially unchanged (t 3.61→3.48), and the negative-direction `gap_down,open_eq_high` combo the earlier review flagged as unhighlighted-but-stronger is *still* the single most significant row in the table (t=−4.05 this run, vs −4.12 previously). Cost accounting for this construct was already adequate at first measurement — it's a single next-session open→close round-trip, not a multi-period rebalance, so `gap_down`/`gap_up`'s turnover-drag concern (which is about *holding* a rebalanced position) doesn't apply the same way here; re-running under the exact same harness with a few more weeks of data was the right bar to clear, and it cleared it. **Not yet done**: a per-year breakdown to reconfirm "6/6 years positive" (the fresh run doesn't emit that split) and explicit capacity/liquidity sizing beyond the ≥₹5cr ADTV floor already applied. |
 
 ### The `sql_translate` two-arg `date()`/`datetime()` fix (2026-08-16) changes NOTHING in the training data — measured before/after, not argued
 
@@ -372,6 +372,49 @@ to legacy `news_articles` with `sentiment_score = 1.0` and `impact = 'MEDIUM'`.
 
 No score, weight, threshold or classification formula changed; a dormant constant was corrected
 and a swallowed error made visible.
+
+### `win_probability` re-measured 2026-08-20, properly powered — real IC, but does not clear this repo's own USABLE bar
+
+Production-grade-hardening §4's "next step, in order" was: verify write-timing provenance (done
+2026-08-15 via `win_probability_scored_at`) → re-run h=1 non-overlapping → cost/turnover-aware
+portfolio run. This is the middle step, done live via `factor_edge.py` (the same harness already
+scheduled for `unified_ranker.py`'s own engine scores, e.g. `smart_money_score` above) rather than
+a hand-rolled query, so the result is directly comparable to every other row measured that way.
+
+`factor_edge.py --table technical_signals --scores win_probability --horizons 1,5,21`, live
+production, 2026-08-20T09:02 IST — **well-powered this time**, not the 1-date `LOW-DATA` reads
+seen elsewhere in this file: 80,496 rows / 2,269 symbols / 72 dates spanning 2026-05-16→08-20,
+75,558 rows matched to forward prices across 53/49/33 dates per horizon.
+
+| horizon | rank_IC | hit_AUC | n | dates | verdict |
+|---|---|---|---|---|---|
+| 1d | +0.044 | 0.492 | 73,368 | 53 | no edge |
+| 5d | +0.077 | 0.513 | 64,597 | 49 | no edge |
+| 21d | +0.103 | 0.537 | 29,483 | 33 | no edge |
+
+Top-decile-minus-bottom-decile quantile spread at 1d: **+0.17%** (Q4 mean fwd +0.12% vs Q0 −0.05%),
+same direction as the 2026-08-15 preliminary read.
+
+**Read this precisely, not as a flat "no edge."** `_verdict()` requires BOTH `abs(rank_IC) >= 0.03`
+AND `hit_AUC >= 0.55` to call anything `USABLE`. Every horizon here clears the IC bar — cleanly,
+and IC *grows* with horizon (0.044→0.077→0.103), the opposite of a decaying artifact — but AUC
+never clears 0.55, topping out at 0.537 on 21d. This is exactly the "AUC can be excellent and
+useless" class this file already warns about, inverted: here IC says something real is happening
+directionally, but AUC says the binary win/lose classification power is too weak to act on. The
+raw h=1 IC (+0.044) is close in magnitude to the original 2026-08-15 preliminary read
+(+0.0364, t=+2.58, 41 dates) — it replicates in sign and rough size with 53 dates instead of 41
+and a properly non-overlapping, provenance-verified sample, which is meaningful corroboration
+rather than a fresh coincidence. Persisted to `factor_edge_history` (`run_at=2026-08-20T09:02:32`).
+
+**Verdict for this repo's purposes: a real, small, well-powered directional signal that is not
+tradeable as scored today** — same shape as `delivery_pct`'s "real spread, dead net of costs"
+finding above, except here the disqualifier is classification power rather than cost. **Not yet
+done**: the full cost/turnover-aware portfolio run this section's third step calls for — this
+result argues it may not be worth the effort (a signal this weak on AUC is unlikely to survive
+25bps costs even if IC is real), but that is an inference, not a measurement, and should not be
+quoted as if the portfolio run happened. Re-check via the historical saga below only if trying to
+understand *why* the write-timing/provenance question needed resolving before this could be
+trusted at all.
 
 ### ⚠ RETRACTION WITHDRAWN 2026-08-15 — the retraction itself was wrong. Result stands, preliminary.
 

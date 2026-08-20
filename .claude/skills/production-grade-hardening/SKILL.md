@@ -19,16 +19,13 @@ Every item below is tagged with which bucket it's in.
 
 | Gap | Closed by | Where |
 |---|---|---|
-| `scripts/backup_pg.py` existed but was scheduled nowhere, so it had never run once | Verifies the dump's TOC at write time, stamps `job_heartbeat('pg-backup')`, scheduled nightly in `ecosystem.config.cjs` | `pg-backup-recency` check in `dataQualityChecks.ts` |
-| "server N commits behind HEAD" (AF-14) was always caught by a human, never a check | `scripts/check_deploy_drift.mjs` compares git HEAD's committer time against `bharat-server`'s pm2 boot time, every 15 min | `deploy-drift` check in `dataQualityChecks.ts` |
+| `scripts/backup_pg.py` existed but was scheduled nowhere, so it had never run once | Verifies the dump's TOC at write time, stamps `job_heartbeat('pg-backup')`, scheduled nightly in `ecosystem.config.cjs`. **Live-verified 2026-08-20**: real `--restore` drill (DROP+CREATE DATABASE, not `pg_restore --clean` — TimescaleDB preloads the extension via `template1` and `--clean`'s DROP+CREATE EXTENSION inside one session always fails against it), 215/215 tables + 24/24 hypertables restored, exact row-count match | `pg-backup-recency` check in `dataQualityChecks.ts`, fix in `4cb780b` |
+| "server N commits behind HEAD" (AF-14) was always caught by a human, never a check | `scripts/check_deploy_drift.mjs` compares git HEAD's committer time against `bharat-server`'s pm2 boot time, every 15 min. **Live-verified 2026-08-20** on the real prod host — `job_heartbeat('deploy-drift')` green | `deploy-drift` check in `dataQualityChecks.ts` |
+| pm2 reports a service "online" while a process with no ancestry link to it has squatted the real port first (found live 2026-08-20 during a Docker Desktop crash — took `ml-api`/`alphaquant-api` fully offline for over an hour, undetected) | `scripts/check_port_drift.mjs` walks the parent-process chain from what's actually LISTENING back to pm2's tracked PID — ancestry, not interpreter path, since this venv's own launcher and pm2's fork-mode wrapper both legitimately spawn the real worker as a child. Every 15 min. **Live-verified**: caught the real incident, corrected version passes clean post-recovery | `port-drift` check in `dataQualityChecks.ts`, commit `5e0bff0` |
 
-Both are documented in `docs/session-log.md`'s 2026-08-19/20 entries, including exactly what was
-and was not verified (this work was done from a machine that is **not** the production host —
-see `/memories/repo/dev-vs-prod-machine.md` — so `tsc --noEmit`/`vitest run` on those changes are
-still owed on the real box). **Before starting anything else in this skill, run those two now if
-they haven't been run yet**: `npx tsc --noEmit`, `npx vitest run`, and one real invocation of
-`node scripts/check_deploy_drift.mjs` + `python scripts/backup_pg.py` on the prod host, then a
-real `--restore` drill into a throwaway database. An untested backup is a belief, not a backup.
+Documented in `docs/session-log.md`'s 2026-08-19/20 entries. **All three of the above are now
+genuinely live-verified on the production host**, not just syntax-checked — §3 below (which used
+to ask for this) is done.
 
 ## 1. Before touching anything — re-verify the ground truth, don't trust this file's dates
 
@@ -73,36 +70,31 @@ reproducible one:
    are not on a machine with a Docker daemon, say so and stop at "written, unbuilt" rather than
    claiming this is done.
 
-## 3. Deploy-drift and backup checks need a real production run
+## 3. ~~Deploy-drift and backup checks need a real production run~~ — DONE, see §0
 
-Already implemented (see §0) but only syntax-verified. This is the cheapest remaining item:
-`pm2 reload ecosystem.config.cjs` on the prod host, wait one cycle of each new job, confirm
-`deploy-drift` and `pg-backup-recency` both go green in `dataQualityChecks`' output, and do one
-real `--restore` drill.
+## 4. Cost-aware validation of the two live measurement leads — DONE 2026-08-20, both resolved
 
-## 4. Cost-aware validation of the two live measurement leads
+`measurement.md` identified two promising, unresolved leads. Both re-measured live against
+production this session, results written into `measurement.md` itself (not summarized here —
+read the two new dated sections there for the full numbers and caveats):
 
-**Bucket: needs the production Postgres instance + pandas. Cannot be done from a dev machine.**
-
-`measurement.md` already identifies exactly two promising, unresolved leads — resolve these two
-before building anything new; they're worth more than new infrastructure:
-
-- **The capitulation triple** (`gap_down` AND `open_eq_low` AND `top_loser`,
-  `live_capitulation_screener.py`): t=+3.61, 6/6 years positive, survives dropping the 3 most
-  extreme days. Needs a cost/turnover-aware re-run — the same file's own gap-down/gap-up rows
-  show a real edge can still be a turnover trap net of costs (delivery_pct had spread t=+7.82 and
-  was still dead long-only after costs).
-- **`win_probability`**: h=1 raw IC +0.0364, t=+2.58, provenance now traceable via
-  `win_probability_scored_at` (migration `1787050000000`). Needs the write-timing verified in
-  production (not assumed) and a real cost/turnover-aware portfolio run, per `measurement.md`'s
-  own "next step, in order" list.
-
-**Use `factor_backtest.py`** (or the harness `measurement.md`'s "already tested" table references)
-against real Postgres. Follow the panel spec exactly: per-date then average, winsorize with
-`interpolation="higher"/"lower"`, filter `is_suspect`, liquidity floor ≥₹1cr ADT, next-day OPEN
-entry. **Update `measurement.md` itself** with the result, whichever way it comes out — a null
-result is exactly as valuable to record as a positive one, per this repo's own retraction
-discipline (several past sessions retracted a confident wrong number once the real query ran).
+- **The capitulation triple** — re-run via `screener_combo_finder.py --tier1`: 430 days / 658
+  signal-rows (up from 425/651), spread +0.5064%/day net of 0.15% round-trip cost, t=+3.48,
+  p=0.0005. Reconfirms the 2026-08-13 read (t=3.61) with 5 more days of data — same combo still
+  wins, magnitude essentially unchanged. This construct's cost accounting was already adequate at
+  first measurement (single next-session open→close round-trip, not a rebalanced hold, so the
+  `gap_down`/`gap_up` turnover-drag concern doesn't transfer) — re-running under the same harness
+  with more data was the right bar, and it cleared it. **Still open**: a per-year breakdown to
+  reconfirm "6/6 years positive" (this run doesn't emit that split).
+- **`win_probability`** — re-run via `factor_edge.py` (the same harness already scheduled for
+  `unified_ranker.py`'s own engine scores), properly powered this time: 53/49/33 dates per
+  horizon (not the 1-date `LOW-DATA` reads seen elsewhere). Rank_IC is real and *grows* with
+  horizon (+0.044 → +0.077 → +0.103, 1d→5d→21d) and replicates the 2026-08-15 preliminary read's
+  magnitude — but `hit_AUC` never clears this repo's own 0.55 `USABLE` bar (tops out at 0.537 on
+  21d), so the verdict is "real signal, not tradeable as scored" rather than a flat no-edge.
+  **Still open**: the actual cost/turnover-aware portfolio backtest — this AUC result argues it
+  likely isn't worth running (a signal this weak on classification power is unlikely to survive
+  25bps costs even with real IC), but that's an inference from this session, not a measurement.
 
 ## 5. `knowable_at` — point-in-time correctness as a schema invariant
 
