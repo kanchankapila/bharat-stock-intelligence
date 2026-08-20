@@ -4933,3 +4933,76 @@ same-day re-triggering (3 catch-ups hours apart, each apparently completing/fail
 to free the active slot before the next restart re-evaluates from scratch) — that's a different
 mechanism than the concurrency collision this fix targets, and is exactly what the new digest
 section's catch-up-count flag exists to keep visible rather than guessed at further this session.
+
+## 2026-08-20 — restore-drill fix landed, a real port-squatting incident found and fixed live, a
+## Docker Desktop crash (self-inflicted) recovered, and both open measurement leads resolved
+
+Continuation of the production-grade-hardening work from the previous session (S110–S121), on
+the real production host. Three commits: `4cb780b`, `5e0bff0`, `f24ce12`.
+
+**`scripts/backup_pg.py --restore` fixed, live-verified.** The previous session's `pg_restore
+--clean` approach always failed against this TimescaleDB image: the extension is preloaded into
+every database via `template1`, and `--clean`'s `DROP EXTENSION`+`CREATE EXTENSION` inside one
+long-lived `pg_restore` session can't re-create an extension already loaded into that backend at
+fork time — `_timescaledb_internal` (just dropped) never comes back, and every compressed-chunk
+restore fails with "schema does not exist". Fixed by `DROP DATABASE`+`CREATE DATABASE` (the fresh
+DB gets the extension via `template1` automatically) then a plain `pg_restore` with no `--clean`.
+Live-verified: 215/215 tables, 24/24 hypertables, exact row-count match against source.
+`check_deploy_drift.mjs` also needed `shell: true` for its `pm2 jlist` call — `pm2` resolves to
+`pm2.cmd` on Windows, which `execFileSync` can't invoke without a shell (EINVAL otherwise).
+
+**A real, live port-squatting incident found and fixed twice — once for real, once as a false
+alarm I had to correct myself.** Built `scripts/check_port_drift.mjs` (a `deploy-drift`-style
+15-min pm2 job) after a memory-leak review turned up 3 orphaned processes — leftover from an
+earlier-session Docker Desktop crash, running under the wrong interpreter — squatting
+`ml-api`/`alphaquant-api`'s ports while pm2 reported both "online". First version of the check
+compared the LISTENING pid to pm2's own tracked pid for exact equality, which produced a second,
+self-inflicted incident: it also flagged pm2's own fork-mode wrapper (`ProcessContainerFork.js`
+always spawns the real `tsx`/node worker as a *child*, never runs it directly) and this repo's
+own venv launcher (`backend-python/venv/Scripts/python.exe` execs the real interpreter — the
+system Python311 install, per `pyvenv.cfg`'s `home` field — as a child too, confirmed by running a
+trivial no-app-code script through it) as "wrong-interpreter orphans." Repeatedly "killing the
+orphan" was actually killing the live, working server every time, which is worse than the bug it
+was meant to catch. Rewrote the check around **process ancestry** (walk the parent-pid chain back
+to pm2's tracked pid) instead of exact-pid/interpreter matching — the only signal that actually
+distinguishes a real squatter from a legitimate child. The corrected version caught the real
+incident and passes clean now. Wired into `ecosystem.config.cjs` (`port-drift-check`, `*/15 * * *
+*`) and `dataQualityChecks.ts` (`port-drift`, mirroring `deploy-drift`'s shape exactly).
+
+**Self-inflicted Docker Desktop crash, recovered.** A `taskkill /F` on Docker Desktop (part of
+the orphan-cleanup churn above) left its WSL2 data disk locked — `com.docker.backend.exe.log`
+showed `/dev/sdd is apparently in use by the system; will not make a filesystem here!` on
+restart, and the engine flapped between working and `500 Internal Server Error` on its own
+internal health pings for several minutes. Fixed with a full `wsl --shutdown` (releases all disk
+locks cleanly) before relaunching — confirmed stable only after 3 consecutive successful queries
+against Postgres, not the first one that happened to work. `bharat-server` needed a manual `pm2
+restart` afterward since it was mid-crash-loop against a Postgres that wasn't accepting
+connections yet. **Lesson for next time**: `taskkill /F` on Docker Desktop is not a safe
+"restart" — it skips the graceful WSL2 disk unmount, and the next launch can wedge on a stale
+lock. Prefer Docker Desktop's own quit/restart if it's responsive at all; `taskkill /F` +
+`wsl --shutdown` together is the correct recovery only once it's already unresponsive.
+
+**Both open leads in `measurement.md` resolved with fresh live measurements** (production-grade-
+hardening §4). Full numbers are in `measurement.md` itself, not duplicated here — summary: the
+capitulation triple (`screener_combo_finder.py --tier1`) reconfirmed at t=+3.48 (was t=+3.61,
+5 more days of data, same combo still wins). `win_probability` (`factor_edge.py`, properly
+powered this time at 53/49/33 dates per horizon vs. earlier 1-date `LOW-DATA` reads) has a real,
+horizon-growing rank_IC (+0.044→+0.077→+0.103) that replicates the 2026-08-15 preliminary read,
+but `hit_AUC` never clears this repo's own 0.55 `USABLE` bar (tops at 0.537) — real signal, not
+tradeable as scored. Both persisted/documented; the actual cost-aware portfolio backtest for
+`win_probability` and a per-year breakdown for the capitulation triple remain open, explicitly
+flagged as such rather than rounded up to "done."
+
+Verified: `npx tsc --noEmit` clean, `npx vitest run` 1044 passed / 41 skipped (0 failed) on this
+session's changes, all three new/fixed monitors (`pg-backup`, `deploy-drift`, `port-drift`)
+confirmed green via `job_heartbeat` on the real production host after full recovery, all 4 core
+services (`bharat-server`, `ml-api`, `alphaquant-api`; `chatbot`/`ollama` intentionally left down
+per user request to conserve memory) responding 200 on their real endpoints.
+
+**Explicitly deferred, not attempted**: production-grade-hardening §2 (containerize the 4
+services) — `docker/*.Dockerfile`, `docker-compose.override.yml`, `.dockerignore` exist from an
+earlier session but are untracked/unbuilt. A `docker compose build` attempt this session pushed
+host free memory from ~1GB to 0.08GB within a minute (the same threshold that caused the crash
+above) and was aborted before it repeated the incident — this host does not have headroom to
+build 4 more images while pm2 and the DB containers are all up. Left for a session with the app
+services stopped first, or a host with more RAM.
