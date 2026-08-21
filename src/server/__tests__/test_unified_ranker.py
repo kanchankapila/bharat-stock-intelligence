@@ -87,7 +87,8 @@ def make_db():
             symbol TEXT NOT NULL, computed_at TEXT NOT NULL, generated_at TEXT NOT NULL,
             regime TEXT, unified_score REAL, conviction_level TEXT, classification TEXT,
             screener_stock_score REAL, ml_score REAL, confluence_score REAL,
-            technical_score REAL, cs_score REAL, breakout_score REAL, smart_money_score REAL,
+            technical_score REAL, cs_score REAL, dl_score REAL, breakout_score REAL,
+            smart_money_score REAL,
             fundamental_score REAL, engine_coverage_count INTEGER, entry_zone_low REAL,
             stop_loss REAL, target_1 REAL, position_size_pct REAL, sector TEXT,
             PRIMARY KEY (symbol, generated_at)
@@ -555,12 +556,20 @@ class TestUnifiedRankerRun:
 
     def test_regime_weights_sum_to_one(self):
         from unified_ranker import REGIME_WEIGHTS
-        # screener shrunk 0.5x 2026-08-20 (measurement.md: two independent measurements found
-        # it net-negative, the heaviest-weighted engine of all 8) -- was 0.30/0.40.
-        assert REGIME_WEIGHTS['BULL']['screener'] == 0.15
-        assert REGIME_WEIGHTS['CRASH']['screener'] == 0.20
+        # screener shrunk 0.5x TWICE on the same policy and the same kind of evidence:
+        # 2026-08-20 (0.30 -> 0.15 BULL, 0.40 -> 0.20 CRASH) and again 2026-08-21
+        # (-> 0.075 / 0.10) after factor_edge put screener_stock_score at rank IC -0.033 @5d
+        # and -0.016 @10d on 35/30 dates while technical/dl were positive on identical rows.
+        # See measurement.md and REGIME_WEIGHTS' own comment block.
+        assert REGIME_WEIGHTS['BULL']['screener'] == 0.075
+        assert REGIME_WEIGHTS['CRASH']['screener'] == 0.10
         for regime, weights in REGIME_WEIGHTS.items():
             assert abs(sum(weights.values()) - 1.0) < 1e-9, f"{regime} weights don't sum to 1"
+        # breakout is PINNED by an independent audit-derived ceiling; a proportional
+        # redistribution must never scale it up. Pinning it here means a future reshuffle that
+        # forgets the exclusion fails on this line rather than silently breaching the ceiling.
+        assert [REGIME_WEIGHTS[r]['breakout'] for r in
+                ('BULL', 'BEAR', 'HIGH_VOL', 'CRASH', 'SIDEWAYS')] == [0.15, 0.05, 0.10, 0.05, 0.13]
 
 
 class TestSellRowGeometryBackstop:

@@ -314,7 +314,7 @@ export const AlphaCockpit: React.FC = () => {
               <Zap className="w-5 h-5 text-indigo-400 fill-indigo-400/20" />
             </div>
             <div>
-              <h1 className="text-2xl font-black text-slate-100 tracking-tighter uppercase italic flex items-center gap-2">
+              <h1 className="v1-title-page flex items-center gap-2">
                 Quant Alpha Cockpit
                 <CanonicalBadge />
               </h1>

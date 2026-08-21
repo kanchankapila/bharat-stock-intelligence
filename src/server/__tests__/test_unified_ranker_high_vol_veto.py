@@ -1,3 +1,4 @@
+import io
 """High-realized-vol veto (2026-08-10).
 
 Guards the only cross-sectionally significant factor found in 4.5 years of this platform's
@@ -146,8 +147,10 @@ class TestGetterUsesPortableSqlAndTheRightColumn:
 # ── Zero-dispersion engine guard ────────────────────────────────────────────────
 from unified_ranker import (  # noqa: E402
     ZERO_DISPERSION_MIN_SYMBOLS,
+    ZERO_DISPERSION_MIN_SD,
     drop_zero_dispersion_engines,
     _blend,
+    _normalize_to_100,
 )
 
 
@@ -160,13 +163,44 @@ class TestDropZeroDispersionEngines:
         assert dropped == ['ml']
         assert set(kept) == {'screener'}
 
-    def test_keeps_an_engine_with_any_real_spread(self):
+    def test_keeps_an_engine_with_real_spread(self):
         n = ZERO_DISPERSION_MIN_SYMBOLS + 10
-        vals = {f'S{i}': 50.0 for i in range(n)}
-        vals['S0'] = 50.5                       # one symbol differs -> still informative
+        vals = {f'S{i}': float(i) for i in range(n)}   # sd ~= 17.6, well clear of the floor
         kept, dropped = drop_zero_dispersion_engines({'ml': vals})
         assert dropped == []
         assert 'ml' in kept
+
+    def test_drops_a_near_flat_engine_one_symbol_apart(self):
+        """Was asserted the other way until 2026-08-22, when the blend began normalizing.
+
+        Under the old raw blend a 59-tied/1-different engine was a harmless near-constant
+        offset. _normalize_to_100 re-spreads ANY input to a uniform 0-100, so that same engine
+        now hands its single differing symbol the top percentile on noise and collects its full
+        regime weight for it. The premise changed, so the assertion had to.
+        """
+        n = ZERO_DISPERSION_MIN_SYMBOLS + 10
+        vals = {f'S{i}': 50.0 for i in range(n)}
+        vals['S0'] = 50.5
+        kept, dropped = drop_zero_dispersion_engines({'ml': vals})
+        assert dropped == ['ml']
+
+    def test_drops_the_live_ml_collapse_band(self):
+        """The real shape this floor exists for: ml_score's live 2026-08-24 range 69.1-74.1
+        (sd 1.33) while carrying the joint-heaviest 0.172 weight."""
+        n = ZERO_DISPERSION_MIN_SYMBOLS + 10
+        vals = {f'S{i}': 69.1 + (i % 6) for i in range(n)}   # spans 69.1-74.1
+        kept, dropped = drop_zero_dispersion_engines({'ml': vals})
+        assert dropped == ['ml']
+
+    def test_floor_is_on_stddev_so_a_lone_outlier_does_not_rescue_a_flat_engine(self):
+        """A range test is fooled by one extreme value; stddev dilutes it with n. Not immune,
+        though -- at n=60 that same single outlier gives sd 6.45 and the engine IS kept. The
+        floor is a dispersion test, not an outlier test, and this pins the real behaviour."""
+        vals = {f'S{i}': 50.0 for i in range(500)}
+        vals['S0'] = 100.0                       # full-scale RANGE, negligible dispersion
+        assert max(vals.values()) - min(vals.values()) == 50.0
+        kept, dropped = drop_zero_dispersion_engines({'ml': vals})
+        assert dropped == ['ml']
 
     def test_thin_coverage_is_not_treated_as_a_dead_engine(self):
         """A flat map over 5 symbols is sparse coverage, not a collapsed model."""
@@ -301,3 +335,62 @@ class TestLayerFiringInstrumentation:
 
 if __name__ == '__main__':
     raise SystemExit(pytest.main([__file__, '-q']))
+
+
+class TestBlendIsScaleInvariant:
+    """The defect the normalization fixes: _blend is a weighted AVERAGE, so engines on
+    different scales do not get the influence their weights say, and a missing engine shifts
+    the score by that engine's mean offset rather than by its information."""
+
+    def test_a_narrow_engine_gets_less_influence_than_its_weight_when_unnormalized(self):
+        wide = {f'S{i}': float(i) for i in range(100)}          # 0-99
+        narrow = {f'S{i}': 69.0 + i * 0.05 for i in range(100)}   # 69-74, ml's live band
+        w = {'wide': 0.5, 'narrow': 0.5}
+        span = lambda m: max(m.values()) - min(m.values())
+
+        # Equal weights, so an equal influence share would be 0.5 each. Raw, the wide engine
+        # carries 95% of the blend's spread -- this is ml at 0.172 weight and 1.1% influence.
+        raw_share = (w['wide'] * span(wide)) / (w['wide'] * span(wide) + w['narrow'] * span(narrow))
+        assert raw_share > 0.9
+
+        nw, nn = _normalize_to_100(wide), _normalize_to_100(narrow)
+        norm_share = (w['wide'] * span(nw)) / (w['wide'] * span(nw) + w['narrow'] * span(nn))
+        assert norm_share == pytest.approx(0.5, abs=0.02)   # weight now IS the influence share
+
+    def test_a_missing_engine_no_longer_shifts_the_score_by_its_mean_offset(self):
+        """Live 2026-08-24: engine means ran 27.6 (smart_money) to 73.2 (ml), so symbols with
+        3 engines averaged 28.31 and classified 91 Sell / 0 Buy purely from which engines were
+        absent. After normalization every engine is mean-50, so dropping one is information
+        loss, not a systematic demotion."""
+        w = {'a': 0.5, 'b': 0.5}
+        high = {f'S{i}': 70.0 + (i % 10) for i in range(100)}   # mean ~74
+        low = {f'S{i}': 27.0 + (i % 10) for i in range(100)}    # mean ~31
+
+        sym = 'S5'
+        raw_both = _blend({'a': high[sym], 'b': low[sym]}, {'a', 'b'}, w)
+        raw_only_low = _blend({'a': high[sym], 'b': low[sym]}, {'b'}, w)
+        assert abs(raw_only_low - raw_both) > 15        # the offset, not the information
+
+        nh, nl = _normalize_to_100(high), _normalize_to_100(low)
+        n_both = _blend({'a': nh[sym], 'b': nl[sym]}, {'a', 'b'}, w)
+        n_only_low = _blend({'a': nh[sym], 'b': nl[sym]}, {'b'}, w)
+        assert abs(n_only_low - n_both) < 1.0           # same percentile in both maps
+
+    def test_normalization_is_idempotent_so_already_ranked_engines_are_unharmed(self):
+        """screener/cs/confluence/technical already percentile-normalize inside their getters;
+        normalizing the blend view must not double-transform them."""
+        m = {f'S{i}': float(i * i) for i in range(60)}
+        once = _normalize_to_100(m)
+        assert _normalize_to_100(once) == once
+
+    def test_run_blends_the_normalized_view_not_the_raw_one(self):
+        """Wiring pin, not a behaviour test: the arithmetic above is only reached if run()
+        actually hands _blend the normalized map. It passed the raw engine_scores until
+        2026-08-22, which is what made the scale mismatch reach production."""
+        import unified_ranker
+        src = io.open(unified_ranker.__file__, encoding='utf-8').read()
+        assert 'engine_maps_blend = {name: _normalize_to_100(m)' in src
+        assert 'unified = _blend(blend_scores, present, base_weights)' in src
+        # engine_scores must stay RAW -- reporting columns and breakout's sizing thresholds
+        # both read it, and normalizing it would silently change position sizing too.
+        assert "bo_score = engine_scores['breakout']" in src

@@ -12,10 +12,15 @@
  * content built from v1/v4 components, splitting the UI into a light header over a dark body.
  * Removing the toggle removes the whole class of bug, not just this one instance of it.
  *
- * Neutrals (ink/muted/faint/border) are NOT flat Tailwind slate -- they're pulled from an
- * indigo-tinted grey ramp (hue ~250deg, matching --v6-accent) so secondary text and borders read
- * as a deliberate choice rather than an unconsidered default. v1's own index.css does use plain
- * slate-400 in one spot (the `.label` utility) but that's not treated as precedent here.
+ * ⚠ CORRECTED 2026-08-21: the indigo-tinted grey ramp described below was a deliberate choice
+ * at the time, but user testing found it reads as "a different page" against every other v1
+ * surface -- confirmed live via getComputedStyle: rgb(107,101,146)/rgb(148,143,191) (the old
+ * --v6-faint/--v6-muted) showed up on-page hundreds of times, next to v1's actual neutral
+ * slate-400/500 elsewhere in the same nav. Neutrals below are now real Tailwind slate values,
+ * matching every other v1 page exactly rather than approximating an indigo-tinted variant of
+ * them. Original rationale, kept for history: "pulled from an indigo-tinted grey ramp (hue
+ * ~250deg, matching --v6-accent) so secondary text and borders read as a deliberate choice
+ * rather than an unconsidered default."
  *
  * Scoped to `.v6-root` so it can't leak into AppShell/V2AppShell/v5-isolated, which define their
  * own color systems.
@@ -28,10 +33,10 @@
   --v6-surface-raised: rgba(8, 9, 12, 0.88);
   --v6-surface-blur: blur(20px) saturate(160%);
   --v6-surface-blur-strong: blur(32px) saturate(200%);
-  --v6-ink: #f3f1fb;
-  --v6-ink-soft: #c8c4e6;
-  --v6-muted: #948fbf;
-  --v6-faint: #6b6592;
+  --v6-ink: #ffffff;
+  --v6-ink-soft: #cbd5e1;
+  --v6-muted: #94a3b8;
+  --v6-faint: #64748b;
   --v6-border: rgba(255, 255, 255, 0.07);
   --v6-border-strong: rgba(255, 255, 255, 0.11);
   --v6-accent: #6366f1;

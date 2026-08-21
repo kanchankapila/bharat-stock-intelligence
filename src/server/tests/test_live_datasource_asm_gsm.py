@@ -72,7 +72,7 @@ class TestAsmGsmLiveDataSource:
         # known up front rather than parsed back out of the connection.
         import uuid
         import psycopg2
-        from pg_test_support import _pg_dsn, _sa_url, pg_available
+        from pg_test_support import _pg_dsn, _sa_url, pg_available, drop_throwaway_schema
         from sqlalchemy import create_engine
         from db_compat import ConnWrapper
 
@@ -110,7 +110,7 @@ class TestAsmGsmLiveDataSource:
             check_engine.dispose()
         finally:
             try:
-                admin.cursor().execute(f'DROP SCHEMA IF EXISTS "{schema}" CASCADE')
+                drop_throwaway_schema(admin, schema)
             finally:
                 admin.close()
 

@@ -17,6 +17,7 @@
 // outage does not also hide a deploy-drift finding.
 import { execFileSync } from 'node:child_process';
 import 'dotenv/config';
+import { driftVerdict } from './lib/deployDriftVerdict.mjs';
 
 function sh(cmd, args) {
   // shell: true -- on Windows, pm2 resolves to pm2.cmd (a batch wrapper); .cmd files aren't
@@ -89,30 +90,27 @@ async function main() {
   const proc = pm2ProcessInfo('bharat-server');
 
   console.log(`[deploy-drift] HEAD ${head.sha.slice(0, 12)} committed ${head.committedAt.toISOString()}`);
+  if (proc.running) {
+    console.log(`[deploy-drift] bharat-server started ${proc.startedAt.toISOString()}`);
+  }
 
-  if (!proc.running) {
-    const detail = `bharat-server is not online under pm2 (${proc.error ?? proc.status ?? 'unknown'}).`;
+  const { status, detail } = driftVerdict(head, proc);
+
+  if (status === 'fail') {
     console.error(`[deploy-drift] FAIL: ${detail}`);
     await recordHeartbeat(false, detail);
     process.exitCode = 1;
     return;
   }
 
-  console.log(`[deploy-drift] bharat-server started ${proc.startedAt.toISOString()}`);
-
-  if (head.committedAt > proc.startedAt) {
-    const behindMs = head.committedAt.getTime() - proc.startedAt.getTime();
-    const behindHrs = (behindMs / 3_600_000).toFixed(1);
-    const detail = `HEAD (${head.sha.slice(0, 12)}, committed ${head.committedAt.toISOString()}) is ` +
-      `newer than bharat-server's last restart (${proc.startedAt.toISOString()}) by ${behindHrs}h. ` +
-      `Run: pm2 restart bharat-server.`;
-    console.error(`[deploy-drift] FAIL: ${detail}`);
-    await recordHeartbeat(false, detail);
-    process.exitCode = 1;
-    return;
+  // PENDING is deliberately stamped as a heartbeat SUCCESS: the whole point of the grace window
+  // is that a just-landed commit must not raise a critical alert. It still prints, so a human
+  // reading the log (or running this by hand after a deploy) sees the pending restart.
+  if (status === 'pending') {
+    console.warn(`[deploy-drift] PENDING: ${detail}`);
+  } else {
+    console.log(`[deploy-drift] OK: ${detail}`);
   }
-
-  console.log('[deploy-drift] OK: bharat-server was started at or after the current HEAD commit.');
   await recordHeartbeat(true, '');
 }
 

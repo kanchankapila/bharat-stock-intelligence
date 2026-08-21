@@ -41,6 +41,7 @@ from pg_test_support import (  # noqa: E402
     _pg_dsn,
     _sa_url,
     drain_memory_conns,
+    drop_throwaway_schema,
     pg_available,
     pg_memory_conn,  # noqa: F401  -- re-exported for tests that import it from conftest
 )
@@ -94,7 +95,7 @@ def pg_schema():
         yield conn, schema
     finally:
         try:
-            cur.execute(f'DROP SCHEMA IF EXISTS "{schema}" CASCADE')
+            drop_throwaway_schema(conn, schema)
         finally:
             conn.close()
 
@@ -199,7 +200,7 @@ def _pg_session_schema():
         yield schema
     finally:
         try:
-            cur.execute(f'DROP SCHEMA IF EXISTS "{schema}" CASCADE')
+            drop_throwaway_schema(conn, schema)
         finally:
             conn.close()
 

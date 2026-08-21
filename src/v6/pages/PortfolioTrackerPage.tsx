@@ -641,8 +641,8 @@ export const PortfolioTrackerPage: React.FC<{ userId?: string | null; onSelectSt
     <div className="space-y-4">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="v6-title text-base text-[var(--v6-ink)]">Portfolio</h1>
-          <p className="text-[11px] text-[var(--v6-faint)]">Track positions, P&amp;L, and sector allocation</p>
+          <h1 className="v1-title-page">Portfolio</h1>
+          <p className="text-[11px] text-slate-400 mt-1">Track positions, P&amp;L, and sector allocation</p>
         </div>
         <div className="flex gap-1 p-0.5 bg-[var(--v6-bg-band)] rounded-xl">
           <button

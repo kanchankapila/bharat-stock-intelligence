@@ -280,7 +280,7 @@ async function processAISignal(job: Job): Promise<void> {
   const { gateAISignal, getAISignalMinConfidence, gateOnQuant, getAISignalMinWinProb,
           upsertUnifiedSignal, checkSurveillanceGate } = await import('./signals');
 
-  // Cheap DB-only gates FIRST, before spending an Ollama/Gemini call. Both of these are
+  // Cheap DB-only gates FIRST, before spending a Gemini call. Both of these are
   // independent of the LLM's output, so if either would reject the signal there is no reason
   // to generate one at all — this is what actually cuts inference volume/cost, not the
   // after-the-fact gates below.
@@ -772,6 +772,14 @@ async function processMlDailyOps(job: Job): Promise<{ success: boolean; failedSt
     // SmartOptions Greek-enriched option chain for all F&O stocks (Delta/Gamma/Theta/Vega/IV).
     runPython('so_option_chain_fetcher.py', ['--delay', '0.3'], 30 * 60_000)
       .catch(e => console.warn('[QUEUE] so_option_chain_fetcher failed:', (e as Error).message)),
+    // Per-stock FUTURES OI/positioning (MC FUTSTK) -> stock_futures_oi_history: open interest,
+    // OI change, long/short buildup, rollover %, basis. This is the family measurement.md had
+    // recorded as impossible ("no fetcher captures per-stock futures OI"); the endpoint was
+    // already in urls_sample.json and simply never built. NOT a signal yet -- it must be graded
+    // through factor_edge.py like everything else before anything consumes it. Budget is
+    // generous because it is 2 requests per F&O name at a 0.25s pace.
+    runPython('mc_stock_futures_oi_fetcher.py', [], 30 * 60_000)
+      .catch(e => console.warn('[QUEUE] mc_stock_futures_oi_fetcher failed:', (e as Error).message)),
     // SmartOptions cross-market F&O activity screeners (most-active-value/oi-gainers/oi-losers)
     // at the current monthly expiry -- distinct from so_option_chain_fetcher's per-stock chain
     // above (that one needs stockCode; this one is a ranked cross-market screener with no
@@ -1040,7 +1048,7 @@ async function processMlDailyOps(job: Job): Promise<{ success: boolean; failedSt
   // Warm-start LGBM ensemble on the last 3 days of newly-resolved outcomes (+20 boost rounds).
   // Runs after online_learner so SGD priors are already updated; keeps ensemble fresh daily
   // without the cost of a full weekly retrain.
-  await T.run('ml-ensemble-incremental', () => runPython('ml_ensemble.py', ['--incremental', '--incr-days', '3'], 5 * 60_000));
+  await T.run('ml-ensemble-incremental', () => runPython('ml_ensemble.py', ['--incremental', '--incr-days', '3', '--label', 'triple_barrier'], 5 * 60_000));
 
   await T.run('ml-ensemble-score', () => pythonApi.scorePending());
 
@@ -1307,7 +1315,7 @@ async function processMlWeeklyRetrain(_job: Job): Promise<{ success: boolean; fa
   // Soft failure: if ml-ensemble-train crashes (e.g. ValueError in score_pending), log the
   // warning but let the weekly job continue to breakout_classifier, strategy-optimizer, etc.
   // and always reach T.finish() so the heartbeat is written.
-  await T.run('ml-ensemble-train', () => runPython('ml_ensemble.py', ['--train', '--tune', '--score'], 90 * 60_000))
+  await T.run('ml-ensemble-train', () => runPython('ml_ensemble.py', ['--train', '--tune', '--score', '--label', 'triple_barrier'], 90 * 60_000))
     .catch(e => console.warn('[QUEUE] ml-ensemble-train failed (weekly retrain continues):', (e as Error).message));
   // breakout_classifier.py moved to daily ops (2026-07-17) -- its only training source,
   // stock_ohlcv, updates once a day at EOD, so a weekly cadence left it stale against data
@@ -1339,11 +1347,51 @@ async function processMlWeeklyRetrain(_job: Job): Promise<{ success: boolean; fa
   // does screener/ml/cs/confluence/technical/dl/breakout/smart_money each actually predict
   // forward returns, or is it dead weight in the blend? Advisory only for now (see
   // engine_edge_weight/edge_adjusted_engine_score below, flag-gated off) -- this just measures.
+  // unified_score is FIRST in this list deliberately. Until 2026-08-21 it was absent entirely:
+  // the 8 component engines were graded weekly while the canonical blended output every
+  // dashboard actually shows had NEVER been measured by this harness (checked live:
+  // 0 rows in factor_edge_history WHERE score_col='unified_score'). That is the one number a
+  // user acts on, and it was the only one with no scheduled IC/AUC verdict.
   await runPython('factor_edge.py',
     ['--table', 'unified_recommendations', '--date-col', 'computed_at',
-     '--scores', 'screener_stock_score,ml_score,confluence_score,technical_score,dl_score,cs_score,breakout_score,smart_money_score',
+     '--scores', 'unified_score,screener_stock_score,ml_score,confluence_score,technical_score,dl_score,cs_score,breakout_score,smart_money_score',
      '--horizons', '5,10,21', '--by-regime', '--persist'], 15 * 60_000)
     .catch(e => console.warn('[QUEUE] factor_edge (unified engines) failed:', (e as Error).message));
+
+  // Equal-weight cross-sectional composite of the 6 raw engines -> engine_composite_scores.
+  // Persisted so it ACCUMULATES and can be graded honestly; graded immediately below.
+  // Measured 2026-08-21: 5d rank IC +0.083 over 46 dates -- the highest 5d IC on this platform
+  // and ~7x unified_score's -- but hit_AUC 0.526/0.540 never clears 0.55, so the verdict is
+  // "no edge", NOT usable, and it is deliberately not wired into unified_ranker.py. See
+  // measurement.md (including the same-day correction retracting an earlier USABLE claim).
+  await runPython('engine_composite.py', [], 10 * 60_000)
+    .catch(e => console.warn('[QUEUE] engine_composite failed:', (e as Error).message));
+  await runPython('factor_edge.py',
+    ['--table', 'engine_composite_scores', '--date-col', 'date',
+     '--scores', 'composite', '--horizons', '1,5,21', '--persist'], 15 * 60_000)
+    .catch(e => console.warn('[QUEUE] factor_edge (composite) failed:', (e as Error).message));
+
+  // The RAW engine outputs, upstream of unified_ranker.py's normalization/blend. Graded by hand
+  // on 2026-08-20 and never scheduled, so those verdicts were already going stale -- the same
+  // "a one-off measurement rots" problem the DVM/unified runs above exist to avoid.
+  // movement_probability is deliberately EXCLUDED: its pre-2026-08-20 rows were produced by a
+  // train/serve-skew bug (score() skipped the _lag_by_symbol() that load_training_data() applies,
+  // so it "predicted" a same-day label from that day's own bar -- AUC 0.894, not real). Grading
+  // the column now would just re-persist a tainted verdict, because factor_edge reads the whole
+  // table. Re-add once ~20 dates of post-fix rows have accumulated. See measurement.md.
+  await runPython('factor_edge.py',
+    ['--table', 'technical_signals', '--date-col', 'date',
+     '--scores', 'win_probability,cs_score,breakout_probability,signal_score',
+     '--horizons', '1,5,21', '--persist'], 15 * 60_000)
+    .catch(e => console.warn('[QUEUE] factor_edge (technical_signals) failed:', (e as Error).message));
+  // dl_engine.py's three heads, each at its OWN native horizon (target_ret_1d/5d/15d) rather
+  // than a generic grid -- grading a model against a horizon it was not trained for is the
+  // mismatch that produced three wrong verdicts on 2026-08-20 (see measurement.md's correction).
+  await runPython('factor_edge.py',
+    ['--table', 'deep_learning_predictions', '--date-col', 'prediction_date',
+     '--scores', 'prob_up_1d,prob_up_5d,prob_up_15d',
+     '--horizons', '1,5,15', '--persist'], 15 * 60_000)
+    .catch(e => console.warn('[QUEUE] factor_edge (dl heads) failed:', (e as Error).message));
   // Same as ml-daily-ops above: report the tracker's real verdict rather than a blanket true.
   const verdict = T.finish();
   return { success: verdict.ok, failedSteps: verdict.failedSteps };
@@ -1530,7 +1578,7 @@ export async function initQueues(): Promise<boolean> {
       { 
         connection, 
         concurrency: 1,
-        lockDuration: 600000, // 10 minutes (Ollama can be very slow)
+        lockDuration: 600000, // 10 minutes
         lockRenewTime: 120000, // 2 minutes
       },
     );
@@ -1559,10 +1607,9 @@ export async function initQueues(): Promise<boolean> {
       processAISignal,
       {
         connection,
-        // Ollama now keeps the model resident between calls (OLLAMA_KEEP_ALIVE in aiService.ts,
-        // was `keep_alive: 0` forcing a full reload per stock) and the quant/surveillance gates
-        // run before the LLM call, so this no longer needs to be as conservative as when every
-        // single job paid a cold model load.
+        // AI provider is Gemini (Ollama removed 2026-08-20 — no local model-load cost to
+        // worry about) and the quant/surveillance gates run before the LLM call, so this
+        // stays conservative mainly to respect Gemini's own rate limits, not model-load time.
         concurrency: 2,
         lockDuration: 600000,    // 10 minutes
         lockRenewTime: 180000,   // 3 minutes renewal

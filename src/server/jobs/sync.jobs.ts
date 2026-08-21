@@ -77,9 +77,8 @@ async function processScreenerPerf(job: Job): Promise<{ success: boolean; failed
     .catch(e => console.warn('[QUEUE] screener_ohlcv_backfill failed:', (e as Error).message));
 
   // 3. Compute performance metrics for all screeners (K_PRIOR adaptive; phase_e updates confidence)
-  // 45 min: the run includes per-screener Ollama classification calls and routinely
-  // outlives the old 15-min budget now that screener_appearances has months of history
-  // (12 of its last 14 runs were timeout-killed with an empty "Command failed").
+  // 45 min: this routinely outlives the old 15-min budget now that screener_appearances has
+  // months of history (12 of its last 14 runs were timeout-killed with an empty "Command failed").
   await runPython('screener_performance.py', [], 45 * 60_000);
 
   // 4. Stamp per-stock screener ML features into technical_signals

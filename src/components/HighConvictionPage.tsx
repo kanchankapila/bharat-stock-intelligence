@@ -1,219 +1,173 @@
 import React from 'react';
-import { RefreshCw, Crosshair, Target, AlertTriangle } from 'lucide-react';
+import { RefreshCw, ShieldCheck, Info, TrendingDown, Clock } from 'lucide-react';
 import { trpc } from '../lib/trpc';
 import { cn } from '../lib/utils';
-import { LegacyScoreBanner } from './CanonicalSourceNote';
 
-// ── Types ──────────────────────────────────────────────────────────────────────
+// This page shows the ONE setup on this platform with a validated, cost-aware, positive
+// forward edge -- see .claude/rules/measurement.md's "capitulation triple" entry: gapped down
+// AND opened at the day's low AND already among the day's biggest losers -> a next-session
+// open->close bounce. Re-confirmed 2026-08-20 (t=+3.48, p=0.0005, 430 days, 5/6 years positive).
+//
+// Deliberately NOT another "top picks" list: unified_score/AlphaQuant/screener consensus/every
+// classic factor tested on this platform have been measured null-to-negative net of costs (see
+// measurement.md). Rather than add a 2nd/3rd/Nth score to the pile the user is already confused
+// by, this page shows the ONE thing that has cleared that bar, with the actual backtest numbers
+// next to it instead of a badge -- and says so plainly when nothing is currently matching,
+// since this setup fires on roughly one stock a day, not every cycle.
 
-interface ComboStock {
-  symbol: string; name: string; sector: string;
-  signalScore: number; entryPrice: number; signalTypes: string[];
-  piotroski: number; sharpeRatio: number; rankComposite: number;
-  bullishScreenerCount: number; return12m: number;
-  convictionLevel: string | null; avgTrackRecord: number | null;
-  stopLoss: number; target: number; rrRatio: number;
+interface Combo {
+  filters: string[];
+  n_days: number;
+  n_signals: number;
+  spread_pct: number;
+  t_stat: number;
+  p_value: number;
 }
 
-interface ComboResult {
-  regime: string; reason: string; stocks: ComboStock[];
+interface Evidence {
+  as_of: string;
+  n_days_history: number;
+  cost_pct_used: number;
+  best: Combo;
+  is_edge: boolean;
 }
 
-// ── Helpers ────────────────────────────────────────────────────────────────────
-
-function fmt(n: number, dec = 1) {
-  return isNaN(n) ? '—' : n.toFixed(dec);
+interface Match {
+  symbol: string;
+  price: number;
+  change_per: number;
+  volume: number;
 }
 
 function fmtPrice(n: number) {
-  return n > 0
-    ? `₹${n.toLocaleString('en-IN', { maximumFractionDigits: 2 })}`
-    : '—';
+  return n > 0 ? `₹${n.toLocaleString('en-IN', { maximumFractionDigits: 2 })}` : '—';
 }
 
-// ── Sub-components ─────────────────────────────────────────────────────────────
-
-function RegimeBadge({ regime }: { regime: string }) {
-  const textColor =
-    regime === 'BULL'     ? 'v1-text-bullish' :
-    regime === 'SIDEWAYS' ? 'v1-text-neutral' :
-                            'v1-text-bearish';
-  return (
-    <span className={cn('v1-badge text-[10px]', textColor)}>
-      {regime}
-    </span>
-  );
+function daysStale(asOf: string): number {
+  return Math.floor((Date.now() - new Date(asOf).getTime()) / 86_400_000);
 }
 
-function ConvictionBadge({ level }: { level: string | null }) {
-  if (!level) return null;
-  const badgeClass =
-    level === 'A_HIGH'
-      ? 'v1-badge-a'
-      : 'v1-badge-b';
-  return (
-    <span className={cn('v1-badge text-[9px]', badgeClass)}>
-      {level.replace('_', ' ')}
-    </span>
-  );
-}
-
-function SignalPill({ type }: { type: string }) {
-  const style =
-    type === 'RSI_DIVERGENCE'  ? 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30' :
-    type === 'EMA_BULL_STACK'  ? 'bg-sky-500/20 text-sky-400 border-sky-500/30' :
-    type === 'NR7_COMPRESSION' ? 'bg-violet-500/20 text-violet-400 border-violet-500/30' :
-                                  'bg-slate-700/60 text-slate-400 border-slate-600';
-  return (
-    <span className={cn('text-[9px] font-bold font-display uppercase tracking-wider px-1.5 py-0.5 rounded border', style)}>
-      {type.replace(/_/g, ' ')}
-    </span>
-  );
-}
-
-function MetricCell({ label, value, color }: { label: string; value: string; color?: string }) {
-  return (
-    <div className="text-center">
-      <div className={cn('text-sm font-black', color ?? 'text-white')}>{value}</div>
-      <div className="text-[9px] text-slate-600 font-display uppercase tracking-wider mt-0.5">{label}</div>
-    </div>
-  );
-}
-
-function HighConvictionCard({
-  stock,
-  onSelectStock,
-}: {
-  stock: ComboStock;
-  onSelectStock: (s: string) => void;
-}) {
-  const rrColor =
-    stock.rrRatio >= 2 ? 'text-emerald-400' :
-    stock.rrRatio >= 1 ? 'text-amber-400'   : 'text-rose-400';
-
-  const retColor = stock.return12m >= 0 ? 'text-emerald-400' : 'text-rose-400';
-
-  const oneLineReason = [
-    stock.signalTypes.length > 0
-      ? stock.signalTypes.map(t => t.replace(/_/g, ' ').toLowerCase()).join(' + ')
-      : 'signal match',
-    `Piotroski ${stock.piotroski}/9`,
-    `${stock.bullishScreenerCount} screeners`,
-    `Sharpe ${fmt(stock.sharpeRatio)}`,
-  ].join(' · ');
-
-  return (
-    <div
-      className="v1-card p-5 cursor-pointer transition-all flex flex-col gap-4"
-      onClick={() => onSelectStock(stock.symbol)}
-    >
-      {/* Header */}
-      <div className="flex items-start justify-between gap-2">
-        <div className="min-w-0">
-          <div className="flex items-center gap-2 flex-wrap">
-            <span className="text-xl font-black text-white tracking-tighter">{stock.symbol}</span>
-            <span className="text-[10px] text-slate-500 bg-slate-800/60 px-2 py-0.5 rounded-full shrink-0">
-              {stock.sector}
-            </span>
-          </div>
-          <div className="text-[11px] text-slate-400 mt-0.5 truncate">{stock.name}</div>
-        </div>
-        <ConvictionBadge level={stock.convictionLevel} />
+function EvidenceCard({ evidence }: { evidence: Evidence | null }) {
+  if (!evidence) {
+    return (
+      <div className="v1-card p-5 flex items-start gap-3">
+        <Info className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
+        <p className="text-xs text-slate-400">
+          Backtest evidence not yet computed on this environment. Run{' '}
+          <code className="text-[10px] bg-slate-800/60 px-1.5 py-0.5 rounded">
+            python screener_combo_finder.py --tier1 --persist
+          </code>{' '}
+          to populate it.
+        </p>
       </div>
+    );
+  }
 
-      {/* Signal pills + score */}
-      <div className="flex flex-wrap items-center gap-1.5">
-        {stock.signalTypes.map(t => <SignalPill key={t} type={t} />)}
-        <span className="ml-auto text-[10px] text-slate-500 font-bold shrink-0">
-          ★ {stock.signalScore}/10
+  const { best } = evidence;
+  const stale = daysStale(evidence.as_of);
+
+  return (
+    <div className="v1-card p-5 space-y-4">
+      <div className="flex items-start justify-between gap-3 flex-wrap">
+        <div className="flex items-start gap-2.5">
+          <ShieldCheck className="w-5 h-5 text-emerald-400 shrink-0 mt-0.5" />
+          <div>
+            <h2 className="v1-title-card">Validated Edge</h2>
+            <p className="text-xs text-slate-400 mt-1 leading-relaxed">
+              Setup: <code className="text-[10px] bg-slate-800/60 px-1.5 py-0.5 rounded text-indigo-300">
+                {best.filters.join(' + ')}
+              </code>{' '}
+              — gapped down, opened at the day's low, already among today's biggest losers.
+              Buy next session's open, exit next session's close.
+            </p>
+          </div>
+        </div>
+        <span className="text-[10px] text-slate-500 whitespace-nowrap flex items-center gap-1">
+          <Clock className="w-3 h-3" />
+          Computed {evidence.as_of}{stale > 30 ? ` (${stale}d ago — may be stale)` : ''}
         </span>
       </div>
 
-      {/* Trading levels */}
-      <div className="grid grid-cols-4 gap-2 bg-slate-900/40 rounded-xl p-3">
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3 bg-slate-900/40 rounded-xl p-4">
         <div className="text-center">
-          <div className="text-xs font-black text-white">{fmtPrice(stock.entryPrice)}</div>
-          <div className="text-[9px] text-slate-500 font-display uppercase tracking-wider mt-0.5">Entry</div>
+          <div className="text-sm font-black text-emerald-400">+{best.spread_pct.toFixed(2)}%</div>
+          <div className="text-[9px] text-slate-500 uppercase tracking-wider mt-0.5">Net spread/day</div>
         </div>
         <div className="text-center">
-          <div className="text-xs font-black text-rose-400">{fmtPrice(stock.stopLoss)}</div>
-          <div className="text-[9px] text-slate-500 font-display uppercase tracking-wider mt-0.5">Stop</div>
+          <div className="text-sm font-black text-white">{best.t_stat.toFixed(2)}</div>
+          <div className="text-[9px] text-slate-500 uppercase tracking-wider mt-0.5">t-stat</div>
         </div>
         <div className="text-center">
-          <div className="text-xs font-black text-emerald-400">{fmtPrice(stock.target)}</div>
-          <div className="text-[9px] text-slate-500 font-display uppercase tracking-wider mt-0.5">Target</div>
+          <div className="text-sm font-black text-white">{best.n_days}</div>
+          <div className="text-[9px] text-slate-500 uppercase tracking-wider mt-0.5">Days tested</div>
         </div>
         <div className="text-center">
-          <div className={cn('text-xs font-black', rrColor)}>{fmt(stock.rrRatio)}x</div>
-          <div className="text-[9px] text-slate-500 font-display uppercase tracking-wider mt-0.5">R:R</div>
+          <div className="text-sm font-black text-white">{best.n_signals}</div>
+          <div className="text-[9px] text-slate-500 uppercase tracking-wider mt-0.5">Signal-days</div>
         </div>
       </div>
 
-      {/* Score metrics */}
-      <div className="grid grid-cols-5 gap-1">
-        <MetricCell
-          label="Piotroski"
-          value={`${stock.piotroski}/9`}
-          color={stock.piotroski >= 7 ? 'text-emerald-400' : 'text-amber-400'}
-        />
-        <MetricCell
-          label="Sharpe"
-          value={fmt(stock.sharpeRatio)}
-          color={stock.sharpeRatio >= 1.5 ? 'text-emerald-400' : 'text-amber-400'}
-        />
-        <MetricCell label="Rank" value={`${fmt(stock.rankComposite)}%`} color="text-sky-400" />
-        <MetricCell label="Screeners" value={String(stock.bullishScreenerCount)} color="text-violet-400" />
-        <MetricCell
-          label="12M Ret"
-          value={`${fmt(stock.return12m)}%`}
-          color={retColor}
-        />
-      </div>
-
-      {/* One-line reason footer */}
       <div className="text-[10px] text-slate-500 border-t border-slate-800/50 pt-3 leading-relaxed">
-        {oneLineReason}
+        Net of {evidence.cost_pct_used}% round-trip cost, over {evidence.n_days_history} days of history.
+        Capacity is genuinely small — median ~₹0.5cr deployable per signal, usually one qualifying
+        stock a day. This is not a scalable "top picks" list; it's a narrow, real edge. Every other
+        score on this platform (unified/Alpha, AlphaQuant, screener consensus) has been measured
+        null-to-negative net of costs — see <code className="bg-slate-800/60 px-1 rounded">measurement.md</code>.
       </div>
     </div>
   );
 }
 
-// ── Page ───────────────────────────────────────────────────────────────────────
+function MatchCard({ m, onSelectStock }: { m: Match; onSelectStock?: (s: string) => void }) {
+  return (
+    <div className="v1-card-down p-4 cursor-pointer" onClick={() => onSelectStock?.(m.symbol)}>
+      <div className="flex justify-between items-start">
+        <div>
+          <h3 className="font-display text-lg font-bold text-white tracking-wide">{m.symbol}</h3>
+          <div className="flex items-center gap-1 font-data text-[11px] mt-1 font-bold text-rose-400">
+            <TrendingDown className="w-3 h-3" />
+            {m.change_per.toFixed(2)}%
+          </div>
+        </div>
+        <div className="text-right">
+          <div className="font-data text-lg font-bold text-slate-100">{fmtPrice(m.price)}</div>
+          <div className="font-data text-[9px] text-slate-500 mt-1 uppercase">Vol: {m.volume?.toLocaleString('en-IN')}</div>
+        </div>
+      </div>
+      <div className="text-[10px] text-slate-500 border-t border-slate-800/50 pt-3 mt-3">
+        Capitulation match — consider at tomorrow's open, per the validated setup above.
+      </div>
+    </div>
+  );
+}
 
 export function HighConvictionPage({
   onSelectStock,
 }: {
-  onSelectStock: (s: string) => void;
+  onSelectStock?: (s: string) => void;
 }) {
-  const { data, isLoading, refetch, isRefetching } = trpc.getBestComboSignals.useQuery(
-    { limit: 20 },
-    { refetchInterval: 5 * 60_000 },
-  );
+  const { data, isLoading, refetch, isRefetching } = trpc.getCapitulationSignal.useQuery(undefined, {
+    refetchInterval: 60_000,
+  });
 
-  const result = data as ComboResult | undefined;
-  const isBear  = result?.regime === 'BEAR' || result?.regime === 'UNKNOWN';
-  const isEmpty = !isLoading && result && result.stocks.length === 0 && !isBear;
+  const matches: Match[] = data?.matches ?? [];
+  const evidence: Evidence | null = data?.evidence ?? null;
 
   return (
     <div className="p-6 space-y-6">
-      {/* Header */}
       <div className="flex items-center justify-between flex-wrap gap-3">
-        <div className="flex items-center gap-3">
-          <Crosshair className="w-5 h-5 text-amber-400" />
-          <div>
-            <h1 className="v1-title-page">
-              Best Picks
-            </h1>
-            <p className="text-xs text-slate-500 mt-0.5">
-              4-gate filter · RSI Divergence + EMA Bull Stack · Piotroski ≥7 · Proven sectors
-            </p>
-          </div>
+        <div>
+          <h1 className="v1-title-page">Highest-Conviction Signal</h1>
+          <p className="text-xs text-slate-500 mt-0.5">
+            The one setup on this platform with a measured, cost-aware edge — not another score to guess between.
+          </p>
         </div>
         <div className="flex items-center gap-3">
-          {result && <RegimeBadge regime={result.regime} />}
-          <span className="text-[10px] text-slate-500">
-            {result?.stocks.length ?? 0} setups
-          </span>
+          {data?.asOf && (
+            <span className="text-[10px] text-slate-500">
+              Scan as of {new Date(data.asOf).toLocaleTimeString('en-IN')}
+            </span>
+          )}
           <button
             onClick={() => refetch()}
             disabled={isRefetching || isLoading}
@@ -224,55 +178,25 @@ export function HighConvictionPage({
         </div>
       </div>
 
-      <LegacyScoreBanner note="A separate rule-based gate (RSI divergence/EMA stack + Piotroski + Sharpe filters on signal_outcomes/quant_scores), not the unified cross-engine model -- check Alpha / Buy Recs for the canonical, regime-aware view." />
+      <EvidenceCard evidence={evidence} />
 
-      {/* Loading skeletons */}
-      {isLoading && (
+      {isLoading ? (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-          {[...Array(6)].map((_, i) => (
-            <div key={i} className="glass border border-slate-800/50 rounded-2xl p-5 h-64 animate-pulse" />
+          {[...Array(3)].map((_, i) => (
+            <div key={i} className="glass border border-slate-800/50 rounded-2xl p-5 h-32 animate-pulse" />
           ))}
         </div>
-      )}
-
-      {/* Bear regime */}
-      {!isLoading && isBear && (
-        <div className="flex flex-col items-center justify-center py-20 gap-4">
-          <AlertTriangle className="w-10 h-10 text-rose-400" />
-          <h2 className="text-lg font-black text-white uppercase tracking-tighter">
-            BEAR Regime — Gates Closed
-          </h2>
-          <p className="text-sm text-slate-500 text-center max-w-sm">
-            No new positions. All 4 gates require BULL or SIDEWAYS market regime.
-            Check back when conditions improve.
+      ) : matches.length === 0 ? (
+        <div className="v1-card p-8 text-center">
+          <p className="text-sm text-slate-400">No capitulation match this scan cycle.</p>
+          <p className="text-xs text-slate-600 mt-1.5">
+            Expected most of the time — this setup fires on roughly one stock a day on average.
+            The live scan refreshes every 15 minutes during market hours.
           </p>
         </div>
-      )}
-
-      {/* Empty (BULL/SIDEWAYS, 0 results) */}
-      {isEmpty && (
-        <div className="flex flex-col items-center justify-center py-20 gap-4">
-          <Target className="w-10 h-10 text-slate-600" />
-          <h2 className="text-lg font-black text-white uppercase tracking-tighter">
-            No Setups Right Now
-          </h2>
-          <p className="text-sm text-slate-500 text-center max-w-sm">
-            No stocks pass all 4 gates simultaneously. Check back after market close
-            once the signal scanner and quant scoring have run.
-          </p>
-        </div>
-      )}
-
-      {/* Card grid */}
-      {!isLoading && !isBear && result && result.stocks.length > 0 && (
+      ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-          {result.stocks.map(stock => (
-            <HighConvictionCard
-              key={stock.symbol}
-              stock={stock}
-              onSelectStock={onSelectStock}
-            />
-          ))}
+          {matches.map(m => <MatchCard key={m.symbol} m={m} onSelectStock={onSelectStock} />)}
         </div>
       )}
     </div>
