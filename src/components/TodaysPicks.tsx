@@ -8,11 +8,14 @@ interface TodaysPicksProps {
   onSelectStock?: (symbol: string) => void;
 }
 
+// ponytail: card = the matching v1-card-{up,down,neutral} variant, same colors these tiers
+// already used (emerald/amber/rose), so conviction stays visible while the card shape matches
+// the rest of v1.
 const CONVICTION_CONFIG = {
-  ELITE:    { label: 'ELITE',    bg: 'bg-emerald-500/15', border: 'border-emerald-500/40', text: 'text-emerald-400', dot: 'bg-emerald-400' },
-  STRONG:   { label: 'STRONG',   bg: 'bg-amber-500/15',   border: 'border-amber-500/40',   text: 'text-amber-400',   dot: 'bg-amber-400'   },
-  MODERATE: { label: 'MODERATE', bg: 'bg-slate-700/40',   border: 'border-slate-600/40',   text: 'text-slate-400',   dot: 'bg-slate-400'   },
-  WEAK:     { label: 'WEAK',     bg: 'bg-rose-500/10',    border: 'border-rose-500/30',     text: 'text-rose-400',    dot: 'bg-rose-400'    },
+  ELITE:    { label: 'ELITE',    card: 'v1-card-up',      bg: 'bg-emerald-500/15', text: 'text-emerald-400', dot: 'bg-emerald-400' },
+  STRONG:   { label: 'STRONG',   card: 'v1-card-neutral',  bg: 'bg-amber-500/15',   text: 'text-amber-400',   dot: 'bg-amber-400'   },
+  MODERATE: { label: 'MODERATE', card: 'v1-card',          bg: 'bg-slate-700/40',   text: 'text-slate-400',   dot: 'bg-slate-400'   },
+  WEAK:     { label: 'WEAK',     card: 'v1-card-down',     bg: 'bg-rose-500/10',    text: 'text-rose-400',    dot: 'bg-rose-400'    },
 } as const;
 
 function conviction(level: string | null | undefined) {
@@ -91,10 +94,7 @@ export function TodaysPicks({ onSelectStock }: TodaysPicksProps) {
               <div
                 key={pick.symbol}
                 onClick={() => onSelectStock?.(pick.symbol)}
-                className={cn(
-                  'rounded-xl border p-4 space-y-3 cursor-pointer transition-all hover:scale-[1.01]',
-                  cv.bg, cv.border
-                )}
+                className={cn(cv.card, 'p-4 space-y-3 cursor-pointer hover:scale-[1.01]')}
               >
                 {/* Header */}
                 <div className="flex items-start justify-between">
