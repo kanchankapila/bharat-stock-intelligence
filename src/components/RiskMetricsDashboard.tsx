@@ -166,7 +166,7 @@ export const RiskMetricsDashboard: React.FC<Props> = ({ focusSymbol, collapsed =
                   <div className="text-xs text-slate-500">{symbolRisk.name} · {symbolRisk.sector}</div>
                 </div>
                 {symbolRisk.risk_tier && (
-                  <span className={`px-3 py-1 rounded-full text-xs font-bold border ${
+                  <span className={`v1-badge ${
                     RISK_TIER_CONFIG[symbolRisk.risk_tier as keyof typeof RISK_TIER_CONFIG]?.bg ?? ''
                   } ${RISK_TIER_CONFIG[symbolRisk.risk_tier as keyof typeof RISK_TIER_CONFIG]?.color ?? ''}`}>
                     {symbolRisk.risk_tier} Risk
@@ -260,7 +260,7 @@ export const RiskMetricsDashboard: React.FC<Props> = ({ focusSymbol, collapsed =
               {Object.entries(distribution.tiers).map(([tier, count]) => {
                 const cfg = RISK_TIER_CONFIG[tier as keyof typeof RISK_TIER_CONFIG] ?? RISK_TIER_CONFIG.Unknown;
                 return (
-                  <span key={tier} className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full border ${cfg.bg} ${cfg.color}`}>
+                  <span key={tier} className={`v1-badge gap-1.5 ${cfg.bg} ${cfg.color}`}>
                     <span className={`w-1.5 h-1.5 rounded-full ${cfg.dot}`} />
                     {tier}: {count}
                   </span>
@@ -307,7 +307,7 @@ export const RiskMetricsDashboard: React.FC<Props> = ({ focusSymbol, collapsed =
                           <div className="text-slate-500 text-[10px]">{row.sector}</div>
                         </td>
                         <td className="py-2 px-2 text-right">
-                          <span className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full border text-[10px] ${rCfg.bg} ${rCfg.color}`}>
+                          <span className={`v1-badge text-[10px] ${rCfg.bg} ${rCfg.color}`}>
                             <span className={`w-1 h-1 rounded-full ${rCfg.dot}`} />
                             {tier}
                           </span>

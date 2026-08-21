@@ -109,7 +109,7 @@ function SignalPill({ sig }: { sig: TechSignal }) {
   const m = SIG_META[sig.type];
   if (!m) return null;
   return (
-    <span className={cn('inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md border text-[10px] font-bold', m.bg, m.color)}>
+    <span className={cn('v1-badge text-[10px]', m.bg, m.color)}>
       <span className={cn('w-1.5 h-1.5 rounded-full shrink-0', STRENGTH_DOT[sig.strength])} />
       {m.short}
     </span>
@@ -221,7 +221,7 @@ function ExpandedRow({ r, onSelectStock }: { r: SignalRow; onSelectStock: (s: st
   return (
     <tr>
       <td colSpan={11} className="px-4 pb-4 pt-0 bg-slate-900/60">
-        <div className="rounded-xl border border-slate-800/50 bg-slate-900/40 p-4 space-y-4">
+        <div className="v1-card p-4 space-y-4">
           {/* Signal details */}
           <div className="space-y-2">
             {r.signals.map((s, i) => {
@@ -265,9 +265,9 @@ function ExpandedRow({ r, onSelectStock }: { r: SignalRow; onSelectStock: (s: st
                   const changePctFormatted = typeof changePctVal === 'number' ? changePctVal.toFixed(1) : changePctVal;
                   
                   return (
-                    <div 
-                      key={idx} 
-                      className="flex-shrink-0 min-w-[80px] p-2 bg-slate-950/60 rounded-lg border border-slate-800/40 flex flex-col justify-between hover:border-slate-700 transition-colors"
+                    <div
+                      key={idx}
+                      className="v1-stat-pill flex-shrink-0 min-w-[80px] p-2 justify-between"
                     >
                       <span className="text-[8px] font-bold text-slate-500 font-display uppercase tracking-wider">{item.name}</span>
                       <span className={cn(
@@ -311,7 +311,7 @@ function ExpandedRow({ r, onSelectStock }: { r: SignalRow; onSelectStock: (s: st
               { label: 'SMA200',    value: r.above_sma200 ? '✓ Above' : '✗ Below' },
               { label: 'News Sent', value: r.news_sentiment_score != null ? `${r.news_sentiment_score >= 0 ? '+' : ''}${r.news_sentiment_score.toFixed(2)}` : '0.00' },
             ].map(({ label, value }) => (
-              <div key={label} className="bg-slate-800/50 rounded-lg p-2 text-center">
+              <div key={label} className="v1-stat-pill p-2 text-center items-center">
                 <div className="text-[9px] font-bold font-display uppercase tracking-wider text-slate-400 mb-0.5">{label}</div>
                 <div className="text-xs font-bold text-slate-200">{value ?? '—'}</div>
               </div>
@@ -325,19 +325,19 @@ function ExpandedRow({ r, onSelectStock }: { r: SignalRow; onSelectStock: (s: st
               <p className="text-sm text-slate-300 leading-relaxed">{r.ai_insight}</p>
               <div className="grid grid-cols-3 gap-2 mt-2">
                 {r.entry_zone && (
-                  <div className="bg-emerald-500/10 border border-emerald-500/20 rounded-lg p-2 text-center">
+                  <div className="v1-stat-pill v1-stat-pill-up p-2 text-center items-center">
                     <div className="text-[9px] font-bold text-emerald-500 font-display uppercase tracking-wider">Entry</div>
                     <div className="text-xs text-emerald-300 font-bold mt-0.5">{r.entry_zone}</div>
                   </div>
                 )}
                 {r.stop_loss && (
-                  <div className="bg-rose-500/10 border border-rose-500/20 rounded-lg p-2 text-center">
+                  <div className="v1-stat-pill v1-stat-pill-down p-2 text-center items-center">
                     <div className="text-[9px] font-bold text-rose-500 font-display uppercase tracking-wider">Stop Loss</div>
                     <div className="text-xs text-rose-300 font-bold mt-0.5">{r.stop_loss}</div>
                   </div>
                 )}
                 {r.targets && (
-                  <div className="bg-sky-500/10 border border-sky-500/20 rounded-lg p-2 text-center">
+                  <div className="v1-stat-pill p-2 text-center items-center bg-sky-500/10 border-sky-500/20">
                     <div className="text-[9px] font-bold text-sky-500 font-display uppercase tracking-wider">Targets</div>
                     <div className="text-xs text-sky-300 font-bold mt-0.5">{r.targets}</div>
                   </div>
@@ -381,7 +381,7 @@ function FilterPanel({ filters, onChange, onClose }: {
     <div className="glass border border-slate-800/30 rounded-2xl p-4 space-y-4 w-80 shadow-2xl">
       <div className="flex items-center justify-between">
         <span className="text-sm font-bold text-slate-200">Filters</span>
-        <button onClick={onClose} className="text-slate-400 hover:text-white"><X className="w-4 h-4" /></button>
+        <button onClick={onClose} className="v1-btn-ghost"><X className="w-4 h-4" /></button>
       </div>
 
       <div>
@@ -433,10 +433,9 @@ function FilterPanel({ filters, onChange, onClose }: {
       </div>
 
       <div className="flex gap-2">
-        <button onClick={() => { onChange(local); onClose(); }}
-          className="flex-1 bg-indigo-600 hover:bg-indigo-500 text-white text-sm font-bold py-2 rounded-xl transition-colors">Apply</button>
+        <button onClick={() => { onChange(local); onClose(); }} className="v1-btn-primary flex-1">Apply</button>
         <button onClick={() => { const d = { minScore: 1, signalTypes: [], aboveSma200: false, minVolumeRatio: 1 }; setLocal(d); onChange(d); onClose(); }}
-          className="flex-1 bg-slate-800 hover:bg-slate-700 text-slate-300 text-sm font-bold py-2 rounded-xl transition-colors">Reset</button>
+          className="v1-btn-secondary flex-1">Reset</button>
       </div>
     </div>
   );
@@ -548,7 +547,7 @@ export function DailySignals({ onSelectStock, watchlist = [], onToggleWatchlist 
         </div>
         <div className="flex items-center gap-2 shrink-0">
           {prog?.isRunning && (
-            <div className="flex items-center gap-2 text-xs text-amber-400 bg-amber-500/10 border border-amber-500/20 rounded-xl px-3 py-1.5">
+            <div className="v1-badge text-xs bg-amber-500/10 border-amber-500/20 text-amber-400">
               <Loader2 className="w-3 h-3 animate-spin" />
               Scanning…
             </div>
@@ -566,10 +565,7 @@ export function DailySignals({ onSelectStock, watchlist = [], onToggleWatchlist 
               <span className="bg-indigo-500 text-white rounded-full w-4 h-4 flex items-center justify-center text-[10px]">{activeFilterCount}</span>
             )}
           </button>
-          <button
-            onClick={() => { refetch(); refetchStatus(); }}
-            className="flex items-center gap-2 px-3 py-1.5 rounded-xl text-sm font-bold bg-slate-800 border border-slate-800/30 text-slate-400 hover:text-white transition-colors"
-          >
+          <button onClick={() => { refetch(); refetchStatus(); }} className="v1-btn-icon">
             <RefreshCw className="w-4 h-4" />
           </button>
           <button
@@ -608,12 +604,12 @@ export function DailySignals({ onSelectStock, watchlist = [], onToggleWatchlist 
       {/* Summary stats */}
       {totalToday > 0 && (
         <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
-          <div className="rounded-xl border border-slate-800/50 bg-slate-950/30 p-3">
+          <div className="v1-card p-3">
             <div className="v1-data-label">Total Setups</div>
             <div className="v1-data-value text-slate-100 tabular-nums mt-1">{totalToday}</div>
           </div>
           {Object.entries(byScore).map(([band, count]) => (
-            <div key={band} className="rounded-xl border border-slate-800/50 bg-slate-950/30 p-3">
+            <div key={band} className="v1-card p-3">
               <div className="v1-data-label">Score {band}</div>
               <div className={cn('v1-data-value tabular-nums mt-1',
                 band === '7-10' ? 'text-emerald-400' : band === '4-6' ? 'text-amber-400' : 'text-slate-400'
@@ -621,7 +617,7 @@ export function DailySignals({ onSelectStock, watchlist = [], onToggleWatchlist 
             </div>
           ))}
           {lastComputed && (
-            <div className="rounded-xl border border-slate-800/50 bg-slate-950/30 p-3 col-span-2 md:col-span-1">
+            <div className="v1-card p-3 col-span-2 md:col-span-1">
               <div className="v1-data-label">Last Computed</div>
               <div className="v1-data-value text-slate-300 mt-1">
                 {new Date(lastComputed).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })}
@@ -638,7 +634,7 @@ export function DailySignals({ onSelectStock, watchlist = [], onToggleWatchlist 
             const m = SIG_META[type];
             if (!m) return null;
             return (
-              <div key={type} className={cn('flex items-center gap-2 px-3 py-1.5 rounded-xl border text-xs font-bold', m.bg, m.color)}>
+              <div key={type} className={cn('v1-badge gap-2 text-xs', m.bg, m.color)}>
                 {m.label}
                 <span className="opacity-70">{count}</span>
               </div>
@@ -666,7 +662,7 @@ export function DailySignals({ onSelectStock, watchlist = [], onToggleWatchlist 
 
       {/* Win Rate Panel */}
       {showWinRates && (
-        <div className="rounded-2xl border border-emerald-500/20 bg-emerald-500/5 p-4 space-y-4">
+        <div className="v1-card-up p-4 space-y-4">
           <div className="flex items-center justify-between">
             <p className="v1-title-section flex items-center gap-2">
               <BarChart2 className="w-4 h-4" />
@@ -801,7 +797,7 @@ export function DailySignals({ onSelectStock, watchlist = [], onToggleWatchlist 
 
       {/* Sector Momentum Panel */}
       {showSector && (
-        <div className="rounded-2xl border border-violet-500/20 bg-violet-500/5 p-4 space-y-4">
+        <div className="v1-card p-4 space-y-4">
           <div className="flex items-center justify-between flex-wrap gap-2">
             <p className="v1-title-section flex items-center gap-2">
               <Activity className="w-4 h-4" />
@@ -821,20 +817,16 @@ export function DailySignals({ onSelectStock, watchlist = [], onToggleWatchlist 
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
               {sectorStats.slice(0, 9).map(sec => (
                 <div key={sec.sector}
-                  className={cn('rounded-xl border p-3 space-y-2',
-                    sec.hotFlag
-                      ? 'border-violet-500/40 bg-violet-500/10'
-                      : 'border-slate-800/30 bg-slate-900/40'
-                  )}
+                  className={cn('p-3 space-y-2', sec.hotFlag ? 'v1-card bg-violet-500/10' : 'v1-card-accent')}
                 >
                   {/* Sector header */}
                   <div className="flex items-center justify-between gap-2">
                     <span className="text-xs font-black text-slate-100 truncate">{sec.sector}</span>
                     <div className="flex items-center gap-1.5 shrink-0">
                       {sec.hotFlag && (
-                        <span className="text-[9px] font-black bg-violet-500 text-white px-1.5 py-0.5 rounded-full">🔥 HOT</span>
+                        <span className="v1-badge bg-violet-500 border-violet-500 text-white">🔥 HOT</span>
                       )}
-                      <span className="text-[10px] font-bold text-violet-300 bg-violet-500/20 px-2 py-0.5 rounded-full">
+                      <span className="v1-badge text-[10px] bg-violet-500/20 border-violet-500/40 text-violet-300">
                         {sec.totalSignals} setups
                       </span>
                     </div>
@@ -871,9 +863,9 @@ export function DailySignals({ onSelectStock, watchlist = [], onToggleWatchlist 
                           <span className={cn('text-[9px] font-bold', s.changePct == null ? 'text-slate-500' : s.changePct >= 0 ? 'text-emerald-400' : 'text-rose-400')}>
                             {s.changePct == null ? '—' : `${s.changePct >= 0 ? '+' : ''}${s.changePct.toFixed(1)}%`}
                           </span>
-                          <span className={cn('text-[9px] font-black px-1 py-0.5 rounded',
-                            s.score >= 7 ? 'bg-emerald-500/20 text-emerald-400' :
-                            s.score >= 4 ? 'bg-amber-500/20 text-amber-400' : 'bg-slate-700 text-slate-400'
+                          <span className={cn('v1-badge text-[9px]',
+                            s.score >= 7 ? 'bg-emerald-500/20 border-emerald-500/40 text-emerald-400' :
+                            s.score >= 4 ? 'bg-amber-500/20 border-amber-500/40 text-amber-400' : 'bg-slate-700 border-slate-600 text-slate-400'
                           )}>{s.score}</span>
                         </div>
                         {/* Signal type pills (max 2) */}
@@ -881,7 +873,7 @@ export function DailySignals({ onSelectStock, watchlist = [], onToggleWatchlist 
                           {s.signalTypes.slice(0, 2).map(t => {
                             const m = SIG_META[t as SignalType];
                             return m ? (
-                              <span key={t} className={cn('text-[8px] font-bold px-1 py-0.5 rounded border', m.bg, m.color)}>
+                              <span key={t} className={cn('v1-badge text-[8px]', m.bg, m.color)}>
                                 {m.short}
                               </span>
                             ) : null;
@@ -944,7 +936,7 @@ export function DailySignals({ onSelectStock, watchlist = [], onToggleWatchlist 
 
       {/* Results table */}
       {filtered.length > 0 && (
-        <div className="rounded-2xl border border-slate-800/50 bg-slate-950/30 overflow-x-auto">
+        <div className="v1-card overflow-x-auto">
           <table className="w-full text-sm">
             <thead className="border-b border-slate-800/50">
               <tr>
@@ -1053,11 +1045,11 @@ export function DailySignals({ onSelectStock, watchlist = [], onToggleWatchlist 
       )}
 
       {/* Legend */}
-      <div className="rounded-xl border border-slate-800/50 bg-slate-950/20 p-4">
+      <div className="v1-card p-4">
         <p className="text-xs font-bold text-slate-400 mb-3">Signal Legend</p>
         <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
           {(Object.entries(SIG_META) as [SignalType, typeof SIG_META[SignalType]][]).map(([type, m]) => (
-            <div key={type} className={cn('rounded-lg border px-3 py-2', m.bg)}>
+            <div key={type} className={cn('v1-stat-pill px-3 py-2', m.bg)}>
               <div className={cn('text-[10px] font-black font-display uppercase tracking-wider', m.color)}>{m.label}</div>
               <div className="text-[10px] text-slate-400 mt-0.5">
                 {type === 'RSI_DIVERGENCE'     && 'Price falls, RSI rises above SMA200'}

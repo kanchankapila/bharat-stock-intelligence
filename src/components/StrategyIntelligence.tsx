@@ -49,12 +49,12 @@ interface StrategyStock {
   screener_net_score?: number;
 }
 
-const CLASS_COLORS: Record<string, { bg: string; text: string; dot: string }> = {
-  'Strong Buy': { bg: 'bg-emerald-500/10', text: 'text-emerald-400', dot: 'bg-emerald-400' },
-  'Buy':        { bg: 'bg-teal-500/10',    text: 'text-teal-400',    dot: 'bg-teal-400' },
-  'Hold':       { bg: 'bg-amber-500/10',   text: 'text-amber-400',   dot: 'bg-amber-400' },
-  'Avoid':      { bg: 'bg-orange-500/10',  text: 'text-orange-400',  dot: 'bg-orange-400' },
-  'Sell':       { bg: 'bg-rose-500/10',    text: 'text-rose-400',    dot: 'bg-rose-400' },
+const CLASS_COLORS: Record<string, { bg: string; text: string; dot: string; border: string; pill: string }> = {
+  'Strong Buy': { bg: 'bg-emerald-500/10', text: 'text-emerald-400', dot: 'bg-emerald-400', border: 'border-emerald-500/30', pill: 'v1-stat-pill-up' },
+  'Buy':        { bg: 'bg-teal-500/10',    text: 'text-teal-400',    dot: 'bg-teal-400',    border: 'border-teal-500/30',    pill: 'v1-stat-pill-up' },
+  'Hold':       { bg: 'bg-amber-500/10',   text: 'text-amber-400',   dot: 'bg-amber-400',   border: 'border-amber-500/30',   pill: 'v1-stat-pill-neutral' },
+  'Avoid':      { bg: 'bg-orange-500/10',  text: 'text-orange-400',  dot: 'bg-orange-400',  border: 'border-orange-500/30',  pill: 'v1-stat-pill-down' },
+  'Sell':       { bg: 'bg-rose-500/10',    text: 'text-rose-400',    dot: 'bg-rose-400',    border: 'border-rose-500/30',    pill: 'v1-stat-pill-down' },
 };
 
 const STRATEGY_CHART_COLOR: Record<string, string> = {
@@ -91,7 +91,7 @@ function ScoreBar({ value, color = 'indigo' }: { value: number; color?: string }
 function ClassBadge({ cls }: { cls: string }) {
   const c = CLASS_COLORS[cls] ?? CLASS_COLORS['Hold'];
   return (
-    <span className={cn('inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold font-display uppercase tracking-wider', c.bg, c.text)}>
+    <span className={cn('v1-badge text-[10px] font-display uppercase tracking-wider', c.bg, c.border, c.text)}>
       <span className={cn('w-1.5 h-1.5 rounded-full', c.dot)} />
       {cls}
     </span>
@@ -155,7 +155,7 @@ function FilterPanel({ filters, onChange, onClose }: { filters: Filters; onChang
     <div className="bg-slate-900 border border-slate-700 rounded-2xl p-4 space-y-4 w-72 shadow-2xl">
       <div className="flex items-center justify-between">
         <span className="text-sm font-bold text-white">Filters</span>
-        <button onClick={onClose} className="text-slate-500 hover:text-white"><X className="w-4 h-4" /></button>
+        <button onClick={onClose} className="v1-btn-ghost"><X className="w-4 h-4" /></button>
       </div>
       <div className="grid grid-cols-2 gap-3">
         {num('minSharpe', 'Min Sharpe', '0.5', 0)}
@@ -178,8 +178,8 @@ function FilterPanel({ filters, onChange, onClose }: { filters: Filters; onChang
         <label htmlFor="sma200" className="text-sm text-slate-300">Above 200-day SMA only</label>
       </div>
       <div className="flex gap-2">
-        <button onClick={apply} className="flex-1 bg-indigo-600 hover:bg-indigo-500 text-white text-sm font-bold py-2 rounded-xl transition-colors">Apply</button>
-        <button onClick={reset} className="flex-1 bg-slate-800 hover:bg-slate-700 text-slate-300 text-sm font-bold py-2 rounded-xl transition-colors">Reset</button>
+        <button onClick={apply} className="v1-btn-primary flex-1">Apply</button>
+        <button onClick={reset} className="v1-btn-secondary flex-1">Reset</button>
       </div>
     </div>
   );
@@ -269,10 +269,7 @@ export function StrategyIntelligence({ onSelectStock }: { onSelectStock: (symbol
             <SlidersHorizontal className="w-4 h-4" />
             Filters {activeFiltersCount > 0 && <span className="bg-indigo-500 text-white rounded-full w-4 h-4 flex items-center justify-center text-[10px]">{activeFiltersCount}</span>}
           </button>
-          <button
-            onClick={() => refetch()}
-            className="flex items-center gap-2 px-3 py-1.5 rounded-xl text-sm font-bold bg-slate-800 border border-slate-700 text-slate-400 hover:text-white transition-colors"
-          >
+          <button onClick={() => refetch()} className="v1-btn-icon">
             <RefreshCw className="w-4 h-4" />
           </button>
         </div>
@@ -285,7 +282,7 @@ export function StrategyIntelligence({ onSelectStock }: { onSelectStock: (symbol
         {(['Strong Buy','Buy','Hold','Avoid','Sell'] as const).map(cls => {
           const c = CLASS_COLORS[cls];
           return (
-            <div key={cls} className={cn('rounded-xl border border-slate-800 p-3 flex flex-col gap-1', c.bg)}>
+            <div key={cls} className={cn('v1-stat-pill', c.pill)}>
               <span className="v1-data-label">{cls}</span>
               <span className={cn('v1-data-value tabular-nums', c.text)}>{byClass[cls] ?? 0}</span>
             </div>
@@ -444,10 +441,7 @@ export function StrategyIntelligence({ onSelectStock }: { onSelectStock: (symbol
       {/* Load more */}
       {sorted.length >= limit && (
         <div className="flex justify-center">
-          <button
-            onClick={() => setLimit(l => l + 50)}
-            className="px-6 py-2 rounded-xl text-sm font-bold bg-slate-800 border border-slate-700 text-slate-300 hover:text-white hover:border-slate-500 transition-colors"
-          >
+          <button onClick={() => setLimit(l => l + 50)} className="v1-btn-secondary">
             Load more ({limit} shown)
           </button>
         </div>

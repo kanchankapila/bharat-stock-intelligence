@@ -362,9 +362,9 @@ export const AlphaCockpit: React.FC = () => {
           )}
 
           {/* Refresh Button */}
-          <button 
+          <button
             onClick={() => { refetchPicks(); showToast('Recalculating score updates...', 'success'); }}
-            className="p-3 bg-slate-800 hover:bg-slate-700 border border-slate-700/50 hover:border-slate-600 rounded-xl text-slate-400 hover:text-white transition-all shadow-md active:scale-95"
+            className="v1-btn-icon"
             title="Refresh Picks"
           >
             <RefreshCw className="w-4 h-4" />
@@ -377,7 +377,7 @@ export const AlphaCockpit: React.FC = () => {
         
         {/* Left Column: Stock Selection List (5 Cols) */}
         <div className="xl:col-span-4 space-y-4">
-          <div className="bg-slate-900/30 border border-slate-800/50 rounded-2xl p-4 space-y-4 backdrop-blur-md">
+          <div className="v1-card p-4 space-y-4">
             <div className="flex justify-between items-center border-b border-slate-800/80 pb-3">
               <h2 className="text-xs font-black uppercase text-slate-300 tracking-wider flex items-center gap-2">
                 <BarChart2 className="w-4 h-4 text-indigo-400" />
@@ -461,7 +461,7 @@ export const AlphaCockpit: React.FC = () => {
                       <div className="min-w-0">
                         <div className="flex items-center gap-2">
                           <span className="font-black text-sm italic tracking-tight font-data">{p.symbol}</span>
-                          <span className={cn("px-1.5 py-0.5 rounded text-[8px] font-black uppercase border tracking-wider", style.bg)}>
+                          <span className={cn("v1-badge text-[8px] uppercase tracking-wider", style.bg)}>
                             {style.label}
                           </span>
                         </div>
@@ -514,13 +514,13 @@ export const AlphaCockpit: React.FC = () => {
           {selectedPick ? (
             <>
               {/* Profile Card & Scoring Breakdowns */}
-              <div className="bg-slate-900/30 border border-slate-800/50 rounded-2xl p-6 backdrop-blur-md space-y-6">
+              <div className="v1-card p-6 space-y-6">
                 <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center border-b border-slate-800/80 pb-4 gap-3">
                   <div>
                     <div className="flex items-center gap-3">
                       <h2 className="text-2xl font-black text-slate-100 tracking-tighter font-data uppercase">{selectedPick.symbol}</h2>
                       <span className={cn(
-                        "px-3 py-1 rounded-full text-xs font-black border font-display uppercase tracking-widest font-data",
+                        "v1-badge font-display uppercase tracking-widest font-data",
                         CLASSIFICATION_COLORS[selectedPick.classification] || 'bg-slate-800 border-slate-700 text-slate-300'
                       )}>
                         {selectedPick.classification}
@@ -548,7 +548,7 @@ export const AlphaCockpit: React.FC = () => {
                 <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
                   
                   {/* Unified Score */}
-                  <div className="bg-slate-950/40 border border-slate-850 p-3 rounded-xl flex flex-col justify-between">
+                  <div className="v1-stat-pill p-3 justify-between">
                     <span className="text-[9px] text-slate-500 font-bold font-display uppercase tracking-wider block font-data">Unified Score</span>
                     <div className="flex items-baseline justify-between mt-2">
                       <span className="text-xl font-black text-slate-200 font-data">{Math.round(selectedPick.unified_score)}</span>
@@ -560,7 +560,7 @@ export const AlphaCockpit: React.FC = () => {
                   </div>
 
                   {/* ML Ensemble Score */}
-                  <div className="bg-slate-950/40 border border-slate-850 p-3 rounded-xl flex flex-col justify-between">
+                  <div className="v1-stat-pill p-3 justify-between">
                     <span className="text-[9px] text-slate-500 font-bold font-display uppercase tracking-wider block font-data">ML Ensemble</span>
                     <div className="flex items-baseline justify-between mt-2">
                       <span className="text-xl font-black text-indigo-300 font-data">
@@ -574,7 +574,7 @@ export const AlphaCockpit: React.FC = () => {
                   </div>
 
                   {/* Deep Learning Score */}
-                  <div className="bg-slate-950/40 border border-slate-850 p-3 rounded-xl flex flex-col justify-between">
+                  <div className="v1-stat-pill p-3 justify-between">
                     <span className="text-[9px] text-slate-500 font-bold font-display uppercase tracking-wider block font-data">Deep Learning</span>
                     <div className="flex items-baseline justify-between mt-2">
                       <span className="text-xl font-black text-sky-300 font-data">
@@ -588,7 +588,7 @@ export const AlphaCockpit: React.FC = () => {
                   </div>
 
                   {/* Screener Confluence */}
-                  <div className="bg-slate-950/40 border border-slate-850 p-3 rounded-xl flex flex-col justify-between">
+                  <div className="v1-stat-pill p-3 justify-between">
                     <span className="text-[9px] text-slate-500 font-bold font-display uppercase tracking-wider block font-data">Confluence Count</span>
                     <div className="flex items-baseline justify-between mt-2">
                       <span className="text-xl font-black text-teal-300 font-data">
@@ -640,7 +640,7 @@ export const AlphaCockpit: React.FC = () => {
                   <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                     
                     {/* Entry Range */}
-                    <div className="bg-slate-950/40 border border-slate-850 p-3 rounded-xl text-center">
+                    <div className="v1-stat-pill p-3 text-center items-center">
                       <span className="text-[8px] text-slate-500 font-data font-bold font-display uppercase tracking-wider block">Recommended Entry</span>
                       <span className="text-sm font-black text-slate-100 font-data block mt-1.5">
                         {selectedPick.entry_zone_low ? `₹${selectedPick.entry_zone_low.toFixed(0)}` : '—'}
@@ -649,7 +649,7 @@ export const AlphaCockpit: React.FC = () => {
                     </div>
 
                     {/* Stop Loss */}
-                    <div className="bg-slate-950/40 border border-rose-950/30 p-3 rounded-xl text-center">
+                    <div className="v1-stat-pill v1-stat-pill-down p-3 text-center items-center">
                       <span className="text-[8px] text-rose-400 font-data font-bold font-display uppercase tracking-wider block">Downside Stop Loss</span>
                       <span className="text-sm font-black text-rose-300 font-data block mt-1.5">
                         {selectedPick.stop_loss ? `₹${selectedPick.stop_loss.toFixed(0)}` : '—'}
@@ -657,7 +657,7 @@ export const AlphaCockpit: React.FC = () => {
                     </div>
 
                     {/* Target 1 */}
-                    <div className="bg-slate-950/40 border border-emerald-950/30 p-3 rounded-xl text-center">
+                    <div className="v1-stat-pill v1-stat-pill-up p-3 text-center items-center">
                       <span className="text-[8px] text-emerald-400 font-data font-bold font-display uppercase tracking-wider block">Target 1</span>
                       <span className="text-sm font-black text-emerald-300 font-data block mt-1.5">
                         {selectedPick.target_1 ? `₹${selectedPick.target_1.toFixed(0)}` : '—'}
@@ -665,7 +665,7 @@ export const AlphaCockpit: React.FC = () => {
                     </div>
 
                     {/* Target 2 */}
-                    <div className="bg-slate-950/40 border border-emerald-950/30 p-3 rounded-xl text-center">
+                    <div className="v1-stat-pill v1-stat-pill-up p-3 text-center items-center">
                       <span className="text-[8px] text-emerald-400 font-data font-bold font-display uppercase tracking-wider block">Target 2</span>
                       <span className="text-sm font-black text-emerald-300 font-data block mt-1.5">
                         {selectedPick.target_2 ? `₹${selectedPick.target_2.toFixed(0)}` : '—'}
@@ -737,7 +737,7 @@ export const AlphaCockpit: React.FC = () => {
                               const list = JSON.parse(selectedPick.screener_names_json);
                               if (Array.isArray(list)) {
                                 return list.map((name: string, i: number) => (
-                                  <span key={i} className="text-[8px] font-data px-2 py-0.5 rounded bg-indigo-950/40 text-indigo-300 border border-indigo-900/40 uppercase font-bold">
+                                  <span key={i} className="v1-badge text-[8px] font-data bg-indigo-950/40 border-indigo-900/40 text-indigo-300 uppercase">
                                     {name}
                                   </span>
                                 ));
@@ -756,7 +756,7 @@ export const AlphaCockpit: React.FC = () => {
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
 
                 {/* Risk Checklist (ASM/GSM, Earnings Proximity, Options Skew, Pledging) */}
-                <div className="bg-slate-900/30 border border-slate-800/50 rounded-2xl p-5 backdrop-blur-md space-y-4">
+                <div className="v1-card p-5 space-y-4">
                   <h3 className="text-xs font-black uppercase text-slate-355 tracking-wider flex items-center gap-2">
                     <ShieldAlert className="w-4 h-4 text-rose-400" />
                     Regulatory & Technical Risk Gate
@@ -765,39 +765,39 @@ export const AlphaCockpit: React.FC = () => {
                   <div className="space-y-2.5 text-[11px] font-data">
                     
                     {/* ASM / GSM Surveillance Flag */}
-                    <div className="flex items-center justify-between p-2.5 bg-slate-950/40 border border-slate-850 rounded-xl">
+                    <div className="v1-stat-pill flex-row items-center justify-between p-2.5">
                       <div className="flex items-center gap-2">
                         <Shield className="w-4 h-4 text-slate-500" />
                         <span className="text-slate-400">ASM / GSM Status</span>
                       </div>
                       <span className={cn(
-                        "px-2 py-0.5 rounded text-[9px] font-bold uppercase",
-                        selectedPick.asm_flag || selectedPick.gsm_stage ? "bg-rose-500/20 text-rose-400" : "bg-emerald-500/20 text-emerald-400"
+                        "v1-badge text-[9px] uppercase",
+                        selectedPick.asm_flag || selectedPick.gsm_stage ? "bg-rose-500/20 border-rose-500/40 text-rose-400" : "bg-emerald-500/20 border-emerald-500/40 text-emerald-400"
                       )}>
                         {selectedPick.asm_flag ? 'ASM Active' : selectedPick.gsm_stage ? `GSM Stage ${selectedPick.gsm_stage}` : 'Clean'}
                       </span>
                     </div>
 
                     {/* Earnings Proximity */}
-                    <div className="flex items-center justify-between p-2.5 bg-slate-950/40 border border-slate-850 rounded-xl">
+                    <div className="v1-stat-pill flex-row items-center justify-between p-2.5">
                       <div className="flex items-center gap-2">
                         <Calendar className="w-4 h-4 text-slate-500" />
                         <span className="text-slate-400">Earnings Proximity</span>
                       </div>
                       <span className={cn(
-                        "px-2 py-0.5 rounded text-[9px] font-bold",
+                        "v1-badge text-[9px]",
                         selectedPick.days_to_next_results != null && selectedPick.days_to_next_results <= 5
-                          ? "bg-rose-500/20 text-rose-400" 
-                          : "text-slate-300"
+                          ? "bg-rose-500/20 border-rose-500/40 text-rose-400"
+                          : "bg-slate-800/60 border-slate-700/40 text-slate-300"
                       )}>
-                        {selectedPick.days_to_next_results != null 
-                          ? `${selectedPick.days_to_next_results} Days Left` 
+                        {selectedPick.days_to_next_results != null
+                          ? `${selectedPick.days_to_next_results} Days Left`
                           : 'No Event Set'}
                       </span>
                     </div>
 
                     {/* Options Implied Volatility Rank */}
-                    <div className="flex items-center justify-between p-2.5 bg-slate-950/40 border border-slate-850 rounded-xl">
+                    <div className="v1-stat-pill flex-row items-center justify-between p-2.5">
                       <div className="flex items-center gap-2">
                         <Activity className="w-4 h-4 text-slate-500" />
                         <span className="text-slate-400">Options IV Rank / Skew</span>
@@ -809,7 +809,7 @@ export const AlphaCockpit: React.FC = () => {
                     </div>
 
                     {/* Promoter net transaction */}
-                    <div className="flex items-center justify-between p-2.5 bg-slate-950/40 border border-slate-850 rounded-xl">
+                    <div className="v1-stat-pill flex-row items-center justify-between p-2.5">
                       <div className="flex items-center gap-2">
                         <Users className="w-4 h-4 text-slate-500" />
                         <span className="text-slate-400">Promoter Trades (90d)</span>
@@ -827,7 +827,7 @@ export const AlphaCockpit: React.FC = () => {
 
                     {/* Calibrated Win Rate (Calibration tab) */}
                     {matchedCalibration && (
-                      <div className="flex items-center justify-between p-2.5 bg-slate-950/40 border border-indigo-950/30 rounded-xl">
+                      <div className="v1-stat-pill flex-row items-center justify-between p-2.5">
                         <div className="flex items-center gap-2">
                           <CheckCircle2 className="w-4 h-4 text-indigo-400" />
                           <span className="text-slate-400">Historical Win Rate</span>
@@ -841,7 +841,7 @@ export const AlphaCockpit: React.FC = () => {
                 </div>
 
                 {/* Capital Allocation & Simulator (Calculator & Logger) */}
-                <div className="bg-slate-900/30 border border-slate-800/50 rounded-2xl p-5 backdrop-blur-md space-y-4">
+                <div className="v1-card p-5 space-y-4">
                   <h3 className="text-xs font-black uppercase text-slate-350 tracking-wider flex items-center gap-2">
                     <Scale className="w-4 h-4 text-indigo-400" />
                     Allocation Calculator & Decision Log
@@ -949,7 +949,7 @@ export const AlphaCockpit: React.FC = () => {
                     <button
                       onClick={() => handleLogExecution('SKIP')}
                       disabled={logActionMutation.isPending}
-                      className="flex-1 py-2.5 bg-slate-800 hover:bg-slate-700 border border-slate-700 hover:border-slate-600 text-slate-300 text-xs font-black rounded-xl transition-all shadow-lg text-center cursor-pointer"
+                      className="v1-btn-secondary flex-1 py-2.5 text-xs font-black"
                     >
                       LOG SKIP SETUP
                     </button>
@@ -958,7 +958,7 @@ export const AlphaCockpit: React.FC = () => {
               </div>
             </>
           ) : (
-            <div className="bg-slate-900/30 border border-slate-800/50 rounded-2xl p-20 text-center backdrop-blur-md">
+            <div className="v1-card p-20 text-center">
               <Zap className="w-12 h-12 text-slate-500/30 mx-auto mb-4 animate-pulse" />
               <p className="text-slate-400 font-bold uppercase">Select an active stock setup from the ranking picks list</p>
             </div>

@@ -52,11 +52,11 @@ const TILT = {
 const tiltOf = (t?: string | null) => TILT[(t as keyof typeof TILT)] ?? TILT.NEUTRAL;
 
 const CLS = {
-  'Strong Buy': 'text-emerald-300 bg-emerald-500/15 ring-emerald-400/30',
-  'Buy':        'text-teal-300 bg-teal-500/15 ring-teal-400/30',
-  'Hold':       'text-slate-300 bg-slate-500/15 ring-slate-400/20',
-  'Sell':       'text-rose-300 bg-rose-500/15 ring-rose-400/30',
-  'Strong Sell':'text-rose-200 bg-rose-600/20 ring-rose-400/40',
+  'Strong Buy': 'text-emerald-300 bg-emerald-500/15 border-emerald-400/30',
+  'Buy':        'text-teal-300 bg-teal-500/15 border-teal-400/30',
+  'Hold':       'text-slate-300 bg-slate-500/15 border-slate-400/20',
+  'Sell':       'text-rose-300 bg-rose-500/15 border-rose-400/30',
+  'Strong Sell':'text-rose-200 bg-rose-600/20 border-rose-400/40',
 } as const;
 
 const n2 = (x: number | null | undefined) => (x == null ? '—' : Number(x).toFixed(2));
@@ -194,8 +194,7 @@ const IntradayPage: React.FC<{ onSelectStock: (symbol: string) => void }> = ({ o
         const gate = gateQ.data as EmissionGateStatus | null | undefined;
         if (!gate) return null;
         const side = (label: string, s: EmissionGateSide) => (
-          <div className={cn('rounded-xl ring-1 p-3 flex items-center justify-between gap-3',
-            s.open ? 'ring-emerald-400/25 bg-emerald-500/[0.06]' : 'ring-amber-400/25 bg-amber-500/[0.06]')}>
+          <div className={cn('v1-stat-pill flex-row items-center justify-between p-3', s.open ? 'v1-stat-pill-up' : 'v1-stat-pill-neutral')}>
             <div className="min-w-0">
               <div className="v1-data-label flex items-center gap-1.5">
                 {label} Gate
@@ -340,7 +339,7 @@ const IntradayPage: React.FC<{ onSelectStock: (symbol: string) => void }> = ({ o
                       </div>
                     </td>
                     <td className="px-2 py-3">
-                      <span className={cn('inline-flex px-2 py-1 rounded-md text-[10px] font-black font-display uppercase tracking-wide ring-1', clsStyle)}>
+                      <span className={cn('v1-badge text-[10px] font-display uppercase tracking-wide', clsStyle)}>
                         {r.classification ?? 'Hold'}
                       </span>
                     </td>
