@@ -42,17 +42,20 @@ interface ConfluenceSignal {
 
 // ─── Conviction Badge ────────────────────────────────────────────────────────
 
+// ponytail: aligned to the same ELITE=emerald/STRONG=amber/MODERATE=default/WEAK=slate mapping
+// TodaysPicks.tsx/CommandCenterDashboard.tsx use -- this file previously had ELITE=amber,
+// STRONG=emerald (the opposite), a real cross-page color-meaning inconsistency.
 const CONVICTION_CONFIG = {
-  ELITE:    { color: 'from-amber-500 to-orange-500',  text: 'text-amber-400',  border: 'border-amber-500/40',  bg: 'bg-amber-500/10'  },
-  STRONG:   { color: 'from-emerald-500 to-emerald-500', text: 'text-emerald-400', border: 'border-emerald-500/40', bg: 'bg-emerald-500/10' },
-  MODERATE: { color: 'from-indigo-500 to-indigo-500',   text: 'text-indigo-400',   border: 'border-indigo-500/40',   bg: 'bg-indigo-500/10'   },
-  WEAK:     { color: 'from-slate-500 to-slate-600',   text: 'text-slate-400',  border: 'border-slate-600',     bg: 'bg-slate-800'     },
+  ELITE:    { badge: 'v1-badge v1-badge-s' },
+  STRONG:   { badge: 'v1-badge v1-badge-b' },
+  MODERATE: { badge: 'v1-badge bg-indigo-500/15 border-indigo-500/40 text-indigo-300' },
+  WEAK:     { badge: 'v1-badge v1-badge-c' },
 };
 
 function ConvictionBadge({ level }: { level: string }) {
   const cfg = CONVICTION_CONFIG[level as keyof typeof CONVICTION_CONFIG] ?? CONVICTION_CONFIG.WEAK;
   return (
-    <span className={cn('px-2 py-0.5 rounded text-[10px] font-bold tracking-widest border', cfg.bg, cfg.text, cfg.border)}>
+    <span className={cn('text-[10px] tracking-widest', cfg.badge)}>
       {level}
     </span>
   );
