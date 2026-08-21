@@ -98,7 +98,7 @@ export function MoneyFlowPage() {
       <V4QuickNav />
       <div className="flex items-center justify-between flex-wrap gap-3">
         <div>
-          <h1 className="text-xl font-bold flex items-center gap-2">
+          <h1 className="v1-title-page flex items-center gap-2">
             <Users size={20} className="text-sky-400" />
             Money Flow — FII / DII / MF
           </h1>

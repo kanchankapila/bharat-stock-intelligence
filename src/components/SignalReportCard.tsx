@@ -67,7 +67,7 @@ export function SignalReportCard() {
   return (
     <div className="p-6 space-y-8">
       <div>
-        <h1 className="text-3xl font-semibold text-white">Signal Intelligence Engine</h1>
+        <h1 className="v1-title-page">Signal Intelligence Engine</h1>
         <p className="mt-2 text-sm text-slate-400">Overview of current engine performance, confidence, and source signal health.</p>
       </div>
 

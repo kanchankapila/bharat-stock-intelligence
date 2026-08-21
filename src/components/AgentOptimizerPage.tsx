@@ -23,7 +23,7 @@ export function AgentOptimizerPage() {
     <div className="p-6 space-y-6 max-w-5xl mx-auto">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-white flex items-center gap-2">
+          <h1 className="v1-title-page flex items-center gap-2">
             <Settings className="w-6 h-6 text-teal-400" /> Optimizer Agent
           </h1>
           {latest && <p className="text-sm text-slate-400 mt-1">Last run: {latest.run_date} · Trigger: {latest.trigger}</p>}

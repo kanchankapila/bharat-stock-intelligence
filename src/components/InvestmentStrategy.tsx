@@ -74,7 +74,7 @@ export function InvestmentStrategy({ onSelectStock }: { onSelectStock: (symbol: 
       {/* Header */}
       <div className="flex flex-col md:flex-row md:items-end justify-between gap-4">
         <div>
-          <h2 className="text-3xl font-black text-white tracking-tight flex items-center gap-3">
+          <h2 className="v1-title-page flex items-center gap-3">
             <Target className="w-8 h-8 text-indigo-400" />
             Strategy Builder Hub
           </h2>

@@ -276,7 +276,7 @@ export function ScreenerIntelligencePage() {
         {/* Header */}
         <div className="flex items-center justify-between px-5 py-3 border-b border-slate-800/50 flex-shrink-0">
           <div>
-            <h1 className="text-base font-semibold text-white flex items-center gap-2">
+            <h1 className="v1-title-page flex items-center gap-2">
               <BarChart2 className="w-4 h-4 text-indigo-400" />
               Screener Intelligence
             </h1>

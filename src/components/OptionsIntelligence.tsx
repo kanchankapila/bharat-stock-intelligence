@@ -44,7 +44,7 @@ export default function OptionsIntelligence() {
     <div className="space-y-6">
       <div className="flex items-start justify-between">
         <div>
-          <h2 className="text-2xl font-bold text-white font-display">
+          <h2 className="v1-title-page">
             Options Intelligence
           </h2>
           <p className="text-slate-400 text-sm mt-1">Live Put-Call Ratios for Nifty 50 constituents.</p>

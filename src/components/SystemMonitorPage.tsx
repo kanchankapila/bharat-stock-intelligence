@@ -237,7 +237,7 @@ export default function SystemMonitorPage() {
             <Zap className="w-5 h-5 text-indigo-400" />
           </div>
           <div>
-            <h1 className="text-lg font-bold text-white">System Monitor</h1>
+            <h1 className="v1-title-page">System Monitor</h1>
             <p className="text-xs text-slate-400">Signal generation pipeline — script status & manual controls</p>
           </div>
         </div>

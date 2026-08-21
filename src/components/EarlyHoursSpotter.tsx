@@ -89,7 +89,7 @@ export default function EarlyHoursSpotter({ onSelectStock }: EarlyHoursSpotterPr
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 v1-card p-6 relative overflow-hidden">
         <div className="absolute inset-0 bg-gradient-to-r from-amber-500/5 to-transparent pointer-events-none" />
         <div className="space-y-1 relative">
-          <h1 className="text-3xl font-black text-white tracking-tighter uppercase italic flex items-center gap-3">
+          <h1 className="v1-title-page flex items-center gap-3">
             <Zap className="w-8 h-8 text-amber-500 fill-amber-500/20 animate-pulse" />
             Early Hours Spotter
           </h1>

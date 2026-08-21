@@ -243,7 +243,7 @@ const NSEStockDiscovery: React.FC<{
           <div className="flex-1">
             <div className="flex items-center gap-2 mb-2">
               <Briefcase className="w-6 h-6 text-indigo-400" />
-              <h2 className="text-2xl font-bold text-slate-100">NSE Stock Discovery</h2>
+              <h2 className="v1-title-page">NSE Stock Discovery</h2>
             </div>
             <p className="text-sm text-indigo-200">
               Browse and search all NSE listed stocks with sector and industry filtering

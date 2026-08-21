@@ -29,7 +29,7 @@ export function AgentDataScientistPage() {
     <div className="p-6 space-y-6 max-w-5xl mx-auto">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-white flex items-center gap-2">
+          <h1 className="v1-title-page flex items-center gap-2">
             <Database className="w-6 h-6 text-indigo-400" /> Data Scientist Agent
           </h1>
           {latest && (

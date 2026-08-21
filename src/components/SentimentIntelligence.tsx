@@ -471,7 +471,7 @@ export function SentimentIntelligence({ onSelectStock }: { onSelectStock: (symbo
       {/* Header */}
       <div className="flex flex-col md:flex-row md:items-start md:justify-between gap-3">
         <div>
-          <h2 className="text-2xl font-black text-white tracking-tight flex items-center gap-2">
+          <h2 className="v1-title-page flex items-center gap-2">
             <Newspaper className="w-6 h-6 text-indigo-400" />
             Market Sentiment Intelligence
           </h2>

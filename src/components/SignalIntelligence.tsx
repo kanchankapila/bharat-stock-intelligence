@@ -294,7 +294,7 @@ export function SignalIntelligence() {
       {/* ── Header ──────────────────────────────────────────────────────────── */}
       <div className="flex items-center justify-between flex-wrap gap-3">
         <div>
-          <h1 className="text-xl font-bold text-white flex items-center gap-2">
+          <h1 className="v1-title-page flex items-center gap-2">
             <Zap className="w-5 h-5 text-amber-400" />
             Signal Intelligence Engine
           </h1>

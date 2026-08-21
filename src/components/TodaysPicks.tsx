@@ -55,7 +55,7 @@ export function TodaysPicks({ onSelectStock }: TodaysPicksProps) {
       <LegacyScoreBanner note="Computes its own ad-hoc blend (0.4x signal score + 0.4x win probability + 0.2x confluence), unrelated to unified_recommendations -- despite this page's name, it does not read the canonical unified_score. Check Alpha / Buy Recs for the canonical, regime-aware view." />
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-lg font-semibold text-white flex items-center gap-2">
+          <h1 className="v1-title-page flex items-center gap-2">
             <Zap className="w-5 h-5 text-amber-400" />
             Today's Picks
           </h1>

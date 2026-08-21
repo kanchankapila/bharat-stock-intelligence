@@ -611,7 +611,7 @@ export default function HedgeFundResearch({ onAddWatchlist }: HedgeFundResearchP
             <FlaskConical className="w-4 h-4 text-violet-400" />
           </div>
           <div>
-            <h1 className="text-sm font-black text-white font-display uppercase tracking-widest">Hedge Fund Research</h1>
+            <h1 className="v1-title-page">Hedge Fund Research</h1>
             <p className="text-[10px] text-slate-400 font-bold uppercase italic">AI-Driven Daily Intelligence</p>
           </div>
         </div>

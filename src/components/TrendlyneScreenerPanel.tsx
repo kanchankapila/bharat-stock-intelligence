@@ -156,7 +156,7 @@ const TrendlyneScreenerPanel: React.FC<TrendlyneScreenerPanelProps> = ({ onSelec
                 <BarChart3 className="w-6 h-6 text-amber-400" />
               </div>
               <div>
-                <h2 className="text-2xl font-black text-white tracking-tight uppercase italic">Screener Intelligence</h2>
+                <h2 className="v1-title-page tracking-tight uppercase italic">Screener Intelligence</h2>
                 <p className="text-[10px] font-bold text-slate-400 font-display uppercase tracking-widest mt-0.5 flex items-center gap-2">
                   <span className="bg-indigo-500/20 text-indigo-400 px-1.5 py-0.5 rounded text-[9.5px] border border-indigo-500/20">FinBERT AI POWERED</span>
                   Advanced Multi-Factor Market Scanners

@@ -45,7 +45,7 @@ export default function ExportPortfolioView() {
     <div className="p-6 space-y-4">
       <div className="flex items-center justify-between">
         <div>
-          <h2 className="text-lg font-bold text-white">Export Portfolio</h2>
+          <h2 className="v1-title-page">Export Portfolio</h2>
           <p className="text-xs text-slate-400">Generate portfolio weights and optionally run a backtest</p>
         </div>
         <div className="flex items-center gap-2">

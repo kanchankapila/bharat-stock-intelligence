@@ -250,7 +250,7 @@ export function StrategyIntelligence({ onSelectStock }: { onSelectStock: (symbol
       {/* Header */}
       <div className="flex flex-col md:flex-row md:items-start md:justify-between gap-4">
         <div>
-          <h2 className="text-2xl font-black text-white tracking-tight flex items-center gap-2">
+          <h2 className="v1-title-page flex items-center gap-2">
             <Target className="w-6 h-6 text-indigo-400" />
             Strategy Intelligence
           </h2>

@@ -100,7 +100,7 @@ export const EODMarketScreener: React.FC<Props> = ({ onSelectStock }) => {
       {/* Header */}
       <div className="flex items-center justify-between mb-6 flex-shrink-0">
         <div>
-          <h1 className="text-2xl font-bold font-display flex items-center gap-3">
+          <h1 className="v1-title-page flex items-center gap-3">
             <Activity className="w-6 h-6 text-violet-400" />
             EOD Market Screener
           </h1>

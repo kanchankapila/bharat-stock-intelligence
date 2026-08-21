@@ -201,7 +201,7 @@ export function HighConvictionPage({
         <div className="flex items-center gap-3">
           <Crosshair className="w-5 h-5 text-amber-400" />
           <div>
-            <h1 className="text-xl font-black text-white italic uppercase tracking-tighter">
+            <h1 className="v1-title-page">
               Best Picks
             </h1>
             <p className="text-xs text-slate-500 mt-0.5">

@@ -160,7 +160,7 @@ const PremiumScreenersPage: React.FC<PremiumScreenersPageProps> = ({ onSelectSto
             <Star className="w-5 h-5 text-amber-400" />
           </div>
           <div>
-            <h1 className="text-xl md:text-2xl font-black text-white font-display uppercase tracking-wide">Premium Screeners</h1>
+            <h1 className="v1-title-page">Premium Screeners</h1>
             <p className="text-xs text-slate-300 mt-1">Premium Trendlyne screeners with stock-level intelligence cards.</p>
           </div>
         </div>

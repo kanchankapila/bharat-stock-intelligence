@@ -172,7 +172,7 @@ const TopRatedStocks: React.FC<{
             <div className="w-10 h-10 bg-indigo-500/10 rounded-xl flex items-center justify-center border border-indigo-500/20">
               <Trophy className="w-6 h-6 text-indigo-500" />
             </div>
-            <h1 className="text-4xl font-black text-white italic tracking-tighter uppercase">
+            <h1 className="v1-title-page italic tracking-tighter uppercase">
               AlphaQuant <span className="text-indigo-500">Intelligence</span>
             </h1>
           </div>

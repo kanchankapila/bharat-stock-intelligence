@@ -21,7 +21,7 @@ export default function PortfolioAnalytics() {
   return (
     <div className="space-y-6">
       <div>
-        <h2 className="text-2xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-emerald-400 to-indigo-500">
+        <h2 className="v1-title-page">
           Portfolio Analytics
         </h2>
         <p className="text-slate-400 text-sm mt-1">Calculate risk metrics and correlation matrices for a custom portfolio.</p>

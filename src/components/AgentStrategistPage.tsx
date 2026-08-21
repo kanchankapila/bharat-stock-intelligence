@@ -27,7 +27,7 @@ export function AgentStrategistPage() {
     <div className="p-6 space-y-6 max-w-5xl mx-auto">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-white flex items-center gap-2">
+          <h1 className="v1-title-page flex items-center gap-2">
             <Target className="w-6 h-6 text-purple-400" /> Strategist Agent
           </h1>
           {data?.runDate && <p className="text-sm text-slate-400 mt-1">Run date: {data.runDate}</p>}

@@ -536,7 +536,7 @@ export function DailySignals({ onSelectStock, watchlist = [], onToggleWatchlist 
       {/* Header */}
       <div className="flex flex-col md:flex-row md:items-start md:justify-between gap-3">
         <div>
-          <h2 className="text-2xl font-black text-slate-100 tracking-tight flex items-center gap-2">
+          <h2 className="v1-title-page tracking-tight flex items-center gap-2">
             <Zap className="w-6 h-6 text-amber-400" />
             Daily Technical Signals
           </h2>

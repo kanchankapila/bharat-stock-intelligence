@@ -399,7 +399,7 @@ const FnOIntelligenceCenter: React.FC<FnOScannerProps> = ({ onSelectStock }) => 
       {/* Header */}
       <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-6">
         <div>
-          <h1 className="text-3xl font-black text-white italic uppercase tracking-tighter">F&O Intelligence Center</h1>
+          <h1 className="v1-title-page">F&O Intelligence Center</h1>
           <p className="text-[10px] font-black text-slate-400 font-display uppercase tracking-widest mt-1 italic">Real-time derivative analytics — {scannerData?.expiry ? `Expiry: ${scannerData.expiry}` : 'Live'}</p>
         </div>
 

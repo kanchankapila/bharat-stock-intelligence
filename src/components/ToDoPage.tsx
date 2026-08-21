@@ -80,7 +80,7 @@ export const ToDoPage: React.FC = () => {
       {/* Header */}
       <div className="flex justify-between items-end">
         <div>
-          <h1 className="text-4xl font-black text-white italic tracking-tighter uppercase flex items-center gap-3">
+          <h1 className="v1-title-page italic tracking-tighter uppercase flex items-center gap-3">
             <Lightbulb className="w-8 h-8 text-amber-500 fill-amber-500/20" />
             Implementation Ideas
           </h1>

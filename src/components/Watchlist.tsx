@@ -104,7 +104,7 @@ export const Watchlist: React.FC<WatchlistProps> = ({
     <div ref={ref} className="p-4 space-y-4">
       <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
         <div>
-          <h2 className="text-xl font-bold text-slate-100 tracking-tight flex items-center gap-2">
+          <h2 className="v1-title-page tracking-tight flex items-center gap-2">
             <WatchlistIcon className="w-5 h-5 text-indigo-400" />
             My Watchlist
           </h2>

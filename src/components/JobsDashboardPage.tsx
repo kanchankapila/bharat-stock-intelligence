@@ -295,7 +295,7 @@ export default function JobsDashboardPage() {
             <div className="p-2 bg-indigo-500/10 rounded-lg text-indigo-400 glow-accent">
               <Cpu className="w-5 h-5" />
             </div>
-            <h1 className="text-2xl font-black tracking-wider uppercase bg-gradient-to-r from-slate-100 via-indigo-200 to-indigo-400 bg-clip-text text-transparent" style={{ fontFamily: "'Rajdhani', sans-serif" }}>
+            <h1 className="v1-title-page">
               Background Jobs & Crons Console
             </h1>
           </div>

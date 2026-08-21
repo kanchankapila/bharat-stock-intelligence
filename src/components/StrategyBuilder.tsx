@@ -21,7 +21,7 @@ export default function StrategyBuilder() {
   return (
     <div className="space-y-6">
       <div>
-        <h2 className="text-2xl font-bold text-white font-display">
+        <h2 className="v1-title-page">
           Visual Strategy Builder
         </h2>
         <p className="text-slate-400 text-sm mt-1">Configure ML optimization cycles to fine-tune AI scoring weights dynamically.</p>

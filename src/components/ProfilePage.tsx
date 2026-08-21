@@ -720,7 +720,7 @@ const onDrop = useCallback((e: React.DragEvent) => { e.preventDefault(); setDrag
       <div className="flex items-center gap-3">
         <div className="p-2 bg-indigo-900/40 rounded-lg"><BarChart2 className="w-5 h-5 text-indigo-400" /></div>
         <div>
-          <h1 className="text-lg font-bold text-white">Trading Profile</h1>
+          <h1 className="v1-title-page">Trading Profile</h1>
           <p className="text-xs text-slate-400">Upload Kotak CSVs — data saved locally, multi-client supported</p>
         </div>
       </div>

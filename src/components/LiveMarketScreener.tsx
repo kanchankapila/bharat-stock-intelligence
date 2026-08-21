@@ -135,7 +135,7 @@ export const LiveMarketScreener: React.FC<Props> = ({ onSelectStock }) => {
       {/* Header & Tabs */}
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-6 flex-shrink-0">
         <div>
-          <h1 className="text-2xl font-bold font-display flex items-center gap-3">
+          <h1 className="v1-title-page flex items-center gap-3">
             <Activity className="w-6 h-6 text-indigo-400 animate-pulse" />
             Live Market Screener
           </h1>

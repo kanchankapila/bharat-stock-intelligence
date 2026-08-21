@@ -233,7 +233,7 @@ export const SmartMoneyPage: React.FC<SmartMoneyPageProps> = ({ onSelectStock })
     <div className="p-4 md:p-6 space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-black text-white">Smart Money</h1>
+          <h1 className="v1-title-page">Smart Money</h1>
           <p className="text-sm text-slate-400 mt-0.5">Institutional deals, insider activity, and block trades</p>
         </div>
         <button

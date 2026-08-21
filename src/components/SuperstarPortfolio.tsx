@@ -607,7 +607,7 @@ const SuperstarPortfolio: React.FC = () => {
             <div className="w-7 h-7 rounded-lg bg-gradient-to-br from-indigo-500 to-violet-600 flex items-center justify-center">
               <Users className="w-3.5 h-3.5 text-white" />
             </div>
-            <h1 className="text-2xl font-black text-white tracking-tight">Superstar Portfolio</h1>
+            <h1 className="v1-title-page">Superstar Portfolio</h1>
           </div>
           <p className="text-slate-400 text-xs font-medium">
             Track India's legendary investors · Powered by TradeBrains · {quarterLabel(quarter)}
