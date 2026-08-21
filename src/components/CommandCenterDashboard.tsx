@@ -13,12 +13,15 @@ import { V4QuickNav } from '../v4/components/V4QuickNav';
 type ConvictionFilter = 'ALL' | 'S_ELITE' | 'A_HIGH' | 'B_MEDIUM' | 'C_LOW' | 'D_MARGINAL';
 type HorizonFilter    = 'ALL' | 'intraday' | 'swing' | 'long_term';
 
-const CONVICTION_STYLE: Record<string, { bg: string; border: string; text: string; dot: string; label: string }> = {
-  S_ELITE:    { bg: 'bg-emerald-500/15', border: 'border-emerald-500/40', text: 'text-emerald-400', dot: 'bg-emerald-400', label: 'S — Elite'    },
-  A_HIGH:     { bg: 'bg-sky-500/15',     border: 'border-sky-500/40',     text: 'text-sky-400',     dot: 'bg-sky-400',     label: 'A — High'     },
-  B_MEDIUM:   { bg: 'bg-amber-500/15',   border: 'border-amber-500/40',   text: 'text-amber-400',   dot: 'bg-amber-400',   label: 'B — Medium'   },
-  C_LOW:      { bg: 'bg-slate-700/40',   border: 'border-slate-600/40',   text: 'text-slate-400',   dot: 'bg-slate-400',   label: 'C — Low'      },
-  D_MARGINAL: { bg: 'bg-zinc-800/60',    border: 'border-zinc-700/40',    text: 'text-zinc-500',    dot: 'bg-zinc-500',    label: 'D — Marginal' },
+// ponytail: card = the matching v1-card-{up,down,neutral,accent} variant, so pick cards share
+// the rest of v1's glass+colored-top-edge shape. bg/border stay for the small tier badge chip,
+// which still wants its own solid tint (v1-card's background is fixed, can't be re-tinted).
+const CONVICTION_STYLE: Record<string, { bg: string; border: string; text: string; dot: string; label: string; card: string }> = {
+  S_ELITE:    { bg: 'bg-emerald-500/15', border: 'border-emerald-500/40', text: 'text-emerald-400', dot: 'bg-emerald-400', label: 'S — Elite',    card: 'v1-card-up' },
+  A_HIGH:     { bg: 'bg-sky-500/15',     border: 'border-sky-500/40',     text: 'text-sky-400',     dot: 'bg-sky-400',     label: 'A — High',     card: 'v1-card' },
+  B_MEDIUM:   { bg: 'bg-amber-500/15',   border: 'border-amber-500/40',   text: 'text-amber-400',   dot: 'bg-amber-400',   label: 'B — Medium',   card: 'v1-card-neutral' },
+  C_LOW:      { bg: 'bg-slate-700/40',   border: 'border-slate-600/40',   text: 'text-slate-400',   dot: 'bg-slate-400',   label: 'C — Low',      card: 'v1-card-accent' },
+  D_MARGINAL: { bg: 'bg-zinc-800/60',    border: 'border-zinc-700/40',    text: 'text-zinc-500',    dot: 'bg-zinc-500',    label: 'D — Marginal', card: 'v1-card-accent' },
 };
 
 const REGIME_STYLE: Record<string, { color: string; icon: string; bg: string }> = {
@@ -87,7 +90,7 @@ function EodPickCard({ pick, onSelect }: { pick: any; onSelect: (sym: string) =>
   return (
     <motion.div
       layout
-      className={cn('rounded-xl border p-4 cursor-pointer hover:brightness-110 transition-all', style.bg, style.border)}
+      className={cn(style.card, 'p-4 cursor-pointer hover:brightness-110')}
       onClick={() => onSelect(pick.symbol)}
     >
       <div className="flex items-start justify-between gap-3 mb-3">
