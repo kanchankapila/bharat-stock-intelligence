@@ -181,7 +181,7 @@ describe('JOB_REGISTRY.graceMinutes consistency', () => {
     'ml-ensemble-score', 'drift-detector', 'reward-engine', 'rl-agent-update',
     'signal-type-stats', 'news-symbol-link',
   ];
-  const mlWeeklyRetrainSubsteps = ['ml-ensemble-train', 'strategy-optimizer'];
+  const mlWeeklyRetrainSubsteps = ['ml-ensemble-train', 'strategy-optimizer', 'exit-policy-train', 'cs-ranker-train', 'backtest-optimizer'];
   const eventDrivenIds = ['ai-signals', 'dl-retrain-emergency'];
 
   it('driving-job list covers every scheduled JOB_REGISTRY entry not already special-cased', () => {
