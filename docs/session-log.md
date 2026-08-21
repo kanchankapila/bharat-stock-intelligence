@@ -5116,3 +5116,117 @@ bug found, a genuine tuning tradeoff left for the user's call, not changed unpro
 Magic MCP never connected this session -- confirmed twice via `ToolSearch`, and the API key saved
 in `~/.claude.json` is dead (`Old Magic keys were reset`, confirmed by running the package
 directly) -- needs a real new key from the user, not fixable from inside the session.
+
+## 2026-08-20/21 — v1 promoted back to default with real nav/content parity, v7/v8 fully deleted, palette swept across every v1 page
+
+User asked to bring every v2-v6 feature into v1, make v1's design consistent, and make v1 the
+default. First pass was nav-level only: a full v1-vs-v2/v3/v4/v5/v6 route inventory (spawned as
+a background Explore agent) found v1's own `AppShell.tsx` nav already linked 45 of ~49 items
+every other shell had -- the real gap was just 9 components (2 genuinely v6-native --
+`ScreenerBrowserPage`, `PortfolioTrackerPage` -- plus 7 retrofit from v5: `PreMarketBriefing`,
+`OptionsDeskPage`, `InstitutionalFlowDeskPage`, `EarningsPulseDeskPage`, `RiskDeskPage`,
+`SignalReviewPage`, `V2Settings`) and 3 already-routed-but-nav-unlinked v1 pages (`IntradayPage`,
+`LiveMarketScreener`, `EODMarketScreener`). Wired all into `AppShell.tsx`'s `NAV_GROUPS` +
+`V1Routes.tsx`, reusing `v6-theme.css`'s existing `.v6-root` CSS-variable bridge (already
+purpose-built 2026-08-07 to alias v5's `--v5-*` tokens onto v1's own colors for exactly this
+case) so the retrofit pages render on-theme with zero styling changes. Flipped `App.tsx`'s
+no-saved-preference fallback from `'v6'`→`'v1'`, and fixed `AppShell.tsx`'s version-switcher
+accent, which had hardcoded the "recommended" indigo highlight onto Workbench regardless of the
+actual default (a real, if cosmetic, bug my own change would have made worse if left alone).
+
+**User then caught a real gap the nav-inventory approach structurally couldn't see**: "V2
+dashboard still has different cards from v1 Dashboard." Nav presence isn't the same claim as
+content identity -- some nav slots (Dashboard, Watchlist, Stock Details, Signal Tracking) render
+a *different underlying file* per shell, not the same component reused, and the first pass's
+inventory only checked "does v1 have a same-named nav item," never "is it the same file." Traced
+each: `DashboardPage.tsx` (v1) was missing 8 cards `V2Dashboard.tsx` had --
+`getPerformanceDashboard`/`getFiiDiiFlow`/`getFeatureImportance`-backed win-rate/Sharpe/alpha
+KPIs, an FII/DII flow chart, a feature-importance chart, a model-registry list, a
+strategy-performance list -- ported all 8 in v1's own `.glass`/`KpiChip`/`SectionLabel` idiom
+(not v2's `terminal-panel` classes) rather than copy-pasting v2's markup verbatim. v1's
+`/watchlist` route was missing `PriceAlertsPanel` entirely (App.tsx's shared route had it, v1's
+didn't) -- added. `V1StockDetails.tsx` was missing 3 of `V2StockDetails.tsx`'s 7 unique queries
+(`getAiInsights`, `getCompanyProfileAnalysis` -- both self-contained, ported as a new "AI
+Insights" tab); the other 4 either duplicate what v1's separate "Stock Intelligence Hub" nav
+item (`StockIntelligencePage`, 28 queries) already covers (`getFnOSignals`), or were deliberately
+declined: `getNiftyTraderData` is interwoven through ~15 places in `V2StockDetails.tsx` (peer
+comparison, industry financials, quarterly trends) -- not a bounded card, porting it unsafely
+would be worse than flagging it; `getQuantScores` was **not** ported on purpose --
+`scoring-authority.md` treats raw `quant_scores` as an input the UI must not surface as
+canonical, and v1 already shows the correct `getUnifiedScoreForSymbol` instead. Checked and
+ruled out as non-gaps: `SignalTracking`/`V2SignalTracking` (identical, one query each),
+V3Dashboard's home-mode (fully subsumed once `SignalHistoryModal`, already inline in
+`DashboardPage.tsx`, is accounted for), `/screener-v2` (orphaned route, zero nav link in any
+shell). Live-screenshotted every content fix except `V1StockDetails`' AI Insights tab -- `/details`
+turned out unreachable via any click flow in any shell today (`handleSelectStock` always opens
+the slide-out drawer instead, App.tsx:372, pre-existing and unrelated to this session) -- verified
+by source-parity (JSX copied verbatim from the already-proven `V2StockDetails`) and a clean `tsc`
+instead.
+
+**User then asked to delete v7 (`src/v7/`, "Aurora Desk") and v8 (`src/v8/`, "Fintech Slate")
+completely** -- both built earlier the same session, uncommitted. Checked every file each pulled
+in before deleting anything: `src/components/ui/` (5 shadcn-pattern primitives on
+`class-variance-authority`+`@radix-ui/react-slot`) and `src/components/dashboard/` (4 widgets)
+had zero consumers outside v8; `src/lib/marketStatus.ts` had zero consumers outside v7+v8;
+`src/styles/fintech-theme.css` only fed those same dashboard/ widgets and v8's shell -- all
+genuinely orphaned once v7/v8 go, deleted alongside rather than left as dead code. Uninstalled
+the 2 now-unused npm deps. Reverted `tsconfig.json`/`vite.config.ts`'s `@` path alias back to its
+original `.`(root) mapping -- confirmed zero remaining `@/` imports anywhere before reverting.
+**Deliberately kept** `index.html`'s Inter/JetBrains-Mono Google Fonts addition even though it
+was made during v7/v8 work: `v6-theme.css` (pre-existing, shipped, not part of this deletion)
+declares `font-family: 'Inter'`/`'JetBrains Mono'` and had been silently degrading to system
+fallback fonts for its entire life before this addition -- reverting the font link would have
+been a real regression to an unrelated, already-live shell. Grepped the whole repo for
+`v7|v8|V7Shell|V8Shell|FintechHomePage` after deletion -- zero hits.
+
+**User then asked for "look and feel of all pages in V1 same as Dashboard page."** Sampled ~10
+representative files first rather than rewriting blind: most v1 pages already share
+`DashboardPage.tsx`'s slate/indigo/amber/emerald/rose vocabulary closely (inherited from the
+shared global `index.css`), but a `grep`-based classification across all 63 files v1's nav
+reaches found **6 genuine systemic outliers** with near-zero on-palette Tailwind classes and
+dozens of off-palette ones: `AgentAuditorPage`/`AgentDataScientistPage`/`AgentStrategistPage`/
+`AgentOptimizerPage` (plain `gray`/`red`/`green`), `OptionsIntelligence`, `PortfolioAnalytics`,
+`StrategyBuilder` (plain `gray`/`blue`/`red`). Confirmed via context sampling before touching
+anything that `blue`/`red`/`green` were being used as generic accent/positive/negative roles
+(the same job `indigo`/`emerald`/`rose` already do elsewhere), not as a deliberate distinct
+semantic (e.g. a chart's 3rd data-series color) -- safe to recolor. Applied the same 1:1
+shade-preserving Tailwind swap (`gray→slate`, `blue→indigo`, `red→rose`, `green→emerald`) across
+**all 63** v1-reachable page files, not just the 6 outliers (341 total hits, mechanical and
+reversible) -- these files are shared with v2/v3/v6's own route trees too, so the fix improves
+consistency platform-wide, not just in v1. Found and fixed a second-order gap the Tailwind sweep
+couldn't see: 3 files had the *same* off-palette colors as **raw hex codes** in `recharts`
+stroke/fill props (`#60a5fa`, `#3b82f6`, etc. -- Tailwind's own hex values used as literal
+strings, not classes), swept those to their exact on-brand equivalents in
+`AgentAuditorPage`/`AgentDataScientistPage`/`AgentOptimizerPage`/`SmartMoneyPage`/`V1Backtest`/
+`V1StockDetails`. Deliberately left `DashboardPage.tsx` itself and `SentimentIntelligence.tsx`
+untouched -- the former is the reference file (a couple of its own hex constants, e.g.
+`#dc2626`, predate this session and aren't in scope), the latter's `#22c55e`/`#ef4444` are
+already `DashboardPage`'s own `emerald`/`rose` hex constants verbatim, a false positive in the
+hex sweep's wider net.
+
+**Live-verified throughout**, not just `tsc`/`vitest`: `run-bharat-stock-intelligence`'s
+`driver.mjs` screenshotted the default landing shell (confirmed v1, not v6), the 3 new desk
+pages (Screener Browser/Risk Desk/Portfolio Tracker -- all on-theme, zero console errors), the
+Dashboard's new Quant Performance section (all 4 new cards populated with real live data),
+Watchlist (`PriceAlertsPanel` present), and both recolored outlier pages (Portfolio Analytics,
+Data Scientist Agent -- confirmed the chart line is now indigo-400, not the stray light-blue hex
+that survived the first Tailwind-only sweep). `npx tsc --noEmit` clean and `npx vitest run`
+109/120 files, 1048/1089 tests, 0 failed, unchanged from session-start baseline, re-run after
+every logical change (7 times total across the session, never once regressed).
+
+**Not done, flagged rather than silently skipped**: this repo has ~30 more v1-reachable page
+files with real (if minority) off-palette hit counts before the sweep that weren't individually
+content-audited the way `PortfolioAnalytics`/`V1StockDetails` were -- the *palette* is now
+uniform everywhere, but layout/card-shape/typography consistency (e.g. matching `SectionLabel`'s
+exact divider-line treatment, `KpiChip`'s exact shape) was only verified on the pages this
+session directly touched, not swept structurally across all 63. `V3Dashboard`'s stock-detail-tab
+mode (used at `/details` for `dashboardVersion==='v3'` only) was traced by query-set comparison
+against `StockIntelligencePage`, not opened live, since v3 wasn't in scope this session. **A
+large, unrelated diff was present in `git status` throughout this session** (`server.ts`,
+`src/server/agents/*.py`, `ollama_client.py`/`ollamaManager.ts` deleted,
+`narrative_client.py`/`test_narrative_client.py` new, `src/services/aiService.ts`,
+`requirements.txt` -- an Ollama-to-different-LLM-client migration, not this session's work) --
+confirmed via `git log` that nothing was committed this session, so no risk of it being swept
+into a commit, but flagging it here per `concurrent_session_hazards_2026_08_12` memory: **commit
+only by explicit path** (`git add <file> <file> ...`), never `git add -A`, when this work does
+get committed.

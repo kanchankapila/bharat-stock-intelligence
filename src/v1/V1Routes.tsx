@@ -56,6 +56,7 @@ const V1Screener            = React.lazy(() => import('../components/V1Screener'
 const V1StockDetails        = React.lazy(() => import('../components/V1StockDetails').then(m => ({ default: m.V1StockDetails })));
 
 const Watchlist               = React.lazy(() => import('../components/Watchlist').then(m => ({ default: m.Watchlist })));
+const PriceAlertsPanel        = React.lazy(() => import('../components/PriceAlertsPanel').then(m => ({ default: m.PriceAlertsPanel })));
 const MarketCommandCenter = React.lazy(() => import('../v4/views/MarketCommandCenter').then(m => ({ default: m.MarketCommandCenter })));
 const StockIntelligencePage = React.lazy(() => import('../v4/views/StockIntelligencePage').then(m => ({ default: m.StockIntelligencePage })));
 const SectorPerformance = React.lazy(() => import('../components/SectorIntelligence').then(m => ({ default: m.SectorPerformance })));
@@ -67,6 +68,18 @@ const CorporateEventsPanel = React.lazy(() => import('../components/CorporateEve
 const Card = React.lazy(() => import('../components/Card').then(m => ({ default: m.Card })));
 const EconomicCalendarWidget = React.lazy(() => import('../components/TradingViewWidgets').then(m => ({ default: m.EconomicCalendarWidget })));
 const MarketOverviewWidget = React.lazy(() => import('../components/TradingViewWidgets').then(m => ({ default: m.MarketOverviewWidget })));
+
+// v6-native (2 pages that were exclusive to V6Shell) and v5-desk retrofits (previously reachable
+// only under dashboardVersion==='v6'/'v7'/'v8' -- see App.tsx) -- v1's own nav now links all 8.
+const PreMarketBriefing        = React.lazy(() => import('../v4/components/PreMarketBriefing'));
+const ScreenerBrowserPage      = React.lazy(() => import('../v6/pages/ScreenerBrowserPage'));
+const PortfolioTrackerPage     = React.lazy(() => import('../v6/pages/PortfolioTrackerPage'));
+const OptionsDeskPage          = React.lazy(() => import('../v5/pages/OptionsDeskPage').then(m => ({ default: m.OptionsDeskPage })));
+const InstitutionalFlowDeskPage = React.lazy(() => import('../v5/pages/InstitutionalFlowDeskPage').then(m => ({ default: m.InstitutionalFlowDeskPage })));
+const EarningsPulseDeskPage    = React.lazy(() => import('../v5/pages/EarningsPulseDeskPage').then(m => ({ default: m.EarningsPulseDeskPage })));
+const RiskDeskPage             = React.lazy(() => import('../v5/pages/RiskDeskPage').then(m => ({ default: m.RiskDeskPage })));
+const SignalReviewPage         = React.lazy(() => import('../v5/pages/SignalReviewPage').then(m => ({ default: m.SignalReviewPage })));
+const V2Settings               = React.lazy(() => import('../v2/views/settings/V2Settings').then(m => ({ default: m.V2Settings })));
 
 
 // This component will receive all the props App.tsx was passing down
@@ -82,6 +95,7 @@ const V1Routes = ({
     selectedSymbol,
     researchSubTab,
     setResearchSubTab,
+    userId,
 }) => {
     const location = useLocation();
     const navigate = useNavigate();
@@ -106,7 +120,9 @@ const V1Routes = ({
                             watchlistDetails={watchlistDetails || []}
                             onSelectStock={onSelectStock}
                             onRemove={onToggleWatchlist}
+                            userId={userId}
                         />
+                        <PriceAlertsPanel userId={userId} />
                     </React.Suspense>
                 </motion.div>
             } />
@@ -140,6 +156,7 @@ const V1Routes = ({
                             <Route path="/money-flow" element={<MoneyFlowPage />} />
                             <Route path="/top-rated" element={<TopRatedStocks onSelectStock={onSelectStock} watchlist={watchlist} onToggleWatchlist={onToggleWatchlist} />} />
                             <Route path="/intraday" element={<IntradayPage onSelectStock={onSelectStock} />} />
+                            <Route path="/premarket" element={<div className="p-4 sm:p-6 max-w-6xl mx-auto"><PreMarketBriefing /></div>} />
                             <Route path="/indices" element={<IndicesPage onSelectStock={onSelectStock} selectedIndex={selectedIndex} setSelectedIndex={setSelectedIndex} />} />
                             <Route path="/market-map" element={
                                 <div className="p-6 space-y-6">
@@ -152,15 +169,20 @@ const V1Routes = ({
                                 </div>
                             } />
                             <Route path="/screener" element={<V1Screener stocks={stocks} onSelectStock={onSelectStock} watchlist={watchlist} onToggleWatchlist={onToggleWatchlist} />} />
+                            <Route path="/screener-browser" element={<ScreenerBrowserPage onSelectStock={onSelectStock} />} />
                             <Route path="/trendlyne" element={<TrendlyneScreenerPanel onSelectStock={onSelectStock} watchlist={watchlist} onToggleWatchlist={onToggleWatchlist} />} />
                             <Route path="/premium-screeners" element={<PremiumScreenersPage onSelectStock={onSelectStock} />} />
                             <Route path="/live-screener" element={<LiveMarketScreener onSelectStock={onSelectStock} />} />
                             <Route path="/eod-screener" element={<EODMarketScreener onSelectStock={onSelectStock} />} />
                             <Route path="/discover" element={<div className="p-6"><NSEStockDiscovery onSelectStock={onSelectStock} /></div>} />
                             <Route path="/smart-money" element={<SmartMoneyPage onSelectStock={onSelectStock} />} />
+                            <Route path="/institutional-flow" element={<InstitutionalFlowDeskPage />} />
                             <Route path="/earnings" element={<EarningsPage onSelectStock={onSelectStock} />} />
+                            <Route path="/earnings-desk" element={<EarningsPulseDeskPage onSelectSymbol={onSelectStock} />} />
                             <Route path="/fno-scanners" element={<FnOIntelligenceCenter onSelectStock={onSelectStock} />} />
                             <Route path="/options" element={<div className="p-6"><OptionsIntelligence /></div>} />
+                            <Route path="/options-desk" element={<OptionsDeskPage onSelectSymbol={onSelectStock} />} />
+                            <Route path="/risk" element={<RiskDeskPage onSelectSymbol={onSelectStock} />} />
                             <Route path="/todays-picks" element={<TodaysPicks onSelectStock={onSelectStock} />} />
                             <Route path="/early-spotter" element={<EarlyHoursSpotter onSelectStock={onSelectStock} />} />
                             <Route path="/screener-intelligence" element={<ScreenerIntelligencePage />} />
@@ -185,6 +207,7 @@ const V1Routes = ({
                             <Route path="/signal-tracking" element={<SignalTracking />} />
                             <Route path="/signal-intelligence" element={<SignalIntelligence />} />
                             <Route path="/signal-report-card" element={<SignalReportCard />} />
+                            <Route path="/signal-review" element={<SignalReviewPage onSelectSymbol={onSelectStock} />} />
                             <Route path="/research" element={
                                 <div className="flex flex-col">
                                     <div className="flex gap-2 px-4 py-2 border-b border-slate-800">
@@ -228,8 +251,10 @@ const V1Routes = ({
                             <Route path="/jobs" element={<JobsDashboardPage />} />
                             <Route path="/profile" element={<ProfilePage />} />
                             <Route path="/portfolio" element={<div className="p-6"><PortfolioAnalytics /></div>} />
+                            <Route path="/portfolio-tracker" element={<div className="p-6"><PortfolioTrackerPage userId={userId} onSelectStock={onSelectStock} /></div>} />
                             <Route path="/builder" element={<div className="p-6"><StrategyBuilder /></div>} />
                             <Route path="/export-picks" element={<div className="p-6"><ExportPortfolioView /></div>} />
+                            <Route path="/settings" element={<V2Settings />} />
                             <Route path="/chat" element={<div className="p-4"><StockChatbot /></div>} />
                             <Route path="/alpha-cockpit" element={<Navigate to="/alpha" replace />} />
                         </Routes>

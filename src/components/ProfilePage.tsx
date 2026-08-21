@@ -212,8 +212,8 @@ function Card({ label, value, sub, color, icon: Icon, highlight }: {
   label: string; value: string; sub?: string; color: string; icon: any; highlight?: boolean;
 }) {
   return (
-    <div className={`rounded-xl border p-4 flex flex-col gap-2 ${highlight ? 'bg-indigo-950/30 border-indigo-800' : 'bg-slate-900 border-slate-800'}`}>
-      <div className="flex items-center gap-1.5 text-slate-400 text-[11px] font-semibold uppercase tracking-wider">
+    <div className={`p-4 flex flex-col gap-2 ${highlight ? 'rounded-xl border bg-indigo-950/30 border-indigo-800' : 'v1-card'}`}>
+      <div className="flex items-center gap-1.5 text-slate-400 text-[11px] font-semibold font-display uppercase tracking-wider">
         <Icon className="w-3 h-3" /> {label}
       </div>
       <div className={`text-2xl font-black ${color}`}>{value}</div>
@@ -228,7 +228,7 @@ function LRow_({ label, value, color = 'text-slate-200', bold = false, indent = 
   return (
     <div className={`flex justify-between py-2 text-sm ${divider ? 'border-t border-slate-700 mt-1 pt-3' : 'border-b border-slate-800/50'}`}>
       <span className={`${indent ? 'pl-4 text-slate-400' : bold ? 'font-bold text-white' : 'text-slate-300'}`}>{label}</span>
-      <span className={`font-mono ${bold ? 'font-black text-base' : 'font-medium'} ${color}`}>{value}</span>
+      <span className={`font-data ${bold ? 'font-black text-base' : 'font-medium'} ${color}`}>{value}</span>
     </div>
   );
 }
@@ -323,22 +323,22 @@ function ClientAnalytics({ profile }: { profile: ClientProfile }) {
     <div className="space-y-5">
       {/* Summary cards */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-        <Card label="Net P&L (Realized)" value={INR(totalNetPL, { sign: true })} sub={`${gl.length} positions · ${yearwise.length} FYs`} color={totalNetPL >= 0 ? 'text-emerald-400' : 'text-red-400'} icon={totalNetPL >= 0 ? TrendingUp : TrendingDown} highlight />
-        <Card label="Total Buy Value" value={INR(totalBuy || gl.reduce((s,g)=>s+g.buyAmt,0))} sub={`${buyTxns.length || '—'} buy transactions`} color="text-blue-400" icon={ArrowUpRight} />
+        <Card label="Net P&L (Realized)" value={INR(totalNetPL, { sign: true })} sub={`${gl.length} positions · ${yearwise.length} FYs`} color={totalNetPL >= 0 ? 'text-emerald-400' : 'text-rose-400'} icon={totalNetPL >= 0 ? TrendingUp : TrendingDown} highlight />
+        <Card label="Total Buy Value" value={INR(totalBuy || gl.reduce((s,g)=>s+g.buyAmt,0))} sub={`${buyTxns.length || '—'} buy transactions`} color="text-indigo-400" icon={ArrowUpRight} />
         <Card label="Cash Deposited" value={totalDeposited > 0 ? INR(totalDeposited) : 'No ledger'} sub={totalWithdrawn > 0 ? `Withdrawn: ${INR(totalWithdrawn)}` : 'Upload Ledger CSVs'} color="text-purple-400" icon={Wallet} />
         <Card label="Total Charges" value={INR(totalAllChg || totalGLChg)} sub="Brokerage + STT + GST + DP + penalties" color="text-amber-400" icon={Receipt} />
       </div>
 
       {/* Net cash return banner */}
       {hasLedger && (
-        <div className={`rounded-xl border p-4 ${netCashReturn >= 0 ? 'bg-emerald-950/20 border-emerald-900/50' : 'bg-red-950/20 border-red-900/50'}`}>
+        <div className={`rounded-xl border p-4 ${netCashReturn >= 0 ? 'bg-emerald-950/20 border-emerald-900/50' : 'bg-rose-950/20 border-rose-900/50'}`}>
           <div className="flex items-center justify-between">
             <div>
-              <div className="text-[11px] font-bold text-slate-400 uppercase tracking-wider mb-1">Net Cash Return (Bank → Kotak → Bank)</div>
-              <div className={`text-3xl font-black ${netCashReturn >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>{INR(netCashReturn, { sign: true })}</div>
+              <div className="text-[11px] font-bold text-slate-400 font-display uppercase tracking-wider mb-1">Net Cash Return (Bank → Kotak → Bank)</div>
+              <div className={`text-3xl font-black ${netCashReturn >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>{INR(netCashReturn, { sign: true })}</div>
               <div className="text-xs text-slate-500 mt-1">Withdrew {INR(totalWithdrawn)} − Deposited {INR(totalDeposited)} from your bank account</div>
             </div>
-            {netCashReturn >= 0 ? <CheckCircle className="w-10 h-10 text-emerald-700" /> : <AlertTriangle className="w-10 h-10 text-red-700" />}
+            {netCashReturn >= 0 ? <CheckCircle className="w-10 h-10 text-emerald-700" /> : <AlertTriangle className="w-10 h-10 text-rose-700" />}
           </div>
         </div>
       )}
@@ -353,23 +353,23 @@ function ClientAnalytics({ profile }: { profile: ClientProfile }) {
       {/* ── CASH FLOW ── */}
       {tab === 'cashflow' && (
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-          <div className="rounded-xl bg-slate-900 border border-slate-800 p-4">
+          <div className="v1-card p-4">
             <h3 className="text-sm font-bold text-white mb-4 flex items-center gap-2"><Wallet className="w-4 h-4 text-purple-400" /> Cash Flow Statement</h3>
             {hasLedger ? (
               <div className="space-y-0">
                 <LRow_ label="Opening Balance" value={INR(openingBal, { sign: true })} />
-                <LRow_ label="+ Cash deposited from bank (RECEIPT)" value={INR(totalDeposited)} color="text-blue-400" indent />
+                <LRow_ label="+ Cash deposited from bank (RECEIPT)" value={INR(totalDeposited)} color="text-indigo-400" indent />
                 <LRow_ label="+ Stock sale settlements (BILL credits)" value={INR(billCredits)} color="text-emerald-400" indent />
                 {otherJVCredits > 0 && <LRow_ label="+ Other JV credits (misc adjustments)" value={INR(otherJVCredits)} color="text-emerald-300" indent />}
                 <LRow_ label="− Stock purchase settlements (BILL debits)" value={`-${INR(billDebits)}`} color="text-slate-400" indent />
                 {billLevies > 0    && <LRow_ label="− Exchange levies (BILL other charges)" value={`-${INR(billLevies)}`} color="text-orange-300" indent />}
                 {totalDP > 0       && <LRow_ label="− DP / demat charges (JV)" value={`-${INR(totalDP)}`} color="text-orange-400" indent />}
-                {totalAuction > 0  && <LRow_ label="− Auction penalty — AUC INT (JV)" value={`-${INR(totalAuction)}`} color="text-red-400" indent />}
-                {totalInterest > 0 && <LRow_ label="− Debit interest (JV)" value={`-${INR(totalInterest)}`} color="text-red-400" indent />}
+                {totalAuction > 0  && <LRow_ label="− Auction penalty — AUC INT (JV)" value={`-${INR(totalAuction)}`} color="text-rose-400" indent />}
+                {totalInterest > 0 && <LRow_ label="− Debit interest (JV)" value={`-${INR(totalInterest)}`} color="text-rose-400" indent />}
                 {otherJVDebits > 0 && <LRow_ label="− Other JV debits (misc adjustments)" value={`-${INR(otherJVDebits)}`} color="text-slate-400" indent />}
                 {shortBlocked > 0  && <LRow_ label="  SHORT 150% block (JV) — reversed below" value={`-${INR(shortBlocked)}`} color="text-slate-600" indent />}
                 {shortReversed > 0 && <LRow_ label="  SHORT REV 150% (JV) — nets zero with above" value={INR(shortReversed)} color="text-slate-600" indent />}
-                <LRow_ label="− Withdrawn to bank (PAYMENT / Withdrawal)" value={`-${INR(totalWithdrawn)}`} color="text-red-400" indent />
+                <LRow_ label="− Withdrawn to bank (PAYMENT / Withdrawal)" value={`-${INR(totalWithdrawn)}`} color="text-rose-400" indent />
                 <LRow_ label="Closing Balance" value={INR(closingBal, { sign: true })} color="text-white" bold divider />
                 {shortBlocked > 0 && (
                   <div className="mt-2 text-[10px] text-slate-600 px-1">
@@ -380,26 +380,26 @@ function ClientAnalytics({ profile }: { profile: ClientProfile }) {
             ) : <p className="text-slate-500 text-sm">Upload Ledger CSVs to see full cash flow</p>}
           </div>
 
-          <div className="rounded-xl bg-slate-900 border border-slate-800 p-4">
+          <div className="v1-card p-4">
             <h3 className="text-sm font-bold text-white mb-4 flex items-center gap-2"><TrendingUp className="w-4 h-4 text-emerald-400" /> P&L Waterfall</h3>
             <div className="space-y-0">
-              {hasTxn && <LRow_ label="Total Buy Value" value={INR(totalBuy)} color="text-blue-400" />}
+              {hasTxn && <LRow_ label="Total Buy Value" value={INR(totalBuy)} color="text-indigo-400" />}
               {hasTxn && <LRow_ label="Total Sell Value" value={INR(totalSell)} color="text-emerald-400" />}
-              {hasGL  && <LRow_ label="Gross P&L" value={INR(totalGrossPL, { sign: true })} color={totalGrossPL >= 0 ? 'text-emerald-400' : 'text-red-400'} />}
+              {hasGL  && <LRow_ label="Gross P&L" value={INR(totalGrossPL, { sign: true })} color={totalGrossPL >= 0 ? 'text-emerald-400' : 'text-rose-400'} />}
               {(totalTxnChg || totalGLChg) > 0 && <LRow_ label="− Exchange charges (brokerage+STT+GST+misc)" value={`-${INR(totalTxnChg || totalGLChg)}`} color="text-orange-400" indent />}
-              {hasGL  && <LRow_ label="Net P&L (post exchange charges)" value={INR(totalNetPL, { sign: true })} color={totalNetPL >= 0 ? 'text-emerald-400' : 'text-red-400'} />}
+              {hasGL  && <LRow_ label="Net P&L (post exchange charges)" value={INR(totalNetPL, { sign: true })} color={totalNetPL >= 0 ? 'text-emerald-400' : 'text-rose-400'} />}
               {totalDP > 0       && <LRow_ label="− DP charges" value={`-${INR(totalDP)}`} color="text-orange-400" indent />}
-              {totalAuction > 0  && <LRow_ label="− Auction penalties (avoidable)" value={`-${INR(totalAuction)}`} color="text-red-400" indent />}
-              {totalInterest > 0 && <LRow_ label="− Debit interest" value={`-${INR(totalInterest)}`} color="text-red-400" indent />}
-              <LRow_ label="True Net P&L (all costs)" value={INR(totalNetPL - totalDP - totalAuction - totalInterest, { sign: true })} color={(totalNetPL - totalDP - totalAuction - totalInterest) >= 0 ? 'text-emerald-400' : 'text-red-400'} bold divider />
+              {totalAuction > 0  && <LRow_ label="− Auction penalties (avoidable)" value={`-${INR(totalAuction)}`} color="text-rose-400" indent />}
+              {totalInterest > 0 && <LRow_ label="− Debit interest" value={`-${INR(totalInterest)}`} color="text-rose-400" indent />}
+              <LRow_ label="True Net P&L (all costs)" value={INR(totalNetPL - totalDP - totalAuction - totalInterest, { sign: true })} color={(totalNetPL - totalDP - totalAuction - totalInterest) >= 0 ? 'text-emerald-400' : 'text-rose-400'} bold divider />
             </div>
 
             {hasLedger && hasGL && (
               <div className="mt-4 p-3 rounded-lg bg-slate-800 border border-slate-700 text-xs space-y-1">
                 <div className="font-bold text-slate-400 uppercase mb-2 flex items-center gap-1"><CheckCircle className="w-3 h-3" /> Reconciliation</div>
-                <div className="flex justify-between"><span className="text-slate-400">G&L Net P&L</span><span className={`font-mono ${totalNetPL >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>{INR(totalNetPL, { sign: true })}</span></div>
-                <div className="flex justify-between"><span className="text-slate-400">Ledger net cash return</span><span className={`font-mono ${netCashReturn >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>{INR(netCashReturn, { sign: true })}</span></div>
-                <div className="flex justify-between border-t border-slate-700 pt-1"><span className="text-slate-400">Difference (unrealized + timing)</span><span className="font-mono text-amber-400">{INR(totalNetPL - netCashReturn, { sign: true })}</span></div>
+                <div className="flex justify-between"><span className="text-slate-400">G&L Net P&L</span><span className={`font-data ${totalNetPL >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>{INR(totalNetPL, { sign: true })}</span></div>
+                <div className="flex justify-between"><span className="text-slate-400">Ledger net cash return</span><span className={`font-data ${netCashReturn >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>{INR(netCashReturn, { sign: true })}</span></div>
+                <div className="flex justify-between border-t border-slate-700 pt-1"><span className="text-slate-400">Difference (unrealized + timing)</span><span className="font-data text-amber-400">{INR(totalNetPL - netCashReturn, { sign: true })}</span></div>
               </div>
             )}
           </div>
@@ -409,20 +409,20 @@ function ClientAnalytics({ profile }: { profile: ClientProfile }) {
       {/* ── P&L BY YEAR ── */}
       {tab === 'pnl' && (
         <div className="space-y-3">
-          <div className="rounded-xl bg-slate-900 border border-slate-800 p-4">
+          <div className="v1-card p-4">
             <h3 className="text-sm font-bold text-slate-300 mb-4">Year-wise Net P&L</h3>
             <div className="space-y-3">
               {yearwise.map(y => (
                 <div key={y.fy} className="flex items-center gap-3">
                   <span className="text-xs text-slate-400 w-24 flex-shrink-0">{y.fy}</span>
-                  <MiniBar value={y.netPL} max={maxAbsPL} color={y.netPL >= 0 ? 'bg-emerald-500' : 'bg-red-500'} />
-                  <span className={`text-xs font-bold font-mono w-28 text-right flex-shrink-0 ${y.netPL >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>{INR(y.netPL, { sign: true })}</span>
+                  <MiniBar value={y.netPL} max={maxAbsPL} color={y.netPL >= 0 ? 'bg-emerald-500' : 'bg-rose-500'} />
+                  <span className={`text-xs font-bold font-data w-28 text-right flex-shrink-0 ${y.netPL >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>{INR(y.netPL, { sign: true })}</span>
                 </div>
               ))}
             </div>
           </div>
           {yearwise.map(y => (
-            <div key={y.fy} className="rounded-xl bg-slate-900 border border-slate-800 overflow-hidden">
+            <div key={y.fy} className="v1-card overflow-hidden">
               <button onClick={() => setExpY(expandedYear === y.fy ? null : y.fy)}
                 className="w-full flex items-center justify-between px-4 py-3 hover:bg-slate-800/50 transition-colors">
                 <div className="flex items-center gap-3">
@@ -431,7 +431,7 @@ function ClientAnalytics({ profile }: { profile: ClientProfile }) {
                 </div>
                 <div className="flex items-center gap-4">
                   <div className="text-right">
-                    <div className={`font-black font-mono ${y.netPL >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>{INR(y.netPL, { sign: true })}</div>
+                    <div className={`font-black font-data ${y.netPL >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>{INR(y.netPL, { sign: true })}</div>
                     <div className="text-xs text-orange-400">charges: -{INR(y.charges)}</div>
                   </div>
                   {expandedYear === y.fy ? <ChevronUp className="w-4 h-4 text-slate-500" /> : <ChevronDown className="w-4 h-4 text-slate-500" />}
@@ -447,25 +447,25 @@ function ClientAnalytics({ profile }: { profile: ClientProfile }) {
                         return (
                           <tr key={s.scriptName} className="border-b border-slate-800/50 hover:bg-slate-800/30">
                             <td className="px-3 py-2 font-medium text-white whitespace-nowrap">{s.scriptName}</td>
-                            <td className="px-3 py-2 text-blue-400 font-mono">{INR(s.buyAmt)}</td>
-                            <td className="px-3 py-2 text-slate-300 font-mono">{INR(s.sellAmt)}</td>
-                            <td className={`px-3 py-2 font-mono ${s.shortTerm>0?'text-emerald-400':s.shortTerm<0?'text-red-400':'text-slate-600'}`}>{s.shortTerm!==0?INR(s.shortTerm,{sign:true}):'—'}</td>
-                            <td className={`px-3 py-2 font-mono ${s.longTerm>0?'text-emerald-400':s.longTerm<0?'text-red-400':'text-slate-600'}`}>{s.longTerm!==0?INR(s.longTerm,{sign:true}):'—'}</td>
-                            <td className="px-3 py-2 text-orange-400 font-mono">-{INR(s.totalCharges+s.sttCtt)}</td>
-                            <td className={`px-3 py-2 font-bold font-mono ${s.netPL>=0?'text-emerald-400':'text-red-400'}`}>{INR(s.netPL,{sign:true})}</td>
-                            <td className={`px-3 py-2 font-mono ${ret>=0?'text-emerald-400':'text-red-400'}`}>{ret>=0?'+':''}{ret.toFixed(1)}%</td>
+                            <td className="px-3 py-2 text-indigo-400 font-data">{INR(s.buyAmt)}</td>
+                            <td className="px-3 py-2 text-slate-300 font-data">{INR(s.sellAmt)}</td>
+                            <td className={`px-3 py-2 font-data ${s.shortTerm>0?'text-emerald-400':s.shortTerm<0?'text-rose-400':'text-slate-600'}`}>{s.shortTerm!==0?INR(s.shortTerm,{sign:true}):'—'}</td>
+                            <td className={`px-3 py-2 font-data ${s.longTerm>0?'text-emerald-400':s.longTerm<0?'text-rose-400':'text-slate-600'}`}>{s.longTerm!==0?INR(s.longTerm,{sign:true}):'—'}</td>
+                            <td className="px-3 py-2 text-orange-400 font-data">-{INR(s.totalCharges+s.sttCtt)}</td>
+                            <td className={`px-3 py-2 font-bold font-data ${s.netPL>=0?'text-emerald-400':'text-rose-400'}`}>{INR(s.netPL,{sign:true})}</td>
+                            <td className={`px-3 py-2 font-data ${ret>=0?'text-emerald-400':'text-rose-400'}`}>{ret>=0?'+':''}{ret.toFixed(1)}%</td>
                           </tr>
                         );
                       })}
                     </tbody>
                     <tfoot><tr className="bg-slate-800/50">
                       <td className="px-3 py-2 font-bold text-white">Total</td>
-                      <td className="px-3 py-2 text-blue-400 font-mono font-bold">{INR(y.stocks.reduce((s,g)=>s+g.buyAmt,0))}</td>
-                      <td className="px-3 py-2 text-emerald-400 font-mono font-bold">{INR(y.stocks.reduce((s,g)=>s+g.sellAmt,0))}</td>
-                      <td className="px-3 py-2 font-mono font-bold text-slate-300">{INR(y.stocks.reduce((s,g)=>s+g.shortTerm,0),{sign:true})}</td>
-                      <td className="px-3 py-2 font-mono font-bold text-slate-300">{INR(y.stocks.reduce((s,g)=>s+g.longTerm,0),{sign:true})}</td>
-                      <td className="px-3 py-2 text-orange-400 font-mono font-bold">-{INR(y.charges)}</td>
-                      <td className={`px-3 py-2 font-black font-mono text-sm ${y.netPL>=0?'text-emerald-400':'text-red-400'}`}>{INR(y.netPL,{sign:true})}</td>
+                      <td className="px-3 py-2 text-indigo-400 font-data font-bold">{INR(y.stocks.reduce((s,g)=>s+g.buyAmt,0))}</td>
+                      <td className="px-3 py-2 text-emerald-400 font-data font-bold">{INR(y.stocks.reduce((s,g)=>s+g.sellAmt,0))}</td>
+                      <td className="px-3 py-2 font-data font-bold text-slate-300">{INR(y.stocks.reduce((s,g)=>s+g.shortTerm,0),{sign:true})}</td>
+                      <td className="px-3 py-2 font-data font-bold text-slate-300">{INR(y.stocks.reduce((s,g)=>s+g.longTerm,0),{sign:true})}</td>
+                      <td className="px-3 py-2 text-orange-400 font-data font-bold">-{INR(y.charges)}</td>
+                      <td className={`px-3 py-2 font-black font-data text-sm ${y.netPL>=0?'text-emerald-400':'text-rose-400'}`}>{INR(y.netPL,{sign:true})}</td>
                       <td />
                     </tr></tfoot>
                   </table>
@@ -477,7 +477,7 @@ function ClientAnalytics({ profile }: { profile: ClientProfile }) {
             <div className="rounded-xl bg-indigo-950/30 border border-indigo-800 p-4 flex items-center justify-between">
               <div><div className="text-sm text-slate-400">All Years Combined</div><div className="text-xs text-slate-500">{gl.length} positions · {yearwise.length} FYs</div></div>
               <div className="text-right">
-                <div className={`text-3xl font-black ${totalNetPL>=0?'text-emerald-400':'text-red-400'}`}>{INR(totalNetPL,{sign:true})}</div>
+                <div className={`text-3xl font-black ${totalNetPL>=0?'text-emerald-400':'text-rose-400'}`}>{INR(totalNetPL,{sign:true})}</div>
                 <div className="text-xs text-orange-400">charges: -{INR(totalGLChg)}</div>
               </div>
             </div>
@@ -489,26 +489,26 @@ function ClientAnalytics({ profile }: { profile: ClientProfile }) {
       {tab === 'stocks' && (
         <div className="space-y-4">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div className="rounded-xl bg-slate-900 border border-slate-800 p-4">
+            <div className="v1-card p-4">
               <h3 className="text-sm font-bold text-emerald-400 mb-3">🏆 Top Winners</h3>
               {winners.map(g => (
                 <div key={g.scriptName+g.fy} className="flex items-center justify-between py-2 border-b border-slate-800/50">
                   <div><div className="text-sm font-medium text-white">{g.scriptName}</div><div className="text-xs text-slate-500">{g.fy} · {INR(g.buyAmt)} invested</div></div>
-                  <div className="text-right"><div className="text-sm font-bold text-emerald-400 font-mono">{INR(g.netPL,{sign:true})}</div><div className="text-xs text-emerald-600">+{g.buyAmt>0?((g.netPL/g.buyAmt)*100).toFixed(1):'∞'}%</div></div>
+                  <div className="text-right"><div className="text-sm font-bold text-emerald-400 font-data">{INR(g.netPL,{sign:true})}</div><div className="text-xs text-emerald-600">+{g.buyAmt>0?((g.netPL/g.buyAmt)*100).toFixed(1):'∞'}%</div></div>
                 </div>
               ))}
             </div>
-            <div className="rounded-xl bg-slate-900 border border-slate-800 p-4">
-              <h3 className="text-sm font-bold text-red-400 mb-3">📉 Biggest Losses</h3>
+            <div className="v1-card p-4">
+              <h3 className="text-sm font-bold text-rose-400 mb-3">📉 Biggest Losses</h3>
               {losers.map(g => (
                 <div key={g.scriptName+g.fy} className="flex items-center justify-between py-2 border-b border-slate-800/50">
                   <div><div className="text-sm font-medium text-white">{g.scriptName}</div><div className="text-xs text-slate-500">{g.fy} · {INR(g.buyAmt)} invested</div></div>
-                  <div className="text-right"><div className="text-sm font-bold text-red-400 font-mono">{INR(g.netPL,{sign:true})}</div><div className="text-xs text-red-600">{g.buyAmt>0?((g.netPL/g.buyAmt)*100).toFixed(1):'—'}%</div></div>
+                  <div className="text-right"><div className="text-sm font-bold text-rose-400 font-data">{INR(g.netPL,{sign:true})}</div><div className="text-xs text-rose-600">{g.buyAmt>0?((g.netPL/g.buyAmt)*100).toFixed(1):'—'}%</div></div>
                 </div>
               ))}
             </div>
           </div>
-          <div className="rounded-xl bg-slate-900 border border-slate-800 overflow-hidden">
+          <div className="v1-card overflow-hidden">
             <div className="px-4 py-3 border-b border-slate-800"><span className="text-sm font-bold text-slate-300">All Positions ({gl.length})</span></div>
             <div className="overflow-x-auto">
               <table className="w-full text-xs">
@@ -520,13 +520,13 @@ function ClientAnalytics({ profile }: { profile: ClientProfile }) {
                       <tr key={s.scriptName+s.fy} className={`border-b border-slate-800/50 ${i%2?'bg-slate-800/10':''}`}>
                         <td className="px-4 py-2 font-medium text-white whitespace-nowrap">{s.scriptName}</td>
                         <td className="px-4 py-2 text-slate-500">{s.fy}</td>
-                        <td className="px-4 py-2 text-blue-400 font-mono">{INR(s.buyAmt)}</td>
-                        <td className="px-4 py-2 text-slate-300 font-mono">{INR(s.sellAmt)}</td>
-                        <td className={`px-4 py-2 font-mono ${s.shortTerm>0?'text-emerald-400':s.shortTerm<0?'text-red-400':'text-slate-600'}`}>{s.shortTerm!==0?INR(s.shortTerm,{sign:true}):'—'}</td>
-                        <td className={`px-4 py-2 font-mono ${s.longTerm>0?'text-emerald-400':s.longTerm<0?'text-red-400':'text-slate-600'}`}>{s.longTerm!==0?INR(s.longTerm,{sign:true}):'—'}</td>
-                        <td className="px-4 py-2 text-orange-400 font-mono">-{INR(s.totalCharges+s.sttCtt)}</td>
-                        <td className={`px-4 py-2 font-bold font-mono ${s.netPL>=0?'text-emerald-400':'text-red-400'}`}>{INR(s.netPL,{sign:true})}</td>
-                        <td className={`px-4 py-2 font-mono ${ret>=0?'text-emerald-400':'text-red-400'}`}>{ret>=0?'+':''}{ret.toFixed(1)}%</td>
+                        <td className="px-4 py-2 text-indigo-400 font-data">{INR(s.buyAmt)}</td>
+                        <td className="px-4 py-2 text-slate-300 font-data">{INR(s.sellAmt)}</td>
+                        <td className={`px-4 py-2 font-data ${s.shortTerm>0?'text-emerald-400':s.shortTerm<0?'text-rose-400':'text-slate-600'}`}>{s.shortTerm!==0?INR(s.shortTerm,{sign:true}):'—'}</td>
+                        <td className={`px-4 py-2 font-data ${s.longTerm>0?'text-emerald-400':s.longTerm<0?'text-rose-400':'text-slate-600'}`}>{s.longTerm!==0?INR(s.longTerm,{sign:true}):'—'}</td>
+                        <td className="px-4 py-2 text-orange-400 font-data">-{INR(s.totalCharges+s.sttCtt)}</td>
+                        <td className={`px-4 py-2 font-bold font-data ${s.netPL>=0?'text-emerald-400':'text-rose-400'}`}>{INR(s.netPL,{sign:true})}</td>
+                        <td className={`px-4 py-2 font-data ${ret>=0?'text-emerald-400':'text-rose-400'}`}>{ret>=0?'+':''}{ret.toFixed(1)}%</td>
                       </tr>
                     );
                   })}
@@ -550,23 +550,23 @@ function ClientAnalytics({ profile }: { profile: ClientProfile }) {
               { label: 'Auction Penalties', v: totalAuction, desc: 'Short delivery — avoidable' },
               { label: 'Debit Interest', v: totalInterest, desc: 'Charged when balance negative' },
             ].filter(c=>c.v>0).map(c => (
-              <div key={c.label} className="rounded-xl bg-slate-900 border border-slate-800 p-3">
+              <div key={c.label} className="v1-card p-3">
                 <div className="text-xs text-slate-500 mb-1">{c.label}</div>
                 <div className="text-xl font-black text-amber-400">{INR(c.v)}</div>
                 <div className="text-[10px] text-slate-600 mt-1">{c.desc}</div>
               </div>
             ))}
           </div>
-          <div className="rounded-xl bg-slate-900 border border-slate-800 p-4">
+          <div className="v1-card p-4">
             <h3 className="text-sm font-bold text-slate-300 mb-3">Charge Impact on P&L</h3>
             <div className="space-y-0">
-              {totalGrossPL!==0 && <LRow_ label="Gross P&L (before charges)" value={INR(totalGrossPL,{sign:true})} color={totalGrossPL>=0?'text-emerald-400':'text-red-400'} />}
+              {totalGrossPL!==0 && <LRow_ label="Gross P&L (before charges)" value={INR(totalGrossPL,{sign:true})} color={totalGrossPL>=0?'text-emerald-400':'text-rose-400'} />}
               {(totalTxnChg||totalGLChg)>0 && <LRow_ label="− Exchange charges" value={`-${INR(totalTxnChg||totalGLChg)}`} color="text-orange-400" indent />}
-              {totalNetPL!==0 && <LRow_ label="Net P&L (after exchange charges)" value={INR(totalNetPL,{sign:true})} color={totalNetPL>=0?'text-emerald-400':'text-red-400'} />}
+              {totalNetPL!==0 && <LRow_ label="Net P&L (after exchange charges)" value={INR(totalNetPL,{sign:true})} color={totalNetPL>=0?'text-emerald-400':'text-rose-400'} />}
               {totalDP>0 && <LRow_ label="− DP charges" value={`-${INR(totalDP)}`} color="text-orange-400" indent />}
-              {totalAuction>0 && <LRow_ label="− Auction penalties" value={`-${INR(totalAuction)}`} color="text-red-400" indent />}
-              {totalInterest>0 && <LRow_ label="− Debit interest" value={`-${INR(totalInterest)}`} color="text-red-400" indent />}
-              <LRow_ label="True Net P&L (all costs)" value={INR(totalNetPL-totalDP-totalAuction-totalInterest,{sign:true})} color={(totalNetPL-totalDP-totalAuction-totalInterest)>=0?'text-emerald-400':'text-red-400'} bold divider />
+              {totalAuction>0 && <LRow_ label="− Auction penalties" value={`-${INR(totalAuction)}`} color="text-rose-400" indent />}
+              {totalInterest>0 && <LRow_ label="− Debit interest" value={`-${INR(totalInterest)}`} color="text-rose-400" indent />}
+              <LRow_ label="True Net P&L (all costs)" value={INR(totalNetPL-totalDP-totalAuction-totalInterest,{sign:true})} color={(totalNetPL-totalDP-totalAuction-totalInterest)>=0?'text-emerald-400':'text-rose-400'} bold divider />
             </div>
           </div>
         </div>
@@ -575,13 +575,13 @@ function ClientAnalytics({ profile }: { profile: ClientProfile }) {
       {/* ── BEHAVIOR ── */}
       {tab === 'behavior' && (
         <div className="space-y-4">
-          <div className="rounded-xl bg-slate-900 border border-slate-800 p-4">
+          <div className="v1-card p-4">
             <div className="flex items-center gap-2 mb-4"><Target className="w-4 h-4 text-indigo-400" /><h3 className="text-sm font-bold text-slate-300">Auto-Detected Patterns</h3></div>
             <div className="space-y-3">
               {behaviors.map((b,i) => (
                 <div key={i} className={`rounded-lg p-3 border ${b.severity==='warn'?'bg-amber-950/20 border-amber-900/50':b.severity==='ok'?'bg-emerald-950/20 border-emerald-900/50':'bg-slate-800 border-slate-700'}`}>
                   <div className="flex items-start gap-2">
-                    {b.severity==='warn'?<AlertTriangle className="w-4 h-4 text-amber-400 mt-0.5 flex-shrink-0"/>:b.severity==='ok'?<CheckCircle className="w-4 h-4 text-emerald-400 mt-0.5 flex-shrink-0"/>:<Info className="w-4 h-4 text-blue-400 mt-0.5 flex-shrink-0"/>}
+                    {b.severity==='warn'?<AlertTriangle className="w-4 h-4 text-amber-400 mt-0.5 flex-shrink-0"/>:b.severity==='ok'?<CheckCircle className="w-4 h-4 text-emerald-400 mt-0.5 flex-shrink-0"/>:<Info className="w-4 h-4 text-indigo-400 mt-0.5 flex-shrink-0"/>}
                     <div><div className="text-sm font-semibold text-white">{b.title}</div><div className="text-xs text-slate-400 mt-0.5">{b.body}</div></div>
                   </div>
                 </div>
@@ -591,7 +591,7 @@ function ClientAnalytics({ profile }: { profile: ClientProfile }) {
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             {[
               { emoji:'✅', title:'What works', color:'border-emerald-900/50', items:['COVID crash recovery timing','Early entry in growth stories (Adani Green at ₹85)','Patience on high-conviction plays','Delivery-only — avoids intraday noise'] },
-              { emoji:'❌', title:"Doesn't work",  color:'border-red-900/50',     items:['No stop-loss — positions held to near-zero','Averaging down on structurally broken cos.','Mixing platforms (Kotak + Smallcase) on same stock','Holding dormant losers while paying DP charges'] },
+              { emoji:'❌', title:"Doesn't work",  color:'border-rose-900/50',     items:['No stop-loss — positions held to near-zero','Averaging down on structurally broken cos.','Mixing platforms (Kotak + Smallcase) on same stock','Holding dormant losers while paying DP charges'] },
               { emoji:'📏', title:'Rules to adopt', color:'border-indigo-900/50', items:['Set exit price before every entry','Max 20% capital in sub-₹10 stocks','Max 2 averages on any single position','One platform per stock (T+2 discipline)','Quarterly review — exit −30% with no thesis'] },
             ].map(s => (
               <div key={s.title} className={`rounded-xl bg-slate-900 border ${s.color} p-4`}>
@@ -710,11 +710,11 @@ const onDrop = useCallback((e: React.DragEvent) => { e.preventDefault(); setDrag
   const clientList = Array.from(clients.values()).sort((a, b) => a.clientId.localeCompare(b.clientId));
   const active     = clients.get(activeClient);
 
-  const typeColor: Record<CSVType, string> = { transaction: 'text-blue-400', gain_loss: 'text-emerald-400', ledger: 'text-amber-400', unknown: 'text-red-400' };
+  const typeColor: Record<CSVType, string> = { transaction: 'text-indigo-400', gain_loss: 'text-emerald-400', ledger: 'text-amber-400', unknown: 'text-rose-400' };
   const typeLabel: Record<CSVType, string> = { transaction: 'Transactions', gain_loss: 'Gain/Loss', ledger: 'Ledger', unknown: '⚠ Unknown' };
 
   return (
-    <div className="min-h-screen bg-slate-950 p-4 md:p-6 space-y-5">
+    <div className="min-h-screen p-4 md:p-6 space-y-5">
 
       {/* Header */}
       <div className="flex items-center gap-3">
@@ -739,7 +739,7 @@ const onDrop = useCallback((e: React.DragEvent) => { e.preventDefault(); setDrag
           : <Upload className="w-6 h-6 text-slate-500 mx-auto mb-2" />}
         <p className="text-slate-300 font-semibold text-sm">{uploading ? 'Processing...' : 'Drop CSVs here or click to browse'}</p>
         <div className="flex justify-center gap-4 mt-2 text-[11px] text-slate-500">
-          <span><span className="text-blue-400">●</span> Transaction_Statement_*.csv</span>
+          <span><span className="text-indigo-400">●</span> Transaction_Statement_*.csv</span>
           <span><span className="text-emerald-400">●</span> Gain_Loss_*.csv</span>
           <span><span className="text-amber-400">●</span> Ledger_*.csv</span>
         </div>
@@ -786,15 +786,15 @@ const onDrop = useCallback((e: React.DragEvent) => { e.preventDefault(); setDrag
 
       {/* ── Active client files ── */}
       {active && (
-        <div className="rounded-xl bg-slate-900 border border-slate-800 p-4">
+        <div className="v1-card p-4">
           <div className="flex items-center justify-between mb-3">
-            <h3 className="text-xs font-bold text-slate-400 uppercase tracking-widest flex items-center gap-2">
+            <h3 className="text-xs font-bold text-slate-400 font-display uppercase tracking-widest flex items-center gap-2">
               <FileText className="w-3.5 h-3.5" />
               {active.clientName ? `${active.clientName} (${active.clientId})` : active.clientId} — {active.files.length} file{active.files.length !== 1 ? 's' : ''}
               <span className="text-slate-600 font-normal normal-case">· saved {new Date(active.lastUpdated).toLocaleDateString('en-IN')}</span>
             </h3>
             <button onClick={() => deleteClient(active.clientId)}
-              className="flex items-center gap-1 text-xs text-red-500 hover:text-red-400 transition-colors">
+              className="flex items-center gap-1 text-xs text-rose-500 hover:text-rose-400 transition-colors">
               <Trash2 className="w-3 h-3" /> Delete client
             </button>
           </div>

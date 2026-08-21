@@ -231,9 +231,9 @@ export function OptionsDeskPage({ onSelectSymbol }: { onSelectSymbol?: (symbol: 
 
 function Metric({ title, value }: { title: string; value: string }) {
   return (
-    <div className="rounded-2xl border border-[var(--v5-border)] bg-[var(--v5-surface-2)] p-3">
-      <div className="text-[11px] font-semibold uppercase tracking-wide text-[var(--v5-muted)]">{title}</div>
-      <div className="mt-1 text-lg font-bold text-[var(--v5-ink)]">{value}</div>
+    <div className="v1-card p-3">
+      <div className="text-[11px] font-semibold font-display uppercase tracking-wide text-slate-400">{title}</div>
+      <div className="mt-1 text-lg font-bold font-data text-slate-100">{value}</div>
     </div>
   );
 }

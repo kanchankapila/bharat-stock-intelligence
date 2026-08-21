@@ -95,10 +95,10 @@ export const MarketIndices: React.FC<{ onSelect?: (id: string, name: string) => 
                     item.hasData && 'animate-pulse',
                     !item.hasData ? 'bg-slate-500' : isUp ? 'bg-emerald-400' : 'bg-rose-400'
                   )} />
-                  <span className="text-[10px] font-semibold text-slate-400 uppercase tracking-widest">{item.name}</span>
+                  <span className="text-[10px] font-semibold text-slate-400 font-display uppercase tracking-widest">{item.name}</span>
                 </div>
                 <span className={cn(
-                  'text-[9px] font-semibold px-2 py-0.5 rounded-full uppercase tracking-wider border',
+                  'text-[9px] font-semibold px-2 py-0.5 rounded-full font-display uppercase tracking-wider border',
                   !item.hasData
                     ? 'bg-slate-700/20 text-slate-400 border-slate-600/30'
                     : isUp

@@ -233,10 +233,10 @@ const TIER_COLOR: Record<string, string> = {
 };
 
 const StatTile: React.FC<{ label: string; value: string; sub?: string }> = ({ label, value, sub }) => (
-  <div className="glass rounded-xl px-4 py-3 border border-[var(--v6-border)]">
-    <p className="text-[10px] font-bold text-[var(--v6-faint)] uppercase tracking-widest mb-1">{label}</p>
-    <p className="text-lg font-bold font-mono text-[var(--v6-ink)]">{value}</p>
-    {sub && <p className="text-[10px] text-[var(--v6-faint)] mt-0.5 truncate">{sub}</p>}
+  <div className="v1-card px-4 py-3">
+    <p className="text-[10px] font-bold text-slate-400 font-display uppercase tracking-widest mb-1">{label}</p>
+    <p className="text-lg font-bold font-data text-slate-100">{value}</p>
+    {sub && <p className="text-[10px] text-slate-500 mt-0.5 truncate">{sub}</p>}
   </div>
 );
 
@@ -306,7 +306,7 @@ const ScreenerBrowser: React.FC<{ onSelectStock?: (symbol: string) => void }> = 
       )}
 
       {/* Filter bar */}
-      <div className="glass rounded-xl p-3 space-y-2">
+      <div className="v1-card p-3 space-y-2">
         <div className="flex items-center gap-1.5">
           <Filter className="w-3 h-3 text-[var(--v6-faint)]" />
           <p className="text-[10px] font-bold text-[var(--v6-faint)] uppercase tracking-widest">Filters</p>

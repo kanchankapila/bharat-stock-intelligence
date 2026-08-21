@@ -117,22 +117,22 @@ export const V1Backtest: React.FC<{ stocks?: MarketData[] }> = () => {
           <Card title="Strategy Parameters" icon={Filter}>
             <div className="space-y-5">
                <div className="space-y-2">
-                 <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest pl-1">Target Symbol</label>
+                 <label className="text-[10px] font-black text-slate-400 font-display uppercase tracking-widest pl-1">Target Symbol</label>
                  <input
                     type="text"
                     value={symbol}
                     onChange={(e) => setSymbol(e.target.value.toUpperCase())}
-                    className="w-full glass-strong border border-slate-800/50 rounded-xl p-3 text-xs font-bold text-white focus:outline-none focus:ring-1 focus:ring-blue-500 uppercase"
+                    className="w-full glass-strong border border-slate-800/50 rounded-xl p-3 text-xs font-bold text-white focus:outline-none focus:ring-1 focus:ring-indigo-500 uppercase"
                     placeholder="e.g. RELIANCE"
                  />
                </div>
 
                <div className="space-y-2">
-                 <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest pl-1">Timeframe</label>
+                 <label className="text-[10px] font-black text-slate-400 font-display uppercase tracking-widest pl-1">Timeframe</label>
                  <select
                     value={timeframe}
                     onChange={(e) => setTimeframe(e.target.value)}
-                    className="w-full glass-strong border border-slate-800/50 rounded-xl p-3 text-xs font-bold text-white focus:outline-none focus:ring-1 focus:ring-blue-500"
+                    className="w-full glass-strong border border-slate-800/50 rounded-xl p-3 text-xs font-bold text-white focus:outline-none focus:ring-1 focus:ring-indigo-500"
                  >
                    <option>Daily Candlesticks</option>
                    <option>1H Momentum</option>
@@ -141,18 +141,18 @@ export const V1Backtest: React.FC<{ stocks?: MarketData[] }> = () => {
                </div>
 
                <div className="pt-4 border-t border-slate-800/30 space-y-4">
-                  <h4 className="text-[10px] font-black text-blue-500 uppercase tracking-[0.2em] mb-2">Technical Indicators</h4>
+                  <h4 className="text-[10px] font-black text-indigo-500 uppercase tracking-[0.2em] mb-2">Technical Indicators</h4>
 
                   <div className="grid grid-cols-2 gap-4">
                     <div className="space-y-1.5">
-                      <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest">RSI Upper (Sell)</label>
+                      <label className="text-[9px] font-black text-slate-400 font-display uppercase tracking-widest">RSI Upper (Sell)</label>
                       <input
                         type="number" value={rsiUpper} onChange={(e) => setRsiUpper(parseInt(e.target.value))}
                         className="w-full glass-strong border border-slate-800/50 rounded-lg p-2 text-xs font-bold text-white"
                       />
                     </div>
                     <div className="space-y-1.5">
-                      <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest">RSI Lower (Buy)</label>
+                      <label className="text-[9px] font-black text-slate-400 font-display uppercase tracking-widest">RSI Lower (Buy)</label>
                       <input
                         type="number" value={rsiLower} onChange={(e) => setRsiLower(parseInt(e.target.value))}
                         className="w-full glass-strong border border-slate-800/50 rounded-lg p-2 text-xs font-bold text-white"
@@ -162,14 +162,14 @@ export const V1Backtest: React.FC<{ stocks?: MarketData[] }> = () => {
 
                   <div className="grid grid-cols-2 gap-4">
                     <div className="space-y-1.5">
-                      <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest">EMA Short Period</label>
+                      <label className="text-[9px] font-black text-slate-400 font-display uppercase tracking-widest">EMA Short Period</label>
                       <input
                         type="number" value={emaShort} onChange={(e) => setEmaShort(parseInt(e.target.value))}
                         className="w-full glass-strong border border-slate-800/50 rounded-lg p-2 text-xs font-bold text-white"
                       />
                     </div>
                     <div className="space-y-1.5">
-                      <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest">EMA Long Period</label>
+                      <label className="text-[9px] font-black text-slate-400 font-display uppercase tracking-widest">EMA Long Period</label>
                       <input
                         type="number" value={emaLong} onChange={(e) => setEmaLong(parseInt(e.target.value))}
                         className="w-full glass-strong border border-slate-800/50 rounded-lg p-2 text-xs font-bold text-white"
@@ -183,7 +183,7 @@ export const V1Backtest: React.FC<{ stocks?: MarketData[] }> = () => {
                    onClick={startBacktest}
                    disabled={isRunning}
                    className={cn(
-                     "flex-1 py-3 bg-blue-600 hover:bg-blue-700 text-white font-black rounded-xl text-[10px] tracking-widest uppercase transition-all shadow-lg shadow-blue-500/20",
+                     "flex-1 py-3 bg-indigo-600 hover:bg-indigo-700 text-white font-black rounded-xl text-[10px] tracking-widest uppercase transition-all shadow-lg shadow-indigo-500/20",
                      isRunning && "opacity-50 cursor-not-allowed"
                    )}
                  >
@@ -207,13 +207,13 @@ export const V1Backtest: React.FC<{ stocks?: MarketData[] }> = () => {
                   <button
                     key={s.id}
                     onClick={() => loadStrategy(s)}
-                    className="w-full text-left p-3 glass-strong border border-slate-800/50 rounded-xl hover:border-blue-500 transition-all group"
+                    className="w-full text-left p-3 glass-strong border border-slate-800/50 rounded-xl hover:border-indigo-500 transition-all group"
                   >
-                    <p className="text-xs font-black text-white italic group-hover:text-blue-400 uppercase tracking-tight">{s.name}</p>
+                    <p className="text-xs font-black text-white italic group-hover:text-indigo-400 uppercase tracking-tight">{s.name}</p>
                     <div className="flex gap-2 mt-1">
-                      <span className="text-[8px] font-bold text-slate-400 uppercase tracking-widest">{s.symbol}</span>
-                      <span className="text-[8px] font-bold text-slate-300 uppercase tracking-widest">•</span>
-                      <span className="text-[8px] font-bold text-slate-400 uppercase tracking-widest">{s.timeframe}</span>
+                      <span className="text-[8px] font-bold text-slate-400 font-display uppercase tracking-widest">{s.symbol}</span>
+                      <span className="text-[8px] font-bold text-slate-300 font-display uppercase tracking-widest">•</span>
+                      <span className="text-[8px] font-bold text-slate-400 font-display uppercase tracking-widest">{s.timeframe}</span>
                     </div>
                   </button>
                 ))}
@@ -226,8 +226,8 @@ export const V1Backtest: React.FC<{ stocks?: MarketData[] }> = () => {
           <Card title="Simulation Analysis" icon={Activity} className="h-full">
             {!results && (
               <div className="h-full min-h-[400px] flex flex-col items-center justify-center p-12 text-center relative overflow-hidden">
-                <div className="w-24 h-24 bg-blue-600/10 rounded-full flex items-center justify-center mb-6">
-                  <Activity className={cn("text-blue-500 w-12 h-12", isRunning && "animate-pulse")} />
+                <div className="w-24 h-24 bg-indigo-600/10 rounded-full flex items-center justify-center mb-6">
+                  <Activity className={cn("text-indigo-500 w-12 h-12", isRunning && "animate-pulse")} />
                 </div>
                 <h4 className="text-white font-black text-2xl italic uppercase tracking-tighter">AI Scenario Simulation</h4>
                 <p className="text-slate-400 text-sm mt-3 max-w-sm mx-auto leading-relaxed">
@@ -239,7 +239,7 @@ export const V1Backtest: React.FC<{ stocks?: MarketData[] }> = () => {
                       initial={{ left: '-100%' }}
                       animate={{ left: '100%' }}
                       transition={{ duration: 1.5, repeat: Infinity, ease: 'linear' }}
-                      className="absolute top-0 h-1 w-1/3 bg-blue-500 shadow-[0_0_15px_rgba(59,130,246,0.8)]"
+                      className="absolute top-0 h-1 w-1/3 bg-indigo-500 shadow-[0_0_15px_rgba(59,130,246,0.8)]"
                     />
                   </div>
                 )}
@@ -251,13 +251,13 @@ export const V1Backtest: React.FC<{ stocks?: MarketData[] }> = () => {
                  <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                    {[
                      { label: 'Returns', value: `${results.totalReturn >= 0 ? '+' : ''}${results.totalReturn}%`, icon: TrendingUp, color: results.totalReturn >= 0 ? 'text-emerald-400' : 'text-rose-400' },
-                     { label: 'Profit Factor', value: results.profitFactor, icon: Activity, color: 'text-blue-400' },
+                     { label: 'Profit Factor', value: results.profitFactor, icon: Activity, color: 'text-indigo-400' },
                      { label: 'Win Rate', value: `${results.winRate}%`, icon: Zap, color: 'text-amber-400' },
                      { label: 'Max DD', value: `${results.maxDrawdown}%`, icon: ArrowDownRight, color: 'text-rose-400' },
                    ].map(stat => (
                      <div key={stat.label} className="p-5 glass-strong border border-slate-800/50 rounded-2xl relative overflow-hidden group">
                        <stat.icon className="w-4 h-4 text-slate-200 absolute -right-1 -top-1 scale-[300%] rotate-12 opacity-50 group-hover:scale-[400%] transition-transform" />
-                       <p className="text-slate-400 text-[10px] font-black uppercase tracking-widest relative z-10">{stat.label}</p>
+                       <p className="text-slate-400 text-[10px] font-black font-display uppercase tracking-widest relative z-10">{stat.label}</p>
                        <p className={cn("text-2xl font-black mt-2 relative z-10 tracking-tighter", stat.color)}>{stat.value}</p>
                      </div>
                    ))}
@@ -266,17 +266,17 @@ export const V1Backtest: React.FC<{ stocks?: MarketData[] }> = () => {
                  <div className="p-6 glass-strong rounded-3xl border border-slate-800/50">
                    <div className="flex justify-between items-center mb-8">
                      <div>
-                       <h5 className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Equity Growth</h5>
+                       <h5 className="text-[10px] font-black text-slate-400 font-display uppercase tracking-widest mb-1">Equity Growth</h5>
                        <p className="text-sm font-black text-white italic">Backtest Period: 2014 - {new Date().getFullYear()}</p>
                      </div>
                      <div className="flex gap-6">
                         <div className="flex items-center gap-2">
-                           <div className="w-2.5 h-2.5 bg-blue-500 rounded-full" />
-                           <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Portfolio</span>
+                           <div className="w-2.5 h-2.5 bg-indigo-500 rounded-full" />
+                           <span className="text-[9px] font-black text-slate-400 font-display uppercase tracking-widest">Portfolio</span>
                         </div>
                         <div className="flex items-center gap-2">
                            <div className="w-2.5 h-2.5 bg-rose-500/20 border border-rose-500 rounded-full" />
-                           <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Drawdown</span>
+                           <span className="text-[9px] font-black text-slate-400 font-display uppercase tracking-widest">Drawdown</span>
                         </div>
                      </div>
                    </div>
@@ -285,8 +285,8 @@ export const V1Backtest: React.FC<{ stocks?: MarketData[] }> = () => {
                        <AreaChart data={results.equityCurve}>
                          <defs>
                            <linearGradient id="equityGradient" x1="0" y1="0" x2="0" y2="1">
-                             <stop offset="5%" stopColor="#3b82f6" stopOpacity={0.3}/>
-                             <stop offset="95%" stopColor="#3b82f6" stopOpacity={0}/>
+                             <stop offset="5%" stopColor="#6366f1" stopOpacity={0.3}/>
+                             <stop offset="95%" stopColor="#6366f1" stopOpacity={0}/>
                            </linearGradient>
                            <linearGradient id="drawdownGradient" x1="0" y1="0" x2="0" y2="1">
                              <stop offset="5%" stopColor="#f43f5e" stopOpacity={0.1}/>
@@ -302,19 +302,19 @@ export const V1Backtest: React.FC<{ stocks?: MarketData[] }> = () => {
                            labelStyle={{ color: '#64748b', fontSize: '10px', fontWeight: 'bold' }}
                            itemStyle={{ fontSize: '12px', fontWeight: 'bold', color: '#fff' }}
                          />
-                         <Area yAxisId="left" type="monotone" dataKey="equity" stroke="#3b82f6" fillOpacity={1} fill="url(#equityGradient)" strokeWidth={3} />
+                         <Area yAxisId="left" type="monotone" dataKey="equity" stroke="#6366f1" fillOpacity={1} fill="url(#equityGradient)" strokeWidth={3} />
                          <Area yAxisId="right" type="monotone" dataKey="drawdown" stroke="#f43f5e" fillOpacity={1} fill="url(#drawdownGradient)" strokeWidth={1} strokeDasharray="3 3" />
                        </AreaChart>
                      </ResponsiveContainer>
                    </div>
                  </div>
 
-                 <div className="p-6 bg-blue-500/10 border border-blue-500/20 rounded-3xl flex flex-col md:flex-row items-center justify-between gap-6 overflow-hidden relative">
+                 <div className="p-6 bg-indigo-500/10 border border-indigo-500/20 rounded-3xl flex flex-col md:flex-row items-center justify-between gap-6 overflow-hidden relative">
                     <div className="absolute top-0 right-0 p-4 opacity-5">
-                       <Zap className="w-32 h-32 text-blue-500" />
+                       <Zap className="w-32 h-32 text-indigo-500" />
                     </div>
                     <div className="flex items-center gap-4 relative z-10">
-                        <div className="w-12 h-12 bg-blue-500 text-blue-950 rounded-2xl flex items-center justify-center font-black italic">
+                        <div className="w-12 h-12 bg-indigo-500 text-indigo-950 rounded-2xl flex items-center justify-center font-black italic">
                            AI
                         </div>
                         <div>
@@ -328,7 +328,7 @@ export const V1Backtest: React.FC<{ stocks?: MarketData[] }> = () => {
                     </div>
                     <button
                       onClick={startBacktest}
-                      className="px-6 py-3 bg-white text-blue-900 font-black rounded-xl text-[10px] tracking-widest uppercase hover:bg-blue-50 transition-all relative z-10"
+                      className="px-6 py-3 bg-white text-indigo-900 font-black rounded-xl text-[10px] tracking-widest uppercase hover:bg-indigo-50 transition-all relative z-10"
                     >
                       Optimize Strategy
                     </button>
@@ -348,17 +348,17 @@ export const V1Backtest: React.FC<{ stocks?: MarketData[] }> = () => {
         </p>
         <div className="flex flex-wrap items-end gap-4 mb-6">
           <div className="space-y-1.5">
-            <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Start</label>
+            <label className="text-[9px] font-black text-slate-400 font-display uppercase tracking-widest">Start</label>
             <input type="date" value={wfStart} onChange={(e) => setWfStart(e.target.value)}
               className="glass-strong border border-slate-800/50 rounded-lg p-2 text-xs font-bold text-white" />
           </div>
           <div className="space-y-1.5">
-            <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest">End</label>
+            <label className="text-[9px] font-black text-slate-400 font-display uppercase tracking-widest">End</label>
             <input type="date" value={wfEnd} onChange={(e) => setWfEnd(e.target.value)}
               className="glass-strong border border-slate-800/50 rounded-lg p-2 text-xs font-bold text-white" />
           </div>
           <div className="space-y-1.5">
-            <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Mode</label>
+            <label className="text-[9px] font-black text-slate-400 font-display uppercase tracking-widest">Mode</label>
             <select value={wfMode} onChange={(e) => setWfMode(e.target.value as any)}
               className="glass-strong border border-slate-800/50 rounded-lg p-2 text-xs font-bold text-white">
               <option value="rolling">Rolling (365d IS / 90d OOS)</option>
@@ -366,7 +366,7 @@ export const V1Backtest: React.FC<{ stocks?: MarketData[] }> = () => {
             </select>
           </div>
           <div className="space-y-1.5">
-            <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Objective</label>
+            <label className="text-[9px] font-black text-slate-400 font-display uppercase tracking-widest">Objective</label>
             <select value={wfObjective} onChange={(e) => setWfObjective(e.target.value as any)}
               className="glass-strong border border-slate-800/50 rounded-lg p-2 text-xs font-bold text-white">
               <option value="sharpe">Sharpe</option>
@@ -377,7 +377,7 @@ export const V1Backtest: React.FC<{ stocks?: MarketData[] }> = () => {
             onClick={startWalkForward}
             disabled={wfRunning}
             className={cn(
-              "py-2.5 px-6 bg-blue-600 hover:bg-blue-700 text-white font-black rounded-xl text-[10px] tracking-widest uppercase transition-all",
+              "py-2.5 px-6 bg-indigo-600 hover:bg-indigo-700 text-white font-black rounded-xl text-[10px] tracking-widest uppercase transition-all",
               wfRunning && "opacity-50 cursor-not-allowed"
             )}
           >
@@ -400,7 +400,7 @@ export const V1Backtest: React.FC<{ stocks?: MarketData[] }> = () => {
                 { label: 'Max DD', value: `${wfCombined.max_drawdown_pct ?? 0}%` },
               ].map(stat => (
                 <div key={stat.label} className="p-4 glass-strong border border-slate-800/50 rounded-2xl">
-                  <p className="text-slate-400 text-[10px] font-black uppercase tracking-widest">{stat.label}</p>
+                  <p className="text-slate-400 text-[10px] font-black font-display uppercase tracking-widest">{stat.label}</p>
                   <p className="text-xl font-black mt-1 text-white tracking-tighter">{stat.value}</p>
                 </div>
               ))}
@@ -410,7 +410,7 @@ export const V1Backtest: React.FC<{ stocks?: MarketData[] }> = () => {
               <div className="overflow-x-auto">
                 <table className="w-full text-xs">
                   <thead>
-                    <tr className="text-[9px] font-black text-slate-400 uppercase tracking-widest border-b border-slate-800/50">
+                    <tr className="text-[9px] font-black text-slate-400 font-display uppercase tracking-widest border-b border-slate-800/50">
                       <th className="text-left p-2">Fold</th>
                       <th className="text-left p-2">OOS Window</th>
                       <th className="text-left p-2">Best Params</th>
@@ -462,7 +462,7 @@ export const V1Backtest: React.FC<{ stocks?: MarketData[] }> = () => {
                   type="text"
                   value={strategyName}
                   onChange={(e) => setStrategyName(e.target.value)}
-                  className="w-full glass-strong border border-slate-800/50 rounded-2xl p-4 text-xs font-bold text-white focus:outline-none focus:ring-1 focus:ring-blue-500"
+                  className="w-full glass-strong border border-slate-800/50 rounded-2xl p-4 text-xs font-bold text-white focus:outline-none focus:ring-1 focus:ring-indigo-500"
                   placeholder="e.g. Aggressive RSI Scalper"
                   autoFocus
                 />
@@ -476,7 +476,7 @@ export const V1Backtest: React.FC<{ stocks?: MarketData[] }> = () => {
                   <button
                     onClick={handleSaveStrategy}
                     disabled={!strategyName}
-                    className="flex-1 py-3 bg-blue-600 text-white font-black rounded-xl text-[10px] tracking-widest uppercase transition-all disabled:opacity-50"
+                    className="flex-1 py-3 bg-indigo-600 text-white font-black rounded-xl text-[10px] tracking-widest uppercase transition-all disabled:opacity-50"
                   >
                     Confirm Save
                   </button>

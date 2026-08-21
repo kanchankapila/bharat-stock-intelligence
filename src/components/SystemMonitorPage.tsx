@@ -70,9 +70,9 @@ function fmtIstSchedule(iso: string | null | undefined): string {
 
 const STATE_CONFIG: Record<RunState, { label: string; color: string; bg: string; icon: any }> = {
   never:   { label: 'Never Run', color: 'text-slate-400',  bg: 'bg-slate-800',    icon: Clock },
-  running: { label: 'Running',   color: 'text-blue-400',   bg: 'bg-blue-900/40',  icon: RefreshCw },
+  running: { label: 'Running',   color: 'text-indigo-400',   bg: 'bg-indigo-900/40',  icon: RefreshCw },
   success: { label: 'OK',        color: 'text-emerald-400',bg: 'bg-emerald-900/30',icon: CheckCircle },
-  failed:  { label: 'Failed',    color: 'text-red-400',    bg: 'bg-red-900/30',   icon: XCircle },
+  failed:  { label: 'Failed',    color: 'text-rose-400',    bg: 'bg-rose-900/30',   icon: XCircle },
   stale:   { label: 'Stale',     color: 'text-amber-400',  bg: 'bg-amber-900/30', icon: AlertTriangle },
 };
 
@@ -103,7 +103,7 @@ function ScriptCard({ script, onTrigger, triggering }: {
           <CatIcon className="w-4 h-4 text-slate-500 shrink-0" />
           <span className="text-sm font-semibold text-white whitespace-normal break-words leading-tight">{script.label}</span>
           {script.critical && (
-            <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-indigo-900/60 text-indigo-300 uppercase tracking-wider shrink-0">
+            <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-indigo-900/60 text-indigo-300 font-display uppercase tracking-wider shrink-0">
               Critical
             </span>
           )}
@@ -123,7 +123,7 @@ function ScriptCard({ script, onTrigger, triggering }: {
           {Object.entries(script.stats).map(([k, v]) => (
             <div key={k} className="text-[11px]">
               <span className="text-slate-500 capitalize">{k}: </span>
-              <span className="text-slate-200 font-mono font-semibold">{String(v ?? '—')}</span>
+              <span className="text-slate-200 font-data font-semibold">{String(v ?? '—')}</span>
             </div>
           ))}
         </div>
@@ -131,7 +131,7 @@ function ScriptCard({ script, onTrigger, triggering }: {
 
       {/* Error */}
       {script.error && (
-        <div className="text-[11px] text-red-400 bg-red-900/20 rounded px-2 py-1 font-mono whitespace-pre-wrap break-words leading-snug">
+        <div className="text-[11px] text-rose-400 bg-rose-900/20 rounded px-2 py-1 font-data whitespace-pre-wrap break-words leading-snug">
           {script.error}
         </div>
       )}
@@ -153,8 +153,8 @@ function ScriptCard({ script, onTrigger, triggering }: {
             Next schedule: <span className="text-slate-400">{fmtIstSchedule(script.nextScheduledAt ?? null)}</span>
           </div>
           <div className="text-slate-600">
-            Runs: <span className="text-slate-400 font-mono">{script.runCount ?? 0}</span>
-            {' '}· Fails: <span className="text-slate-400 font-mono">{script.failCount ?? 0}</span>
+            Runs: <span className="text-slate-400 font-data">{script.runCount ?? 0}</span>
+            {' '}· Fails: <span className="text-slate-400 font-data">{script.failCount ?? 0}</span>
           </div>
           <div className="text-[10px] text-slate-600 whitespace-normal break-words">{script.schedule}</div>
         </div>
@@ -228,7 +228,7 @@ export default function SystemMonitorPage() {
   };
 
   return (
-    <div className="min-h-screen bg-slate-950 p-4 md:p-6 space-y-6">
+    <div className="min-h-screen p-4 md:p-6 space-y-6">
 
       {/* Page header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
@@ -271,9 +271,9 @@ export default function SystemMonitorPage() {
       <div className="grid grid-cols-5 gap-3">
         {[
           { label: 'OK',      val: summary.ok,      color: 'text-emerald-400', bg: 'bg-emerald-900/20', icon: CheckCircle },
-          { label: 'Running', val: summary.running,  color: 'text-blue-400',   bg: 'bg-blue-900/20',    icon: RefreshCw },
+          { label: 'Running', val: summary.running,  color: 'text-indigo-400',   bg: 'bg-indigo-900/20',    icon: RefreshCw },
           { label: 'Stale',   val: summary.stale,    color: 'text-amber-400',  bg: 'bg-amber-900/20',   icon: AlertTriangle },
-          { label: 'Failed',  val: summary.failed,   color: 'text-red-400',    bg: 'bg-red-900/20',     icon: XCircle },
+          { label: 'Failed',  val: summary.failed,   color: 'text-rose-400',    bg: 'bg-rose-900/20',     icon: XCircle },
           { label: 'Never',   val: summary.never,    color: 'text-slate-400',  bg: 'bg-slate-800',      icon: Clock },
         ].map(({ label, val, color, bg, icon: Icon }) => (
           <div key={label} className={`rounded-xl p-3 flex items-center gap-2 ${bg}`}>
@@ -288,14 +288,14 @@ export default function SystemMonitorPage() {
 
       {/* Schedule + status matrix (IST) */}
       {(scripts || []).length > 0 && (
-        <div className="rounded-xl border border-slate-800 bg-slate-900/50 p-4">
-          <h3 className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-3 flex items-center gap-2">
+        <div className="v1-card p-4">
+          <h3 className="text-xs font-bold text-slate-400 font-display uppercase tracking-widest mb-3 flex items-center gap-2">
             <Clock className="w-3.5 h-3.5" /> Job Schedule Matrix (IST)
           </h3>
           <div className="overflow-x-auto">
             <table className="w-full text-left border-collapse">
               <thead>
-                <tr className="border-b border-slate-800 text-[10px] text-slate-500 uppercase tracking-wider">
+                <tr className="border-b border-slate-800 text-[10px] text-slate-500 font-display uppercase tracking-wider">
                   <th className="py-2 pr-3">Job</th>
                   <th className="py-2 pr-3">Category</th>
                   <th className="py-2 pr-3">Configured Schedule</th>
@@ -343,7 +343,7 @@ export default function SystemMonitorPage() {
           <div key={cat} className="space-y-3">
             <div className="flex items-center gap-2">
               <CatIcon className="w-4 h-4 text-slate-500" />
-              <h2 className="text-sm font-bold text-slate-300 uppercase tracking-widest">{cat}</h2>
+              <h2 className="text-sm font-bold text-slate-300 font-display uppercase tracking-widest">{cat}</h2>
               <div className="flex-1 h-px bg-slate-800" />
             </div>
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
@@ -361,8 +361,8 @@ export default function SystemMonitorPage() {
       })}
 
       {/* Schedule reference */}
-      <div className="rounded-xl border border-slate-800 bg-slate-900/50 p-4">
-        <h3 className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-3 flex items-center gap-2">
+      <div className="v1-card p-4">
+        <h3 className="text-xs font-bold text-slate-400 font-display uppercase tracking-widest mb-3 flex items-center gap-2">
           <Clock className="w-3.5 h-3.5" /> Auto-Schedule Reference
         </h3>
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2">

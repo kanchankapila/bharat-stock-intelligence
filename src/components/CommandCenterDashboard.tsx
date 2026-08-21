@@ -26,7 +26,7 @@ const REGIME_STYLE: Record<string, { color: string; icon: string; bg: string }> 
   BEAR:     { color: 'text-rose-400',    icon: '▼', bg: 'bg-rose-500/10 border-rose-500/30'       },
   SIDEWAYS: { color: 'text-amber-400',   icon: '↔', bg: 'bg-amber-500/10 border-amber-500/30'    },
   HIGH_VOL: { color: 'text-amber-400',   icon: '⚡', bg: 'bg-amber-500/10 border-amber-500/30'    },
-  CRASH:    { color: 'text-red-400',     icon: '☠', bg: 'bg-red-500/10 border-red-500/30'         },
+  CRASH:    { color: 'text-rose-400',     icon: '☠', bg: 'bg-rose-500/10 border-rose-500/30'         },
 };
 
 const fmt2 = (n: number | null | undefined) =>
@@ -200,7 +200,7 @@ function EodPickCard({ pick, onSelect }: { pick: any; onSelect: (sym: string) =>
 function IntradayCard({ sig, onSelect }: { sig: any; onSelect: (sym: string) => void }) {
   return (
     <div
-      className="rounded-lg border border-slate-700/50 bg-slate-800/40 p-3 cursor-pointer hover:border-slate-600 transition-colors"
+      className="v1-card p-3 cursor-pointer hover:border-slate-600 transition-colors"
       onClick={() => onSelect(sig.symbol)}
     >
       <div className="flex items-center justify-between mb-1">
@@ -355,7 +355,7 @@ export function CommandCenterDashboard({ onSelectStock }: { onSelectStock: (sym:
                 </span>
               </div>
               {regime?.name === 'CRASH' ? (
-                <div className="flex items-center gap-2 p-4 rounded-xl bg-red-500/10 border border-red-500/30 text-red-400 text-sm">
+                <div className="flex items-center gap-2 p-4 rounded-xl bg-rose-500/10 border border-rose-500/30 text-rose-400 text-sm">
                   <AlertTriangle className="w-4 h-4 flex-none" />
                   Intraday signals disabled — CRASH regime active. Preserve capital.
                 </div>

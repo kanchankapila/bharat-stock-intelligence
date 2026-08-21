@@ -60,7 +60,7 @@ const SIG_META: Record<SignalType, { label: string; short: string; color: string
   OVERSOLD_RECOVERY:  { label: 'Oversold Recovery',    short: 'OB Recov',   color: 'text-teal-400',   bg: 'bg-teal-500/10 border-teal-500/30' },
   EMA_BULL_STACK:     { label: 'EMA Bull Stack',       short: 'EMA Stack',  color: 'text-lime-400',   bg: 'bg-lime-500/10 border-lime-500/30' },
   WEEK_52_BREAKOUT:   { label: '52-Week Breakout',     short: '52W High',   color: 'text-orange-400', bg: 'bg-orange-500/10 border-orange-500/30' },
-  BULLISH_ENGULFING:  { label: 'Bullish Engulfing',    short: 'Engulfing',  color: 'text-green-400',  bg: 'bg-green-500/10 border-green-500/30' },
+  BULLISH_ENGULFING:  { label: 'Bullish Engulfing',    short: 'Engulfing',  color: 'text-emerald-400',  bg: 'bg-emerald-500/10 border-emerald-500/30' },
   SUPERTREND_CROSS:   { label: 'SuperTrend Crossover', short: 'ST Flip↑',   color: 'text-cyan-400',   bg: 'bg-cyan-500/10 border-cyan-500/30' },
   NR7_COMPRESSION:     { label: 'NR7 Compression',       short: 'NR7',         color: 'text-purple-400', bg: 'bg-purple-500/10 border-purple-500/30' },
   VOLUME_ACCUMULATION:    { label: 'Volume Accumulation',   short: 'Vol Accum',    color: 'text-rose-400',    bg: 'bg-rose-500/10 border-rose-500/30' },
@@ -70,7 +70,7 @@ const SIG_META: Record<SignalType, { label: string; short: string; color: string
   PCR_EXTREME:            { label: 'PCR Extreme',           short: 'PCR Ext',      color: 'text-purple-300',  bg: 'bg-purple-500/10 border-purple-400/30' },
   DEATH_CROSS:            { label: 'Death Cross',           short: 'Death ✗',      color: 'text-rose-500',    bg: 'bg-rose-600/10 border-rose-600/30' },
   RSI_BEARISH_DIVERGENCE: { label: 'RSI Bear Divergence',   short: 'RSI Bear',     color: 'text-orange-400',  bg: 'bg-orange-600/10 border-orange-600/30' },
-  DISTRIBUTION_DAY:       { label: 'Distribution Day',      short: 'Distribute',   color: 'text-red-400',     bg: 'bg-red-600/10 border-red-600/30' },
+  DISTRIBUTION_DAY:       { label: 'Distribution Day',      short: 'Distribute',   color: 'text-rose-400',     bg: 'bg-rose-600/10 border-rose-600/30' },
   CONVERGENCE_SIGNAL:     { label: 'Convergence Signal',    short: 'Converge',     color: 'text-emerald-400', bg: 'bg-emerald-500/10 border-emerald-500/30' },
   REGIME_SECTOR_SIGNAL:   { label: 'Regime + Sector',       short: 'Regime+Sec',   color: 'text-indigo-400',  bg: 'bg-indigo-500/10 border-indigo-500/30' },
   QUALITY_OVERSOLD_SIGNAL:{ label: 'Quality Oversold',      short: 'Qual Ovsld',   color: 'text-teal-400',    bg: 'bg-teal-500/10 border-teal-500/30' },
@@ -181,25 +181,25 @@ function TimeframeReturnsCell({ symbol }: { symbol: string }) {
     <div ref={containerRef} className="flex items-center gap-2.5 text-[10px] tabular-nums whitespace-nowrap">
       {w1 && (
         <span className="flex flex-col">
-          <span className="text-[7.5px] text-slate-500 uppercase tracking-wider font-bold">1W</span>
+          <span className="text-[7.5px] text-slate-500 font-display uppercase tracking-wider font-bold">1W</span>
           <span className={w1.color}>{w1.formatted}</span>
         </span>
       )}
       {m1 && (
         <span className="flex flex-col">
-          <span className="text-[7.5px] text-slate-500 uppercase tracking-wider font-bold">1M</span>
+          <span className="text-[7.5px] text-slate-500 font-display uppercase tracking-wider font-bold">1M</span>
           <span className={m1.color}>{m1.formatted}</span>
         </span>
       )}
       {m3 && (
         <span className="flex flex-col">
-          <span className="text-[7.5px] text-slate-500 uppercase tracking-wider font-bold">3M</span>
+          <span className="text-[7.5px] text-slate-500 font-display uppercase tracking-wider font-bold">3M</span>
           <span className={m3.color}>{m3.formatted}</span>
         </span>
       )}
       {y1 && (
         <span className="flex flex-col">
-          <span className="text-[7.5px] text-slate-500 uppercase tracking-wider font-bold">1Y</span>
+          <span className="text-[7.5px] text-slate-500 font-display uppercase tracking-wider font-bold">1Y</span>
           <span className={y1.color}>{y1.formatted}</span>
         </span>
       )}
@@ -229,8 +229,8 @@ function ExpandedRow({ r, onSelectStock }: { r: SignalRow; onSelectStock: (s: st
               if (!m) return null;
               return (
                 <div key={i} className={cn('rounded-lg border px-3 py-2 flex items-start gap-3', m.bg)}>
-                  <span className={cn('text-[10px] font-black uppercase tracking-wider shrink-0 mt-0.5', m.color)}>{m.label}</span>
-                  <span className={cn('text-[10px] font-bold uppercase tracking-wider shrink-0 mt-0.5', STRENGTH_COLOR[s.strength])}>{s.strength}</span>
+                  <span className={cn('text-[10px] font-black font-display uppercase tracking-wider shrink-0 mt-0.5', m.color)}>{m.label}</span>
+                  <span className={cn('text-[10px] font-bold font-display uppercase tracking-wider shrink-0 mt-0.5', STRENGTH_COLOR[s.strength])}>{s.strength}</span>
                   <span className="text-xs text-slate-400">{s.detail}</span>
                 </div>
               );
@@ -244,9 +244,9 @@ function ExpandedRow({ r, onSelectStock }: { r: SignalRow; onSelectStock: (s: st
               <span>Fetching timeframe returns from Trendlyne...</span>
             </div>
           ) : trendlyneTa?.body?.parameters?.price_analysis ? (
-            <div className="bg-slate-950/40 border border-slate-800/60 rounded-xl p-3 space-y-2">
+            <div className="v1-card p-3 space-y-2">
               <div className="flex items-center justify-between">
-                <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest flex items-center gap-1.5">
+                <span className="text-[9px] font-black text-slate-400 font-display uppercase tracking-widest flex items-center gap-1.5">
                   <TrendingUp className="w-3.5 h-3.5 text-indigo-400" />
                   Trendlyne Performance Returns ({trendlyneTa.body.parameters.beta_benchmark_index || 'NIFTY 50'})
                 </span>
@@ -269,7 +269,7 @@ function ExpandedRow({ r, onSelectStock }: { r: SignalRow; onSelectStock: (s: st
                       key={idx} 
                       className="flex-shrink-0 min-w-[80px] p-2 bg-slate-950/60 rounded-lg border border-slate-800/40 flex flex-col justify-between hover:border-slate-700 transition-colors"
                     >
-                      <span className="text-[8px] font-bold text-slate-500 uppercase tracking-wider">{item.name}</span>
+                      <span className="text-[8px] font-bold text-slate-500 font-display uppercase tracking-wider">{item.name}</span>
                       <span className={cn(
                         "text-[11px] font-black italic mt-0.5",
                         isPositive ? "text-emerald-400" : isNegative ? "text-rose-400" : "text-slate-350"
@@ -312,7 +312,7 @@ function ExpandedRow({ r, onSelectStock }: { r: SignalRow; onSelectStock: (s: st
               { label: 'News Sent', value: r.news_sentiment_score != null ? `${r.news_sentiment_score >= 0 ? '+' : ''}${r.news_sentiment_score.toFixed(2)}` : '0.00' },
             ].map(({ label, value }) => (
               <div key={label} className="bg-slate-800/50 rounded-lg p-2 text-center">
-                <div className="text-[9px] font-bold uppercase tracking-wider text-slate-400 mb-0.5">{label}</div>
+                <div className="text-[9px] font-bold font-display uppercase tracking-wider text-slate-400 mb-0.5">{label}</div>
                 <div className="text-xs font-bold text-slate-200">{value ?? '—'}</div>
               </div>
             ))}
@@ -321,24 +321,24 @@ function ExpandedRow({ r, onSelectStock }: { r: SignalRow; onSelectStock: (s: st
           {/* AI insight */}
           {r.ai_insight && (
             <div className="bg-indigo-500/5 border border-indigo-500/20 rounded-xl p-3 space-y-2">
-              <p className="text-xs font-bold text-indigo-400 uppercase tracking-wider">AI Analysis</p>
+              <p className="text-xs font-bold text-indigo-400 font-display uppercase tracking-wider">AI Analysis</p>
               <p className="text-sm text-slate-300 leading-relaxed">{r.ai_insight}</p>
               <div className="grid grid-cols-3 gap-2 mt-2">
                 {r.entry_zone && (
                   <div className="bg-emerald-500/10 border border-emerald-500/20 rounded-lg p-2 text-center">
-                    <div className="text-[9px] font-bold text-emerald-500 uppercase tracking-wider">Entry</div>
+                    <div className="text-[9px] font-bold text-emerald-500 font-display uppercase tracking-wider">Entry</div>
                     <div className="text-xs text-emerald-300 font-bold mt-0.5">{r.entry_zone}</div>
                   </div>
                 )}
                 {r.stop_loss && (
                   <div className="bg-rose-500/10 border border-rose-500/20 rounded-lg p-2 text-center">
-                    <div className="text-[9px] font-bold text-rose-500 uppercase tracking-wider">Stop Loss</div>
+                    <div className="text-[9px] font-bold text-rose-500 font-display uppercase tracking-wider">Stop Loss</div>
                     <div className="text-xs text-rose-300 font-bold mt-0.5">{r.stop_loss}</div>
                   </div>
                 )}
                 {r.targets && (
                   <div className="bg-sky-500/10 border border-sky-500/20 rounded-lg p-2 text-center">
-                    <div className="text-[9px] font-bold text-sky-500 uppercase tracking-wider">Targets</div>
+                    <div className="text-[9px] font-bold text-sky-500 font-display uppercase tracking-wider">Targets</div>
                     <div className="text-xs text-sky-300 font-bold mt-0.5">{r.targets}</div>
                   </div>
                 )}
@@ -385,7 +385,7 @@ function FilterPanel({ filters, onChange, onClose }: {
       </div>
 
       <div>
-        <label className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Min Score: {local.minScore}</label>
+        <label className="text-[10px] font-bold font-display uppercase tracking-wider text-slate-400">Min Score: {local.minScore}</label>
         <input type="range" min={1} max={10} value={local.minScore}
           onChange={e => setLocal(p => ({ ...p, minScore: +e.target.value }))}
           className="w-full mt-1 accent-indigo-500"
@@ -393,7 +393,7 @@ function FilterPanel({ filters, onChange, onClose }: {
       </div>
 
       <div>
-        <label className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block mb-2">Signal Types</label>
+        <label className="text-[10px] font-bold font-display uppercase tracking-wider text-slate-400 block mb-2">Signal Types</label>
         <div className="flex flex-wrap gap-1.5">
           {allTypes.map(t => {
             const m = SIG_META[t];
@@ -423,7 +423,7 @@ function FilterPanel({ filters, onChange, onClose }: {
       </div>
 
       <div>
-        <label className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
+        <label className="text-[10px] font-bold font-display uppercase tracking-wider text-slate-400">
           Min Volume Ratio: {local.minVolumeRatio.toFixed(1)}×
         </label>
         <input type="range" min={1} max={5} step={0.5} value={local.minVolumeRatio}
@@ -451,7 +451,7 @@ function SortTh({ label, sortKey, sort, onSort }: {
 }) {
   const active = sort.key === sortKey;
   return (
-    <th className="text-left py-2 px-3 text-[10px] font-bold uppercase tracking-wider text-slate-400 cursor-pointer hover:text-slate-300 select-none whitespace-nowrap"
+    <th className="text-left py-2 px-3 text-[10px] font-bold font-display uppercase tracking-wider text-slate-400 cursor-pointer hover:text-slate-300 select-none whitespace-nowrap"
       onClick={() => onSort(sortKey)}>
       <span className="flex items-center gap-1">
         {label}
@@ -609,12 +609,12 @@ export function DailySignals({ onSelectStock, watchlist = [], onToggleWatchlist 
       {totalToday > 0 && (
         <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
           <div className="rounded-xl border border-slate-800/50 bg-slate-950/30 p-3">
-            <div className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Total Setups</div>
+            <div className="text-[10px] font-bold font-display uppercase tracking-wider text-slate-400">Total Setups</div>
             <div className="text-2xl font-black text-slate-100 tabular-nums mt-1">{totalToday}</div>
           </div>
           {Object.entries(byScore).map(([band, count]) => (
             <div key={band} className="rounded-xl border border-slate-800/50 bg-slate-950/30 p-3">
-              <div className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Score {band}</div>
+              <div className="text-[10px] font-bold font-display uppercase tracking-wider text-slate-400">Score {band}</div>
               <div className={cn('text-2xl font-black tabular-nums mt-1',
                 band === '7-10' ? 'text-emerald-400' : band === '4-6' ? 'text-amber-400' : 'text-slate-400'
               )}>{count}</div>
@@ -622,7 +622,7 @@ export function DailySignals({ onSelectStock, watchlist = [], onToggleWatchlist 
           ))}
           {lastComputed && (
             <div className="rounded-xl border border-slate-800/50 bg-slate-950/30 p-3 col-span-2 md:col-span-1">
-              <div className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Last Computed</div>
+              <div className="text-[10px] font-bold font-display uppercase tracking-wider text-slate-400">Last Computed</div>
               <div className="text-xs font-bold text-slate-300 mt-1">
                 {new Date(lastComputed).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })}
               </div>
@@ -650,7 +650,7 @@ export function DailySignals({ onSelectStock, watchlist = [], onToggleWatchlist 
       {/* Date selector */}
       {dates && dates.length > 1 && (
         <div className="flex items-center gap-2 flex-wrap">
-          <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Date:</span>
+          <span className="text-[10px] font-bold font-display uppercase tracking-wider text-slate-400">Date:</span>
           {dates.slice(0, 7).map(d => (
             <button key={d}
               onClick={() => setSelectedDate(d === selectedDate ? undefined : d)}
@@ -668,7 +668,7 @@ export function DailySignals({ onSelectStock, watchlist = [], onToggleWatchlist 
       {showWinRates && (
         <div className="rounded-2xl border border-emerald-500/20 bg-emerald-500/5 p-4 space-y-4">
           <div className="flex items-center justify-between">
-            <p className="text-sm font-black text-emerald-400 uppercase tracking-wider flex items-center gap-2">
+            <p className="text-sm font-black text-emerald-400 font-display uppercase tracking-wider flex items-center gap-2">
               <BarChart2 className="w-4 h-4" />
               Historical Win Rates
             </p>
@@ -684,7 +684,7 @@ export function DailySignals({ onSelectStock, watchlist = [], onToggleWatchlist 
               pages. */}
           {winRates?.labelDefinition && (
             <p className="text-[10px] leading-relaxed text-amber-300/80 border border-amber-500/20 bg-amber-500/5 rounded-lg px-2.5 py-1.5">
-              Labeled <span className="font-mono font-bold">{winRates.labelDefinition}</span> —
+              Labeled <span className="font-data font-bold">{winRates.labelDefinition}</span> —
               a path-based max-favorable-excursion rule, counting a WIN if the barrier was touched
               at any point in the window. It is <span className="font-bold">not comparable</span> to
               a fixed terminal-return win rate, which runs far lower on the same signals. Technical
@@ -708,14 +708,14 @@ export function DailySignals({ onSelectStock, watchlist = [], onToggleWatchlist 
               {/* Overall stats */}
               <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
                 {[
-                  { label: 'Total Trades', value: winRates.overall.total.toString(), color: 'text-slate-100' },
-                  { label: 'Win Rate', value: `${winRates.overall.winRate.toFixed(1)}%`, color: winRates.overall.winRate >= 55 ? 'text-emerald-400' : winRates.overall.winRate >= 45 ? 'text-amber-400' : 'text-rose-400' },
-                  { label: 'Avg Return', value: `${winRates.overall.avgReturn >= 0 ? '+' : ''}${winRates.overall.avgReturn.toFixed(2)}%`, color: winRates.overall.avgReturn >= 0 ? 'text-emerald-400' : 'text-rose-400' },
-                  { label: 'Avg Win', value: `+${winRates.overall.avgWin.toFixed(2)}%`, color: 'text-emerald-400' },
-                  { label: 'Avg Loss', value: `${winRates.overall.avgLoss.toFixed(2)}%`, color: 'text-rose-400' },
-                ].map(({ label, value, color }) => (
-                  <div key={label} className="bg-slate-900/60 rounded-xl border border-slate-800/50 p-3 text-center">
-                    <div className="text-[9px] font-bold uppercase tracking-wider text-slate-400 mb-1">{label}</div>
+                  { label: 'Total Trades', value: winRates.overall.total.toString(), color: 'text-slate-100', card: 'v1-card-neutral' as const },
+                  { label: 'Win Rate', value: `${winRates.overall.winRate.toFixed(1)}%`, color: winRates.overall.winRate >= 55 ? 'text-emerald-400' : winRates.overall.winRate >= 45 ? 'text-amber-400' : 'text-rose-400', card: winRates.overall.winRate >= 55 ? 'v1-card-up' as const : winRates.overall.winRate >= 45 ? 'v1-card-neutral' as const : 'v1-card-down' as const },
+                  { label: 'Avg Return', value: `${winRates.overall.avgReturn >= 0 ? '+' : ''}${winRates.overall.avgReturn.toFixed(2)}%`, color: winRates.overall.avgReturn >= 0 ? 'text-emerald-400' : 'text-rose-400', card: winRates.overall.avgReturn >= 0 ? 'v1-card-up' as const : 'v1-card-down' as const },
+                  { label: 'Avg Win', value: `+${winRates.overall.avgWin.toFixed(2)}%`, color: 'text-emerald-400', card: 'v1-card-up' as const },
+                  { label: 'Avg Loss', value: `${winRates.overall.avgLoss.toFixed(2)}%`, color: 'text-rose-400', card: 'v1-card-down' as const },
+                ].map(({ label, value, color, card }) => (
+                  <div key={label} className={cn(card, 'p-3 text-center')}>
+                    <div className="text-[9px] font-bold font-display uppercase tracking-wider text-slate-400 mb-1">{label}</div>
                     <div className={cn('text-xl font-black tabular-nums', color)}>{value}</div>
                   </div>
                 ))}
@@ -727,8 +727,8 @@ export function DailySignals({ onSelectStock, watchlist = [], onToggleWatchlist 
                   const hd = winRates.byHorizon[h];
                   if (!hd || hd.total === 0) return null;
                   return (
-                    <div key={h} className="bg-slate-900/40 rounded-xl border border-slate-800/50 p-3">
-                      <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-2">{h}-Day Horizon</p>
+                    <div key={h} className="v1-card p-3">
+                      <p className="text-[10px] font-bold font-display uppercase tracking-wider text-slate-400 mb-2">{h}-Day Horizon</p>
                       <div className="flex items-center justify-between">
                         <span className="text-sm text-slate-400">{hd.total} trades</span>
                         <span className={cn('text-lg font-black', hd.winRate >= 55 ? 'text-emerald-400' : hd.winRate >= 45 ? 'text-amber-400' : 'text-rose-400')}>
@@ -746,7 +746,7 @@ export function DailySignals({ onSelectStock, watchlist = [], onToggleWatchlist 
               {/* By signal type */}
               {Object.keys(winRates.bySignalType).length > 0 && (
                 <div>
-                  <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-2">Win Rate by Signal Type</p>
+                  <p className="text-[10px] font-bold font-display uppercase tracking-wider text-slate-400 mb-2">Win Rate by Signal Type</p>
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
                     {(Object.entries(winRates.bySignalType) as [SignalType, { total: number; wins: number; winRate: number; avgReturn: number }][])
                       .sort((a, b) => b[1].winRate - a[1].winRate)
@@ -776,14 +776,14 @@ export function DailySignals({ onSelectStock, watchlist = [], onToggleWatchlist 
               {/* By score bucket */}
               {Object.keys(winRates.byScoreBucket).length > 0 && (
                 <div>
-                  <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-2">Win Rate by Signal Score</p>
+                  <p className="text-[10px] font-bold font-display uppercase tracking-wider text-slate-400 mb-2">Win Rate by Signal Score</p>
                   <div className="grid grid-cols-3 gap-2">
                     {(['7-10', '4-6', '1-3'] as const).map(bucket => {
                       const b = winRates.byScoreBucket[bucket];
                       if (!b || b.total === 0) return null;
                       return (
-                        <div key={bucket} className="bg-slate-900/40 rounded-xl border border-slate-800/50 p-3 text-center">
-                          <div className="text-[9px] font-bold uppercase tracking-wider text-slate-400 mb-1">Score {bucket}</div>
+                        <div key={bucket} className="v1-card p-3 text-center">
+                          <div className="text-[9px] font-bold font-display uppercase tracking-wider text-slate-400 mb-1">Score {bucket}</div>
                           <div className={cn('text-lg font-black', b.winRate >= 55 ? 'text-emerald-400' : b.winRate >= 45 ? 'text-amber-400' : 'text-rose-400')}>
                             {b.winRate.toFixed(0)}%
                           </div>
@@ -803,7 +803,7 @@ export function DailySignals({ onSelectStock, watchlist = [], onToggleWatchlist 
       {showSector && (
         <div className="rounded-2xl border border-violet-500/20 bg-violet-500/5 p-4 space-y-4">
           <div className="flex items-center justify-between flex-wrap gap-2">
-            <p className="text-sm font-black text-violet-400 uppercase tracking-wider flex items-center gap-2">
+            <p className="text-sm font-black text-violet-400 font-display uppercase tracking-wider flex items-center gap-2">
               <Activity className="w-4 h-4" />
               Sector Momentum — Sympathy Play Radar
             </p>
@@ -948,17 +948,17 @@ export function DailySignals({ onSelectStock, watchlist = [], onToggleWatchlist 
           <table className="w-full text-sm">
             <thead className="border-b border-slate-800/50">
               <tr>
-                <th className="text-left py-2 px-3 text-[10px] font-bold uppercase tracking-wider text-slate-400 w-6">#</th>
+                <th className="text-left py-2 px-3 text-[10px] font-bold font-display uppercase tracking-wider text-slate-400 w-6">#</th>
                 <SortTh label="Symbol"   sortKey="symbol"       sort={sort} onSort={toggleSort} />
-                <th className="text-left py-2 px-3 text-[10px] font-bold uppercase tracking-wider text-slate-400">Signals</th>
+                <th className="text-left py-2 px-3 text-[10px] font-bold font-display uppercase tracking-wider text-slate-400">Signals</th>
                 <SortTh label="Score"    sortKey="signal_score" sort={sort} onSort={toggleSort} />
                 <SortTh label="CMP"      sortKey="cmp"          sort={sort} onSort={toggleSort} />
                 <SortTh label="Chg%"     sortKey="change_pct"   sort={sort} onSort={toggleSort} />
-                <th className="text-left py-2 px-3 text-[10px] font-bold uppercase tracking-wider text-slate-400">Trendlyne Returns</th>
+                <th className="text-left py-2 px-3 text-[10px] font-bold font-display uppercase tracking-wider text-slate-400">Trendlyne Returns</th>
                 <SortTh label="RSI"      sortKey="rsi"          sort={sort} onSort={toggleSort} />
                 <SortTh label="Vol Ratio" sortKey="volume_ratio" sort={sort} onSort={toggleSort} />
-                <th className="text-left py-2 px-3 text-[10px] font-bold uppercase tracking-wider text-slate-400">SMA200</th>
-                <th className="text-left py-2 px-3 text-[10px] font-bold uppercase tracking-wider text-slate-400">AI</th>
+                <th className="text-left py-2 px-3 text-[10px] font-bold font-display uppercase tracking-wider text-slate-400">SMA200</th>
+                <th className="text-left py-2 px-3 text-[10px] font-bold font-display uppercase tracking-wider text-slate-400">AI</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-800/40">
@@ -1002,7 +1002,7 @@ export function DailySignals({ onSelectStock, watchlist = [], onToggleWatchlist 
                             {r.symbol}
                             <ArrowUpRight className="w-2.5 h-2.5 opacity-0 group-hover/sym:opacity-100 transition-opacity text-indigo-400" />
                           </div>
-                          {r.name && <div className="text-[9px] text-slate-400 font-bold uppercase tracking-wider truncate max-w-[120px] mt-0.5 leading-none">{r.name}</div>}
+                          {r.name && <div className="text-[9px] text-slate-400 font-bold font-display uppercase tracking-wider truncate max-w-[120px] mt-0.5 leading-none">{r.name}</div>}
                         </div>
                       </div>
                     </td>
@@ -1058,7 +1058,7 @@ export function DailySignals({ onSelectStock, watchlist = [], onToggleWatchlist 
         <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
           {(Object.entries(SIG_META) as [SignalType, typeof SIG_META[SignalType]][]).map(([type, m]) => (
             <div key={type} className={cn('rounded-lg border px-3 py-2', m.bg)}>
-              <div className={cn('text-[10px] font-black uppercase tracking-wider', m.color)}>{m.label}</div>
+              <div className={cn('text-[10px] font-black font-display uppercase tracking-wider', m.color)}>{m.label}</div>
               <div className="text-[10px] text-slate-400 mt-0.5">
                 {type === 'RSI_DIVERGENCE'     && 'Price falls, RSI rises above SMA200'}
                 {type === 'HIDDEN_DIVERGENCE'  && 'Price HL, RSI LL — trend continuation'}

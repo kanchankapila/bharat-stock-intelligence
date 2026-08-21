@@ -34,12 +34,12 @@ function fmtPrice(n: number) {
 // ── Sub-components ─────────────────────────────────────────────────────────────
 
 function RegimeBadge({ regime }: { regime: string }) {
-  const style =
-    regime === 'BULL'     ? 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30' :
-    regime === 'SIDEWAYS' ? 'bg-amber-500/20 text-amber-400 border-amber-500/30' :
-                            'bg-rose-500/20 text-rose-400 border-rose-500/30';
+  const textColor =
+    regime === 'BULL'     ? 'v1-text-bullish' :
+    regime === 'SIDEWAYS' ? 'v1-text-neutral' :
+                            'v1-text-bearish';
   return (
-    <span className={cn('text-[10px] font-black uppercase tracking-widest px-2 py-0.5 rounded-full border', style)}>
+    <span className={cn('v1-badge text-[10px]', textColor)}>
       {regime}
     </span>
   );
@@ -47,12 +47,12 @@ function RegimeBadge({ regime }: { regime: string }) {
 
 function ConvictionBadge({ level }: { level: string | null }) {
   if (!level) return null;
-  const style =
+  const badgeClass =
     level === 'A_HIGH'
-      ? 'bg-amber-500/20 text-amber-300 border-amber-500/30'
-      : 'bg-blue-500/20 text-blue-300 border-blue-500/30';
+      ? 'v1-badge-a'
+      : 'v1-badge-b';
   return (
-    <span className={cn('text-[9px] font-black uppercase tracking-wider px-1.5 py-0.5 rounded border', style)}>
+    <span className={cn('v1-badge text-[9px]', badgeClass)}>
       {level.replace('_', ' ')}
     </span>
   );
@@ -65,7 +65,7 @@ function SignalPill({ type }: { type: string }) {
     type === 'NR7_COMPRESSION' ? 'bg-violet-500/20 text-violet-400 border-violet-500/30' :
                                   'bg-slate-700/60 text-slate-400 border-slate-600';
   return (
-    <span className={cn('text-[9px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded border', style)}>
+    <span className={cn('text-[9px] font-bold font-display uppercase tracking-wider px-1.5 py-0.5 rounded border', style)}>
       {type.replace(/_/g, ' ')}
     </span>
   );
@@ -75,7 +75,7 @@ function MetricCell({ label, value, color }: { label: string; value: string; col
   return (
     <div className="text-center">
       <div className={cn('text-sm font-black', color ?? 'text-white')}>{value}</div>
-      <div className="text-[9px] text-slate-600 uppercase tracking-wider mt-0.5">{label}</div>
+      <div className="text-[9px] text-slate-600 font-display uppercase tracking-wider mt-0.5">{label}</div>
     </div>
   );
 }
@@ -104,7 +104,7 @@ function HighConvictionCard({
 
   return (
     <div
-      className="glass border border-slate-800/50 rounded-2xl p-5 cursor-pointer hover:border-slate-600/60 transition-all flex flex-col gap-4"
+      className="v1-card p-5 cursor-pointer transition-all flex flex-col gap-4"
       onClick={() => onSelectStock(stock.symbol)}
     >
       {/* Header */}
@@ -133,19 +133,19 @@ function HighConvictionCard({
       <div className="grid grid-cols-4 gap-2 bg-slate-900/40 rounded-xl p-3">
         <div className="text-center">
           <div className="text-xs font-black text-white">{fmtPrice(stock.entryPrice)}</div>
-          <div className="text-[9px] text-slate-500 uppercase tracking-wider mt-0.5">Entry</div>
+          <div className="text-[9px] text-slate-500 font-display uppercase tracking-wider mt-0.5">Entry</div>
         </div>
         <div className="text-center">
           <div className="text-xs font-black text-rose-400">{fmtPrice(stock.stopLoss)}</div>
-          <div className="text-[9px] text-slate-500 uppercase tracking-wider mt-0.5">Stop</div>
+          <div className="text-[9px] text-slate-500 font-display uppercase tracking-wider mt-0.5">Stop</div>
         </div>
         <div className="text-center">
           <div className="text-xs font-black text-emerald-400">{fmtPrice(stock.target)}</div>
-          <div className="text-[9px] text-slate-500 uppercase tracking-wider mt-0.5">Target</div>
+          <div className="text-[9px] text-slate-500 font-display uppercase tracking-wider mt-0.5">Target</div>
         </div>
         <div className="text-center">
           <div className={cn('text-xs font-black', rrColor)}>{fmt(stock.rrRatio)}x</div>
-          <div className="text-[9px] text-slate-500 uppercase tracking-wider mt-0.5">R:R</div>
+          <div className="text-[9px] text-slate-500 font-display uppercase tracking-wider mt-0.5">R:R</div>
         </div>
       </div>
 

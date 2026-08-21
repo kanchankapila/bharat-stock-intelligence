@@ -207,18 +207,18 @@ export default function App() {
 
   const [selectedSymbol, setSelectedSymbol] = useState<string | null>(null);
   const [drawerSymbol, setDrawerSymbol] = useState<string | null>(null);
-  // 'v6' = the consolidation shell (V6Shell, see src/v6/) -- promoted to the default 2026-08-09
-  // now that its home page (MarketCommandCenter) and desk pages (retrofit from v5) cover
-  // everything v2/v3 offered plus a real portfolio/MF tracker and multi-provider screener
-  // browser neither had. v1/v2/v3/v5 stay reachable via the version switcher for anyone who
-  // explicitly picks them (an existing `dashboardVersion` value in localStorage is always
-  // honored below); only a visitor with NO saved preference at all -- fresh or pre-v6 -- now
-  // lands on v6 instead of v3. Renders through the same v2Enabled route tree as v2/v3 so it
-  // inherits every existing page for free -- only the shell chrome differs.
+  // 'v1' = the classic AppShell -- promoted (back) to the default 2026-08-20 now that it nav-links
+  // every page the other shells had (the v6-native Screener Browser/Portfolio Tracker plus the
+  // v5-desk retrofits: Pre-Market, Options/Institutional-Flow/Earnings/Risk desks, Signal Review,
+  // and V2Settings) and its own <main> bridges v5/v6-origin components onto v1's color tokens via
+  // v6-theme.css's `.v6-root` (see AppShell.tsx). v2/v3/v6/v5 stay reachable via the version
+  // switcher for anyone who explicitly picks them (an existing `dashboardVersion` value in
+  // localStorage is always honored below); only a visitor with NO saved preference at all now
+  // lands on v1 instead of v6.
   const [dashboardVersion, setDashboardVersion] = useState<'v1' | 'v2' | 'v3' | 'v6'>(() => {
     const saved = localStorage.getItem('dashboardVersion');
     if (saved === 'v1' || saved === 'v2' || saved === 'v3' || saved === 'v6') return saved;
-    return 'v6';
+    return 'v1';
   });
   const changeDashboardVersion = (version: 'v1' | 'v2' | 'v3' | 'v6') => {
     localStorage.setItem('dashboardVersion', version);
@@ -703,6 +703,7 @@ export default function App() {
                 selectedSymbol={selectedSymbol}
                 researchSubTab={researchSubTab}
                 setResearchSubTab={setResearchSubTab}
+                userId={user?.uid}
             />
           </SafeRoutes>
         </AnimatePresence>

@@ -39,7 +39,7 @@ export const PremarketPanel: React.FC<PremarketPanelProps> = ({ onSelectStock })
         <Activity className="w-5 h-5 text-emerald-400" />
         <h2 className="text-lg font-bold text-white">Pre-Market Intelligence</h2>
       </div>
-      <div className="bg-slate-800/40 rounded-xl p-6 border border-slate-700/30 text-center">
+      <div className="v1-card p-6 text-center">
         <Globe className="w-8 h-8 text-slate-500 mx-auto mb-2" />
         <p className="text-sm text-slate-400">Pre-market data unavailable</p>
         <p className="text-xs text-slate-500 mt-1">MoneyControl API may be temporarily unreachable</p>
@@ -65,7 +65,7 @@ export const PremarketPanel: React.FC<PremarketPanelProps> = ({ onSelectStock })
       </div>
 
       {globalMarkets.length > 0 && (
-        <div className="bg-slate-800/50 rounded-xl p-4 border border-slate-700/50">
+        <div className="v1-card p-4">
           <div className="flex items-center gap-2 mb-3">
             <Globe className="w-4 h-4 text-blue-400" />
             <span className="text-sm font-semibold text-slate-300">Global Markets</span>
@@ -75,7 +75,7 @@ export const PremarketPanel: React.FC<PremarketPanelProps> = ({ onSelectStock })
               const chg = parseFloat(mkt.change || mkt.pChange || 0);
               const isPos = chg >= 0;
               return (
-                <div key={i} className="bg-slate-900/60 rounded-lg p-2.5 text-center">
+                <div key={i} className={cn(isPos ? 'v1-card-up' : 'v1-card-down', 'p-2.5 text-center')}>
                   <div className="text-xs text-slate-400 truncate mb-1">{mkt.name || mkt.market_name}</div>
                   <div className="text-sm font-bold text-white">{mkt.price || mkt.lastPrice}</div>
                   <div className={cn('text-xs font-medium', isPos ? 'text-emerald-400' : 'text-red-400')}>
@@ -90,7 +90,7 @@ export const PremarketPanel: React.FC<PremarketPanelProps> = ({ onSelectStock })
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
         {stocks.length > 0 && (
-          <div className="bg-slate-800/50 rounded-xl p-4 border border-slate-700/50 lg:col-span-1">
+          <div className="v1-card p-4 lg:col-span-1">
             <div className="flex items-center gap-2 mb-3">
               <Eye className="w-4 h-4 text-amber-400" />
               <span className="text-sm font-semibold text-slate-300">Stocks to Watch</span>
@@ -120,7 +120,7 @@ export const PremarketPanel: React.FC<PremarketPanelProps> = ({ onSelectStock })
         )}
 
         {fllChartData.length > 0 && (
-          <div className="bg-slate-800/50 rounded-xl p-4 border border-slate-700/50 lg:col-span-1">
+          <div className="v1-card p-4 lg:col-span-1">
             <div className="flex items-center gap-2 mb-3">
               <BarChart2 className="w-4 h-4 text-purple-400" />
               <span className="text-sm font-semibold text-slate-300">FII / DII Activity</span>
@@ -172,7 +172,7 @@ export const PremarketPanel: React.FC<PremarketPanelProps> = ({ onSelectStock })
         )}
 
         {upcomingEvents.length > 0 && (
-          <div className="bg-slate-800/50 rounded-xl p-4 border border-slate-700/50 lg:col-span-1">
+          <div className="v1-card p-4 lg:col-span-1">
             <div className="flex items-center gap-2 mb-3">
               <Clock className="w-4 h-4 text-cyan-400" />
               <span className="text-sm font-semibold text-slate-300">Economic Calendar</span>
@@ -180,7 +180,7 @@ export const PremarketPanel: React.FC<PremarketPanelProps> = ({ onSelectStock })
             <div className="space-y-2 max-h-[200px] overflow-y-auto pr-1">
               {upcomingEvents.slice(0, 8).map((evt: any, i: number) => (
                 <div key={i} className="flex items-start gap-2 p-2 rounded-lg bg-slate-900/60">
-                  <div className="shrink-0 text-xs text-cyan-400 font-mono mt-0.5">{evt.event_date || evt.date}</div>
+                  <div className="shrink-0 text-xs text-cyan-400 font-data mt-0.5">{evt.event_date || evt.date}</div>
                   <div>
                     <div className="text-xs font-medium text-white leading-tight">{evt.event_name || evt.title}</div>
                     {evt.impact && (
@@ -197,7 +197,7 @@ export const PremarketPanel: React.FC<PremarketPanelProps> = ({ onSelectStock })
       </div>
 
       {brokerRecos.length > 0 && (
-        <div className="bg-slate-800/50 rounded-xl p-4 border border-slate-700/50">
+        <div className="v1-card p-4">
           <div className="flex items-center gap-2 mb-3">
             <TrendingUp className="w-4 h-4 text-emerald-400" />
             <span className="text-sm font-semibold text-slate-300">Broker Research Recommendations</span>
@@ -231,7 +231,7 @@ export const PremarketPanel: React.FC<PremarketPanelProps> = ({ onSelectStock })
       )}
 
       {news.length > 0 && (
-        <div className="bg-slate-800/50 rounded-xl p-4 border border-slate-700/50">
+        <div className="v1-card p-4">
           <div className="flex items-center gap-2 mb-3">
             <Newspaper className="w-4 h-4 text-slate-400" />
             <span className="text-sm font-semibold text-slate-300">Pre-Market News</span>

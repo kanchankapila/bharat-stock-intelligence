@@ -18,13 +18,13 @@ export default function DLDashboard() {
 
       {/* Current Regime */}
       <div className="glass rounded-xl p-4">
-        <div className="text-[10px] text-slate-400 uppercase tracking-widest font-black mb-2">Current Market Regime</div>
+        <div className="text-[10px] text-slate-400 font-display uppercase tracking-widest font-black mb-2">Current Market Regime</div>
         {regime ? (
           <div className="flex items-center gap-3">
             <span className={`text-2xl font-bold ${
               regime.regime === 'BULL'     ? 'text-emerald-400' :
               regime.regime === 'BEAR'     ? 'text-rose-400' :
-              regime.regime === 'CRASH'    ? 'text-red-300' :
+              regime.regime === 'CRASH'    ? 'text-rose-300' :
               regime.regime === 'HIGH_VOL' ? 'text-amber-400' : 'text-slate-300'
             }`}>{regime.regime}</span>
             <span className="text-slate-500 text-sm">
@@ -38,7 +38,7 @@ export default function DLDashboard() {
 
       {/* Model Performance */}
       <div className="glass rounded-xl p-4">
-        <div className="text-[10px] text-slate-400 uppercase tracking-widest font-black mb-3">Model Performance (30d)</div>
+        <div className="text-[10px] text-slate-400 font-display uppercase tracking-widest font-black mb-3">Model Performance (30d)</div>
         {perf && (perf as any[]).length > 0 ? (
           <div className="space-y-2">
             {(perf as any[]).slice(0, 10).map((row: any, i: number) => (

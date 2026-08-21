@@ -33,7 +33,7 @@ export const SectorHeatmap: React.FC<{ indexId?: string; className?: string }> =
                 : "bg-rose-500/5 border-rose-500/20 text-rose-400"
             )}
           >
-            <span className="text-[9px] font-black uppercase tracking-widest text-slate-400">{sector.name}</span>
+            <span className="text-[9px] font-black font-display uppercase tracking-widest text-slate-400">{sector.name}</span>
             <div className="flex items-end justify-between mt-1">
               <span className="text-base font-black italic tracking-tighter truncate">
                 {sector.change >= 0 ? '+' : ''}{sector.change.toFixed(2)}%
@@ -59,8 +59,8 @@ export const SectorPerformance: React.FC<{ className?: string }> = ({ className 
     <Card title="Market Map (Sectors)" icon={PieChart} className={cn("h-full", className)}>
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
         {sectors.slice(0, 8).map((s: any) => (
-          <div key={s.id} className="p-3 bg-slate-950 border border-slate-800 rounded-xl hover:border-slate-700 transition-all">
-            <p className="text-[8px] font-black text-slate-500 uppercase tracking-widest mb-1">{s.shortname}</p>
+          <div key={s.id} className="v1-card p-3 hover:border-slate-700 transition-all">
+            <p className="text-[8px] font-black text-slate-500 font-display uppercase tracking-widest mb-1">{s.shortname}</p>
             <div className="flex items-center justify-between">
               <p className={cn(
                 "text-base font-black italic tracking-tighter",
@@ -110,7 +110,7 @@ export const SectorAdvanceDecline: React.FC<{ className?: string }> = ({ classNa
           const up = parseFloat(s.changePer ?? '0') >= 0;
           return (
             <div key={s.indexId ?? s.indexName} className="flex items-center gap-3">
-              <span className="text-[10px] font-black uppercase tracking-widest text-slate-400 w-32 truncate shrink-0">
+              <span className="text-[10px] font-black font-display uppercase tracking-widest text-slate-400 w-32 truncate shrink-0">
                 {s.indexName}
               </span>
               <div className="flex-1 h-2 bg-slate-800 rounded-full overflow-hidden flex">
@@ -182,7 +182,7 @@ export const SectorConstituents: React.FC<{ onSelectStock?: (symbol: string) => 
         <div className="overflow-x-auto pt-2">
           <table className="w-full">
             <thead>
-              <tr className="text-[9px] font-black uppercase tracking-widest text-slate-500 border-b border-slate-800/50">
+              <tr className="text-[9px] font-black font-display uppercase tracking-widest text-slate-500 border-b border-slate-800/50">
                 <th className="text-left pb-2 pr-3">Stock</th>
                 <th className="text-right pb-2 pr-3">Price</th>
                 <th className="text-right pb-2 pr-3">Chg%</th>
@@ -203,7 +203,7 @@ export const SectorConstituents: React.FC<{ onSelectStock?: (symbol: string) => 
                     className={cn("border-t border-slate-800/40", clickable ? "cursor-pointer hover:bg-slate-800/30" : "")}
                   >
                     <td className="py-2 pr-3 text-xs font-bold text-slate-200">{s.stockName}</td>
-                    <td className="py-2 pr-3 text-right text-xs font-mono text-slate-100">₹{s.currPrice}</td>
+                    <td className="py-2 pr-3 text-right text-xs font-data text-slate-100">₹{s.currPrice}</td>
                     <td className={cn("py-2 pr-3 text-right text-xs font-bold", up ? "text-emerald-400" : "text-rose-400")}>
                       {up ? '+' : ''}{s.perChange}%
                     </td>

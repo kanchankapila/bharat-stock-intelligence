@@ -91,7 +91,7 @@ function ScoreBar({ value, color = 'indigo' }: { value: number; color?: string }
 function ClassBadge({ cls }: { cls: string }) {
   const c = CLASS_COLORS[cls] ?? CLASS_COLORS['Hold'];
   return (
-    <span className={cn('inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider', c.bg, c.text)}>
+    <span className={cn('inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold font-display uppercase tracking-wider', c.bg, c.text)}>
       <span className={cn('w-1.5 h-1.5 rounded-full', c.dot)} />
       {cls}
     </span>
@@ -116,7 +116,7 @@ function SortableHeader({ label, sortKey, sort, onSort }: { label: string; sortK
   const active = sort.key === sortKey;
   return (
     <th
-      className="text-left py-2 px-3 text-[10px] font-bold uppercase tracking-wider text-slate-500 cursor-pointer hover:text-slate-300 select-none whitespace-nowrap"
+      className="text-left py-2 px-3 text-[10px] font-bold font-display uppercase tracking-wider text-slate-500 cursor-pointer hover:text-slate-300 select-none whitespace-nowrap"
       onClick={() => onSort(sortKey)}
     >
       <span className="flex items-center gap-1">
@@ -136,7 +136,7 @@ function FilterPanel({ filters, onChange, onClose }: { filters: Filters; onChang
   function num(key: keyof Filters, label: string, placeholder: string, min?: number, max?: number) {
     return (
       <div className="flex flex-col gap-1">
-        <label className="text-[10px] font-bold uppercase tracking-wider text-slate-400">{label}</label>
+        <label className="text-[10px] font-bold font-display uppercase tracking-wider text-slate-400">{label}</label>
         <input
           type="number"
           placeholder={placeholder}
@@ -286,7 +286,7 @@ export function StrategyIntelligence({ onSelectStock }: { onSelectStock: (symbol
           const c = CLASS_COLORS[cls];
           return (
             <div key={cls} className={cn('rounded-xl border border-slate-800 p-3 flex flex-col gap-1', c.bg)}>
-              <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">{cls}</span>
+              <span className="text-[10px] font-bold font-display uppercase tracking-wider text-slate-400">{cls}</span>
               <span className={cn('text-2xl font-black tabular-nums', c.text)}>{byClass[cls] ?? 0}</span>
             </div>
           );
@@ -294,8 +294,8 @@ export function StrategyIntelligence({ onSelectStock }: { onSelectStock: (symbol
       </div>
 
       {/* Score distribution for the active ranking */}
-      <div className="bg-slate-900/50 border border-slate-800 rounded-xl p-3">
-        <div className="text-[10px] font-semibold text-slate-400 uppercase tracking-wide mb-1">{scoreLabel} score distribution</div>
+      <div className="v1-card p-3">
+        <div className="text-[10px] font-semibold text-slate-400 font-display uppercase tracking-wide mb-1">{scoreLabel} score distribution</div>
         <ResponsiveContainer width="100%" height={100}>
           <BarChart data={scoreHistogram} margin={{ top: 4, right: 4, left: -20, bottom: 0 }}>
             <CartesianGrid strokeDasharray="3 3" stroke="#334155" vertical={false} />
@@ -366,11 +366,11 @@ export function StrategyIntelligence({ onSelectStock }: { onSelectStock: (symbol
 
       {/* Main table */}
       {sorted.length > 0 && (
-        <div className="rounded-2xl border border-slate-800 bg-slate-900/30 overflow-x-auto">
+        <div className="v1-card overflow-x-auto">
           <table className="w-full text-sm">
             <thead className="border-b border-slate-800">
               <tr>
-                <th className="text-left py-2 px-3 text-[10px] font-bold uppercase tracking-wider text-slate-500 w-8">#</th>
+                <th className="text-left py-2 px-3 text-[10px] font-bold font-display uppercase tracking-wider text-slate-500 w-8">#</th>
                 <SortableHeader label="Symbol" sortKey="symbol" sort={sort} onSort={toggleSort} />
                 <SortableHeader label="Class" sortKey="composite_class" sort={sort} onSort={toggleSort} />
                 <SortableHeader label={scoreLabel} sortKey={scoreKey} sort={sort} onSort={toggleSort} />
@@ -387,7 +387,7 @@ export function StrategyIntelligence({ onSelectStock }: { onSelectStock: (symbol
                 <SortableHeader label="ROE" sortKey="return_on_equity" sort={sort} onSort={toggleSort} />
                 <SortableHeader label="F-Sc" sortKey="piotroski_f_score" sort={sort} onSort={toggleSort} />
                 <SortableHeader label="Bull" sortKey="bullish_screener_count" sort={sort} onSort={toggleSort} />
-                <th className="text-left py-2 px-3 text-[10px] font-bold uppercase tracking-wider text-slate-500">SMA</th>
+                <th className="text-left py-2 px-3 text-[10px] font-bold font-display uppercase tracking-wider text-slate-500">SMA</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-800/50">
@@ -454,7 +454,7 @@ export function StrategyIntelligence({ onSelectStock }: { onSelectStock: (symbol
       )}
 
       {/* Legend / methodology note */}
-      <div className="rounded-xl border border-slate-800 bg-slate-900/20 p-4">
+      <div className="v1-card p-4">
         <p className="text-xs font-bold text-slate-400 mb-2">Scoring Methodology</p>
         <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-[11px] text-slate-500">
           <span><span className="text-indigo-400 font-bold">Composite</span> = 30% Momentum + 25% Quality + 25% Value + 20% Confluence</span>

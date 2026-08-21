@@ -49,7 +49,7 @@ export function AlertPreferencesToggle() {
 
       {open && (
         <div className="absolute right-0 mt-2 w-64 bg-slate-900 border border-slate-700/60 rounded-xl shadow-2xl p-3 space-y-2 text-xs">
-          <p className="text-slate-400 font-semibold uppercase tracking-wider text-[10px] mb-1">Alert Preferences</p>
+          <p className="text-slate-400 font-semibold font-display uppercase tracking-wider text-[10px] mb-1">Alert Preferences</p>
 
           <button
             onClick={toggleNotifications}

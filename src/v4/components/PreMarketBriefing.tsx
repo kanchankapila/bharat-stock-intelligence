@@ -114,13 +114,16 @@ export const PreMarketBriefing: React.FC = () => {
             {displayTiles.map((t) => {
               const Icon = trendIcon(t.ret1d);
               return (
-                <div key={t.symbol} className="glass rounded-xl p-2.5">
+                <div key={t.symbol} className={cn(
+                  t.ret1d == null ? 'v1-card-neutral' : t.ret1d > 0.05 ? 'v1-card-up' : t.ret1d < -0.05 ? 'v1-card-down' : 'v1-card-neutral',
+                  'p-2.5'
+                )}>
                   <div className="text-[9px] text-slate-500 uppercase tracking-widest truncate">{t.label || t.symbol}</div>
                   <div className="flex items-center justify-between mt-1">
-                    <span className="text-sm font-mono font-bold text-slate-100">
+                    <span className="text-sm font-data font-bold text-slate-100">
                       {t.close != null ? t.close.toLocaleString(undefined, { maximumFractionDigits: 2 }) : '—'}
                     </span>
-                    <span className={cn('flex items-center gap-0.5 text-[11px] font-mono font-bold', trendColor(t.ret1d))}>
+                    <span className={cn('flex items-center gap-0.5 text-[11px] font-data font-bold', trendColor(t.ret1d))}>
                       <Icon className="w-3 h-3" />
                       {fmtPct(t.ret1d)}
                     </span>

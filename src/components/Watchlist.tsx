@@ -129,7 +129,7 @@ export const Watchlist: React.FC<WatchlistProps> = ({
             return (
               <Card 
                 key={stock.symbol} 
-                className="group hover:border-blue-500/30 transition-all cursor-pointer relative overflow-hidden flex flex-col justify-between" 
+                className="group hover:border-indigo-500/30 transition-all cursor-pointer relative overflow-hidden flex flex-col justify-between" 
                 onClick={() => onSelectStock(stock.symbol)}
               >
                 <div>
@@ -161,7 +161,7 @@ export const Watchlist: React.FC<WatchlistProps> = ({
                   
                   <div className="mt-4 flex items-end justify-between">
                      <div>
-                        <p className="text-[7px] font-black text-slate-400 uppercase tracking-widest mb-1">LTP</p>
+                        <p className="text-[7px] font-black text-slate-400 font-display uppercase tracking-widest mb-1">LTP</p>
                         <p className="text-xl font-black text-white tabular-nums tracking-tight italic">₹{stock.price.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</p>
                      </div>
                      <div className="h-8 w-20">
@@ -184,7 +184,7 @@ export const Watchlist: React.FC<WatchlistProps> = ({
                 </div>
 
                 {/* Enriched Watchlist Metadata Badging */}
-                <div className="mt-4 pt-4 border-t border-slate-800/30 space-y-1.5 text-[9.5px] font-black text-slate-400 uppercase tracking-widest">
+                <div className="mt-4 pt-4 border-t border-slate-800/30 space-y-1.5 text-[9.5px] font-black text-slate-400 font-display uppercase tracking-widest">
                   {stock.capturedPrice != null && (
                     <div className="flex items-center justify-between">
                       <span>Captured Price</span>

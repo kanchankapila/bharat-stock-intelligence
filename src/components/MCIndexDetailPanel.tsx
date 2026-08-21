@@ -66,13 +66,13 @@ export const MCIndexDetailPanel: React.FC<MCIndexDetailPanelProps> = ({ indId, n
   return (
     <div className="space-y-6">
       {/* Header Info */}
-      <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 bg-slate-900/40 p-6 rounded-2xl border border-slate-800/30 backdrop-blur-xl">
+      <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
         <div>
           <div className="flex items-center gap-3">
             <h2 className="text-2xl font-black text-white italic uppercase tracking-tight">{name}</h2>
             {details && (
               <span className={cn(
-                "px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-widest flex items-center gap-1",
+                "px-3 py-1 rounded-full text-[10px] font-black font-display uppercase tracking-widest flex items-center gap-1",
                 parseFloat(details.percentchange) >= 0 ? "bg-emerald-500/10 text-emerald-400" : "bg-rose-500/10 text-rose-400"
               )}>
                 {parseFloat(details.percentchange) >= 0 ? <TrendingUp className="w-3 h-3" /> : <TrendingDown className="w-3 h-3" />}
@@ -80,7 +80,7 @@ export const MCIndexDetailPanel: React.FC<MCIndexDetailPanelProps> = ({ indId, n
               </span>
             )}
           </div>
-          <p className="text-slate-400 text-[10px] font-bold uppercase tracking-widest mt-1">
+          <p className="text-slate-400 text-[10px] font-bold font-display uppercase tracking-widest mt-1">
             {details?.exchange} • {details?.lastupdated}
           </p>
         </div>
@@ -108,7 +108,7 @@ export const MCIndexDetailPanel: React.FC<MCIndexDetailPanelProps> = ({ indId, n
                   key={r}
                   onClick={() => setGraphRange(r)}
                   className={cn(
-                    "px-3 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all",
+                    "px-3 py-1.5 rounded-lg text-[10px] font-black font-display uppercase tracking-widest transition-all",
                     graphRange === r ? "bg-blue-600 text-white shadow-lg" : "text-slate-400 hover:text-slate-300"
                   )}
                 >
@@ -123,7 +123,7 @@ export const MCIndexDetailPanel: React.FC<MCIndexDetailPanelProps> = ({ indId, n
                   key={t}
                   onClick={() => setGraphType(t)}
                   className={cn(
-                    "px-3 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all",
+                    "px-3 py-1.5 rounded-lg text-[10px] font-black font-display uppercase tracking-widest transition-all",
                     graphType === t ? "bg-blue-600 text-white shadow-lg" : "text-slate-400 hover:text-slate-300"
                   )}
                 >
@@ -245,7 +245,7 @@ export const MCIndexDetailPanel: React.FC<MCIndexDetailPanelProps> = ({ indId, n
               
               {fundamentals.sectorWeights && fundamentals.sectorWeights.length > 0 && (
                 <div className="mt-6">
-                   <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-3">Top Sectoral Weights</p>
+                   <p className="text-[10px] font-black text-slate-400 font-display uppercase tracking-widest mb-3">Top Sectoral Weights</p>
                    <div className="space-y-2">
                      {fundamentals.sectorWeights.slice(0, 5).map((sw: any, i: number) => (
                        <div key={i} className="flex justify-between items-center text-[10px]">
@@ -273,7 +273,7 @@ export const MCIndexDetailPanel: React.FC<MCIndexDetailPanelProps> = ({ indId, n
              
              <div className="mt-6 grid grid-cols-1 md:grid-cols-2 gap-6">
                 <div>
-                   <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-3">OHLC Stats</p>
+                   <p className="text-[10px] font-black text-slate-400 font-display uppercase tracking-widest mb-3">OHLC Stats</p>
                    <div className="grid grid-cols-2 gap-2">
                       <div className="glass-strong p-2 rounded-lg border border-slate-800/30">
                         <span className="text-[9.5px] text-slate-400 font-bold uppercase">Open</span>
@@ -295,7 +295,7 @@ export const MCIndexDetailPanel: React.FC<MCIndexDetailPanelProps> = ({ indId, n
                 </div>
                 
                 <div>
-                   <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-3">Range Analysis</p>
+                   <p className="text-[10px] font-black text-slate-400 font-display uppercase tracking-widest mb-3">Range Analysis</p>
                    <div className="space-y-3">
                       <div>
                         <div className="flex justify-between text-[10px] mb-1">
@@ -325,7 +325,7 @@ export const MCIndexDetailPanel: React.FC<MCIndexDetailPanelProps> = ({ indId, n
                     key={p}
                     onClick={() => setTimeframe(p)}
                     className={cn(
-                      "px-4 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all",
+                      "px-4 py-1.5 rounded-lg text-[10px] font-black font-display uppercase tracking-widest transition-all",
                       timeframe === p ? "bg-blue-600 text-white shadow-lg shadow-blue-900/20" : "text-slate-400 hover:text-slate-300"
                     )}
                   >
@@ -336,7 +336,7 @@ export const MCIndexDetailPanel: React.FC<MCIndexDetailPanelProps> = ({ indId, n
               
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                  <div>
-                   <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-3">Pivot Levels</p>
+                   <p className="text-[10px] font-black text-slate-400 font-display uppercase tracking-widest mb-3">Pivot Levels</p>
                    <div className="space-y-1.5">
                      {technicals.data.pivotLevels?.[0]?.pivotLevel && (
                         Object.entries(technicals.data.pivotLevels[0].pivotLevel).map(([key, val]) => (
@@ -385,7 +385,7 @@ export const MCIndexDetailPanel: React.FC<MCIndexDetailPanelProps> = ({ indId, n
                       </LineChart>
                     </ResponsiveContainer>
                   </div>
-                  <div className="flex justify-between mt-2 text-[10px] font-black text-slate-400 uppercase tracking-widest">
+                  <div className="flex justify-between mt-2 text-[10px] font-black text-slate-400 font-display uppercase tracking-widest">
                     <span>Current: <span className="text-white">{peChart[peChart.length - 1]?.value?.toFixed(2)}</span></span>
                     <span>Min: <span className="text-emerald-400">{Math.min(...peChart.map(d => d.value)).toFixed(2)}</span></span>
                     <span>Max: <span className="text-rose-400">{Math.max(...peChart.map(d => d.value)).toFixed(2)}</span></span>
@@ -409,7 +409,7 @@ export const MCIndexDetailPanel: React.FC<MCIndexDetailPanelProps> = ({ indId, n
                       </LineChart>
                     </ResponsiveContainer>
                   </div>
-                  <div className="flex justify-between mt-2 text-[10px] font-black text-slate-400 uppercase tracking-widest">
+                  <div className="flex justify-between mt-2 text-[10px] font-black text-slate-400 font-display uppercase tracking-widest">
                     <span>Current: <span className="text-white">{pbChart[pbChart.length - 1]?.value?.toFixed(2)}</span></span>
                     <span>Min: <span className="text-emerald-400">{Math.min(...pbChart.map(d => d.value)).toFixed(2)}</span></span>
                     <span>Max: <span className="text-rose-400">{Math.max(...pbChart.map(d => d.value)).toFixed(2)}</span></span>

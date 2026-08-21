@@ -21,18 +21,18 @@ import stockData from '../data/stocklist';
 type ConvFilter = 'TOP' | 'ALL' | 'S_ELITE' | 'A_HIGH' | 'B_MEDIUM';
 type HorizonFilter = 'ALL' | 'intraday' | 'swing' | 'long_term';
 
-// ─── Style maps ───────────────────────────────────────────────────────────────
-
-const CONV = {
-  S_ELITE:  { label: 'S', bg: 'bg-emerald-500/20', border: 'border-emerald-500/40', text: 'text-emerald-300', dot: 'bg-emerald-400' },
-  A_HIGH:   { label: 'A', bg: 'bg-sky-500/20',     border: 'border-sky-500/40',     text: 'text-sky-300',     dot: 'bg-sky-400'     },
-  B_MEDIUM: { label: 'B', bg: 'bg-amber-500/15',   border: 'border-amber-500/35',   text: 'text-amber-300',   dot: 'bg-amber-400'   },
-  C_LOW:    { label: 'C', bg: 'bg-slate-700/40',   border: 'border-slate-600/40',   text: 'text-slate-400',   dot: 'bg-slate-500'   },
+// ─── Conviction tier labels & badge classes ───────────────────────────────────
+// Map conviction_level to v1-badge class names + display label
+const CONVICTION_BADGE = {
+  S_ELITE:  { label: 'S', badgeClass: 'v1-badge-s' },
+  A_HIGH:   { label: 'A', badgeClass: 'v1-badge-a' },
+  B_MEDIUM: { label: 'B', badgeClass: 'v1-badge-b' },
+  C_LOW:    { label: 'C', badgeClass: 'v1-badge-c' },
 } as const;
 
 const REGIME_COLOR: Record<string, string> = {
-  BULL: 'text-emerald-400', BEAR: 'text-rose-400', HIGH_VOL: 'text-amber-400',
-  SIDEWAYS: 'text-sky-400', CRASH: 'text-red-400',
+  BULL: 'v1-text-bullish', BEAR: 'v1-text-bearish', HIGH_VOL: 'v1-text-neutral',
+  SIDEWAYS: 'text-sky-400', CRASH: 'text-rose-400',
 };
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -67,18 +67,21 @@ function ScoreBar({ value, max = 100, color = 'bg-sky-500' }: { value: number | 
 
 function StockCard({ p, onSelect }: { p: any; onSelect: (sym: string) => void }) {
   const [expanded, setExpanded] = useState(false);
-  const style = CONV[p.conviction_level as keyof typeof CONV] ?? CONV.B_MEDIUM;
+  const conviction = CONVICTION_BADGE[p.conviction_level as keyof typeof CONVICTION_BADGE] ?? CONVICTION_BADGE.B_MEDIUM;
   const winPct = p.win_probability != null ? Math.round(p.win_probability * 100) : null;
   const rr = n2(p.risk_reward);
   const sym = String(p.symbol || '').toUpperCase();
 
+  // Determine card border color based on conviction level
+  const cardBorderClass = {
+    S_ELITE: 'v1-card-up',
+    A_HIGH: 'v1-card',
+    B_MEDIUM: 'v1-card-neutral',
+    C_LOW: 'v1-card-down',
+  }[p.conviction_level as string] || 'v1-card';
+
   return (
-    <div
-      className={cn(
-        'rounded-xl border p-4 flex flex-col gap-2 transition-all hover:brightness-110',
-        style.bg, style.border,
-      )}
-    >
+    <div className={cn('v1-card p-4 flex flex-col gap-2', cardBorderClass)}>
       {/* Header row */}
       <div className="flex items-start justify-between gap-2">
         <div className="flex-1 min-w-0">
@@ -93,8 +96,8 @@ function StockCard({ p, onSelect }: { p: any; onSelect: (sym: string) => void })
         </div>
 
         <div className="flex flex-col items-end gap-1">
-          <span className={cn('text-[10px] font-bold px-2 py-0.5 rounded-full border', style.text, style.border)}>
-            {style.label}
+          <span className={cn('v1-badge', conviction.badgeClass)}>
+            {conviction.label}
           </span>
           {p.timeframe && (
             <span className="text-[9px] text-slate-500 uppercase">{p.timeframe.replace('_', ' ')}</span>
@@ -264,11 +267,11 @@ function StockCard({ p, onSelect }: { p: any; onSelect: (sym: string) => void })
 // ─── Intraday pick card (compact -- distinct data source from the swing/positional cards above) ──
 
 function IntradayPickCard({ p, onSelect }: { p: any; onSelect: (sym: string) => void }) {
-  const style = CONV[p.conviction_level as keyof typeof CONV] ?? CONV.B_MEDIUM;
+  const conviction = CONVICTION_BADGE[p.conviction_level as keyof typeof CONVICTION_BADGE] ?? CONVICTION_BADGE.B_MEDIUM;
   const rr = n2(p.risk_reward);
   const sym = String(p.symbol || '').toUpperCase();
   return (
-    <div className={cn('rounded-xl border p-3 flex flex-col gap-1.5', style.bg, style.border)}>
+    <div className="v1-card p-3 flex flex-col gap-1.5">
       <div className="flex items-start justify-between gap-2">
         <button
           onClick={() => onSelect(sym)}
@@ -277,8 +280,8 @@ function IntradayPickCard({ p, onSelect }: { p: any; onSelect: (sym: string) => 
           <div>{displayStockName(sym)}</div>
           <div className="text-[11px] font-medium text-slate-400 mt-0.5">{sym || '—'}</div>
         </button>
-        <span className={cn('text-[10px] font-bold px-1.5 py-0.5 rounded-full border', style.text, style.border)}>
-          {style.label} · {n2(p.intraday_score)}
+        <span className={cn('v1-badge', conviction.badgeClass)}>
+          {conviction.label} · {n2(p.intraday_score)}
         </span>
       </div>
       <div className="grid grid-cols-3 gap-1 text-[10px]">
@@ -309,8 +312,9 @@ function IntradayPickCard({ p, onSelect }: { p: any; onSelect: (sym: string) => 
 // ─── Stat pill ────────────────────────────────────────────────────────────────
 
 function StatPill({ label, value, color = 'text-white' }: { label: string; value: string | number; color?: string }) {
+  const cardClass = color.includes('emerald') ? 'v1-card-up' : color.includes('rose') ? 'v1-card-down' : 'v1-card-neutral';
   return (
-    <div className="bg-slate-800/60 border border-slate-700/50 rounded-lg px-3 py-2 text-center">
+    <div className={cn(cardClass, 'px-3 py-2 text-center')}>
       <div className={cn('text-base font-bold', color)}>{value}</div>
       <div className="text-[10px] text-slate-500 mt-0.5">{label}</div>
     </div>
@@ -381,7 +385,7 @@ export function BuyRecommendationsPage({ onSelectStock }: { onSelectStock: (sym:
   const regimeColor = REGIME_COLOR[data?.regime ?? ''] ?? 'text-slate-400';
 
   return (
-    <div className="min-h-screen bg-slate-900 text-white p-4 space-y-4">
+    <div className="min-h-screen text-white p-4 space-y-4">
       <V4QuickNav />
 
       {/* Page header */}
@@ -416,7 +420,7 @@ export function BuyRecommendationsPage({ onSelectStock }: { onSelectStock: (sym:
           isolated from the swing/positional picks above. Its Buy/Strong Buy emission is gated on the
           engine's own trailing realised P&L, so an empty/closed state here is a correct, honest
           reflection of "no validated same-day edge right now", not a loading or data problem. */}
-      <div className="bg-slate-800/30 border border-slate-700/40 rounded-xl p-3">
+      <div className="v1-card p-3">
         <div className="flex items-center gap-2 mb-2">
           <Zap size={14} className="text-amber-400" />
           <span className="text-sm font-semibold text-white">Intraday</span>
@@ -462,8 +466,8 @@ export function BuyRecommendationsPage({ onSelectStock }: { onSelectStock: (sym:
       {/* At-a-glance charts */}
       {filtered.length > 0 && (
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-          <div className="bg-slate-800/40 border border-slate-700/50 rounded-lg p-3">
-            <div className="text-[10px] font-semibold text-slate-400 uppercase tracking-wide mb-1">Win-probability distribution</div>
+          <div className="v1-card p-3">
+            <div className="text-[10px] font-semibold text-slate-400 font-display uppercase tracking-wide mb-1">Win-probability distribution</div>
             <ResponsiveContainer width="100%" height={110}>
               <BarChart data={winProbHistogram} margin={{ top: 4, right: 4, left: -20, bottom: 0 }}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#334155" vertical={false} />
@@ -478,8 +482,8 @@ export function BuyRecommendationsPage({ onSelectStock }: { onSelectStock: (sym:
               </BarChart>
             </ResponsiveContainer>
           </div>
-          <div className="bg-slate-800/40 border border-slate-700/50 rounded-lg p-3">
-            <div className="text-[10px] font-semibold text-slate-400 uppercase tracking-wide mb-1">Sector concentration (top 8)</div>
+          <div className="v1-card p-3">
+            <div className="text-[10px] font-semibold text-slate-400 font-display uppercase tracking-wide mb-1">Sector concentration (top 8)</div>
             <ResponsiveContainer width="100%" height={110}>
               <BarChart data={sectorChartData} layout="vertical" margin={{ top: 4, right: 12, left: 4, bottom: 0 }}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#334155" horizontal={false} />

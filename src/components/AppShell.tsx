@@ -7,6 +7,7 @@ import {
   Star, LogIn, TrendingUp, ArrowUpRight, ArrowDownRight, Menu,
   ChevronLeft, ChevronRight, Radio, Settings2, Briefcase, Calendar, Sparkles,
   FlaskConical, Layers, MonitorDot, ChartLine, X, MessageSquare, Gauge, FileDown,
+  Sunrise, Shield, SlidersHorizontal,
 } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { useEscapeKey, SkipLink, MAIN_CONTENT_ID } from '../lib/a11y';
@@ -16,6 +17,11 @@ import type { User as FirebaseUser } from 'firebase/auth';
 import { useWebSocket } from '../v2/hooks/useWebSocket';
 import { notifyAlert } from '../lib/browserNotify';
 import { CommandPalette } from './CommandPalette';
+// v6-theme.css's `.v6-root` was built (2026-08-07) specifically to alias v5.css's --v5-* variables
+// onto v1 AppShell's own color values ("restyled to match v1 AppShell's actual look" -- see that
+// file's header) so v5/v6-origin pages render on-theme wherever `.v6-root` wraps them. Reused here
+// (not copied) so the 8 desk/browser pages this nav now links to need zero styling changes.
+import '../v6/v6-theme.css';
 
 // ─── Nav Config ───────────────────────────────────────────────────────────────
 
@@ -54,6 +60,8 @@ const NAV_GROUPS: NavGroup[] = [
       { icon: LayoutDashboard, label: 'Dashboard',  id: 'dashboard'   },
       { icon: BarChart2,       label: 'Indices',    id: 'indices'     },
       { icon: Activity,        label: 'Market Map', id: 'market-map'  },
+      { icon: Sunrise,         label: 'Pre-Market', id: 'premarket'   },
+      { icon: Radio,           label: 'Intraday',   id: 'intraday'    },
     ],
   },
   {
@@ -67,14 +75,21 @@ const NAV_GROUPS: NavGroup[] = [
     label: 'Analysis',
     items: [
       { icon: Filter,  label: 'Screener',   id: 'screener'    },
+      { icon: Layers,  label: 'Screener Browser', id: 'screener-browser' },
+      { icon: Filter,  label: 'Live Screener', id: 'live-screener' },
+      { icon: History, label: 'EOD Screener',  id: 'eod-screener'  },
       { icon: Target,  label: 'F&O Intel',  id: 'fno-scanners'},
       { icon: TrendingUp, label: 'Options Intel', id: 'options' },
+      { icon: TrendingUp, label: 'Options Desk', id: 'options-desk' },
       { icon: Zap,     label: 'Trendlyne',  id: 'trendlyne'   },
       { icon: Star,    label: 'Premium Screeners', id: 'premium-screeners' },
       { icon: Search,     label: 'Discover',    id: 'discover'    },
       { icon: Briefcase,  label: 'Smart Money', id: 'smart-money' },
+      { icon: Briefcase,  label: 'Institutional Flow', id: 'institutional-flow' },
       { icon: Users,      label: 'Money Flow',  id: 'money-flow'  },
       { icon: Calendar,   label: 'Earnings',    id: 'earnings'    },
+      { icon: Calendar,   label: 'Earnings Desk', id: 'earnings-desk' },
+      { icon: Shield,     label: 'Risk',        id: 'risk'        },
     ],
   },
   {
@@ -96,6 +111,7 @@ const NAV_GROUPS: NavGroup[] = [
       { icon: Radio,        label: 'Signal Ledger',      id: 'signal-tracking'    },
       { icon: Radio,        label: 'Signals',            id: 'signals'            },
       { icon: ChartLine,    label: 'Signal Report Card', id: 'signal-report-card' },
+      { icon: ChartLine,    label: 'Signal Review',      id: 'signal-review'      },
       { icon: Activity,     label: 'Sentiment',          id: 'sentiment'          },
       { icon: History,      label: 'Backtest',           id: 'backtest'           },
       { icon: Settings2,    label: 'ML Builder',         id: 'builder'            },
@@ -106,6 +122,7 @@ const NAV_GROUPS: NavGroup[] = [
     label: 'Portfolio',
     items: [
       { icon: PieChart,  label: 'Portfolio',  id: 'portfolio'  },
+      { icon: PieChart,  label: 'Portfolio Tracker', id: 'portfolio-tracker' },
       { icon: Bookmark,  label: 'Watchlist',  id: 'watchlist'  },
       { icon: Users,     label: 'Superstars', id: 'superstars' },
       { icon: Star,      label: 'My Profile', id: 'profile'    },
@@ -127,6 +144,7 @@ const NAV_GROUPS: NavGroup[] = [
       { icon: Sparkles,      label: 'Switch to V5', id: 'v5'      },
       { icon: Globe,         label: 'Economics',  id: 'economics' },
       { icon: CheckCircle2,  label: 'ToDo',       id: 'todo'      },
+      { icon: SlidersHorizontal, label: 'Settings', id: 'settings' },
       { icon: MonitorDot,    label: 'System Monitor', id: 'monitor'   },
       { icon: Calendar,      label: 'Job Console',    id: 'jobs'      },
       { icon: FileDown,      label: 'Export Portfolio', id: 'export-picks' },
@@ -317,7 +335,7 @@ const SidebarInner = React.memo(function SidebarInner({ collapsed, setCollapsed,
                 exit={{ opacity: 0 }}
                 className="overflow-hidden min-w-0"
               >
-                <p className={cn('text-[10px] font-black uppercase tracking-widest leading-none', marketStatus.isOpen ? 'text-emerald-400' : 'text-slate-400')}>
+                <p className={cn('text-[10px] font-black font-display uppercase tracking-widest leading-none', marketStatus.isOpen ? 'text-emerald-400' : 'text-slate-400')}>
                   NSE {marketStatus.isOpen ? 'LIVE' : 'CLOSED'}
                 </p>
                 <p className="text-[9px] text-slate-400 mt-0.5 leading-none truncate">{marketStatus.countdown}</p>
@@ -460,7 +478,7 @@ const SidebarInner = React.memo(function SidebarInner({ collapsed, setCollapsed,
             >
               {displayIndices.slice(0, 3).map(idx => (
                 <div key={idx.name} className="flex items-center justify-between">
-                  <span className="text-[9px] text-slate-400 uppercase tracking-wide truncate max-w-[80px]">{idx.name}</span>
+                  <span className="text-[9px] text-slate-400 font-display uppercase tracking-wide truncate max-w-[80px]">{idx.name}</span>
                   <div className="flex items-center gap-1 shrink-0">
                     <span className="text-[9px] font-bold text-slate-400 tabular-nums">{idx.value.toLocaleString('en-IN')}</span>
                     <span className={cn('text-[8px] font-bold', idx.isUp ? 'text-emerald-400' : 'text-rose-400')}>
@@ -566,7 +584,10 @@ export const AppShell: React.FC<AppShellProps> = ({
   }, [lastMessage]);
 
   return (
-    <div className="flex h-screen overflow-hidden bg-transparent text-slate-200">
+    // v6-root (v6-theme.css, imported above): bridges v5/v6-origin pages' --v5-*/--v6-* CSS
+    // variables onto v1's own color values -- the exact same wrapping V6Shell itself uses --
+    // harmlessly redundant with index.css's global body background for every other page.
+    <div className="v6-root flex h-screen overflow-hidden bg-transparent text-slate-200">
       <SkipLink />
       {/* ── Desktop sidebar ── */}
       <motion.aside
@@ -626,7 +647,7 @@ export const AppShell: React.FC<AppShellProps> = ({
               <>
                 <span className="text-slate-300 hidden sm:block">/</span>
                 {ActiveIcon && <ActiveIcon className="w-3 h-3 text-amber-400 shrink-0" />}
-                <span className="text-[11px] font-black text-amber-400 uppercase tracking-wide truncate"
+                <span className="text-[11px] font-black text-amber-400 font-display uppercase tracking-wide truncate"
                   style={{ fontFamily: "'Rajdhani', sans-serif" }}>
                   {activeLabel}
                 </span>
@@ -644,7 +665,7 @@ export const AppShell: React.FC<AppShellProps> = ({
                 onClick={() => onSelectIndexByName(idx.name)}
                 className="flex items-center gap-1.5 group"
               >
-                <span className="text-[9px] text-slate-400 uppercase tracking-wider group-hover:text-slate-300 transition-colors">
+                <span className="text-[9px] text-slate-400 font-display uppercase tracking-wider group-hover:text-slate-300 transition-colors">
                   {idx.name.replace('NIFTY BANK', 'BANKNIFTY').replace('NIFTY 50', 'NIFTY50').replace('SENSEX', 'SENSEX')}
                 </span>
                 <span className="text-[11px] font-bold text-slate-300 tabular-nums">{idx.value.toLocaleString('en-IN')}</span>
@@ -662,20 +683,23 @@ export const AppShell: React.FC<AppShellProps> = ({
               'w-1.5 h-1.5 rounded-full',
               getMarketStatus().isOpen ? 'bg-emerald-400 animate-pulse' : 'bg-slate-400',
             )} />
-            <span className="text-[9px] font-black uppercase tracking-wider text-slate-400">
+            <span className="text-[9px] font-black font-display uppercase tracking-wider text-slate-400">
               {getMarketStatus().isOpen ? 'LIVE' : 'CLOSED'}
             </span>
           </div>
 
           {/* Version Switchers */}
           <div className="flex gap-1 shrink-0 select-none">
-            <button 
+            {/* v1 = this shell -- promoted (back) to the default 2026-08-20 now that its own nav
+                links every page the others had (see App.tsx's dashboardVersion initializer), so
+                this button carries the "recommended" accent Workbench used to. */}
+            <button
               onClick={() => {
                 localStorage.setItem('dashboardVersion', 'v1');
                 localStorage.setItem('v2Enabled', 'false');
                 window.location.reload();
               }}
-              className="bg-slate-900 border border-slate-800 text-slate-400 hover:text-slate-200 font-black text-[9px] rounded-md px-2.5 py-1 uppercase tracking-wider cursor-pointer transition-colors"
+              className="bg-indigo-600 hover:bg-indigo-500 text-white font-black text-[9px] rounded-md px-2.5 py-1 font-display uppercase tracking-wider cursor-pointer transition-colors"
             >
               V1
             </button>
@@ -685,7 +709,7 @@ export const AppShell: React.FC<AppShellProps> = ({
                 localStorage.setItem('v2Enabled', 'true');
                 window.location.reload();
               }}
-              className="bg-slate-900 border border-slate-800 text-slate-400 hover:text-slate-200 font-black text-[9px] rounded-md px-2.5 py-1 uppercase tracking-wider cursor-pointer transition-colors"
+              className="bg-slate-900 border border-slate-800 text-slate-400 hover:text-slate-200 font-black text-[9px] rounded-md px-2.5 py-1 font-display uppercase tracking-wider cursor-pointer transition-colors"
             >
               V2
             </button>
@@ -695,20 +719,20 @@ export const AppShell: React.FC<AppShellProps> = ({
                 localStorage.setItem('v2Enabled', 'true');
                 window.location.reload();
               }}
-              className="bg-slate-900 border border-slate-800 text-slate-400 hover:text-slate-200 font-black text-[9px] rounded-md px-2.5 py-1 uppercase tracking-wider cursor-pointer transition-colors"
+              className="bg-slate-900 border border-slate-800 text-slate-400 hover:text-slate-200 font-black text-[9px] rounded-md px-2.5 py-1 font-display uppercase tracking-wider cursor-pointer transition-colors"
             >
               V3 Pro
             </button>
             {/* v6 = the consolidation shell (src/v6/), reusing the same v2Enabled route tree as
-                v2/v3 -- promoted to the default 2026-08-09 (see App.tsx's dashboardVersion
-                initializer), so this button now carries the "recommended" accent V3 used to. */}
+                v2/v3 -- was the default 2026-08-09..2026-08-20, now demoted back to a plain
+                switcher entry like v2/v3 (see App.tsx's dashboardVersion initializer). */}
             <button
               onClick={() => {
                 localStorage.setItem('dashboardVersion', 'v6');
                 localStorage.setItem('v2Enabled', 'true');
                 window.location.reload();
               }}
-              className="bg-indigo-600 hover:bg-indigo-500 text-white font-black text-[9px] rounded-md px-2.5 py-1 uppercase tracking-wider cursor-pointer transition-colors"
+              className="bg-slate-900 border border-slate-800 text-slate-400 hover:text-slate-200 font-black text-[9px] rounded-md px-2.5 py-1 font-display uppercase tracking-wider cursor-pointer transition-colors"
             >
               Workbench
             </button>
@@ -716,7 +740,7 @@ export const AppShell: React.FC<AppShellProps> = ({
                 a plain navigation, not a localStorage-driven reload like its siblings. */}
             <button
               onClick={() => { window.location.href = '/v5'; }}
-              className="bg-violet-600 hover:bg-violet-500 text-white font-black text-[9px] rounded-md px-2.5 py-1 uppercase tracking-wider cursor-pointer transition-colors"
+              className="bg-violet-600 hover:bg-violet-500 text-white font-black text-[9px] rounded-md px-2.5 py-1 font-display uppercase tracking-wider cursor-pointer transition-colors"
             >
               V5
             </button>
@@ -738,7 +762,7 @@ export const AppShell: React.FC<AppShellProps> = ({
                 <Radio className="w-5 h-5 text-indigo-400 animate-pulse" />
               </div>
               <div>
-                <h4 className="text-xs font-black text-slate-200 uppercase tracking-wider font-mono">
+                <h4 className="text-xs font-black text-slate-200 font-display uppercase tracking-wider font-data">
                   Live Alert: {toastMessage.symbol}
                 </h4>
                 <p className="text-[10px] text-indigo-200 mt-0.5 leading-snug">

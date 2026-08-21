@@ -29,7 +29,7 @@ export function AgentAuditorPage() {
           <h1 className="text-2xl font-bold text-white flex items-center gap-2">
             <BarChart2 className="w-6 h-6 text-orange-400" /> Auditor Agent
           </h1>
-          {report && <p className="text-sm text-gray-400 mt-1">Auditing picks from: {report.audit_for_date}</p>}
+          {report && <p className="text-sm text-slate-400 mt-1">Auditing picks from: {report.audit_for_date}</p>}
         </div>
         <button
           onClick={() => runMutation.mutate()}
@@ -45,14 +45,14 @@ export function AgentAuditorPage() {
         {(Object.keys(TF_LABELS) as Timeframe[]).map(t => (
           <button key={t} onClick={() => setTf(t)}
             className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
-              tf === t ? 'bg-orange-600 text-white' : 'bg-white/5 text-gray-400 hover:bg-white/10'
+              tf === t ? 'bg-orange-600 text-white' : 'bg-white/5 text-slate-400 hover:bg-white/10'
             }`}>
             {TF_LABELS[t]}
           </button>
         ))}
       </div>
 
-      {isLoading && <p className="text-gray-400">Loading audit...</p>}
+      {isLoading && <p className="text-slate-400">Loading audit...</p>}
 
       {report && (
         <>
@@ -63,13 +63,13 @@ export function AgentAuditorPage() {
 
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
             {[
-              { label: 'Hit Rate', value: `${report.hit_rate?.toFixed(0)}%`, color: report.hit_rate >= 60 ? 'text-green-400' : 'text-red-400' },
-              { label: 'Avg Return', value: `${report.avg_return_pct >= 0 ? '+' : ''}${report.avg_return_pct?.toFixed(2)}%`, color: report.avg_return_pct >= 0 ? 'text-green-400' : 'text-red-400' },
-              { label: 'Alpha vs Nifty', value: `${report.alpha_pct >= 0 ? '+' : ''}${report.alpha_pct?.toFixed(2)}%`, color: report.alpha_pct >= 0 ? 'text-green-400' : 'text-red-400' },
-              { label: 'Profit Factor', value: report.profit_factor?.toFixed(2), color: report.profit_factor >= 1.5 ? 'text-green-400' : 'text-yellow-400' },
+              { label: 'Hit Rate', value: `${report.hit_rate?.toFixed(0)}%`, color: report.hit_rate >= 60 ? 'text-emerald-400' : 'text-rose-400' },
+              { label: 'Avg Return', value: `${report.avg_return_pct >= 0 ? '+' : ''}${report.avg_return_pct?.toFixed(2)}%`, color: report.avg_return_pct >= 0 ? 'text-emerald-400' : 'text-rose-400' },
+              { label: 'Alpha vs Nifty', value: `${report.alpha_pct >= 0 ? '+' : ''}${report.alpha_pct?.toFixed(2)}%`, color: report.alpha_pct >= 0 ? 'text-emerald-400' : 'text-rose-400' },
+              { label: 'Profit Factor', value: report.profit_factor?.toFixed(2), color: report.profit_factor >= 1.5 ? 'text-emerald-400' : 'text-yellow-400' },
             ].map(m => (
-              <div key={m.label} className="bg-white/5 rounded-xl p-4 border border-white/10">
-                <p className="text-xs text-gray-400">{m.label}</p>
+              <div key={m.label} className="v1-card p-4">
+                <p className="text-xs text-slate-400">{m.label}</p>
                 <p className={`text-2xl font-bold mt-1 ${m.color}`}>{m.value}</p>
               </div>
             ))}
@@ -77,28 +77,28 @@ export function AgentAuditorPage() {
 
           <div className="grid grid-cols-3 gap-4 text-center">
             {[
-              { label: '✅ Hits', value: report.hits, color: 'text-green-400' },
-              { label: '❌ Misses', value: report.misses, color: 'text-red-400' },
+              { label: '✅ Hits', value: report.hits, color: 'text-emerald-400' },
+              { label: '❌ Misses', value: report.misses, color: 'text-rose-400' },
               { label: '⏳ Open', value: report.open_positions, color: 'text-yellow-400' },
             ].map(m => (
-              <div key={m.label} className="bg-white/5 rounded-xl p-4 border border-white/10">
-                <p className="text-sm text-gray-400">{m.label}</p>
+              <div key={m.label} className="v1-card p-4">
+                <p className="text-sm text-slate-400">{m.label}</p>
                 <p className={`text-3xl font-bold mt-1 ${m.color}`}>{m.value}</p>
               </div>
             ))}
           </div>
 
           {attrData.length > 0 && (
-            <div className="bg-white/5 rounded-xl p-4 border border-white/10">
-              <p className="text-sm font-semibold text-gray-300 mb-4">Signal Attribution (Win Rate %)</p>
+            <div className="v1-card p-4">
+              <p className="text-sm font-semibold text-slate-300 mb-4">Signal Attribution (Win Rate %)</p>
               <ResponsiveContainer width="100%" height={160}>
                 <BarChart data={attrData} layout="vertical">
-                  <XAxis type="number" domain={[0, 100]} tick={{ fontSize: 10, fill: '#9ca3af' }} />
-                  <YAxis type="category" dataKey="sig" tick={{ fontSize: 10, fill: '#9ca3af' }} width={100} />
-                  <Tooltip contentStyle={{ background: '#1f2937', border: '1px solid #374151' }} />
+                  <XAxis type="number" domain={[0, 100]} tick={{ fontSize: 10, fill: '#94a3b8' }} />
+                  <YAxis type="category" dataKey="sig" tick={{ fontSize: 10, fill: '#94a3b8' }} width={100} />
+                  <Tooltip contentStyle={{ background: '#1e293b', border: '1px solid #334155' }} />
                   <Bar dataKey="wr" name="Win Rate %">
                     {attrData.map((entry, i) => (
-                      <Cell key={i} fill={entry.wr >= 60 ? '#4ade80' : entry.wr >= 45 ? '#facc15' : '#f87171'} />
+                      <Cell key={i} fill={entry.wr >= 60 ? '#34d399' : entry.wr >= 45 ? '#facc15' : '#fb7185'} />
                     ))}
                   </Bar>
                 </BarChart>
@@ -108,7 +108,7 @@ export function AgentAuditorPage() {
         </>
       )}
       {!report && !isLoading && (
-        <p className="text-gray-500 text-sm">No audit data for {TF_LABELS[tf]} yet. Run the agent after market close.</p>
+        <p className="text-slate-500 text-sm">No audit data for {TF_LABELS[tf]} yet. Run the agent after market close.</p>
       )}
     </div>
   );

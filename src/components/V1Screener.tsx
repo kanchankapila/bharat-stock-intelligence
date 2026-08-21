@@ -186,7 +186,7 @@ export const V1Screener: React.FC<{
               <div className="lg:col-span-3 space-y-6">
                 <div className="space-y-4">
                   <h4 className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] flex items-center gap-2">
-                    <Zap className="w-3 h-3 text-blue-500" /> System Presets
+                    <Zap className="w-3 h-3 text-indigo-500" /> System Presets
                   </h4>
                   <div className="flex flex-col gap-2">
                     {['All', 'TradingView', 'Gainers', 'Losers', 'High ROE', 'Low Debt', 'Near 52W High', 'Near 52W Low'].map(tag => (
@@ -194,8 +194,8 @@ export const V1Screener: React.FC<{
                           key={tag}
                           onClick={() => { setFilter(tag); setActiveScanner(null); }}
                           className={cn(
-                              "px-4 py-2.5 rounded-xl text-[10px] font-black tracking-widest transition-all border uppercase text-left",
-                              (filter === tag && !activeScanner) ? "bg-blue-600 border-blue-600 text-white shadow-lg shadow-blue-500/20" : "glass-strong border-slate-800/50 text-slate-400 hover:border-slate-800/30 hover:text-white"
+                              "px-4 py-2.5 text-[10px] font-black tracking-widest transition-all uppercase text-left",
+                              (filter === tag && !activeScanner) ? "bg-indigo-600 border border-indigo-600 rounded-[10px] text-white shadow-lg shadow-indigo-500/20" : "v1-card text-slate-400 hover:text-white"
                           )}
                       >
                         {tag}
@@ -210,17 +210,17 @@ export const V1Screener: React.FC<{
                   </h4>
                   <div className="space-y-4">
                     <div className="space-y-1.5">
-                       <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Max P/E Ratio</label>
+                       <label className="text-[9px] font-black text-slate-400 font-display uppercase tracking-widest">Max P/E Ratio</label>
                        <input
                           type="range" min="0" max="60" step="5"
                           value={maxPe || 60}
                           onChange={(e) => setMaxPe(parseInt(e.target.value))}
-                          className="w-full accent-blue-500 h-1 glass rounded-full appearance-none cursor-pointer"
+                          className="w-full accent-indigo-500 h-1 glass rounded-full appearance-none cursor-pointer"
                        />
                        <div className="flex justify-between text-[8px] font-bold text-slate-400"><span>0</span><span>{maxPe || 60}</span></div>
                     </div>
                     <div className="space-y-1.5">
-                       <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Min ROE %</label>
+                       <label className="text-[9px] font-black text-slate-400 font-display uppercase tracking-widest">Min ROE %</label>
                        <input
                           type="range" min="0" max="40" step="5"
                           value={minRoe || 0}
@@ -230,7 +230,7 @@ export const V1Screener: React.FC<{
                        <div className="flex justify-between text-[8px] font-bold text-slate-400"><span>0</span><span>{minRoe || 0}%</span></div>
                     </div>
                     <div className="space-y-1.5">
-                       <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Max P/B Ratio</label>
+                       <label className="text-[9px] font-black text-slate-400 font-display uppercase tracking-widest">Max P/B Ratio</label>
                        <input
                           type="range" min="0" max="15" step="1"
                           value={maxPb || 15}
@@ -240,7 +240,7 @@ export const V1Screener: React.FC<{
                        <div className="flex justify-between text-[8px] font-bold text-slate-400"><span>0</span><span>{maxPb || 15}</span></div>
                     </div>
                     <div className="space-y-1.5">
-                       <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Max D/E Ratio</label>
+                       <label className="text-[9px] font-black text-slate-400 font-display uppercase tracking-widest">Max D/E Ratio</label>
                        <input
                           type="range" min="0" max="3" step="0.5"
                           value={maxDe || 3}
@@ -251,7 +251,7 @@ export const V1Screener: React.FC<{
                     </div>
                     <button
                        onClick={() => { setMaxPe(undefined); setMinRoe(undefined); setMaxDe(undefined); setMaxPb(undefined); }}
-                       className="w-full py-2 glass-strong border border-slate-800/50 rounded-lg text-[8px] font-black text-slate-400 uppercase tracking-widest hover:border-slate-800/30 hover:text-slate-300 transition-all"
+                       className="w-full py-2 glass-strong border border-slate-800/50 rounded-lg text-[8px] font-black text-slate-400 font-display uppercase tracking-widest hover:border-slate-800/30 hover:text-slate-300 transition-all"
                     >
                        Reset Gears
                     </button>
@@ -264,11 +264,11 @@ export const V1Screener: React.FC<{
                   </h4>
                   <div className="space-y-4">
                     <div className="space-y-1.5">
-                       <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Min Market Cap (Cr)</label>
+                       <label className="text-[9px] font-black text-slate-400 font-display uppercase tracking-widest">Min Market Cap (Cr)</label>
                        <select
                           value={minMktCap}
                           onChange={(e) => setMinMktCap(parseInt(e.target.value))}
-                          className="w-full glass-strong border border-slate-800/50 rounded-lg py-2 px-3 text-[10px] font-bold text-slate-200 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                          className="w-full glass-strong border border-slate-800/50 rounded-lg py-2 px-3 text-[10px] font-bold text-slate-200 focus:outline-none focus:ring-1 focus:ring-indigo-500"
                        >
                           <option value="0">All Caps</option>
                           <option value="500">500 Cr+</option>
@@ -278,11 +278,11 @@ export const V1Screener: React.FC<{
                        </select>
                     </div>
                     <div className="space-y-1.5">
-                       <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Sector Focus</label>
+                       <label className="text-[9px] font-black text-slate-400 font-display uppercase tracking-widest">Sector Focus</label>
                        <select
                           value={selectedSector}
                           onChange={(e) => setSelectedSector(e.target.value)}
-                          className="w-full glass-strong border border-slate-800/50 rounded-lg py-2 px-3 text-[10px] font-bold text-slate-200 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                          className="w-full glass-strong border border-slate-800/50 rounded-lg py-2 px-3 text-[10px] font-bold text-slate-200 focus:outline-none focus:ring-1 focus:ring-indigo-500"
                        >
                           <option value="All">All Sectors</option>
                           <option value="Energy">Energy</option>
@@ -293,7 +293,7 @@ export const V1Screener: React.FC<{
                        </select>
                     </div>
                     <div className="space-y-2">
-                       <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Timeframe Multi-Select</label>
+                       <label className="text-[9px] font-black text-slate-400 font-display uppercase tracking-widest">Timeframe Multi-Select</label>
                        <div className="grid grid-cols-2 gap-2">
                           {['15m', '1h', '4h', 'D', 'W'].map(tf => (
                             <button
@@ -306,8 +306,8 @@ export const V1Screener: React.FC<{
                                 }
                               }}
                               className={cn(
-                                "px-2 py-1.5 rounded-lg text-[9px] font-black tracking-widest border transition-all",
-                                selectedTimeframes.includes(tf) ? "bg-blue-600 border-blue-600 text-white" : "glass-strong border-slate-800/50 text-slate-400"
+                                "px-2 py-1.5 text-[9px] font-black tracking-widest transition-all",
+                                selectedTimeframes.includes(tf) ? "bg-indigo-600 border border-indigo-600 rounded-[10px] text-white" : "v1-card text-slate-400"
                               )}
                             >
                               {tf}
@@ -329,8 +329,8 @@ export const V1Screener: React.FC<{
                             key={scanner.id}
                             onClick={() => handleScannerSelect(scanner)}
                             className={cn(
-                                "px-4 py-2 rounded-xl text-[10px] font-black tracking-widest transition-all border uppercase",
-                                activeScanner?.id === scanner.id ? "bg-emerald-600 border-emerald-600 text-white shadow-lg shadow-emerald-500/20" : "glass-strong border-slate-800/50 text-slate-400 hover:border-slate-800/30 hover:text-white"
+                                "px-4 py-2 text-[10px] font-black tracking-widest transition-all uppercase",
+                                activeScanner?.id === scanner.id ? "bg-emerald-600 border border-emerald-600 rounded-[10px] text-white shadow-lg shadow-emerald-500/20" : "v1-card text-slate-400 hover:text-white"
                             )}
                         >
                           {scanner.name}
@@ -342,7 +342,7 @@ export const V1Screener: React.FC<{
             <div className="flex flex-col md:flex-row gap-4 items-center justify-between pt-6 border-t border-slate-800/30">
               <div className="flex flex-col gap-4 w-full">
                 <div className="flex items-center gap-3">
-                   <h4 className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Quick Technical Screener:</h4>
+                   <h4 className="text-[10px] font-black text-slate-400 font-display uppercase tracking-widest">Quick Technical Screener:</h4>
                    <div className="flex flex-wrap gap-2">
                       {[
                         { name: 'Bullish BO', id: 'mc-25-BPBULL' },
@@ -358,7 +358,7 @@ export const V1Screener: React.FC<{
                           }}
                           className={cn(
                             "px-3 py-1.5 rounded-lg text-[9px] font-bold tracking-tight uppercase border transition-all",
-                            activeScanner?.id === iq.id ? "bg-blue-600 border-blue-600 text-white" : "glass border-slate-800/50 text-slate-400 hover:border-slate-800/30 hover:text-white"
+                            activeScanner?.id === iq.id ? "bg-indigo-600 border-indigo-600 text-white" : "glass border-slate-800/50 text-slate-400 hover:border-slate-800/30 hover:text-white"
                           )}
                         >
                           {iq.name}
@@ -374,7 +374,7 @@ export const V1Screener: React.FC<{
                     placeholder="Deep search assets..."
                     value={searchQuery}
                     onChange={(e) => setSearchQuery(e.target.value)}
-                    className="glass-strong border border-slate-800/50 rounded-2xl py-3.5 pl-10 pr-4 text-xs text-slate-200 focus:outline-none focus:ring-1 focus:ring-blue-500 w-full transition-all"
+                    className="glass-strong border border-slate-800/50 rounded-2xl py-3.5 pl-10 pr-4 text-xs text-slate-200 focus:outline-none focus:ring-1 focus:ring-indigo-500 w-full transition-all"
                   />
                 </div>
               </div>
@@ -402,12 +402,12 @@ export const V1Screener: React.FC<{
               </div>
          </div>
 
-        <div className="overflow-x-auto rounded-3xl border border-slate-800/30 glass-strong/50 backdrop-blur-sm">
+        <div className="overflow-x-auto v1-card">
           {isLoading ? (
             <div className="py-48 flex flex-col items-center justify-center space-y-6">
               <div className="relative w-12 h-12">
-                <div className="absolute inset-0 border-2 border-blue-500/20 rounded-full" />
-                <div className="absolute inset-0 border-2 border-blue-500 border-t-transparent rounded-full animate-spin" />
+                <div className="absolute inset-0 border-2 border-indigo-500/20 rounded-full" />
+                <div className="absolute inset-0 border-2 border-indigo-500 border-t-transparent rounded-full animate-spin" />
               </div>
               <p className="text-[10px] font-black text-slate-400 uppercase tracking-[0.3em] animate-pulse">Synchronizing Intelligence...</p>
             </div>
@@ -472,7 +472,7 @@ export const V1Screener: React.FC<{
                             </button>
                           )}
                           <div className="cursor-pointer" onClick={() => onSelectStock(symbol)}>
-                            <div className="font-black text-slate-200 text-xs tracking-tight group-hover:text-blue-400 transition-colors uppercase truncate max-w-[150px]">{name || symbol}</div>
+                            <div className="font-black text-slate-200 text-xs tracking-tight group-hover:text-indigo-400 transition-colors uppercase truncate max-w-[150px]">{name || symbol}</div>
                             <div className="text-[8px] text-slate-400 font-bold tracking-widest mt-1 uppercase italic truncate max-w-[150px]">{symbol}</div>
                           </div>
                         </div>
@@ -488,7 +488,7 @@ export const V1Screener: React.FC<{
                       </td>
                       {activeTab === 'fundamental' ? (
                         ['pe', 'roe', 'pb', 'debtEquity'].map(f => (
-                          <td key={f} className="px-6 py-6 text-center font-bold text-[10px] text-slate-400 uppercase tracking-widest">
+                          <td key={f} className="px-6 py-6 text-center font-bold text-[10px] text-slate-400 font-display uppercase tracking-widest">
                             {row[f]?.toFixed(2) || '-'}
                           </td>
                         ))

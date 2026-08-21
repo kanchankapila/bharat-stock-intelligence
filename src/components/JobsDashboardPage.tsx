@@ -115,7 +115,7 @@ const CronCountdown: React.FC<{ nextTimeIso: string | null }> = ({ nextTimeIso }
   const isExecuting = timeLeft === 'Executing...';
 
   return (
-    <div className="flex items-center gap-1.5 font-mono text-xs">
+    <div className="flex items-center gap-1.5 font-data text-xs">
       <Clock className={cn("w-3.5 h-3.5", isExecuting ? "text-amber-400 animate-pulse" : "text-indigo-400")} />
       <span className={cn(
         "font-black tracking-wider",
@@ -276,7 +276,7 @@ export default function JobsDashboardPage() {
                 )}
               </div>
               <div className="flex-1">
-                <h4 className="text-xs font-black uppercase tracking-wider font-mono">
+                <h4 className="text-xs font-black font-display uppercase tracking-wider font-data">
                   {notification.type === 'success' ? 'Trigger Confirmed' : 'Trigger Failed'}
                 </h4>
                 <p className="text-[11px] leading-snug mt-1 font-bold text-slate-300">
@@ -307,7 +307,7 @@ export default function JobsDashboardPage() {
         {/* Global connection widget */}
         <div className="flex items-center gap-3 shrink-0 self-start md:self-center">
           <div className={cn(
-            "px-3 py-1.5 rounded-full border text-[10px] font-black uppercase tracking-widest font-mono flex items-center gap-2 shadow-inner transition-all",
+            "px-3 py-1.5 rounded-full border text-[10px] font-black font-display uppercase tracking-widest font-data flex items-center gap-2 shadow-inner transition-all",
             isRedisOffline
               ? "bg-rose-950/30 border-rose-500/30 text-rose-400"
               : isPartialOffline
@@ -348,7 +348,7 @@ export default function JobsDashboardPage() {
             <ShieldAlert className="w-8 h-8" />
           </div>
           <div>
-            <h3 className="text-sm font-black text-rose-300 uppercase tracking-widest font-mono">Redis Daemon Unreachable</h3>
+            <h3 className="text-sm font-black text-rose-300 font-display uppercase tracking-widest font-data">Redis Daemon Unreachable</h3>
             <p className="text-xs text-rose-200/70 max-w-md mt-1 font-bold">
               The application could not establish a connection to the Redis container. Please verify the `bharat_redis` Docker container is running and exposed on port 6379.
             </p>
@@ -361,7 +361,7 @@ export default function JobsDashboardPage() {
         {/* Total Queues Card */}
         <div className="glass p-4.5 rounded-2xl relative overflow-hidden group hover:border-slate-700/80 transition-all shadow-md">
           <div className="flex justify-between items-start">
-            <span className="text-[10px] font-black uppercase text-slate-400 tracking-wider font-mono">Configured Queues</span>
+            <span className="text-[10px] font-black uppercase text-slate-400 tracking-wider font-data">Configured Queues</span>
             <div className="p-1.5 bg-slate-800/40 rounded-lg text-slate-300 group-hover:text-indigo-400 transition-colors">
               <Server className="w-4 h-4" />
             </div>
@@ -374,24 +374,24 @@ export default function JobsDashboardPage() {
         </div>
 
         {/* Active Jobs Card */}
-        <div className="glass p-4.5 rounded-2xl relative overflow-hidden group hover:border-blue-800/60 transition-all shadow-md">
+        <div className="glass p-4.5 rounded-2xl relative overflow-hidden group hover:border-indigo-800/60 transition-all shadow-md">
           <div className="flex justify-between items-start">
-            <span className="text-[10px] font-black uppercase text-slate-400 tracking-wider font-mono">Running Jobs</span>
-            <div className="p-1.5 bg-blue-500/10 rounded-lg text-blue-400 animate-pulse">
+            <span className="text-[10px] font-black uppercase text-slate-400 tracking-wider font-data">Running Jobs</span>
+            <div className="p-1.5 bg-indigo-500/10 rounded-lg text-indigo-400 animate-pulse">
               <Zap className="w-4 h-4" />
             </div>
           </div>
           <div className="mt-3 flex items-baseline gap-2">
-            <span className="text-2xl font-black tracking-tight text-blue-300">{totals.active}</span>
-            <span className="text-[10px] text-blue-500 font-bold">In-process thread count</span>
+            <span className="text-2xl font-black tracking-tight text-indigo-300">{totals.active}</span>
+            <span className="text-[10px] text-indigo-500 font-bold">In-process thread count</span>
           </div>
-          <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-blue-500/30 group-hover:bg-blue-500 transition-colors" />
+          <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-indigo-500/30 group-hover:bg-indigo-500 transition-colors" />
         </div>
 
         {/* Waiting / Delayed Card */}
         <div className="glass p-4.5 rounded-2xl relative overflow-hidden group hover:border-amber-800/60 transition-all shadow-md">
           <div className="flex justify-between items-start">
-            <span className="text-[10px] font-black uppercase text-slate-400 tracking-wider font-mono">Pending Jobs</span>
+            <span className="text-[10px] font-black uppercase text-slate-400 tracking-wider font-data">Pending Jobs</span>
             <div className="p-1.5 bg-amber-500/10 rounded-lg text-amber-400">
               <Hourglass className="w-4 h-4" />
             </div>
@@ -406,7 +406,7 @@ export default function JobsDashboardPage() {
         {/* Failed Jobs Card */}
         <div className="glass p-4.5 rounded-2xl relative overflow-hidden group hover:border-rose-800/60 transition-all shadow-md">
           <div className="flex justify-between items-start">
-            <span className="text-[10px] font-black uppercase text-slate-400 tracking-wider font-mono">Failed Jobs</span>
+            <span className="text-[10px] font-black uppercase text-slate-400 tracking-wider font-data">Failed Jobs</span>
             <div className="p-1.5 bg-rose-500/10 rounded-lg text-rose-400">
               <AlertCircle className="w-4 h-4" />
             </div>
@@ -425,11 +425,11 @@ export default function JobsDashboardPage() {
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2">
               <Calendar className="w-4 h-4 text-indigo-400" />
-              <h2 className="text-xs font-black uppercase text-slate-200 tracking-widest font-mono">
+              <h2 className="text-xs font-black uppercase text-slate-200 tracking-widest font-data">
                 Active Repeatable Cron Schedules
               </h2>
             </div>
-            <span className="text-[10px] px-2 py-0.5 rounded bg-slate-800 font-mono text-slate-400 font-black">
+            <span className="text-[10px] px-2 py-0.5 rounded bg-slate-800 font-data text-slate-400 font-black">
               {allCrons.length} JOBS REGISTERED
             </span>
           </div>
@@ -438,14 +438,14 @@ export default function JobsDashboardPage() {
             {allCrons.map((cron, idx) => {
               const catConfig = CATEGORIES.find(c => c.id === cron.category) || CATEGORIES[0];
               return (
-                <div key={cron.queueId + '-' + idx} className="p-3.5 rounded-xl border border-slate-800/50 bg-slate-900/20 flex flex-col justify-between space-y-3 relative group hover:border-slate-800 transition-all">
+                <div key={cron.queueId + '-' + idx} className="v1-card p-3.5 flex flex-col justify-between space-y-3 relative group hover:border-slate-800 transition-all">
                   <div className="space-y-1">
                     <div className="flex items-center justify-between">
                       <span className="text-[10px] font-bold text-slate-300 whitespace-normal break-words leading-tight">
                         {cron.queueLabel}
                       </span>
                       <span className={cn(
-                        "text-[8px] font-black uppercase tracking-wider px-1.5 py-0.5 rounded font-mono",
+                        "text-[8px] font-black font-display uppercase tracking-wider px-1.5 py-0.5 rounded font-data",
                         cron.category === 'data-sync' ? "bg-emerald-950/40 text-emerald-400 border border-emerald-500/20" :
                         cron.category === 'signals-analysis' ? "bg-amber-950/40 text-amber-400 border border-amber-500/20" :
                         cron.category === 'machine-learning' ? "bg-violet-950/40 text-violet-400 border border-violet-500/20" :
@@ -455,24 +455,24 @@ export default function JobsDashboardPage() {
                         {catConfig.label.split(' ')[0]}
                       </span>
                     </div>
-                    <h4 className="text-[11px] font-black text-slate-400 font-mono uppercase tracking-wider whitespace-normal break-words leading-tight">
+                    <h4 className="text-[11px] font-black text-slate-400 font-data font-display uppercase tracking-wider whitespace-normal break-words leading-tight">
                       {cron.jobName}
                     </h4>
                   </div>
 
                   <div className="flex items-start justify-between gap-3 border-t border-slate-800/40 pt-2 bg-slate-900/10">
                     <div className="flex flex-col gap-0.5">
-                      <span className="text-[8px] text-slate-500 font-black uppercase font-mono tracking-widest">Schedule</span>
-                      <span className="text-[10px] font-bold text-slate-300 font-mono whitespace-normal break-all">{cron.cron}</span>
+                      <span className="text-[8px] text-slate-500 font-black uppercase font-data tracking-widest">Schedule</span>
+                      <span className="text-[10px] font-bold text-slate-300 font-data whitespace-normal break-all">{cron.cron}</span>
                       <span className="text-[9px] text-slate-500 font-bold whitespace-normal break-words">{fmtIstDateTime(cron.next)}</span>
                     </div>
 
                     <div className="flex flex-col text-right min-w-0">
-                      <span className="text-[8px] text-slate-500 font-black uppercase font-mono tracking-widest">Next Execution (IST)</span>
+                      <span className="text-[8px] text-slate-500 font-black uppercase font-data tracking-widest">Next Execution (IST)</span>
                       <CronCountdown nextTimeIso={cron.next} />
                       <span className={cn(
-                        "text-[9px] font-black uppercase tracking-wider",
-                        cron.queueStatus === 'running' ? 'text-blue-400' :
+                        "text-[9px] font-black font-display uppercase tracking-wider",
+                        cron.queueStatus === 'running' ? 'text-indigo-400' :
                         cron.queueStatus === 'queued' ? 'text-amber-400' :
                         cron.queueStatus === 'idle' ? 'text-emerald-400' :
                         'text-rose-400'
@@ -503,7 +503,7 @@ export default function JobsDashboardPage() {
                   key={cat.id}
                   onClick={() => setActiveCategory(cat.id)}
                   className={cn(
-                    "px-3 py-1.5 rounded-full text-xs font-bold font-mono uppercase tracking-wider transition-all whitespace-nowrap border shrink-0",
+                    "px-3 py-1.5 rounded-full text-xs font-bold font-data font-display uppercase tracking-wider transition-all whitespace-nowrap border shrink-0",
                     active
                       ? "bg-indigo-600/10 border-indigo-500/50 text-indigo-400 shadow-[0_0_12px_rgba(79,70,229,0.15)] font-black"
                       : "bg-slate-950/20 border-slate-800/80 text-slate-400 hover:text-slate-200 hover:border-slate-700"
@@ -522,7 +522,7 @@ export default function JobsDashboardPage() {
               placeholder="Search queues by title/desc..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              className="w-full bg-slate-950/40 border border-slate-800/80 hover:border-slate-700/80 focus:border-indigo-500 focus:outline-none pl-9 pr-4 py-1.5 rounded-full text-xs font-bold text-slate-200 placeholder-slate-500 shadow-inner font-mono tracking-wide"
+              className="w-full bg-slate-950/40 border border-slate-800/80 hover:border-slate-700/80 focus:border-indigo-500 focus:outline-none pl-9 pr-4 py-1.5 rounded-full text-xs font-bold text-slate-200 placeholder-slate-500 shadow-inner font-data tracking-wide"
             />
           </div>
         </div>
@@ -563,7 +563,7 @@ export default function JobsDashboardPage() {
                   <div className="flex items-start justify-between gap-2">
                     <div>
                       <span className={cn(
-                        "text-[8px] font-black uppercase px-2 py-0.5 rounded border font-mono tracking-wider",
+                        "text-[8px] font-black uppercase px-2 py-0.5 rounded border font-data tracking-wider",
                         item.category === 'data-sync' ? "bg-emerald-950/40 text-emerald-400 border-emerald-500/20" :
                         item.category === 'signals-analysis' ? "bg-amber-950/40 text-amber-400 border-amber-500/20" :
                         item.category === 'machine-learning' ? "bg-violet-950/40 text-violet-400 border-violet-500/20" :
@@ -572,13 +572,13 @@ export default function JobsDashboardPage() {
                       )}>
                         {catConfig.label}
                       </span>
-                      <h3 className="text-sm font-black text-slate-200 mt-1.5 uppercase font-mono tracking-wide whitespace-normal break-words leading-tight">
+                      <h3 className="text-sm font-black text-slate-200 mt-1.5 uppercase font-data tracking-wide whitespace-normal break-words leading-tight">
                         {item.label}
                       </h3>
                     </div>
 
                     <span className={cn(
-                      "text-[8px] font-black px-1.5 py-0.5 rounded font-mono uppercase tracking-widest shrink-0 border",
+                      "text-[8px] font-black px-1.5 py-0.5 rounded font-data font-display uppercase tracking-widest shrink-0 border",
                       isConnected
                         ? "bg-emerald-950/30 border-emerald-500/20 text-emerald-400"
                         : "bg-rose-950/30 border-rose-500/20 text-rose-400 animate-pulse"
@@ -596,10 +596,10 @@ export default function JobsDashboardPage() {
                 <div className="grid grid-cols-5 gap-1.5 border-t border-b border-slate-800/40 py-2.5 bg-slate-900/10 px-2 rounded-xl">
                   {/* Active */}
                   <div className="text-center">
-                    <span className="block text-[8px] text-slate-500 font-black uppercase font-mono tracking-wider">Active</span>
+                    <span className="block text-[8px] text-slate-500 font-black uppercase font-data tracking-wider">Active</span>
                     <span className={cn(
-                      "text-xs font-black font-mono",
-                      item.activeCount ? "text-blue-400 font-extrabold" : "text-slate-400"
+                      "text-xs font-black font-data",
+                      item.activeCount ? "text-indigo-400 font-extrabold" : "text-slate-400"
                     )}>
                       {item.activeCount || 0}
                     </span>
@@ -607,25 +607,25 @@ export default function JobsDashboardPage() {
 
                   {/* Waiting */}
                   <div className="text-center">
-                    <span className="block text-[8px] text-slate-500 font-black uppercase font-mono tracking-wider">Wait</span>
-                    <span className="text-xs font-black font-mono text-slate-400">
+                    <span className="block text-[8px] text-slate-500 font-black uppercase font-data tracking-wider">Wait</span>
+                    <span className="text-xs font-black font-data text-slate-400">
                       {item.waitingCount || 0}
                     </span>
                   </div>
 
                   {/* Delayed */}
                   <div className="text-center">
-                    <span className="block text-[8px] text-slate-500 font-black uppercase font-mono tracking-wider">Delay</span>
-                    <span className="text-xs font-black font-mono text-slate-400">
+                    <span className="block text-[8px] text-slate-500 font-black uppercase font-data tracking-wider">Delay</span>
+                    <span className="text-xs font-black font-data text-slate-400">
                       {item.delayedCount || 0}
                     </span>
                   </div>
 
                   {/* Completed */}
                   <div className="text-center">
-                    <span className="block text-[8px] text-slate-500 font-black uppercase font-mono tracking-wider">Done</span>
+                    <span className="block text-[8px] text-slate-500 font-black uppercase font-data tracking-wider">Done</span>
                     <span className={cn(
-                      "text-xs font-black font-mono",
+                      "text-xs font-black font-data",
                       item.completedCount ? "text-emerald-400" : "text-slate-400"
                     )}>
                       {item.completedCount || 0}
@@ -634,9 +634,9 @@ export default function JobsDashboardPage() {
 
                   {/* Failed */}
                   <div className="text-center">
-                    <span className="block text-[8px] text-slate-500 font-black uppercase font-mono tracking-wider">Fail</span>
+                    <span className="block text-[8px] text-slate-500 font-black uppercase font-data tracking-wider">Fail</span>
                     <span className={cn(
-                      "text-xs font-black font-mono",
+                      "text-xs font-black font-data",
                       item.failedCount ? "text-rose-400 font-extrabold" : "text-slate-400"
                     )}>
                       {item.failedCount || 0}
@@ -645,23 +645,23 @@ export default function JobsDashboardPage() {
                 </div>
 
                 {/* Realtime timing telemetry */}
-                <div className="grid grid-cols-2 gap-2 text-[10px] font-mono text-slate-400">
+                <div className="grid grid-cols-2 gap-2 text-[10px] font-data text-slate-400">
                   <div className="rounded-lg border border-slate-800/60 bg-slate-950/30 px-2 py-1.5">
-                    <div className="text-[8px] uppercase tracking-wider text-slate-500 font-black">Current</div>
+                    <div className="text-[8px] font-display uppercase tracking-wider text-slate-500 font-black">Current</div>
                     <div className="font-bold text-slate-200">{item.currentStatus || 'offline'}</div>
                   </div>
                   <div className="rounded-lg border border-slate-800/60 bg-slate-950/30 px-2 py-1.5">
-                    <div className="text-[8px] uppercase tracking-wider text-slate-500 font-black">Next Run (IST)</div>
+                    <div className="text-[8px] font-display uppercase tracking-wider text-slate-500 font-black">Next Run (IST)</div>
                     <div className="font-bold text-indigo-300">{item.nextScheduledAt ? relFromIso(item.nextScheduledAt) : 'N/A'}</div>
                     <div className="text-[9px] text-slate-500">{fmtIstDateTime(item.nextScheduledAt)}</div>
                   </div>
                   <div className="rounded-lg border border-slate-800/60 bg-slate-950/30 px-2 py-1.5">
-                    <div className="text-[8px] uppercase tracking-wider text-slate-500 font-black">Last Success (IST)</div>
+                    <div className="text-[8px] font-display uppercase tracking-wider text-slate-500 font-black">Last Success (IST)</div>
                     <div className="font-bold text-emerald-300">{relFromIso(item.lastSuccessAt)}</div>
                     <div className="text-[9px] text-slate-500">{fmtIstDateTime(item.lastSuccessAt)}</div>
                   </div>
                   <div className="rounded-lg border border-slate-800/60 bg-slate-950/30 px-2 py-1.5">
-                    <div className="text-[8px] uppercase tracking-wider text-slate-500 font-black">Typical Runtime</div>
+                    <div className="text-[8px] font-display uppercase tracking-wider text-slate-500 font-black">Typical Runtime</div>
                     <div className="font-bold text-slate-200">
                       p50 {fmtDuration(item.duration?.p50Ms)}
                       <span className="text-slate-500"> · p95 {fmtDuration(item.duration?.p95Ms)}</span>
@@ -671,7 +671,7 @@ export default function JobsDashboardPage() {
 
                 {/* Footer trigger controls */}
                 <div className="flex items-center justify-between pt-1">
-                  <div className="text-[9px] text-slate-500 font-bold font-mono uppercase whitespace-normal break-all pr-2">
+                  <div className="text-[9px] text-slate-500 font-bold font-data uppercase whitespace-normal break-all pr-2">
                     ID: {item.id}
                   </div>
 
@@ -679,7 +679,7 @@ export default function JobsDashboardPage() {
                     disabled={!isConnected || isBusy}
                     onClick={() => handleTriggerJob(item.id)}
                     className={cn(
-                      "px-3 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-wider font-mono flex items-center gap-1.5 transition-all cursor-pointer shadow-md select-none border",
+                      "px-3 py-1.5 rounded-lg text-[10px] font-black font-display uppercase tracking-wider font-data flex items-center gap-1.5 transition-all cursor-pointer shadow-md select-none border",
                       isSuccess
                         ? "bg-emerald-600 border-emerald-500 text-white font-extrabold"
                         : isBusy
@@ -713,9 +713,9 @@ export default function JobsDashboardPage() {
         </div>
 
         {filteredQueues.length === 0 && (
-          <div className="text-center py-12 bg-slate-950/10 border border-slate-850 rounded-2xl">
+          <div className="text-center py-12 v1-card">
             <SlidersHorizontal className="w-8 h-8 text-slate-650 mx-auto mb-2" />
-            <p className="text-xs text-slate-400 font-bold uppercase tracking-widest">No matching queues configured</p>
+            <p className="text-xs text-slate-400 font-bold font-display uppercase tracking-widest">No matching queues configured</p>
           </div>
         )}
       </div>
@@ -727,11 +727,11 @@ export default function JobsDashboardPage() {
           <div className="p-4 bg-slate-950/30 border-b border-slate-800/80 flex items-center justify-between">
             <div className="flex items-center gap-2">
               <Terminal className="w-4 h-4 text-emerald-400" />
-              <h3 className="text-xs font-black uppercase text-slate-200 tracking-widest font-mono">
+              <h3 className="text-xs font-black uppercase text-slate-200 tracking-widest font-data">
                 System Job Execution Stream
               </h3>
             </div>
-            <span className="text-[9px] font-black uppercase tracking-wider text-slate-500 font-mono">
+            <span className="text-[9px] font-black font-display uppercase tracking-wider text-slate-500 font-data">
               REAL-TIME BUFFER
             </span>
           </div>
@@ -739,7 +739,7 @@ export default function JobsDashboardPage() {
           <div className="overflow-x-auto">
             <table className="w-full text-left border-collapse">
               <thead>
-                <tr className="border-b border-slate-850 text-[9px] font-black uppercase tracking-wider text-slate-400 font-mono bg-slate-950/15">
+                <tr className="border-b border-slate-850 text-[9px] font-black font-display uppercase tracking-wider text-slate-400 font-data bg-slate-950/15">
                   <th className="py-2.5 px-4">Time</th>
                   <th className="py-2.5 px-4">Category</th>
                   <th className="py-2.5 px-4">Queue Context</th>
@@ -760,8 +760,8 @@ export default function JobsDashboardPage() {
                   return (
                     <React.Fragment key={job.id}>
                       <tr className={cn(
-                        "border-b border-slate-850 text-xs hover:bg-slate-900/20 font-mono transition-colors",
-                        isFailed ? "bg-rose-950/5" : isActive ? "bg-blue-950/5" : ""
+                        "border-b border-slate-850 text-xs hover:bg-slate-900/20 font-data transition-colors",
+                        isFailed ? "bg-rose-950/5" : isActive ? "bg-indigo-950/5" : ""
                       )}>
                         {/* Time */}
                         <td className="py-3 px-4 text-slate-400 font-bold whitespace-nowrap">
@@ -774,7 +774,7 @@ export default function JobsDashboardPage() {
                         {/* Category badge */}
                         <td className="py-3 px-4">
                           <span className={cn(
-                            "text-[8px] font-black px-1.5 py-0.5 rounded font-mono uppercase tracking-wider border",
+                            "text-[8px] font-black px-1.5 py-0.5 rounded font-data font-display uppercase tracking-wider border",
                             job.category === 'data-sync' ? "bg-emerald-950/40 text-emerald-400 border-emerald-500/20" :
                             job.category === 'signals-analysis' ? "bg-amber-950/40 text-amber-400 border-amber-500/20" :
                             job.category === 'machine-learning' ? "bg-violet-950/40 text-violet-400 border-violet-500/20" :
@@ -805,10 +805,10 @@ export default function JobsDashboardPage() {
                         {/* State tag */}
                         <td className="py-3 px-4">
                           <span className={cn(
-                            "text-[8px] font-black px-2 py-0.5 rounded-full font-mono uppercase tracking-widest border",
+                            "text-[8px] font-black px-2 py-0.5 rounded-full font-data font-display uppercase tracking-widest border",
                             job.state === 'completed' ? "bg-emerald-950/40 border-emerald-500/20 text-emerald-400" :
                             job.state === 'failed' ? "bg-rose-950/40 border-rose-500/20 text-rose-400" :
-                            job.state === 'active' ? "bg-blue-950/40 border-blue-500/20 text-blue-400 animate-pulse" :
+                            job.state === 'active' ? "bg-indigo-950/40 border-indigo-500/20 text-indigo-400 animate-pulse" :
                             "bg-amber-950/40 border-amber-500/20 text-amber-400"
                           )}>
                             {job.state}
@@ -827,7 +827,7 @@ export default function JobsDashboardPage() {
                                 <div
                                   className={cn(
                                     "h-full rounded-full transition-all duration-300",
-                                    job.state === 'completed' ? "bg-emerald-500" : "bg-blue-500"
+                                    job.state === 'completed' ? "bg-emerald-500" : "bg-indigo-500"
                                   )}
                                   style={{ width: `${job.progress || (job.state === 'completed' ? 100 : 10)}%` }}
                                 />
@@ -842,17 +842,17 @@ export default function JobsDashboardPage() {
                           {isFailed ? (
                             <button
                               onClick={() => setExpandedJobId(isExpanded ? null : job.id)}
-                              className="px-2.5 py-1 text-[9px] font-black uppercase tracking-wider rounded border border-rose-500/20 bg-rose-950/20 text-rose-400 hover:bg-rose-500 hover:text-white transition-all flex items-center gap-1.5 ml-auto cursor-pointer"
+                              className="px-2.5 py-1 text-[9px] font-black font-display uppercase tracking-wider rounded border border-rose-500/20 bg-rose-950/20 text-rose-400 hover:bg-rose-500 hover:text-white transition-all flex items-center gap-1.5 ml-auto cursor-pointer"
                             >
                               <span>Traceback</span>
                               {isExpanded ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
                             </button>
                           ) : job.finishedOn && job.processedOn ? (
-                            <span className="text-[10px] text-slate-500 font-bold font-mono">
+                            <span className="text-[10px] text-slate-500 font-bold font-data">
                               {((job.finishedOn - job.processedOn) / 1000).toFixed(2)}s
                             </span>
                           ) : (
-                            <span className="text-[10px] text-slate-500 font-mono">—</span>
+                            <span className="text-[10px] text-slate-500 font-data">—</span>
                           )}
                         </td>
                       </tr>
@@ -869,12 +869,12 @@ export default function JobsDashboardPage() {
                                 transition={{ duration: 0.2 }}
                                 className="overflow-hidden bg-slate-950/70"
                               >
-                                <div className="p-4.5 font-mono text-[10px] text-rose-300 leading-relaxed border-t border-rose-500/10 space-y-2">
+                                <div className="p-4.5 font-data text-[10px] text-rose-300 leading-relaxed border-t border-rose-500/10 space-y-2">
                                   <div className="flex items-center gap-2 text-rose-400 font-black border-b border-rose-500/10 pb-2">
                                     <ShieldAlert className="w-3.5 h-3.5 shrink-0" />
                                     <span>CRITICAL QUEUE EXCEPTION TRACEBACK FOR JOB: {job.id}</span>
                                   </div>
-                                  <pre className="whitespace-pre-wrap select-all font-mono py-2 text-slate-300 leading-normal max-h-48 overflow-y-auto hide-scrollbar">
+                                  <pre className="whitespace-pre-wrap select-all font-data py-2 text-slate-300 leading-normal max-h-48 overflow-y-auto hide-scrollbar">
                                     {job.failedReason || 'No traceback logs returned from parent worker thread.'}
                                   </pre>
                                   <p className="text-[9px] text-rose-400/60 font-black">

@@ -62,7 +62,7 @@ export const McNewsCard: React.FC<{ item: McNewsItem; accent?: Accent }> = ({ it
           </div>
         )}
         <div className="flex items-center justify-between text-[10px] text-slate-400 gap-2">
-          <span className={cn('flex items-center gap-1 font-mono px-2 py-0.5 rounded font-bold', a.chip)}>
+          <span className={cn('flex items-center gap-1 font-data px-2 py-0.5 rounded font-bold', a.chip)}>
             <CalendarClock className="w-3 h-3" />
             {item.formatted_date || item.display_date}
           </span>
@@ -117,7 +117,7 @@ export const McNewsLinks: React.FC<{
           target="_blank"
           rel="noopener noreferrer"
           className={cn(
-            'text-[10px] font-bold uppercase tracking-wider px-2 py-1 rounded border border-slate-800 transition-colors',
+            'text-[10px] font-bold font-display uppercase tracking-wider px-2 py-1 rounded border border-slate-800 transition-colors',
             a.text,
             a.hover,
           )}

@@ -75,7 +75,7 @@ function MetricCell({ label, value, unit = '', good = 'high', tooltip }: {
   return (
     <div className="flex flex-col gap-0.5" title={tooltip}>
       <span className="text-xs text-slate-500">{label}</span>
-      <span className={`text-sm font-mono font-bold ${
+      <span className={`text-sm font-data font-bold ${
         value == null ? 'text-slate-600' :
         isGood ? 'text-emerald-400' : 'text-rose-400'
       }`}>
@@ -125,7 +125,7 @@ export const RiskMetricsDashboard: React.FC<Props> = ({ focusSymbol, collapsed =
   }, [topStocks]);
 
   return (
-    <div className="bg-slate-900/80 border border-slate-700/50 rounded-2xl overflow-hidden">
+    <div className="v1-card overflow-hidden">
       {/* ── Header ──────────────────────────────────────────────────────────── */}
       <div
         className="flex items-center justify-between px-5 py-4 cursor-pointer hover:bg-slate-800/40 transition-colors"
@@ -159,7 +159,7 @@ export const RiskMetricsDashboard: React.FC<Props> = ({ focusSymbol, collapsed =
 
           {/* ── Per-symbol detail panel ──────────────────────────────────── */}
           {symbolRisk && (
-            <div className="bg-slate-800/40 rounded-xl border border-slate-700/40 p-4 space-y-4">
+            <div className="v1-card p-4 space-y-4">
               <div className="flex items-center justify-between">
                 <div>
                   <div className="font-bold text-slate-200">{symbolRisk.symbol}</div>
@@ -312,14 +312,14 @@ export const RiskMetricsDashboard: React.FC<Props> = ({ focusSymbol, collapsed =
                             {tier}
                           </span>
                         </td>
-                        <td className="py-2 px-2 text-right font-mono text-slate-300">{fmt(row.beta_1y, 2)}</td>
-                        <td className={`py-2 px-2 text-right font-mono ${row.sharpe_ratio > 1 ? 'text-emerald-400' : row.sharpe_ratio < 0 ? 'text-rose-400' : 'text-slate-400'}`}>
+                        <td className="py-2 px-2 text-right font-data text-slate-300">{fmt(row.beta_1y, 2)}</td>
+                        <td className={`py-2 px-2 text-right font-data ${row.sharpe_ratio > 1 ? 'text-emerald-400' : row.sharpe_ratio < 0 ? 'text-rose-400' : 'text-slate-400'}`}>
                           {fmt(row.sharpe_ratio, 2)}
                         </td>
-                        <td className={`py-2 px-2 text-right font-mono ${row.sortino_ratio > 1.5 ? 'text-emerald-400' : row.sortino_ratio < 0 ? 'text-rose-400' : 'text-slate-400'}`}>
+                        <td className={`py-2 px-2 text-right font-data ${row.sortino_ratio > 1.5 ? 'text-emerald-400' : row.sortino_ratio < 0 ? 'text-rose-400' : 'text-slate-400'}`}>
                           {fmt(row.sortino_ratio, 2)}
                         </td>
-                        <td className={`py-2 px-2 text-right font-mono ${row.var_95 > 4 ? 'text-rose-400' : row.var_95 < 2 ? 'text-emerald-400' : 'text-amber-400'}`}>
+                        <td className={`py-2 px-2 text-right font-data ${row.var_95 > 4 ? 'text-rose-400' : row.var_95 < 2 ? 'text-emerald-400' : 'text-amber-400'}`}>
                           {fmt(row.var_95, 1)}%
                         </td>
                         <td className="py-2 px-2 text-right">

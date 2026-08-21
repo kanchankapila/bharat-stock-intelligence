@@ -41,7 +41,7 @@ function StockListRow({ index, style, stocks, onSelectStock }: RowComponentProps
       className="grid grid-cols-12 gap-4 p-4 border-b border-slate-800/30 hover:bg-slate-800/50 transition-colors cursor-pointer group items-center"
     >
       <div className="col-span-2">
-        <span className="font-bold text-slate-100 group-hover:text-blue-400 transition-colors">
+        <span className="font-bold text-slate-100 group-hover:text-indigo-400 transition-colors">
           {stock.symbol}
         </span>
       </div>
@@ -83,11 +83,11 @@ function StockGridCell({ columnIndex, rowIndex, style, stocks, columnCount, onSe
     <div style={style} {...ariaAttributes} className="p-2">
       <div
         onClick={() => onSelectStock && stock.symbol && onSelectStock(stock.symbol)}
-        className="h-full bg-slate-800/50 border border-slate-800/30 rounded-lg p-4 hover:border-slate-600 transition-all hover:shadow-lg hover:shadow-blue-500/10 group cursor-pointer overflow-hidden"
+        className="h-full v1-card p-4 hover:border-slate-600 transition-all hover:shadow-lg hover:shadow-indigo-500/10 group cursor-pointer overflow-hidden"
       >
         <div className="flex items-start justify-between mb-3">
           <div className="flex-1">
-            <h3 className="font-bold text-slate-100 text-base group-hover:text-blue-400 transition-colors">
+            <h3 className="font-bold text-slate-100 text-base group-hover:text-indigo-400 transition-colors">
               {stock.symbol}
             </h3>
             <p className="text-xs text-slate-400 mt-1 line-clamp-2">
@@ -108,12 +108,12 @@ function StockGridCell({ columnIndex, rowIndex, style, stocks, columnCount, onSe
           {stock.isin && (
             <div className="flex justify-between">
               <span className="text-slate-400">ISIN:</span>
-              <span className="text-slate-300 font-mono truncate ml-2">{stock.isin}</span>
+              <span className="text-slate-300 font-data truncate ml-2">{stock.isin}</span>
             </div>
           )}
         </div>
 
-        <div className="pt-3 border-t border-slate-800/30 flex items-center gap-2 text-slate-400 text-xs group-hover:text-blue-400/70 transition-colors">
+        <div className="pt-3 border-t border-slate-800/30 flex items-center gap-2 text-slate-400 text-xs group-hover:text-indigo-400/70 transition-colors">
           <TrendingUp className="w-3 h-3" />
           <span>View Details</span>
         </div>
@@ -238,20 +238,20 @@ const NSEStockDiscovery: React.FC<{
   return (
     <div className="space-y-6">
       {/* Header */}
-      <div className="bg-gradient-to-r from-blue-900 via-blue-800 to-blue-900 rounded-lg border border-blue-700/50 p-6">
+      <div className="bg-gradient-to-r from-indigo-900 via-indigo-800 to-indigo-900 rounded-lg border border-indigo-700/50 p-6">
         <div className="flex items-start justify-between gap-4 mb-4">
           <div className="flex-1">
             <div className="flex items-center gap-2 mb-2">
-              <Briefcase className="w-6 h-6 text-blue-400" />
+              <Briefcase className="w-6 h-6 text-indigo-400" />
               <h2 className="text-2xl font-bold text-slate-100">NSE Stock Discovery</h2>
             </div>
-            <p className="text-sm text-blue-200">
+            <p className="text-sm text-indigo-200">
               Browse and search all NSE listed stocks with sector and industry filtering
             </p>
           </div>
           <div className="text-right">
-            <p className="text-2xl font-bold text-blue-400">{totalStocks}</p>
-            <p className="text-xs text-blue-200">Total Stocks</p>
+            <p className="text-2xl font-bold text-indigo-400">{totalStocks}</p>
+            <p className="text-xs text-indigo-200">Total Stocks</p>
           </div>
         </div>
       </div>
@@ -264,7 +264,7 @@ const NSEStockDiscovery: React.FC<{
           placeholder="Search by symbol or company name..."
           value={searchQuery}
           onChange={(e) => setSearchQuery(e.target.value)}
-          className="w-full pl-9 pr-4 py-2 bg-slate-800 border border-slate-800/30 rounded-lg text-white placeholder-slate-500 focus:outline-none focus:border-blue-400/50"
+          className="w-full pl-9 pr-4 py-2 bg-slate-800 border border-slate-800/30 rounded-lg text-white placeholder-slate-500 focus:outline-none focus:border-indigo-400/50"
         />
       </div>
 
@@ -280,7 +280,7 @@ const NSEStockDiscovery: React.FC<{
             {selectedSector && (
               <button
                 onClick={() => setSelectedSector(null)}
-                className="text-xs text-blue-400 hover:text-blue-300"
+                className="text-xs text-indigo-400 hover:text-indigo-300"
               >
                 Clear
               </button>
@@ -297,7 +297,7 @@ const NSEStockDiscovery: React.FC<{
                 className={cn(
                   'px-3 py-1 rounded-full text-sm font-medium transition-all border',
                   selectedSector === sector
-                    ? 'bg-blue-500/20 text-blue-400 border-blue-400/50'
+                    ? 'bg-indigo-500/20 text-indigo-400 border-indigo-400/50'
                     : 'bg-slate-800/50 text-slate-400 border-slate-800/30 hover:border-slate-600'
                 )}
               >
@@ -318,7 +318,7 @@ const NSEStockDiscovery: React.FC<{
               {selectedIndustry && (
                 <button
                   onClick={() => setSelectedIndustry(null)}
-                  className="text-xs text-blue-400 hover:text-blue-300"
+                  className="text-xs text-indigo-400 hover:text-indigo-300"
                 >
                   Clear
                 </button>
@@ -336,7 +336,7 @@ const NSEStockDiscovery: React.FC<{
                     className={cn(
                       'px-3 py-1 rounded-full text-sm font-medium transition-all border',
                       selectedIndustry === industry
-                        ? 'bg-blue-500/20 text-blue-400 border-blue-400/50'
+                        ? 'bg-indigo-500/20 text-indigo-400 border-indigo-400/50'
                         : 'bg-slate-800/50 text-slate-400 border-slate-800/30 hover:border-slate-600'
                     )}
                   >
@@ -365,7 +365,7 @@ const NSEStockDiscovery: React.FC<{
           className={cn(
             'p-2 rounded-lg transition-all border',
             viewMode === 'grid'
-              ? 'bg-blue-500/20 text-blue-400 border-blue-400/50'
+              ? 'bg-indigo-500/20 text-indigo-400 border-indigo-400/50'
               : 'bg-slate-800/50 text-slate-400 border-slate-800/30 hover:border-slate-600'
           )}
           title="Grid View"
@@ -377,7 +377,7 @@ const NSEStockDiscovery: React.FC<{
           className={cn(
             'p-2 rounded-lg transition-all border',
             viewMode === 'list'
-              ? 'bg-blue-500/20 text-blue-400 border-blue-400/50'
+              ? 'bg-indigo-500/20 text-indigo-400 border-indigo-400/50'
               : 'bg-slate-800/50 text-slate-400 border-slate-800/30 hover:border-slate-600'
           )}
           title="List View"
@@ -389,13 +389,13 @@ const NSEStockDiscovery: React.FC<{
       {/* Loading State */}
       {isLoading && (
         <div className="flex items-center justify-center py-12">
-          <Loader className="w-8 h-8 text-blue-400 animate-spin" />
+          <Loader className="w-8 h-8 text-indigo-400 animate-spin" />
         </div>
       )}
 
       {/* No Results */}
       {!isLoading && displayedStocks.length === 0 && (
-        <div className="bg-slate-800/50 border border-slate-800/30 rounded-lg p-8 text-center">
+        <div className="v1-card p-8 text-center">
           <TrendingUp className="w-12 h-12 text-slate-400 mx-auto mb-3" />
           <p className="text-slate-400">No stocks found</p>
           <p className="text-sm text-slate-400 mt-1">
@@ -432,7 +432,7 @@ const NSEStockDiscovery: React.FC<{
           <div className="text-sm font-medium text-slate-400 px-2">
             {displayedStocks.length} stocks found
           </div>
-          <div className="bg-slate-800/30 rounded-lg overflow-hidden border border-slate-800/30">
+          <div className="v1-card overflow-hidden">
             <div className="grid grid-cols-12 gap-4 p-4 bg-slate-800/50 border-b border-slate-800/30 font-medium text-xs text-slate-400">
               <div className="col-span-2">Symbol</div>
               <div className="col-span-4">Company Name</div>
@@ -452,7 +452,7 @@ const NSEStockDiscovery: React.FC<{
       )}
 
       {/* Footer Info */}
-      <div className="bg-slate-800/30 border border-slate-800/30 rounded-lg p-3 text-xs text-slate-400 space-y-1">
+      <div className="v1-card p-3 text-xs text-slate-400 space-y-1">
         <p>
           Comprehensive NSE stock database with {totalStocks} listed companies across {sectors.length} sectors.
         </p>

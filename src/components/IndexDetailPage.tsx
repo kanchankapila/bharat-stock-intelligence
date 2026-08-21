@@ -66,7 +66,7 @@ export const IndexDetailPage: React.FC<{
           <div>
             <div className="flex items-center gap-3 mb-2">
               <h1 className="text-2xl font-black text-white uppercase tracking-tight">{indexName}</h1>
-              <span className={cn("px-2 py-0.5 rounded text-[10px] font-black uppercase tracking-widest",
+              <span className={cn("px-2 py-0.5 rounded text-[10px] font-black font-display uppercase tracking-widest",
                 isUp ? "bg-emerald-500/10 text-emerald-400" : "bg-rose-500/10 text-rose-400")}>
                 {isUp ? 'Bullish' : 'Bearish'}
               </span>
@@ -79,7 +79,7 @@ export const IndexDetailPage: React.FC<{
                 <span className="text-sm opacity-70">({d?.perChange}%)</span>
               </div>
             </div>
-            {idx && <p className="text-[10px] text-slate-400 font-black uppercase tracking-widest mt-2">Updated: {idx.lastupdated}</p>}
+            {idx && <p className="text-[10px] text-slate-400 font-black font-display uppercase tracking-widest mt-2">Updated: {idx.lastupdated}</p>}
           </div>
           {idx && (
             <div className="grid grid-cols-2 gap-3">
@@ -90,7 +90,7 @@ export const IndexDetailPage: React.FC<{
                 { label: 'Prev Close', value: idx.prevclose },
               ].map(s => (
                 <div key={s.label} className="glass-strong rounded-xl p-3 text-right min-w-[100px]">
-                  <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">{s.label}</p>
+                  <p className="text-[10px] font-black font-display uppercase tracking-widest text-slate-400">{s.label}</p>
                   <p className="text-sm font-black text-white tabular-nums">{s.value}</p>
                 </div>
               ))}
@@ -104,7 +104,7 @@ export const IndexDetailPage: React.FC<{
           const pct = Math.max(5, Math.min(95, ((cur - lo) / (hi - lo || 1)) * 100));
           return (
             <div className="mt-6">
-              <div className="flex justify-between text-[10px] font-black uppercase tracking-widest text-slate-400 mb-1">
+              <div className="flex justify-between text-[10px] font-black font-display uppercase tracking-widest text-slate-400 mb-1">
                 <span>52W Low: {idx.yearlylow}</span>
                 <span>52W High: {idx.yearlyhigh}</span>
               </div>
@@ -119,13 +119,13 @@ export const IndexDetailPage: React.FC<{
       {/* Performance Returns */}
       {perf.length > 0 && (
         <div className="glass border border-slate-800/50 rounded-3xl p-6">
-          <h2 className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-4">Performance Returns</h2>
+          <h2 className="text-[10px] font-black font-display uppercase tracking-widest text-slate-400 mb-4">Performance Returns</h2>
           <div className="grid grid-cols-3 sm:grid-cols-5 md:grid-cols-9 gap-3">
             {perf.map(p => {
               const v = parseFloat(String(p.value ?? 0));
               return (
                 <div key={p.label} className="glass-strong rounded-xl p-3 text-center">
-                  <p className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-1">{p.label}</p>
+                  <p className="text-[10px] font-black font-display uppercase tracking-widest text-slate-400 mb-1">{p.label}</p>
                   <p className={cn("text-sm font-black tabular-nums", v >= 0 ? "text-emerald-400" : "text-rose-400")}>
                     {v >= 0 ? '+' : ''}{v.toFixed(1)}%
                   </p>
@@ -140,7 +140,7 @@ export const IndexDetailPage: React.FC<{
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
         {mas.length > 0 && (
           <div className="glass border border-slate-800/50 rounded-3xl p-6">
-            <h2 className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-4">Moving Averages vs Current</h2>
+            <h2 className="text-[10px] font-black font-display uppercase tracking-widest text-slate-400 mb-4">Moving Averages vs Current</h2>
             <div className="space-y-3">
               {mas.map(ma => {
                 const cur = parseFloat((idx!.lastprice ?? '0').replace(/,/g, ''));
@@ -148,7 +148,7 @@ export const IndexDetailPage: React.FC<{
                 const above = cur > maV;
                 return (
                   <div key={ma.label} className="flex items-center justify-between p-3 glass-strong rounded-xl">
-                    <span className="text-[10px] font-black uppercase tracking-widest text-slate-400">{ma.label}</span>
+                    <span className="text-[10px] font-black font-display uppercase tracking-widest text-slate-400">{ma.label}</span>
                     <div className="flex items-center gap-3">
                       <span className="text-sm font-black text-white tabular-nums">{ma.value}</span>
                       <span className={cn("text-[10px] font-black px-2 py-0.5 rounded uppercase",
@@ -165,7 +165,7 @@ export const IndexDetailPage: React.FC<{
 
         {/* Advance / Decline */}
         <div className="glass border border-slate-800/50 rounded-3xl p-6">
-          <h2 className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-4">Advance / Decline</h2>
+          <h2 className="text-[10px] font-black font-display uppercase tracking-widest text-slate-400 mb-4">Advance / Decline</h2>
           {(() => {
             const adv = Number(pf?.adv ?? 0);
             const decl = Number(pf?.decl ?? 0);
@@ -185,7 +185,7 @@ export const IndexDetailPage: React.FC<{
                     { label: 'Declines', value: decl, color: 'text-rose-400' },
                   ].map(item => (
                     <div key={item.label} className="glass-strong rounded-xl p-3 text-center">
-                      <p className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-1">{item.label}</p>
+                      <p className="text-[10px] font-black font-display uppercase tracking-widest text-slate-400 mb-1">{item.label}</p>
                       <p className={cn("text-xl font-black tabular-nums", item.color)}>{item.value}</p>
                     </div>
                   ))}
@@ -200,7 +200,7 @@ export const IndexDetailPage: React.FC<{
       {tech && (
         <div className="glass border border-slate-800/50 rounded-3xl p-6">
           <div className="flex items-center justify-between mb-5">
-            <h2 className="text-[10px] font-black uppercase tracking-widest text-slate-400">Technical Analysis</h2>
+            <h2 className="text-[10px] font-black font-display uppercase tracking-widest text-slate-400">Technical Analysis</h2>
             <div className="flex gap-1">
               {(['D', 'W', 'M'] as const).map(p => (
                 <button key={p} onClick={() => setTechPeriod(p)}
@@ -215,7 +215,7 @@ export const IndexDetailPage: React.FC<{
           {tech.sentiments && (
             <div className="mb-5 p-4 glass-strong rounded-2xl">
               <div className="flex items-center justify-between mb-3">
-                <span className="text-[10px] font-black uppercase tracking-widest text-slate-400">Overall Sentiment</span>
+                <span className="text-[10px] font-black font-display uppercase tracking-widest text-slate-400">Overall Sentiment</span>
                 <span className={cn("px-3 py-1 rounded text-[10px] font-black uppercase",
                   tech.sentiments.indication?.includes('Bullish') ? "bg-emerald-500/10 text-emerald-400" :
                   tech.sentiments.indication?.includes('Bearish') ? "bg-rose-500/10 text-rose-400" :
@@ -224,9 +224,9 @@ export const IndexDetailPage: React.FC<{
                 </span>
               </div>
               <div className="grid grid-cols-3 gap-3 text-center">
-                <div><p className="text-emerald-400 text-xl font-black">{tech.sentiments.totalBullish}</p><p className="text-[10px] font-black uppercase tracking-widest text-slate-400 mt-1">Bullish</p></div>
-                <div><p className="text-slate-400 text-xl font-black">{tech.sentiments.totalNeutral}</p><p className="text-[10px] font-black uppercase tracking-widest text-slate-400 mt-1">Neutral</p></div>
-                <div><p className="text-rose-400 text-xl font-black">{tech.sentiments.totalBearish}</p><p className="text-[10px] font-black uppercase tracking-widest text-slate-400 mt-1">Bearish</p></div>
+                <div><p className="text-emerald-400 text-xl font-black">{tech.sentiments.totalBullish}</p><p className="text-[10px] font-black font-display uppercase tracking-widest text-slate-400 mt-1">Bullish</p></div>
+                <div><p className="text-slate-400 text-xl font-black">{tech.sentiments.totalNeutral}</p><p className="text-[10px] font-black font-display uppercase tracking-widest text-slate-400 mt-1">Neutral</p></div>
+                <div><p className="text-rose-400 text-xl font-black">{tech.sentiments.totalBearish}</p><p className="text-[10px] font-black font-display uppercase tracking-widest text-slate-400 mt-1">Bearish</p></div>
               </div>
             </div>
           )}
@@ -234,7 +234,7 @@ export const IndexDetailPage: React.FC<{
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
             {tech.indicators && (
               <div>
-                <p className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-3">Indicators</p>
+                <p className="text-[10px] font-black font-display uppercase tracking-widest text-slate-400 mb-3">Indicators</p>
                 <div className="space-y-2">
                   {tech.indicators.map((ind: any) => {
                     const val = Array.isArray(ind.value)
@@ -261,7 +261,7 @@ export const IndexDetailPage: React.FC<{
 
             {tech.sma && (
               <div>
-                <p className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-3">SMA Signals</p>
+                <p className="text-[10px] font-black font-display uppercase tracking-widest text-slate-400 mb-3">SMA Signals</p>
                 <div className="space-y-2">
                   {tech.sma.map((s: any) => (
                     <div key={s.key} className="flex items-center justify-between p-2 glass-strong rounded-lg">
@@ -293,13 +293,13 @@ export const IndexDetailPage: React.FC<{
       {/* Constituent Stocks */}
       {stocks.length > 0 && (
         <div className="glass border border-slate-800/50 rounded-3xl p-6">
-          <h2 className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-4">
+          <h2 className="text-[10px] font-black font-display uppercase tracking-widest text-slate-400 mb-4">
             Constituent Stocks ({stocks.length})
           </h2>
           <div className="overflow-x-auto">
             <table className="w-full">
               <thead>
-                <tr className="text-[10px] font-black uppercase tracking-widest text-slate-400 border-b border-slate-800/50">
+                <tr className="text-[10px] font-black font-display uppercase tracking-widest text-slate-400 border-b border-slate-800/50">
                   <th className="text-left pb-3 pr-4">Symbol / Company</th>
                   <th className="text-right pb-3 pr-4">Price</th>
                   <th className="text-right pb-3 pr-4">Change</th>

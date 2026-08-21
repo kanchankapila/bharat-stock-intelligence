@@ -1,5 +1,10 @@
-@import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=IBM+Plex+Sans:wght@400;500;600&display=swap');
-
+/* Space Grotesk/IBM Plex Sans are loaded via index.html's <link> tag (merged in
+   alongside the other four families 2026-08-21) -- this file used to @import them
+   itself, but v5.css is now pulled in globally via src/index.css (not just when
+   V5App mounts), and a nested @import stops being first-in-stylesheet the moment
+   anything precedes its host file in the merged bundle. PostCSS/Vite warned
+   "@import must precede all other statements" on every dev reload as a result;
+   an index.html <link> has no such ordering constraint. */
 /*
  * v5's component library, retrofitted to CSS custom properties 2026-08-07 so it can render
  * correctly wherever it's nested -- both under .v5-root (the standalone /v5 workbench, unchanged

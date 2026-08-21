@@ -45,14 +45,14 @@ export const SeasonalityCalendar: React.FC<Props> = ({ onSelectStock }) => {
             <Calendar className="w-5 h-5 text-indigo-400" />
             Seasonality Heatmap Calendar
           </h2>
-          <p className="text-[10px] font-mono text-slate-500 uppercase tracking-widest mt-0.5">
+          <p className="text-[10px] font-data text-slate-500 font-display uppercase tracking-widest mt-0.5">
             Historical returns & positive year ratios for swing trading
           </p>
         </div>
         
         {/* Month Selector dropdown */}
         <div className="flex items-center gap-2">
-          <label className="text-[10px] font-mono text-slate-400 uppercase">Target Month:</label>
+          <label className="text-[10px] font-data text-slate-400 uppercase">Target Month:</label>
           <select 
             value={selectedMonth}
             onChange={(e) => setSelectedMonth(Number(e.target.value))}
@@ -81,7 +81,7 @@ export const SeasonalityCalendar: React.FC<Props> = ({ onSelectStock }) => {
       <div className="flex-grow overflow-y-auto pr-1 terminal-scrollbar min-h-0">
         {isLoading ? (
           <div className="flex items-center justify-center h-full">
-            <span className="text-xs font-mono text-slate-500 animate-pulse">Loading Seasonality Data...</span>
+            <span className="text-xs font-data text-slate-500 animate-pulse">Loading Seasonality Data...</span>
           </div>
         ) : filtered.length === 0 ? (
           <div className="flex items-center justify-center h-full text-slate-500 text-xs font-bold">
@@ -107,10 +107,10 @@ export const SeasonalityCalendar: React.FC<Props> = ({ onSelectStock }) => {
                     <div>
                       <div className="flex justify-between items-start mb-2">
                         <div>
-                          <p className="text-xs font-black text-white group-hover:text-indigo-400 transition-colors uppercase tracking-wider">{item.sc_id}</p>
+                          <p className="text-xs font-black text-white group-hover:text-indigo-400 transition-colors font-display uppercase tracking-wider">{item.sc_id}</p>
                           <p className="text-[9px] text-slate-500 font-bold truncate max-w-[150px]">{item.name}</p>
                         </div>
-                        <span className={cn("text-[9px] font-black px-2 py-0.5 rounded border uppercase tracking-wider",
+                        <span className={cn("text-[9px] font-black px-2 py-0.5 rounded border font-display uppercase tracking-wider",
                           winRate === null ? "bg-slate-800/50 text-slate-500 border-slate-700/40" :
                           winRate >= 80 ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/20" : "bg-amber-500/10 text-amber-400 border-amber-500/20"
                         )}>
@@ -120,15 +120,15 @@ export const SeasonalityCalendar: React.FC<Props> = ({ onSelectStock }) => {
 
                       <div className="grid grid-cols-3 gap-2 mt-4 text-center">
                         <div className="p-1 bg-slate-900/30 border border-slate-800/40 rounded-lg">
-                          <p className="text-[8px] font-black text-slate-500 uppercase tracking-widest">Avg</p>
+                          <p className="text-[8px] font-black text-slate-500 font-display uppercase tracking-widest">Avg</p>
                           <p className="text-xs font-black text-emerald-400 mt-0.5">+{item.avg_pct.toFixed(1)}%</p>
                         </div>
                         <div className="p-1 bg-slate-900/30 border border-slate-800/40 rounded-lg">
-                          <p className="text-[8px] font-black text-slate-500 uppercase tracking-widest">Max</p>
+                          <p className="text-[8px] font-black text-slate-500 font-display uppercase tracking-widest">Max</p>
                           <p className="text-xs font-black text-slate-300 mt-0.5">+{item.max_pct.toFixed(1)}%</p>
                         </div>
                         <div className="p-1 bg-slate-900/30 border border-slate-800/40 rounded-lg">
-                          <p className="text-[8px] font-black text-slate-500 uppercase tracking-widest">Min</p>
+                          <p className="text-[8px] font-black text-slate-500 font-display uppercase tracking-widest">Min</p>
                           <p className="text-xs font-black text-rose-400 mt-0.5">{item.min_pct.toFixed(1)}%</p>
                         </div>
                       </div>

@@ -35,7 +35,7 @@ const REGIME_STYLE: Record<string, { color: string; bg: string; label: string }>
   SIDEWAYS: { color: 'text-amber-400',   bg: 'bg-amber-500/10 border-amber-500/25',     label: 'SIDEWAYS' },
   BEAR:     { color: 'text-rose-400',    bg: 'bg-rose-500/10 border-rose-500/25',       label: 'BEAR' },
   HIGH_VOL: { color: 'text-orange-400',  bg: 'bg-orange-500/10 border-orange-500/25',   label: 'HIGH VOL' },
-  CRASH:    { color: 'text-red-500',     bg: 'bg-red-500/15 border-red-500/40',         label: 'CRASH' },
+  CRASH:    { color: 'text-rose-500',     bg: 'bg-rose-500/15 border-rose-500/40',         label: 'CRASH' },
 };
 
 const RegimeBadge: React.FC = () => {
@@ -107,7 +107,7 @@ export const MarketCommandCenter: React.FC<MarketCommandCenterProps> = ({ onSele
         <div className="flex flex-col gap-4">
           <div className="flex items-center gap-4 flex-wrap">
             <RegimeBadge />
-            <div className="flex-1 min-w-[220px] px-3 py-2 rounded-xl border border-slate-800 bg-slate-950/40">
+            <div className="flex-1 min-w-[220px] v1-card px-3 py-2">
               <MarketMoodGauge />
             </div>
           </div>

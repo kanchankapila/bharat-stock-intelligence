@@ -131,15 +131,15 @@ export const LiveMarketScreener: React.FC<Props> = ({ onSelectStock }) => {
   };
 
   return (
-    <div className="flex flex-col h-[650px] glass border border-slate-800/50 rounded-xl p-6 text-slate-200">
+    <div className="flex flex-col min-h-screen text-slate-200">
       {/* Header & Tabs */}
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-6 flex-shrink-0">
         <div>
-          <h1 className="text-2xl font-bold font-['Rajdhani'] flex items-center gap-3">
+          <h1 className="text-2xl font-bold font-display flex items-center gap-3">
             <Activity className="w-6 h-6 text-indigo-400 animate-pulse" />
             Live Market Screener
           </h1>
-          <p className="text-xs font-mono text-slate-500 mt-1 uppercase tracking-widest">
+          <p className="text-xs font-data text-slate-500 mt-1 font-display uppercase tracking-widest">
             Realtime NiftyTrader Filters & AI Strategies
           </p>
         </div>
@@ -149,7 +149,7 @@ export const LiveMarketScreener: React.FC<Props> = ({ onSelectStock }) => {
           <button
             onClick={() => setActiveTab('screener')}
             className={cn(
-              "px-3 py-1.5 rounded-md font-mono text-xs font-bold transition-all flex items-center gap-1.5",
+              "px-3 py-1.5 rounded-md font-data text-xs font-bold transition-all flex items-center gap-1.5",
               activeTab === 'screener' ? "bg-indigo-600 text-white shadow-md shadow-indigo-600/10" : "text-slate-400 hover:text-slate-200"
             )}
           >
@@ -160,7 +160,7 @@ export const LiveMarketScreener: React.FC<Props> = ({ onSelectStock }) => {
           <button
             onClick={() => setActiveTab('ai')}
             className={cn(
-              "px-3 py-1.5 rounded-md font-mono text-xs font-bold transition-all flex items-center gap-1.5",
+              "px-3 py-1.5 rounded-md font-data text-xs font-bold transition-all flex items-center gap-1.5",
               activeTab === 'ai' ? "bg-indigo-600 text-white shadow-md shadow-indigo-600/10" : "text-slate-400 hover:text-slate-200"
             )}
           >
@@ -171,7 +171,7 @@ export const LiveMarketScreener: React.FC<Props> = ({ onSelectStock }) => {
           <button
             onClick={() => setActiveTab('intraday')}
             className={cn(
-              "px-3 py-1.5 rounded-md font-mono text-xs font-bold transition-all flex items-center gap-1.5",
+              "px-3 py-1.5 rounded-md font-data text-xs font-bold transition-all flex items-center gap-1.5",
               activeTab === 'intraday' ? "bg-indigo-600 text-white shadow-md shadow-indigo-600/10" : "text-slate-400 hover:text-slate-200"
             )}
           >
@@ -184,7 +184,7 @@ export const LiveMarketScreener: React.FC<Props> = ({ onSelectStock }) => {
           <button
             onClick={() => setShowFilters(!showFilters)}
             className={cn(
-              "flex items-center gap-2 px-4 py-2 rounded-lg font-mono text-xs font-bold transition-all",
+              "flex items-center gap-2 px-4 py-2 rounded-lg font-data text-xs font-bold transition-all",
               activeCount > 0 ? "bg-indigo-600/20 text-indigo-400 border border-indigo-500/30" : "bg-slate-800 text-slate-400 border border-slate-700"
             )}
           >
@@ -206,7 +206,7 @@ export const LiveMarketScreener: React.FC<Props> = ({ onSelectStock }) => {
           </div>
           <button 
             onClick={() => applyCombo(optimalCombos.optimal_combinations[0].filters)}
-            className="bg-indigo-600 hover:bg-indigo-500 text-white px-2.5 py-1 rounded font-semibold transition-all flex items-center gap-1 font-mono text-[10px]"
+            className="bg-indigo-600 hover:bg-indigo-500 text-white px-2.5 py-1 rounded font-semibold transition-all flex items-center gap-1 font-data text-[10px]"
           >
             <Play className="w-2.5 h-2.5 fill-current" /> Apply Combo
           </button>
@@ -223,9 +223,9 @@ export const LiveMarketScreener: React.FC<Props> = ({ onSelectStock }) => {
               exit={{ height: 0, opacity: 0 }}
               className="overflow-hidden mb-6 flex-shrink-0"
             >
-              <div className="bg-slate-900/50 border border-slate-800 rounded-xl p-5">
+              <div className="v1-card p-5">
                 <div className="flex justify-between items-center mb-4">
-                  <h3 className="text-sm font-bold font-['Rajdhani'] uppercase tracking-wider text-slate-400">Active Filters</h3>
+                  <h3 className="text-sm font-bold font-display uppercase tracking-wider text-slate-400">Active Filters</h3>
                   {activeCount > 0 && (
                     <button onClick={clearFilters} className="text-xs text-rose-400 hover:text-rose-300 flex items-center gap-1">
                       <X className="w-3 h-3" /> Clear All
@@ -236,7 +236,7 @@ export const LiveMarketScreener: React.FC<Props> = ({ onSelectStock }) => {
                 <div className="space-y-6">
                   {FILTER_GROUPS.map(group => (
                     <div key={group.name}>
-                      <h4 className="text-xs font-mono text-slate-500 mb-3">{group.name}</h4>
+                      <h4 className="text-xs font-data text-slate-500 mb-3">{group.name}</h4>
                       <div className="flex flex-wrap gap-2">
                         {group.keys.map(key => {
                           const active = !!filters[key];
@@ -245,7 +245,7 @@ export const LiveMarketScreener: React.FC<Props> = ({ onSelectStock }) => {
                               key={key}
                               onClick={() => toggleFilter(key)}
                               className={cn(
-                                "text-[10px] font-mono px-3 py-1.5 rounded-md transition-all border",
+                                "text-[10px] font-data px-3 py-1.5 rounded-md transition-all border",
                                 active 
                                   ? "bg-indigo-600/20 text-indigo-300 border-indigo-500/50 shadow-[0_0_10px_rgba(99,102,241,0.1)]" 
                                   : "bg-slate-800/50 text-slate-400 border-slate-700/50 hover:bg-slate-800 hover:text-slate-300"
@@ -271,54 +271,51 @@ export const LiveMarketScreener: React.FC<Props> = ({ onSelectStock }) => {
           isLoading ? (
             <div className="flex flex-col items-center justify-center h-64 text-indigo-400">
               <Zap className="w-8 h-8 animate-pulse mb-4 opacity-50" />
-              <p className="font-mono text-xs tracking-widest animate-pulse">SCANNING MARKET...</p>
+              <p className="font-data text-xs tracking-widest animate-pulse">SCANNING MARKET...</p>
             </div>
           ) : stocks.length === 0 ? (
             <div className="flex flex-col items-center justify-center h-64 text-slate-500">
               <Activity className="w-8 h-8 mb-4 opacity-30" />
-              <p className="font-mono text-xs tracking-widest">NO STOCKS MATCH FILTERS</p>
+              <p className="font-data text-xs tracking-widest">NO STOCKS MATCH FILTERS</p>
             </div>
           ) : (
             <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
               {sortedStocks.map((stock: any) => {
                 const chg = stock.change_per ?? 0;
-                let borderColor = 'border-amber-500/40';
-                let bgColor = 'bg-amber-500/10';
+                let cardClass = 'v1-card-neutral';
                 let textColor = 'text-amber-400';
                 let Icon = Minus;
 
                 if (chg > 0) {
-                  borderColor = 'border-emerald-500/50';
-                  bgColor = 'bg-emerald-500/10';
+                  cardClass = 'v1-card-up';
                   textColor = 'text-emerald-400';
                   Icon = TrendingUp;
                 } else if (chg < 0) {
-                  borderColor = 'border-rose-500/50';
-                  bgColor = 'bg-rose-500/10';
+                  cardClass = 'v1-card-down';
                   textColor = 'text-rose-400';
                   Icon = TrendingDown;
                 }
 
                 return (
-                  <div 
-                    key={stock.symbol_name} 
+                  <div
+                    key={stock.symbol_name}
                     onClick={() => onSelectStock?.(stock.symbol_name)}
                     className={cn(
-                      "rounded-xl border p-4 transition-all hover:shadow-[0_8px_30px_rgba(0,0,0,0.12)] backdrop-blur-sm cursor-pointer hover:scale-[1.01]",
-                      borderColor, bgColor
+                      cardClass,
+                      "p-4 transition-all hover:shadow-[0_8px_30px_rgba(0,0,0,0.12)] cursor-pointer hover:scale-[1.01]"
                     )}
                   >
                     <div className="flex justify-between items-start mb-4">
                       <div>
-                        <h3 className="font-['Rajdhani'] text-lg font-bold text-white tracking-wide">{stock.symbol_name}</h3>
-                        <div className={cn("flex items-center gap-1 font-mono text-[11px] mt-1 font-bold", textColor)}>
+                        <h3 className="font-display text-lg font-bold text-white tracking-wide">{stock.symbol_name}</h3>
+                        <div className={cn("flex items-center gap-1 font-data text-[11px] mt-1 font-bold", textColor)}>
                           <Icon className="w-3 h-3" />
                           {chg > 0 ? '+' : ''}{chg.toFixed(2)}% ({stock.change_value > 0 ? '+' : ''}{stock.change_value})
                         </div>
                       </div>
                       <div className="text-right">
-                        <div className="font-mono text-lg font-bold text-slate-100">₹{stock.last_trade_price?.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</div>
-                        <div className="font-mono text-[9px] text-slate-500 mt-1 uppercase">Vol: {stock.volume?.toLocaleString('en-IN')}</div>
+                        <div className="font-data text-lg font-bold text-slate-100">₹{stock.last_trade_price?.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</div>
+                        <div className="font-data text-[9px] text-slate-500 mt-1 uppercase">Vol: {stock.volume?.toLocaleString('en-IN')}</div>
                       </div>
                     </div>
 
@@ -330,8 +327,8 @@ export const LiveMarketScreener: React.FC<Props> = ({ onSelectStock }) => {
                         const displayKey = key.replace(/_/g, ' ').toUpperCase();
                         return (
                           <div key={key} className="overflow-hidden">
-                            <p className="font-mono text-[9px] text-slate-500 truncate">{displayKey}</p>
-                            <p className="font-mono text-xs font-semibold text-slate-300 mt-0.5 truncate">{formattedValue}</p>
+                            <p className="font-data text-[9px] text-slate-500 truncate">{displayKey}</p>
+                            <p className="font-data text-xs font-semibold text-slate-300 mt-0.5 truncate">{formattedValue}</p>
                           </div>
                         );
                       })}
@@ -344,12 +341,12 @@ export const LiveMarketScreener: React.FC<Props> = ({ onSelectStock }) => {
         ) : activeTab === 'ai' ? (
           /* AI Strategy Dashboard */
           <div className="space-y-6">
-            <div className="bg-slate-900/30 border border-slate-800 rounded-xl p-5 mb-4">
-              <h2 className="text-sm font-bold font-['Rajdhani'] uppercase tracking-wider text-slate-300 mb-2 flex items-center gap-2">
+            <div className="v1-card p-5 mb-4">
+              <h2 className="text-sm font-bold font-display uppercase tracking-wider text-slate-300 mb-2 flex items-center gap-2">
                 <Brain className="w-4 h-4 text-indigo-400" />
                 Decision Tree Strategy Optimizer
               </h2>
-              <p className="text-xs text-slate-500 leading-relaxed font-mono">
+              <p className="text-xs text-slate-500 leading-relaxed font-data">
                 The AI model continuously parses historical EOD outcomes for all live screener combinations. It ranks filters and groups them to discover optimal multi-factor triggers.
               </p>
             </div>
@@ -359,7 +356,7 @@ export const LiveMarketScreener: React.FC<Props> = ({ onSelectStock }) => {
                 <Zap className="w-6 h-6 text-indigo-500 animate-spin" />
               </div>
             ) : !optimalCombos || !optimalCombos.optimal_combinations?.length ? (
-              <div className="text-center py-12 text-slate-500 font-mono text-xs">
+              <div className="text-center py-12 text-slate-500 font-data text-xs">
                 No optimal combinations computed yet. Please execute <code>live_screener_optimizer.py</code>.
               </div>
             ) : (
@@ -381,12 +378,12 @@ export const LiveMarketScreener: React.FC<Props> = ({ onSelectStock }) => {
                   }
 
                   return (
-                    <div key={idx} className="border border-slate-800/80 rounded-xl bg-slate-900/30 p-5 flex flex-col justify-between hover:border-slate-700/60 transition-all">
+                    <div key={idx} className="v1-card p-5 flex flex-col justify-between hover:border-slate-700/60 transition-all">
                       <div>
                         {/* Title & recommendation tag */}
                         <div className="flex justify-between items-start gap-4 mb-4">
-                          <span className="font-mono text-xs text-indigo-400 font-bold">Strategy #{idx + 1}</span>
-                          <span className={cn("text-[9px] font-mono font-bold px-2 py-0.5 rounded border uppercase tracking-wider", actionColor)}>
+                          <span className="font-data text-xs text-indigo-400 font-bold">Strategy #{idx + 1}</span>
+                          <span className={cn("text-[9px] font-data font-bold px-2 py-0.5 rounded border font-display uppercase tracking-wider", actionColor)}>
                             {actionText}
                           </span>
                         </div>
@@ -394,34 +391,34 @@ export const LiveMarketScreener: React.FC<Props> = ({ onSelectStock }) => {
                         {/* Combined Filters */}
                         <div className="flex flex-wrap gap-1.5 mb-5">
                           {combo.filters.map((f: string) => (
-                            <code key={f} className="text-[10px] font-mono bg-slate-850 px-2 py-1 rounded text-slate-300 border border-slate-800/80">{f}</code>
+                            <code key={f} className="text-[10px] font-data bg-slate-850 px-2 py-1 rounded text-slate-300 border border-slate-800/80">{f}</code>
                           ))}
                         </div>
 
                         {/* Stats block */}
                         <div className="grid grid-cols-3 gap-2 bg-slate-950/40 border border-slate-900 rounded-lg p-3 mb-4">
                           <div>
-                            <p className="font-mono text-[9px] text-slate-500 uppercase">Win Rate</p>
-                            <p className="font-mono text-sm font-bold text-emerald-400 mt-0.5">{wr.toFixed(1)}%</p>
+                            <p className="font-data text-[9px] text-slate-500 uppercase">Win Rate</p>
+                            <p className="font-data text-sm font-bold text-emerald-400 mt-0.5">{wr.toFixed(1)}%</p>
                           </div>
                           <div>
-                            <p className="font-mono text-[9px] text-slate-500 uppercase">Avg Return (3d)</p>
-                            <p className="font-mono text-sm font-bold text-slate-200 mt-0.5">+{ret.toFixed(2)}%</p>
+                            <p className="font-data text-[9px] text-slate-500 uppercase">Avg Return (3d)</p>
+                            <p className="font-data text-sm font-bold text-slate-200 mt-0.5">+{ret.toFixed(2)}%</p>
                           </div>
                           <div>
-                            <p className="font-mono text-[9px] text-slate-500 uppercase">Sample Count</p>
-                            <p className="font-mono text-sm font-bold text-slate-400 mt-0.5">{combo.sample_count}</p>
+                            <p className="font-data text-[9px] text-slate-500 uppercase">Sample Count</p>
+                            <p className="font-data text-sm font-bold text-slate-400 mt-0.5">{combo.sample_count}</p>
                           </div>
                         </div>
 
                         {/* Backtest matching block */}
                         <div className="border-t border-slate-800/50 pt-4 mt-2">
-                          <h4 className="text-[10px] font-mono font-bold text-slate-400 uppercase tracking-widest flex items-center gap-1.5 mb-2.5">
+                          <h4 className="text-[10px] font-data font-bold text-slate-400 font-display uppercase tracking-widest flex items-center gap-1.5 mb-2.5">
                             <BarChart2 className="w-3.5 h-3.5 text-indigo-400" />
                             Historical Backtest Performance
                           </h4>
                           {backtest ? (
-                            <div className="grid grid-cols-2 gap-3 font-mono text-xs text-slate-300">
+                            <div className="grid grid-cols-2 gap-3 font-data text-xs text-slate-300">
                               <div className="flex justify-between items-center bg-slate-900/20 p-2 rounded">
                                 <span className="text-slate-500 text-[10px]">TOTAL RETURN:</span>
                                 <span className="font-bold text-emerald-400">+{backtest.total_return_pct.toFixed(2)}%</span>
@@ -440,7 +437,7 @@ export const LiveMarketScreener: React.FC<Props> = ({ onSelectStock }) => {
                               </div>
                             </div>
                           ) : (
-                            <div className="bg-slate-950/20 border border-slate-800/40 rounded p-3 text-[10px] font-mono text-slate-500 text-center">
+                            <div className="bg-slate-950/20 border border-slate-800/40 rounded p-3 text-[10px] font-data text-slate-500 text-center">
                               No backtest run resolved. Execute <code>backtest_live_screener.py</code> for this combo.
                             </div>
                           )}
@@ -449,13 +446,13 @@ export const LiveMarketScreener: React.FC<Props> = ({ onSelectStock }) => {
 
                       {/* Action triggers */}
                       <div className="mt-5 pt-3 border-t border-slate-800/50 flex items-center justify-between">
-                        <span className="text-[10px] font-mono text-slate-500 flex items-center gap-1">
+                        <span className="text-[10px] font-data text-slate-500 flex items-center gap-1">
                           <Award className="w-3.5 h-3.5 text-amber-500" />
                           Rank #{idx + 1}
                         </span>
                         <button
                           onClick={() => applyCombo(combo.filters)}
-                          className="bg-indigo-600 hover:bg-indigo-500 text-white font-mono text-xs font-bold px-4 py-2 rounded-lg transition-all flex items-center gap-1.5"
+                          className="bg-indigo-600 hover:bg-indigo-500 text-white font-data text-xs font-bold px-4 py-2 rounded-lg transition-all flex items-center gap-1.5"
                         >
                           <Play className="w-3 h-3 fill-current" /> Apply Filter Combo
                         </button>
@@ -471,12 +468,12 @@ export const LiveMarketScreener: React.FC<Props> = ({ onSelectStock }) => {
              Fully separate from the AI tab above: that one optimizes for the 1d/3d/5d swing
              horizon, this one for the same-day exit an intraday trade would actually take. */
           <div className="space-y-6">
-            <div className="bg-slate-900/30 border border-slate-800 rounded-xl p-5 mb-4">
-              <h2 className="text-sm font-bold font-['Rajdhani'] uppercase tracking-wider text-slate-300 mb-2 flex items-center gap-2">
+            <div className="v1-card p-5 mb-4">
+              <h2 className="text-sm font-bold font-display uppercase tracking-wider text-slate-300 mb-2 flex items-center gap-2">
                 <Target className="w-4 h-4 text-indigo-400" />
                 Intraday Edge Ranking
               </h2>
-              <p className="text-xs text-slate-500 leading-relaxed font-mono">
+              <p className="text-xs text-slate-500 leading-relaxed font-data">
                 Stocks matching NiftyTrader filters as of the latest 15-min collection cycle. Ranked by a
                 gradient-boosted classifier's learned <strong>same-day</strong> win-probability once trained
                 (backtested against actual EOD screener stock movement, retrained daily, gated so a worse
@@ -485,13 +482,13 @@ export const LiveMarketScreener: React.FC<Props> = ({ onSelectStock }) => {
                 for a 1-5 day swing horizon.
               </p>
               {intradaySignals?.asOf && (
-                <p className="text-[10px] font-mono text-slate-600 mt-2 flex items-center gap-1.5">
+                <p className="text-[10px] font-data text-slate-600 mt-2 flex items-center gap-1.5">
                   <Clock className="w-3 h-3" /> Live matches as of {new Date(intradaySignals.asOf).toLocaleString('en-IN')}
                 </p>
               )}
               {mlModelStatus ? (
-                <div className="mt-3 pt-3 border-t border-slate-800/50 flex flex-wrap items-center gap-x-5 gap-y-1 text-[10px] font-mono text-slate-400">
-                  <span className="text-indigo-300 font-bold uppercase tracking-wider">ML Ranker Active</span>
+                <div className="mt-3 pt-3 border-t border-slate-800/50 flex flex-wrap items-center gap-x-5 gap-y-1 text-[10px] font-data text-slate-400">
+                  <span className="text-indigo-300 font-bold font-display uppercase tracking-wider">ML Ranker Active</span>
                   <span>Held-out AUC: <strong className="text-slate-200">{mlModelStatus.test_auc?.toFixed(3)}</strong></span>
                   {mlModelStatus.cv_auc != null && <span>CV AUC: <strong className="text-slate-200">{mlModelStatus.cv_auc.toFixed(3)}</strong></span>}
                   <span>Base rate: <strong className="text-slate-200">{(mlModelStatus.base_rate * 100).toFixed(1)}%</strong></span>
@@ -507,7 +504,7 @@ export const LiveMarketScreener: React.FC<Props> = ({ onSelectStock }) => {
                   )}
                 </div>
               ) : (
-                <p className="text-[10px] font-mono text-slate-600 mt-3 pt-3 border-t border-slate-800/50">
+                <p className="text-[10px] font-data text-slate-600 mt-3 pt-3 border-t border-slate-800/50">
                   No trained ML model yet — execute <code>live_screener_ml_ranker.py --train</code> once enough
                   same-day outcomes have resolved. Ranking below falls back to the single-best-filter rule until then.
                 </p>
@@ -520,7 +517,7 @@ export const LiveMarketScreener: React.FC<Props> = ({ onSelectStock }) => {
                   true (falls back to the rule-based ranking below); this banner explains why
                   the "ML XX%" badges disappeared rather than leaving it unexplained. */}
               {intradaySignals?.mlEdgeProven === false && (
-                <div className="mt-3 pt-3 border-t border-rose-900/40 flex items-start gap-2 text-[10px] font-mono text-rose-300">
+                <div className="mt-3 pt-3 border-t border-rose-900/40 flex items-start gap-2 text-[10px] font-data text-rose-300">
                   <AlertTriangle className="w-3.5 h-3.5 flex-shrink-0 mt-0.5" />
                   <span>
                     Trained model shows <strong>no demonstrated live edge</strong> against actual
@@ -536,7 +533,7 @@ export const LiveMarketScreener: React.FC<Props> = ({ onSelectStock }) => {
                 <Zap className="w-6 h-6 text-indigo-500 animate-spin" />
               </div>
             ) : !intradaySignals?.stocks?.length ? (
-              <div className="text-center py-12 text-slate-500 font-mono text-xs">
+              <div className="text-center py-12 text-slate-500 font-data text-xs">
                 No live screener matches yet this cycle — the collector runs every 15 min during market hours.
               </div>
             ) : (
@@ -546,29 +543,28 @@ export const LiveMarketScreener: React.FC<Props> = ({ onSelectStock }) => {
                   const hasEdge = s.best_sample_count > 0;
                   const hasMl = s.ml_win_probability !== null && s.ml_win_probability !== undefined;
                   const positive = hasMl ? s.ml_win_probability >= 0.5 : s.edge_score > 0;
-                  const borderColor = !hasEdge && !hasMl ? 'border-slate-700/50' : positive ? 'border-emerald-500/50' : 'border-rose-500/40';
-                  const bgColor = !hasEdge && !hasMl ? 'bg-slate-900/30' : positive ? 'bg-emerald-500/10' : 'bg-rose-500/10';
+                  const cardClass = !hasEdge && !hasMl ? 'v1-card-neutral' : positive ? 'v1-card-up' : 'v1-card-down';
                   return (
                     <div
                       key={s.symbol}
                       onClick={() => onSelectStock?.(s.symbol)}
                       className={cn(
-                        "rounded-xl border p-4 transition-all hover:shadow-[0_8px_30px_rgba(0,0,0,0.12)] backdrop-blur-sm cursor-pointer hover:scale-[1.01]",
-                        borderColor, bgColor
+                        cardClass,
+                        "p-4 transition-all hover:shadow-[0_8px_30px_rgba(0,0,0,0.12)] cursor-pointer hover:scale-[1.01]"
                       )}
                     >
                       <div className="flex justify-between items-start mb-3">
                         <div>
-                          <h3 className="font-['Rajdhani'] text-lg font-bold text-white tracking-wide">{s.symbol}</h3>
-                          <div className={cn("flex items-center gap-1 font-mono text-[11px] mt-1 font-bold", chg >= 0 ? 'text-emerald-400' : 'text-rose-400')}>
+                          <h3 className="font-display text-lg font-bold text-white tracking-wide">{s.symbol}</h3>
+                          <div className={cn("flex items-center gap-1 font-data text-[11px] mt-1 font-bold", chg >= 0 ? 'text-emerald-400' : 'text-rose-400')}>
                             {chg >= 0 ? <TrendingUp className="w-3 h-3" /> : <TrendingDown className="w-3 h-3" />}
                             {chg > 0 ? '+' : ''}{chg.toFixed(2)}%
                           </div>
                         </div>
                         <div className="text-right">
-                          <div className="font-mono text-lg font-bold text-slate-100">₹{s.price?.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</div>
+                          <div className="font-data text-lg font-bold text-slate-100">₹{s.price?.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</div>
                           {hasMl && (
-                            <div className={cn("font-mono text-[10px] font-bold mt-1 px-1.5 py-0.5 rounded inline-block", s.ml_win_probability >= 0.5 ? 'text-emerald-400 bg-emerald-500/10' : 'text-amber-400 bg-amber-500/10')}>
+                            <div className={cn("font-data text-[10px] font-bold mt-1 px-1.5 py-0.5 rounded inline-block", s.ml_win_probability >= 0.5 ? 'text-emerald-400 bg-emerald-500/10' : 'text-amber-400 bg-amber-500/10')}>
                               ML {(s.ml_win_probability * 100).toFixed(0)}%
                             </div>
                           )}
@@ -578,29 +574,29 @@ export const LiveMarketScreener: React.FC<Props> = ({ onSelectStock }) => {
                       <div className="border-t border-slate-800/50 pt-3">
                         {hasEdge ? (
                           <>
-                            <p className="font-mono text-[9px] text-slate-500 uppercase mb-1">Best Setup</p>
-                            <code className="text-[10px] font-mono bg-slate-850 px-2 py-1 rounded text-indigo-300 border border-slate-800/80">{s.best_filter}</code>
+                            <p className="font-data text-[9px] text-slate-500 uppercase mb-1">Best Setup</p>
+                            <code className="text-[10px] font-data bg-slate-850 px-2 py-1 rounded text-indigo-300 border border-slate-800/80">{s.best_filter}</code>
                             <div className="grid grid-cols-3 gap-2 mt-3">
                               <div>
-                                <p className="font-mono text-[9px] text-slate-500 uppercase">Win Rate</p>
-                                <p className={cn("font-mono text-sm font-bold mt-0.5", s.best_win_rate >= 0.5 ? 'text-emerald-400' : 'text-amber-400')}>
+                                <p className="font-data text-[9px] text-slate-500 uppercase">Win Rate</p>
+                                <p className={cn("font-data text-sm font-bold mt-0.5", s.best_win_rate >= 0.5 ? 'text-emerald-400' : 'text-amber-400')}>
                                   {(s.best_win_rate * 100).toFixed(0)}%
                                 </p>
                               </div>
                               <div>
-                                <p className="font-mono text-[9px] text-slate-500 uppercase">Avg Return</p>
-                                <p className={cn("font-mono text-sm font-bold mt-0.5", s.best_avg_return >= 0 ? 'text-emerald-400' : 'text-rose-400')}>
+                                <p className="font-data text-[9px] text-slate-500 uppercase">Avg Return</p>
+                                <p className={cn("font-data text-sm font-bold mt-0.5", s.best_avg_return >= 0 ? 'text-emerald-400' : 'text-rose-400')}>
                                   {s.best_avg_return >= 0 ? '+' : ''}{s.best_avg_return.toFixed(2)}%
                                 </p>
                               </div>
                               <div>
-                                <p className="font-mono text-[9px] text-slate-500 uppercase">Samples</p>
-                                <p className="font-mono text-sm font-bold text-slate-400 mt-0.5">{s.best_sample_count}</p>
+                                <p className="font-data text-[9px] text-slate-500 uppercase">Samples</p>
+                                <p className="font-data text-sm font-bold text-slate-400 mt-0.5">{s.best_sample_count}</p>
                               </div>
                             </div>
                           </>
                         ) : (
-                          <p className="font-mono text-[10px] text-slate-600">
+                          <p className="font-data text-[10px] text-slate-600">
                             Matched {s.filters.map((f: any) => f.filter_key).join(', ')} — no resolved same-day track record yet.
                           </p>
                         )}
@@ -613,7 +609,7 @@ export const LiveMarketScreener: React.FC<Props> = ({ onSelectStock }) => {
 
             {/* Optimal intraday filter combinations (decision-tree, isolated from the swing model) */}
             <div className="pt-2">
-              <h2 className="text-sm font-bold font-['Rajdhani'] uppercase tracking-wider text-slate-300 mb-4 flex items-center gap-2">
+              <h2 className="text-sm font-bold font-display uppercase tracking-wider text-slate-300 mb-4 flex items-center gap-2">
                 <Brain className="w-4 h-4 text-indigo-400" />
                 Optimal Intraday Filter Combinations
               </h2>
@@ -622,7 +618,7 @@ export const LiveMarketScreener: React.FC<Props> = ({ onSelectStock }) => {
                   <Zap className="w-6 h-6 text-indigo-500 animate-spin" />
                 </div>
               ) : !intradayCombos || !intradayCombos.optimal_combinations?.length ? (
-                <div className="text-center py-8 text-slate-500 font-mono text-xs">
+                <div className="text-center py-8 text-slate-500 font-data text-xs">
                   No optimal intraday combinations computed yet. Please execute <code>live_screener_optimizer.py</code>.
                 </div>
               ) : (
@@ -631,41 +627,41 @@ export const LiveMarketScreener: React.FC<Props> = ({ onSelectStock }) => {
                     const wr = combo.win_rate * 100;
                     const backtest = findIntradayBacktestForCombo(combo.filters);
                     return (
-                      <div key={idx} className="border border-slate-800/80 rounded-xl bg-slate-900/30 p-5 flex flex-col justify-between hover:border-slate-700/60 transition-all">
+                      <div key={idx} className="v1-card p-5 flex flex-col justify-between hover:border-slate-700/60 transition-all">
                         <div>
                           <div className="flex justify-between items-start gap-4 mb-4">
-                            <span className="font-mono text-xs text-indigo-400 font-bold">Intraday Strategy #{idx + 1}</span>
-                            <span className={cn("text-[9px] font-mono font-bold px-2 py-0.5 rounded border uppercase tracking-wider",
+                            <span className="font-data text-xs text-indigo-400 font-bold">Intraday Strategy #{idx + 1}</span>
+                            <span className={cn("text-[9px] font-data font-bold px-2 py-0.5 rounded border font-display uppercase tracking-wider",
                               wr >= 60 ? "text-emerald-400 border-emerald-500/30 bg-emerald-500/5" : "text-slate-400 border-slate-800 bg-slate-950/40")}>
                               {wr >= 60 ? 'STRONG (AI)' : 'WATCH'}
                             </span>
                           </div>
                           <div className="flex flex-wrap gap-1.5 mb-5">
                             {combo.filters.map((f: string) => (
-                              <code key={f} className="text-[10px] font-mono bg-slate-850 px-2 py-1 rounded text-slate-300 border border-slate-800/80">{f}</code>
+                              <code key={f} className="text-[10px] font-data bg-slate-850 px-2 py-1 rounded text-slate-300 border border-slate-800/80">{f}</code>
                             ))}
                           </div>
                           <div className="grid grid-cols-3 gap-2 bg-slate-950/40 border border-slate-900 rounded-lg p-3 mb-4">
                             <div>
-                              <p className="font-mono text-[9px] text-slate-500 uppercase">Win Rate</p>
-                              <p className="font-mono text-sm font-bold text-emerald-400 mt-0.5">{wr.toFixed(1)}%</p>
+                              <p className="font-data text-[9px] text-slate-500 uppercase">Win Rate</p>
+                              <p className="font-data text-sm font-bold text-emerald-400 mt-0.5">{wr.toFixed(1)}%</p>
                             </div>
                             <div>
-                              <p className="font-mono text-[9px] text-slate-500 uppercase">Avg Return (same-day)</p>
-                              <p className="font-mono text-sm font-bold text-slate-200 mt-0.5">{combo.avg_return >= 0 ? '+' : ''}{combo.avg_return.toFixed(2)}%</p>
+                              <p className="font-data text-[9px] text-slate-500 uppercase">Avg Return (same-day)</p>
+                              <p className="font-data text-sm font-bold text-slate-200 mt-0.5">{combo.avg_return >= 0 ? '+' : ''}{combo.avg_return.toFixed(2)}%</p>
                             </div>
                             <div>
-                              <p className="font-mono text-[9px] text-slate-500 uppercase">Samples</p>
-                              <p className="font-mono text-sm font-bold text-slate-400 mt-0.5">{combo.sample_count}</p>
+                              <p className="font-data text-[9px] text-slate-500 uppercase">Samples</p>
+                              <p className="font-data text-sm font-bold text-slate-400 mt-0.5">{combo.sample_count}</p>
                             </div>
                           </div>
                           <div className="border-t border-slate-800/50 pt-4 mt-2">
-                            <h4 className="text-[10px] font-mono font-bold text-slate-400 uppercase tracking-widest flex items-center gap-1.5 mb-2.5">
+                            <h4 className="text-[10px] font-data font-bold text-slate-400 font-display uppercase tracking-widest flex items-center gap-1.5 mb-2.5">
                               <BarChart2 className="w-3.5 h-3.5 text-indigo-400" />
                               Historical Backtest Performance
                             </h4>
                             {backtest ? (
-                              <div className="grid grid-cols-2 gap-3 font-mono text-xs text-slate-300">
+                              <div className="grid grid-cols-2 gap-3 font-data text-xs text-slate-300">
                                 <div className="flex justify-between items-center bg-slate-900/20 p-2 rounded">
                                   <span className="text-slate-500 text-[10px]">TOTAL RETURN:</span>
                                   <span className="font-bold text-emerald-400">{backtest.total_return_pct >= 0 ? '+' : ''}{backtest.total_return_pct.toFixed(2)}%</span>
@@ -684,20 +680,20 @@ export const LiveMarketScreener: React.FC<Props> = ({ onSelectStock }) => {
                                 </div>
                               </div>
                             ) : (
-                              <div className="bg-slate-950/20 border border-slate-800/40 rounded p-3 text-[10px] font-mono text-slate-500 text-center">
+                              <div className="bg-slate-950/20 border border-slate-800/40 rounded p-3 text-[10px] font-data text-slate-500 text-center">
                                 No backtest run resolved. Execute <code>backtest_live_screener.py --intraday</code> for this combo.
                               </div>
                             )}
                           </div>
                         </div>
                         <div className="mt-5 pt-3 border-t border-slate-800/50 flex items-center justify-between">
-                          <span className="text-[10px] font-mono text-slate-500 flex items-center gap-1">
+                          <span className="text-[10px] font-data text-slate-500 flex items-center gap-1">
                             <Award className="w-3.5 h-3.5 text-amber-500" />
                             Rank #{idx + 1}
                           </span>
                           <button
                             onClick={() => applyCombo(combo.filters)}
-                            className="bg-indigo-600 hover:bg-indigo-500 text-white font-mono text-xs font-bold px-4 py-2 rounded-lg transition-all flex items-center gap-1.5"
+                            className="bg-indigo-600 hover:bg-indigo-500 text-white font-data text-xs font-bold px-4 py-2 rounded-lg transition-all flex items-center gap-1.5"
                           >
                             <Play className="w-3 h-3 fill-current" /> Apply Filter Combo
                           </button>

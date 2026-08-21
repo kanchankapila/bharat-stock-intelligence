@@ -50,7 +50,7 @@ export const Card = React.forwardRef<HTMLDivElement, CardProps>(({
   >
     {title && (
       <div className={cn(dense ? 'px-3 py-2.5' : 'px-5 py-3.5', 'border-b border-slate-800/50 flex items-center justify-between bg-slate-950/20')}>
-        <h3 className="text-[10px] font-semibold text-slate-400 flex items-center gap-2 uppercase tracking-widest">
+        <h3 className="text-[10px] font-semibold text-slate-400 flex items-center gap-2 font-display uppercase tracking-widest">
           {Icon && <Icon className="w-3.5 h-3.5 text-indigo-600" />}
           {title}
         </h3>

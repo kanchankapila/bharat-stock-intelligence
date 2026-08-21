@@ -56,13 +56,13 @@ export const EarningsPage: React.FC<EarningsPageProps> = ({ onSelectStock }) => 
   })).sort((a, b) => Math.abs(b.chg) - Math.abs(a.chg));
 
   return (
-    <div className="p-4 md:p-6 space-y-6">
-      <div className="flex items-center justify-between flex-wrap gap-3">
-        <div>
-          <h1 className="text-2xl font-black text-white">Earnings Tracker</h1>
-          <p className="text-sm text-slate-400 mt-0.5">Q-results, beat/miss analysis and price shockers</p>
+    <div className="v1-page space-y-6">
+      <div className="v1-header">
+        <div className="v1-header-left">
+          <h1 className="v1-title-page">Earnings Tracker</h1>
+          <p className="text-sm text-slate-400">Q-results, beat/miss analysis and price shockers</p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="v1-header-actions">
           <div className="relative">
             <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
             <input
@@ -70,18 +70,18 @@ export const EarningsPage: React.FC<EarningsPageProps> = ({ onSelectStock }) => 
               placeholder="Filter Symbol..."
               value={searchSymbol}
               onChange={e => setSearchSymbol(e.target.value)}
-              className="pl-9 pr-3 py-1.5 rounded-lg bg-slate-700/50 border border-slate-600 text-slate-200 text-xs focus:outline-none focus:border-emerald-500 w-32"
+              className="v1-input w-32 pl-9 text-xs"
             />
           </div>
           <input
             type="date"
             value={selectedDate}
             onChange={e => setSelectedDate(e.target.value)}
-            className="px-3 py-1.5 rounded-lg bg-slate-700/50 border border-slate-600 text-slate-200 text-xs"
+            className="v1-input text-xs"
           />
           <button
             onClick={() => refetch()}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-700/50 text-slate-300 hover:bg-slate-600/50 text-xs transition-colors"
+            className="v1-btn-secondary text-xs"
           >
             <RefreshCw className="w-3 h-3" /> Refresh
           </button>
@@ -89,16 +89,16 @@ export const EarningsPage: React.FC<EarningsPageProps> = ({ onSelectStock }) => 
       </div>
 
       {dashboard && (
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+        <div className="v1-grid-4">
           {[
-            { label: 'Reporting Today',  value: dashboard.totalResults || dashboard.todayCount || '—', color: 'text-blue-400'    },
-            { label: 'Beat Estimates',   value: dashboard.beat || '—',                                  color: 'text-emerald-400' },
-            { label: 'Missed Estimates', value: dashboard.miss || dashboard.missed || '—',              color: 'text-red-400'    },
-            { label: 'In Line',          value: dashboard.inline || dashboard.neutral || '—',           color: 'text-amber-400'  },
+            { label: 'Reporting Today',  value: dashboard.totalResults || dashboard.todayCount || '—', cardClass: 'v1-stat-pill' },
+            { label: 'Beat Estimates',   value: dashboard.beat || '—',                                  cardClass: 'v1-stat-pill v1-stat-pill-up' },
+            { label: 'Missed Estimates', value: dashboard.miss || dashboard.missed || '—',              cardClass: 'v1-stat-pill v1-stat-pill-down' },
+            { label: 'In Line',          value: dashboard.inline || dashboard.neutral || '—',           cardClass: 'v1-stat-pill v1-stat-pill-neutral' },
           ].map((card, i) => (
-            <div key={i} className="bg-slate-800/50 rounded-xl p-4 border border-slate-800/30">
-              <div className={cn('text-2xl font-black', card.color)}>{card.value}</div>
-              <div className="text-xs text-slate-400 mt-0.5">{card.label}</div>
+            <div key={i} className={card.cardClass}>
+              <div className="v1-data-value">{card.value}</div>
+              <div className="v1-data-label">{card.label}</div>
             </div>
           ))}
         </div>
@@ -123,7 +123,7 @@ export const EarningsPage: React.FC<EarningsPageProps> = ({ onSelectStock }) => 
       </div>
 
       {activeTab === 'today' && (
-        <div className="bg-slate-800/50 rounded-xl border border-slate-800/30 overflow-hidden">
+        <div className="v1-card overflow-hidden">
           <div className="overflow-x-auto">
             <table className="w-full">
               <thead className="bg-slate-900/60">
@@ -153,19 +153,19 @@ export const EarningsPage: React.FC<EarningsPageProps> = ({ onSelectStock }) => 
                       <td className="py-2.5 px-3 text-xs text-slate-300">₹{item.revenue || item.sales || '—'}Cr</td>
                       <td className="py-2.5 px-3 text-xs text-slate-300">₹{item.netProfit || item.profit || '—'}Cr</td>
                       <td className="py-2.5 px-3">
-                        <span className={cn('text-xs font-bold', revGrowth >= 0 ? 'text-emerald-400' : 'text-red-400')}>
+                        <span className={cn('text-xs font-bold', revGrowth >= 0 ? 'text-emerald-400' : 'text-rose-400')}>
                           {revGrowth >= 0 ? '+' : ''}{revGrowth.toFixed(1)}%
                         </span>
                       </td>
                       <td className="py-2.5 px-3">
-                        <span className={cn('text-xs font-bold', profitGrowth >= 0 ? 'text-emerald-400' : 'text-red-400')}>
+                        <span className={cn('text-xs font-bold', profitGrowth >= 0 ? 'text-emerald-400' : 'text-rose-400')}>
                           {profitGrowth >= 0 ? '+' : ''}{profitGrowth.toFixed(1)}%
                         </span>
                       </td>
                       <td className="py-2.5 px-3">
                         <span className={cn('text-xs px-1.5 py-0.5 rounded font-semibold',
                           item.resultStatus === 'beat' ? 'bg-emerald-500/20 text-emerald-400' :
-                          item.resultStatus === 'miss' ? 'bg-red-500/20 text-red-400' :
+                          item.resultStatus === 'miss' ? 'bg-rose-500/20 text-rose-400' :
                           'bg-slate-600/50 text-slate-400'
                         )}>
                           {item.resultStatus || '—'}
@@ -185,7 +185,7 @@ export const EarningsPage: React.FC<EarningsPageProps> = ({ onSelectStock }) => 
           {calendarList.map((item: any, i: number) => (
             <div
               key={i}
-              className="bg-slate-800/50 rounded-xl p-3 border border-slate-800/30 cursor-pointer hover:border-emerald-500/40 transition-colors"
+              className="v1-card p-3 cursor-pointer hover:border-emerald-500/40 transition-colors"
               onClick={() => onSelectStock?.(item.symbol)}
             >
               <div className="flex items-start justify-between gap-2">
@@ -193,7 +193,7 @@ export const EarningsPage: React.FC<EarningsPageProps> = ({ onSelectStock }) => 
                   <div className="text-xs font-bold text-slate-100">{item.companyName || item.name}</div>
                   <div className="text-xs text-slate-400">{item.symbol}</div>
                 </div>
-                <div className="text-xs text-cyan-400 font-mono shrink-0">{item.resultDate || item.date}</div>
+                <div className="text-xs text-cyan-400 font-data shrink-0">{item.resultDate || item.date}</div>
               </div>
               {item.boardMeetingPurpose && (
                 <div className="text-xs text-slate-400 mt-1.5 leading-snug">{item.boardMeetingPurpose}</div>
@@ -205,7 +205,7 @@ export const EarningsPage: React.FC<EarningsPageProps> = ({ onSelectStock }) => 
 
       {activeTab === 'beatmiss' && beatMissData.length > 0 && (
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-          <div className="bg-slate-800/50 rounded-xl p-4 border border-slate-800/30">
+          <div className="v1-card p-4">
             <div className="text-sm font-semibold text-slate-300 mb-3">Actual vs Estimate Growth (%)</div>
             <ResponsiveContainer width="100%" height={300}>
               <BarChart data={beatMissData} margin={{ left: -10, right: 8 }}>
@@ -225,7 +225,7 @@ export const EarningsPage: React.FC<EarningsPageProps> = ({ onSelectStock }) => 
               </BarChart>
             </ResponsiveContainer>
           </div>
-          <div className="bg-slate-800/50 rounded-xl border border-slate-800/30 overflow-hidden">
+          <div className="v1-card overflow-hidden">
             <div className="px-3 py-2 bg-slate-900/60 border-b border-slate-800/30">
               <span className="text-xs font-bold text-slate-300">Actual vs Estimate Detail</span>
             </div>
@@ -243,7 +243,7 @@ export const EarningsPage: React.FC<EarningsPageProps> = ({ onSelectStock }) => 
                       <div className="text-xs text-slate-400">{item.metric || 'Net Profit'}</div>
                     </div>
                     <div className="text-right">
-                      <div className={cn('text-xs font-bold', beat == null ? 'text-slate-500' : beat ? 'text-emerald-400' : 'text-red-400')}>
+                      <div className={cn('text-xs font-bold', beat == null ? 'text-slate-500' : beat ? 'text-emerald-400' : 'text-rose-400')}>
                         {beat == null ? '—' : beat ? '✓ Beat' : '✗ Miss'}
                       </div>
                       <div className="text-xs text-slate-400">{item.actual} vs {item.estimate}</div>
@@ -258,7 +258,7 @@ export const EarningsPage: React.FC<EarningsPageProps> = ({ onSelectStock }) => 
 
       {activeTab === 'shockers' && shockerData.length > 0 && (
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-          <div className="bg-slate-800/50 rounded-xl p-4 border border-slate-800/30">
+          <div className="v1-card p-4">
             <div className="text-sm font-semibold text-slate-300 mb-3">Price Impact After Results (%)</div>
             <ResponsiveContainer width="100%" height={300}>
               <BarChart data={shockerData} layout="vertical" margin={{ left: 60, right: 20 }}>
@@ -277,7 +277,7 @@ export const EarningsPage: React.FC<EarningsPageProps> = ({ onSelectStock }) => 
               </BarChart>
             </ResponsiveContainer>
           </div>
-          <div className="bg-slate-800/50 rounded-xl border border-slate-800/30 overflow-hidden">
+          <div className="v1-card overflow-hidden">
             <div className="px-3 py-2 bg-slate-900/60 border-b border-slate-800/30">
               <span className="text-xs font-bold text-slate-300">Price Shockers List</span>
             </div>
@@ -291,7 +291,7 @@ export const EarningsPage: React.FC<EarningsPageProps> = ({ onSelectStock }) => 
                       <div className="text-xs font-bold text-slate-100">{item.companyName || item.symbol}</div>
                       <div className="text-xs text-slate-400">₹{item.price || item.lastPrice}</div>
                     </div>
-                    <div className={cn('text-sm font-black', chg >= 0 ? 'text-emerald-400' : 'text-red-400')}>
+                    <div className={cn('text-sm font-black', chg >= 0 ? 'text-emerald-400' : 'text-rose-400')}>
                       {chg >= 0 ? '+' : ''}{chg.toFixed(2)}%
                     </div>
                   </div>

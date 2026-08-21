@@ -26,7 +26,7 @@ export const V1NewsTab: React.FC<{ symbol: string }> = ({ symbol }) => {
     return (
       <div className="flex flex-col items-center justify-center py-20 glass-strong rounded-2xl border border-slate-800/50 animate-pulse">
         <Activity className="w-10 h-10 text-blue-500 mb-3 animate-spin" />
-        <h3 className="text-slate-300 font-bold text-sm uppercase tracking-wider">Loading MoneyControl Live News…</h3>
+        <h3 className="text-slate-300 font-bold text-sm font-display uppercase tracking-wider">Loading MoneyControl Live News…</h3>
       </div>
     );
   }
@@ -62,15 +62,15 @@ export const V1NewsTab: React.FC<{ symbol: string }> = ({ symbol }) => {
             <div key={item.id} className="p-5 glass-strong border border-slate-800/50 rounded-2xl hover:border-blue-500/30 transition-all group">
               <div className="flex gap-3 items-center mb-3">
                 <span className={cn(
-                  "text-[9px] font-black px-2 py-0.5 rounded uppercase tracking-widest",
+                  "text-[9px] font-black px-2 py-0.5 rounded font-display uppercase tracking-widest",
                   item.category === 'Economy' ? "bg-amber-500/20 text-amber-500" :
                   item.category === 'Stock' ? "bg-blue-500/20 text-blue-500" : "bg-purple-500/20 text-purple-500"
                 )}>
                   {item.category}
                 </span>
-                <span className="text-[9px] font-bold text-slate-400 uppercase tracking-widest">{item.time}</span>
+                <span className="text-[9px] font-bold text-slate-400 font-display uppercase tracking-widest">{item.time}</span>
                 <span className="text-[9px] font-black text-slate-300 mx-1">•</span>
-                <span className="text-[9px] font-black text-blue-500/80 uppercase tracking-widest">{item.source}</span>
+                <span className="text-[9px] font-black text-blue-500/80 font-display uppercase tracking-widest">{item.source}</span>
               </div>
               <h4 className="text-lg font-black text-white italic tracking-tighter leading-tight mb-2 group-hover:text-blue-400 transition-colors">
                 {item.title}
@@ -86,7 +86,7 @@ export const V1NewsTab: React.FC<{ symbol: string }> = ({ symbol }) => {
                     </span>
                   ))}
                 </div>
-                <button className="text-[9px] font-black text-blue-500 uppercase tracking-widest hover:text-white transition-colors">
+                <button className="text-[9px] font-black text-blue-500 font-display uppercase tracking-widest hover:text-white transition-colors">
                   READ ARTICLE →
                 </button>
               </div>

@@ -26,7 +26,7 @@ export function ConvictionPill({ level }: { level: string | null | undefined }) 
 }
 
 function Tag({ label, color = 'bg-slate-700 text-slate-300' }: { label: string; color?: string }) {
-  return <span className={cn('px-1.5 py-0.5 rounded text-[9px] font-semibold uppercase tracking-wide', color)}>{label}</span>;
+  return <span className={cn('px-1.5 py-0.5 rounded text-[9px] font-semibold font-display uppercase tracking-wide', color)}>{label}</span>;
 }
 
 /** Row-shape accepted from either getBuyRecommendations picks or getUnifiedScoreForSymbol. */

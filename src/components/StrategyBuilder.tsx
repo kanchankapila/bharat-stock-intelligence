@@ -1,6 +1,5 @@
 import React, { useState } from 'react';
 import { trpc } from '../lib/trpc';
-import { Card } from './Card';
 import { Play, Settings2, ShieldCheck, Target, Zap } from 'lucide-react';
 import { motion } from 'motion/react';
 
@@ -22,25 +21,25 @@ export default function StrategyBuilder() {
   return (
     <div className="space-y-6">
       <div>
-        <h2 className="text-2xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-purple-400 to-pink-500">
+        <h2 className="text-2xl font-bold text-white font-display">
           Visual Strategy Builder
         </h2>
-        <p className="text-gray-400 text-sm mt-1">Configure ML optimization cycles to fine-tune AI scoring weights dynamically.</p>
+        <p className="text-slate-400 text-sm mt-1">Configure ML optimization cycles to fine-tune AI scoring weights dynamically.</p>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         <div className="lg:col-span-2 space-y-6">
-          <Card className="p-6 bg-gray-900 border border-white/10">
+          <div className="v1-card p-6">
             <h3 className="text-lg font-semibold text-white mb-6 flex items-center gap-2">
-              <Settings2 className="w-5 h-5 text-blue-400" />
+              <Settings2 className="w-5 h-5 text-indigo-400" />
               Optimization Parameters
             </h3>
             
             <div className="space-y-6">
               <div>
                 <div className="flex justify-between mb-2">
-                  <label className="text-sm font-medium text-gray-300">Evaluation Horizon (Days)</label>
-                  <span className="text-blue-400 font-mono">{evalDays}</span>
+                  <label className="text-sm font-medium text-slate-300">Evaluation Horizon (Days)</label>
+                  <span className="text-indigo-400 font-data">{evalDays}</span>
                 </div>
                 <input 
                   type="range" 
@@ -48,14 +47,14 @@ export default function StrategyBuilder() {
                   max="60" 
                   value={evalDays}
                   onChange={(e) => setEvalDays(Number(e.target.value))}
-                  className="w-full h-2 bg-gray-700 rounded-lg appearance-none cursor-pointer accent-blue-500"
+                  className="w-full h-2 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-indigo-500"
                 />
               </div>
 
               <div>
                 <div className="flex justify-between mb-2">
-                  <label className="text-sm font-medium text-gray-300">Evolution Iterations (Generations)</label>
-                  <span className="text-purple-400 font-mono">{iterations}</span>
+                  <label className="text-sm font-medium text-slate-300">Evolution Iterations (Generations)</label>
+                  <span className="text-purple-400 font-data">{iterations}</span>
                 </div>
                 <input 
                   type="range" 
@@ -63,17 +62,17 @@ export default function StrategyBuilder() {
                   max="50" 
                   value={iterations}
                   onChange={(e) => setIterations(Number(e.target.value))}
-                  className="w-full h-2 bg-gray-700 rounded-lg appearance-none cursor-pointer accent-purple-500"
+                  className="w-full h-2 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-purple-500"
                 />
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-gray-300 mb-2">Target Strategies</label>
+                <label className="block text-sm font-medium text-slate-300 mb-2">Target Strategies</label>
                 <input 
                   type="text" 
                   value={strategies}
                   onChange={(e) => setStrategies(e.target.value)}
-                  className="w-full bg-gray-800 border border-gray-700 rounded-lg px-4 py-2 text-white focus:ring-2 focus:ring-blue-500"
+                  className="w-full bg-slate-800 border border-slate-700 rounded-lg px-4 py-2 text-white focus:ring-2 focus:ring-indigo-500"
                 />
               </div>
             </div>
@@ -82,7 +81,7 @@ export default function StrategyBuilder() {
               <button
                 onClick={handleRunOptimizer}
                 disabled={optimizeMutation.isPending}
-                className="w-full flex items-center justify-center gap-2 px-6 py-3 bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-500 hover:to-purple-500 text-white rounded-lg font-bold transition-all disabled:opacity-50"
+                className="w-full flex items-center justify-center gap-2 px-6 py-3 bg-indigo-600 hover:bg-indigo-500 text-white rounded-[10px] font-bold transition-all disabled:opacity-50"
               >
                 {optimizeMutation.isPending ? (
                   <motion.div animate={{ rotate: 360 }} transition={{ repeat: Infinity, duration: 1 }} className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full" />
@@ -92,22 +91,22 @@ export default function StrategyBuilder() {
                 {optimizeMutation.isPending ? 'Optimizer Running in Background...' : 'Deploy ML Optimizer'}
               </button>
             </div>
-          </Card>
+          </div>
         </div>
 
         <div className="space-y-6">
-          <Card className="p-6 bg-gradient-to-br from-indigo-900/50 to-purple-900/50 border border-purple-500/20">
+          <div className="v1-card-neutral p-6">
             <h3 className="font-semibold text-white mb-4 flex items-center gap-2">
               <Zap className="w-5 h-5 text-yellow-400" />
               Live Impact
             </h3>
-            <p className="text-sm text-gray-400 mb-4">
+            <p className="text-sm text-slate-400 mb-4">
               Running the optimizer will trigger the Differential Evolution engine to test thousands of weight combinations against historical data.
             </p>
-            <p className="text-sm text-gray-400">
+            <p className="text-sm text-slate-400">
               When complete, the best weights will be applied automatically, and a system alert will notify you.
             </p>
-          </Card>
+          </div>
         </div>
       </div>
     </div>

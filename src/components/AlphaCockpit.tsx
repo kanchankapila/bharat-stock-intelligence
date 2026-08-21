@@ -52,11 +52,11 @@ const TradeJournalPanel: React.FC = () => {
 
   if (isError) return null; // not signed in, or a real failure — either way, nothing to show
   return (
-    <div className="bg-slate-900/30 border border-slate-800/50 rounded-2xl p-4 backdrop-blur-md">
+    <div className="v1-card p-4">
       <div className="flex items-center justify-between mb-3">
-        <h3 className="text-xs font-black text-slate-300 uppercase tracking-widest">My Trade Journal</h3>
+        <h3 className="text-xs font-black text-slate-300 font-display uppercase tracking-widest">My Trade Journal</h3>
         {stats && stats.totalCount > 0 && (
-          <span className="text-[10px] font-mono text-slate-400">
+          <span className="text-[10px] font-data text-slate-400">
             {stats.winRate}% win rate · ₹{stats.totalPnl.toFixed(0)} P&amp;L over {stats.totalCount} closed
           </span>
         )}
@@ -69,7 +69,7 @@ const TradeJournalPanel: React.FC = () => {
         <div className="overflow-x-auto">
           <table className="w-full text-[11px]">
             <thead>
-              <tr className="text-[9px] text-slate-500 uppercase tracking-wider">
+              <tr className="text-[9px] text-slate-500 font-display uppercase tracking-wider">
                 <th className="text-left px-2 py-1.5 font-medium">Symbol</th>
                 <th className="text-left px-2 py-1.5 font-medium">Action</th>
                 <th className="text-right px-2 py-1.5 font-medium">Entry</th>
@@ -82,11 +82,11 @@ const TradeJournalPanel: React.FC = () => {
                 <tr key={a.id}>
                   <td className="px-2 py-1.5 font-bold text-slate-200">{a.symbol}</td>
                   <td className={cn("px-2 py-1.5 font-medium", a.action_type === 'BUY' ? "text-emerald-400" : "text-slate-400")}>{a.action_type}</td>
-                  <td className="px-2 py-1.5 text-right font-mono text-slate-300">{a.entry_actual ?? a.entry_price_rec ?? '—'}</td>
-                  <td className={cn("px-2 py-1.5 text-right font-mono", (a.pnl ?? 0) > 0 ? "text-emerald-400" : (a.pnl ?? 0) < 0 ? "text-rose-400" : "text-slate-500")}>
+                  <td className="px-2 py-1.5 text-right font-data text-slate-300">{a.entry_actual ?? a.entry_price_rec ?? '—'}</td>
+                  <td className={cn("px-2 py-1.5 text-right font-data", (a.pnl ?? 0) > 0 ? "text-emerald-400" : (a.pnl ?? 0) < 0 ? "text-rose-400" : "text-slate-500")}>
                     {a.pnl != null ? a.pnl.toFixed(2) : '—'}
                   </td>
-                  <td className="px-2 py-1.5 text-right font-mono text-slate-500">{a.executed_at ? new Date(a.executed_at).toLocaleDateString('en-IN') : '—'}</td>
+                  <td className="px-2 py-1.5 text-right font-data text-slate-500">{a.executed_at ? new Date(a.executed_at).toLocaleDateString('en-IN') : '—'}</td>
                 </tr>
               ))}
             </tbody>
@@ -302,12 +302,12 @@ export const AlphaCockpit: React.FC = () => {
             : "bg-rose-950/90 border-rose-500/40 text-rose-300"
         )}>
           <CheckCircle2 className={cn("w-5 h-5 shrink-0", toast.type === 'success' ? "text-emerald-400" : "text-rose-400")} />
-          <span className="text-xs font-bold font-mono">{toast.message}</span>
+          <span className="text-xs font-bold font-data">{toast.message}</span>
         </div>
       )}
 
       {/* Header Banner */}
-      <div className="flex flex-col lg:flex-row justify-between items-start lg:items-center gap-4 bg-slate-900/40 border border-slate-800/60 p-6 rounded-2xl backdrop-blur-xl">
+      <div className="flex flex-col lg:flex-row justify-between items-start lg:items-center gap-4">
         <div>
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 bg-indigo-600/20 border border-indigo-500/30 rounded-xl flex items-center justify-center shadow-lg">
@@ -318,11 +318,11 @@ export const AlphaCockpit: React.FC = () => {
                 Quant Alpha Cockpit
                 <CanonicalBadge />
               </h1>
-              <p className="text-[10px] text-slate-400 font-mono font-bold tracking-widest uppercase mt-0.5">
+              <p className="text-[10px] text-slate-400 font-data font-bold tracking-widest uppercase mt-0.5">
                 Phase 3 Decision Authority & Execution Router
               </p>
               {recommendationsData?.lastComputedAt && (
-                <p className="text-[9px] text-slate-500 font-mono mt-1 normal-case tracking-normal">
+                <p className="text-[9px] text-slate-500 font-data mt-1 normal-case tracking-normal">
                   Model run {formatISTWithLocal(recommendationsData.lastComputedAt)}
                   {dataUpdatedAt > 0 && <span className="ml-1.5 text-slate-600">· fetched {relativeFromNow(dataUpdatedAt)}</span>}
                 </p>
@@ -334,11 +334,11 @@ export const AlphaCockpit: React.FC = () => {
         {/* Global Macro Overlay */}
         <div className="flex flex-wrap items-center gap-4">
           {/* Regime Detector */}
-          <div className="bg-slate-950/60 border border-slate-850 px-4 py-2 rounded-xl flex items-center gap-3">
+          <div className={cn(regime.name === 'BULL' ? 'v1-card-up' : regime.name === 'BEAR' ? 'v1-card-down' : 'v1-card-neutral', 'px-4 py-2 flex items-center gap-3')}>
             <Sliders className="w-4 h-4 text-indigo-400" />
             <div>
-              <span className="text-[8px] text-slate-500 font-mono block font-bold uppercase tracking-widest">Nifty Regime</span>
-              <span className="text-xs font-black text-slate-200 flex items-center gap-1.5 font-mono">
+              <span className="text-[8px] text-slate-500 font-data block font-bold font-display uppercase tracking-widest">Nifty Regime</span>
+              <span className="text-xs font-black text-slate-200 flex items-center gap-1.5 font-data">
                 <span className={cn(
                   "inline-block w-2 h-2 rounded-full",
                   regime.name === 'BULL' ? "bg-emerald-500" : regime.name === 'BEAR' ? "bg-rose-500" : "bg-sky-500"
@@ -350,11 +350,11 @@ export const AlphaCockpit: React.FC = () => {
 
           {/* FII/DII Smart Money Flows */}
           {latestFlow && (
-            <div className="bg-slate-950/60 border border-slate-850 px-4 py-2 rounded-xl flex items-center gap-3">
+            <div className={cn(latestFlow.fii_net == null ? 'v1-card-neutral' : latestFlow.fii_net >= 0 ? 'v1-card-up' : 'v1-card-down', 'px-4 py-2 flex items-center gap-3')}>
               <Users className="w-4 h-4 text-sky-400" />
               <div>
-                <span className="text-[8px] text-slate-500 font-mono block font-bold uppercase tracking-widest">FII Net Flow (Daily)</span>
-                <span className={cn("text-xs font-black font-mono", latestFlow.fii_net == null ? "text-slate-500" : latestFlow.fii_net >= 0 ? "text-emerald-400" : "text-rose-400")}>
+                <span className="text-[8px] text-slate-500 font-data block font-bold font-display uppercase tracking-widest">FII Net Flow (Daily)</span>
+                <span className={cn("text-xs font-black font-data", latestFlow.fii_net == null ? "text-slate-500" : latestFlow.fii_net >= 0 ? "text-emerald-400" : "text-rose-400")}>
                   {latestFlow.fii_net == null ? '—' : `${latestFlow.fii_net >= 0 ? 'Buy +' : 'Sell '}₹${Math.abs(latestFlow.fii_net).toFixed(0)} Cr`}
                 </span>
               </div>
@@ -433,7 +433,7 @@ export const AlphaCockpit: React.FC = () => {
             {recommendationsLoading ? (
               <div className="py-20 flex flex-col items-center justify-center">
                 <RefreshCw className="w-8 h-8 text-indigo-500/40 animate-spin mb-4" />
-                <p className="text-[10px] text-slate-400 font-bold tracking-widest uppercase font-mono animate-pulse">Running Rank Engine...</p>
+                <p className="text-[10px] text-slate-400 font-bold tracking-widest uppercase font-data animate-pulse">Running Rank Engine...</p>
               </div>
             ) : filteredPicks.length === 0 ? (
               <div className="py-20 text-center bg-slate-950/20 border border-slate-900 rounded-xl">
@@ -460,20 +460,20 @@ export const AlphaCockpit: React.FC = () => {
                     >
                       <div className="min-w-0">
                         <div className="flex items-center gap-2">
-                          <span className="font-black text-sm italic tracking-tight font-mono">{p.symbol}</span>
+                          <span className="font-black text-sm italic tracking-tight font-data">{p.symbol}</span>
                           <span className={cn("px-1.5 py-0.5 rounded text-[8px] font-black uppercase border tracking-wider", style.bg)}>
                             {style.label}
                           </span>
                         </div>
-                        <p className="text-[9px] text-slate-500 font-mono mt-0.5 truncate">{p.sector || 'Uncategorized'}</p>
+                        <p className="text-[9px] text-slate-500 font-data mt-0.5 truncate">{p.sector || 'Uncategorized'}</p>
                       </div>
 
                       <div className="text-right">
                         <div className="flex items-center gap-1.5 justify-end">
-                          <span className="text-[9px] text-slate-500 font-mono font-bold uppercase">Score</span>
-                          <span className={cn("font-black text-sm font-mono", scoreColor)}>{Math.round(p.unified_score)}</span>
+                          <span className="text-[9px] text-slate-500 font-data font-bold uppercase">Score</span>
+                          <span className={cn("font-black text-sm font-data", scoreColor)}>{Math.round(p.unified_score)}</span>
                         </div>
-                        <div className="text-[8px] text-slate-500 font-mono mt-0.5 uppercase tracking-wide">
+                        <div className="text-[8px] text-slate-500 font-data mt-0.5 font-display uppercase tracking-wide">
                           ₹{p.livePrice?.toFixed(0) || p.cmp?.toFixed(0) || '—'}
                           <span className={cn("ml-1 font-bold", p.changePercent == null ? "text-slate-500" : p.changePercent >= 0 ? "text-emerald-500" : "text-rose-500")}>
                             {formatPct(p.changePercent, 1)}
@@ -490,21 +490,21 @@ export const AlphaCockpit: React.FC = () => {
           {/* Quick Statistics Summary */}
           <div className="bg-gradient-to-br from-indigo-950/20 to-slate-900/40 border border-slate-800/50 p-4 rounded-2xl flex items-center justify-between">
             <div className="space-y-1">
-              <span className="text-[8px] text-slate-400 font-bold uppercase tracking-widest font-mono">Platform Accuracy</span>
-              <div className="text-2xl font-black text-slate-200 font-mono italic">
+              <span className="text-[8px] text-slate-400 font-bold font-display uppercase tracking-widest font-data">Platform Accuracy</span>
+              <div className="text-2xl font-black text-slate-200 font-data italic">
                 {signalStats?.recommendationStats?.wins && signalStats?.recommendationStats?.total ? (
                   `${Math.round((signalStats.recommendationStats.wins / signalStats.recommendationStats.total) * 100)}%`
                 ) : '—'}
               </div>
-              <p className="text-[8px] text-slate-500 font-semibold font-mono">Win rate on computed exits</p>
+              <p className="text-[8px] text-slate-500 font-semibold font-data">Win rate on computed exits</p>
             </div>
             <div className="h-10 w-px bg-slate-800" />
             <div className="space-y-1 text-right">
-              <span className="text-[8px] text-slate-400 font-bold uppercase tracking-widest font-mono">Total Recommendations</span>
-              <div className="text-2xl font-black text-indigo-400 font-mono italic">
+              <span className="text-[8px] text-slate-400 font-bold font-display uppercase tracking-widest font-data">Total Recommendations</span>
+              <div className="text-2xl font-black text-indigo-400 font-data italic">
                 {signalStats?.recommendationStats?.total || '—'}
               </div>
-              <p className="text-[8px] text-slate-500 font-semibold font-mono">Active tracking database</p>
+              <p className="text-[8px] text-slate-500 font-semibold font-data">Active tracking database</p>
             </div>
           </div>
         </div>
@@ -518,26 +518,26 @@ export const AlphaCockpit: React.FC = () => {
                 <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center border-b border-slate-800/80 pb-4 gap-3">
                   <div>
                     <div className="flex items-center gap-3">
-                      <h2 className="text-2xl font-black text-slate-100 tracking-tighter font-mono uppercase">{selectedPick.symbol}</h2>
+                      <h2 className="text-2xl font-black text-slate-100 tracking-tighter font-data uppercase">{selectedPick.symbol}</h2>
                       <span className={cn(
-                        "px-3 py-1 rounded-full text-xs font-black border uppercase tracking-widest font-mono",
+                        "px-3 py-1 rounded-full text-xs font-black border font-display uppercase tracking-widest font-data",
                         CLASSIFICATION_COLORS[selectedPick.classification] || 'bg-slate-800 border-slate-700 text-slate-300'
                       )}>
                         {selectedPick.classification}
                       </span>
                     </div>
-                    <p className="text-[10px] text-slate-400 font-bold mt-1 font-mono uppercase tracking-widest">
+                    <p className="text-[10px] text-slate-400 font-bold mt-1 font-data font-display uppercase tracking-widest">
                       {selectedPick.sector} • {selectedPick.timeframe?.replace('_', ' ') || 'SWING'} Setup
                     </p>
                   </div>
 
                   <div className="text-left sm:text-right">
-                    <span className="text-[9px] text-slate-500 font-bold block uppercase tracking-widest font-mono">Current Price</span>
+                    <span className="text-[9px] text-slate-500 font-bold block font-display uppercase tracking-widest font-data">Current Price</span>
                     <div className="flex items-baseline gap-2">
-                      <span className="text-2xl font-black text-slate-200 font-mono">
+                      <span className="text-2xl font-black text-slate-200 font-data">
                         {formatAmount(selectedPick.livePrice || selectedPick.cmp)}
                       </span>
-                      <span className={cn("text-xs font-bold font-mono", selectedPick.changePercent == null ? "text-slate-500" : selectedPick.changePercent >= 0 ? "text-emerald-400" : "text-rose-400")}>
+                      <span className={cn("text-xs font-bold font-data", selectedPick.changePercent == null ? "text-slate-500" : selectedPick.changePercent >= 0 ? "text-emerald-400" : "text-rose-400")}>
                         {formatPct(selectedPick.changePercent)}
                       </span>
                     </div>
@@ -549,10 +549,10 @@ export const AlphaCockpit: React.FC = () => {
                   
                   {/* Unified Score */}
                   <div className="bg-slate-950/40 border border-slate-850 p-3 rounded-xl flex flex-col justify-between">
-                    <span className="text-[9px] text-slate-500 font-bold uppercase tracking-wider block font-mono">Unified Score</span>
+                    <span className="text-[9px] text-slate-500 font-bold font-display uppercase tracking-wider block font-data">Unified Score</span>
                     <div className="flex items-baseline justify-between mt-2">
-                      <span className="text-xl font-black text-slate-200 font-mono">{Math.round(selectedPick.unified_score)}</span>
-                      <span className="text-[8px] text-slate-500 font-semibold font-mono">/ 100</span>
+                      <span className="text-xl font-black text-slate-200 font-data">{Math.round(selectedPick.unified_score)}</span>
+                      <span className="text-[8px] text-slate-500 font-semibold font-data">/ 100</span>
                     </div>
                     <div className="w-full h-1 bg-slate-800 rounded-full mt-2 overflow-hidden">
                       <div className="h-full bg-indigo-500" style={{ width: `${selectedPick.unified_score}%` }} />
@@ -561,12 +561,12 @@ export const AlphaCockpit: React.FC = () => {
 
                   {/* ML Ensemble Score */}
                   <div className="bg-slate-950/40 border border-slate-850 p-3 rounded-xl flex flex-col justify-between">
-                    <span className="text-[9px] text-slate-500 font-bold uppercase tracking-wider block font-mono">ML Ensemble</span>
+                    <span className="text-[9px] text-slate-500 font-bold font-display uppercase tracking-wider block font-data">ML Ensemble</span>
                     <div className="flex items-baseline justify-between mt-2">
-                      <span className="text-xl font-black text-indigo-300 font-mono">
+                      <span className="text-xl font-black text-indigo-300 font-data">
                         {selectedPick.ml_score != null ? Math.round(selectedPick.ml_score) : '—'}
                       </span>
-                      <span className="text-[8px] text-slate-500 font-semibold font-mono">/ 100</span>
+                      <span className="text-[8px] text-slate-500 font-semibold font-data">/ 100</span>
                     </div>
                     <div className="w-full h-1 bg-slate-800 rounded-full mt-2 overflow-hidden">
                       <div className="h-full bg-indigo-400" style={{ width: `${selectedPick.ml_score || 0}%` }} />
@@ -575,12 +575,12 @@ export const AlphaCockpit: React.FC = () => {
 
                   {/* Deep Learning Score */}
                   <div className="bg-slate-950/40 border border-slate-850 p-3 rounded-xl flex flex-col justify-between">
-                    <span className="text-[9px] text-slate-500 font-bold uppercase tracking-wider block font-mono">Deep Learning</span>
+                    <span className="text-[9px] text-slate-500 font-bold font-display uppercase tracking-wider block font-data">Deep Learning</span>
                     <div className="flex items-baseline justify-between mt-2">
-                      <span className="text-xl font-black text-sky-300 font-mono">
+                      <span className="text-xl font-black text-sky-300 font-data">
                         {selectedPick.dl_score != null ? Math.round(selectedPick.dl_score) : '—'}
                       </span>
-                      <span className="text-[8px] text-slate-500 font-semibold font-mono">/ 100</span>
+                      <span className="text-[8px] text-slate-500 font-semibold font-data">/ 100</span>
                     </div>
                     <div className="w-full h-1 bg-slate-800 rounded-full mt-2 overflow-hidden">
                       <div className="h-full bg-sky-400" style={{ width: `${selectedPick.dl_score || 0}%` }} />
@@ -589,12 +589,12 @@ export const AlphaCockpit: React.FC = () => {
 
                   {/* Screener Confluence */}
                   <div className="bg-slate-950/40 border border-slate-850 p-3 rounded-xl flex flex-col justify-between">
-                    <span className="text-[9px] text-slate-500 font-bold uppercase tracking-wider block font-mono">Confluence Count</span>
+                    <span className="text-[9px] text-slate-500 font-bold font-display uppercase tracking-wider block font-data">Confluence Count</span>
                     <div className="flex items-baseline justify-between mt-2">
-                      <span className="text-xl font-black text-teal-300 font-mono">
+                      <span className="text-xl font-black text-teal-300 font-data">
                         {selectedPick.bullish_screener_count || '—'}
                       </span>
-                      <span className="text-[8px] text-slate-500 font-semibold font-mono">Bullish</span>
+                      <span className="text-[8px] text-slate-500 font-semibold font-data">Bullish</span>
                     </div>
                     <div className="w-full h-1 bg-slate-800 rounded-full mt-2 overflow-hidden">
                       <div className="h-full bg-teal-400" style={{ width: `${Math.min(10, selectedPick.bullish_screener_count || 0) * 10}%` }} />
@@ -605,24 +605,24 @@ export const AlphaCockpit: React.FC = () => {
                 {/* Score breakdown pillars */}
                 {selectedPick.fundamental_score != null || selectedPick.technical_score != null || selectedPick.confluence_score != null ? (
                   <div className="bg-slate-950/20 border border-slate-850/50 p-4 rounded-xl space-y-3">
-                    <span className="text-[9px] text-slate-400 font-bold uppercase tracking-widest block font-mono">Pillar Analysis Ranks</span>
+                    <span className="text-[9px] text-slate-400 font-bold font-display uppercase tracking-widest block font-data">Pillar Analysis Ranks</span>
                     <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                       {selectedPick.technical_score != null && (
                         <div className="flex items-center justify-between text-[11px]">
                           <span className="text-slate-500 font-medium">Technical Rank:</span>
-                          <span className="font-bold text-slate-200 font-mono">{selectedPick.technical_score.toFixed(1)}%</span>
+                          <span className="font-bold text-slate-200 font-data">{selectedPick.technical_score.toFixed(1)}%</span>
                         </div>
                       )}
                       {selectedPick.fundamental_score != null && (
                         <div className="flex items-center justify-between text-[11px]">
                           <span className="text-slate-500 font-medium">Fundamental Rank:</span>
-                          <span className="font-bold text-slate-200 font-mono">{selectedPick.fundamental_score.toFixed(1)}%</span>
+                          <span className="font-bold text-slate-200 font-data">{selectedPick.fundamental_score.toFixed(1)}%</span>
                         </div>
                       )}
                       {selectedPick.confluence_score != null && (
                         <div className="flex items-center justify-between text-[11px]">
                           <span className="text-slate-500 font-medium">Confluence Rank:</span>
-                          <span className="font-bold text-slate-200 font-mono">{selectedPick.confluence_score.toFixed(1)}%</span>
+                          <span className="font-bold text-slate-200 font-data">{selectedPick.confluence_score.toFixed(1)}%</span>
                         </div>
                       )}
                     </div>
@@ -641,8 +641,8 @@ export const AlphaCockpit: React.FC = () => {
                     
                     {/* Entry Range */}
                     <div className="bg-slate-950/40 border border-slate-850 p-3 rounded-xl text-center">
-                      <span className="text-[8px] text-slate-500 font-mono font-bold uppercase tracking-wider block">Recommended Entry</span>
-                      <span className="text-sm font-black text-slate-100 font-mono block mt-1.5">
+                      <span className="text-[8px] text-slate-500 font-data font-bold font-display uppercase tracking-wider block">Recommended Entry</span>
+                      <span className="text-sm font-black text-slate-100 font-data block mt-1.5">
                         {selectedPick.entry_zone_low ? `₹${selectedPick.entry_zone_low.toFixed(0)}` : '—'}
                         {selectedPick.entry_zone_high && selectedPick.entry_zone_high !== selectedPick.entry_zone_low ? ` - ₹${selectedPick.entry_zone_high.toFixed(0)}` : ''}
                       </span>
@@ -650,24 +650,24 @@ export const AlphaCockpit: React.FC = () => {
 
                     {/* Stop Loss */}
                     <div className="bg-slate-950/40 border border-rose-950/30 p-3 rounded-xl text-center">
-                      <span className="text-[8px] text-rose-400 font-mono font-bold uppercase tracking-wider block">Downside Stop Loss</span>
-                      <span className="text-sm font-black text-rose-300 font-mono block mt-1.5">
+                      <span className="text-[8px] text-rose-400 font-data font-bold font-display uppercase tracking-wider block">Downside Stop Loss</span>
+                      <span className="text-sm font-black text-rose-300 font-data block mt-1.5">
                         {selectedPick.stop_loss ? `₹${selectedPick.stop_loss.toFixed(0)}` : '—'}
                       </span>
                     </div>
 
                     {/* Target 1 */}
                     <div className="bg-slate-950/40 border border-emerald-950/30 p-3 rounded-xl text-center">
-                      <span className="text-[8px] text-emerald-400 font-mono font-bold uppercase tracking-wider block">Target 1</span>
-                      <span className="text-sm font-black text-emerald-300 font-mono block mt-1.5">
+                      <span className="text-[8px] text-emerald-400 font-data font-bold font-display uppercase tracking-wider block">Target 1</span>
+                      <span className="text-sm font-black text-emerald-300 font-data block mt-1.5">
                         {selectedPick.target_1 ? `₹${selectedPick.target_1.toFixed(0)}` : '—'}
                       </span>
                     </div>
 
                     {/* Target 2 */}
                     <div className="bg-slate-950/40 border border-emerald-950/30 p-3 rounded-xl text-center">
-                      <span className="text-[8px] text-emerald-400 font-mono font-bold uppercase tracking-wider block">Target 2</span>
-                      <span className="text-sm font-black text-emerald-300 font-mono block mt-1.5">
+                      <span className="text-[8px] text-emerald-400 font-data font-bold font-display uppercase tracking-wider block">Target 2</span>
+                      <span className="text-sm font-black text-emerald-300 font-data block mt-1.5">
                         {selectedPick.target_2 ? `₹${selectedPick.target_2.toFixed(0)}` : '—'}
                       </span>
                     </div>
@@ -676,7 +676,7 @@ export const AlphaCockpit: React.FC = () => {
                   {/* Horizontal Visual Thermometer */}
                   {selectedPick.stop_loss && selectedPick.target_1 && (
                     <div className="bg-slate-950/40 border border-slate-850 p-4 rounded-xl space-y-2">
-                      <div className="flex justify-between text-[9px] text-slate-500 font-mono uppercase font-bold">
+                      <div className="flex justify-between text-[9px] text-slate-500 font-data uppercase font-bold">
                         <span>Stop Loss (₹{selectedPick.stop_loss.toFixed(0)})</span>
                         <span className="text-indigo-400">Current Price (₹{(selectedPick.livePrice || selectedPick.cmp)?.toFixed(0)})</span>
                         <span>Target 1 (₹{selectedPick.target_1.toFixed(0)})</span>
@@ -708,7 +708,7 @@ export const AlphaCockpit: React.FC = () => {
                           style={{ left: `${getThermomPosition(selectedPick.livePrice || selectedPick.cmp, selectedPick.stop_loss, selectedPick.entry_zone_low || selectedPick.stop_loss, selectedPick.target_1)}%` }}
                         />
                       </div>
-                      <div className="flex justify-between text-[8px] text-slate-500 font-mono">
+                      <div className="flex justify-between text-[8px] text-slate-500 font-data">
                         <span>Downside Risk</span>
                         <span className="text-indigo-400/70 font-bold">Entry Zone (Highlighted)</span>
                         <span>Upside Target</span>
@@ -737,7 +737,7 @@ export const AlphaCockpit: React.FC = () => {
                               const list = JSON.parse(selectedPick.screener_names_json);
                               if (Array.isArray(list)) {
                                 return list.map((name: string, i: number) => (
-                                  <span key={i} className="text-[8px] font-mono px-2 py-0.5 rounded bg-indigo-950/40 text-indigo-300 border border-indigo-900/40 uppercase font-bold">
+                                  <span key={i} className="text-[8px] font-data px-2 py-0.5 rounded bg-indigo-950/40 text-indigo-300 border border-indigo-900/40 uppercase font-bold">
                                     {name}
                                   </span>
                                 ));
@@ -762,7 +762,7 @@ export const AlphaCockpit: React.FC = () => {
                     Regulatory & Technical Risk Gate
                   </h3>
 
-                  <div className="space-y-2.5 text-[11px] font-mono">
+                  <div className="space-y-2.5 text-[11px] font-data">
                     
                     {/* ASM / GSM Surveillance Flag */}
                     <div className="flex items-center justify-between p-2.5 bg-slate-950/40 border border-slate-850 rounded-xl">
@@ -832,7 +832,7 @@ export const AlphaCockpit: React.FC = () => {
                           <CheckCircle2 className="w-4 h-4 text-indigo-400" />
                           <span className="text-slate-400">Historical Win Rate</span>
                         </div>
-                        <span className="text-indigo-300 font-black font-mono">
+                        <span className="text-indigo-300 font-black font-data">
                           {(matchedCalibration.win_rate * 100).toFixed(0)}% ({matchedCalibration.total_signals} samples)
                         </span>
                       </div>
@@ -855,7 +855,7 @@ export const AlphaCockpit: React.FC = () => {
                         type="number"
                         value={simulatorCapital}
                         onChange={(e) => setSimulatorCapital(Math.max(100, +e.target.value))}
-                        className="w-full bg-slate-950 border border-slate-800 text-slate-200 px-3 py-1.5 rounded-lg outline-none focus:border-indigo-500/50 font-bold font-mono"
+                        className="w-full bg-slate-950 border border-slate-800 text-slate-200 px-3 py-1.5 rounded-lg outline-none focus:border-indigo-500/50 font-bold font-data"
                       />
                     </div>
                     <div>
@@ -865,7 +865,7 @@ export const AlphaCockpit: React.FC = () => {
                         step="0.1"
                         value={simulatorRiskPct}
                         onChange={(e) => setSimulatorRiskPct(Math.max(0.1, +e.target.value))}
-                        className="w-full bg-slate-950 border border-slate-800 text-slate-200 px-3 py-1.5 rounded-lg outline-none focus:border-indigo-500/50 font-bold font-mono"
+                        className="w-full bg-slate-950 border border-slate-800 text-slate-200 px-3 py-1.5 rounded-lg outline-none focus:border-indigo-500/50 font-bold font-data"
                       />
                     </div>
                     
@@ -877,7 +877,7 @@ export const AlphaCockpit: React.FC = () => {
                             key={t}
                             onClick={() => setSimulatorTargetType(t)}
                             className={cn(
-                              "flex-1 py-1.5 border rounded-lg text-[9px] uppercase font-bold tracking-wider font-mono",
+                              "flex-1 py-1.5 border rounded-lg text-[9px] uppercase font-bold tracking-wider font-data",
                               simulatorTargetType === t 
                                 ? "bg-indigo-600/10 border-indigo-500/60 text-indigo-400"
                                 : "bg-slate-950 border-slate-800 text-slate-500 hover:text-slate-300"
@@ -893,7 +893,7 @@ export const AlphaCockpit: React.FC = () => {
                   {/* Results Pane */}
                   {calculatorResults ? (
                     calculatorResults.isValid ? (
-                      <div className="bg-slate-950/50 border border-slate-850 p-3 rounded-xl text-[11px] font-mono space-y-2">
+                      <div className="bg-slate-950/50 border border-slate-850 p-3 rounded-xl text-[11px] font-data space-y-2">
                         <div className="flex justify-between">
                           <span className="text-slate-500">Position Size:</span>
                           <span className="font-bold text-slate-200">{calculatorResults.sharesToBuy} Shares</span>
@@ -921,7 +921,7 @@ export const AlphaCockpit: React.FC = () => {
                     ) : (
                       <div className="bg-rose-950/20 border border-rose-900/40 p-3 rounded-xl flex items-center gap-2">
                         <AlertTriangle className="w-4 h-4 text-rose-400 shrink-0" />
-                        <span className="text-[10px] text-rose-300 font-bold font-mono">{calculatorResults.reason}</span>
+                        <span className="text-[10px] text-rose-300 font-bold font-data">{calculatorResults.reason}</span>
                       </div>
                     )
                   ) : null}

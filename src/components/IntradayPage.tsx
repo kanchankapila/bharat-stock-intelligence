@@ -135,7 +135,7 @@ const IntradayPage: React.FC<{ onSelectStock: (symbol: string) => void }> = ({ o
 
           {/* Breadth meter */}
           <div className="w-full lg:w-[340px] shrink-0">
-            <div className="flex items-center justify-between text-[11px] font-bold uppercase tracking-wider text-slate-400 mb-2">
+            <div className="flex items-center justify-between text-[11px] font-bold font-display uppercase tracking-wider text-slate-400 mb-2">
               <span className="flex items-center gap-1.5"><Activity className="w-3.5 h-3.5" /> Market Breadth</span>
               {breadth && (
                 <span className={breadthStale ? 'text-amber-500' : tilt.text}>
@@ -153,13 +153,13 @@ const IntradayPage: React.FC<{ onSelectStock: (symbol: string) => void }> = ({ o
                   <div className="h-full bg-slate-600" style={{ width: `${(breadth.unch / Math.max(1, breadth.total)) * 100}%` }} />
                   <div className="h-full bg-rose-500/80" style={{ width: `${(breadth.dec / Math.max(1, breadth.total)) * 100}%` }} />
                 </div>
-                <div className="mt-2 flex justify-between text-xs font-mono">
+                <div className="mt-2 flex justify-between text-xs font-data">
                   <span className="text-emerald-400">▲ {breadth.adv} adv</span>
                   <span className="text-slate-500">{breadth.total} traded</span>
                   <span className="text-rose-400">{breadth.dec} dec ▼</span>
                 </div>
                 <div className="mt-1 text-xs text-slate-500">
-                  avg move <b className={cn('font-mono', breadth.avg_change_pct >= 0 ? 'text-emerald-400' : 'text-rose-400')}>
+                  avg move <b className={cn('font-data', breadth.avg_change_pct >= 0 ? 'text-emerald-400' : 'text-rose-400')}>
                     {breadth.avg_change_pct >= 0 ? '+' : ''}{n2(breadth.avg_change_pct)}%</b>
                 </div>
               </>
@@ -197,7 +197,7 @@ const IntradayPage: React.FC<{ onSelectStock: (symbol: string) => void }> = ({ o
           <div className={cn('rounded-xl ring-1 p-3 flex items-center justify-between gap-3',
             s.open ? 'ring-emerald-400/25 bg-emerald-500/[0.06]' : 'ring-amber-400/25 bg-amber-500/[0.06]')}>
             <div className="min-w-0">
-              <div className="flex items-center gap-1.5 text-[10px] font-black uppercase tracking-widest text-slate-500">
+              <div className="flex items-center gap-1.5 text-[10px] font-black font-display uppercase tracking-widest text-slate-500">
                 {label} Gate
                 <span className={cn('w-1.5 h-1.5 rounded-full', s.open ? 'bg-emerald-400' : 'bg-amber-400')} />
               </div>
@@ -230,7 +230,7 @@ const IntradayPage: React.FC<{ onSelectStock: (symbol: string) => void }> = ({ o
         const total = Number(a?.total ?? 0);
         if (!total) {
           return (
-            <div className="rounded-2xl ring-1 ring-slate-800 bg-slate-900/40 px-5 py-4 text-sm text-slate-500 flex items-center gap-2">
+            <div className="v1-card px-5 py-4 text-sm text-slate-500 flex items-center gap-2">
               <Gauge className="w-4 h-4" /> Paper-trade accuracy accrues after market close — no resolved intraday trades yet.
             </div>
           );
@@ -241,24 +241,24 @@ const IntradayPage: React.FC<{ onSelectStock: (symbol: string) => void }> = ({ o
         const totalPnl = Number(a?.total_pnl ?? 0);
         const pos = avgPnl >= 0;
         return (
-          <div className="rounded-2xl ring-1 ring-slate-800 bg-slate-900/40 p-4 grid grid-cols-2 md:grid-cols-4 gap-4">
+          <div className="v1-card p-4 grid grid-cols-2 md:grid-cols-4 gap-4">
             <div>
-              <div className="text-[10px] uppercase tracking-widest text-slate-500 font-bold">Win Rate (30d)</div>
+              <div className="text-[10px] font-display uppercase tracking-widest text-slate-500 font-bold">Win Rate (30d)</div>
               <div className={cn('text-2xl font-black tabular-nums', winRate >= 50 ? 'text-emerald-300' : 'text-amber-300')}>{winRate.toFixed(1)}%</div>
               <div className="text-[10px] text-slate-600">{wins}W / {Number(a?.losses ?? 0)}L of {total}</div>
             </div>
             <div>
-              <div className="text-[10px] uppercase tracking-widest text-slate-500 font-bold">Avg P&amp;L / trade</div>
+              <div className="text-[10px] font-display uppercase tracking-widest text-slate-500 font-bold">Avg P&amp;L / trade</div>
               <div className={cn('text-2xl font-black tabular-nums', pos ? 'text-emerald-300' : 'text-rose-300')}>{pos ? '+' : ''}{avgPnl.toFixed(2)}%</div>
               <div className="text-[10px] text-slate-600">paper, entry→exit</div>
             </div>
             <div>
-              <div className="text-[10px] uppercase tracking-widest text-slate-500 font-bold">Cumulative P&amp;L</div>
+              <div className="text-[10px] font-display uppercase tracking-widest text-slate-500 font-bold">Cumulative P&amp;L</div>
               <div className={cn('text-2xl font-black tabular-nums', totalPnl >= 0 ? 'text-emerald-300' : 'text-rose-300')}>{totalPnl >= 0 ? '+' : ''}{totalPnl.toFixed(1)}%</div>
               <div className="text-[10px] text-slate-600">sum of resolved trades</div>
             </div>
             <div>
-              <div className="text-[10px] uppercase tracking-widest text-slate-500 font-bold">Resolved Trades</div>
+              <div className="text-[10px] font-display uppercase tracking-widest text-slate-500 font-bold">Resolved Trades</div>
               <div className="text-2xl font-black tabular-nums text-slate-200">{total}</div>
               <div className="text-[10px] text-slate-600">EOD paper-traded</div>
             </div>
@@ -277,7 +277,7 @@ const IntradayPage: React.FC<{ onSelectStock: (symbol: string) => void }> = ({ o
         </div>
         <button
           onClick={() => setBuysOnly(v => !v)}
-          className={cn('px-3.5 py-2 rounded-xl text-xs font-bold uppercase tracking-wider ring-1 transition-colors',
+          className={cn('px-3.5 py-2 rounded-xl text-xs font-bold font-display uppercase tracking-wider ring-1 transition-colors',
             buysOnly ? 'bg-emerald-500/15 text-emerald-300 ring-emerald-400/30' : 'bg-slate-900/70 text-slate-400 ring-slate-800')}
         >
           {buysOnly ? 'Longs only' : 'All setups'}
@@ -285,7 +285,7 @@ const IntradayPage: React.FC<{ onSelectStock: (symbol: string) => void }> = ({ o
         <div className="flex items-center gap-1 bg-slate-900/70 border border-slate-800 rounded-xl p-1">
           {([['intraday_score', 'Score'], ['breakout_score', 'Breakout'], ['risk_reward', 'R:R'], ['position_size_pct', 'Size']] as [SortKey, string][]).map(([k, lbl]) => (
             <button key={k} onClick={() => setSortKey(k)}
-              className={cn('px-3 py-1.5 rounded-lg text-[11px] font-bold uppercase tracking-wider flex items-center gap-1 transition-colors',
+              className={cn('px-3 py-1.5 rounded-lg text-[11px] font-bold font-display uppercase tracking-wider flex items-center gap-1 transition-colors',
                 sortKey === k ? 'bg-cyan-500/15 text-cyan-300' : 'text-slate-500 hover:text-slate-300')}>
               <ArrowUpDown className="w-3 h-3" /> {lbl}
             </button>
@@ -294,11 +294,11 @@ const IntradayPage: React.FC<{ onSelectStock: (symbol: string) => void }> = ({ o
       </div>
 
       {/* ── Ranking table ───────────────────────────────────────────────── */}
-      <div className="rounded-2xl ring-1 ring-slate-800 bg-slate-900/40 overflow-hidden">
+      <div className="v1-card overflow-hidden">
         <div className="overflow-x-auto">
           <table className="w-full text-sm min-w-[880px]">
             <thead>
-              <tr className="text-[10px] uppercase tracking-widest text-slate-500 bg-slate-900/70 border-b border-slate-800">
+              <tr className="text-[10px] font-display uppercase tracking-widest text-slate-500 bg-slate-900/70 border-b border-slate-800">
                 <th className="text-left font-bold px-4 py-3 w-10">#</th>
                 <th className="text-left font-bold px-2 py-3">Symbol</th>
                 <th className="text-left font-bold px-2 py-3">Setup</th>
@@ -329,7 +329,7 @@ const IntradayPage: React.FC<{ onSelectStock: (symbol: string) => void }> = ({ o
                   <tr key={r.symbol}
                     onClick={() => onSelectStock(r.symbol)}
                     className="group border-b border-slate-800/60 hover:bg-slate-800/40 cursor-pointer transition-colors">
-                    <td className="px-4 py-3 text-slate-600 font-mono text-xs">{i + 1}</td>
+                    <td className="px-4 py-3 text-slate-600 font-data text-xs">{i + 1}</td>
                     <td className="px-2 py-3">
                       <div className="flex items-center gap-2">
                         <span className="font-bold text-slate-100">{r.symbol}</span>
@@ -340,7 +340,7 @@ const IntradayPage: React.FC<{ onSelectStock: (symbol: string) => void }> = ({ o
                       </div>
                     </td>
                     <td className="px-2 py-3">
-                      <span className={cn('inline-flex px-2 py-1 rounded-md text-[10px] font-black uppercase tracking-wide ring-1', clsStyle)}>
+                      <span className={cn('inline-flex px-2 py-1 rounded-md text-[10px] font-black font-display uppercase tracking-wide ring-1', clsStyle)}>
                         {r.classification ?? 'Hold'}
                       </span>
                     </td>
@@ -349,17 +349,17 @@ const IntradayPage: React.FC<{ onSelectStock: (symbol: string) => void }> = ({ o
                         <div className="w-14 h-1.5 rounded-full bg-slate-800 overflow-hidden hidden md:block">
                           <div className={cn('h-full', tilt.bar)} style={{ width: `${Math.min(100, r.intraday_score ?? 0)}%` }} />
                         </div>
-                        <span className="font-mono font-bold text-slate-100 tabular-nums">{n2(r.intraday_score)}</span>
+                        <span className="font-data font-bold text-slate-100 tabular-nums">{n2(r.intraday_score)}</span>
                       </div>
                     </td>
-                    <td className="px-2 py-3 text-right font-mono text-slate-300 tabular-nums">{r.breakout_score == null ? '—' : `${Math.round(r.breakout_score)}%`}</td>
-                    <td className="px-2 py-3 text-right font-mono text-slate-200 tabular-nums">{n2(r.cmp)}</td>
-                    <td className="px-2 py-3 text-right font-mono text-emerald-400 tabular-nums">{n2(r.target_1)}</td>
-                    <td className="px-2 py-3 text-right font-mono text-rose-400 tabular-nums">{n2(r.stop_loss)}</td>
-                    <td className="px-2 py-3 text-right font-mono text-amber-300 tabular-nums">{r.risk_reward == null ? '—' : `${n2(r.risk_reward)}×`}</td>
+                    <td className="px-2 py-3 text-right font-data text-slate-300 tabular-nums">{r.breakout_score == null ? '—' : `${Math.round(r.breakout_score)}%`}</td>
+                    <td className="px-2 py-3 text-right font-data text-slate-200 tabular-nums">{n2(r.cmp)}</td>
+                    <td className="px-2 py-3 text-right font-data text-emerald-400 tabular-nums">{n2(r.target_1)}</td>
+                    <td className="px-2 py-3 text-right font-data text-rose-400 tabular-nums">{n2(r.stop_loss)}</td>
+                    <td className="px-2 py-3 text-right font-data text-amber-300 tabular-nums">{r.risk_reward == null ? '—' : `${n2(r.risk_reward)}×`}</td>
                     <td className="px-4 py-3 text-right">
                       {(r.position_size_pct ?? 0) > 0
-                        ? <span className={cn('font-mono font-bold tabular-nums', up ? 'text-emerald-300' : 'text-slate-300')}>{n2(r.position_size_pct)}%</span>
+                        ? <span className={cn('font-data font-bold tabular-nums', up ? 'text-emerald-300' : 'text-slate-300')}>{n2(r.position_size_pct)}%</span>
                         : <span className="text-slate-600">—</span>}
                     </td>
                     <td className="pr-3"><ChevronRight className="w-4 h-4 text-slate-700 group-hover:text-slate-400 transition-colors" /></td>
@@ -381,12 +381,12 @@ const IntradayPage: React.FC<{ onSelectStock: (symbol: string) => void }> = ({ o
 
 const Kpi: React.FC<{ icon: React.ElementType; label: string; value: string; accent: string; sub: string }> =
   ({ icon: Icon, label, value, accent, sub }) => (
-  <div className="rounded-2xl ring-1 ring-slate-800 bg-slate-900/50 p-4 flex items-center gap-4">
+  <div className={cn(accent.includes('emerald') ? 'v1-card-up' : accent.includes('rose') ? 'v1-card-down' : 'v1-card-neutral', 'p-4 flex items-center gap-4')}>
     <div className="w-11 h-11 rounded-xl bg-slate-800/70 grid place-items-center shrink-0">
       <Icon className={cn('w-5 h-5', accent)} />
     </div>
     <div className="min-w-0">
-      <div className="text-[10px] uppercase tracking-widest text-slate-500 font-bold">{label}</div>
+      <div className="text-[10px] font-display uppercase tracking-widest text-slate-500 font-bold">{label}</div>
       <div className={cn('text-2xl font-black tabular-nums leading-tight', accent)}>{value}</div>
       <div className="text-[10px] text-slate-600">{sub}</div>
     </div>

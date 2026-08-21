@@ -1,9 +1,23 @@
 @import "tailwindcss";
 @import "./v2/styles/variables.css";
+/* v5.css previously loaded only when V5App.tsx itself mounted (its own `import './v5.css'`) --
+   but V1Routes.tsx and App.tsx's dashboardVersion==='v6' branches both pull v5's desk-page
+   components (OptionsDeskPage, RiskDeskPage, etc.) directly into v1/v6 without ever mounting
+   V5App, so .v5-card/.v5-input/.v5-title/etc had no matching CSS rule at all on that path --
+   verified live: `.v5-card` was entirely absent from the compiled stylesheet, so every such
+   card rendered fully unstyled/invisible. v6-theme.css's .v6-root already bridges --v5-*
+   variables onto v1's own dark palette (built 2026-08-07 for this exact purpose) -- the bridge
+   just had nothing to apply to. Importing here, globally, is the missing half of that fix. */
+@import "./v5/v5.css";
 
 @theme {
   --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
   --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
+  /* v1 DashboardPage.tsx's own font pair -- font-display for section labels/headers,
+     font-data for numeric/price values. Kept distinct from font-sans/font-mono (used by
+     v2/v3/v5/v6) so this doesn't retheme shells that weren't asked for. */
+  --font-display: "Rajdhani", sans-serif;
+  --font-data: "Space Mono", monospace;
 }
 
 /* ─── Base (Premium Dark Theme) ───────────────────────────────────────── */
@@ -140,6 +154,52 @@ body {
     @apply text-[10px] font-semibold text-slate-400 uppercase tracking-widest;
   }
 
+  /* v1 DashboardPage.tsx card treatment, promoted to a shared class so other v1 pages can
+     opt into the same glass surface instead of each hand-rolling bg-slate-900/border combos.
+     DashboardPage colors almost every card's top edge (bull/bear on index tiles, bullish-green
+     on breadth, amber on the gauge, etc.) -- a flat borderless card reads as a different, flatter
+     theme even with the same glass background. Default to the app's own indigo accent (already
+     used for focus rings / the body glow in this file) so every card gets a colored top edge by
+     default; callers with a real bullish/bearish signal override with v1-card-{up,down,neutral}
+     or an inline borderTopColor, same pattern DashboardPage.tsx itself uses. */
+  /* Written as raw CSS, not @apply glass ... -- Tailwind v4's @apply cannot reliably compose a
+     hand-written @layer-utilities class (glass) from inside another one; that silently produced
+     an empty ruleset for every v1-card-* class here (verified live: .v1-card was entirely absent
+     from the compiled stylesheet, so every converted card rendered with zero styling). */
+  .v1-card, .v1-card-accent, .v1-card-up, .v1-card-down, .v1-card-neutral {
+    background: rgba(10, 11, 16, 0.65);
+    backdrop-filter: blur(20px) saturate(160%);
+    -webkit-backdrop-filter: blur(20px) saturate(160%);
+    border: 1px solid rgba(255, 255, 255, 0.07);
+    border-top-width: 2px;
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.02);
+    border-radius: 10px;
+    animation: v1-card-in 0.35s ease-out backwards;
+    transition: transform 0.18s ease-out, box-shadow 0.18s ease-out, border-color 0.18s ease-out;
+  }
+  .v1-card { border-top-color: rgba(99, 102, 241, 0.7); }
+  .v1-card-accent { border-top-color: rgba(255, 255, 255, 0.07); }
+  .v1-card-up { border-top-color: rgba(16, 185, 129, 0.7); }
+  .v1-card-down { border-top-color: rgba(244, 63, 94, 0.7); }
+  .v1-card-neutral { border-top-color: rgba(245, 158, 11, 0.7); }
+
+  /* Entrance animation + hover lift, shared by every v1-card* class -- one place instead of
+     hand-wiring Framer Motion into 40+ converted files. prefers-reduced-motion disables both. */
+  @keyframes v1-card-in {
+    from { opacity: 0; transform: translateY(6px); }
+    to   { opacity: 1; transform: translateY(0); }
+  }
+  a.v1-card:hover, a.v1-card-up:hover, a.v1-card-down:hover, a.v1-card-neutral:hover, a.v1-card-accent:hover,
+  button.v1-card:hover, button.v1-card-up:hover, button.v1-card-down:hover, button.v1-card-neutral:hover, button.v1-card-accent:hover,
+  .v1-card[onclick]:hover, .v1-card-up[onclick]:hover, .v1-card-down[onclick]:hover, .v1-card-neutral[onclick]:hover, .v1-card-accent[onclick]:hover,
+  .v1-card.cursor-pointer:hover, .v1-card-up.cursor-pointer:hover, .v1-card-down.cursor-pointer:hover, .v1-card-neutral.cursor-pointer:hover, .v1-card-accent.cursor-pointer:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 10px 28px rgba(0, 0, 0, 0.22);
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .v1-card, .v1-card-accent, .v1-card-up, .v1-card-down, .v1-card-neutral { animation: none; }
+  }
+
   /* Ticker animation */
   .animate-ticker {
     animation: ticker 45s linear infinite;
@@ -165,5 +225,241 @@ body {
   @keyframes shimmer {
     from { background-position: 200% 0; }
     to   { background-position: -200% 0; }
+  }
+
+  /* ─── V1 Unified Component Library ─────────────────────────────────────
+     All 63 v1 pages should use these classes. They encode DashboardPage's
+     premium dark aesthetic + accessibility. No page should hand-roll
+     button styles, input styling, or color schemes anymore.
+     ────────────────────────────────────────────────────────────────────── */
+
+  /* Page & Section Titles — use Rajdhani for visual impact */
+  .v1-title-page {
+    @apply text-3xl font-black text-white;
+    font-family: var(--font-display);
+    letter-spacing: 0;
+  }
+  .v1-title-section {
+    @apply text-xl font-bold text-white;
+    font-family: var(--font-display);
+  }
+  .v1-title-card {
+    @apply text-base font-semibold text-white;
+    font-family: var(--font-display);
+  }
+
+  /* Data values — Space Mono for trust + readability at high zoom */
+  .v1-data-value {
+    @apply text-lg font-black;
+    font-family: var(--font-data);
+    font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+  }
+  .v1-data-label {
+    @apply text-xs font-semibold text-slate-400 uppercase tracking-widest;
+    font-family: var(--font-sans);
+  }
+
+  /* Button: Primary Action (CTA, buy/sell, confirm) */
+  .v1-btn-primary {
+    @apply inline-flex items-center justify-center gap-2 px-4 py-2 rounded-lg font-semibold text-sm text-white transition-all;
+    background: #6366f1;
+    border: 1px solid rgba(99, 102, 241, 0.3);
+  }
+  .v1-btn-primary:hover:not(:disabled) {
+    background: #7c3aed;
+    transform: translateY(-1px);
+    box-shadow: 0 6px 20px rgba(99, 102, 241, 0.25);
+  }
+  .v1-btn-primary:active:not(:disabled) {
+    transform: translateY(0);
+  }
+  .v1-btn-primary:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+
+  /* Button: Secondary Action (filter, toggle, less important) */
+  .v1-btn-secondary {
+    @apply inline-flex items-center justify-center gap-2 px-4 py-2 rounded-lg font-normal text-sm text-slate-300 transition-all;
+    background: rgba(71, 85, 105, 0.3);
+    border: 1px solid rgba(255, 255, 255, 0.07);
+  }
+  .v1-btn-secondary:hover:not(:disabled) {
+    background: rgba(71, 85, 105, 0.5);
+    border-color: rgba(255, 255, 255, 0.14);
+  }
+  .v1-btn-secondary:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+
+  /* Button: Ghost (minimal, icon-only friendly) */
+  .v1-btn-ghost {
+    @apply inline-flex items-center justify-center gap-2 px-2 py-1.5 rounded-lg text-slate-400 transition-all;
+    background: transparent;
+  }
+  .v1-btn-ghost:hover:not(:disabled) {
+    @apply text-slate-300 bg-slate-700/30;
+  }
+
+  /* Button: Icon (square, 32×32) */
+  .v1-btn-icon {
+    @apply flex items-center justify-center w-8 h-8 rounded-lg transition-all;
+    background: rgba(71, 85, 105, 0.3);
+    color: #cbd5e1;
+  }
+  .v1-btn-icon:hover:not(:disabled) {
+    background: rgba(71, 85, 105, 0.5);
+  }
+  .v1-btn-icon svg {
+    width: 16px;
+    height: 16px;
+  }
+
+  /* Input: Text, Date, Search, Select */
+  .v1-input {
+    @apply w-full px-3 py-2 rounded-lg text-sm text-slate-200 placeholder-slate-500 transition-all;
+    background: rgba(71, 85, 105, 0.3);
+    border: 1px solid rgba(255, 255, 255, 0.07);
+    font-family: var(--font-sans);
+  }
+  .v1-input:focus {
+    outline: none;
+    background: rgba(71, 85, 105, 0.4);
+    border-color: rgba(16, 185, 129, 0.5);
+    box-shadow: 0 0 0 2px rgba(16, 185, 129, 0.1);
+  }
+  .v1-input::placeholder {
+    @apply text-slate-500;
+  }
+  .v1-input:disabled {
+    @apply opacity-50 cursor-not-allowed;
+  }
+
+  /* Badge: Conviction tier (S_ELITE, A_HIGH, B_MEDIUM, C_LOW) */
+  .v1-badge {
+    @apply inline-flex items-center gap-1 px-2 py-0.5 rounded-full border text-xs font-bold transition-colors;
+  }
+  .v1-badge-s, .v1-badge-elite, .v1-badge-strong {
+    background: rgba(16, 185, 129, 0.15);
+    border-color: rgba(16, 185, 129, 0.4);
+    @apply text-emerald-300;
+  }
+  .v1-badge-a, .v1-badge-high {
+    background: rgba(14, 165, 233, 0.15);
+    border-color: rgba(14, 165, 233, 0.4);
+    @apply text-sky-300;
+  }
+  .v1-badge-b, .v1-badge-medium {
+    background: rgba(245, 158, 11, 0.12);
+    border-color: rgba(245, 158, 11, 0.35);
+    @apply text-amber-300;
+  }
+  .v1-badge-c, .v1-badge-low {
+    background: rgba(71, 85, 105, 0.4);
+    border-color: rgba(71, 85, 105, 0.4);
+    @apply text-slate-400;
+  }
+
+  /* Semantic color utility classes (for text, not just badges) */
+  .v1-text-bullish { @apply text-emerald-400; }
+  .v1-text-bearish { @apply text-rose-400; }
+  .v1-text-neutral { @apply text-amber-400; }
+  .v1-text-hold { @apply text-amber-400; }
+  .v1-text-accent { @apply text-indigo-400; }
+  .v1-text-secondary { @apply text-slate-400; }
+  .v1-text-muted { @apply text-slate-500; }
+
+  /* Stat pill: compact info display (label + value) */
+  .v1-stat-pill {
+    @apply flex flex-col gap-1 p-4 rounded-lg;
+    background: rgba(10, 11, 16, 0.65);
+    border: 1px solid rgba(255, 255, 255, 0.07);
+    border-top: 2px solid rgba(99, 102, 241, 0.7);
+  }
+  .v1-stat-pill-up {
+    border-top-color: rgba(16, 185, 129, 0.7);
+  }
+  .v1-stat-pill-down {
+    border-top-color: rgba(244, 63, 94, 0.7);
+  }
+  .v1-stat-pill-neutral {
+    border-top-color: rgba(245, 158, 11, 0.7);
+  }
+
+  /* Tab navigation: horizontal tabs with v1 accent */
+  .v1-tabs {
+    @apply flex gap-2 border-b border-slate-700/50 overflow-x-auto;
+  }
+  .v1-tab {
+    @apply px-4 py-3 text-sm font-medium text-slate-400 border-b-2 border-transparent transition-colors cursor-pointer;
+  }
+  .v1-tab:hover:not(.v1-tab-active) {
+    @apply text-slate-300;
+  }
+  .v1-tab-active {
+    @apply text-indigo-400 border-b-indigo-400;
+  }
+
+  /* Section divider */
+  .v1-divider {
+    @apply my-6 h-px bg-gradient-to-r from-transparent via-slate-600/50 to-transparent;
+  }
+
+  /* Grid layout for data tiles */
+  .v1-grid {
+    @apply grid gap-4;
+  }
+  .v1-grid-2 {
+    @apply grid grid-cols-2 gap-4;
+  }
+  .v1-grid-3 {
+    @apply grid grid-cols-3 gap-4;
+  }
+  .v1-grid-4 {
+    @apply grid grid-cols-4 gap-4;
+  }
+  @media (max-width: 768px) {
+    .v1-grid-3 { @apply grid-cols-2; }
+    .v1-grid-4 { @apply grid-cols-2; }
+  }
+  @media (max-width: 640px) {
+    .v1-grid-2, .v1-grid-3, .v1-grid-4 { @apply grid-cols-1; }
+  }
+
+  /* Page container: standard padding + max-width */
+  .v1-page {
+    @apply w-full max-w-full p-4 md:p-6 space-y-6;
+  }
+
+  /* Section container within a page */
+  .v1-section {
+    @apply space-y-4;
+  }
+
+  /* Header section: title + subtitle + actions */
+  .v1-header {
+    @apply flex items-start justify-between gap-4 flex-wrap;
+  }
+  .v1-header-left {
+    @apply flex-1 min-w-0;
+  }
+  .v1-header-actions {
+    @apply flex items-center gap-2;
+  }
+
+  /* Empty state messaging */
+  .v1-empty {
+    @apply flex flex-col items-center justify-center gap-3 py-12 text-center;
+  }
+  .v1-empty-icon {
+    @apply text-4xl text-slate-600;
+  }
+  .v1-empty-title {
+    @apply font-semibold text-slate-400;
+    font-family: var(--font-display);
+  }
+  .v1-empty-text {
+    @apply text-sm text-slate-500;
   }
 }

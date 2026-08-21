@@ -55,7 +55,7 @@ export const TrendlyneSectorDashboard: React.FC = () => {
       return (
         <div className="flex flex-col items-center justify-center h-64 glass/50 rounded-2xl border border-slate-800/50 animate-pulse">
           <Activity className="w-8 h-8 text-blue-500 animate-spin mb-4" />
-          <p className="text-slate-400 text-sm font-bold uppercase tracking-widest">Loading Data...</p>
+          <p className="text-slate-400 text-sm font-bold font-display uppercase tracking-widest">Loading Data...</p>
         </div>
       );
     }
@@ -122,7 +122,7 @@ export const TrendlyneSectorDashboard: React.FC = () => {
           <div className="overflow-x-auto">
             <table className="w-full text-left border-collapse">
               <thead>
-                <tr className="glass-strong/50 border-b border-slate-800/50 text-[10px] font-black text-slate-400 uppercase tracking-widest">
+                <tr className="glass-strong/50 border-b border-slate-800/50 text-[10px] font-black text-slate-400 font-display uppercase tracking-widest">
                   <th className="p-4 cursor-pointer group" onClick={() => handleSort('name')}>
                     <div className="flex items-center">{viewMode === 'sectors' ? 'Sector' : 'Index'} {renderSortIcon('name')}</div>
                   </th>
@@ -216,7 +216,7 @@ export const TrendlyneSectorDashboard: React.FC = () => {
            <button
              onClick={() => setViewMode('sectors')}
              className={cn(
-               "px-4 py-2 rounded-lg text-xs font-black uppercase tracking-wider transition-colors flex items-center gap-2",
+               "px-4 py-2 rounded-lg text-xs font-black font-display uppercase tracking-wider transition-colors flex items-center gap-2",
                viewMode === 'sectors' ? "bg-blue-600 text-white" : "text-slate-400 hover:text-slate-200 hover:bg-slate-800/50"
              )}
            >
@@ -225,7 +225,7 @@ export const TrendlyneSectorDashboard: React.FC = () => {
            <button
              onClick={() => setViewMode('indices')}
              className={cn(
-               "px-4 py-2 rounded-lg text-xs font-black uppercase tracking-wider transition-colors flex items-center gap-2",
+               "px-4 py-2 rounded-lg text-xs font-black font-display uppercase tracking-wider transition-colors flex items-center gap-2",
                viewMode === 'indices' ? "bg-blue-600 text-white" : "text-slate-400 hover:text-slate-200 hover:bg-slate-800/50"
              )}
            >
