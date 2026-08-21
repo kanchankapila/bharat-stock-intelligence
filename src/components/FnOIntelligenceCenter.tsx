@@ -279,7 +279,7 @@ const SentimentMeter: React.FC<{ pct: number; bull: number; bear: number; total:
   const label = pct >= 60 ? 'Bullish' : pct <= 40 ? 'Bearish' : 'Neutral';
   return (
     <div className={cn("flex-1 min-w-[180px] p-4", pct >= 60 ? 'v1-card-up' : pct <= 40 ? 'v1-card-down' : 'v1-card-neutral')}>
-      <p className="text-[10px] font-black text-slate-400 font-display uppercase tracking-widest mb-2">Market Sentiment</p>
+      <p className="v1-data-label mb-2">Market Sentiment</p>
       <div className="flex items-center gap-3">
         <div className="flex-1 h-2 bg-slate-800 rounded-full overflow-hidden">
           <div className={cn("h-full rounded-full transition-all", color)} style={{ width: `${pct}%` }} />
@@ -485,7 +485,7 @@ const FnOIntelligenceCenter: React.FC<FnOScannerProps> = ({ onSelectStock }) => 
           <div className={cn("flex-1 min-w-[140px] p-4",
             BUILDUP_META[intel.dominantBuildup]?.signal === 'bullish' ? 'v1-card-up' :
             BUILDUP_META[intel.dominantBuildup]?.signal === 'bearish' ? 'v1-card-down' : 'v1-card-neutral')}>
-            <p className="text-[10px] font-black text-slate-400 font-display uppercase tracking-widest mb-1">Dominant Buildup</p>
+            <p className="v1-data-label mb-1">Dominant Buildup</p>
             <p className={cn("text-sm font-black uppercase italic",
               BUILDUP_META[intel.dominantBuildup]?.signal === 'bullish' ? 'text-emerald-400' :
               BUILDUP_META[intel.dominantBuildup]?.signal === 'bearish' ? 'text-rose-400' : 'text-amber-400')}>
@@ -499,8 +499,8 @@ const FnOIntelligenceCenter: React.FC<FnOScannerProps> = ({ onSelectStock }) => 
 
           {intel.avgOIChg != null && (
             <div className={cn("flex-1 min-w-[130px] p-4", intel.avgOIChg >= 0 ? 'v1-card-up' : 'v1-card-down')}>
-              <p className="text-[10px] font-black text-slate-400 font-display uppercase tracking-widest mb-1">Avg OI Change</p>
-              <p className={cn("text-xl font-black tabular-nums italic",
+              <p className="v1-data-label mb-1">Avg OI Change</p>
+              <p className={cn("v1-data-value tabular-nums italic",
                 intel.avgOIChg >= 0 ? 'text-emerald-400' : 'text-rose-400')}>
                 {intel.avgOIChg >= 0 ? '+' : ''}{intel.avgOIChg.toFixed(1)}%
               </p>
@@ -512,8 +512,8 @@ const FnOIntelligenceCenter: React.FC<FnOScannerProps> = ({ onSelectStock }) => 
 
           {intel.avgIV != null && (
             <div className="flex-1 min-w-[130px] v1-card p-4">
-              <p className="text-[10px] font-black text-slate-400 font-display uppercase tracking-widest mb-1">Avg IV</p>
-              <p className={cn("text-xl font-black tabular-nums italic",
+              <p className="v1-data-label mb-1">Avg IV</p>
+              <p className={cn("v1-data-value tabular-nums italic",
                 intel.avgIV > 30 ? 'text-amber-400' : intel.avgIV > 20 ? 'text-yellow-400' : 'text-slate-300')}>
                 {intel.avgIV.toFixed(1)}%
               </p>
@@ -529,7 +529,7 @@ const FnOIntelligenceCenter: React.FC<FnOScannerProps> = ({ onSelectStock }) => 
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
         {/* Sidebar Scanners */}
         <div className="lg:col-span-3 space-y-2">
-          <h3 className="text-[10px] font-black text-slate-400 font-display uppercase tracking-widest mb-4 flex items-center gap-2">
+          <h3 className="v1-title-card mb-4 flex items-center gap-2">
             <Filter className="w-3 h-3" /> Select Strategy
           </h3>
           {scanners[activeTab].map(s => (
@@ -704,7 +704,7 @@ const FnOIntelligenceCenter: React.FC<FnOScannerProps> = ({ onSelectStock }) => 
               <Zap className="absolute -right-4 -bottom-4 w-20 h-20 text-indigo-500/10 -rotate-12" />
               <div className="flex items-center gap-2 mb-2">
                 <Eye className="w-3 h-3 text-indigo-400" />
-                <h4 className="text-[10px] font-black text-indigo-400 font-display uppercase tracking-widest italic">Live Market Read</h4>
+                <h4 className="v1-title-card italic">Live Market Read</h4>
               </div>
               <p className="text-[11px] text-slate-400 leading-relaxed font-medium relative z-10 italic">
                 "{expertCommentary}"
@@ -715,7 +715,7 @@ const FnOIntelligenceCenter: React.FC<FnOScannerProps> = ({ onSelectStock }) => 
               <Target className="absolute -right-4 -bottom-4 w-20 h-20 text-emerald-500/10 -rotate-12" />
               <div className="flex items-center gap-2 mb-2">
                 <Target className="w-3 h-3 text-emerald-400" />
-                <h4 className="text-[10px] font-black text-emerald-400 font-display uppercase tracking-widest italic">Strategy Playbook</h4>
+                <h4 className="v1-title-card italic">Strategy Playbook</h4>
               </div>
               <p className="text-[11px] text-slate-400 leading-relaxed font-medium relative z-10 italic">
                 {strategyNote}

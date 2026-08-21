@@ -135,10 +135,10 @@ const IntradayPage: React.FC<{ onSelectStock: (symbol: string) => void }> = ({ o
 
           {/* Breadth meter */}
           <div className="w-full lg:w-[340px] shrink-0">
-            <div className="flex items-center justify-between text-[11px] font-bold font-display uppercase tracking-wider text-slate-400 mb-2">
-              <span className="flex items-center gap-1.5"><Activity className="w-3.5 h-3.5" /> Market Breadth</span>
+            <div className="flex items-center justify-between mb-2">
+              <span className="v1-data-label flex items-center gap-1.5"><Activity className="w-3.5 h-3.5" /> Market Breadth</span>
               {breadth && (
-                <span className={breadthStale ? 'text-amber-500' : tilt.text}>
+                <span className={cn('v1-data-value', breadthStale ? 'text-amber-500' : tilt.text)}>
                   {(breadth.breadth_score * 100).toFixed(0)}<span className="text-slate-500">/100</span>
                   {breadthStale && breadthQ.data?.ageMinutes != null && (
                     <span className="ml-1.5 text-[10px] text-amber-500 normal-case tracking-normal">({breadthQ.data.ageMinutes}m old)</span>
@@ -197,7 +197,7 @@ const IntradayPage: React.FC<{ onSelectStock: (symbol: string) => void }> = ({ o
           <div className={cn('rounded-xl ring-1 p-3 flex items-center justify-between gap-3',
             s.open ? 'ring-emerald-400/25 bg-emerald-500/[0.06]' : 'ring-amber-400/25 bg-amber-500/[0.06]')}>
             <div className="min-w-0">
-              <div className="flex items-center gap-1.5 text-[10px] font-black font-display uppercase tracking-widest text-slate-500">
+              <div className="v1-data-label flex items-center gap-1.5">
                 {label} Gate
                 <span className={cn('w-1.5 h-1.5 rounded-full', s.open ? 'bg-emerald-400' : 'bg-amber-400')} />
               </div>
@@ -208,7 +208,7 @@ const IntradayPage: React.FC<{ onSelectStock: (symbol: string) => void }> = ({ o
             </div>
             {s.avg_pnl_pct != null && (
               <div className="shrink-0 text-right">
-                <div className={cn('text-lg font-black tabular-nums', s.avg_pnl_pct >= 0 ? 'text-emerald-300' : 'text-rose-300')}>
+                <div className={cn('v1-data-value tabular-nums', s.avg_pnl_pct >= 0 ? 'text-emerald-300' : 'text-rose-300')}>
                   {s.avg_pnl_pct >= 0 ? '+' : ''}{s.avg_pnl_pct.toFixed(2)}%
                 </div>
                 <div className="text-[10px] text-slate-600">{s.n_trades} trades / 10d</div>
@@ -243,23 +243,23 @@ const IntradayPage: React.FC<{ onSelectStock: (symbol: string) => void }> = ({ o
         return (
           <div className="v1-card p-4 grid grid-cols-2 md:grid-cols-4 gap-4">
             <div>
-              <div className="text-[10px] font-display uppercase tracking-widest text-slate-500 font-bold">Win Rate (30d)</div>
-              <div className={cn('text-2xl font-black tabular-nums', winRate >= 50 ? 'text-emerald-300' : 'text-amber-300')}>{winRate.toFixed(1)}%</div>
+              <div className="v1-data-label">Win Rate (30d)</div>
+              <div className={cn('v1-data-value tabular-nums', winRate >= 50 ? 'text-emerald-300' : 'text-amber-300')}>{winRate.toFixed(1)}%</div>
               <div className="text-[10px] text-slate-600">{wins}W / {Number(a?.losses ?? 0)}L of {total}</div>
             </div>
             <div>
-              <div className="text-[10px] font-display uppercase tracking-widest text-slate-500 font-bold">Avg P&amp;L / trade</div>
-              <div className={cn('text-2xl font-black tabular-nums', pos ? 'text-emerald-300' : 'text-rose-300')}>{pos ? '+' : ''}{avgPnl.toFixed(2)}%</div>
+              <div className="v1-data-label">Avg P&amp;L / trade</div>
+              <div className={cn('v1-data-value tabular-nums', pos ? 'text-emerald-300' : 'text-rose-300')}>{pos ? '+' : ''}{avgPnl.toFixed(2)}%</div>
               <div className="text-[10px] text-slate-600">paper, entry→exit</div>
             </div>
             <div>
-              <div className="text-[10px] font-display uppercase tracking-widest text-slate-500 font-bold">Cumulative P&amp;L</div>
-              <div className={cn('text-2xl font-black tabular-nums', totalPnl >= 0 ? 'text-emerald-300' : 'text-rose-300')}>{totalPnl >= 0 ? '+' : ''}{totalPnl.toFixed(1)}%</div>
+              <div className="v1-data-label">Cumulative P&amp;L</div>
+              <div className={cn('v1-data-value tabular-nums', totalPnl >= 0 ? 'text-emerald-300' : 'text-rose-300')}>{totalPnl >= 0 ? '+' : ''}{totalPnl.toFixed(1)}%</div>
               <div className="text-[10px] text-slate-600">sum of resolved trades</div>
             </div>
             <div>
-              <div className="text-[10px] font-display uppercase tracking-widest text-slate-500 font-bold">Resolved Trades</div>
-              <div className="text-2xl font-black tabular-nums text-slate-200">{total}</div>
+              <div className="v1-data-label">Resolved Trades</div>
+              <div className="v1-data-value tabular-nums text-slate-200">{total}</div>
               <div className="text-[10px] text-slate-600">EOD paper-traded</div>
             </div>
           </div>
@@ -386,8 +386,8 @@ const Kpi: React.FC<{ icon: React.ElementType; label: string; value: string; acc
       <Icon className={cn('w-5 h-5', accent)} />
     </div>
     <div className="min-w-0">
-      <div className="text-[10px] font-display uppercase tracking-widest text-slate-500 font-bold">{label}</div>
-      <div className={cn('text-2xl font-black tabular-nums leading-tight', accent)}>{value}</div>
+      <div className="v1-data-label">{label}</div>
+      <div className={cn('v1-data-value tabular-nums leading-tight', accent)}>{value}</div>
       <div className="text-[10px] text-slate-600">{sub}</div>
     </div>
   </div>

@@ -225,7 +225,7 @@ export const LiveMarketScreener: React.FC<Props> = ({ onSelectStock }) => {
             >
               <div className="v1-card p-5">
                 <div className="flex justify-between items-center mb-4">
-                  <h3 className="text-sm font-bold font-display uppercase tracking-wider text-slate-400">Active Filters</h3>
+                  <h3 className="v1-title-card">Active Filters</h3>
                   {activeCount > 0 && (
                     <button onClick={clearFilters} className="text-xs text-rose-400 hover:text-rose-300 flex items-center gap-1">
                       <X className="w-3 h-3" /> Clear All
@@ -342,7 +342,7 @@ export const LiveMarketScreener: React.FC<Props> = ({ onSelectStock }) => {
           /* AI Strategy Dashboard */
           <div className="space-y-6">
             <div className="v1-card p-5 mb-4">
-              <h2 className="text-sm font-bold font-display uppercase tracking-wider text-slate-300 mb-2 flex items-center gap-2">
+              <h2 className="v1-title-section mb-2 flex items-center gap-2">
                 <Brain className="w-4 h-4 text-indigo-400" />
                 Decision Tree Strategy Optimizer
               </h2>
@@ -469,7 +469,7 @@ export const LiveMarketScreener: React.FC<Props> = ({ onSelectStock }) => {
              horizon, this one for the same-day exit an intraday trade would actually take. */
           <div className="space-y-6">
             <div className="v1-card p-5 mb-4">
-              <h2 className="text-sm font-bold font-display uppercase tracking-wider text-slate-300 mb-2 flex items-center gap-2">
+              <h2 className="v1-title-section mb-2 flex items-center gap-2">
                 <Target className="w-4 h-4 text-indigo-400" />
                 Intraday Edge Ranking
               </h2>
@@ -609,7 +609,7 @@ export const LiveMarketScreener: React.FC<Props> = ({ onSelectStock }) => {
 
             {/* Optimal intraday filter combinations (decision-tree, isolated from the swing model) */}
             <div className="pt-2">
-              <h2 className="text-sm font-bold font-display uppercase tracking-wider text-slate-300 mb-4 flex items-center gap-2">
+              <h2 className="v1-title-section mb-4 flex items-center gap-2">
                 <Brain className="w-4 h-4 text-indigo-400" />
                 Optimal Intraday Filter Combinations
               </h2>

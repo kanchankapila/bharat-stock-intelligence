@@ -250,8 +250,8 @@ const NSEStockDiscovery: React.FC<{
             </p>
           </div>
           <div className="text-right">
-            <p className="text-2xl font-bold text-indigo-400">{totalStocks}</p>
-            <p className="text-xs text-indigo-200">Total Stocks</p>
+            <p className="v1-data-value text-indigo-400">{totalStocks}</p>
+            <p className="v1-data-label text-indigo-200">Total Stocks</p>
           </div>
         </div>
       </div>

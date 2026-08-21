@@ -361,13 +361,13 @@ export default function JobsDashboardPage() {
         {/* Total Queues Card */}
         <div className="glass p-4.5 rounded-2xl relative overflow-hidden group hover:border-slate-700/80 transition-all shadow-md">
           <div className="flex justify-between items-start">
-            <span className="text-[10px] font-black uppercase text-slate-400 tracking-wider font-data">Configured Queues</span>
+            <span className="v1-data-label">Configured Queues</span>
             <div className="p-1.5 bg-slate-800/40 rounded-lg text-slate-300 group-hover:text-indigo-400 transition-colors">
               <Server className="w-4 h-4" />
             </div>
           </div>
           <div className="mt-3 flex items-baseline gap-2">
-            <span className="text-2xl font-black tracking-tight text-slate-200">{queues.length}</span>
+            <span className="v1-data-value text-slate-200">{queues.length}</span>
             <span className="text-[10px] text-slate-500 font-bold">Connected ({totalConnected})</span>
           </div>
           <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-indigo-500/30 group-hover:bg-indigo-500 transition-colors" />
@@ -376,13 +376,13 @@ export default function JobsDashboardPage() {
         {/* Active Jobs Card */}
         <div className="glass p-4.5 rounded-2xl relative overflow-hidden group hover:border-indigo-800/60 transition-all shadow-md">
           <div className="flex justify-between items-start">
-            <span className="text-[10px] font-black uppercase text-slate-400 tracking-wider font-data">Running Jobs</span>
+            <span className="v1-data-label">Running Jobs</span>
             <div className="p-1.5 bg-indigo-500/10 rounded-lg text-indigo-400 animate-pulse">
               <Zap className="w-4 h-4" />
             </div>
           </div>
           <div className="mt-3 flex items-baseline gap-2">
-            <span className="text-2xl font-black tracking-tight text-indigo-300">{totals.active}</span>
+            <span className="v1-data-value text-indigo-300">{totals.active}</span>
             <span className="text-[10px] text-indigo-500 font-bold">In-process thread count</span>
           </div>
           <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-indigo-500/30 group-hover:bg-indigo-500 transition-colors" />
@@ -391,13 +391,13 @@ export default function JobsDashboardPage() {
         {/* Waiting / Delayed Card */}
         <div className="glass p-4.5 rounded-2xl relative overflow-hidden group hover:border-amber-800/60 transition-all shadow-md">
           <div className="flex justify-between items-start">
-            <span className="text-[10px] font-black uppercase text-slate-400 tracking-wider font-data">Pending Jobs</span>
+            <span className="v1-data-label">Pending Jobs</span>
             <div className="p-1.5 bg-amber-500/10 rounded-lg text-amber-400">
               <Hourglass className="w-4 h-4" />
             </div>
           </div>
           <div className="mt-3 flex items-baseline gap-2">
-            <span className="text-2xl font-black tracking-tight text-amber-300">{totals.waiting}</span>
+            <span className="v1-data-value text-amber-300">{totals.waiting}</span>
             <span className="text-[10px] text-amber-500 font-bold">Scheduled & delayed queue size</span>
           </div>
           <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-amber-500/30 group-hover:bg-amber-500 transition-colors" />
@@ -406,13 +406,13 @@ export default function JobsDashboardPage() {
         {/* Failed Jobs Card */}
         <div className="glass p-4.5 rounded-2xl relative overflow-hidden group hover:border-rose-800/60 transition-all shadow-md">
           <div className="flex justify-between items-start">
-            <span className="text-[10px] font-black uppercase text-slate-400 tracking-wider font-data">Failed Jobs</span>
+            <span className="v1-data-label">Failed Jobs</span>
             <div className="p-1.5 bg-rose-500/10 rounded-lg text-rose-400">
               <AlertCircle className="w-4 h-4" />
             </div>
           </div>
           <div className="mt-3 flex items-baseline gap-2">
-            <span className="text-2xl font-black tracking-tight text-rose-400">{totals.failed}</span>
+            <span className="v1-data-value text-rose-400">{totals.failed}</span>
             <span className="text-[10px] text-rose-500 font-bold">Accumulated error rows</span>
           </div>
           <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-rose-500/30 group-hover:bg-rose-500 transition-colors" />
@@ -425,7 +425,7 @@ export default function JobsDashboardPage() {
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2">
               <Calendar className="w-4 h-4 text-indigo-400" />
-              <h2 className="text-xs font-black uppercase text-slate-200 tracking-widest font-data">
+              <h2 className="v1-title-section">
                 Active Repeatable Cron Schedules
               </h2>
             </div>
@@ -727,7 +727,7 @@ export default function JobsDashboardPage() {
           <div className="p-4 bg-slate-950/30 border-b border-slate-800/80 flex items-center justify-between">
             <div className="flex items-center gap-2">
               <Terminal className="w-4 h-4 text-emerald-400" />
-              <h3 className="text-xs font-black uppercase text-slate-200 tracking-widest font-data">
+              <h3 className="v1-title-section">
                 System Job Execution Stream
               </h3>
             </div>

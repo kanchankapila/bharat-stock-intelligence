@@ -69,8 +69,8 @@ export function AgentAuditorPage() {
               { label: 'Profit Factor', value: report.profit_factor?.toFixed(2), color: report.profit_factor >= 1.5 ? 'text-emerald-400' : 'text-yellow-400' },
             ].map(m => (
               <div key={m.label} className="v1-card p-4">
-                <p className="text-xs text-slate-400">{m.label}</p>
-                <p className={`text-2xl font-bold mt-1 ${m.color}`}>{m.value}</p>
+                <p className="v1-data-label">{m.label}</p>
+                <p className={`v1-data-value mt-1 ${m.color}`}>{m.value}</p>
               </div>
             ))}
           </div>
@@ -82,15 +82,15 @@ export function AgentAuditorPage() {
               { label: '⏳ Open', value: report.open_positions, color: 'text-yellow-400' },
             ].map(m => (
               <div key={m.label} className="v1-card p-4">
-                <p className="text-sm text-slate-400">{m.label}</p>
-                <p className={`text-3xl font-bold mt-1 ${m.color}`}>{m.value}</p>
+                <p className="v1-data-label">{m.label}</p>
+                <p className={`v1-data-value mt-1 ${m.color}`}>{m.value}</p>
               </div>
             ))}
           </div>
 
           {attrData.length > 0 && (
             <div className="v1-card p-4">
-              <p className="text-sm font-semibold text-slate-300 mb-4">Signal Attribution (Win Rate %)</p>
+              <p className="v1-title-card mb-4">Signal Attribution (Win Rate %)</p>
               <ResponsiveContainer width="100%" height={160}>
                 <BarChart data={attrData} layout="vertical">
                   <XAxis type="number" domain={[0, 100]} tick={{ fontSize: 10, fill: '#94a3b8' }} />

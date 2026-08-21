@@ -136,7 +136,7 @@ export const RiskMetricsDashboard: React.FC<Props> = ({ focusSymbol, collapsed =
             <Shield className="w-4 h-4 text-violet-400" />
           </div>
           <div>
-            <h3 className="text-sm font-bold text-slate-200">Risk & Multi-Factor Dashboard</h3>
+            <h3 className="v1-title-card">Risk & Multi-Factor Dashboard</h3>
             <p className="text-xs text-slate-500">Beta · Sortino · VaR · Quality+Momentum+Value factors</p>
           </div>
         </div>

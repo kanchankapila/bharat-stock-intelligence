@@ -39,7 +39,7 @@ export const CorporateEventsPanel: React.FC<{ onSelectStock?: (symbol: string) =
       <div className="v1-card p-5">
         <div className="flex items-center gap-2 mb-4">
           <CalendarDays className="w-5 h-5 text-sky-400" />
-          <h3 className="text-sm font-bold text-slate-100 font-display uppercase tracking-widest">Corporate Actions Calendar</h3>
+          <h3 className="v1-title-card uppercase tracking-widest">Corporate Actions Calendar</h3>
         </div>
         {actionsLoading ? (
           <p className="text-xs text-slate-500 font-data">Loading&hellip;</p>
@@ -81,7 +81,7 @@ export const CorporateEventsPanel: React.FC<{ onSelectStock?: (symbol: string) =
       <div className="v1-card p-5">
         <div className="flex items-center gap-2 mb-4">
           <ShieldCheck className="w-5 h-5 text-amber-400" />
-          <h3 className="text-sm font-bold text-slate-100 font-display uppercase tracking-widest">Credit Rating Actions</h3>
+          <h3 className="v1-title-card uppercase tracking-widest">Credit Rating Actions</h3>
         </div>
         {ratingsLoading ? (
           <p className="text-xs text-slate-500 font-data">Loading&hellip;</p>
@@ -113,7 +113,7 @@ export const CorporateEventsPanel: React.FC<{ onSelectStock?: (symbol: string) =
       <div className="v1-card p-5">
         <div className="flex items-center gap-2 mb-4">
           <FileCheck2 className="w-5 h-5 text-emerald-400" />
-          <h3 className="text-sm font-bold text-slate-100 font-display uppercase tracking-widest">Filed with NSE</h3>
+          <h3 className="v1-title-card uppercase tracking-widest">Filed with NSE</h3>
         </div>
         {filedLoading ? (
           <p className="text-xs text-slate-500 font-data">Loading&hellip;</p>

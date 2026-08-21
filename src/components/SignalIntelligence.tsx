@@ -101,8 +101,8 @@ function FactorBar({ label, value, max, color }: { label: string; value: number;
 function StatCard({ label, value, sub, color }: { label: string; value: string | number; sub?: string; color?: string }) {
   return (
     <div className="v1-card p-3 flex flex-col gap-0.5">
-      <span className="text-[10px] text-slate-500 font-display uppercase tracking-widest">{label}</span>
-      <span className={cn('text-2xl font-bold', color ?? 'text-white')}>{value}</span>
+      <span className="v1-data-label">{label}</span>
+      <span className={cn('v1-data-value', color ?? 'text-white')}>{value}</span>
       {sub && <span className="text-[10px] text-slate-500">{sub}</span>}
     </div>
   );
@@ -368,7 +368,7 @@ export function SignalIntelligence() {
         <div className="flex-1 min-w-0 v1-card overflow-hidden">
           <div className="px-4 py-3 border-b border-slate-700/50 flex items-center gap-2">
             <Award className="w-4 h-4 text-amber-400" />
-            <span className="text-sm font-bold text-white">High Conviction Opportunities</span>
+            <span className="v1-title-card">High Conviction Opportunities</span>
             <span className="ml-auto text-[10px] text-slate-500">{signals.length} stocks</span>
           </div>
 
@@ -491,7 +491,7 @@ export function SignalIntelligence() {
         <div className="v1-card overflow-hidden">
           <div className="px-4 py-3 border-b border-slate-700/50 flex items-center gap-2">
             <Star className="w-4 h-4 text-amber-400" />
-            <span className="text-sm font-bold text-white">Scanner Reliability Leaderboard</span>
+            <span className="v1-title-card">Scanner Reliability Leaderboard</span>
           </div>
           {reliability && reliability.length > 0 ? (
             <div className="divide-y divide-slate-800/50">
@@ -535,7 +535,7 @@ export function SignalIntelligence() {
         <div className="v1-card overflow-hidden">
           <div className="px-4 py-3 border-b border-slate-700/50 flex items-center gap-2">
             <BarChart3 className="w-4 h-4 text-indigo-400" />
-            <span className="text-sm font-bold text-white">Sector Momentum Matrix</span>
+            <span className="v1-title-card">Sector Momentum Matrix</span>
           </div>
           {sectorMatrix && sectorMatrix.length > 0 ? (
             <>

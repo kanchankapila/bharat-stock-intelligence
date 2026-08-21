@@ -410,7 +410,7 @@ const TrendlyneScreenerPanel: React.FC<TrendlyneScreenerPanelProps> = ({ onSelec
 
           {/* Quick Select Grid (Now at Bottom) */}
           <div className="space-y-4">
-            <h4 className="text-[10px] font-black text-slate-400 uppercase tracking-[0.3em] px-2">Quick Directory</h4>
+            <h4 className="v1-title-section px-2">Quick Directory</h4>
             <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-2">
               {filteredCategories.map((screener) => (
                 <button
@@ -535,15 +535,15 @@ const TrendlyneScreenerPanel: React.FC<TrendlyneScreenerPanelProps> = ({ onSelec
             </div>
             <div className="flex gap-4">
                <div className="text-right">
-                  <p className="text-xl font-black text-white tabular-nums italic">{categories.length}</p>
-                  <p className="text-[9.5px] font-black text-slate-400 uppercase tracking-[0.2em]">Total Screeners</p>
+                  <p className="v1-data-value text-white tabular-nums italic">{categories.length}</p>
+                  <p className="v1-data-label">Total Screeners</p>
                </div>
                <div className="w-px h-10 bg-slate-800" />
                <div className="text-right">
-                  <p className="text-xl font-black text-amber-500 tabular-nums italic">
+                  <p className="v1-data-value text-amber-500 tabular-nums italic">
                      {categories.filter(c => c.sentiment === 'bullish').length}
                   </p>
-                  <p className="text-[9.5px] font-black text-slate-400 uppercase tracking-[0.2em]">Bullish Scans</p>
+                  <p className="v1-data-label">Bullish Scans</p>
                </div>
             </div>
          </div>

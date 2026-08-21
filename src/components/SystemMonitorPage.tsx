@@ -279,8 +279,8 @@ export default function SystemMonitorPage() {
           <div key={label} className={`rounded-xl p-3 flex items-center gap-2 ${bg}`}>
             <Icon className={`w-4 h-4 ${color} shrink-0 ${label === 'Running' && val > 0 ? 'animate-spin' : ''}`} />
             <div>
-              <div className={`text-xl font-black ${color}`}>{val}</div>
-              <div className="text-[10px] text-slate-500 uppercase font-bold tracking-wide">{label}</div>
+              <div className={`v1-data-value ${color}`}>{val}</div>
+              <div className="v1-data-label">{label}</div>
             </div>
           </div>
         ))}
@@ -289,7 +289,7 @@ export default function SystemMonitorPage() {
       {/* Schedule + status matrix (IST) */}
       {(scripts || []).length > 0 && (
         <div className="v1-card p-4">
-          <h3 className="text-xs font-bold text-slate-400 font-display uppercase tracking-widest mb-3 flex items-center gap-2">
+          <h3 className="v1-title-card mb-3 flex items-center gap-2">
             <Clock className="w-3.5 h-3.5" /> Job Schedule Matrix (IST)
           </h3>
           <div className="overflow-x-auto">
@@ -343,7 +343,7 @@ export default function SystemMonitorPage() {
           <div key={cat} className="space-y-3">
             <div className="flex items-center gap-2">
               <CatIcon className="w-4 h-4 text-slate-500" />
-              <h2 className="text-sm font-bold text-slate-300 font-display uppercase tracking-widest">{cat}</h2>
+              <h2 className="v1-title-section">{cat}</h2>
               <div className="flex-1 h-px bg-slate-800" />
             </div>
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
@@ -362,7 +362,7 @@ export default function SystemMonitorPage() {
 
       {/* Schedule reference */}
       <div className="v1-card p-4">
-        <h3 className="text-xs font-bold text-slate-400 font-display uppercase tracking-widest mb-3 flex items-center gap-2">
+        <h3 className="v1-title-card mb-3 flex items-center gap-2">
           <Clock className="w-3.5 h-3.5" /> Auto-Schedule Reference
         </h3>
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2">

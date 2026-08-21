@@ -144,7 +144,7 @@ export function InvestmentStrategy({ onSelectStock }: { onSelectStock: (symbol: 
           <div className="bg-emerald-500/10 border border-emerald-500/20 rounded-xl p-4 flex items-start gap-3">
             <CheckCircle2 className="w-5 h-5 text-emerald-400 shrink-0 mt-0.5" />
             <div>
-              <h3 className="text-sm font-bold text-emerald-400">The Bharat Core Compounder Strategy</h3>
+              <h3 className="v1-title-card">The Bharat Core Compounder Strategy</h3>
               <p className="text-xs text-slate-300 mt-1">
                 Looks for stocks with zero debt, monopoly characteristics, and strong cash flows that are currently trading at attractive technical entry points (Buy on Dips, RSI Oversold). Perfect for medium to long-term holding.
               </p>
@@ -206,7 +206,7 @@ export function InvestmentStrategy({ onSelectStock }: { onSelectStock: (symbol: 
           <div className="bg-rose-500/10 border border-rose-500/20 rounded-xl p-4 flex items-start gap-3">
             <Activity className="w-5 h-5 text-rose-400 shrink-0 mt-0.5" />
             <div>
-              <h3 className="text-sm font-bold text-rose-400">Intraday Momentum Engine</h3>
+              <h3 className="v1-title-card">Intraday Momentum Engine</h3>
               <p className="text-xs text-slate-300 mt-1">
                 Aggregates live intraday triggers from Trendlyne (MACD, CCI, Supertrend crossovers) and MoneyControl Tech scanners. High scores indicate confluence across multiple timeframes.
               </p>

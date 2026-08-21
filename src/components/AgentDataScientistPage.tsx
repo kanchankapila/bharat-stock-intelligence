@@ -68,8 +68,8 @@ export function AgentDataScientistPage() {
               { label: 'Signal Resolution', value: `${latest.signal_resolution_rate?.toFixed(1)}%`, sub: 'outcomes resolved' },
             ].map(m => (
               <div key={m.label} className="v1-card p-4">
-                <p className="text-xs text-slate-400">{m.label}</p>
-                <p className="text-2xl font-bold text-white mt-1">{m.value}</p>
+                <p className="v1-data-label">{m.label}</p>
+                <p className="v1-data-value text-white mt-1">{m.value}</p>
                 <p className="text-xs text-slate-500 mt-1">{m.sub}</p>
               </div>
             ))}
@@ -102,7 +102,7 @@ export function AgentDataScientistPage() {
 
       {chartData.length > 1 && (
         <div className="v1-card p-4">
-          <p className="text-sm font-semibold text-slate-300 mb-4">30-Day Quality Score Trend</p>
+          <p className="v1-title-card mb-4">30-Day Quality Score Trend</p>
           <ResponsiveContainer width="100%" height={160}>
             <LineChart data={chartData}>
               <XAxis dataKey="date" tick={{ fontSize: 10, fill: '#94a3b8' }} />

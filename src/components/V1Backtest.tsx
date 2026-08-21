@@ -257,8 +257,8 @@ export const V1Backtest: React.FC<{ stocks?: MarketData[] }> = () => {
                    ].map(stat => (
                      <div key={stat.label} className="p-5 glass-strong border border-slate-800/50 rounded-2xl relative overflow-hidden group">
                        <stat.icon className="w-4 h-4 text-slate-200 absolute -right-1 -top-1 scale-[300%] rotate-12 opacity-50 group-hover:scale-[400%] transition-transform" />
-                       <p className="text-slate-400 text-[10px] font-black font-display uppercase tracking-widest relative z-10">{stat.label}</p>
-                       <p className={cn("text-2xl font-black mt-2 relative z-10 tracking-tighter", stat.color)}>{stat.value}</p>
+                       <p className="v1-data-label relative z-10">{stat.label}</p>
+                       <p className={cn("v1-data-value mt-2 relative z-10 tracking-tighter", stat.color)}>{stat.value}</p>
                      </div>
                    ))}
                  </div>
@@ -400,8 +400,8 @@ export const V1Backtest: React.FC<{ stocks?: MarketData[] }> = () => {
                 { label: 'Max DD', value: `${wfCombined.max_drawdown_pct ?? 0}%` },
               ].map(stat => (
                 <div key={stat.label} className="p-4 glass-strong border border-slate-800/50 rounded-2xl">
-                  <p className="text-slate-400 text-[10px] font-black font-display uppercase tracking-widest">{stat.label}</p>
-                  <p className="text-xl font-black mt-1 text-white tracking-tighter">{stat.value}</p>
+                  <p className="v1-data-label">{stat.label}</p>
+                  <p className="v1-data-value mt-1 text-white tracking-tighter">{stat.value}</p>
                 </div>
               ))}
             </div>

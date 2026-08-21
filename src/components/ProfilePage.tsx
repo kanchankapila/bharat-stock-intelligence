@@ -213,10 +213,10 @@ function Card({ label, value, sub, color, icon: Icon, highlight }: {
 }) {
   return (
     <div className={`p-4 flex flex-col gap-2 ${highlight ? 'rounded-xl border bg-indigo-950/30 border-indigo-800' : 'v1-card'}`}>
-      <div className="flex items-center gap-1.5 text-slate-400 text-[11px] font-semibold font-display uppercase tracking-wider">
+      <div className="v1-data-label flex items-center gap-1.5">
         <Icon className="w-3 h-3" /> {label}
       </div>
-      <div className={`text-2xl font-black ${color}`}>{value}</div>
+      <div className={`v1-data-value ${color}`}>{value}</div>
       {sub && <div className="text-[11px] text-slate-500">{sub}</div>}
     </div>
   );
@@ -334,8 +334,8 @@ function ClientAnalytics({ profile }: { profile: ClientProfile }) {
         <div className={`rounded-xl border p-4 ${netCashReturn >= 0 ? 'bg-emerald-950/20 border-emerald-900/50' : 'bg-rose-950/20 border-rose-900/50'}`}>
           <div className="flex items-center justify-between">
             <div>
-              <div className="text-[11px] font-bold text-slate-400 font-display uppercase tracking-wider mb-1">Net Cash Return (Bank → Kotak → Bank)</div>
-              <div className={`text-3xl font-black ${netCashReturn >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>{INR(netCashReturn, { sign: true })}</div>
+              <div className="v1-data-label mb-1">Net Cash Return (Bank → Kotak → Bank)</div>
+              <div className={`v1-data-value ${netCashReturn >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>{INR(netCashReturn, { sign: true })}</div>
               <div className="text-xs text-slate-500 mt-1">Withdrew {INR(totalWithdrawn)} − Deposited {INR(totalDeposited)} from your bank account</div>
             </div>
             {netCashReturn >= 0 ? <CheckCircle className="w-10 h-10 text-emerald-700" /> : <AlertTriangle className="w-10 h-10 text-rose-700" />}
@@ -354,7 +354,7 @@ function ClientAnalytics({ profile }: { profile: ClientProfile }) {
       {tab === 'cashflow' && (
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
           <div className="v1-card p-4">
-            <h3 className="text-sm font-bold text-white mb-4 flex items-center gap-2"><Wallet className="w-4 h-4 text-purple-400" /> Cash Flow Statement</h3>
+            <h3 className="v1-title-card mb-4 flex items-center gap-2"><Wallet className="w-4 h-4 text-purple-400" /> Cash Flow Statement</h3>
             {hasLedger ? (
               <div className="space-y-0">
                 <LRow_ label="Opening Balance" value={INR(openingBal, { sign: true })} />
@@ -381,7 +381,7 @@ function ClientAnalytics({ profile }: { profile: ClientProfile }) {
           </div>
 
           <div className="v1-card p-4">
-            <h3 className="text-sm font-bold text-white mb-4 flex items-center gap-2"><TrendingUp className="w-4 h-4 text-emerald-400" /> P&L Waterfall</h3>
+            <h3 className="v1-title-card mb-4 flex items-center gap-2"><TrendingUp className="w-4 h-4 text-emerald-400" /> P&L Waterfall</h3>
             <div className="space-y-0">
               {hasTxn && <LRow_ label="Total Buy Value" value={INR(totalBuy)} color="text-indigo-400" />}
               {hasTxn && <LRow_ label="Total Sell Value" value={INR(totalSell)} color="text-emerald-400" />}
@@ -410,7 +410,7 @@ function ClientAnalytics({ profile }: { profile: ClientProfile }) {
       {tab === 'pnl' && (
         <div className="space-y-3">
           <div className="v1-card p-4">
-            <h3 className="text-sm font-bold text-slate-300 mb-4">Year-wise Net P&L</h3>
+            <h3 className="v1-title-card mb-4">Year-wise Net P&L</h3>
             <div className="space-y-3">
               {yearwise.map(y => (
                 <div key={y.fy} className="flex items-center gap-3">
@@ -558,7 +558,7 @@ function ClientAnalytics({ profile }: { profile: ClientProfile }) {
             ))}
           </div>
           <div className="v1-card p-4">
-            <h3 className="text-sm font-bold text-slate-300 mb-3">Charge Impact on P&L</h3>
+            <h3 className="v1-title-card mb-3">Charge Impact on P&L</h3>
             <div className="space-y-0">
               {totalGrossPL!==0 && <LRow_ label="Gross P&L (before charges)" value={INR(totalGrossPL,{sign:true})} color={totalGrossPL>=0?'text-emerald-400':'text-rose-400'} />}
               {(totalTxnChg||totalGLChg)>0 && <LRow_ label="− Exchange charges" value={`-${INR(totalTxnChg||totalGLChg)}`} color="text-orange-400" indent />}
@@ -576,7 +576,7 @@ function ClientAnalytics({ profile }: { profile: ClientProfile }) {
       {tab === 'behavior' && (
         <div className="space-y-4">
           <div className="v1-card p-4">
-            <div className="flex items-center gap-2 mb-4"><Target className="w-4 h-4 text-indigo-400" /><h3 className="text-sm font-bold text-slate-300">Auto-Detected Patterns</h3></div>
+            <div className="flex items-center gap-2 mb-4"><Target className="w-4 h-4 text-indigo-400" /><h3 className="v1-title-card">Auto-Detected Patterns</h3></div>
             <div className="space-y-3">
               {behaviors.map((b,i) => (
                 <div key={i} className={`rounded-lg p-3 border ${b.severity==='warn'?'bg-amber-950/20 border-amber-900/50':b.severity==='ok'?'bg-emerald-950/20 border-emerald-900/50':'bg-slate-800 border-slate-700'}`}>

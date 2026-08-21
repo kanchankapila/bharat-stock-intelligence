@@ -609,21 +609,21 @@ export function DailySignals({ onSelectStock, watchlist = [], onToggleWatchlist 
       {totalToday > 0 && (
         <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
           <div className="rounded-xl border border-slate-800/50 bg-slate-950/30 p-3">
-            <div className="text-[10px] font-bold font-display uppercase tracking-wider text-slate-400">Total Setups</div>
-            <div className="text-2xl font-black text-slate-100 tabular-nums mt-1">{totalToday}</div>
+            <div className="v1-data-label">Total Setups</div>
+            <div className="v1-data-value text-slate-100 tabular-nums mt-1">{totalToday}</div>
           </div>
           {Object.entries(byScore).map(([band, count]) => (
             <div key={band} className="rounded-xl border border-slate-800/50 bg-slate-950/30 p-3">
-              <div className="text-[10px] font-bold font-display uppercase tracking-wider text-slate-400">Score {band}</div>
-              <div className={cn('text-2xl font-black tabular-nums mt-1',
+              <div className="v1-data-label">Score {band}</div>
+              <div className={cn('v1-data-value tabular-nums mt-1',
                 band === '7-10' ? 'text-emerald-400' : band === '4-6' ? 'text-amber-400' : 'text-slate-400'
               )}>{count}</div>
             </div>
           ))}
           {lastComputed && (
             <div className="rounded-xl border border-slate-800/50 bg-slate-950/30 p-3 col-span-2 md:col-span-1">
-              <div className="text-[10px] font-bold font-display uppercase tracking-wider text-slate-400">Last Computed</div>
-              <div className="text-xs font-bold text-slate-300 mt-1">
+              <div className="v1-data-label">Last Computed</div>
+              <div className="v1-data-value text-slate-300 mt-1">
                 {new Date(lastComputed).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })}
               </div>
             </div>
@@ -668,7 +668,7 @@ export function DailySignals({ onSelectStock, watchlist = [], onToggleWatchlist 
       {showWinRates && (
         <div className="rounded-2xl border border-emerald-500/20 bg-emerald-500/5 p-4 space-y-4">
           <div className="flex items-center justify-between">
-            <p className="text-sm font-black text-emerald-400 font-display uppercase tracking-wider flex items-center gap-2">
+            <p className="v1-title-section flex items-center gap-2">
               <BarChart2 className="w-4 h-4" />
               Historical Win Rates
             </p>
@@ -715,8 +715,8 @@ export function DailySignals({ onSelectStock, watchlist = [], onToggleWatchlist 
                   { label: 'Avg Loss', value: `${winRates.overall.avgLoss.toFixed(2)}%`, color: 'text-rose-400', card: 'v1-card-down' as const },
                 ].map(({ label, value, color, card }) => (
                   <div key={label} className={cn(card, 'p-3 text-center')}>
-                    <div className="text-[9px] font-bold font-display uppercase tracking-wider text-slate-400 mb-1">{label}</div>
-                    <div className={cn('text-xl font-black tabular-nums', color)}>{value}</div>
+                    <div className="v1-data-label mb-1">{label}</div>
+                    <div className={cn('v1-data-value tabular-nums', color)}>{value}</div>
                   </div>
                 ))}
               </div>
@@ -803,7 +803,7 @@ export function DailySignals({ onSelectStock, watchlist = [], onToggleWatchlist 
       {showSector && (
         <div className="rounded-2xl border border-violet-500/20 bg-violet-500/5 p-4 space-y-4">
           <div className="flex items-center justify-between flex-wrap gap-2">
-            <p className="text-sm font-black text-violet-400 font-display uppercase tracking-wider flex items-center gap-2">
+            <p className="v1-title-section flex items-center gap-2">
               <Activity className="w-4 h-4" />
               Sector Momentum — Sympathy Play Radar
             </p>

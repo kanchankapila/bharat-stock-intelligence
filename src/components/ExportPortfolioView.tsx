@@ -77,7 +77,7 @@ export default function ExportPortfolioView() {
 
       {stats && (
         <div className="v1-card p-4">
-          <h3 className="font-semibold">Backtest summary</h3>
+          <h3 className="v1-title-card">Backtest summary</h3>
           <pre className="text-xs overflow-auto mt-2" style={{maxHeight:300}}>{JSON.stringify(stats, null, 2)}</pre>
         </div>
       )}

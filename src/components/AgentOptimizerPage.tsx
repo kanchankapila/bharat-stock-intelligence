@@ -55,15 +55,15 @@ export function AgentOptimizerPage() {
               { label: 'Full Optimizer', value: latest.full_optimizer_triggered ? '🔄 Triggered' : '— not needed' },
             ].map(m => (
               <div key={m.label} className="v1-card p-4">
-                <p className="text-xs text-slate-400">{m.label}</p>
-                <p className="text-lg font-bold text-white mt-1">{m.value}</p>
+                <p className="v1-data-label">{m.label}</p>
+                <p className="v1-data-value text-white mt-1">{m.value}</p>
               </div>
             ))}
           </div>
 
           {Object.keys(changes).length > 0 && (
             <div className="v1-card p-4 overflow-x-auto">
-              <p className="text-sm font-semibold text-slate-300 mb-3">Weight Changes</p>
+              <p className="v1-title-card mb-3">Weight Changes</p>
               <table className="w-full text-sm">
                 <thead>
                   <tr className="text-slate-400 border-b border-white/10">
@@ -105,7 +105,7 @@ export function AgentOptimizerPage() {
 
       {chartData.length > 1 && (
         <div className="v1-card p-4">
-          <p className="text-sm font-semibold text-slate-300 mb-4">Win Rate Trend (30 days)</p>
+          <p className="v1-title-card mb-4">Win Rate Trend (30 days)</p>
           <ResponsiveContainer width="100%" height={160}>
             <LineChart data={chartData}>
               <XAxis dataKey="date" tick={{ fontSize: 10, fill: '#94a3b8' }} />

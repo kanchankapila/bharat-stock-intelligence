@@ -286,8 +286,8 @@ export function StrategyIntelligence({ onSelectStock }: { onSelectStock: (symbol
           const c = CLASS_COLORS[cls];
           return (
             <div key={cls} className={cn('rounded-xl border border-slate-800 p-3 flex flex-col gap-1', c.bg)}>
-              <span className="text-[10px] font-bold font-display uppercase tracking-wider text-slate-400">{cls}</span>
-              <span className={cn('text-2xl font-black tabular-nums', c.text)}>{byClass[cls] ?? 0}</span>
+              <span className="v1-data-label">{cls}</span>
+              <span className={cn('v1-data-value tabular-nums', c.text)}>{byClass[cls] ?? 0}</span>
             </div>
           );
         })}
@@ -295,7 +295,7 @@ export function StrategyIntelligence({ onSelectStock }: { onSelectStock: (symbol
 
       {/* Score distribution for the active ranking */}
       <div className="v1-card p-3">
-        <div className="text-[10px] font-semibold text-slate-400 font-display uppercase tracking-wide mb-1">{scoreLabel} score distribution</div>
+        <div className="v1-title-card mb-1">{scoreLabel} score distribution</div>
         <ResponsiveContainer width="100%" height={100}>
           <BarChart data={scoreHistogram} margin={{ top: 4, right: 4, left: -20, bottom: 0 }}>
             <CartesianGrid strokeDasharray="3 3" stroke="#334155" vertical={false} />
@@ -455,7 +455,7 @@ export function StrategyIntelligence({ onSelectStock }: { onSelectStock: (symbol
 
       {/* Legend / methodology note */}
       <div className="v1-card p-4">
-        <p className="text-xs font-bold text-slate-400 mb-2">Scoring Methodology</p>
+        <p className="v1-title-card mb-2">Scoring Methodology</p>
         <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-[11px] text-slate-500">
           <span><span className="text-indigo-400 font-bold">Composite</span> = 30% Momentum + 25% Quality + 25% Value + 20% Confluence</span>
           <span><span className="text-emerald-400 font-bold">Momentum</span> = 50%×12M + 30%×6M + 20%×3M return percentile rank</span>

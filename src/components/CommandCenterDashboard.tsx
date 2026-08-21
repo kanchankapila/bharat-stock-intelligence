@@ -330,7 +330,7 @@ export function CommandCenterDashboard({ onSelectStock }: { onSelectStock: (sym:
             <section>
               <div className="flex items-center gap-2 mb-3">
                 <Shield className="w-4 h-4 text-violet-400" />
-                <h2 className="text-sm font-bold text-white">EOD Swing Picks</h2>
+                <h2 className="v1-title-section">EOD Swing Picks</h2>
                 <span className="text-[10px] text-slate-500 ml-auto">{data?.eodPicks?.length ?? 0} stocks</span>
               </div>
               {(data?.eodPicks?.length ?? 0) === 0 ? (
@@ -349,7 +349,7 @@ export function CommandCenterDashboard({ onSelectStock }: { onSelectStock: (sym:
             <section>
               <div className="flex items-center gap-2 mb-3">
                 <Zap className="w-4 h-4 text-amber-400" />
-                <h2 className="text-sm font-bold text-white">Intraday Live</h2>
+                <h2 className="v1-title-section">Intraday Live</h2>
                 <span className="text-[10px] text-slate-500 ml-auto">
                   {data?.intradaySignals?.length ?? 0} HIGH-strength signals
                 </span>

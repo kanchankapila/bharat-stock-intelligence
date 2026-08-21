@@ -122,8 +122,8 @@ export default function EarlyHoursSpotter({ onSelectStock }: EarlyHoursSpotterPr
               <Sparkles className="w-5 h-5" />
             </div>
             <div>
-              <p className="text-[9px] font-black text-slate-500 font-display uppercase tracking-widest">Avg spot score</p>
-              <p className="text-xl font-black text-white italic mt-0.5">{avgScore} <span className="text-xs text-slate-500 font-bold font-display uppercase tracking-widest italic">/ 100</span></p>
+              <p className="v1-data-label">Avg spot score</p>
+              <p className="v1-data-value text-white mt-0.5">{avgScore} <span className="text-xs text-slate-500 font-bold font-display uppercase tracking-widest italic">/ 100</span></p>
             </div>
           </div>
 
@@ -133,9 +133,9 @@ export default function EarlyHoursSpotter({ onSelectStock }: EarlyHoursSpotterPr
               <TrendingUp className="w-5 h-5" />
             </div>
             <div>
-              <p className="text-[9px] font-black text-slate-500 font-display uppercase tracking-widest">Top opening gap</p>
+              <p className="v1-data-label">Top opening gap</p>
               {topGainer && (
-                <p className="text-sm font-black text-white italic mt-0.5 font-display uppercase tracking-wider group cursor-pointer hover:text-indigo-400" onClick={() => onSelectStock(topGainer.symbol)}>
+                <p className="v1-data-value text-white mt-0.5 group cursor-pointer hover:text-indigo-400" onClick={() => onSelectStock(topGainer.symbol)}>
                   {topGainer.symbol} <span className="text-emerald-400">+{topGainer.iepGapPct.toFixed(1)}%</span>
                 </p>
               )}
@@ -148,9 +148,9 @@ export default function EarlyHoursSpotter({ onSelectStock }: EarlyHoursSpotterPr
               <Volume2 className="w-5 h-5" />
             </div>
             <div>
-              <p className="text-[9px] font-black text-slate-500 font-display uppercase tracking-widest">Top delivery spike</p>
+              <p className="v1-data-label">Top delivery spike</p>
               {topDelSpike && (
-                <p className="text-sm font-black text-white italic mt-0.5 font-display uppercase tracking-wider cursor-pointer hover:text-indigo-400" onClick={() => onSelectStock(topDelSpike.symbol)}>
+                <p className="v1-data-value text-white mt-0.5 cursor-pointer hover:text-indigo-400" onClick={() => onSelectStock(topDelSpike.symbol)}>
                   {topDelSpike.symbol} <span className="text-indigo-400">+{topDelSpike.deliverySpikePct.toFixed(0)}%</span>
                 </p>
               )}
@@ -163,8 +163,8 @@ export default function EarlyHoursSpotter({ onSelectStock }: EarlyHoursSpotterPr
               <FileText className="w-5 h-5" />
             </div>
             <div>
-              <p className="text-[9px] font-black text-slate-500 font-display uppercase tracking-widest">Event confluence</p>
-              <p className="text-xl font-black text-white italic mt-0.5">{hasNewsCount} <span className="text-xs text-slate-500 font-bold font-display uppercase tracking-widest italic">stocks</span></p>
+              <p className="v1-data-label">Event confluence</p>
+              <p className="v1-data-value text-white mt-0.5">{hasNewsCount} <span className="text-xs text-slate-500 font-bold font-display uppercase tracking-widest italic">stocks</span></p>
             </div>
           </div>
         </div>

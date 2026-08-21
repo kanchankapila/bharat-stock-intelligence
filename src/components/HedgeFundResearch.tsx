@@ -266,7 +266,7 @@ function StockDeepDive({
           if (!dl) return null;
           return (
             <div className="mt-4 border-t border-slate-700/50 pt-4">
-              <p className="text-[10px] font-black font-display uppercase tracking-widest text-slate-400 mb-3">AI Model Signals</p>
+              <p className="v1-title-card mb-3">AI Model Signals</p>
               <div className="flex gap-2 mb-3">
                 {([1, 5, 15] as const).map(h => {
                   const prob = (dl[`prob_up_${h}d`] as number) ?? 0;
@@ -407,16 +407,16 @@ function MarketContextBar({ report }: { report: ResearchReport }) {
     <div className="v1-card px-4 py-3 flex flex-wrap items-center gap-4">
       <RegimeBadge regime={report.market_regime} />
 
-      <div className="flex items-center gap-1.5 text-xs">
-        <span className="text-slate-500 font-bold">Sentiment</span>
-        <span className={cn('font-black', sentimentColor)}>
+      <div className="flex items-center gap-1.5">
+        <span className="v1-data-label">Sentiment</span>
+        <span className={cn('v1-data-value', sentimentColor)}>
           {report.sentiment_score > 0 ? '+' : ''}{report.sentiment_score.toFixed(0)}
         </span>
       </div>
 
-      <div className="flex items-center gap-1.5 text-xs">
-        <span className="text-slate-500 font-bold">FII 5D</span>
-        <span className={cn('font-black', fiiColor)}>
+      <div className="flex items-center gap-1.5">
+        <span className="v1-data-label">FII 5D</span>
+        <span className={cn('v1-data-value', fiiColor)}>
           {report.fii_net_5d >= 0 ? '+' : ''}₹{(report.fii_net_5d / 100).toFixed(0)}Cr
         </span>
       </div>
@@ -454,7 +454,7 @@ function ResearchSidebar({
     <div className="space-y-4">
       {/* Avoid List */}
       <div className="v1-card p-4 space-y-3">
-        <p className="text-[10px] font-black font-display uppercase tracking-widest text-slate-400 flex items-center gap-1">
+        <p className="v1-title-card flex items-center gap-1">
           <AlertTriangle className="w-3 h-3 text-rose-400" /> Avoid List
         </p>
         {report.avoid_list?.length > 0 ? (
@@ -471,7 +471,7 @@ function ResearchSidebar({
 
       {/* Watchlist Candidates */}
       <div className="v1-card p-4 space-y-3">
-        <p className="text-[10px] font-black font-display uppercase tracking-widest text-slate-400 flex items-center gap-1">
+        <p className="v1-title-card flex items-center gap-1">
           <Eye className="w-3 h-3 text-indigo-400" /> Watchlist Candidates
         </p>
         {report.watchlist?.length > 0 ? (
@@ -501,7 +501,7 @@ function ResearchSidebar({
 
       {/* Sector Rankings */}
       <div className="v1-card p-4 space-y-3">
-        <p className="text-[10px] font-black font-display uppercase tracking-widest text-slate-400 flex items-center gap-1">
+        <p className="v1-title-card flex items-center gap-1">
           <Trophy className="w-3 h-3 text-amber-400" /> Sector Rankings
         </p>
         {report.sector_rankings?.length > 0 ? (
@@ -750,7 +750,7 @@ export default function HedgeFundResearch({ onAddWatchlist }: HedgeFundResearchP
             {/* Executive Summary */}
             {report.executive_summary && (
               <div className="v1-card p-4">
-                <p className="text-[10px] font-black font-display uppercase tracking-widest text-slate-400 mb-2 flex items-center gap-1">
+                <p className="v1-title-card mb-2 flex items-center gap-1">
                   <Activity className="w-3 h-3" /> Executive Summary
                 </p>
                 <p className="text-xs text-slate-300 leading-relaxed">{report.executive_summary}</p>
@@ -761,7 +761,7 @@ export default function HedgeFundResearch({ onAddWatchlist }: HedgeFundResearchP
             <div className="grid grid-cols-1 lg:grid-cols-[1fr_280px] gap-5">
               {/* Top Picks Table */}
               <div className="space-y-3">
-                <p className="text-[10px] font-black font-display uppercase tracking-widest text-slate-400 px-1 flex items-center gap-1">
+                <p className="v1-title-card px-1 flex items-center gap-1">
                   <Trophy className="w-3 h-3 text-amber-400" /> Top Picks ({report.top_picks?.length ?? 0})
                 </p>
                 {report.top_picks?.length > 0 ? (

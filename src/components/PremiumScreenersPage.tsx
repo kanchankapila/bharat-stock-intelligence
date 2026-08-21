@@ -168,7 +168,7 @@ const PremiumScreenersPage: React.FC<PremiumScreenersPageProps> = ({ onSelectSto
 
       <div className="glass rounded-2xl border border-slate-800/60 p-4">
         <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3 mb-4">
-          <h2 className="text-sm font-black font-display uppercase tracking-wider text-slate-200">Premium Screener Directory</h2>
+          <h2 className="v1-title-section">Premium Screener Directory</h2>
           <div className="relative w-full md:w-80">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-slate-400" />
             <input
@@ -302,7 +302,7 @@ const PremiumScreenersPage: React.FC<PremiumScreenersPageProps> = ({ onSelectSto
       {selectedStock && selectedSymbol && (
         <div className="glass rounded-2xl border border-amber-500/30 p-4 md:p-5 space-y-4">
           <div>
-            <h3 className="text-sm font-black text-white font-display uppercase tracking-wider">Premium Stock Intelligence</h3>
+            <h3 className="v1-title-section">Premium Stock Intelligence</h3>
             <p className="text-xs text-slate-300 mt-1 whitespace-normal break-words">
               {selectedStock.name} ({selectedSymbol})
             </p>

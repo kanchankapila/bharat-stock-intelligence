@@ -110,10 +110,10 @@ export const TradeDecisionCockpit: React.FC<{ onSelectStock: (symbol: string) =>
             item.pct == null ? 'v1-card-neutral' : (item.pct as number) > 0 ? 'v1-card-up' : (item.pct as number) < 0 ? 'v1-card-down' : 'v1-card-neutral',
             'px-3 py-2'
           )}>
-            <p className="text-[9px] font-bold text-slate-500 font-display uppercase tracking-wider">{item.label}</p>
+            <p className="v1-data-label">{item.label}</p>
             {item.v != null ? (
               <>
-                <p className="text-sm font-black text-white tabular-nums mt-0.5">
+                <p className="v1-data-value text-white tabular-nums mt-0.5">
                   {item.plain ? item.v : `₹${fmt(item.v as number, 0)}`}
                 </p>
                 {item.pct != null && !item.plain && (
@@ -128,7 +128,7 @@ export const TradeDecisionCockpit: React.FC<{ onSelectStock: (symbol: string) =>
                 )}
               </>
             ) : (
-              <p className="text-sm font-black text-slate-600 mt-0.5">—</p>
+              <p className="v1-data-value text-slate-600 mt-0.5">—</p>
             )}
           </div>
         ))}
@@ -183,7 +183,7 @@ export const TradeDecisionCockpit: React.FC<{ onSelectStock: (symbol: string) =>
         <div className="xl:col-span-8 v1-card overflow-hidden">
           <div className="flex items-center justify-between px-4 py-3 border-b border-slate-800/50">
             <div>
-              <h3 className="text-xs font-black text-white font-display uppercase tracking-wider">Trade Candidates</h3>
+              <h3 className="v1-title-card">Trade Candidates</h3>
               <p className="text-[9px] text-slate-500 font-bold uppercase mt-0.5">Ranked by composite quant score · click row for detail</p>
             </div>
             <span className="text-[9px] bg-slate-800 text-slate-300 font-bold px-2 py-0.5 rounded uppercase">

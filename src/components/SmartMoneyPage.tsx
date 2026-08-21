@@ -253,8 +253,8 @@ export const SmartMoneyPage: React.FC<SmartMoneyPageProps> = ({ onSelectStock })
         ].map((card, i) => (
           <div key={i} className="v1-card p-4">
             <card.icon className={cn('w-4 h-4 mb-2', card.color)} />
-            <div className="text-2xl font-black text-white">{card.value}</div>
-            <div className="text-xs text-slate-400 mt-0.5">{card.label}</div>
+            <div className="v1-data-value text-white">{card.value}</div>
+            <div className="v1-data-label mt-0.5">{card.label}</div>
           </div>
         ))}
       </div>
@@ -303,7 +303,7 @@ export const SmartMoneyPage: React.FC<SmartMoneyPageProps> = ({ onSelectStock })
       {activeTab === 'insider' && (
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
           <div className="v1-card p-4">
-            <div className="text-sm font-semibold text-slate-300 mb-3">Insider Buy vs Sell</div>
+            <div className="v1-title-card mb-3">Insider Buy vs Sell</div>
             <ResponsiveContainer width="100%" height={180}>
               <PieChart>
                 <Pie data={insiderNetData} dataKey="value" cx="50%" cy="50%" outerRadius={70} label={({ name, value }: any) => `${name}: ${value}`}>
@@ -370,7 +370,7 @@ export const SmartMoneyPage: React.FC<SmartMoneyPageProps> = ({ onSelectStock })
       {activeTab === 'sector' && sectorChartData.length > 0 && (
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
           <div className="v1-card p-4">
-            <div className="text-sm font-semibold text-slate-300 mb-3">Deal Value by Sector</div>
+            <div className="v1-title-card mb-3">Deal Value by Sector</div>
             <ResponsiveContainer width="100%" height={280}>
               <BarChart data={sectorChartData} layout="vertical" margin={{ left: 80, right: 16 }}>
                 <XAxis type="number" tick={{ fontSize: 10, fill: '#94a3b8' }} />

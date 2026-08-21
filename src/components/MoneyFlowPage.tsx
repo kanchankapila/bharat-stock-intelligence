@@ -33,8 +33,8 @@ function StatCard({ label, value, color, sub }: { label: string; value: string; 
   const cardClass = color.includes('emerald') ? 'v1-card-up' : color.includes('rose') ? 'v1-card-down' : 'v1-card-neutral';
   return (
     <div className={cn(cardClass, 'p-3')}>
-      <div className="text-[10px] text-slate-500 font-display uppercase tracking-wide font-semibold">{label}</div>
-      <div className={cn('text-lg font-bold mt-0.5', color)}>{value}</div>
+      <div className="v1-data-label">{label}</div>
+      <div className={cn('v1-data-value mt-0.5', color)}>{value}</div>
       {sub && <div className="text-[10px] text-slate-500 mt-0.5">{sub}</div>}
     </div>
   );
@@ -168,7 +168,7 @@ export function MoneyFlowPage() {
 
       {/* Cumulative flow chart */}
       <div className="v1-card p-3">
-        <div className="text-[11px] font-semibold text-slate-400 font-display uppercase tracking-wide mb-2">
+        <div className="v1-title-card mb-2">
           Cumulative net flow (₹ Cr) — {range === 'ALL' ? 'since 2016' : range}
         </div>
         {isLoading ? (
@@ -196,7 +196,7 @@ export function MoneyFlowPage() {
 
       {/* Daily net flow bars */}
       <div className="v1-card p-3">
-        <div className="text-[11px] font-semibold text-slate-400 font-display uppercase tracking-wide mb-2">Daily net flow (₹ Cr)</div>
+        <div className="v1-title-card mb-2">Daily net flow (₹ Cr)</div>
         {rows.length > 0 && (
           <ResponsiveContainer width="100%" height={220}>
             <ComposedChart data={rows} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>

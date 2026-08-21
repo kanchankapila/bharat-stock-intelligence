@@ -45,7 +45,7 @@ export const PriceAlertsPanel: React.FC<{ userId?: string; defaultSymbol?: strin
     <div className="v1-card p-5">
       <div className="flex items-center gap-2 mb-4">
         <Bell className="w-5 h-5 text-amber-400" />
-        <h3 className="text-sm font-bold text-slate-100 font-display uppercase tracking-widest">Price Alerts</h3>
+        <h3 className="v1-title-card">Price Alerts</h3>
       </div>
 
       {/* Create form */}

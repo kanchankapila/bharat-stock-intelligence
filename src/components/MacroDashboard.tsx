@@ -38,7 +38,7 @@ export const MacroDashboard: React.FC = () => {
       <div className="v1-card p-5">
         <div className="flex items-center gap-2 mb-4">
           <Globe2 className="w-5 h-5 text-indigo-400" />
-          <h3 className="text-sm font-bold text-slate-100 font-display uppercase tracking-widest">Macro Snapshot</h3>
+          <h3 className="v1-title-card">Macro Snapshot</h3>
         </div>
         {tilesLoading ? (
           <p className="text-xs text-slate-500 font-data">Loading macro data&hellip;</p>
@@ -76,7 +76,7 @@ export const MacroDashboard: React.FC = () => {
       <div className="v1-card p-5">
         <div className="flex items-center gap-2 mb-4">
           <CalendarClock className="w-5 h-5 text-amber-400" />
-          <h3 className="text-sm font-bold text-slate-100 font-display uppercase tracking-widest">Economic Calendar — High Impact</h3>
+          <h3 className="v1-title-card">Economic Calendar — High Impact</h3>
         </div>
         {eventsLoading ? (
           <p className="text-xs text-slate-500 font-data">Loading calendar&hellip;</p>

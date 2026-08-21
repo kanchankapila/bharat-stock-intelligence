@@ -132,7 +132,7 @@ export const EODMarketScreener: React.FC<Props> = ({ onSelectStock }) => {
           >
             <div className="v1-card p-5">
               <div className="flex justify-between items-center mb-4">
-                <h3 className="text-sm font-bold font-display uppercase tracking-wider text-slate-400">EOD Active Filters</h3>
+                <h3 className="v1-title-card">EOD Active Filters</h3>
                 {activeCount > 0 && (
                   <button onClick={clearFilters} className="text-xs text-rose-400 hover:text-rose-300 flex items-center gap-1">
                     <X className="w-3 h-3" /> Clear All

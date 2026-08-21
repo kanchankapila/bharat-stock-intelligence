@@ -425,10 +425,10 @@ const PortfolioDetail: React.FC<{
           { label: 'Quarter', value: quarterLabel(quarter), icon: <Star className="w-3 h-3" /> },
         ].map(({ label, value, icon, color }) => (
           <div key={label} className="v1-card px-4 py-3">
-            <div className="flex items-center gap-1.5 text-[10px] text-slate-400 font-bold font-display uppercase tracking-widest mb-1">
+            <div className="v1-data-label flex items-center gap-1.5 mb-1">
               {icon}{label}
             </div>
-            <div className={cn('text-lg font-black tabular-nums', color ?? 'text-white')}>{value}</div>
+            <div className={cn('v1-data-value tabular-nums', color ?? 'text-white')}>{value}</div>
           </div>
         ))}
       </div>
