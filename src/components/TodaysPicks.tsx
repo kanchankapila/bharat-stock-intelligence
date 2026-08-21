@@ -11,11 +11,14 @@ interface TodaysPicksProps {
 // ponytail: card = the matching v1-card-{up,down,neutral} variant, same colors these tiers
 // already used (emerald/amber/rose), so conviction stays visible while the card shape matches
 // the rest of v1.
+// ponytail: badge = v1-badge-{s,b,c} where a matching tier exists (colors chosen to match, not
+// rank -- v1-badge has no "down"/rose slot, so WEAK keeps its own rose badge, same rounded-full
+// shape as the rest via the shared v1-badge base class).
 const CONVICTION_CONFIG = {
-  ELITE:    { label: 'ELITE',    card: 'v1-card-up',      bg: 'bg-emerald-500/15', text: 'text-emerald-400', dot: 'bg-emerald-400' },
-  STRONG:   { label: 'STRONG',   card: 'v1-card-neutral',  bg: 'bg-amber-500/15',   text: 'text-amber-400',   dot: 'bg-amber-400'   },
-  MODERATE: { label: 'MODERATE', card: 'v1-card',          bg: 'bg-slate-700/40',   text: 'text-slate-400',   dot: 'bg-slate-400'   },
-  WEAK:     { label: 'WEAK',     card: 'v1-card-down',     bg: 'bg-rose-500/10',    text: 'text-rose-400',    dot: 'bg-rose-400'    },
+  ELITE:    { label: 'ELITE',    card: 'v1-card-up',      badge: 'v1-badge v1-badge-s',                    text: 'text-emerald-400', dot: 'bg-emerald-400' },
+  STRONG:   { label: 'STRONG',   card: 'v1-card-neutral', badge: 'v1-badge v1-badge-b',                    text: 'text-amber-400',   dot: 'bg-amber-400'   },
+  MODERATE: { label: 'MODERATE', card: 'v1-card',         badge: 'v1-badge v1-badge-c',                    text: 'text-slate-400',   dot: 'bg-slate-400'   },
+  WEAK:     { label: 'WEAK',     card: 'v1-card-down',    badge: 'v1-badge bg-rose-500/10 border-rose-500/30 text-rose-400', text: 'text-rose-400', dot: 'bg-rose-400' },
 } as const;
 
 function conviction(level: string | null | undefined) {
@@ -101,7 +104,7 @@ export function TodaysPicks({ onSelectStock }: TodaysPicksProps) {
                   <div>
                     <div className="flex items-center gap-2">
                       <span className="font-bold text-white text-sm">{pick.symbol}</span>
-                      <span className={cn('text-[10px] font-bold px-1.5 py-0.5 rounded-full', cv.bg, cv.text)}>
+                      <span className={cn('text-[10px]', cv.badge)}>
                         {cv.label}
                       </span>
                     </div>

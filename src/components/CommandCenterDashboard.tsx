@@ -16,12 +16,12 @@ type HorizonFilter    = 'ALL' | 'intraday' | 'swing' | 'long_term';
 // ponytail: card = the matching v1-card-{up,down,neutral,accent} variant, so pick cards share
 // the rest of v1's glass+colored-top-edge shape. bg/border stay for the small tier badge chip,
 // which still wants its own solid tint (v1-card's background is fixed, can't be re-tinted).
-const CONVICTION_STYLE: Record<string, { bg: string; border: string; text: string; dot: string; label: string; card: string }> = {
-  S_ELITE:    { bg: 'bg-emerald-500/15', border: 'border-emerald-500/40', text: 'text-emerald-400', dot: 'bg-emerald-400', label: 'S — Elite',    card: 'v1-card-up' },
-  A_HIGH:     { bg: 'bg-sky-500/15',     border: 'border-sky-500/40',     text: 'text-sky-400',     dot: 'bg-sky-400',     label: 'A — High',     card: 'v1-card' },
-  B_MEDIUM:   { bg: 'bg-amber-500/15',   border: 'border-amber-500/40',   text: 'text-amber-400',   dot: 'bg-amber-400',   label: 'B — Medium',   card: 'v1-card-neutral' },
-  C_LOW:      { bg: 'bg-slate-700/40',   border: 'border-slate-600/40',   text: 'text-slate-400',   dot: 'bg-slate-400',   label: 'C — Low',      card: 'v1-card-accent' },
-  D_MARGINAL: { bg: 'bg-zinc-800/60',    border: 'border-zinc-700/40',    text: 'text-zinc-500',    dot: 'bg-zinc-500',    label: 'D — Marginal', card: 'v1-card-accent' },
+const CONVICTION_STYLE: Record<string, { bg: string; border: string; text: string; dot: string; label: string; card: string; badge: string }> = {
+  S_ELITE:    { bg: 'bg-emerald-500/15', border: 'border-emerald-500/40', text: 'text-emerald-400', dot: 'bg-emerald-400', label: 'S — Elite',    card: 'v1-card-up',     badge: 'v1-badge v1-badge-s' },
+  A_HIGH:     { bg: 'bg-sky-500/15',     border: 'border-sky-500/40',     text: 'text-sky-400',     dot: 'bg-sky-400',     label: 'A — High',     card: 'v1-card',        badge: 'v1-badge v1-badge-a' },
+  B_MEDIUM:   { bg: 'bg-amber-500/15',   border: 'border-amber-500/40',   text: 'text-amber-400',   dot: 'bg-amber-400',   label: 'B — Medium',   card: 'v1-card-neutral', badge: 'v1-badge v1-badge-b' },
+  C_LOW:      { bg: 'bg-slate-700/40',   border: 'border-slate-600/40',   text: 'text-slate-400',   dot: 'bg-slate-400',   label: 'C — Low',      card: 'v1-card-accent', badge: 'v1-badge v1-badge-c' },
+  D_MARGINAL: { bg: 'bg-zinc-800/60',    border: 'border-zinc-700/40',    text: 'text-zinc-500',    dot: 'bg-zinc-500',    label: 'D — Marginal', card: 'v1-card-accent', badge: 'v1-badge bg-zinc-800/60 border-zinc-700/40 text-zinc-500' },
 };
 
 const REGIME_STYLE: Record<string, { color: string; icon: string; bg: string }> = {
@@ -97,7 +97,7 @@ function EodPickCard({ pick, onSelect }: { pick: any; onSelect: (sym: string) =>
         <div>
           <div className="flex items-center gap-2">
             <span className="text-white font-bold text-sm">{pick.symbol}</span>
-            <span className={cn('text-[10px] font-black px-1.5 py-0.5 rounded border', style.bg, style.border, style.text)}>
+            <span className={cn('text-[10px] font-black', style.badge)}>
               {style.label}
             </span>
           </div>
