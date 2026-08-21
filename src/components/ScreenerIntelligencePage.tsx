@@ -83,12 +83,7 @@ function CategoryCard({ cat, onClick, active }: {
   return (
     <button
       onClick={onClick}
-      className={cn(
-        'text-left rounded-xl border p-3 transition-all',
-        active
-          ? 'bg-indigo-500/15 border-indigo-500/50'
-          : 'bg-slate-900/60 border-slate-800/50 hover:border-slate-600/50'
-      )}
+      className={cn('v1-card text-left p-3', active && 'ring-2 ring-indigo-500/60')}
     >
       <div className="flex items-center gap-2 mb-2">
         <Icon className={cn('w-3.5 h-3.5 flex-shrink-0', active ? 'text-indigo-400' : 'text-slate-500')} />
@@ -96,14 +91,17 @@ function CategoryCard({ cat, onClick, active }: {
       </div>
       <div className="flex items-end justify-between">
         <div>
+          {/* ponytail: v1-data-value/label are sized for headline KPI strips (text-lg);
+              this grid packs 9 tiles per row, too narrow for that scale -- kept the original
+              compact sizing, only the card container (background/border) was unified. */}
           <p className={cn('text-sm font-bold', wr && parseFloat(wr) >= 60 ? 'text-emerald-400' : 'text-slate-300')}>
             {wr ? `${wr}%` : '—'}
           </p>
-          <p className="text-[10px] text-slate-500">avg win rate</p>
+          <p className="text-[10px] text-slate-500">win rate</p>
         </div>
         <div className="text-right">
           <p className="text-xs font-semibold text-slate-400">{cat.screener_count}</p>
-          <p className="text-[10px] text-slate-500">screeners</p>
+          <p className="text-[10px] text-slate-500">count</p>
         </div>
       </div>
       {cat.tier_ab_count > 0 && (
