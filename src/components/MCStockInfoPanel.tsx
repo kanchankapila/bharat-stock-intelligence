@@ -114,7 +114,7 @@ const TrendlyneSWOTCard: React.FC<{ swot: any }> = ({ swot }) => {
               </div>
               <div className="space-y-1.5">
                 {items.map((item: string, idx: number) => (
-                  <div key={idx} className="flex items-start gap-2 text-[10px] text-slate-400 leading-relaxed bg-slate-900/35 p-2 rounded-lg border border-slate-800/40 hover:border-slate-800 transition-colors">
+                  <div key={idx} className="v1-card-accent flex items-start gap-2 text-[10px] text-slate-400 leading-relaxed p-2">
                     <span className={cn("font-black shrink-0", cat.iconColor)}>•</span>
                     <span>{item}</span>
                   </div>
@@ -155,7 +155,7 @@ const TrendlyneChecklistCard: React.FC<{ checklist: any }> = ({ checklist }) => 
       </div>
       
       {checklist.insight && (
-        <p className="text-[10px] text-slate-400 italic mb-4 leading-relaxed font-medium bg-slate-900/40 p-2.5 rounded-xl border border-slate-800/60">
+        <p className="v1-card-accent text-[10px] text-slate-400 italic mb-4 leading-relaxed font-medium p-2.5">
           Insight: {checklist.insight}
         </p>
       )}
@@ -166,7 +166,7 @@ const TrendlyneChecklistCard: React.FC<{ checklist: any }> = ({ checklist }) => 
             const items = cdata[sectionName];
             if (!Array.isArray(items) || items.length === 0) return null;
             return (
-              <div key={sectionName} className="p-3 bg-slate-900/20 border border-slate-800/40 rounded-xl">
+              <div key={sectionName} className="v1-card-accent p-3">
                 <p className="text-[8px] font-black text-slate-400 font-display uppercase tracking-widest mb-2 border-b border-slate-800/60 pb-1">
                   {sectionName.toUpperCase()}
                 </p>
@@ -504,7 +504,7 @@ export const MCStockInfoPanel: React.FC<MCStockInfoPanelProps> = ({
   if (error || !unifiedData) {
     const stockName = stockMapping?.name || symbol;
     return (
-      <div ref={containerRef} className="p-8 text-center bg-slate-900/30 border border-slate-800 rounded-2xl">
+      <div ref={containerRef} className="v1-card-down p-8 text-center">
         <AlertCircle className="w-8 h-8 text-rose-500 mx-auto mb-3" />
         <p className="text-sm text-slate-500 font-bold">Failed to load data for {stockName}</p>
         <p className="text-[10px] text-slate-600 mt-1 font-display uppercase tracking-widest">{symbol}</p>
@@ -529,7 +529,7 @@ export const MCStockInfoPanel: React.FC<MCStockInfoPanelProps> = ({
   if (!hasAnyData) {
     const stockName = stockMapping?.name || symbol;
     return (
-      <div ref={containerRef} className="p-8 text-center bg-slate-900/30 border border-slate-800 rounded-2xl">
+      <div ref={containerRef} className="v1-card-neutral p-8 text-center">
         <AlertCircle className="w-8 h-8 text-amber-500 mx-auto mb-3" />
         <p className="text-sm text-slate-400 font-bold">No MoneyControl data available for {stockName}</p>
         <p className="text-[10px] text-slate-600 mt-1 font-display uppercase tracking-widest">{symbol} — not mapped to a MoneyControl ID</p>
@@ -590,7 +590,7 @@ export const MCStockInfoPanel: React.FC<MCStockInfoPanelProps> = ({
   return (
     <div ref={containerRef} className="space-y-6">
 
-      <div className="rounded-2xl border border-slate-800 bg-slate-950/55 p-4">
+      <div className="v1-card p-4">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div>
             <p className="text-[10px] font-black uppercase tracking-[0.18em] text-slate-500">Institutional Stock Intelligence</p>
@@ -730,7 +730,7 @@ export const MCStockInfoPanel: React.FC<MCStockInfoPanelProps> = ({
 
       {/* ── Why: canonical score's own reasoning + engine coverage + sector rotation context ── */}
       {(!section || section === 'all' || section === 'overview') && (unifiedScore?.trade_reasoning || sectorRotation?.rrg) && (
-        <div className="bg-slate-950/40 border border-slate-800/80 rounded-2xl p-3 space-y-2">
+        <div className="v1-card-accent p-3 space-y-2">
           {unifiedScore?.trade_reasoning && (
             <p className="text-[11px] text-slate-300 leading-relaxed">
               <span className="text-indigo-400 font-black font-display uppercase tracking-widest text-[9px] mr-1.5">Why:</span>
@@ -783,7 +783,7 @@ export const MCStockInfoPanel: React.FC<MCStockInfoPanelProps> = ({
 
       {/* ── Trendlyne Price Return Insights (Visible on top across all tabs) ── */}
       {trendlyneTa?.body?.parameters?.price_analysis && (
-        <div className="bg-slate-950/40 border border-slate-800/80 rounded-2xl p-3 space-y-2">
+        <div className="v1-card-accent p-3 space-y-2">
           <PanelSectionHeader
             title="Price Regime"
             subtitle="Trendlyne benchmark-relative return posture"
@@ -808,9 +808,12 @@ export const MCStockInfoPanel: React.FC<MCStockInfoPanelProps> = ({
               const changePctFormatted = typeof changePctVal === 'number' ? changePctVal.toFixed(2) : changePctVal;
               
               return (
-                <div 
-                  key={idx} 
-                  className="flex-shrink-0 min-w-[100px] p-2 bg-slate-950/60 rounded-xl border border-slate-800/40 flex flex-col justify-between hover:border-slate-700 transition-colors"
+                <div
+                  key={idx}
+                  className={cn(
+                    "v1-stat-pill flex-shrink-0 min-w-[100px] p-2 flex-col justify-between",
+                    isPositive ? "v1-stat-pill-up" : isNegative ? "v1-stat-pill-down" : "v1-stat-pill-neutral"
+                  )}
                 >
                   <span className="text-[8px] font-black text-slate-500 font-display uppercase tracking-widest">{item.name}</span>
                   <span className={cn(
@@ -848,7 +851,7 @@ export const MCStockInfoPanel: React.FC<MCStockInfoPanelProps> = ({
 
       {/* ── TAB BAR (Only show if section is 'all' or undefined) ── */}
       {(!section || section === 'all') && (
-        <div className="rounded-2xl border border-slate-800 bg-slate-950/35 p-1.5">
+        <div className="v1-card-accent p-1.5">
           <div className="mb-1.5 px-2 text-[9px] font-black uppercase tracking-[0.16em] text-slate-500">Research Lenses</div>
           <div className="flex overflow-x-auto gap-1 scrollbar-none">
             {TABS.map(tab => (
@@ -906,7 +909,7 @@ export const MCStockInfoPanel: React.FC<MCStockInfoPanelProps> = ({
       })()}
 
       {activeTab === 'overview' && (
-        <div className="rounded-2xl border border-slate-800 bg-slate-950/30 p-4 space-y-4">
+        <div className="v1-card p-4 space-y-4">
           <PanelSectionHeader
             title="Overview Synthesis"
             subtitle="Unified multi-engine read with valuation and profile context"
@@ -915,7 +918,7 @@ export const MCStockInfoPanel: React.FC<MCStockInfoPanelProps> = ({
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
             {/* AlphaQuant Factor Breakdown */}
             {alphaData && (
-              <div className="bg-slate-950/60 border border-slate-800 rounded-2xl p-3 flex flex-col justify-between min-h-[140px]">
+              <div className="v1-card-accent p-3 flex flex-col justify-between min-h-[140px]">
                 <p className="text-[9px] font-black text-blue-500 font-display uppercase tracking-widest mb-3 flex items-center gap-1.5">
                   <Zap className="w-3 h-3" /> AlphaQuant Core
                 </p>
@@ -965,7 +968,7 @@ export const MCStockInfoPanel: React.FC<MCStockInfoPanelProps> = ({
               ].filter(d => d.val != null);
               if (dims.length === 0) return null;
               return (
-                <div className="bg-slate-950/60 border border-slate-800 rounded-2xl p-3 min-h-[140px]">
+                <div className="v1-card-accent p-3 min-h-[140px]">
                   <div className="flex items-center justify-between mb-2">
                     <p className="text-[9px] font-black text-violet-500 font-display uppercase tracking-widest flex items-center gap-1.5">
                       <BarChart3 className="w-3 h-3" /> TB Matrix
@@ -995,19 +998,19 @@ export const MCStockInfoPanel: React.FC<MCStockInfoPanelProps> = ({
           {/* Company Profile (Trendlyne) */}
           {/* ── AI PROFILE ANALYSIS ── */}
           {profileAnalysis && (
-            <div className="bg-slate-800/40 rounded-xl p-5 border border-slate-700/50 mb-6">
+            <div className="v1-card p-5 mb-6">
               <div className="flex items-center justify-between mb-4">
                 <h3 className="text-emerald-400 font-semibold flex items-center gap-2">
                   <BrainCircuit className="w-5 h-5" /> AI Profile Analysis
                 </h3>
                 <div className="flex gap-2">
                   {(profileAnalysis as any).high_growth_scope === 1 && (
-                    <span className="text-xs bg-emerald-500/20 text-emerald-400 px-2 py-1 rounded-full border border-emerald-500/20 flex items-center gap-1">
+                    <span className="v1-badge v1-badge-strong">
                       <ArrowUpRight className="w-3 h-3" /> High Growth Scope
                     </span>
                   )}
                   {(profileAnalysis as any).in_news_for_growth === 1 && (
-                    <span className="text-xs bg-amber-500/20 text-amber-400 px-2 py-1 rounded-full border border-amber-500/20 flex items-center gap-1">
+                    <span className="v1-badge v1-badge-medium">
                       <Zap className="w-3 h-3" /> In News for Growth
                     </span>
                   )}
@@ -1048,7 +1051,7 @@ export const MCStockInfoPanel: React.FC<MCStockInfoPanelProps> = ({
               </h4>
               <div className="space-y-3">
                 {overviewData.faq.slice(0, 3).map((f, i) => (
-                  <div key={i} className="p-3 bg-slate-900/50 rounded-xl border border-slate-800/50">
+                  <div key={i} className="v1-card-accent p-3">
                     <p className="text-[11px] font-black text-slate-200 mb-1">{f.question}</p>
                     <p className="text-[10px] font-medium text-slate-400 leading-relaxed" dangerouslySetInnerHTML={{ __html: f.answer }} />
                   </div>
@@ -1061,7 +1064,7 @@ export const MCStockInfoPanel: React.FC<MCStockInfoPanelProps> = ({
           {(swot || tb?.insights) && (
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
               {/* Alpha Drivers */}
-              <div className="bg-emerald-500/5 border border-emerald-500/10 rounded-2xl p-3">
+              <div className="v1-card-up p-3">
                 <p className="text-[9px] font-black text-emerald-500 font-display uppercase tracking-widest mb-3 flex items-center gap-1.5">
                   <TrendingUp className="w-3.5 h-3.5" /> Alpha Drivers & Strengths
                 </p>
@@ -1084,7 +1087,7 @@ export const MCStockInfoPanel: React.FC<MCStockInfoPanelProps> = ({
               </div>
 
               {/* Risk Vectors */}
-              <div className="bg-rose-500/5 border border-rose-500/10 rounded-2xl p-3">
+              <div className="v1-card-down p-3">
                 <p className="text-[9px] font-black text-rose-500 font-display uppercase tracking-widest mb-3 flex items-center gap-1.5">
                   <AlertCircle className="w-3.5 h-3.5" /> Risk Vectors & Weaknesses
                 </p>
@@ -1112,10 +1115,10 @@ export const MCStockInfoPanel: React.FC<MCStockInfoPanelProps> = ({
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
             {/* MC Classification */}
             {mcScoreClass?.longDesc && (
-              <div className={cn("p-3 rounded-2xl border relative overflow-hidden flex flex-col justify-between",
-                mcScoreClass.stockScore >= 70 ? "bg-emerald-500/5 border-emerald-500/20" :
-                mcScoreClass.stockScore >= 50 ? "bg-amber-500/5 border-amber-500/20" :
-                "bg-rose-500/5 border-rose-500/20"
+              <div className={cn("p-3 relative overflow-hidden flex flex-col justify-between",
+                mcScoreClass.stockScore >= 70 ? "v1-card-up" :
+                mcScoreClass.stockScore >= 50 ? "v1-card-neutral" :
+                "v1-card-down"
               )}>
                 <div className="absolute top-0 right-0 p-4 opacity-[0.03] pointer-events-none"><BrainCircuit className="w-16 h-16" /></div>
                 <div className="relative z-10">
@@ -1139,7 +1142,7 @@ export const MCStockInfoPanel: React.FC<MCStockInfoPanelProps> = ({
 
             {/* MC Investment Checklist */}
             {essentials?.checklist && (
-              <div className="bg-slate-950/60 border border-slate-800 rounded-2xl p-3">
+              <div className="v1-card-accent p-3">
                 <div className="flex items-center justify-between mb-3">
                   <div className="flex items-center gap-1.5">
                     <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500" />
@@ -1191,7 +1194,7 @@ export const MCStockInfoPanel: React.FC<MCStockInfoPanelProps> = ({
               </p>
               <div className="flex flex-wrap gap-3">
                 {tb?.profile && (
-                  <div className="flex-1 min-w-0 flex flex-wrap items-center gap-x-4 gap-y-2 px-4 py-2.5 bg-slate-900/35 border border-white/[0.06] rounded-xl">
+                  <div className="v1-card-accent flex-1 min-w-0 flex flex-wrap items-center gap-x-4 gap-y-2 px-4 py-2.5">
                     {tb.profile.founded_year && (
                       <span className="text-[10px] font-bold text-slate-400">Founded <span className="text-slate-200 font-black">{tb.profile.founded_year}</span></span>
                     )}
@@ -1210,7 +1213,7 @@ export const MCStockInfoPanel: React.FC<MCStockInfoPanelProps> = ({
                   </div>
                 )}
                 {Array.isArray(tb?.overviewData?.stock_mentions?.ace_investors) && tb.overviewData.stock_mentions.ace_investors.length > 0 && (
-                  <div className="flex items-center gap-2 px-4 py-2.5 bg-indigo-500/5 border border-indigo-500/20 rounded-xl">
+                  <div className="v1-card flex items-center gap-2 px-4 py-2.5">
                     <Users className="w-3.5 h-3.5 text-indigo-500 shrink-0" />
                     <span className="text-[10px] font-black text-indigo-400 font-display uppercase tracking-widest">Ace Investors:</span>
                     <span className="text-[10px] font-bold text-slate-200">
@@ -1236,7 +1239,7 @@ export const MCStockInfoPanel: React.FC<MCStockInfoPanelProps> = ({
       {/* FINANCIALS TAB                                                 */}
       {/* ══════════════════════════════════════════════════════════════ */}
       {(activeTab === 'financials' || activeTab === 'earnings') && (
-        <div className="rounded-2xl border border-slate-800 bg-slate-950/30 p-4 space-y-6">
+        <div className="v1-card p-4 space-y-6">
           <PanelSectionHeader
             title={activeTab === 'earnings' ? 'Results & Earnings' : 'Financials Core'}
             subtitle={activeTab === 'earnings' ? 'Forecasts, surprises, ratings and action calendar' : 'Valuation matrix, profitability and events'}
@@ -1316,7 +1319,7 @@ export const MCStockInfoPanel: React.FC<MCStockInfoPanelProps> = ({
                         ['Net Profit', latestRow(forecast.netProfit)],
                         ['Revenue', latestRow(forecast.revenue)],
                       ] as [string, ReturnType<typeof latestRow>][]).map(([label, row]) => row && (
-                        <div key={label} className="p-2.5 bg-slate-950/60 rounded-xl border border-slate-800/50">
+                        <div key={label} className="v1-card-accent p-2.5">
                           <div className="flex items-center justify-between text-[9px] text-slate-500 font-display uppercase tracking-widest mb-1">
                             <span>{label}</span><span>{row.date}</span>
                           </div>
@@ -1359,7 +1362,7 @@ export const MCStockInfoPanel: React.FC<MCStockInfoPanelProps> = ({
             <Card title="Concall Takeaways (AI-Generated)" icon={BrainCircuit} className="mb-6">
               <div className="space-y-3 pt-2">
                 {concallTakeaways.map((c: any, i: number) => (
-                  <div key={i} className="p-3 bg-slate-950 rounded-xl border border-slate-800/50">
+                  <div key={i} className="v1-card-accent p-3">
                     <div className="flex items-center justify-between gap-2 mb-1.5">
                       <span className="text-[10px] font-black text-slate-300 font-display uppercase tracking-widest">
                         {c.quarter || c.fiscal_year || 'Latest concall'}
@@ -1396,7 +1399,7 @@ export const MCStockInfoPanel: React.FC<MCStockInfoPanelProps> = ({
                 </h4>
                 <div className="space-y-2 max-h-[160px] overflow-y-auto pr-1 terminal-scrollbar">
                   {overviewData.eventsData.dividendTableData.map((d: any, i: number) => (
-                    <div key={i} className="flex justify-between items-center p-2.5 bg-slate-900/50 rounded-xl border border-slate-800/50">
+                    <div key={i} className="v1-card-accent flex justify-between items-center p-2.5">
                       <div>
                         <p className="text-[10px] font-black text-amber-400 font-display uppercase tracking-widest">{d.dividendType || 'Dividend'}</p>
                         <p className="text-[11px] font-bold text-slate-200 mt-0.5">₹{d.dividendAmount}</p>
@@ -1418,7 +1421,7 @@ export const MCStockInfoPanel: React.FC<MCStockInfoPanelProps> = ({
                 </h4>
                 <div className="space-y-2 max-h-[160px] overflow-y-auto pr-1 terminal-scrollbar">
                   {overviewData.eventsData.boardMeetingTableData.map((action: any, i: number) => (
-                    <div key={i} className="flex justify-between items-center p-2.5 bg-slate-900/50 rounded-xl border border-slate-800/50">
+                    <div key={i} className="v1-card-accent flex justify-between items-center p-2.5">
                       <p className="text-[10px] font-black text-indigo-400 font-display uppercase tracking-widest leading-tight w-40 truncate">
                         {action.purpose || 'Meeting'}
                       </p>
@@ -1457,13 +1460,13 @@ export const MCStockInfoPanel: React.FC<MCStockInfoPanelProps> = ({
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
             {/* Price Performance Insights */}
             {detailedInsights?.price && (
-              <div className="bg-slate-950/60 border border-slate-800 rounded-2xl p-3">
+              <div className="v1-card-accent p-3">
                 <p className="text-[9px] font-black text-blue-500 font-display uppercase tracking-widest mb-3 flex items-center gap-1.5 border-l-2 border-blue-500 pl-2">
                   Market Dynamics
                 </p>
                 <div className="space-y-1.5">
                   {detailedInsights.price.slice(0, 6).map((p: any, i: number) => (
-                    <div key={i} className="flex justify-between items-center p-2 bg-slate-900/30 rounded-lg border border-slate-800/30">
+                    <div key={i} className="v1-card-accent flex justify-between items-center p-2">
                       <span className="text-[9px] font-black text-slate-500 uppercase truncate max-w-[40%]">{p.shortDesc.split(' ')[0]}</span>
                       <span className={cn("text-[9px] font-black text-right flex-1", 
                         p.color === 'positive' ? "text-emerald-400" : p.color === 'negative' ? "text-rose-400" : "text-slate-300"
@@ -1476,13 +1479,13 @@ export const MCStockInfoPanel: React.FC<MCStockInfoPanelProps> = ({
 
             {/* Ownership Insights */}
             {detailedInsights?.shareholding && (
-              <div className="bg-slate-950/60 border border-slate-800 rounded-2xl p-3">
+              <div className="v1-card-accent p-3">
                 <p className="text-[9px] font-black text-violet-500 font-display uppercase tracking-widest mb-3 flex items-center gap-1.5 border-l-2 border-violet-500 pl-2">
                   Ownership Trends
                 </p>
                 <div className="space-y-1.5">
                   {detailedInsights.shareholding.slice(0, 6).map((sh: any, i: number) => (
-                    <div key={i} className="flex justify-between items-center p-2 bg-slate-900/30 rounded-lg border border-slate-800/30">
+                    <div key={i} className="v1-card-accent flex justify-between items-center p-2">
                       <span className="text-[9px] font-black text-slate-500 uppercase truncate max-w-[40%]">{sh.shorttext}</span>
                       <span className={cn("text-[9px] font-black text-right flex-1",
                         sh.color === 'positive' ? "text-emerald-400" : sh.color === 'negative' ? "text-rose-400" : "text-slate-300"
@@ -1495,7 +1498,7 @@ export const MCStockInfoPanel: React.FC<MCStockInfoPanelProps> = ({
 
             {/* Shareholding Intelligence (TB Insights) */}
             {tb?.shareHoldingGraph?.insights && (
-              <div className="bg-slate-950/60 border border-slate-800 rounded-2xl p-3">
+              <div className="v1-card-accent p-3">
                 <p className="text-[9px] font-black text-emerald-500 font-display uppercase tracking-widest mb-3 flex items-center gap-1.5 border-l-2 border-emerald-500 pl-2">
                   Alpha Insights
                 </p>
@@ -1531,7 +1534,7 @@ export const MCStockInfoPanel: React.FC<MCStockInfoPanelProps> = ({
                 <p className="text-[9px] font-black text-blue-500 font-display uppercase tracking-widest border-l-2 border-blue-500 pl-2">MC Price Returns</p>
                 <div className="grid grid-cols-3 gap-2">
                   {Object.entries(pv?.price || {}).map(([period, val]) => (
-                    <div key={period} className="p-2.5 bg-slate-950 rounded-xl border border-slate-800/50 text-center">
+                    <div key={period} className={cn("v1-stat-pill p-2.5 text-center", Number(val) >= 0 ? "v1-stat-pill-up" : "v1-stat-pill-down")}>
                       <p className="text-[7px] font-black text-slate-500 font-display uppercase tracking-widest mb-0.5">{period}</p>
                       <p className={cn("text-[11px] font-black italic", Number(val) >= 0 ? "text-emerald-400" : "text-rose-400")}>
                         {Number(val) >= 0 ? '+' : ''}{String(val)}%
@@ -1550,7 +1553,7 @@ export const MCStockInfoPanel: React.FC<MCStockInfoPanelProps> = ({
                       ].filter(p => p.val != null).map(({ label, val }) => {
                         const n = typeof val === 'string' ? parseFloat(val) : Number(val);
                         return (
-                          <div key={label} className="p-2 bg-slate-950 rounded-lg border border-slate-800/50 text-center">
+                          <div key={label} className={cn("v1-stat-pill p-2 text-center", n >= 0 ? "v1-stat-pill-up" : "v1-stat-pill-down")}>
                             <p className="text-[7px] font-black text-slate-500 uppercase mb-0.5">{label}</p>
                             <p className={cn("text-[10px] font-black italic", n >= 0 ? "text-emerald-400" : "text-rose-400")}>
                               {n >= 0 ? '+' : ''}{n.toFixed(1)}%
@@ -1572,7 +1575,7 @@ export const MCStockInfoPanel: React.FC<MCStockInfoPanelProps> = ({
                       const deliveryPctMatch = v.delivery_display_text?.match(/\(([\d.]+)%\)/);
                       const deliveryPct = deliveryPctMatch ? parseFloat(deliveryPctMatch[1]) : 0;
                       return (
-                        <div key={period} className="p-3 bg-slate-950 rounded-xl border border-slate-800/50 group">
+                        <div key={period} className="v1-card-accent p-3 group">
                           <div className="flex justify-between items-center mb-1.5">
                             <span className="text-[9px] font-black text-slate-400 font-display uppercase tracking-widest">{period}</span>
                             <div className="text-right">
@@ -1695,7 +1698,10 @@ export const MCStockInfoPanel: React.FC<MCStockInfoPanelProps> = ({
           {/* Piotroski Score */}
           {detailedInsights?.financials?.piotroskiData && (
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-              <div className="p-4 bg-slate-950 border border-slate-800 rounded-2xl text-center">
+              <div className={cn("p-4 text-center",
+                parseInt(detailedInsights.financials.piotroskiData.score) >= 7 ? "v1-card-up" :
+                parseInt(detailedInsights.financials.piotroskiData.score) >= 5 ? "v1-card-neutral" : "v1-card-down"
+              )}>
                 <p className="text-[9px] font-black text-slate-500 font-display uppercase tracking-widest mb-1">Piotroski Score</p>
                 <p className={cn("text-2xl font-black italic",
                   parseInt(detailedInsights.financials.piotroskiData.score) >= 7 ? "text-emerald-400" :
@@ -1703,7 +1709,7 @@ export const MCStockInfoPanel: React.FC<MCStockInfoPanelProps> = ({
                 )}>{detailedInsights.financials.piotroskiData.score}/9</p>
                 <p className="text-[9px] text-slate-500 font-bold font-display uppercase tracking-widest mt-1">{detailedInsights.financials.piotroskiData.shortDesc}</p>
               </div>
-              <div className="md:col-span-2 p-4 bg-slate-950 border border-slate-800 rounded-2xl flex items-center">
+              <div className="v1-card-accent md:col-span-2 p-4 flex items-center">
                 <p className="text-[10px] text-slate-400 italic font-medium">{detailedInsights.financials.piotroskiData.tooltip}</p>
               </div>
             </div>
@@ -1714,7 +1720,7 @@ export const MCStockInfoPanel: React.FC<MCStockInfoPanelProps> = ({
             <Card title="Industry Comparison" icon={Users}>
               <div className="space-y-2 pt-2">
                 {detailedInsights.industryComparison.map((ic: any, i: number) => (
-                  <div key={i} className="flex items-center justify-between p-3 bg-slate-950 rounded-xl border border-slate-800/50">
+                  <div key={i} className="v1-card-accent flex items-center justify-between p-3">
                     <div className="min-w-0">
                       <p className="text-[10px] font-black text-slate-300 font-display uppercase tracking-widest truncate">{ic.title}</p>
                       <p className="text-[9px] text-slate-500 font-medium mt-0.5">{ic.shortDesc}</p>
@@ -1740,7 +1746,7 @@ export const MCStockInfoPanel: React.FC<MCStockInfoPanelProps> = ({
                     href={et.pdfUrl}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="flex items-center justify-between p-3 bg-slate-950 rounded-xl border border-slate-800/50 hover:border-indigo-500/40 transition-colors"
+                    className="v1-card flex items-center justify-between p-3"
                   >
                     <div className="min-w-0">
                       <p className="text-[10px] font-black text-slate-300 font-display uppercase tracking-widest truncate">{et.title}</p>
@@ -1766,7 +1772,7 @@ export const MCStockInfoPanel: React.FC<MCStockInfoPanelProps> = ({
                   const isSafe   = /AAA|AA\+?|A\+?(?![-B])|BBB/.test(rating.toUpperCase());
                   const isDanger = /B[-+]?|CCC|D/.test(rating.toUpperCase()) && !/BBB|AAA|AA/.test(rating.toUpperCase());
                   return (
-                    <div key={i} className="flex items-center justify-between p-3 bg-slate-950 rounded-xl border border-slate-800/50">
+                    <div key={i} className="v1-card-accent flex items-center justify-between p-3">
                       <div className="flex items-center gap-3">
                         <span className={cn("text-sm font-black italic px-2 py-0.5 rounded min-w-[3rem] text-center",
                           isSafe ? "bg-emerald-500/10 text-emerald-400" :
@@ -1877,7 +1883,7 @@ export const MCStockInfoPanel: React.FC<MCStockInfoPanelProps> = ({
                       <div className="space-y-3">
                         <div className="grid grid-cols-2 gap-2">
                           {holdingsList.map((h, i) => (
-                            <div key={i} className="p-3 bg-slate-950 rounded-xl border border-slate-800/50">
+                            <div key={i} className="v1-stat-pill p-3">
                               <p className="text-[7px] font-black text-slate-500 font-display uppercase tracking-widest mb-1">{h.name}</p>
                               <p className="text-sm font-black text-white italic">{Number(h.value).toFixed(2)}%</p>
                             </div>
@@ -1885,7 +1891,7 @@ export const MCStockInfoPanel: React.FC<MCStockInfoPanelProps> = ({
                         </div>
                         
                         {pledgeNum > 0 ? (
-                          <div className="flex items-center gap-2 px-3 py-2 bg-rose-500/10 border border-rose-500/20 rounded-xl">
+                          <div className="v1-card-down flex items-center gap-2 px-3 py-2">
                             <AlertCircle className="w-4 h-4 text-rose-500 shrink-0" />
                             <div>
                               <p className="text-[9px] font-black text-rose-400 font-display uppercase tracking-widest">Promoter Pledging Detected</p>
@@ -1893,7 +1899,7 @@ export const MCStockInfoPanel: React.FC<MCStockInfoPanelProps> = ({
                             </div>
                           </div>
                         ) : (
-                          <div className="flex items-center gap-2 px-3 py-2 bg-emerald-500/5 border border-emerald-500/10 rounded-xl">
+                          <div className="v1-card-up flex items-center gap-2 px-3 py-2">
                             <CheckCircle2 className="w-4 h-4 text-emerald-500 shrink-0" />
                             <p className="text-[9px] font-black text-emerald-400 font-display uppercase tracking-widest">Zero Promoter Shares Pledged</p>
                           </div>
@@ -1906,7 +1912,7 @@ export const MCStockInfoPanel: React.FC<MCStockInfoPanelProps> = ({
                 {/* Stacked Recharts Bar Chart for Quarterly Trends */}
                 <div className="lg:col-span-2 space-y-4">
                   <p className="text-[9px] font-black text-violet-500 font-display uppercase tracking-widest border-l-2 border-violet-500 pl-2">Quarterly Historical Trends</p>
-                  <div className="bg-slate-950/40 border border-slate-800/40 rounded-2xl p-2.5 overflow-hidden">
+                  <div className="v1-card-accent p-2.5 overflow-hidden">
                     {(() => {
                       const holdings = tb?.shareHoldingGraph?.holdings;
                       if (!holdings) return <div className="h-40 flex items-center justify-center text-slate-700 text-[10px] font-black font-display uppercase tracking-widest italic">No historical trend data</div>;
@@ -1975,7 +1981,7 @@ export const MCStockInfoPanel: React.FC<MCStockInfoPanelProps> = ({
                         const pctChange = row.pct_holding_change != null ? Number(row.pct_holding_change) : null;
                         const isNeg = activity === 'EXIT' || (pctChange != null && pctChange < 0);
                         return (
-                          <div key={`${row.investor_slug}-${i}`} className="flex items-center justify-between gap-2 p-2 bg-slate-950 rounded-lg border border-slate-800/50 text-[10px]">
+                          <div key={`${row.investor_slug}-${i}`} className="v1-card-accent flex items-center justify-between gap-2 p-2 text-[10px]">
                             <span className="text-slate-300 font-semibold truncate">{String(row.investor_slug ?? 'investor').replace(/-/g, ' ')}</span>
                             <span className={cn("font-data font-bold shrink-0", isNeg ? "text-rose-400" : "text-emerald-400")}>
                               {activity} {pctChange != null ? `${pctChange >= 0 ? '+' : ''}${pctChange.toFixed(2)}%` : ''}
@@ -1996,7 +2002,7 @@ export const MCStockInfoPanel: React.FC<MCStockInfoPanelProps> = ({
                   ) : (
                     <div className="space-y-1.5 max-h-56 overflow-y-auto terminal-scrollbar pr-1">
                       {institutionalDeals.map((row: any, i: number) => (
-                        <div key={i} className="flex items-center justify-between gap-2 p-2 bg-slate-950 rounded-lg border border-slate-800/50 text-[10px]">
+                        <div key={i} className="v1-card-accent flex items-center justify-between gap-2 p-2 text-[10px]">
                           <div className="min-w-0">
                             <span className="text-slate-300 font-semibold truncate block">{row.counterparty ?? '—'}</span>
                             <span className="text-slate-600 font-data">{row.deal_date}</span>
@@ -2019,7 +2025,7 @@ export const MCStockInfoPanel: React.FC<MCStockInfoPanelProps> = ({
                   ) : (
                     <div className="space-y-1.5 max-h-56 overflow-y-auto terminal-scrollbar pr-1">
                       {blockDealsForStock.map((row: any, i: number) => (
-                        <div key={i} className="flex items-center justify-between gap-2 p-2 bg-slate-950 rounded-lg border border-slate-800/50 text-[10px]">
+                        <div key={i} className="v1-card-accent flex items-center justify-between gap-2 p-2 text-[10px]">
                           <div className="min-w-0">
                             <span className="text-slate-300 font-semibold truncate block">{row.client_name ?? '—'}</span>
                             <span className="text-slate-600 font-data">{row.date} · {row.trade_type}</span>
@@ -2042,7 +2048,7 @@ export const MCStockInfoPanel: React.FC<MCStockInfoPanelProps> = ({
                   ) : (
                     <div className="space-y-1.5 max-h-56 overflow-y-auto terminal-scrollbar pr-1">
                       {insiderTxForStock.map((tx: any, i: number) => (
-                        <div key={i} className="flex items-center justify-between gap-2 p-2 bg-slate-950 rounded-lg border border-slate-800/50 text-[10px]">
+                        <div key={i} className="v1-card-accent flex items-center justify-between gap-2 p-2 text-[10px]">
                           <div className="min-w-0">
                             <span className="text-slate-300 font-semibold truncate block">{tx.person_name} <span className="text-slate-600 font-normal">({tx.person_category})</span></span>
                             <span className="text-slate-600 font-data">{tx.transaction_date}</span>
@@ -2142,7 +2148,7 @@ export const MCStockInfoPanel: React.FC<MCStockInfoPanelProps> = ({
                   <Card title="Recent Quarterly Performance (NiftyTrader)" icon={BarChart3}>
                     <div className="grid grid-cols-2 sm:grid-cols-5 gap-3 pt-2">
                       {quarters.map((q: any, idx: number) => (
-                        <div key={idx} className="p-3 bg-slate-950 rounded-xl border border-slate-800/50">
+                        <div key={idx} className="v1-card-accent p-3">
                           <span className="text-[9px] font-black text-slate-500 font-display uppercase tracking-wider block mb-1">{q.year}</span>
                           <div className="space-y-1">
                             <div className="flex justify-between items-center text-[10px]">
@@ -2172,7 +2178,7 @@ export const MCStockInfoPanel: React.FC<MCStockInfoPanelProps> = ({
       {/* TECHNICAL TAB                                                  */}
       {/* ══════════════════════════════════════════════════════════════ */}
       {activeTab === 'technical' && (
-        <div className="rounded-2xl border border-slate-800 bg-slate-950/30 p-4 space-y-6">
+        <div className="v1-card p-4 space-y-6">
           <PanelSectionHeader
             title="Technical Gauges"
             subtitle="Price structure, indicator stack and momentum diagnostics"
@@ -2186,7 +2192,7 @@ export const MCStockInfoPanel: React.FC<MCStockInfoPanelProps> = ({
                 action={
                   <button
                     onClick={() => setUseTVChart(!useTVChart)}
-                    className="px-3 py-1 bg-blue-600/20 hover:bg-blue-600/30 text-blue-400 text-[9px] font-black font-display uppercase tracking-widest rounded-lg border border-blue-500/30 transition-all"
+                    className="v1-btn-secondary text-[9px] font-black font-display uppercase tracking-widest"
                   >
                     {useTVChart ? 'Show Basic Chart' : 'Show Advanced Chart'}
                   </button>
@@ -2320,7 +2326,7 @@ export const MCStockInfoPanel: React.FC<MCStockInfoPanelProps> = ({
                 <Card title={`Technical Signals (${timeframe === 'D' ? 'Daily' : timeframe === 'W' ? 'Weekly' : 'Monthly'})`} icon={Activity}>
                   <div className="space-y-6">
                     {tech.sentiments && (
-                      <div className="p-3 bg-slate-950/60 rounded-2xl border border-slate-800">
+                      <div className="v1-card-accent p-3">
                         <div className="flex items-center justify-between mb-3">
                           <div className="flex items-center gap-2">
                             <Activity className="w-3.5 h-3.5 text-blue-500" />
@@ -2363,7 +2369,7 @@ export const MCStockInfoPanel: React.FC<MCStockInfoPanelProps> = ({
                         </h4>
                         <div className="space-y-1.5">
                           {tech.crossover?.map((cross: any) => (
-                            <div key={cross.key} className="flex justify-between items-center p-2.5 bg-slate-950 rounded-xl border border-slate-800/50">
+                            <div key={cross.key} className="v1-card-accent flex justify-between items-center p-2.5">
                               <span className="text-[10px] font-black text-slate-500 uppercase">{cross.period}</span>
                               <div className="flex items-center gap-2">
                                 <span className="text-[10px] text-slate-300 font-bold">{cross.displayValue}</span>
@@ -2436,7 +2442,7 @@ export const MCStockInfoPanel: React.FC<MCStockInfoPanelProps> = ({
 
               {/* Multi-Timeframe Confluence */}
               {(techD || techW || techM) && (
-                <div className="bg-slate-950/60 border border-slate-800 rounded-2xl p-3">
+                <div className="v1-card-accent p-3">
                   <p className="text-[9px] font-black text-slate-400 font-display uppercase tracking-widest flex items-center gap-1.5 mb-2">
                     <Activity className="w-3 h-3 text-blue-500" /> Multi-TF Confluence
                   </p>
@@ -2483,7 +2489,7 @@ export const MCStockInfoPanel: React.FC<MCStockInfoPanelProps> = ({
               )}
 
               {/* Active Signals List */}
-              <div className="bg-slate-950/60 border border-slate-800 rounded-2xl p-3 flex flex-col">
+              <div className="v1-card-accent p-3 flex flex-col">
                 <div className="flex items-center gap-1.5 mb-2">
                   <Zap className="w-3 h-3 text-amber-400" />
                   <span className="text-[9px] font-black text-slate-400 font-display uppercase tracking-widest">Active Signals ({allScreeners.length})</span>
@@ -2519,7 +2525,7 @@ export const MCStockInfoPanel: React.FC<MCStockInfoPanelProps> = ({
                 <div className="space-y-4">
                   <p className="text-[9px] font-black text-blue-500 font-display uppercase tracking-widest border-l-2 border-blue-500 pl-2">MC Classic Pivots</p>
                   {tech.pivotLevels.map((pg: any) => (
-                    <div key={pg.key} className="p-3 bg-slate-950 rounded-xl border border-slate-800/50">
+                    <div key={pg.key} className="v1-card-accent p-3">
                       <p className="text-[8px] font-black text-slate-500 uppercase mb-2 text-center">{pg.key}</p>
                       <div className="grid grid-cols-5 gap-1 text-center">
                         <div className="p-1.5 bg-slate-900 rounded-lg border border-rose-500/10">
@@ -2556,7 +2562,7 @@ export const MCStockInfoPanel: React.FC<MCStockInfoPanelProps> = ({
                     { label: 'Fibonacci', data: tb.pivotData.fibonacci },
                     { label: 'Standard',  data: tb.pivotData.standard  },
                   ].filter(l => l.data).map(({ label, data }) => (
-                    <div key={label} className="p-3 bg-slate-950 rounded-xl border border-slate-800/50">
+                    <div key={label} className="v1-card-accent p-3">
                       <p className="text-[8px] font-black text-slate-500 uppercase mb-2 text-center">{label}</p>
                       <div className="grid grid-cols-7 gap-1 text-center">
                         {[
@@ -2582,7 +2588,7 @@ export const MCStockInfoPanel: React.FC<MCStockInfoPanelProps> = ({
           </Card>
 
           {(mc as any)?.technical?.pivotLevels && (
-            <div className="bg-slate-800/50 rounded-xl p-4 border border-slate-700/50 mt-3">
+            <div className="v1-card-accent p-4 mt-3">
               <div className="text-sm font-semibold text-slate-300 mb-3">Pivot Levels</div>
               {Object.entries((mc as any).technical.pivotLevels).map(([method, levels]: [string, any]) => (
                 <div key={method} className="mb-3">
@@ -2619,9 +2625,9 @@ export const MCStockInfoPanel: React.FC<MCStockInfoPanelProps> = ({
             const isBull = ratingText.toLowerCase().includes('bullish') || ratingText.toLowerCase().includes('buy');
             const isBear = ratingText.toLowerCase().includes('bearish') || ratingText.toLowerCase().includes('sell');
             return (
-              <div className={cn("p-4 rounded-2xl border flex items-center justify-between gap-4",
-                isBull ? "bg-emerald-500/5 border-emerald-500/20" :
-                isBear ? "bg-rose-500/5 border-rose-500/20" : "bg-slate-950 border-slate-800"
+              <div className={cn("p-4 flex items-center justify-between gap-4",
+                isBull ? "v1-card-up" :
+                isBear ? "v1-card-down" : "v1-card-accent"
               )}>
                 <div className="flex items-center gap-3">
                   <Zap className={cn("w-5 h-5", isBull ? "text-emerald-400" : isBear ? "text-rose-400" : "text-slate-500")} />
@@ -2646,8 +2652,8 @@ export const MCStockInfoPanel: React.FC<MCStockInfoPanelProps> = ({
             const isBull = /bullish/i.test(sentiment);
             const isBear = /bearish/i.test(sentiment);
             return (
-              <div className={cn("p-3 rounded-2xl border flex items-center justify-between gap-3 text-xs",
-                isBull ? "bg-emerald-500/5 border-emerald-500/20" : isBear ? "bg-rose-500/5 border-rose-500/20" : "bg-slate-950 border-slate-800"
+              <div className={cn("p-3 flex items-center justify-between gap-3 text-xs",
+                isBull ? "v1-card-up" : isBear ? "v1-card-down" : "v1-card-accent"
               )}>
                 <span className="text-slate-500 font-display uppercase tracking-widest text-[9px] font-black">Sentiment on {h.currdate}</span>
                 <span className={cn("font-black italic", isBull ? "text-emerald-400" : isBear ? "text-rose-400" : "text-slate-300")}>
@@ -2666,7 +2672,7 @@ export const MCStockInfoPanel: React.FC<MCStockInfoPanelProps> = ({
             <Card title="Detailed Technical Indicators" icon={Activity}>
               <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2 pt-2">
                 {(technicalAnalysisV2.data.indicators || []).map((ind: any) => (
-                  <div key={ind.id} className="p-2 bg-slate-950 rounded-xl border border-slate-800/50 text-center">
+                  <div key={ind.id} className="v1-stat-pill p-2 text-center">
                     <p className="text-[8px] font-black text-slate-500 font-display uppercase tracking-widest truncate">{ind.displayName}</p>
                     <p className="text-sm font-black text-slate-200 font-data mt-0.5">
                       {(ind.values || []).map((v: any) => v.value).join(' / ')}
@@ -2677,7 +2683,7 @@ export const MCStockInfoPanel: React.FC<MCStockInfoPanelProps> = ({
               {Array.isArray(technicalAnalysisV2.data.crossover) && technicalAnalysisV2.data.crossover.length > 0 && (
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 mt-3 pt-3 border-t border-slate-800/60">
                   {technicalAnalysisV2.data.crossover.map((c: any) => (
-                    <div key={c.key} className="p-2 bg-slate-950 rounded-xl border border-slate-800/50 text-center">
+                    <div key={c.key} className="v1-stat-pill p-2 text-center">
                       <p className="text-[8px] font-black text-slate-500 font-display uppercase tracking-widest">{c.displayValue}</p>
                       <p className="text-[10px] text-slate-300 mt-0.5">{c.indication || c.period}</p>
                     </div>
@@ -2708,7 +2714,7 @@ export const MCStockInfoPanel: React.FC<MCStockInfoPanelProps> = ({
                   try { meta = JSON.parse(p.meta_data || '{}'); } catch { /* ignore */ }
                   const isBuy = meta.pattern_type === 'buy';
                   return (
-                    <div key={i} className="p-3 bg-slate-950 rounded-xl border border-slate-800/50">
+                    <div key={i} className="v1-card-accent p-3">
                       <div className="flex items-center justify-between">
                         <div className="min-w-0">
                           <p className="text-[10px] font-black text-slate-300 font-display uppercase tracking-widest truncate">{p.pattern_name}</p>
@@ -2747,8 +2753,8 @@ export const MCStockInfoPanel: React.FC<MCStockInfoPanelProps> = ({
                     niftyTraderData.analysisData.msg_data.map((msg: string, idx: number) => {
                       const isSupport = msg.toLowerCase().includes('support');
                       return (
-                        <div key={idx} className={cn("p-2.5 rounded-xl border text-[10px] leading-relaxed font-data flex items-start gap-2",
-                          isSupport ? "bg-emerald-950/20 border-emerald-900/40 text-emerald-450" : "bg-rose-950/20 border-rose-900/40 text-rose-455"
+                        <div key={idx} className={cn("p-2.5 text-[10px] leading-relaxed font-data flex items-start gap-2",
+                          isSupport ? "v1-card-up text-emerald-450" : "v1-card-down text-rose-455"
                         )}>
                           <span className="font-black shrink-0">{isSupport ? "▲" : "▼"}</span>
                           <span>{msg}</span>
@@ -2769,7 +2775,7 @@ export const MCStockInfoPanel: React.FC<MCStockInfoPanelProps> = ({
                     {niftyTraderData.analysisData?.priceTable?.[0] && (() => {
                       const latest = niftyTraderData.analysisData.priceTable[0];
                       return (
-                        <div className="p-3 bg-slate-900/45 border border-slate-800 rounded-xl">
+                        <div className="v1-stat-pill p-3">
                           <span className="text-[8px] font-black text-slate-500 font-display uppercase tracking-wider block mb-1">Delivery %</span>
                           <span className="text-base font-black text-slate-100 font-data">
                             {latest.delivery_percentage ? `${latest.delivery_percentage}%` : "N/A"}
@@ -2784,9 +2790,7 @@ export const MCStockInfoPanel: React.FC<MCStockInfoPanelProps> = ({
                       const trend = niftyTraderData.analysisData.stocktrend;
                       const hasNr7 = trend.nr7_today?.toLowerCase() === 'yes';
                       return (
-                        <div className={cn("p-3 border rounded-xl",
-                          hasNr7 ? "bg-blue-950/20 border-blue-900/40" : "bg-slate-900/45 border-slate-800"
-                        )}>
+                        <div className="v1-stat-pill p-3">
                           <span className="text-[8px] font-black text-slate-500 font-display uppercase tracking-wider block mb-1">NR7 Pattern</span>
                           <span className={cn("text-base font-black font-data", hasNr7 ? "text-blue-400 animate-pulse" : "text-slate-400")}>
                             {trend.nr7_today || "NO"}
@@ -2817,7 +2821,7 @@ export const MCStockInfoPanel: React.FC<MCStockInfoPanelProps> = ({
                         {smas.map((sma) => {
                           const isAbove = currentPrice >= (sma.val || 0);
                           return (
-                            <div key={sma.label} className="p-2 bg-slate-900/45 border border-slate-800/60 rounded-xl text-center">
+                            <div key={sma.label} className={cn("v1-stat-pill p-2 text-center", isAbove ? "v1-stat-pill-up" : "v1-stat-pill-down")}>
                               <span className="text-[8px] font-black text-slate-500 uppercase block mb-1">{sma.label.split(' ')[0]}</span>
                               <span className="text-[10px] font-black text-slate-200 font-data block">₹{Math.round(sma.val || 0)}</span>
                               <span className={cn("text-[7px] font-black font-data px-1 py-0.5 rounded uppercase mt-1 inline-block",
@@ -2842,7 +2846,7 @@ export const MCStockInfoPanel: React.FC<MCStockInfoPanelProps> = ({
       {/* PEERS PANEL (Rendered under Financials & Peers)               */}
       {/* ══════════════════════════════════════════════════════════════ */}
       {(activeTab === 'financials' || activeTab === 'earnings') && (
-        <div className="rounded-2xl border border-slate-800 bg-slate-950/30 p-4 space-y-6">
+        <div className="v1-card p-4 space-y-6">
           <PanelSectionHeader
             title="Peers & Relative Positioning"
             subtitle="Sector-level comparables for context, not direct recommendations"
@@ -2868,7 +2872,7 @@ export const MCStockInfoPanel: React.FC<MCStockInfoPanelProps> = ({
                           <div 
                             key={i} 
                             onClick={() => onSelectStock && onSelectStock(peer.symbol)}
-                            className="p-3.5 bg-slate-950/60 hover:bg-slate-900/60 border border-slate-800 hover:border-blue-500/50 rounded-xl transition-all cursor-pointer group active:scale-[0.98]"
+                            className="v1-card p-3.5 cursor-pointer group active:scale-[0.98]"
                           >
                             <div className="flex justify-between items-start mb-2">
                               <div>
@@ -3006,7 +3010,7 @@ export const MCStockInfoPanel: React.FC<MCStockInfoPanelProps> = ({
       {/* ANALYSIS SECTION (Rendered under AI Auditor Report)            */}
       {/* ══════════════════════════════════════════════════════════════ */}
       {activeTab === 'ai_report' && (
-        <div className="rounded-2xl border border-slate-800 bg-slate-950/30 p-4 space-y-6">
+        <div className="v1-card p-4 space-y-6">
           <PanelSectionHeader
             title="AI Auditor Report"
             subtitle="Qualitative synthesis, technical overlays and ownership intelligence"
@@ -3017,7 +3021,7 @@ export const MCStockInfoPanel: React.FC<MCStockInfoPanelProps> = ({
             <Card title="Intelligence Hub: Qualitative Core" icon={Search}>
               <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 pt-2">
                 {/* Alpha Drivers */}
-                <div className="bg-emerald-500/5 border border-emerald-500/10 rounded-2xl p-3">
+                <div className="v1-card-up p-3">
                   <p className="text-[9px] font-black text-emerald-500 font-display uppercase tracking-widest mb-3 flex items-center gap-1.5">
                     <TrendingUp className="w-3 h-3" /> Alpha Drivers & Strengths
                   </p>
@@ -3040,7 +3044,7 @@ export const MCStockInfoPanel: React.FC<MCStockInfoPanelProps> = ({
                 </div>
 
                 {/* Risk Vectors */}
-                <div className="bg-rose-500/5 border border-rose-500/10 rounded-2xl p-3">
+                <div className="v1-card-down p-3">
                   <p className="text-[9px] font-black text-rose-500 font-display uppercase tracking-widest mb-3 flex items-center gap-1.5">
                     <AlertCircle className="w-3 h-3" /> Risk Vectors & Weaknesses
                   </p>
@@ -3069,11 +3073,11 @@ export const MCStockInfoPanel: React.FC<MCStockInfoPanelProps> = ({
           {(detailedInsights?.shareholding || tb?.shareHoldingGraph) && (
             <Card title="Shareholding Intelligence" icon={PieChart}>
               <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 pt-2">
-                <div className="bg-slate-950/60 border border-slate-800 rounded-2xl p-3">
+                <div className="v1-card-accent p-3">
                   <p className="text-[9px] font-black text-blue-500 font-display uppercase tracking-widest mb-3 border-l-2 border-blue-500 pl-2">Ownership Dynamics</p>
                   <div className="space-y-1.5">
                     {detailedInsights?.shareholding?.slice(0, 4).map((sh: any, i: number) => (
-                      <div key={i} className="flex justify-between items-center p-2 bg-slate-900/30 rounded-lg border border-slate-800/30">
+                      <div key={i} className="v1-card-accent flex justify-between items-center p-2">
                         <span className="text-[9px] font-black text-slate-500 uppercase truncate max-w-[40%]">{sh.shorttext}</span>
                         <span className={cn("text-[9px] font-black text-right flex-1",
                           sh.color === 'positive' ? "text-emerald-400" : sh.color === 'negative' ? "text-rose-400" : "text-slate-300"
@@ -3083,7 +3087,7 @@ export const MCStockInfoPanel: React.FC<MCStockInfoPanelProps> = ({
                   </div>
                 </div>
                 {tb?.shareHoldingGraph?.insights && (
-                  <div className="bg-slate-950/60 border border-slate-800 rounded-2xl p-3">
+                  <div className="v1-card-accent p-3">
                     <p className="text-[9px] font-black text-violet-500 font-display uppercase tracking-widest mb-3 border-l-2 border-violet-500 pl-2">Shareholding Trends</p>
                     <div className="space-y-1.5">
                       {(() => {
@@ -3120,7 +3124,9 @@ export const MCStockInfoPanel: React.FC<MCStockInfoPanelProps> = ({
                   <div className="space-y-4 pt-2">
                     <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
                       {trendlyneTa.body.parameters.beta_analysis.map((beta: any, idx: number) => (
-                        <div key={idx} className="bg-slate-950/60 p-3 rounded-xl border border-slate-800/50 flex flex-col items-center justify-center">
+                        <div key={idx} className={cn("v1-stat-pill p-3 flex-col items-center justify-center",
+                          beta.color === 'positive' ? "v1-stat-pill-up" : beta.color === 'negative' ? "v1-stat-pill-down" : "v1-stat-pill-neutral"
+                        )}>
                           <span className="text-[8px] font-black text-slate-500 font-display uppercase tracking-widest">{beta.label} Beta</span>
                           <span className={cn("text-lg font-black italic mt-1", 
                             beta.color === 'positive' ? 'text-emerald-400' : 
@@ -3132,7 +3138,7 @@ export const MCStockInfoPanel: React.FC<MCStockInfoPanelProps> = ({
                       ))}
                     </div>
                     {trendlyneTa.body.parameters.beta_insight && trendlyneTa.body.parameters.beta_insight.length > 0 && (
-                      <div className="bg-slate-950/40 border border-slate-800/50 p-3 rounded-xl space-y-1.5">
+                      <div className="v1-card-accent p-3 space-y-1.5">
                         {trendlyneTa.body.parameters.beta_insight.map((insight: any, idx: number) => (
                           <div key={idx} className="flex items-start gap-2 text-[10px] text-slate-300">
                             <span className={cn("inline-block w-1.5 h-1.5 rounded-full mt-1.5 shrink-0", 
@@ -3155,10 +3161,10 @@ export const MCStockInfoPanel: React.FC<MCStockInfoPanelProps> = ({
                   <Card title="Oscillators & Indicators Dashboard" icon={Activity}>
                     <div className="space-y-4 pt-2">
                       {trendlyneTa.body.parameters.oscillator_signal && (
-                        <div className={cn("p-3 rounded-xl border flex items-center justify-between",
-                          trendlyneTa.body.parameters.oscillator_signal.color === 'positive' ? 'bg-emerald-500/5 border-emerald-500/20 text-emerald-400' :
-                          trendlyneTa.body.parameters.oscillator_signal.color === 'negative' ? 'bg-rose-500/5 border-rose-500/20 text-rose-400' :
-                          'bg-slate-900 border-slate-800 text-slate-300'
+                        <div className={cn("p-3 flex items-center justify-between",
+                          trendlyneTa.body.parameters.oscillator_signal.color === 'positive' ? 'v1-card-up text-emerald-400' :
+                          trendlyneTa.body.parameters.oscillator_signal.color === 'negative' ? 'v1-card-down text-rose-400' :
+                          'v1-card-accent text-slate-300'
                         )}>
                           <span className="text-[10px] font-black font-display uppercase tracking-wider">Overall Signal</span>
                           <span className="text-[10px] font-black italic">{trendlyneTa.body.parameters.oscillator_signal.insight}</span>
@@ -3167,7 +3173,7 @@ export const MCStockInfoPanel: React.FC<MCStockInfoPanelProps> = ({
                       
                       <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                         {trendlyneTa.body.parameters.oscillator_parameter.map((osc: any, idx: number) => (
-                          <div key={idx} className="flex items-center justify-between p-2 bg-slate-950/30 rounded-lg border border-slate-800/50 hover:bg-slate-950/60 hover:border-slate-300 transition-all">
+                          <div key={idx} className="v1-card-accent flex items-center justify-between p-2">
                             <div className="flex-1 min-w-0 pr-2">
                               <p className="text-[9px] font-black text-slate-400 font-display uppercase tracking-widest truncate">{osc.name}</p>
                               {osc.description && (
@@ -3198,10 +3204,10 @@ export const MCStockInfoPanel: React.FC<MCStockInfoPanelProps> = ({
                   <Card title="Trendlyne Technical Insights" icon={BrainCircuit}>
                     <div className="space-y-2 pt-2">
                       {trendlyneTa.body.parameters.technicals_insight.map((insight: any, idx: number) => (
-                        <div key={idx} className={cn("p-3 rounded-xl border flex items-start gap-2.5 text-[10px]",
-                          insight.color === 'positive' ? 'bg-emerald-500/5 border-emerald-500/20 text-slate-200' :
-                          insight.color === 'negative' ? 'bg-rose-500/5 border-rose-500/20 text-slate-200' :
-                          'bg-slate-900 border-slate-800 text-slate-200'
+                        <div key={idx} className={cn("p-3 flex items-start gap-2.5 text-[10px] text-slate-200",
+                          insight.color === 'positive' ? 'v1-card-up' :
+                          insight.color === 'negative' ? 'v1-card-down' :
+                          'v1-card-accent'
                         )}>
                           <span className={cn("inline-block w-1.5 h-1.5 rounded-full mt-1.5 shrink-0", 
                             insight.color === 'positive' ? 'bg-emerald-500' : 
@@ -3226,7 +3232,7 @@ export const MCStockInfoPanel: React.FC<MCStockInfoPanelProps> = ({
       {/* ANALYST RECOMMENDATIONS (Rendered under AI Auditor Report)     */}
       {/* ══════════════════════════════════════════════════════════════ */}
       {activeTab === 'ai_report' && (
-        <div className="rounded-2xl border border-slate-800 bg-slate-950/30 p-4 space-y-6">
+        <div className="v1-card p-4 space-y-6">
           <PanelSectionHeader
             title="Analyst & Forecast Lens"
             subtitle="Consensus trend, target dispersion and valuation expectations"
@@ -3270,11 +3276,11 @@ export const MCStockInfoPanel: React.FC<MCStockInfoPanelProps> = ({
                 <Card title="Forward Price Targets" icon={TrendingUp}>
                   <div className="grid grid-cols-3 gap-2 pt-1">
                     {[
-                      { label: 'High', val: pf.high, color: 'text-emerald-400', bg: 'bg-emerald-500/5' },
-                      { label: 'Mean', val: pf.mean, color: 'text-blue-400',    bg: 'bg-blue-500/5'    },
-                      { label: 'Low',  val: pf.low,  color: 'text-rose-400',    bg: 'bg-rose-500/5'    },
+                      { label: 'High', val: pf.high, color: 'text-emerald-400', variant: 'v1-stat-pill-up' },
+                      { label: 'Mean', val: pf.mean, color: 'text-blue-400',    variant: 'v1-stat-pill-neutral' },
+                      { label: 'Low',  val: pf.low,  color: 'text-rose-400',    variant: 'v1-stat-pill-down' },
                     ].map(t => (
-                      <div key={t.label} className={cn("p-2 rounded-xl border border-white/5 text-center", t.bg)}>
+                      <div key={t.label} className={cn("v1-stat-pill p-2 text-center", t.variant)}>
                         <p className="text-[7px] font-black text-slate-500 font-display uppercase tracking-widest mb-1">{t.label}</p>
                         <p className={cn("text-sm font-black italic", t.color)}>₹{t.val}</p>
                       </div>
@@ -3389,10 +3395,10 @@ export const MCStockInfoPanel: React.FC<MCStockInfoPanelProps> = ({
                 <Card title="Stock Metrics (Trendlyne)" icon={BarChart3}>
                   <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 pt-2">
                     {Object.entries(trendlyneMetrics.body).filter(([key]) => key !== 'prepend_params' && key !== 'head').map(([key, metric]: [string, any]) => (
-                      <div key={key} className={cn("p-3 rounded-xl border flex flex-col justify-between",
-                        metric.color1 === 'positive' ? "bg-emerald-500/5 border-emerald-500/20" :
-                        metric.color1 === 'negative' ? "bg-rose-500/5 border-rose-500/20" :
-                        "bg-slate-950 border-slate-800"
+                      <div key={key} className={cn("p-3 flex flex-col justify-between",
+                        metric.color1 === 'positive' ? "v1-card-up" :
+                        metric.color1 === 'negative' ? "v1-card-down" :
+                        "v1-card-accent"
                       )}>
                         <div>
                           <p className="text-[9px] font-black text-slate-400 font-display uppercase tracking-widest mb-1 leading-tight">{metric.title}</p>
@@ -3414,29 +3420,29 @@ export const MCStockInfoPanel: React.FC<MCStockInfoPanelProps> = ({
                 <Card title="Advanced Technical Analysis (Trendlyne)" icon={Activity}>
                   <div className="space-y-6 pt-2">
                     <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-                      <div className="bg-slate-950 p-3 rounded-xl border border-slate-800 flex flex-col items-center justify-center">
+                      <div className="v1-stat-pill p-3 items-center justify-center">
                         <span className="text-[9px] font-black text-slate-500 font-display uppercase tracking-widest">RSI (14)</span>
                         <span className={cn("text-xl font-black italic mt-1", trendlyneTa.body.parameters.rsi?.color === 'positive' ? 'text-emerald-400' : trendlyneTa.body.parameters.rsi?.color === 'negative' ? 'text-rose-400' : 'text-slate-300')}>{trendlyneTa.body.parameters.rsi?.value}</span>
                         <span className="text-[8px] text-slate-400 text-center mt-1">{trendlyneTa.body.parameters.rsi?.insight?.shorttext}</span>
                       </div>
-                      <div className="bg-slate-950 p-3 rounded-xl border border-slate-800 flex flex-col items-center justify-center">
+                      <div className="v1-stat-pill p-3 items-center justify-center">
                         <span className="text-[9px] font-black text-slate-500 font-display uppercase tracking-widest">MACD</span>
                         <span className={cn("text-xl font-black italic mt-1", trendlyneTa.body.parameters.macd?.color === 'positive' ? 'text-emerald-400' : trendlyneTa.body.parameters.macd?.color === 'negative' ? 'text-rose-400' : 'text-slate-300')}>{trendlyneTa.body.parameters.macd?.value}</span>
                         <span className="text-[8px] text-slate-400 text-center mt-1">{trendlyneTa.body.parameters.macd?.insight?.shorttext}</span>
                       </div>
-                      <div className="bg-slate-950 p-3 rounded-xl border border-slate-800 flex flex-col items-center justify-center">
+                      <div className="v1-stat-pill p-3 items-center justify-center">
                         <span className="text-[9px] font-black text-slate-500 font-display uppercase tracking-widest">Momentum</span>
                         <span className={cn("text-xl font-black italic mt-1", trendlyneTa.body.parameters.momentum?.color === 'positive' ? 'text-emerald-400' : trendlyneTa.body.parameters.momentum?.color === 'negative' ? 'text-rose-400' : 'text-slate-300')}>{trendlyneTa.body.parameters.momentum?.value}</span>
                         <span className="text-[8px] text-slate-400 text-center mt-1">{trendlyneTa.body.parameters.momentum?.insight?.shorttext}</span>
                       </div>
-                      <div className="bg-slate-950 p-3 rounded-xl border border-slate-800 flex flex-col items-center justify-center">
+                      <div className="v1-stat-pill p-3 items-center justify-center">
                         <span className="text-[9px] font-black text-slate-500 font-display uppercase tracking-widest">MFI</span>
                         <span className={cn("text-xl font-black italic mt-1", trendlyneTa.body.parameters.mfi?.color === 'positive' ? 'text-emerald-400' : trendlyneTa.body.parameters.mfi?.color === 'negative' ? 'text-rose-400' : 'text-slate-300')}>{trendlyneTa.body.parameters.mfi?.value}</span>
                         <span className="text-[8px] text-slate-400 text-center mt-1">{trendlyneTa.body.parameters.mfi?.insight?.shorttext}</span>
                       </div>
                     </div>
                     {trendlyneTa.body.parameters.ma_signal && (
-                      <div className="bg-slate-950 p-4 rounded-xl border border-slate-800">
+                      <div className="v1-card-accent p-4">
                         <p className="text-[10px] font-black text-slate-500 font-display uppercase tracking-widest mb-3">Moving Averages Signal</p>
                         <div className="flex gap-4 items-center">
                           <div className="flex-1 text-center">
@@ -3456,7 +3462,7 @@ export const MCStockInfoPanel: React.FC<MCStockInfoPanelProps> = ({
                 </Card>
               )}
               {!(trendlyneMetrics as any)?.body && !(trendlyneTa as any)?.body?.parameters && (
-                <div className="text-center p-8 bg-slate-950 border border-slate-800 rounded-2xl">
+                <div className="v1-card-accent text-center p-8">
                   <p className="text-slate-500 text-sm font-bold">No Trendlyne data available for this stock.</p>
                 </div>
               )}
@@ -3467,14 +3473,14 @@ export const MCStockInfoPanel: React.FC<MCStockInfoPanelProps> = ({
 
       {/* ── F&O Tab ── */}
       {activeTab === 'fno' && (
-        <div className="rounded-2xl border border-slate-800 bg-slate-950/30 p-4 space-y-6">
+        <div className="v1-card p-4 space-y-6">
           <PanelSectionHeader
             title="Options & Flow"
             subtitle="OI structure, PCR, max pain and rollover posture"
           />
           
           {/* Expiry Selector & Contract Headers */}
-          <div className="flex flex-wrap items-center justify-between gap-3 bg-slate-950/40 border border-slate-800/80 rounded-2xl p-4">
+          <div className="v1-card-accent flex flex-wrap items-center justify-between gap-3 p-4">
             <div>
               <h3 className="text-sm font-black text-white flex items-center gap-1.5 font-display uppercase tracking-wider">
                 <Activity className="w-4 h-4 text-purple-400" />
@@ -3493,7 +3499,7 @@ export const MCStockInfoPanel: React.FC<MCStockInfoPanelProps> = ({
                 <select
                   value={selectedExpiry}
                   onChange={(e) => setSelectedExpiry(e.target.value)}
-                  className="bg-slate-900 border border-slate-800 rounded px-2 py-1 text-[10px] text-slate-200 font-black font-display uppercase tracking-wider cursor-pointer"
+                  className="v1-input w-auto px-2 py-1 text-[10px] font-black font-display uppercase tracking-wider cursor-pointer"
                 >
                   {expiriesList.map((exp: string) => {
                     const formattedDate = new Date(exp).toLocaleDateString('en-IN', {
@@ -3565,7 +3571,7 @@ export const MCStockInfoPanel: React.FC<MCStockInfoPanelProps> = ({
                 
                 {/* Insights / Metrics Grid */}
                 <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2">
-                  <div className="bg-slate-950/40 border border-slate-800/80 rounded-xl p-3 flex flex-col justify-between">
+                  <div className="v1-stat-pill p-3 justify-between">
                     <span className="text-[8px] font-black text-slate-500 font-display uppercase tracking-wider">Expiry PCR (OI)</span>
                     <span className={cn(
                       "text-base font-black tracking-tight mt-1",
@@ -3578,7 +3584,7 @@ export const MCStockInfoPanel: React.FC<MCStockInfoPanelProps> = ({
                     </span>
                   </div>
 
-                  <div className="bg-slate-950/40 border border-slate-800/80 rounded-xl p-3 flex flex-col justify-between">
+                  <div className="v1-stat-pill p-3 justify-between">
                     <span className="text-[8px] font-black text-slate-500 font-display uppercase tracking-wider">Max Pain Point</span>
                     <span className="text-base font-black tracking-tight text-blue-400 mt-1">
                       {body.maxPain != null ? `₹${body.maxPain}` : '—'}
@@ -3588,7 +3594,7 @@ export const MCStockInfoPanel: React.FC<MCStockInfoPanelProps> = ({
                     </span>
                   </div>
 
-                  <div className="bg-slate-950/40 border border-slate-800/80 rounded-xl p-3 flex flex-col justify-between">
+                  <div className="v1-stat-pill p-3 justify-between">
                     <span className="text-[8px] font-black text-slate-500 font-display uppercase tracking-wider">Rollover Score</span>
                     <span className="text-base font-black tracking-tight text-amber-400 mt-1">
                       {stockLevel.rollover_percent != null ? `${stockLevel.rollover_percent.toFixed(1)}%` : '—'}
@@ -3598,7 +3604,7 @@ export const MCStockInfoPanel: React.FC<MCStockInfoPanelProps> = ({
                     </span>
                   </div>
 
-                  <div className="bg-slate-950/40 border border-slate-800/80 rounded-xl p-3 flex flex-col justify-between">
+                  <div className="v1-stat-pill p-3 justify-between">
                     <span className="text-[8px] font-black text-slate-500 font-display uppercase tracking-wider">MWPL Limit %</span>
                     <span className="text-base font-black tracking-tight text-purple-400 mt-1">
                       {body.MWPL != null ? `${body.MWPL}%` : '—'}
@@ -3611,7 +3617,7 @@ export const MCStockInfoPanel: React.FC<MCStockInfoPanelProps> = ({
 
                 {/* Open Interest (OI) Profile Chart */}
                 {slicedStrikes.length > 0 && (
-                  <div className="bg-slate-950/40 border border-slate-800/80 rounded-2xl p-4">
+                  <div className="v1-card-accent p-4">
                     <h4 className="text-[10px] font-black font-display uppercase tracking-wider text-slate-400 mb-4 flex items-center gap-1.5">
                       <BarChart3 className="w-3.5 h-3.5 text-blue-500" />
                       Open Interest Profile (Call vs Put)
@@ -3660,14 +3666,14 @@ export const MCStockInfoPanel: React.FC<MCStockInfoPanelProps> = ({
 
                 {/* Support & Resistance Intelligence Card */}
                 {(supportStrike !== null || resistanceStrike !== null) && (
-                  <div className="bg-slate-950/30 border border-slate-800/60 rounded-2xl p-4 space-y-2">
+                  <div className="v1-card-accent p-4 space-y-2">
                     <h4 className="text-[10px] font-black font-display uppercase tracking-wider text-slate-400 flex items-center gap-1.5">
                       <Zap className="w-3.5 h-3.5 text-blue-500" />
                       Derivatives Structural Floor & Ceiling
                     </h4>
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-3 pt-1">
                       {supportStrike !== null && (
-                        <div className="flex items-center justify-between border border-slate-800/60 rounded-xl px-3 py-2 bg-emerald-500/[0.02]">
+                        <div className="v1-card-up flex items-center justify-between px-3 py-2">
                           <div>
                             <p className="text-[8px] font-black text-emerald-500 font-display uppercase tracking-wider">Option Support Base</p>
                             <p className="text-sm font-black text-white mt-0.5">Strike ₹{supportStrike}</p>
@@ -3679,7 +3685,7 @@ export const MCStockInfoPanel: React.FC<MCStockInfoPanelProps> = ({
                         </div>
                       )}
                       {resistanceStrike !== null && (
-                        <div className="flex items-center justify-between border border-slate-800/60 rounded-xl px-3 py-2 bg-rose-500/[0.02]">
+                        <div className="v1-card-down flex items-center justify-between px-3 py-2">
                           <div>
                             <p className="text-[8px] font-black text-rose-500 font-display uppercase tracking-wider">Option Resistance Wall</p>
                             <p className="text-sm font-black text-white mt-0.5">Strike ₹{resistanceStrike}</p>
@@ -3698,7 +3704,7 @@ export const MCStockInfoPanel: React.FC<MCStockInfoPanelProps> = ({
                 )}
 
                 {/* Option Chain Table */}
-                <div className="border border-white/[0.06] rounded-2xl overflow-hidden bg-slate-950/20">
+                <div className="v1-card-accent overflow-hidden">
                   <div className="px-4 py-2 bg-slate-900/30 border-b border-white/[0.06] flex items-center justify-between">
                     <span className="text-[10px] font-black text-slate-400 font-display uppercase tracking-wider">Option Chain Table (ATM Slice)</span>
                     <span className="text-[9px] text-slate-500 font-bold">ATM Strike: ₹{atm}</span>
@@ -3800,7 +3806,7 @@ export const MCStockInfoPanel: React.FC<MCStockInfoPanelProps> = ({
               </div>
             );
           })() : (
-            <div className="text-center py-10 bg-slate-950 border border-slate-800 rounded-2xl">
+            <div className="v1-card-accent text-center py-10">
               <p className="text-slate-500 text-sm font-bold">This symbol may not have derivative options contracts available.</p>
             </div>
           )}
@@ -3813,7 +3819,7 @@ export const MCStockInfoPanel: React.FC<MCStockInfoPanelProps> = ({
                   <span>View Underlying Futures Contracts</span>
                   <span className="text-[8px] group-open:rotate-180 transition-transform">▼</span>
                 </summary>
-                <div className="mt-3 bg-slate-800/20 rounded-xl p-4 border border-slate-800/60">
+                <div className="v1-card-accent mt-3 p-4">
                   <div className="text-xs font-semibold text-slate-300 mb-3">Futures — {symbol}</div>
                   {(mc as any)?.fnoFutures?.data?.futureData ? (
                     <div className="overflow-x-auto">
@@ -3856,7 +3862,7 @@ export const MCStockInfoPanel: React.FC<MCStockInfoPanelProps> = ({
 
       {/* ── TAB: STOCK NEWS ── */}
       {activeTab === 'news' && (
-        <div className="rounded-2xl border border-slate-800 bg-slate-950/30 p-4 space-y-4">
+        <div className="v1-card p-4 space-y-4">
           <PanelSectionHeader
             title="News Flow"
             subtitle="MoneyControl stock-specific stream with time-stamped items"
@@ -3874,7 +3880,7 @@ export const MCStockInfoPanel: React.FC<MCStockInfoPanelProps> = ({
           </div>
 
           {loadingMcNews ? (
-            <div className="text-center py-12 bg-slate-900/30 border border-slate-800 rounded-2xl animate-pulse">
+            <div className="v1-card-accent text-center py-12 animate-pulse">
               <p className="text-xs text-slate-400 font-bold">Fetching latest news for {symbol}…</p>
             </div>
           ) : !mcNewsData || mcNewsData.news.length === 0 ? (
@@ -3897,7 +3903,7 @@ export const MCStockInfoPanel: React.FC<MCStockInfoPanelProps> = ({
 
       {/* ── TAB: CORPORATE ACTIONS ── */}
       {activeTab === 'actions' && (
-        <div className="rounded-2xl border border-slate-800 bg-slate-950/30 p-4 space-y-6">
+        <div className="v1-card p-4 space-y-6">
           <PanelSectionHeader
             title="Corporate Action History"
             subtitle="Dividends, bonus issues, stock splits and rights issues — the record ohlcv_adjust.py cross-checks against for split/bonus price adjustment"
@@ -3908,11 +3914,11 @@ export const MCStockInfoPanel: React.FC<MCStockInfoPanelProps> = ({
               <span>MoneyControl — {symbol}</span>
             </h3>
             {loadingActionHistory ? (
-              <div className="text-center py-8 bg-slate-900/30 border border-slate-800 rounded-2xl animate-pulse">
+              <div className="v1-card-accent text-center py-8 animate-pulse">
                 <p className="text-xs text-slate-400 font-bold">Fetching corporate-action history…</p>
               </div>
             ) : !actionHistory || actionHistory.length === 0 ? (
-              <div className="text-center py-8 bg-slate-900/30 border border-slate-800 rounded-2xl">
+              <div className="v1-card-accent text-center py-8">
                 <p className="text-xs text-slate-500 font-semibold">No dividend, bonus, split or rights history on record for {symbol}.</p>
               </div>
             ) : (
@@ -3972,7 +3978,7 @@ export const MCStockInfoPanel: React.FC<MCStockInfoPanelProps> = ({
               <span>Filed with NSE (last/next 6 months)</span>
             </h3>
             {loadingFiledActions ? (
-              <div className="text-center py-6 bg-slate-900/30 border border-slate-800 rounded-2xl animate-pulse">
+              <div className="v1-card-accent text-center py-6 animate-pulse">
                 <p className="text-xs text-slate-400 font-bold">Checking NSE filings…</p>
               </div>
             ) : !filedActions || filedActions.length === 0 ? (
@@ -3985,7 +3991,7 @@ export const MCStockInfoPanel: React.FC<MCStockInfoPanelProps> = ({
                     href={f.source_url}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="block p-2.5 bg-slate-950/50 border border-slate-800/60 rounded-lg hover:border-slate-700 transition-colors"
+                    className="v1-card block p-2.5"
                   >
                     <div className="flex items-center justify-between gap-2">
                       <span className="text-[9px] px-2 py-0.5 rounded font-bold uppercase text-emerald-400 bg-emerald-500/10 shrink-0">
