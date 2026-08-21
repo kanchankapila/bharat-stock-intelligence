@@ -254,5 +254,5 @@ export function startHeartbeatMonitor(): void {
     }
   };
   setInterval(() => { void check(); }, 60 * 60 * 1000).unref();
-  console.error('[HEARTBEAT] Job staleness monitor started (hourly).');
+  console.log('[HEARTBEAT] Job staleness monitor started (hourly).');
 }

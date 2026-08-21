@@ -14,6 +14,15 @@ export interface CardProps {
   dense?: boolean;
 }
 
+// ponytail: colors match v1-card's border-top-color values (index.css) so Card-based pages
+// share the same "colored top edge" identity as pages using the raw v1-card classes directly.
+const variantTopColor: Record<CardVariant, string> = {
+  default:  'rgba(99, 102, 241, 0.7)',
+  elevated: 'rgba(99, 102, 241, 0.7)',
+  accent:   'rgba(99, 102, 241, 0.7)',
+  ghost:    'transparent',
+};
+
 const variantBase: Record<CardVariant, string> = {
   default:  'glass shadow-[0_4px_20px_rgba(0,0,0,0.03)]',
   elevated: 'glass-strong shadow-[0_8px_32px_rgba(0,0,0,0.05)]',
@@ -41,16 +50,17 @@ export const Card = React.forwardRef<HTMLDivElement, CardProps>(({
   <div
     ref={ref}
     className={cn(
-      'rounded-2xl overflow-hidden transition-all duration-200 border',
+      'rounded-[10px] overflow-hidden transition-all duration-200 border border-t-2',
       variantBase[variant],
       onClick && cn('cursor-pointer', variantHover[variant]),
       className
     )}
+    style={{ borderTopColor: variantTopColor[variant] }}
     onClick={onClick}
   >
     {title && (
       <div className={cn(dense ? 'px-3 py-2.5' : 'px-5 py-3.5', 'border-b border-slate-800/50 flex items-center justify-between bg-slate-950/20')}>
-        <h3 className="text-[10px] font-semibold text-slate-400 flex items-center gap-2 uppercase tracking-widest">
+        <h3 className="text-[10px] font-semibold text-slate-400 flex items-center gap-2 font-display uppercase tracking-widest">
           {Icon && <Icon className="w-3.5 h-3.5 text-indigo-600" />}
           {title}
         </h3>

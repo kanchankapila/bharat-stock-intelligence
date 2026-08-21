@@ -44,7 +44,11 @@ export function EarningsPulseDeskPage({
 
   const kpis = [
     { label: 'Results Declared', value: totalResults == null ? '—' : String(totalResults) },
-    { label: 'Beat', value: beat == null ? '—' : String(beat), tone: beat != null && miss != null && beat >= miss ? 'positive' as const : 'warning' as const },
+    {
+      label: 'Beat', value: beat == null ? '—' : String(beat),
+      tone: beat != null && miss != null && beat >= miss ? 'positive' as const : 'warning' as const,
+      pct: beat != null && miss != null && beat + miss > 0 ? (beat / (beat + miss)) * 100 : undefined,
+    },
     { label: 'Miss', value: miss == null ? '—' : String(miss), tone: miss != null && beat != null && miss > beat ? 'negative' as const : 'neutral' as const },
     { label: 'Price Shockers', value: String(shockers.length) },
   ];

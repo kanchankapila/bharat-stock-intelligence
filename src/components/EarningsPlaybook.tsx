@@ -65,7 +65,7 @@ export const EarningsPlaybook: React.FC<Props> = ({ onSelectStock: _onSelectStoc
           <Sparkles className="w-5 h-5 text-amber-400" />
           Earnings Calendar & Actual-vs-Estimate
         </h2>
-        <p className="text-[10px] font-mono text-slate-500 uppercase tracking-widest mt-0.5">
+        <p className="text-[10px] font-data text-slate-500 font-display uppercase tracking-widest mt-0.5">
           Live result calendar with EPS actual vs consensus, where reported
         </p>
       </div>
@@ -99,12 +99,12 @@ export const EarningsPlaybook: React.FC<Props> = ({ onSelectStock: _onSelectStoc
                   animate={{ opacity: 1, scale: 1 }}
                   exit={{ opacity: 0, scale: 0.98 }}
                   transition={{ duration: 0.2 }}
-                  className="p-4 bg-slate-950/45 border border-slate-900 rounded-xl flex flex-col sm:flex-row sm:items-center justify-between gap-4"
+                  className="v1-card p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4"
                 >
                   <div className="space-y-1 sm:w-2/5">
                     <div className="flex items-center gap-2">
-                      <span className="text-sm font-black text-white uppercase tracking-wider truncate">{item.companyName}</span>
-                      <span className="text-[8px] font-black px-1.5 py-0.5 rounded border border-slate-800 bg-slate-900 text-slate-400 font-mono shrink-0">
+                      <span className="text-sm font-black text-white font-display uppercase tracking-wider truncate">{item.companyName}</span>
+                      <span className="text-[8px] font-black px-1.5 py-0.5 rounded border border-slate-800 bg-slate-900 text-slate-400 font-data shrink-0">
                         {item.resultDate}
                       </span>
                     </div>
@@ -112,17 +112,17 @@ export const EarningsPlaybook: React.FC<Props> = ({ onSelectStock: _onSelectStoc
 
                   <div className="grid grid-cols-3 gap-4 flex-grow max-w-xs text-center sm:text-left">
                     <div>
-                      <span className="text-[8px] font-black text-slate-500 uppercase tracking-widest block">EPS Est.</span>
-                      <span className="text-xs font-bold text-slate-200 font-mono">{item.epsEstimate ?? '—'}</span>
+                      <span className="text-[8px] font-black text-slate-500 font-display uppercase tracking-widest block">EPS Est.</span>
+                      <span className="text-xs font-bold text-slate-200 font-data">{item.epsEstimate ?? '—'}</span>
                     </div>
                     <div>
-                      <span className="text-[8px] font-black text-slate-500 uppercase tracking-widest block">EPS Actual</span>
-                      <span className="text-xs font-bold text-slate-200 font-mono">{item.epsActual ?? 'Not reported'}</span>
+                      <span className="text-[8px] font-black text-slate-500 font-display uppercase tracking-widest block">EPS Actual</span>
+                      <span className="text-xs font-bold text-slate-200 font-data">{item.epsActual ?? 'Not reported'}</span>
                     </div>
                     <div>
-                      <span className="text-[8px] font-black text-slate-500 uppercase tracking-widest block">Surprise</span>
+                      <span className="text-[8px] font-black text-slate-500 font-display uppercase tracking-widest block">Surprise</span>
                       <span className={cn(
-                        'text-xs font-black font-mono',
+                        'text-xs font-black font-data',
                         item.surprisePct == null ? 'text-slate-500' : item.surprisePct >= 0 ? 'text-emerald-400' : 'text-rose-400'
                       )}>
                         {item.surprisePct != null ? `${item.surprisePct > 0 ? '+' : ''}${item.surprisePct.toFixed(1)}%` : '—'}

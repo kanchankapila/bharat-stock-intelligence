@@ -30,10 +30,11 @@ const crFmt = (v: number | null | undefined) =>
   v == null ? '—' : `${v >= 0 ? '+' : ''}₹${v.toLocaleString('en-IN', { maximumFractionDigits: 0 })} Cr`;
 
 function StatCard({ label, value, color, sub }: { label: string; value: string; color: string; sub?: string }) {
+  const cardClass = color.includes('emerald') ? 'v1-card-up' : color.includes('rose') ? 'v1-card-down' : 'v1-card-neutral';
   return (
-    <div className="bg-slate-800/50 border border-slate-700/50 rounded-xl p-3">
-      <div className="text-[10px] text-slate-500 uppercase tracking-wide font-semibold">{label}</div>
-      <div className={cn('text-lg font-bold mt-0.5', color)}>{value}</div>
+    <div className={cn(cardClass, 'p-3')}>
+      <div className="v1-data-label">{label}</div>
+      <div className={cn('v1-data-value mt-0.5', color)}>{value}</div>
       {sub && <div className="text-[10px] text-slate-500 mt-0.5">{sub}</div>}
     </div>
   );
@@ -93,11 +94,11 @@ export function MoneyFlowPage() {
   const latestFetchedAt = data && data.length > 0 ? (data[0] as FlowRow & { fetched_at?: string }).fetched_at : null;
 
   return (
-    <div className="min-h-screen bg-slate-900 text-white p-4 space-y-4">
+    <div className="min-h-screen text-white p-4 space-y-4">
       <V4QuickNav />
       <div className="flex items-center justify-between flex-wrap gap-3">
         <div>
-          <h1 className="text-xl font-bold flex items-center gap-2">
+          <h1 className="v1-title-page flex items-center gap-2">
             <Users size={20} className="text-sky-400" />
             Money Flow — FII / DII / MF
           </h1>
@@ -166,8 +167,8 @@ export function MoneyFlowPage() {
       )}
 
       {/* Cumulative flow chart */}
-      <div className="bg-slate-800/40 border border-slate-700/50 rounded-lg p-3">
-        <div className="text-[11px] font-semibold text-slate-400 uppercase tracking-wide mb-2">
+      <div className="v1-card p-3">
+        <div className="v1-title-card mb-2">
           Cumulative net flow (₹ Cr) — {range === 'ALL' ? 'since 2016' : range}
         </div>
         {isLoading ? (
@@ -194,8 +195,8 @@ export function MoneyFlowPage() {
       </div>
 
       {/* Daily net flow bars */}
-      <div className="bg-slate-800/40 border border-slate-700/50 rounded-lg p-3">
-        <div className="text-[11px] font-semibold text-slate-400 uppercase tracking-wide mb-2">Daily net flow (₹ Cr)</div>
+      <div className="v1-card p-3">
+        <div className="v1-title-card mb-2">Daily net flow (₹ Cr)</div>
         {rows.length > 0 && (
           <ResponsiveContainer width="100%" height={220}>
             <ComposedChart data={rows} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>

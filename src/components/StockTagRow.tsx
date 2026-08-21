@@ -7,26 +7,26 @@ import { cn } from '../lib/utils';
 // Deliberately data-driven: a chip only renders when the underlying field is present, so an
 // unscored/undercovered stock just shows fewer tags rather than a fabricated "neutral" one.
 
-export const CONVICTION_STYLE: Record<string, { label: string; bg: string; border: string; text: string }> = {
-  S_ELITE:    { label: 'S — Elite',    bg: 'bg-emerald-500/20', border: 'border-emerald-500/40', text: 'text-emerald-300' },
-  A_HIGH:     { label: 'A — High',     bg: 'bg-sky-500/20',     border: 'border-sky-500/40',     text: 'text-sky-300'     },
-  B_MEDIUM:   { label: 'B — Medium',   bg: 'bg-amber-500/15',   border: 'border-amber-500/35',   text: 'text-amber-300'   },
-  C_LOW:      { label: 'C — Low',      bg: 'bg-slate-700/40',   border: 'border-slate-600/40',   text: 'text-slate-400'   },
-  D_MARGINAL: { label: 'D — Marginal', bg: 'bg-zinc-800/60',    border: 'border-zinc-700/40',    text: 'text-zinc-500'    },
+export const CONVICTION_STYLE: Record<string, { label: string; bg: string; border: string; text: string; badge: string }> = {
+  S_ELITE:    { label: 'S — Elite',    bg: 'bg-emerald-500/20', border: 'border-emerald-500/40', text: 'text-emerald-300', badge: 'v1-badge v1-badge-s' },
+  A_HIGH:     { label: 'A — High',     bg: 'bg-sky-500/20',     border: 'border-sky-500/40',     text: 'text-sky-300',     badge: 'v1-badge v1-badge-a' },
+  B_MEDIUM:   { label: 'B — Medium',   bg: 'bg-amber-500/15',   border: 'border-amber-500/35',   text: 'text-amber-300',   badge: 'v1-badge v1-badge-b' },
+  C_LOW:      { label: 'C — Low',      bg: 'bg-slate-700/40',   border: 'border-slate-600/40',   text: 'text-slate-400',   badge: 'v1-badge v1-badge-c' },
+  D_MARGINAL: { label: 'D — Marginal', bg: 'bg-zinc-800/60',    border: 'border-zinc-700/40',    text: 'text-zinc-500',    badge: 'v1-badge bg-zinc-800/60 border-zinc-700/40 text-zinc-500' },
 };
 
 export function ConvictionPill({ level }: { level: string | null | undefined }) {
   if (!level) return null;
   const style = CONVICTION_STYLE[level] ?? CONVICTION_STYLE.C_LOW;
   return (
-    <span className={cn('px-2 py-0.5 rounded-full text-[10px] font-bold border', style.bg, style.border, style.text)}>
+    <span className={cn('text-[10px]', style.badge)}>
       {style.label}
     </span>
   );
 }
 
 function Tag({ label, color = 'bg-slate-700 text-slate-300' }: { label: string; color?: string }) {
-  return <span className={cn('px-1.5 py-0.5 rounded text-[9px] font-semibold uppercase tracking-wide', color)}>{label}</span>;
+  return <span className={cn('px-1.5 py-0.5 rounded text-[9px] font-semibold font-display uppercase tracking-wide', color)}>{label}</span>;
 }
 
 /** Row-shape accepted from either getBuyRecommendations picks or getUnifiedScoreForSymbol. */

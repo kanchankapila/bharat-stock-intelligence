@@ -63,11 +63,11 @@ export default function EarlyHoursSpotter({ onSelectStock }: EarlyHoursSpotterPr
     return (
       <div className="p-6 text-center max-w-md mx-auto space-y-4">
         <AlertCircle className="w-12 h-12 text-rose-500 mx-auto" />
-        <h3 className="text-lg font-black text-white uppercase tracking-wider">Failed to load Early Hours predictions</h3>
+        <h3 className="text-lg font-black text-white font-display uppercase tracking-wider">Failed to load Early Hours predictions</h3>
         <p className="text-slate-400 text-xs">{error.message}</p>
         <button 
           onClick={() => refetch()}
-          className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-xl transition-all flex items-center gap-2 mx-auto"
+          className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-xl transition-all flex items-center gap-2 mx-auto"
         >
           <RefreshCw className="w-4 h-4" /> Retry
         </button>
@@ -86,10 +86,10 @@ export default function EarlyHoursSpotter({ onSelectStock }: EarlyHoursSpotterPr
   return (
     <div className="p-6 space-y-6 max-w-7xl mx-auto">
       {/* Header */}
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-slate-900/40 border border-slate-800 rounded-3xl p-6 relative overflow-hidden backdrop-blur-md">
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 v1-card p-6 relative overflow-hidden">
         <div className="absolute inset-0 bg-gradient-to-r from-amber-500/5 to-transparent pointer-events-none" />
         <div className="space-y-1 relative">
-          <h1 className="text-3xl font-black text-white tracking-tighter uppercase italic flex items-center gap-3">
+          <h1 className="v1-title-page flex items-center gap-3">
             <Zap className="w-8 h-8 text-amber-500 fill-amber-500/20 animate-pulse" />
             Early Hours Spotter
           </h1>
@@ -106,8 +106,8 @@ export default function EarlyHoursSpotter({ onSelectStock }: EarlyHoursSpotterPr
           >
             <RefreshCw className={cn("w-4 h-4", (isRefetching || refreshMutation.isPending) && "animate-spin")} />
           </button>
-          <div className="bg-slate-950 border border-slate-800 rounded-xl px-4 py-2 flex flex-col justify-center">
-            <span className="text-[8px] font-black text-slate-500 uppercase tracking-widest block mb-0.5">Active Session</span>
+          <div className="v1-card px-4 py-2 flex flex-col justify-center">
+            <span className="text-[8px] font-black text-slate-500 font-display uppercase tracking-widest block mb-0.5">Active Session</span>
             <span className="text-xs font-black text-white tabular-nums tracking-wider">{items[0]?.date || 'Market Closed'}</span>
           </div>
         </div>
@@ -117,25 +117,25 @@ export default function EarlyHoursSpotter({ onSelectStock }: EarlyHoursSpotterPr
       {items.length > 0 && (
         <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4">
           {/* Average Score */}
-          <div className="bg-slate-900/40 border border-slate-800 rounded-2xl p-4 flex items-center gap-4 relative overflow-hidden backdrop-blur-md">
+          <div className="v1-card p-4 flex items-center gap-4 relative overflow-hidden">
             <div className="p-3 bg-amber-500/10 rounded-xl text-amber-500 border border-amber-500/10">
               <Sparkles className="w-5 h-5" />
             </div>
             <div>
-              <p className="text-[9px] font-black text-slate-500 uppercase tracking-widest">Avg spot score</p>
-              <p className="text-xl font-black text-white italic mt-0.5">{avgScore} <span className="text-xs text-slate-500 font-bold uppercase tracking-widest italic">/ 100</span></p>
+              <p className="v1-data-label">Avg spot score</p>
+              <p className="v1-data-value text-white mt-0.5">{avgScore} <span className="text-xs text-slate-500 font-bold font-display uppercase tracking-widest italic">/ 100</span></p>
             </div>
           </div>
 
           {/* Top Gap Up */}
-          <div className="bg-slate-900/40 border border-slate-800 rounded-2xl p-4 flex items-center gap-4 relative overflow-hidden backdrop-blur-md">
+          <div className="v1-card p-4 flex items-center gap-4 relative overflow-hidden">
             <div className="p-3 bg-emerald-500/10 rounded-xl text-emerald-500 border border-emerald-500/10">
               <TrendingUp className="w-5 h-5" />
             </div>
             <div>
-              <p className="text-[9px] font-black text-slate-500 uppercase tracking-widest">Top opening gap</p>
+              <p className="v1-data-label">Top opening gap</p>
               {topGainer && (
-                <p className="text-sm font-black text-white italic mt-0.5 uppercase tracking-wider group cursor-pointer hover:text-blue-400" onClick={() => onSelectStock(topGainer.symbol)}>
+                <p className="v1-data-value text-white mt-0.5 group cursor-pointer hover:text-indigo-400" onClick={() => onSelectStock(topGainer.symbol)}>
                   {topGainer.symbol} <span className="text-emerald-400">+{topGainer.iepGapPct.toFixed(1)}%</span>
                 </p>
               )}
@@ -143,46 +143,46 @@ export default function EarlyHoursSpotter({ onSelectStock }: EarlyHoursSpotterPr
           </div>
 
           {/* Top Delivery Spike */}
-          <div className="bg-slate-900/40 border border-slate-800 rounded-2xl p-4 flex items-center gap-4 relative overflow-hidden backdrop-blur-md">
-            <div className="p-3 bg-blue-500/10 rounded-xl text-blue-500 border border-blue-500/10">
+          <div className="v1-card p-4 flex items-center gap-4 relative overflow-hidden">
+            <div className="p-3 bg-indigo-500/10 rounded-xl text-indigo-500 border border-indigo-500/10">
               <Volume2 className="w-5 h-5" />
             </div>
             <div>
-              <p className="text-[9px] font-black text-slate-500 uppercase tracking-widest">Top delivery spike</p>
+              <p className="v1-data-label">Top delivery spike</p>
               {topDelSpike && (
-                <p className="text-sm font-black text-white italic mt-0.5 uppercase tracking-wider cursor-pointer hover:text-blue-400" onClick={() => onSelectStock(topDelSpike.symbol)}>
-                  {topDelSpike.symbol} <span className="text-blue-400">+{topDelSpike.deliverySpikePct.toFixed(0)}%</span>
+                <p className="v1-data-value text-white mt-0.5 cursor-pointer hover:text-indigo-400" onClick={() => onSelectStock(topDelSpike.symbol)}>
+                  {topDelSpike.symbol} <span className="text-indigo-400">+{topDelSpike.deliverySpikePct.toFixed(0)}%</span>
                 </p>
               )}
             </div>
           </div>
 
           {/* Corporate Action Confluence */}
-          <div className="bg-slate-900/40 border border-slate-800 rounded-2xl p-4 flex items-center gap-4 relative overflow-hidden backdrop-blur-md">
+          <div className="v1-card p-4 flex items-center gap-4 relative overflow-hidden">
             <div className="p-3 bg-purple-500/10 rounded-xl text-purple-500 border border-purple-500/10">
               <FileText className="w-5 h-5" />
             </div>
             <div>
-              <p className="text-[9px] font-black text-slate-500 uppercase tracking-widest">Event confluence</p>
-              <p className="text-xl font-black text-white italic mt-0.5">{hasNewsCount} <span className="text-xs text-slate-500 font-bold uppercase tracking-widest italic">stocks</span></p>
+              <p className="v1-data-label">Event confluence</p>
+              <p className="v1-data-value text-white mt-0.5">{hasNewsCount} <span className="text-xs text-slate-500 font-bold font-display uppercase tracking-widest italic">stocks</span></p>
             </div>
           </div>
         </div>
       )}
 
       {/* Main Table Panel */}
-      <div className="bg-slate-900/40 border border-slate-800 rounded-3xl p-6 relative overflow-hidden backdrop-blur-md">
+      <div className="v1-card p-6 relative overflow-hidden">
         {items.length === 0 ? (
           <div className="py-20 text-center space-y-4">
             <Sparkles className="w-12 h-12 text-slate-700 mx-auto" />
-            <p className="text-slate-500 text-sm font-bold uppercase tracking-widest italic">No candidates met the morning breakout filters today</p>
+            <p className="text-slate-500 text-sm font-bold font-display uppercase tracking-widest italic">No candidates met the morning breakout filters today</p>
             <p className="text-slate-600 text-xs max-w-sm mx-auto">Candidates qualify when they show combined scores exceeding 35 points, factoring pre-open imbalance, gaps, and previous evening delivery volumes.</p>
           </div>
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full text-left border-collapse">
               <thead>
-                <tr className="border-b border-slate-800 text-[10px] font-black text-slate-500 uppercase tracking-widest">
+                <tr className="border-b border-slate-800 text-[10px] font-black text-slate-500 font-display uppercase tracking-widest">
                   <th className="pb-4">Candidate Stock</th>
                   <th className="pb-4 text-center">Spot Score</th>
                   <th className="pb-4">Pre-Open Imbalance</th>
@@ -205,7 +205,7 @@ export default function EarlyHoursSpotter({ onSelectStock }: EarlyHoursSpotterPr
                         <div className="flex flex-col">
                           <span 
                             onClick={() => onSelectStock(row.symbol)}
-                            className="text-sm font-black text-white italic uppercase tracking-wider group-hover:text-blue-400 cursor-pointer transition-colors flex items-center gap-1.5"
+                            className="text-sm font-black text-white italic font-display uppercase tracking-wider group-hover:text-indigo-400 cursor-pointer transition-colors flex items-center gap-1.5"
                           >
                             {row.symbol}
                             {row.hasCorporateAction && (
@@ -263,11 +263,11 @@ export default function EarlyHoursSpotter({ onSelectStock }: EarlyHoursSpotterPr
                         <div className="flex flex-col items-center">
                           <span className={cn(
                             "text-xs font-black tabular-nums tracking-tighter",
-                            row.deliverySpikePct > 30 ? "text-blue-400" : "text-slate-400"
+                            row.deliverySpikePct > 30 ? "text-indigo-400" : "text-slate-400"
                           )}>
                             {row.deliverySpikePct >= 0 ? '+' : ''}{row.deliverySpikePct.toFixed(0)}%
                           </span>
-                          <span className="text-[7px] text-slate-500 uppercase tracking-widest font-black mt-0.5">vs 5d avg</span>
+                          <span className="text-[7px] text-slate-500 font-display uppercase tracking-widest font-black mt-0.5">vs 5d avg</span>
                         </div>
                       </td>
 
@@ -275,7 +275,7 @@ export default function EarlyHoursSpotter({ onSelectStock }: EarlyHoursSpotterPr
                       <td className="py-4">
                         <div className="flex flex-wrap gap-1.5 max-w-[280px]">
                           {row.breakoutSignals.length === 0 ? (
-                            <span className="text-slate-600 text-[10px] font-bold italic uppercase tracking-wider">No breakouts triggered</span>
+                            <span className="text-slate-600 text-[10px] font-bold italic font-display uppercase tracking-wider">No breakouts triggered</span>
                           ) : (
                             row.breakoutSignals.map((sig: string) => {
                               const isBreakout = sig.includes('Breakout');
@@ -283,7 +283,7 @@ export default function EarlyHoursSpotter({ onSelectStock }: EarlyHoursSpotterPr
                                 <span 
                                   key={sig}
                                   className={cn(
-                                    "px-1.5 py-0.5 rounded border text-[9px] font-black uppercase tracking-wider shrink-0",
+                                    "px-1.5 py-0.5 rounded border text-[9px] font-black font-display uppercase tracking-wider shrink-0",
                                     isBreakout 
                                       ? "bg-amber-500/10 border-amber-500/25 text-amber-500" 
                                       : "bg-slate-800/30 border-slate-700/30 text-slate-400"
@@ -306,7 +306,7 @@ export default function EarlyHoursSpotter({ onSelectStock }: EarlyHoursSpotterPr
                               <Info className="w-3.5 h-3.5" />
                             </button>
                             <div className="absolute right-0 bottom-full mb-2 w-72 bg-slate-950 border border-slate-800 rounded-xl p-4 shadow-xl opacity-0 scale-90 translate-y-2 pointer-events-none group-hover/reasons:opacity-100 group-hover/reasons:scale-100 group-hover/reasons:translate-y-0 transition-all duration-150 z-50 text-left">
-                              <p className="text-[8px] font-black text-slate-500 uppercase tracking-widest mb-2 flex items-center gap-1.5 border-b border-slate-850 pb-1.5">
+                              <p className="text-[8px] font-black text-slate-500 font-display uppercase tracking-widest mb-2 flex items-center gap-1.5 border-b border-slate-850 pb-1.5">
                                 <Sparkles className="w-3 h-3 text-amber-500" /> Spot Analysis
                               </p>
                               <ul className="space-y-1.5">
@@ -319,7 +319,7 @@ export default function EarlyHoursSpotter({ onSelectStock }: EarlyHoursSpotterPr
                               </ul>
                               {row.corporateActionTitle && (
                                 <div className="mt-3 pt-2 border-t border-slate-850">
-                                  <p className="text-[8px] font-black text-purple-400 uppercase tracking-widest mb-1 flex items-center gap-1.5">
+                                  <p className="text-[8px] font-black text-purple-400 font-display uppercase tracking-widest mb-1 flex items-center gap-1.5">
                                     <FileText className="w-3 h-3 text-purple-400" /> Corporate Event
                                   </p>
                                   <p className="text-[9px] text-slate-400 font-bold leading-relaxed">{row.corporateActionTitle}</p>
@@ -330,7 +330,7 @@ export default function EarlyHoursSpotter({ onSelectStock }: EarlyHoursSpotterPr
                           
                           <button 
                             onClick={() => onSelectStock(row.symbol)}
-                            className="px-3 py-1.5 bg-slate-950 border border-slate-800 rounded-lg text-xs font-black text-white hover:border-slate-700 hover:text-blue-400 transition-all cursor-pointer flex items-center gap-1"
+                            className="px-3 py-1.5 bg-slate-950 border border-slate-800 rounded-lg text-xs font-black text-white hover:border-slate-700 hover:text-indigo-400 transition-all cursor-pointer flex items-center gap-1"
                           >
                             Trade <ArrowUpRight className="w-3 h-3" />
                           </button>

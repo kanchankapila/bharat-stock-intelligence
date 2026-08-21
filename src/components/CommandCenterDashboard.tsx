@@ -13,12 +13,15 @@ import { V4QuickNav } from '../v4/components/V4QuickNav';
 type ConvictionFilter = 'ALL' | 'S_ELITE' | 'A_HIGH' | 'B_MEDIUM' | 'C_LOW' | 'D_MARGINAL';
 type HorizonFilter    = 'ALL' | 'intraday' | 'swing' | 'long_term';
 
-const CONVICTION_STYLE: Record<string, { bg: string; border: string; text: string; dot: string; label: string }> = {
-  S_ELITE:    { bg: 'bg-emerald-500/15', border: 'border-emerald-500/40', text: 'text-emerald-400', dot: 'bg-emerald-400', label: 'S — Elite'    },
-  A_HIGH:     { bg: 'bg-sky-500/15',     border: 'border-sky-500/40',     text: 'text-sky-400',     dot: 'bg-sky-400',     label: 'A — High'     },
-  B_MEDIUM:   { bg: 'bg-amber-500/15',   border: 'border-amber-500/40',   text: 'text-amber-400',   dot: 'bg-amber-400',   label: 'B — Medium'   },
-  C_LOW:      { bg: 'bg-slate-700/40',   border: 'border-slate-600/40',   text: 'text-slate-400',   dot: 'bg-slate-400',   label: 'C — Low'      },
-  D_MARGINAL: { bg: 'bg-zinc-800/60',    border: 'border-zinc-700/40',    text: 'text-zinc-500',    dot: 'bg-zinc-500',    label: 'D — Marginal' },
+// ponytail: card = the matching v1-card-{up,down,neutral,accent} variant, so pick cards share
+// the rest of v1's glass+colored-top-edge shape. bg/border stay for the small tier badge chip,
+// which still wants its own solid tint (v1-card's background is fixed, can't be re-tinted).
+const CONVICTION_STYLE: Record<string, { bg: string; border: string; text: string; dot: string; label: string; card: string; badge: string }> = {
+  S_ELITE:    { bg: 'bg-emerald-500/15', border: 'border-emerald-500/40', text: 'text-emerald-400', dot: 'bg-emerald-400', label: 'S — Elite',    card: 'v1-card-up',     badge: 'v1-badge v1-badge-s' },
+  A_HIGH:     { bg: 'bg-sky-500/15',     border: 'border-sky-500/40',     text: 'text-sky-400',     dot: 'bg-sky-400',     label: 'A — High',     card: 'v1-card',        badge: 'v1-badge v1-badge-a' },
+  B_MEDIUM:   { bg: 'bg-amber-500/15',   border: 'border-amber-500/40',   text: 'text-amber-400',   dot: 'bg-amber-400',   label: 'B — Medium',   card: 'v1-card-neutral', badge: 'v1-badge v1-badge-b' },
+  C_LOW:      { bg: 'bg-slate-700/40',   border: 'border-slate-600/40',   text: 'text-slate-400',   dot: 'bg-slate-400',   label: 'C — Low',      card: 'v1-card-accent', badge: 'v1-badge v1-badge-c' },
+  D_MARGINAL: { bg: 'bg-zinc-800/60',    border: 'border-zinc-700/40',    text: 'text-zinc-500',    dot: 'bg-zinc-500',    label: 'D — Marginal', card: 'v1-card-accent', badge: 'v1-badge bg-zinc-800/60 border-zinc-700/40 text-zinc-500' },
 };
 
 const REGIME_STYLE: Record<string, { color: string; icon: string; bg: string }> = {
@@ -26,7 +29,7 @@ const REGIME_STYLE: Record<string, { color: string; icon: string; bg: string }> 
   BEAR:     { color: 'text-rose-400',    icon: '▼', bg: 'bg-rose-500/10 border-rose-500/30'       },
   SIDEWAYS: { color: 'text-amber-400',   icon: '↔', bg: 'bg-amber-500/10 border-amber-500/30'    },
   HIGH_VOL: { color: 'text-amber-400',   icon: '⚡', bg: 'bg-amber-500/10 border-amber-500/30'    },
-  CRASH:    { color: 'text-red-400',     icon: '☠', bg: 'bg-red-500/10 border-red-500/30'         },
+  CRASH:    { color: 'text-rose-400',     icon: '☠', bg: 'bg-rose-500/10 border-rose-500/30'         },
 };
 
 const fmt2 = (n: number | null | undefined) =>
@@ -87,14 +90,14 @@ function EodPickCard({ pick, onSelect }: { pick: any; onSelect: (sym: string) =>
   return (
     <motion.div
       layout
-      className={cn('rounded-xl border p-4 cursor-pointer hover:brightness-110 transition-all', style.bg, style.border)}
+      className={cn(style.card, 'p-4 cursor-pointer hover:brightness-110')}
       onClick={() => onSelect(pick.symbol)}
     >
       <div className="flex items-start justify-between gap-3 mb-3">
         <div>
           <div className="flex items-center gap-2">
             <span className="text-white font-bold text-sm">{pick.symbol}</span>
-            <span className={cn('text-[10px] font-black px-1.5 py-0.5 rounded border', style.bg, style.border, style.text)}>
+            <span className={cn('text-[10px] font-black', style.badge)}>
               {style.label}
             </span>
           </div>
@@ -200,7 +203,7 @@ function EodPickCard({ pick, onSelect }: { pick: any; onSelect: (sym: string) =>
 function IntradayCard({ sig, onSelect }: { sig: any; onSelect: (sym: string) => void }) {
   return (
     <div
-      className="rounded-lg border border-slate-700/50 bg-slate-800/40 p-3 cursor-pointer hover:border-slate-600 transition-colors"
+      className="v1-card p-3 cursor-pointer hover:border-slate-600 transition-colors"
       onClick={() => onSelect(sig.symbol)}
     >
       <div className="flex items-center justify-between mb-1">
@@ -330,7 +333,7 @@ export function CommandCenterDashboard({ onSelectStock }: { onSelectStock: (sym:
             <section>
               <div className="flex items-center gap-2 mb-3">
                 <Shield className="w-4 h-4 text-violet-400" />
-                <h2 className="text-sm font-bold text-white">EOD Swing Picks</h2>
+                <h2 className="v1-title-section">EOD Swing Picks</h2>
                 <span className="text-[10px] text-slate-500 ml-auto">{data?.eodPicks?.length ?? 0} stocks</span>
               </div>
               {(data?.eodPicks?.length ?? 0) === 0 ? (
@@ -349,13 +352,13 @@ export function CommandCenterDashboard({ onSelectStock }: { onSelectStock: (sym:
             <section>
               <div className="flex items-center gap-2 mb-3">
                 <Zap className="w-4 h-4 text-amber-400" />
-                <h2 className="text-sm font-bold text-white">Intraday Live</h2>
+                <h2 className="v1-title-section">Intraday Live</h2>
                 <span className="text-[10px] text-slate-500 ml-auto">
                   {data?.intradaySignals?.length ?? 0} HIGH-strength signals
                 </span>
               </div>
               {regime?.name === 'CRASH' ? (
-                <div className="flex items-center gap-2 p-4 rounded-xl bg-red-500/10 border border-red-500/30 text-red-400 text-sm">
+                <div className="flex items-center gap-2 p-4 rounded-xl bg-rose-500/10 border border-rose-500/30 text-rose-400 text-sm">
                   <AlertTriangle className="w-4 h-4 flex-none" />
                   Intraday signals disabled — CRASH regime active. Preserve capital.
                 </div>

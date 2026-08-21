@@ -96,22 +96,22 @@ export const EODMarketScreener: React.FC<Props> = ({ onSelectStock }) => {
   );
 
   return (
-    <div className="flex flex-col h-[600px] backdrop-blur-md bg-slate-900/30 border border-slate-800/50 rounded-xl p-6 text-slate-200">
+    <div className="flex flex-col min-h-screen text-slate-200">
       {/* Header */}
       <div className="flex items-center justify-between mb-6 flex-shrink-0">
         <div>
-          <h1 className="text-2xl font-bold font-['Rajdhani'] flex items-center gap-3">
+          <h1 className="v1-title-page flex items-center gap-3">
             <Activity className="w-6 h-6 text-violet-400" />
             EOD Market Screener
           </h1>
-          <p className="text-xs font-mono text-slate-500 mt-1 uppercase tracking-widest">
+          <p className="text-xs font-data text-slate-500 mt-1 font-display uppercase tracking-widest">
             {stocks.length} Matches Found
           </p>
         </div>
         <button
           onClick={() => setShowFilters(!showFilters)}
           className={cn(
-            "flex items-center gap-2 px-4 py-2 rounded-lg font-mono text-xs font-bold transition-all",
+            "flex items-center gap-2 px-4 py-2 rounded-lg font-data text-xs font-bold transition-all",
             activeCount > 0 ? "bg-violet-600/20 text-violet-400 border border-violet-500/30" : "bg-slate-800 text-slate-400 border border-slate-700"
           )}
         >
@@ -130,9 +130,9 @@ export const EODMarketScreener: React.FC<Props> = ({ onSelectStock }) => {
             exit={{ height: 0, opacity: 0 }}
             className="overflow-hidden mb-6 flex-shrink-0"
           >
-            <div className="bg-slate-900/50 border border-slate-800 rounded-xl p-5">
+            <div className="v1-card p-5">
               <div className="flex justify-between items-center mb-4">
-                <h3 className="text-sm font-bold font-['Rajdhani'] uppercase tracking-wider text-slate-400">EOD Active Filters</h3>
+                <h3 className="v1-title-card">EOD Active Filters</h3>
                 {activeCount > 0 && (
                   <button onClick={clearFilters} className="text-xs text-rose-400 hover:text-rose-300 flex items-center gap-1">
                     <X className="w-3 h-3" /> Clear All
@@ -143,7 +143,7 @@ export const EODMarketScreener: React.FC<Props> = ({ onSelectStock }) => {
               <div className="space-y-6 max-h-[300px] overflow-y-auto hide-scrollbar pr-2">
                 {FILTER_GROUPS.map(group => (
                   <div key={group.name}>
-                    <h4 className="text-xs font-mono text-slate-500 mb-3">{group.name}</h4>
+                    <h4 className="text-xs font-data text-slate-500 mb-3">{group.name}</h4>
                     <div className="flex flex-wrap gap-2">
                       {group.keys.map(key => {
                         const active = !!filters[key];
@@ -152,7 +152,7 @@ export const EODMarketScreener: React.FC<Props> = ({ onSelectStock }) => {
                             key={key}
                             onClick={() => toggleFilter(key)}
                             className={cn(
-                              "text-[10px] font-mono px-3 py-1.5 rounded-md transition-all border",
+                              "text-[10px] font-data px-3 py-1.5 rounded-md transition-all border",
                               active 
                                 ? "bg-violet-600/20 text-violet-300 border-violet-500/50 shadow-[0_0_10px_rgba(139,92,246,0.1)]" 
                                 : "bg-slate-800/50 text-slate-400 border-slate-700/50 hover:bg-slate-800 hover:text-slate-300"
@@ -176,54 +176,51 @@ export const EODMarketScreener: React.FC<Props> = ({ onSelectStock }) => {
         {isLoading ? (
           <div className="flex flex-col items-center justify-center h-64 text-violet-400">
             <Zap className="w-8 h-8 animate-pulse mb-4 opacity-50" />
-            <p className="font-mono text-xs tracking-widest animate-pulse">SCANNING EOD MARKET...</p>
+            <p className="font-data text-xs tracking-widest animate-pulse">SCANNING EOD MARKET...</p>
           </div>
         ) : stocks.length === 0 ? (
           <div className="flex flex-col items-center justify-center h-64 text-slate-500">
             <Activity className="w-8 h-8 mb-4 opacity-30" />
-            <p className="font-mono text-xs tracking-widest">NO STOCKS MATCH FILTERS</p>
+            <p className="font-data text-xs tracking-widest">NO STOCKS MATCH FILTERS</p>
           </div>
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
             {sortedStocks.map((stock: any) => {
               const chg = stock.change_percent ?? 0;
-              let borderColor = 'border-amber-500/40';
-              let bgColor = 'bg-amber-500/10';
+              let cardClass = 'v1-card-neutral';
               let textColor = 'text-amber-400';
               let Icon = Minus;
 
               if (chg > 0) {
-                borderColor = 'border-emerald-500/50';
-                bgColor = 'bg-emerald-500/10';
+                cardClass = 'v1-card-up';
                 textColor = 'text-emerald-400';
                 Icon = TrendingUp;
               } else if (chg < 0) {
-                borderColor = 'border-rose-500/50';
-                bgColor = 'bg-rose-500/10';
+                cardClass = 'v1-card-down';
                 textColor = 'text-rose-400';
                 Icon = TrendingDown;
               }
 
               return (
-                <div 
-                  key={stock.symbol} 
+                <div
+                  key={stock.symbol}
                   onClick={() => onSelectStock?.(stock.symbol)}
                   className={cn(
-                    "rounded-xl border p-4 transition-all hover:shadow-[0_8px_30px_rgba(0,0,0,0.12)] backdrop-blur-sm cursor-pointer hover:scale-[1.01]",
-                    borderColor, bgColor
+                    cardClass,
+                    "p-4 transition-all hover:shadow-[0_8px_30px_rgba(0,0,0,0.12)] cursor-pointer hover:scale-[1.01]"
                   )}
                 >
                   <div className="flex justify-between items-start mb-4">
                     <div>
-                      <h3 className="font-['Rajdhani'] text-lg font-bold text-white tracking-wide">{stock.symbol}</h3>
-                      <div className={cn("flex items-center gap-1 font-mono text-[11px] mt-1 font-bold", textColor)}>
+                      <h3 className="font-display text-lg font-bold text-white tracking-wide">{stock.symbol}</h3>
+                      <div className={cn("flex items-center gap-1 font-data text-[11px] mt-1 font-bold", textColor)}>
                         <Icon className="w-3 h-3" />
                         {chg > 0 ? '+' : ''}{chg.toFixed(2)}% ({stock.change > 0 ? '+' : ''}{stock.change})
                       </div>
                     </div>
                     <div className="text-right">
-                      <div className="font-mono text-lg font-bold text-slate-100">₹{stock.last_trade_price?.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</div>
-                      <div className="font-mono text-[9px] text-slate-500 mt-1 uppercase">Vol: {stock.t0_volume?.toLocaleString('en-IN')}</div>
+                      <div className="font-data text-lg font-bold text-slate-100">₹{stock.last_trade_price?.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</div>
+                      <div className="font-data text-[9px] text-slate-500 mt-1 uppercase">Vol: {stock.t0_volume?.toLocaleString('en-IN')}</div>
                     </div>
                   </div>
 
@@ -235,8 +232,8 @@ export const EODMarketScreener: React.FC<Props> = ({ onSelectStock }) => {
                       const displayKey = key.replace(/t0_/g, '').replace(/_/g, ' ').trim().toUpperCase();
                       return (
                         <div key={key} className="overflow-hidden">
-                          <p className="font-mono text-[9px] text-slate-500 truncate">{displayKey}</p>
-                          <p className="font-mono text-[10px] font-semibold text-slate-300 mt-0.5 truncate">{formattedValue}</p>
+                          <p className="font-data text-[9px] text-slate-500 truncate">{displayKey}</p>
+                          <p className="font-data text-[10px] font-semibold text-slate-300 mt-0.5 truncate">{formattedValue}</p>
                         </div>
                       );
                     })}

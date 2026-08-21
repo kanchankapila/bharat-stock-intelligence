@@ -57,11 +57,11 @@ function RegimeBadge({ regime }: { regime: string }) {
     BULL: 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30',
     SIDEWAYS: 'bg-yellow-500/20 text-yellow-400 border-yellow-500/30',
     BEAR: 'bg-rose-500/20 text-rose-400 border-rose-500/30',
-    TRANSITIONAL_BULL: 'bg-blue-500/20 text-blue-400 border-blue-500/30',
+    TRANSITIONAL_BULL: 'bg-indigo-500/20 text-indigo-400 border-indigo-500/30',
   };
   const cls = map[regime] ?? 'bg-slate-800/50 text-slate-400 border-slate-700/30';
   return (
-    <span className={cn('px-2 py-0.5 rounded-full text-[10px] font-black uppercase tracking-widest border', cls)}>
+    <span className={cn('px-2 py-0.5 rounded-full text-[10px] font-black font-display uppercase tracking-widest border', cls)}>
       {regime.replace(/_/g, ' ')}
     </span>
   );
@@ -78,7 +78,7 @@ function StatusBadge({ status }: { status: string }) {
   }
   if (status === 'GENERATING') {
     return (
-      <span className="flex items-center gap-1 text-blue-400 text-xs font-bold">
+      <span className="flex items-center gap-1 text-indigo-400 text-xs font-bold">
         <RefreshCw className="w-3.5 h-3.5 animate-spin" /> GENERATING
       </span>
     );
@@ -100,7 +100,7 @@ function StatusBadge({ status }: { status: string }) {
 // --- ConvictionDots ---
 function ConvictionDots({ score }: { score: number }) {
   const filled = Math.round((score / 100) * 5);
-  const colorCls = filled >= 4 ? 'bg-emerald-400' : filled >= 3 ? 'bg-blue-400' : 'bg-yellow-400';
+  const colorCls = filled >= 4 ? 'bg-emerald-400' : filled >= 3 ? 'bg-indigo-400' : 'bg-yellow-400';
   return (
     <span className="flex items-center gap-0.5">
       {Array.from({ length: 5 }).map((_, i) => (
@@ -119,7 +119,7 @@ function LayerBadge({ layers }: { layers: number }) {
     layers >= 4
       ? 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30'
       : layers >= 3
-      ? 'bg-blue-500/20 text-blue-400 border-blue-500/30'
+      ? 'bg-indigo-500/20 text-indigo-400 border-indigo-500/30'
       : 'bg-slate-800/50 text-slate-400 border-slate-700/30';
   return (
     <span className={cn('px-1.5 py-0.5 rounded text-[9px] font-black border', cls)}>
@@ -132,7 +132,7 @@ function LayerBadge({ layers }: { layers: number }) {
 function ScoreBar({ label, value, max = 100 }: { label: string; value: number | null; max?: number }) {
   const pct = value == null ? 0 : Math.min(100, Math.round((value / max) * 100));
   const color =
-    pct >= 70 ? 'bg-emerald-500' : pct >= 40 ? 'bg-blue-500' : 'bg-yellow-500';
+    pct >= 70 ? 'bg-emerald-500' : pct >= 40 ? 'bg-indigo-500' : 'bg-yellow-500';
   return (
     <div className="space-y-0.5">
       <div className="flex justify-between text-[10px] text-slate-400 font-bold">
@@ -166,11 +166,11 @@ function StockDeepDive({
       transition={{ duration: 0.25 }}
       className="overflow-hidden"
     >
-      <div className="glass-strong border border-slate-800/30 rounded-2xl p-5 mt-1 mb-2 overflow-hidden">
+      <div className="v1-card p-5 mt-1 mb-2 overflow-hidden">
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
           {/* Column 1: Score Breakdown */}
           <div className="space-y-3">
-            <p className="text-[10px] font-black uppercase tracking-widest text-slate-400 flex items-center gap-1">
+            <p className="text-[10px] font-black font-display uppercase tracking-widest text-slate-400 flex items-center gap-1">
               <BarChart2 className="w-3 h-3" /> Score Breakdown
             </p>
             <ScoreBar label="Conviction" value={pick.conviction_score} />
@@ -183,7 +183,7 @@ function StockDeepDive({
 
           {/* Column 2: Fundamental Snapshot */}
           <div className="space-y-3">
-            <p className="text-[10px] font-black uppercase tracking-widest text-slate-400 flex items-center gap-1">
+            <p className="text-[10px] font-black font-display uppercase tracking-widest text-slate-400 flex items-center gap-1">
               <Activity className="w-3 h-3" /> Fundamentals
             </p>
             <table className="w-full text-xs text-slate-300">
@@ -209,7 +209,7 @@ function StockDeepDive({
 
           {/* Column 3: AI Blurb + Trade Setup */}
           <div className="space-y-3">
-            <p className="text-[10px] font-black uppercase tracking-widest text-slate-400 flex items-center gap-1">
+            <p className="text-[10px] font-black font-display uppercase tracking-widest text-slate-400 flex items-center gap-1">
               <Eye className="w-3 h-3" /> AI Insight
             </p>
             {blurbs?.[pick.symbol] ? (
@@ -219,7 +219,7 @@ function StockDeepDive({
             )}
 
             <div className="mt-3 pt-3 border-t border-slate-800/30 space-y-1">
-              <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Trade Setup</p>
+              <p className="text-[10px] font-black font-display uppercase tracking-widest text-slate-400">Trade Setup</p>
               <div className="flex gap-2 flex-wrap">
                 <span className="px-2 py-0.5 rounded bg-rose-500/10 border border-rose-500/20 text-rose-400 text-[10px] font-black">
                   SL {pick.stop_loss_pct.toFixed(1)}%
@@ -230,7 +230,7 @@ function StockDeepDive({
                 <span className="px-2 py-0.5 rounded bg-emerald-500/20 border border-emerald-500/30 text-emerald-300 text-[10px] font-black">
                   T2 +{pick.target_2_pct.toFixed(1)}%
                 </span>
-                <span className="px-2 py-0.5 rounded bg-blue-500/10 border border-blue-500/20 text-blue-400 text-[10px] font-black">
+                <span className="px-2 py-0.5 rounded bg-indigo-500/10 border border-indigo-500/20 text-indigo-400 text-[10px] font-black">
                   R:R {pick.risk_reward.toFixed(1)}
                 </span>
               </div>
@@ -252,7 +252,7 @@ function StockDeepDive({
             {onAddWatchlist && (
               <button
                 onClick={() => onAddWatchlist(pick.symbol, { source: 'HedgeFund Research', conviction: pick.conviction_score })}
-                className="mt-3 w-full py-1.5 rounded-lg bg-blue-500/10 border border-blue-500/20 text-blue-400 text-xs font-black hover:bg-blue-500/20 transition-all"
+                className="mt-3 w-full py-1.5 rounded-lg bg-indigo-500/10 border border-indigo-500/20 text-indigo-400 text-xs font-black hover:bg-indigo-500/20 transition-all"
               >
                 + Add to Watchlist
               </button>
@@ -266,14 +266,14 @@ function StockDeepDive({
           if (!dl) return null;
           return (
             <div className="mt-4 border-t border-slate-700/50 pt-4">
-              <p className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-3">AI Model Signals</p>
+              <p className="v1-title-card mb-3">AI Model Signals</p>
               <div className="flex gap-2 mb-3">
                 {([1, 5, 15] as const).map(h => {
                   const prob = (dl[`prob_up_${h}d`] as number) ?? 0;
                   const ret  = dl[`exp_ret_${h}d`] as number | null;
                   const color = prob >= 0.65 ? 'text-emerald-400' : prob >= 0.50 ? 'text-amber-400' : 'text-rose-400';
                   return (
-                    <div key={h} className="flex-1 glass rounded-lg p-2 text-center">
+                    <div key={h} className="v1-card flex-1 p-2 text-center">
                       <div className="text-[9px] text-slate-500 mb-1">{h}D</div>
                       <div className={`text-sm font-bold ${color}`}>{(prob * 100).toFixed(0)}%↑</div>
                       {ret != null && (
@@ -317,9 +317,9 @@ function TopPicksTable({
   const sorted = [...picks].sort((a, b) => b.conviction_score - a.conviction_score).slice(0, 10);
 
   return (
-    <div className="glass-strong border border-slate-800/30 rounded-2xl overflow-hidden">
+    <div className="v1-card overflow-hidden">
       {/* Table Header */}
-      <div className="px-4 py-3 border-b border-slate-800/30 grid grid-cols-[24px_1fr_60px_40px_60px_50px_50px_50px_50px_60px] gap-2 text-[9px] font-black uppercase tracking-widest text-slate-500">
+      <div className="px-4 py-3 border-b border-slate-800/30 grid grid-cols-[24px_1fr_60px_40px_60px_50px_50px_50px_50px_60px] gap-2 text-[9px] font-black font-display uppercase tracking-widest text-slate-500">
         <span>#</span>
         <span>Symbol</span>
         <span className="text-right">Score</span>
@@ -349,7 +349,7 @@ function TopPicksTable({
                 <span className="text-xs font-black text-white uppercase truncate">{pick.symbol}</span>
                 <ConvictionDots score={pick.conviction_score} />
               </div>
-              <span className="text-right text-xs font-black text-blue-400">{pick.conviction_score.toFixed(0)}</span>
+              <span className="text-right text-xs font-black text-indigo-400">{pick.conviction_score.toFixed(0)}</span>
               <span className="flex justify-center"><LayerBadge layers={pick.layers_confirmed} /></span>
               <span className="text-right text-[10px] text-slate-300 font-bold truncate">{pick.entry_note?.slice(0, 8) || '—'}</span>
               <span className="text-right text-[10px] font-black text-rose-400">{pick.stop_loss_pct.toFixed(1)}%</span>
@@ -369,7 +369,7 @@ function TopPicksTable({
                   <span className={`text-[9px] font-semibold px-1 py-0.5 rounded ${
                     currentRegime.regime === 'BULL'     ? 'bg-emerald-900/60 text-emerald-300' :
                     currentRegime.regime === 'BEAR'     ? 'bg-rose-900/60 text-rose-300' :
-                    currentRegime.regime === 'CRASH'    ? 'bg-red-950/80 text-red-200' :
+                    currentRegime.regime === 'CRASH'    ? 'bg-rose-950/80 text-rose-200' :
                     currentRegime.regime === 'HIGH_VOL' ? 'bg-amber-900/60 text-amber-300' :
                                                           'bg-slate-800 text-slate-400'
                   }`}>
@@ -404,19 +404,19 @@ function MarketContextBar({ report }: { report: ResearchReport }) {
   const fiiColor = report.fii_net_5d >= 0 ? 'text-emerald-400' : 'text-rose-400';
 
   return (
-    <div className="glass border border-slate-800/30 rounded-2xl px-4 py-3 flex flex-wrap items-center gap-4">
+    <div className="v1-card px-4 py-3 flex flex-wrap items-center gap-4">
       <RegimeBadge regime={report.market_regime} />
 
-      <div className="flex items-center gap-1.5 text-xs">
-        <span className="text-slate-500 font-bold">Sentiment</span>
-        <span className={cn('font-black', sentimentColor)}>
+      <div className="flex items-center gap-1.5">
+        <span className="v1-data-label">Sentiment</span>
+        <span className={cn('v1-data-value', sentimentColor)}>
           {report.sentiment_score > 0 ? '+' : ''}{report.sentiment_score.toFixed(0)}
         </span>
       </div>
 
-      <div className="flex items-center gap-1.5 text-xs">
-        <span className="text-slate-500 font-bold">FII 5D</span>
-        <span className={cn('font-black', fiiColor)}>
+      <div className="flex items-center gap-1.5">
+        <span className="v1-data-label">FII 5D</span>
+        <span className={cn('v1-data-value', fiiColor)}>
           {report.fii_net_5d >= 0 ? '+' : ''}₹{(report.fii_net_5d / 100).toFixed(0)}Cr
         </span>
       </div>
@@ -431,7 +431,7 @@ function MarketContextBar({ report }: { report: ResearchReport }) {
           {report.hot_themes.slice(0, 4).map((t) => (
             <span
               key={t}
-              className="px-2 py-0.5 rounded-full bg-violet-500/10 border border-violet-500/20 text-violet-300 text-[9px] font-black uppercase tracking-wide"
+              className="px-2 py-0.5 rounded-full bg-violet-500/10 border border-violet-500/20 text-violet-300 text-[9px] font-black font-display uppercase tracking-wide"
             >
               {t}
             </span>
@@ -453,8 +453,8 @@ function ResearchSidebar({
   return (
     <div className="space-y-4">
       {/* Avoid List */}
-      <div className="glass-strong border border-slate-800/30 rounded-2xl p-4 space-y-3">
-        <p className="text-[10px] font-black uppercase tracking-widest text-slate-400 flex items-center gap-1">
+      <div className="v1-card p-4 space-y-3">
+        <p className="v1-title-card flex items-center gap-1">
           <AlertTriangle className="w-3 h-3 text-rose-400" /> Avoid List
         </p>
         {report.avoid_list?.length > 0 ? (
@@ -470,9 +470,9 @@ function ResearchSidebar({
       </div>
 
       {/* Watchlist Candidates */}
-      <div className="glass-strong border border-slate-800/30 rounded-2xl p-4 space-y-3">
-        <p className="text-[10px] font-black uppercase tracking-widest text-slate-400 flex items-center gap-1">
-          <Eye className="w-3 h-3 text-blue-400" /> Watchlist Candidates
+      <div className="v1-card p-4 space-y-3">
+        <p className="v1-title-card flex items-center gap-1">
+          <Eye className="w-3 h-3 text-indigo-400" /> Watchlist Candidates
         </p>
         {report.watchlist?.length > 0 ? (
           report.watchlist.slice(0, 8).map((item) => (
@@ -482,11 +482,11 @@ function ResearchSidebar({
                 <span className="text-xs font-black text-white uppercase">{item.symbol}</span>
               </div>
               <div className="flex items-center gap-2">
-                <span className="text-[10px] text-blue-400 font-bold">{item.conviction_score.toFixed(0)}</span>
+                <span className="text-[10px] text-indigo-400 font-bold">{item.conviction_score.toFixed(0)}</span>
                 {onAddWatchlist && (
                   <button
                     onClick={() => onAddWatchlist(item.symbol, { source: 'HedgeFund Watchlist' })}
-                    className="px-1.5 py-0.5 rounded bg-blue-500/10 border border-blue-500/20 text-blue-400 text-[9px] font-black hover:bg-blue-500/20 transition-all"
+                    className="px-1.5 py-0.5 rounded bg-indigo-500/10 border border-indigo-500/20 text-indigo-400 text-[9px] font-black hover:bg-indigo-500/20 transition-all"
                   >
                     +
                   </button>
@@ -500,8 +500,8 @@ function ResearchSidebar({
       </div>
 
       {/* Sector Rankings */}
-      <div className="glass-strong border border-slate-800/30 rounded-2xl p-4 space-y-3">
-        <p className="text-[10px] font-black uppercase tracking-widest text-slate-400 flex items-center gap-1">
+      <div className="v1-card p-4 space-y-3">
+        <p className="v1-title-card flex items-center gap-1">
           <Trophy className="w-3 h-3 text-amber-400" /> Sector Rankings
         </p>
         {report.sector_rankings?.length > 0 ? (
@@ -525,7 +525,7 @@ function ResearchSidebar({
                 </div>
                 <div className="h-1 bg-slate-800 rounded-full overflow-hidden">
                   <div
-                    className="h-full bg-blue-500/60 rounded-full"
+                    className="h-full bg-indigo-500/60 rounded-full"
                     style={{ width: `${barPct}%` }}
                   />
                 </div>
@@ -611,7 +611,7 @@ export default function HedgeFundResearch({ onAddWatchlist }: HedgeFundResearchP
             <FlaskConical className="w-4 h-4 text-violet-400" />
           </div>
           <div>
-            <h1 className="text-sm font-black text-white uppercase tracking-widest">Hedge Fund Research</h1>
+            <h1 className="v1-title-page">Hedge Fund Research</h1>
             <p className="text-[10px] text-slate-400 font-bold uppercase italic">AI-Driven Daily Intelligence</p>
           </div>
         </div>
@@ -634,9 +634,9 @@ export default function HedgeFundResearch({ onAddWatchlist }: HedgeFundResearchP
                 key={t}
                 onClick={() => setSelectedType(t)}
                 className={cn(
-                  'px-3 py-1.5 text-[10px] font-black uppercase tracking-wider transition-all',
+                  'px-3 py-1.5 text-[10px] font-black font-display uppercase tracking-wider transition-all',
                   selectedType === t
-                    ? 'bg-blue-500/20 text-blue-400'
+                    ? 'bg-indigo-500/20 text-indigo-400'
                     : 'text-slate-500 hover:text-slate-300'
                 )}
               >
@@ -664,9 +664,9 @@ export default function HedgeFundResearch({ onAddWatchlist }: HedgeFundResearchP
         <button
           onClick={() => setSelectedDate(undefined)}
           className={cn(
-            'px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-widest border transition-all',
+            'px-3 py-1 rounded-full text-[10px] font-black font-display uppercase tracking-widest border transition-all',
             !selectedDate
-              ? 'bg-blue-500/20 text-blue-400 border-blue-500/30'
+              ? 'bg-indigo-500/20 text-indigo-400 border-indigo-500/30'
               : 'text-slate-400 border-slate-800/50 hover:border-slate-600/50'
           )}
         >
@@ -677,9 +677,9 @@ export default function HedgeFundResearch({ onAddWatchlist }: HedgeFundResearchP
             key={d}
             onClick={() => setSelectedDate(d)}
             className={cn(
-              'px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-widest border transition-all',
+              'px-3 py-1 rounded-full text-[10px] font-black font-display uppercase tracking-widest border transition-all',
               selectedDate === d
-                ? 'bg-blue-500/20 text-blue-400 border-blue-500/30'
+                ? 'bg-indigo-500/20 text-indigo-400 border-indigo-500/30'
                 : 'text-slate-400 border-slate-800/50 hover:border-slate-600/50'
             )}
           >
@@ -697,8 +697,8 @@ export default function HedgeFundResearch({ onAddWatchlist }: HedgeFundResearchP
       )}
 
       {!reportLoading && currentStatus === 'GENERATING' && (
-        <div className="glass-strong border border-blue-500/20 rounded-2xl p-8 flex flex-col items-center gap-4 text-center">
-          <RefreshCw className="w-8 h-8 text-blue-400 animate-spin" />
+        <div className="v1-card p-8 flex flex-col items-center gap-4 text-center">
+          <RefreshCw className="w-8 h-8 text-indigo-400 animate-spin" />
           <div>
             <p className="text-sm font-black text-white">Generating Research Report</p>
             <p className="text-xs text-slate-400 mt-1">This takes 2–3 minutes. Auto-refreshing every 15s.</p>
@@ -707,7 +707,7 @@ export default function HedgeFundResearch({ onAddWatchlist }: HedgeFundResearchP
             {[0, 1, 2].map((i) => (
               <span
                 key={i}
-                className="w-2 h-2 rounded-full bg-blue-400 animate-pulse"
+                className="w-2 h-2 rounded-full bg-indigo-400 animate-pulse"
                 style={{ animationDelay: `${i * 0.2}s` }}
               />
             ))}
@@ -716,7 +716,7 @@ export default function HedgeFundResearch({ onAddWatchlist }: HedgeFundResearchP
       )}
 
       {!reportLoading && currentStatus === 'FAILED' && (
-        <div className="glass-strong border border-rose-500/20 rounded-2xl p-8 flex flex-col items-center gap-3 text-center">
+        <div className="v1-card-down p-8 flex flex-col items-center gap-3 text-center">
           <XCircle className="w-8 h-8 text-rose-400" />
           <div>
             <p className="text-sm font-black text-white">Generation Failed</p>
@@ -726,7 +726,7 @@ export default function HedgeFundResearch({ onAddWatchlist }: HedgeFundResearchP
       )}
 
       {!reportLoading && !reportRow && (
-        <div className="glass-strong border border-slate-800/30 rounded-2xl p-8 flex flex-col items-center gap-3 text-center">
+        <div className="v1-card p-8 flex flex-col items-center gap-3 text-center">
           <FlaskConical className="w-8 h-8 text-slate-500" />
           <div>
             <p className="text-sm font-black text-white">No Report Yet</p>
@@ -749,8 +749,8 @@ export default function HedgeFundResearch({ onAddWatchlist }: HedgeFundResearchP
 
             {/* Executive Summary */}
             {report.executive_summary && (
-              <div className="glass-strong border border-slate-800/30 rounded-2xl p-4">
-                <p className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-2 flex items-center gap-1">
+              <div className="v1-card p-4">
+                <p className="v1-title-card mb-2 flex items-center gap-1">
                   <Activity className="w-3 h-3" /> Executive Summary
                 </p>
                 <p className="text-xs text-slate-300 leading-relaxed">{report.executive_summary}</p>
@@ -761,13 +761,13 @@ export default function HedgeFundResearch({ onAddWatchlist }: HedgeFundResearchP
             <div className="grid grid-cols-1 lg:grid-cols-[1fr_280px] gap-5">
               {/* Top Picks Table */}
               <div className="space-y-3">
-                <p className="text-[10px] font-black uppercase tracking-widest text-slate-400 px-1 flex items-center gap-1">
+                <p className="v1-title-card px-1 flex items-center gap-1">
                   <Trophy className="w-3 h-3 text-amber-400" /> Top Picks ({report.top_picks?.length ?? 0})
                 </p>
                 {report.top_picks?.length > 0 ? (
                   <TopPicksTable picks={report.top_picks} blurbs={blurbs} onAddWatchlist={onAddWatchlist} dlBySymbol={dlBySymbol} currentRegime={currentRegime} />
                 ) : (
-                  <div className="glass-strong border border-slate-800/30 rounded-2xl p-6 text-center text-slate-500 text-xs">
+                  <div className="v1-card p-6 text-center text-slate-500 text-xs">
                     No picks available for this report.
                   </div>
                 )}

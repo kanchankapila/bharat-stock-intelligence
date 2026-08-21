@@ -138,7 +138,7 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({ navGroups, onNav
                             <r.icon className={cn('w-3.5 h-3.5 shrink-0', active ? 'text-indigo-400' : 'text-slate-500')} />
                             <span className="text-xs font-semibold text-slate-200 truncate">{r.label}</span>
                           </span>
-                          <span className="text-[9px] font-bold text-slate-600 uppercase tracking-wider shrink-0">{r.group}</span>
+                          <span className="text-[9px] font-bold text-slate-600 font-display uppercase tracking-wider shrink-0">{r.group}</span>
                         </>
                       ) : (
                         <>

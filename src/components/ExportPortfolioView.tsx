@@ -45,7 +45,7 @@ export default function ExportPortfolioView() {
     <div className="p-6 space-y-4">
       <div className="flex items-center justify-between">
         <div>
-          <h2 className="text-lg font-bold text-white">Export Portfolio</h2>
+          <h2 className="v1-title-page">Export Portfolio</h2>
           <p className="text-xs text-slate-400">Generate portfolio weights and optionally run a backtest</p>
         </div>
         <div className="flex items-center gap-2">
@@ -60,14 +60,14 @@ export default function ExportPortfolioView() {
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
         {picks.map(p => (
-          <div key={p.symbol} className="p-3 rounded border border-slate-800 bg-slate-900">
+          <div key={p.symbol} className="v1-card p-3">
             <div className="flex justify-between items-center">
               <div>
                 <div className="font-semibold">{p.symbol}</div>
                 <div className="text-xs text-slate-400">Vol {p.volPct?.toFixed?.(2)}%</div>
               </div>
               <div className="text-right">
-                <div className="font-mono font-semibold">{(p.weight * 100).toFixed(2)}%</div>
+                <div className="font-data font-semibold">{(p.weight * 100).toFixed(2)}%</div>
                 <div className="text-xs text-slate-500">weight</div>
               </div>
             </div>
@@ -76,8 +76,8 @@ export default function ExportPortfolioView() {
       </div>
 
       {stats && (
-        <div className="p-4 rounded border bg-slate-900">
-          <h3 className="font-semibold">Backtest summary</h3>
+        <div className="v1-card p-4">
+          <h3 className="v1-title-card">Backtest summary</h3>
           <pre className="text-xs overflow-auto mt-2" style={{maxHeight:300}}>{JSON.stringify(stats, null, 2)}</pre>
         </div>
       )}

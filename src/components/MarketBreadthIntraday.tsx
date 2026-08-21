@@ -79,7 +79,7 @@ export const MarketBreadthIntraday: React.FC<MarketBreadthIntradayProps> = ({
             </ResponsiveContainer>
           </div>
         )}
-        <p className="text-[9.5px] text-center text-slate-300 font-bold uppercase tracking-widest">
+        <p className="text-[9.5px] text-center text-slate-300 font-bold font-display uppercase tracking-widest">
           {total} stocks • A/D Ratio: {declines > 0 ? (advances / declines).toFixed(2) : '—'}
         </p>
       </div>

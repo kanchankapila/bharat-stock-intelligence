@@ -23,7 +23,7 @@ const ScannerPanel: React.FC<{ scanner: ScannerKey; onSelectStock: (symbol: stri
 
   if (isLoading) return <div className="text-center py-12 text-slate-400 text-sm">Loading…</div>;
   if (rows.length === 0) return (
-    <div className="text-center py-12 text-slate-400 bg-slate-950/30 rounded-xl border border-slate-800/50">
+    <div className="text-center py-12 text-slate-400 v1-card">
       No stocks currently match this scanner.
     </div>
   );
@@ -33,7 +33,7 @@ const ScannerPanel: React.FC<{ scanner: ScannerKey; onSelectStock: (symbol: stri
         <button
           key={r.symbol}
           onClick={() => onSelectStock(r.symbol)}
-          className="text-left bg-slate-900/40 border border-slate-800/50 hover:border-indigo-500/50 transition-colors rounded-xl p-3"
+          className="text-left v1-card hover:border-indigo-500/50 transition-colors p-3"
         >
           <div className="flex justify-between items-center">
             <span className="font-black text-white">{r.symbol}</span>
@@ -74,7 +74,7 @@ export function InvestmentStrategy({ onSelectStock }: { onSelectStock: (symbol: 
       {/* Header */}
       <div className="flex flex-col md:flex-row md:items-end justify-between gap-4">
         <div>
-          <h2 className="text-3xl font-black text-white tracking-tight flex items-center gap-3">
+          <h2 className="v1-title-page flex items-center gap-3">
             <Target className="w-8 h-8 text-indigo-400" />
             Strategy Builder Hub
           </h2>
@@ -144,7 +144,7 @@ export function InvestmentStrategy({ onSelectStock }: { onSelectStock: (symbol: 
           <div className="bg-emerald-500/10 border border-emerald-500/20 rounded-xl p-4 flex items-start gap-3">
             <CheckCircle2 className="w-5 h-5 text-emerald-400 shrink-0 mt-0.5" />
             <div>
-              <h3 className="text-sm font-bold text-emerald-400">The Bharat Core Compounder Strategy</h3>
+              <h3 className="v1-title-card">The Bharat Core Compounder Strategy</h3>
               <p className="text-xs text-slate-300 mt-1">
                 Looks for stocks with zero debt, monopoly characteristics, and strong cash flows that are currently trading at attractive technical entry points (Buy on Dips, RSI Oversold). Perfect for medium to long-term holding.
               </p>
@@ -152,19 +152,19 @@ export function InvestmentStrategy({ onSelectStock }: { onSelectStock: (symbol: 
           </div>
 
           {investmentPicks.length === 0 ? (
-            <div className="text-center py-12 text-slate-400 bg-slate-950/30 rounded-xl border border-slate-800/50">
+            <div className="text-center py-12 text-slate-400 v1-card">
               No stocks currently meet the strict quality + value criteria.
             </div>
           ) : (
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
               {investmentPicks.map((pick: any) => (
-                <div key={pick.symbol} className="bg-slate-900/40 border border-slate-800/50 hover:border-indigo-500/50 transition-colors rounded-xl p-4 flex flex-col">
+                <div key={pick.symbol} className="v1-card hover:border-indigo-500/50 transition-colors p-4 flex flex-col">
                   <div className="flex justify-between items-start mb-3">
                     <div>
                       <button onClick={() => onSelectStock(pick.symbol)} className="text-lg font-black text-white hover:text-indigo-400 transition-colors text-left">
                         {pick.symbol}
                       </button>
-                      <p className="text-[10px] text-slate-400 uppercase tracking-widest font-bold truncate max-w-[150px]">{pick.sector || 'Unknown Sector'}</p>
+                      <p className="text-[10px] text-slate-400 font-display uppercase tracking-widest font-bold truncate max-w-[150px]">{pick.sector || 'Unknown Sector'}</p>
                       {pick.price != null && (
                         <p className="text-sm font-bold text-white mt-0.5">
                           ₹{pick.price.toLocaleString('en-IN')}
@@ -176,7 +176,7 @@ export function InvestmentStrategy({ onSelectStock }: { onSelectStock: (symbol: 
                     </div>
                     <div className="flex flex-col items-end">
                       <span className="text-2xl font-black text-emerald-400">{pick.score}</span>
-                      <span className="text-[10px] uppercase tracking-wider text-slate-400 font-bold">Conviction</span>
+                      <span className="text-[10px] font-display uppercase tracking-wider text-slate-400 font-bold">Conviction</span>
                     </div>
                   </div>
                   
@@ -206,7 +206,7 @@ export function InvestmentStrategy({ onSelectStock }: { onSelectStock: (symbol: 
           <div className="bg-rose-500/10 border border-rose-500/20 rounded-xl p-4 flex items-start gap-3">
             <Activity className="w-5 h-5 text-rose-400 shrink-0 mt-0.5" />
             <div>
-              <h3 className="text-sm font-bold text-rose-400">Intraday Momentum Engine</h3>
+              <h3 className="v1-title-card">Intraday Momentum Engine</h3>
               <p className="text-xs text-slate-300 mt-1">
                 Aggregates live intraday triggers from Trendlyne (MACD, CCI, Supertrend crossovers) and MoneyControl Tech scanners. High scores indicate confluence across multiple timeframes.
               </p>
@@ -214,19 +214,19 @@ export function InvestmentStrategy({ onSelectStock }: { onSelectStock: (symbol: 
           </div>
 
           {intradayPicks.length === 0 ? (
-            <div className="text-center py-12 text-slate-400 bg-slate-950/30 rounded-xl border border-slate-800/50">
+            <div className="text-center py-12 text-slate-400 v1-card">
               No intraday momentum triggers detected right now. (Wait for market hours)
             </div>
           ) : (
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
               {intradayPicks.map((pick: any) => (
-                <div key={pick.symbol} className="bg-slate-900/40 border border-slate-800/50 hover:border-rose-500/50 transition-colors rounded-xl p-4 flex flex-col">
+                <div key={pick.symbol} className="v1-card hover:border-rose-500/50 transition-colors p-4 flex flex-col">
                   <div className="flex justify-between items-start mb-3">
                     <div>
                       <button onClick={() => onSelectStock(pick.symbol)} className="text-lg font-black text-white hover:text-rose-400 transition-colors text-left">
                         {pick.symbol}
                       </button>
-                      <p className="text-[10px] text-slate-400 uppercase tracking-widest font-bold truncate max-w-[150px]">{pick.sector || 'Unknown Sector'}</p>
+                      <p className="text-[10px] text-slate-400 font-display uppercase tracking-widest font-bold truncate max-w-[150px]">{pick.sector || 'Unknown Sector'}</p>
                       {pick.price != null && (
                         <p className="text-sm font-bold text-white mt-0.5">
                           ₹{pick.price.toLocaleString('en-IN')}
@@ -238,7 +238,7 @@ export function InvestmentStrategy({ onSelectStock }: { onSelectStock: (symbol: 
                     </div>
                     <div className="flex flex-col items-end">
                       <span className="text-2xl font-black text-rose-400">{pick.score}</span>
-                      <span className="text-[10px] uppercase tracking-wider text-slate-400 font-bold">Strength</span>
+                      <span className="text-[10px] font-display uppercase tracking-wider text-slate-400 font-bold">Strength</span>
                     </div>
                   </div>
                   

@@ -86,7 +86,7 @@ export const TradeDecisionCockpit: React.FC<{ onSelectStock: (symbol: string) =>
     return (
       <div className="py-48 flex flex-col items-center gap-4">
         <div className="w-10 h-10 border-2 border-indigo-500 border-t-transparent rounded-full animate-spin" />
-        <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest animate-pulse">Running Quant Scans…</p>
+        <p className="text-[10px] font-black text-slate-400 font-display uppercase tracking-widest animate-pulse">Running Quant Scans…</p>
       </div>
     );
   }
@@ -106,11 +106,14 @@ export const TradeDecisionCockpit: React.FC<{ onSelectStock: (symbol: string) =>
           { label: 'PCR',         v: pcr != null ? fmt(pcr, 2) : null, pct: pcr != null ? (pcr - 1) * 100 : null, plain: true },
           { label: 'Sentiment',   v: sentimentScore != null ? `${sentimentScore > 0 ? '+' : ''}${fmt(sentimentScore, 1)}` : null, pct: sentimentScore, plain: true },
         ].map((item, i) => (
-          <div key={i} className="bg-slate-900/60 border border-slate-800/50 rounded-xl px-3 py-2">
-            <p className="text-[9px] font-bold text-slate-500 uppercase tracking-wider">{item.label}</p>
+          <div key={i} className={cn(
+            item.pct == null ? 'v1-card-neutral' : (item.pct as number) > 0 ? 'v1-card-up' : (item.pct as number) < 0 ? 'v1-card-down' : 'v1-card-neutral',
+            'px-3 py-2'
+          )}>
+            <p className="v1-data-label">{item.label}</p>
             {item.v != null ? (
               <>
-                <p className="text-sm font-black text-white tabular-nums mt-0.5">
+                <p className="v1-data-value text-white tabular-nums mt-0.5">
                   {item.plain ? item.v : `₹${fmt(item.v as number, 0)}`}
                 </p>
                 {item.pct != null && !item.plain && (
@@ -125,7 +128,7 @@ export const TradeDecisionCockpit: React.FC<{ onSelectStock: (symbol: string) =>
                 )}
               </>
             ) : (
-              <p className="text-sm font-black text-slate-600 mt-0.5">—</p>
+              <p className="v1-data-value text-slate-600 mt-0.5">—</p>
             )}
           </div>
         ))}
@@ -143,7 +146,7 @@ export const TradeDecisionCockpit: React.FC<{ onSelectStock: (symbol: string) =>
             ? <ShieldCheck className="w-5 h-5 text-emerald-400 shrink-0" />
             : <AlertTriangle className="w-5 h-5 text-amber-400 shrink-0" />}
           <div>
-            <span className="text-xs font-black uppercase tracking-wide">
+            <span className="text-xs font-black font-display uppercase tracking-wide">
               {isTradeActive ? 'Trade Signal Active' : 'Risk-Off — No Trade'}
             </span>
             <p className="text-[10px] text-slate-400 font-medium mt-0.5">
@@ -177,10 +180,10 @@ export const TradeDecisionCockpit: React.FC<{ onSelectStock: (symbol: string) =>
       <div className="grid grid-cols-1 xl:grid-cols-12 gap-4">
 
         {/* Candidate Table — 8 cols */}
-        <div className="xl:col-span-8 bg-slate-900/40 border border-slate-800/50 rounded-2xl overflow-hidden">
+        <div className="xl:col-span-8 v1-card overflow-hidden">
           <div className="flex items-center justify-between px-4 py-3 border-b border-slate-800/50">
             <div>
-              <h3 className="text-xs font-black text-white uppercase tracking-wider">Trade Candidates</h3>
+              <h3 className="v1-title-card">Trade Candidates</h3>
               <p className="text-[9px] text-slate-500 font-bold uppercase mt-0.5">Ranked by composite quant score · click row for detail</p>
             </div>
             <span className="text-[9px] bg-slate-800 text-slate-300 font-bold px-2 py-0.5 rounded uppercase">
@@ -191,7 +194,7 @@ export const TradeDecisionCockpit: React.FC<{ onSelectStock: (symbol: string) =>
           {candidates.length === 0 ? (
             <div className="py-16 text-center">
               <Sparkles className="w-8 h-8 text-slate-700 mx-auto mb-2" />
-              <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest">No candidates — run Signals scan first</p>
+              <p className="text-[10px] font-black text-slate-500 font-display uppercase tracking-widest">No candidates — run Signals scan first</p>
             </div>
           ) : (
             <div className="overflow-x-auto">
@@ -200,7 +203,7 @@ export const TradeDecisionCockpit: React.FC<{ onSelectStock: (symbol: string) =>
                   <tr className="border-b border-slate-800/40">
                     {['Stock / Sector', 'Price ₹', 'Chg%', 'RSI', 'MACD', 'Setup', 'Score', 'Entry / SL', 'Win%', ''].map((h, i) => (
                       <th key={i} className={cn(
-                        'px-3 py-2.5 text-[9px] font-black text-slate-500 uppercase tracking-widest whitespace-nowrap',
+                        'px-3 py-2.5 text-[9px] font-black text-slate-500 font-display uppercase tracking-widest whitespace-nowrap',
                         i > 1 && 'text-center'
                       )}>{h}</th>
                     ))}
@@ -343,7 +346,7 @@ export const TradeDecisionCockpit: React.FC<{ onSelectStock: (symbol: string) =>
               <button key={tab.id}
                 onClick={() => setRightPanel(tab.id as any)}
                 className={cn(
-                  'flex-1 flex items-center justify-center gap-1.5 py-1.5 rounded-lg text-[9px] font-black uppercase tracking-wider transition-all',
+                  'flex-1 flex items-center justify-center gap-1.5 py-1.5 rounded-lg text-[9px] font-black font-display uppercase tracking-wider transition-all',
                   rightPanel === tab.id
                     ? 'bg-indigo-600/20 text-indigo-400 border border-indigo-500/30'
                     : 'text-slate-500 hover:text-slate-300'
@@ -360,8 +363,8 @@ export const TradeDecisionCockpit: React.FC<{ onSelectStock: (symbol: string) =>
 
               {/* PCR + Sentiment */}
               <div className="grid grid-cols-2 gap-2">
-                <div className="bg-slate-900/60 border border-slate-800/50 rounded-xl p-3">
-                  <p className="text-[9px] font-bold text-slate-500 uppercase tracking-wider">Put/Call Ratio</p>
+                <div className={cn(pcr != null && pcr > 1.2 ? 'v1-card-up' : pcr != null && pcr < 0.8 ? 'v1-card-down' : 'v1-card-neutral', 'p-3')}>
+                  <p className="text-[9px] font-bold text-slate-500 font-display uppercase tracking-wider">Put/Call Ratio</p>
                   <p className={cn('text-lg font-black tabular-nums mt-0.5',
                     pcr != null && pcr > 1.2 ? 'text-emerald-400'
                     : pcr != null && pcr < 0.8 ? 'text-rose-400'
@@ -372,8 +375,8 @@ export const TradeDecisionCockpit: React.FC<{ onSelectStock: (symbol: string) =>
                     {pcr == null ? '' : pcr > 1.2 ? 'Contrarian Bull' : pcr < 0.8 ? 'Contrarian Bear' : 'Neutral'}
                   </p>
                 </div>
-                <div className="bg-slate-900/60 border border-slate-800/50 rounded-xl p-3">
-                  <p className="text-[9px] font-bold text-slate-500 uppercase tracking-wider">Sentiment</p>
+                <div className={cn(sentimentScore != null && sentimentScore > 0 ? 'v1-card-up' : sentimentScore != null && sentimentScore < 0 ? 'v1-card-down' : 'v1-card-neutral', 'p-3')}>
+                  <p className="text-[9px] font-bold text-slate-500 font-display uppercase tracking-wider">Sentiment</p>
                   <p className={cn('text-lg font-black tabular-nums mt-0.5',
                     sentimentScore != null && sentimentScore > 0 ? 'text-emerald-400'
                     : sentimentScore != null && sentimentScore < 0 ? 'text-rose-400'
@@ -388,8 +391,8 @@ export const TradeDecisionCockpit: React.FC<{ onSelectStock: (symbol: string) =>
 
               {/* Sector Performance */}
               {sectors.length > 0 && (
-                <div className="bg-slate-900/60 border border-slate-800/50 rounded-xl p-3">
-                  <p className="text-[9px] font-black text-slate-400 uppercase tracking-wider mb-2 flex items-center gap-1">
+                <div className="v1-card p-3">
+                  <p className="text-[9px] font-black text-slate-400 font-display uppercase tracking-wider mb-2 flex items-center gap-1">
                     <Activity className="w-3 h-3" /> Sector Performance
                   </p>
                   <div className="space-y-1.5">
@@ -416,8 +419,8 @@ export const TradeDecisionCockpit: React.FC<{ onSelectStock: (symbol: string) =>
 
               {/* Top Movers */}
               {(gainers.length > 0 || losers.length > 0) && (
-                <div className="bg-slate-900/60 border border-slate-800/50 rounded-xl p-3">
-                  <p className="text-[9px] font-black text-slate-400 uppercase tracking-wider mb-2 flex items-center gap-1">
+                <div className="v1-card p-3">
+                  <p className="text-[9px] font-black text-slate-400 font-display uppercase tracking-wider mb-2 flex items-center gap-1">
                     <TrendingUp className="w-3 h-3" /> Top Movers
                   </p>
                   <div className="grid grid-cols-2 gap-x-3 gap-y-1">
@@ -443,8 +446,8 @@ export const TradeDecisionCockpit: React.FC<{ onSelectStock: (symbol: string) =>
 
               {/* FII/DII Flow */}
               {fiiRows.length > 0 && (
-                <div className="bg-slate-900/60 border border-slate-800/50 rounded-xl p-3">
-                  <p className="text-[9px] font-black text-slate-400 uppercase tracking-wider mb-2">FII / DII Flow (₹ Cr)</p>
+                <div className="v1-card p-3">
+                  <p className="text-[9px] font-black text-slate-400 font-display uppercase tracking-wider mb-2">FII / DII Flow (₹ Cr)</p>
                   <table className="w-full">
                     <thead>
                       <tr>
@@ -482,14 +485,14 @@ export const TradeDecisionCockpit: React.FC<{ onSelectStock: (symbol: string) =>
               {!selectedCand ? (
                 <div className="py-16 bg-slate-900/40 border border-slate-800/50 rounded-xl text-center">
                   <Sparkles className="w-7 h-7 text-slate-700 mx-auto mb-2" />
-                  <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest">
+                  <p className="text-[10px] font-black text-slate-500 font-display uppercase tracking-widest">
                     Click a candidate to see detail
                   </p>
                 </div>
               ) : (
                 <div className="space-y-3">
                   {/* Header cards */}
-                  <div className="bg-slate-900/60 border border-slate-800/50 rounded-xl p-3">
+                  <div className="v1-card p-3">
                     <div className="flex items-start justify-between">
                       <div>
                         <h4 className="text-base font-black text-white uppercase">{selectedCand.symbol}</h4>
@@ -524,7 +527,7 @@ export const TradeDecisionCockpit: React.FC<{ onSelectStock: (symbol: string) =>
 
                   {/* Entry / Target / SL */}
                   <div className="bg-slate-900/60 border border-slate-800/50 rounded-xl p-3 space-y-2">
-                    <p className="text-[9px] font-black text-slate-400 uppercase tracking-wider">Trade Levels</p>
+                    <p className="text-[9px] font-black text-slate-400 font-display uppercase tracking-wider">Trade Levels</p>
                     <div className="grid grid-cols-3 gap-2 text-center">
                       {[
                         { label: 'Entry', v: selectedCand.entryPrice, color: 'text-indigo-400' },
@@ -577,13 +580,13 @@ export const TradeDecisionCockpit: React.FC<{ onSelectStock: (symbol: string) =>
                       textually distinguishes the one real model score from the 4 raw/
                       derived heuristics per the audit's minimum-bar recommendation. */}
                   <div className="bg-slate-900/60 border border-slate-800/50 rounded-xl p-3 space-y-2">
-                    <p className="text-[9px] font-black text-slate-400 uppercase tracking-wider">Factor Breakdown</p>
+                    <p className="text-[9px] font-black text-slate-400 font-display uppercase tracking-wider">Factor Breakdown</p>
                     {[
                       { label: 'ML Win Prob', v: selectedCand.mlProbability, color: 'bg-indigo-500', isModel: true },
                       { label: 'Technical Signals (derived)', v: Math.min(100, (selectedCand.techSignalCount ?? 0) * 25), color: 'bg-emerald-500', isModel: false },
                       { label: 'Quant Rank (derived)', v: Math.max(0, 100 - (selectedCand.quantRank ?? 100)), color: 'bg-amber-500', isModel: false },
                       { label: 'Smart Money (derived)', v: Math.min(100, Math.max(0, 50 + (selectedCand.smartMoneyCr ?? 0) * 5)), color: 'bg-pink-500', isModel: false },
-                      { label: 'News Sentiment (derived)', v: Math.min(100, Math.max(0, 50 + (selectedCand.newsSentiment ?? 0) * 50)), color: 'bg-blue-500', isModel: false },
+                      { label: 'News Sentiment (derived)', v: Math.min(100, Math.max(0, 50 + (selectedCand.newsSentiment ?? 0) * 50)), color: 'bg-indigo-500', isModel: false },
                     ].map((f, i) => (
                       <div key={i} title={f.isModel ? 'Validated ML model output' : 'Client-side heuristic, not a calibrated model score'}>
                         <div className="flex justify-between text-[9px] font-bold mb-0.5">
@@ -638,7 +641,7 @@ export const TradeDecisionCockpit: React.FC<{ onSelectStock: (symbol: string) =>
                   {/* AI Insight */}
                   {selectedCand.aiInsight && (
                     <div className="bg-indigo-950/20 border border-indigo-800/30 rounded-xl p-3">
-                      <p className="text-[8.5px] font-bold text-indigo-400 uppercase tracking-wider mb-1">AI Analysis</p>
+                      <p className="text-[8.5px] font-bold text-indigo-400 font-display uppercase tracking-wider mb-1">AI Analysis</p>
                       <p className="text-[10px] text-slate-300 leading-relaxed">{selectedCand.aiInsight}</p>
                     </div>
                   )}
@@ -649,7 +652,7 @@ export const TradeDecisionCockpit: React.FC<{ onSelectStock: (symbol: string) =>
                       const sigs = JSON.parse(selectedCand.signalsJson || '[]');
                       if (sigs.length > 0) return (
                         <div className="bg-slate-900/60 border border-slate-800/50 rounded-xl p-3 space-y-1.5">
-                          <p className="text-[9px] font-black text-slate-400 uppercase tracking-wider">Signal Confluence</p>
+                          <p className="text-[9px] font-black text-slate-400 font-display uppercase tracking-wider">Signal Confluence</p>
                           {sigs.slice(0, 4).map((s: any, i: number) => (
                             <div key={i} className="flex items-start gap-2">
                               <span className="w-1.5 h-1.5 rounded-full bg-indigo-500 mt-1 shrink-0" />
@@ -668,7 +671,7 @@ export const TradeDecisionCockpit: React.FC<{ onSelectStock: (symbol: string) =>
                   {/* Open Full Analysis */}
                   <button
                     onClick={() => onSelectStock(selectedCand.symbol)}
-                    className="w-full py-3 bg-gradient-to-r from-indigo-600 to-violet-600 text-white font-black text-[10px] uppercase tracking-widest rounded-xl hover:shadow-[0_0_20px_rgba(99,102,241,0.3)] transition-all flex items-center justify-center gap-2">
+                    className="w-full py-3 bg-gradient-to-r from-indigo-600 to-violet-600 text-white font-black text-[10px] font-display uppercase tracking-widest rounded-xl hover:shadow-[0_0_20px_rgba(99,102,241,0.3)] transition-all flex items-center justify-center gap-2">
                     Open Full Analysis
                     <ArrowRight className="w-3.5 h-3.5" />
                   </button>

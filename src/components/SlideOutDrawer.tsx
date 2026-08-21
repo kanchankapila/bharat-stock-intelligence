@@ -103,7 +103,7 @@ export const SlideOutDrawer: React.FC<SlideOutDrawerProps> = ({
                 )}
               </h2>
               {quantScore?.sector && (
-                <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mt-0.5">
+                <p className="text-[10px] font-bold text-slate-400 font-display uppercase tracking-widest mt-0.5">
                   {quantScore.sector}
                 </p>
               )}
@@ -118,7 +118,7 @@ export const SlideOutDrawer: React.FC<SlideOutDrawerProps> = ({
                 onToggleWatchlist(symbol, { price: currentPrice, name, source: 'drawer' });
               }}
               className={cn(
-                "p-2 rounded-lg border transition-all flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider",
+                "p-2 rounded-lg border transition-all flex items-center gap-1.5 text-xs font-semibold font-display uppercase tracking-wider",
                 isWatchlisted
                   ? "bg-indigo-600 border-indigo-600 text-white shadow-sm"
                   : "bg-slate-900 border-white/[0.08] text-slate-300 hover:text-white hover:bg-slate-800"
@@ -129,7 +129,7 @@ export const SlideOutDrawer: React.FC<SlideOutDrawerProps> = ({
             </button>
             <button
               onClick={() => setIsMaximized(!isMaximized)}
-              className="p-2 rounded-lg border border-white/[0.08] bg-slate-900 text-slate-400 hover:text-white hover:bg-slate-800 transition-all flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider"
+              className="p-2 rounded-lg border border-white/[0.08] bg-slate-900 text-slate-400 hover:text-white hover:bg-slate-800 transition-all flex items-center gap-1.5 text-xs font-semibold font-display uppercase tracking-wider"
               title={isMaximized ? "Restore Size" : "Maximize View"}
             >
               {isMaximized ? <Minimize2 className="w-3.5 h-3.5" /> : <Maximize2 className="w-3.5 h-3.5" />}
@@ -154,10 +154,10 @@ export const SlideOutDrawer: React.FC<SlideOutDrawerProps> = ({
             <div className="md:col-span-7 glass border border-white/[0.08] rounded-2xl p-4 flex flex-col justify-between">
               <div>
                 <div className="flex items-center justify-between mb-2">
-                  <span className="text-[10px] font-black text-indigo-600 uppercase tracking-widest flex items-center gap-1.5">
+                  <span className="text-[10px] font-black text-indigo-600 font-display uppercase tracking-widest flex items-center gap-1.5">
                     <Award className="w-3.5 h-3.5" /> AlphaQuant Core Rating
                   </span>
-                  <span className={cn("text-[9px] font-black px-2 py-0.5 rounded border uppercase tracking-wider", scoreColors.bg)}>
+                  <span className={cn("text-[9px] font-black px-2 py-0.5 rounded border font-display uppercase tracking-wider", scoreColors.bg)}>
                     {scoreClass}
                   </span>
                 </div>
@@ -178,7 +178,7 @@ export const SlideOutDrawer: React.FC<SlideOutDrawerProps> = ({
                   { label: 'Confluence', val: quantScore?.confluence_rank, suffix: '%' }
                 ].map((item, idx) => (
                   <div key={idx} className="text-center">
-                    <p className="text-[8px] font-bold text-slate-400 uppercase tracking-wider">{item.label}</p>
+                    <p className="text-[8px] font-bold text-slate-400 font-display uppercase tracking-wider">{item.label}</p>
                     <p className="text-xs font-black text-slate-100 mt-0.5 tabular-nums">
                       {item.val != null ? `${Math.round(item.val)}${item.suffix}` : '—'}
                     </p>
@@ -190,7 +190,7 @@ export const SlideOutDrawer: React.FC<SlideOutDrawerProps> = ({
             {/* Hidden Deep Fundamentals (Piotroski, DE, ROE) */}
             <div className="md:col-span-5 glass border border-white/[0.08] rounded-2xl p-4 flex flex-col justify-between">
               <div>
-                <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest flex items-center gap-1.5 mb-3">
+                <span className="text-[10px] font-black text-slate-400 font-display uppercase tracking-widest flex items-center gap-1.5 mb-3">
                   <Activity className="w-3.5 h-3.5 text-indigo-500" /> Deep Fundamentals
                 </span>
                 
@@ -254,7 +254,7 @@ export const SlideOutDrawer: React.FC<SlideOutDrawerProps> = ({
           {/* Historical Signal Audit Logs */}
           <div className="glass border border-white/[0.08] rounded-2xl overflow-hidden shadow-[0_2px_12px_rgba(0,0,0,0.01)]">
             <div className="px-4 py-3 border-b border-white/[0.08] bg-slate-900/40 flex items-center justify-between">
-              <h3 className="text-[11px] font-black text-slate-350 flex items-center gap-2 italic uppercase tracking-widest">
+              <h3 className="text-[11px] font-black text-slate-350 flex items-center gap-2 italic font-display uppercase tracking-widest">
                 <History className="w-3.5 h-3.5 text-indigo-600" /> System Signal Logs
               </h3>
             </div>
@@ -262,7 +262,7 @@ export const SlideOutDrawer: React.FC<SlideOutDrawerProps> = ({
               {loadingHistory ? (
                 <div className="py-8 flex flex-col items-center justify-center">
                   <div className="w-6 h-6 border-2 border-indigo-600 border-t-transparent rounded-full animate-spin mb-2" />
-                  <p className="text-[10px] text-slate-400 uppercase tracking-wider">Syncing historical outcomes...</p>
+                  <p className="text-[10px] text-slate-400 font-display uppercase tracking-wider">Syncing historical outcomes...</p>
                 </div>
               ) : signalHistory && signalHistory.length > 0 ? (
                 <div className="max-h-60 overflow-y-auto pr-1 space-y-2.5">
@@ -312,7 +312,7 @@ export const SlideOutDrawer: React.FC<SlideOutDrawerProps> = ({
               ) : (
                 <div className="py-8 flex flex-col items-center justify-center text-slate-400">
                   <ShieldAlert className="w-8 h-8 text-slate-300 mb-2" />
-                  <p className="text-[10px] uppercase tracking-wider font-semibold">No active signal records found</p>
+                  <p className="text-[10px] font-display uppercase tracking-wider font-semibold">No active signal records found</p>
                 </div>
               )}
             </div>

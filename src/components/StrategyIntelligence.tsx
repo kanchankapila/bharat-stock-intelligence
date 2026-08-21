@@ -49,12 +49,12 @@ interface StrategyStock {
   screener_net_score?: number;
 }
 
-const CLASS_COLORS: Record<string, { bg: string; text: string; dot: string }> = {
-  'Strong Buy': { bg: 'bg-emerald-500/10', text: 'text-emerald-400', dot: 'bg-emerald-400' },
-  'Buy':        { bg: 'bg-teal-500/10',    text: 'text-teal-400',    dot: 'bg-teal-400' },
-  'Hold':       { bg: 'bg-amber-500/10',   text: 'text-amber-400',   dot: 'bg-amber-400' },
-  'Avoid':      { bg: 'bg-orange-500/10',  text: 'text-orange-400',  dot: 'bg-orange-400' },
-  'Sell':       { bg: 'bg-rose-500/10',    text: 'text-rose-400',    dot: 'bg-rose-400' },
+const CLASS_COLORS: Record<string, { bg: string; text: string; dot: string; border: string; pill: string }> = {
+  'Strong Buy': { bg: 'bg-emerald-500/10', text: 'text-emerald-400', dot: 'bg-emerald-400', border: 'border-emerald-500/30', pill: 'v1-stat-pill-up' },
+  'Buy':        { bg: 'bg-teal-500/10',    text: 'text-teal-400',    dot: 'bg-teal-400',    border: 'border-teal-500/30',    pill: 'v1-stat-pill-up' },
+  'Hold':       { bg: 'bg-amber-500/10',   text: 'text-amber-400',   dot: 'bg-amber-400',   border: 'border-amber-500/30',   pill: 'v1-stat-pill-neutral' },
+  'Avoid':      { bg: 'bg-orange-500/10',  text: 'text-orange-400',  dot: 'bg-orange-400',  border: 'border-orange-500/30',  pill: 'v1-stat-pill-down' },
+  'Sell':       { bg: 'bg-rose-500/10',    text: 'text-rose-400',    dot: 'bg-rose-400',    border: 'border-rose-500/30',    pill: 'v1-stat-pill-down' },
 };
 
 const STRATEGY_CHART_COLOR: Record<string, string> = {
@@ -91,7 +91,7 @@ function ScoreBar({ value, color = 'indigo' }: { value: number; color?: string }
 function ClassBadge({ cls }: { cls: string }) {
   const c = CLASS_COLORS[cls] ?? CLASS_COLORS['Hold'];
   return (
-    <span className={cn('inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider', c.bg, c.text)}>
+    <span className={cn('v1-badge text-[10px] font-display uppercase tracking-wider', c.bg, c.border, c.text)}>
       <span className={cn('w-1.5 h-1.5 rounded-full', c.dot)} />
       {cls}
     </span>
@@ -116,7 +116,7 @@ function SortableHeader({ label, sortKey, sort, onSort }: { label: string; sortK
   const active = sort.key === sortKey;
   return (
     <th
-      className="text-left py-2 px-3 text-[10px] font-bold uppercase tracking-wider text-slate-500 cursor-pointer hover:text-slate-300 select-none whitespace-nowrap"
+      className="text-left py-2 px-3 text-[10px] font-bold font-display uppercase tracking-wider text-slate-500 cursor-pointer hover:text-slate-300 select-none whitespace-nowrap"
       onClick={() => onSort(sortKey)}
     >
       <span className="flex items-center gap-1">
@@ -136,7 +136,7 @@ function FilterPanel({ filters, onChange, onClose }: { filters: Filters; onChang
   function num(key: keyof Filters, label: string, placeholder: string, min?: number, max?: number) {
     return (
       <div className="flex flex-col gap-1">
-        <label className="text-[10px] font-bold uppercase tracking-wider text-slate-400">{label}</label>
+        <label className="text-[10px] font-bold font-display uppercase tracking-wider text-slate-400">{label}</label>
         <input
           type="number"
           placeholder={placeholder}
@@ -155,7 +155,7 @@ function FilterPanel({ filters, onChange, onClose }: { filters: Filters; onChang
     <div className="bg-slate-900 border border-slate-700 rounded-2xl p-4 space-y-4 w-72 shadow-2xl">
       <div className="flex items-center justify-between">
         <span className="text-sm font-bold text-white">Filters</span>
-        <button onClick={onClose} className="text-slate-500 hover:text-white"><X className="w-4 h-4" /></button>
+        <button onClick={onClose} className="v1-btn-ghost"><X className="w-4 h-4" /></button>
       </div>
       <div className="grid grid-cols-2 gap-3">
         {num('minSharpe', 'Min Sharpe', '0.5', 0)}
@@ -178,8 +178,8 @@ function FilterPanel({ filters, onChange, onClose }: { filters: Filters; onChang
         <label htmlFor="sma200" className="text-sm text-slate-300">Above 200-day SMA only</label>
       </div>
       <div className="flex gap-2">
-        <button onClick={apply} className="flex-1 bg-indigo-600 hover:bg-indigo-500 text-white text-sm font-bold py-2 rounded-xl transition-colors">Apply</button>
-        <button onClick={reset} className="flex-1 bg-slate-800 hover:bg-slate-700 text-slate-300 text-sm font-bold py-2 rounded-xl transition-colors">Reset</button>
+        <button onClick={apply} className="v1-btn-primary flex-1">Apply</button>
+        <button onClick={reset} className="v1-btn-secondary flex-1">Reset</button>
       </div>
     </div>
   );
@@ -250,7 +250,7 @@ export function StrategyIntelligence({ onSelectStock }: { onSelectStock: (symbol
       {/* Header */}
       <div className="flex flex-col md:flex-row md:items-start md:justify-between gap-4">
         <div>
-          <h2 className="text-2xl font-black text-white tracking-tight flex items-center gap-2">
+          <h2 className="v1-title-page flex items-center gap-2">
             <Target className="w-6 h-6 text-indigo-400" />
             Strategy Intelligence
           </h2>
@@ -269,10 +269,7 @@ export function StrategyIntelligence({ onSelectStock }: { onSelectStock: (symbol
             <SlidersHorizontal className="w-4 h-4" />
             Filters {activeFiltersCount > 0 && <span className="bg-indigo-500 text-white rounded-full w-4 h-4 flex items-center justify-center text-[10px]">{activeFiltersCount}</span>}
           </button>
-          <button
-            onClick={() => refetch()}
-            className="flex items-center gap-2 px-3 py-1.5 rounded-xl text-sm font-bold bg-slate-800 border border-slate-700 text-slate-400 hover:text-white transition-colors"
-          >
+          <button onClick={() => refetch()} className="v1-btn-icon">
             <RefreshCw className="w-4 h-4" />
           </button>
         </div>
@@ -285,17 +282,17 @@ export function StrategyIntelligence({ onSelectStock }: { onSelectStock: (symbol
         {(['Strong Buy','Buy','Hold','Avoid','Sell'] as const).map(cls => {
           const c = CLASS_COLORS[cls];
           return (
-            <div key={cls} className={cn('rounded-xl border border-slate-800 p-3 flex flex-col gap-1', c.bg)}>
-              <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">{cls}</span>
-              <span className={cn('text-2xl font-black tabular-nums', c.text)}>{byClass[cls] ?? 0}</span>
+            <div key={cls} className={cn('v1-stat-pill', c.pill)}>
+              <span className="v1-data-label">{cls}</span>
+              <span className={cn('v1-data-value tabular-nums', c.text)}>{byClass[cls] ?? 0}</span>
             </div>
           );
         })}
       </div>
 
       {/* Score distribution for the active ranking */}
-      <div className="bg-slate-900/50 border border-slate-800 rounded-xl p-3">
-        <div className="text-[10px] font-semibold text-slate-400 uppercase tracking-wide mb-1">{scoreLabel} score distribution</div>
+      <div className="v1-card p-3">
+        <div className="v1-title-card mb-1">{scoreLabel} score distribution</div>
         <ResponsiveContainer width="100%" height={100}>
           <BarChart data={scoreHistogram} margin={{ top: 4, right: 4, left: -20, bottom: 0 }}>
             <CartesianGrid strokeDasharray="3 3" stroke="#334155" vertical={false} />
@@ -366,11 +363,11 @@ export function StrategyIntelligence({ onSelectStock }: { onSelectStock: (symbol
 
       {/* Main table */}
       {sorted.length > 0 && (
-        <div className="rounded-2xl border border-slate-800 bg-slate-900/30 overflow-x-auto">
+        <div className="v1-card overflow-x-auto">
           <table className="w-full text-sm">
             <thead className="border-b border-slate-800">
               <tr>
-                <th className="text-left py-2 px-3 text-[10px] font-bold uppercase tracking-wider text-slate-500 w-8">#</th>
+                <th className="text-left py-2 px-3 text-[10px] font-bold font-display uppercase tracking-wider text-slate-500 w-8">#</th>
                 <SortableHeader label="Symbol" sortKey="symbol" sort={sort} onSort={toggleSort} />
                 <SortableHeader label="Class" sortKey="composite_class" sort={sort} onSort={toggleSort} />
                 <SortableHeader label={scoreLabel} sortKey={scoreKey} sort={sort} onSort={toggleSort} />
@@ -387,7 +384,7 @@ export function StrategyIntelligence({ onSelectStock }: { onSelectStock: (symbol
                 <SortableHeader label="ROE" sortKey="return_on_equity" sort={sort} onSort={toggleSort} />
                 <SortableHeader label="F-Sc" sortKey="piotroski_f_score" sort={sort} onSort={toggleSort} />
                 <SortableHeader label="Bull" sortKey="bullish_screener_count" sort={sort} onSort={toggleSort} />
-                <th className="text-left py-2 px-3 text-[10px] font-bold uppercase tracking-wider text-slate-500">SMA</th>
+                <th className="text-left py-2 px-3 text-[10px] font-bold font-display uppercase tracking-wider text-slate-500">SMA</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-800/50">
@@ -444,18 +441,15 @@ export function StrategyIntelligence({ onSelectStock }: { onSelectStock: (symbol
       {/* Load more */}
       {sorted.length >= limit && (
         <div className="flex justify-center">
-          <button
-            onClick={() => setLimit(l => l + 50)}
-            className="px-6 py-2 rounded-xl text-sm font-bold bg-slate-800 border border-slate-700 text-slate-300 hover:text-white hover:border-slate-500 transition-colors"
-          >
+          <button onClick={() => setLimit(l => l + 50)} className="v1-btn-secondary">
             Load more ({limit} shown)
           </button>
         </div>
       )}
 
       {/* Legend / methodology note */}
-      <div className="rounded-xl border border-slate-800 bg-slate-900/20 p-4">
-        <p className="text-xs font-bold text-slate-400 mb-2">Scoring Methodology</p>
+      <div className="v1-card p-4">
+        <p className="v1-title-card mb-2">Scoring Methodology</p>
         <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-[11px] text-slate-500">
           <span><span className="text-indigo-400 font-bold">Composite</span> = 30% Momentum + 25% Quality + 25% Value + 20% Confluence</span>
           <span><span className="text-emerald-400 font-bold">Momentum</span> = 50%×12M + 30%×6M + 20%×3M return percentile rank</span>

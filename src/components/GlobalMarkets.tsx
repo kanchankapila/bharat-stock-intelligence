@@ -78,7 +78,7 @@ export const GlobalMarkets: React.FC<{ className?: string }> = ({ className }) =
               )}
             >
               <div className="flex justify-between items-start mb-2">
-                <span className="text-[9px] font-black text-slate-500 uppercase tracking-widest truncate pr-2">
+                <span className="text-[9px] font-black text-slate-500 font-display uppercase tracking-widest truncate pr-2">
                   {idx.name}
                 </span>
                 <span className="text-[7px] font-bold text-slate-700 bg-slate-900 px-1.5 py-0.5 rounded uppercase shrink-0">
@@ -95,7 +95,7 @@ export const GlobalMarkets: React.FC<{ className?: string }> = ({ className }) =
               {(() => {
                 const tz = lookupExchangeTimeZone(idx.name) ?? lookupExchangeTimeZone(idx.region);
                 return tz ? (
-                  <div className="text-[7px] font-bold text-slate-600 uppercase tracking-wide mb-1 tabular-nums">
+                  <div className="text-[7px] font-bold text-slate-600 font-display uppercase tracking-wide mb-1 tabular-nums">
                     {currentTimeInZone(tz)} local
                   </div>
                 ) : null;

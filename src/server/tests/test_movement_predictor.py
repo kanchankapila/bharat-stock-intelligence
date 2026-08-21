@@ -28,6 +28,7 @@ from movement_predictor import (
     build_movement_labels, _lag_by_symbol, _make_model, _purged_oof,
     ENRICH_FEATURE_COLS, MIN_PRICE, MIN_TURNOVER_CR, TOP_PCT,
 )
+from breakout_classifier import compute_ohlcv_features, FEATURE_COLS as OHLCV_FEATURE_COLS
 
 
 def _long_ohlcv(data: dict, n_days: int) -> pd.DataFrame:
@@ -124,6 +125,38 @@ class TestLagBySymbol:
         assert a[0] != a[0] or pd.isna(a[0])  # first row has no prior -> NaN
         assert a[1:] == [10, 20]
         assert b[1:] == [100, 200]
+
+
+class TestScoreUsesLaggedFeatures:
+    def test_latest_date_feature_row_must_come_from_the_prior_day_not_same_day(self):
+        """Regression guard for the 2026-08-20 train/serve-skew fix in score(): load_training_data()
+        merges labels(d) against _lag_by_symbol(compute_ohlcv_features(...))(d), i.e. a row
+        labelled date d carries date d-1's raw feature values. score() must feed the model the
+        identical composition -- using date d's own just-closed OHLCV to "predict" date d's own
+        day-range label is a same-day leak (the live column's implausibly high AUC against its
+        own native label traced back to exactly this), not a live, pre-market-actionable score."""
+        n = 25
+        vol = [200_000] * n
+        vol[-1] = 5_000_000  # spike ONLY on the latest day -> vol_ratio only moves on that row
+        close = [100.0 + i * 0.1 for i in range(n)]
+        high = [c + 1.0 for c in close]
+        low = [c - 1.0 for c in close]
+        ohlcv = _long_ohlcv({"A": {"close": close, "high": high, "low": low, "volume": vol}}, n)
+
+        raw = compute_ohlcv_features(ohlcv)
+        lagged = _lag_by_symbol(raw, OHLCV_FEATURE_COLS)
+
+        dates_sorted = sorted(raw["date"].unique())
+        latest, prior = dates_sorted[-1], dates_sorted[-2]
+        raw_latest = raw[raw["date"] == latest].iloc[0]
+        raw_prior = raw[raw["date"] == prior].iloc[0]
+        lagged_latest = lagged[lagged["date"] == latest].iloc[0]
+
+        # vol_ratio only spikes on the volume-spike day itself -- proves the fix's composition
+        # picks up the PRIOR day's (unspiked) value for "today", not the same-day spiked one.
+        assert raw_latest["vol_ratio"] > 5.0  # sanity: the spike really did move the raw feature
+        assert lagged_latest["vol_ratio"] == pytest.approx(raw_prior["vol_ratio"])
+        assert lagged_latest["vol_ratio"] != pytest.approx(raw_latest["vol_ratio"])
 
 
 class TestEnrichmentWiring:

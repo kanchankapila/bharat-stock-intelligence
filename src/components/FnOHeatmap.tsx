@@ -16,7 +16,7 @@ const FnOHeatmap: React.FC<{ onSelectStock: (s: string) => void }> = ({ onSelect
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
-        <h3 className="text-[10px] font-black text-slate-500 uppercase tracking-widest flex items-center gap-2">
+        <h3 className="text-[10px] font-black text-slate-500 font-display uppercase tracking-widest flex items-center gap-2">
           <LayoutGrid className="w-3 h-3" /> F&O Market Sentiment Map
         </h3>
         <div className="flex gap-2">
@@ -67,9 +67,9 @@ const FnOHeatmap: React.FC<{ onSelectStock: (s: string) => void }> = ({ onSelect
           ))}
         </div>
       ) : (
-        <div className="h-48 flex flex-col items-center justify-center bg-slate-900/30 border border-slate-800/50 rounded-3xl">
+        <div className="h-48 flex flex-col items-center justify-center v1-card">
            <Activity className="w-8 h-8 text-slate-800 mb-3" />
-           <p className="text-[10px] font-black text-slate-600 uppercase tracking-widest">Sectoral heatmap currently unavailable</p>
+           <p className="text-[10px] font-black text-slate-600 font-display uppercase tracking-widest">Sectoral heatmap currently unavailable</p>
         </div>
       )}
     </div>

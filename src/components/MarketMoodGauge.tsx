@@ -30,13 +30,13 @@ export const MarketMoodGauge: React.FC = () => {
     return (
       <div className="flex items-center gap-2 py-1">
         <div className="w-4 h-4 border-2 border-indigo-500 border-t-transparent rounded-full animate-spin" />
-        <span className="text-[9px] font-black text-slate-500 uppercase tracking-widest">Loading mood…</span>
+        <span className="text-[9px] font-black text-slate-500 font-display uppercase tracking-widest">Loading mood…</span>
       </div>
     );
   }
 
   if (!data) {
-    return <p className="text-[9px] font-black text-slate-500 uppercase tracking-wider">Market Mood Index unavailable</p>;
+    return <p className="text-[9px] font-black text-slate-500 font-display uppercase tracking-wider">Market Mood Index unavailable</p>;
   }
 
   const { indicator, zone, date } = data;
@@ -50,7 +50,7 @@ export const MarketMoodGauge: React.FC = () => {
   return (
     <div className="space-y-1.5">
       <div className="flex items-baseline justify-between">
-        <span className="text-[9px] font-black text-slate-400 uppercase tracking-wider">Market Mood Index</span>
+        <span className="text-[9px] font-black text-slate-400 font-display uppercase tracking-wider">Market Mood Index</span>
         <span className="text-[9px] text-slate-500">as of {dateLabel}</span>
       </div>
       <div className="flex items-center gap-3">
@@ -60,7 +60,7 @@ export const MarketMoodGauge: React.FC = () => {
             <div className={`h-full rounded-full ${barClass}`} style={{ width: `${pct}%` }} />
           </div>
         </div>
-        <span className={`text-[10px] font-bold uppercase tracking-wide ${zoneClass}`}>{zone}</span>
+        <span className={`text-[10px] font-bold font-display uppercase tracking-wide ${zoneClass}`}>{zone}</span>
       </div>
     </div>
   );

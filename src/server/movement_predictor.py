@@ -601,7 +601,11 @@ def score() -> int:
     ohlcv = _load_ohlcv(cutoff)
     if ohlcv.empty:
         return 0
-    feats = compute_ohlcv_features(ohlcv)
+    # Same lag as load_training_data(): the model was trained on yesterday's-close features
+    # predicting today's own day-range, so scoring must use the identical lagged view --
+    # using today's own (already-closed) features to predict today's own label is a same-day
+    # leak, not a live prediction (train/serve skew; see recurring-bugs.md).
+    feats = _lag_by_symbol(compute_ohlcv_features(ohlcv), art["feature_names"])
     d = feats["date"].max()
     today = feats[feats["date"] == d]
     if today.empty:

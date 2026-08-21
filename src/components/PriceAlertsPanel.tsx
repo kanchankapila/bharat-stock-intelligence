@@ -26,7 +26,7 @@ export const PriceAlertsPanel: React.FC<{ userId?: string; defaultSymbol?: strin
 
   if (!userId) {
     return (
-      <div className="bg-slate-900/40 border border-slate-800/50 rounded-xl p-5 text-xs text-slate-500 font-mono">
+      <div className="v1-card p-5 text-xs text-slate-500 font-data">
         Sign in to set price alerts.
       </div>
     );
@@ -42,10 +42,10 @@ export const PriceAlertsPanel: React.FC<{ userId?: string; defaultSymbol?: strin
   };
 
   return (
-    <div className="bg-slate-900/40 border border-slate-800/50 rounded-xl p-5 backdrop-blur-sm">
+    <div className="v1-card p-5">
       <div className="flex items-center gap-2 mb-4">
         <Bell className="w-5 h-5 text-amber-400" />
-        <h3 className="text-sm font-bold text-slate-100 uppercase tracking-widest">Price Alerts</h3>
+        <h3 className="v1-title-card">Price Alerts</h3>
       </div>
 
       {/* Create form */}
@@ -55,12 +55,12 @@ export const PriceAlertsPanel: React.FC<{ userId?: string; defaultSymbol?: strin
           placeholder="Symbol"
           value={symbol}
           onChange={e => setSymbol(e.target.value.toUpperCase())}
-          className="w-28 bg-slate-950 border border-slate-800 text-slate-200 text-xs font-mono rounded-lg px-3 py-2 focus:outline-none focus:border-indigo-500"
+          className="w-28 bg-slate-950 border border-slate-800 text-slate-200 text-xs font-data rounded-lg px-3 py-2 focus:outline-none focus:border-indigo-500"
         />
         <select
           value={condition}
           onChange={e => setCondition(e.target.value as 'ABOVE' | 'BELOW')}
-          className="bg-slate-950 border border-slate-800 text-slate-200 text-xs font-mono rounded-lg px-3 py-2 focus:outline-none"
+          className="bg-slate-950 border border-slate-800 text-slate-200 text-xs font-data rounded-lg px-3 py-2 focus:outline-none"
         >
           <option value="ABOVE">Goes above</option>
           <option value="BELOW">Falls below</option>
@@ -70,7 +70,7 @@ export const PriceAlertsPanel: React.FC<{ userId?: string; defaultSymbol?: strin
           placeholder="₹ price"
           value={threshold}
           onChange={e => setThreshold(e.target.value)}
-          className="w-28 bg-slate-950 border border-slate-800 text-slate-200 text-xs font-mono rounded-lg px-3 py-2 focus:outline-none focus:border-indigo-500"
+          className="w-28 bg-slate-950 border border-slate-800 text-slate-200 text-xs font-data rounded-lg px-3 py-2 focus:outline-none focus:border-indigo-500"
         />
         <button
           onClick={handleCreate}
@@ -82,16 +82,16 @@ export const PriceAlertsPanel: React.FC<{ userId?: string; defaultSymbol?: strin
       </div>
 
       {isLoading ? (
-        <p className="text-xs text-slate-500 font-mono">Loading alerts&hellip;</p>
+        <p className="text-xs text-slate-500 font-data">Loading alerts&hellip;</p>
       ) : (
         <div className="space-y-4">
           {activeAlerts.length > 0 && (
             <div>
-              <p className="text-[9px] font-bold text-slate-500 uppercase tracking-wider mb-2">Active ({activeAlerts.length})</p>
+              <p className="text-[9px] font-bold text-slate-500 font-display uppercase tracking-wider mb-2">Active ({activeAlerts.length})</p>
               <div className="space-y-1.5">
                 {activeAlerts.map((a: any) => (
                   <div key={a.id} className="flex items-center justify-between bg-slate-950/50 border border-slate-800/60 rounded-lg px-3 py-2">
-                    <span className="text-xs font-mono text-slate-200 flex items-center gap-1.5">
+                    <span className="text-xs font-data text-slate-200 flex items-center gap-1.5">
                       {a.condition === 'ABOVE' ? <TrendingUp className="w-3 h-3 text-emerald-400" /> : <TrendingDown className="w-3 h-3 text-rose-400" />}
                       <b>{a.symbol}</b> {a.condition === 'ABOVE' ? '≥' : '≤'} ₹{a.thresholdPrice}
                     </span>
@@ -105,11 +105,11 @@ export const PriceAlertsPanel: React.FC<{ userId?: string; defaultSymbol?: strin
           )}
           {triggeredAlerts.length > 0 && (
             <div>
-              <p className="text-[9px] font-bold text-slate-500 uppercase tracking-wider mb-2">Recently Triggered</p>
+              <p className="text-[9px] font-bold text-slate-500 font-display uppercase tracking-wider mb-2">Recently Triggered</p>
               <div className="space-y-1.5">
                 {triggeredAlerts.map((a: any) => (
                   <div key={a.id} className="flex items-center justify-between bg-slate-950/30 border border-slate-800/40 rounded-lg px-3 py-2 opacity-70">
-                    <span className="text-xs font-mono text-slate-400">
+                    <span className="text-xs font-data text-slate-400">
                       <b>{a.symbol}</b> {a.condition === 'ABOVE' ? 'crossed above' : 'fell below'} ₹{a.thresholdPrice} — hit ₹{a.triggeredPrice?.toFixed(2)}
                     </span>
                     <span className="text-[10px] text-slate-600">{a.triggeredAt ? new Date(a.triggeredAt).toLocaleDateString('en-IN') : ''}</span>
@@ -119,7 +119,7 @@ export const PriceAlertsPanel: React.FC<{ userId?: string; defaultSymbol?: strin
             </div>
           )}
           {activeAlerts.length === 0 && triggeredAlerts.length === 0 && (
-            <p className="text-xs text-slate-500 font-mono">No alerts yet — add one above.</p>
+            <p className="text-xs text-slate-500 font-data">No alerts yet — add one above.</p>
           )}
         </div>
       )}

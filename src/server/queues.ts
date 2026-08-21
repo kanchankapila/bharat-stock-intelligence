@@ -967,9 +967,14 @@ async function processMlDailyOps(job: Job): Promise<{ success: boolean; failedSt
   await runPython('backfill_technical_features.py', [], 5 * 60_000)
     .catch(e => console.warn('[QUEUE] backfill_technical_features failed:', (e as Error).message));
 
-  // PEAD model: eps_growth_yoy + volume + RS → pead_score in technical_signals.
-  await runPython('pead_model.py', [], 60_000)
-    .catch(e => console.warn('[QUEUE] pead_model failed:', (e as Error).message));
+  // PEAD model retired 2026-08-20. NOT because eps_growth_yoy/qoq were NULL (that was a stale
+  // claim -- verified live, they're genuinely populated: 34,756 pead_score rows / 1,673 symbols
+  // / 37 dates, 06-30->08-19, ~1,655-1,661/day most weekdays). Graded via factor_edge.py the
+  // same session: no edge at 1/5/10/21d (IC 0.026-0.029, AUC 0.505-0.521, never clears
+  // USABLE), AND zero downstream readers -- not unified_ranker.py, not anywhere else, ever
+  // (grep confirmed). A real, correctly-functioning, measured no-edge score nothing reads is
+  // pure runtime cost. See measurement.md for the full grading. Re-add only if pead_score gets
+  // wired into a consumer AND re-graded positive.
 
   // These were UNCAUGHT: if outcome resolution threw (e.g. a transient PG/IPv6 blip), the
   // whole daily-ops run aborted here — skipping ALL ML training below AND never reaching the
@@ -2649,6 +2654,13 @@ export async function initQueues(): Promise<boolean> {
         jobId:   'unified-ranker-daily-repeatable',
         attempts: 2,
         backoff:  { type: 'fixed', delay: 60_000 },
+        // Every other of the 38 other job registrations in this file sets this; this one was
+        // the sole holdout (found in the 2026-08-20 performance audit's bracket-matched sweep
+        // of every addJobWithCatchup/*.add() call). No Worker in this file sets a
+        // defaultJobOptions fallback either, so BullMQ's real default -- keep job data in
+        // Redis forever -- applied here alone. Runs 5x/week; unbounded over the process's life.
+        removeOnComplete: { age: 86400 * 3 },
+        removeOnFail: { age: 86400 * 3, count: 20 },
       },
     );
     unifiedRankerWorkerInstance.on('completed', () => {

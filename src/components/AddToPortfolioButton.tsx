@@ -118,11 +118,11 @@ export const AddToPortfolioButton: React.FC<AddToPortfolioButtonProps> = ({
               </div>
 
               {!userId ? (
-                <div className="p-5 text-xs text-slate-500 font-mono">Sign in to track holdings in your portfolio.</div>
+                <div className="p-5 text-xs text-slate-500 font-data">Sign in to track holdings in your portfolio.</div>
               ) : (
                 <div className="p-5 space-y-3">
                   <div>
-                    <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1">Quantity</label>
+                    <label className="block text-[10px] font-bold text-slate-500 font-display uppercase tracking-wider mb-1">Quantity</label>
                     <input
                       type="number"
                       min="0"
@@ -130,12 +130,12 @@ export const AddToPortfolioButton: React.FC<AddToPortfolioButtonProps> = ({
                       value={quantity}
                       onChange={(e) => setQuantity(e.target.value)}
                       placeholder="e.g. 10"
-                      className="w-full bg-slate-950 border border-slate-800 text-slate-200 text-sm font-mono rounded-lg px-3 py-2 focus:outline-none focus:border-indigo-500"
+                      className="w-full bg-slate-950 border border-slate-800 text-slate-200 text-sm font-data rounded-lg px-3 py-2 focus:outline-none focus:border-indigo-500"
                       autoFocus
                     />
                   </div>
                   <div>
-                    <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1">Buy Price (₹)</label>
+                    <label className="block text-[10px] font-bold text-slate-500 font-display uppercase tracking-wider mb-1">Buy Price (₹)</label>
                     <input
                       type="number"
                       min="0"
@@ -143,21 +143,21 @@ export const AddToPortfolioButton: React.FC<AddToPortfolioButtonProps> = ({
                       value={buyPrice}
                       onChange={(e) => setBuyPrice(e.target.value)}
                       placeholder="Price per share"
-                      className="w-full bg-slate-950 border border-slate-800 text-slate-200 text-sm font-mono rounded-lg px-3 py-2 focus:outline-none focus:border-indigo-500"
+                      className="w-full bg-slate-950 border border-slate-800 text-slate-200 text-sm font-data rounded-lg px-3 py-2 focus:outline-none focus:border-indigo-500"
                     />
                   </div>
                   <div>
-                    <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1">Buy Date</label>
+                    <label className="block text-[10px] font-bold text-slate-500 font-display uppercase tracking-wider mb-1">Buy Date</label>
                     <input
                       type="date"
                       value={buyDate}
                       max={todayISO()}
                       onChange={(e) => setBuyDate(e.target.value)}
-                      className="w-full bg-slate-950 border border-slate-800 text-slate-200 text-sm font-mono rounded-lg px-3 py-2 focus:outline-none focus:border-indigo-500"
+                      className="w-full bg-slate-950 border border-slate-800 text-slate-200 text-sm font-data rounded-lg px-3 py-2 focus:outline-none focus:border-indigo-500"
                     />
                   </div>
                   {quantity && buyPrice && Number.isFinite(parseFloat(quantity)) && Number.isFinite(parseFloat(buyPrice)) && (
-                    <p className="text-[11px] text-slate-500 font-mono">
+                    <p className="text-[11px] text-slate-500 font-data">
                       Total invested: ₹{(parseFloat(quantity) * parseFloat(buyPrice)).toLocaleString('en-IN', { maximumFractionDigits: 2 })}
                     </p>
                   )}

@@ -42,17 +42,20 @@ interface ConfluenceSignal {
 
 // ─── Conviction Badge ────────────────────────────────────────────────────────
 
+// ponytail: aligned to the same ELITE=emerald/STRONG=amber/MODERATE=default/WEAK=slate mapping
+// TodaysPicks.tsx/CommandCenterDashboard.tsx use -- this file previously had ELITE=amber,
+// STRONG=emerald (the opposite), a real cross-page color-meaning inconsistency.
 const CONVICTION_CONFIG = {
-  ELITE:    { color: 'from-amber-500 to-orange-500',  text: 'text-amber-400',  border: 'border-amber-500/40',  bg: 'bg-amber-500/10'  },
-  STRONG:   { color: 'from-emerald-500 to-green-500', text: 'text-emerald-400', border: 'border-emerald-500/40', bg: 'bg-emerald-500/10' },
-  MODERATE: { color: 'from-blue-500 to-indigo-500',   text: 'text-blue-400',   border: 'border-blue-500/40',   bg: 'bg-blue-500/10'   },
-  WEAK:     { color: 'from-slate-500 to-slate-600',   text: 'text-slate-400',  border: 'border-slate-600',     bg: 'bg-slate-800'     },
+  ELITE:    { badge: 'v1-badge v1-badge-s' },
+  STRONG:   { badge: 'v1-badge v1-badge-b' },
+  MODERATE: { badge: 'v1-badge bg-indigo-500/15 border-indigo-500/40 text-indigo-300' },
+  WEAK:     { badge: 'v1-badge v1-badge-c' },
 };
 
 function ConvictionBadge({ level }: { level: string }) {
   const cfg = CONVICTION_CONFIG[level as keyof typeof CONVICTION_CONFIG] ?? CONVICTION_CONFIG.WEAK;
   return (
-    <span className={cn('px-2 py-0.5 rounded text-[10px] font-bold tracking-widest border', cfg.bg, cfg.text, cfg.border)}>
+    <span className={cn('text-[10px] tracking-widest', cfg.badge)}>
       {level}
     </span>
   );
@@ -87,7 +90,7 @@ function FactorBar({ label, value, max, color }: { label: string; value: number;
     <div className="space-y-1">
       <div className="flex justify-between text-[10px]">
         <span className="text-slate-400">{label}</span>
-        <span className="text-slate-300 font-mono">{value.toFixed(1)}</span>
+        <span className="text-slate-300 font-data">{value.toFixed(1)}</span>
       </div>
       <div className="h-1.5 bg-slate-800 rounded-full overflow-hidden">
         <div className={cn('h-full rounded-full', color)} style={{ width: `${pct}%` }} />
@@ -100,9 +103,9 @@ function FactorBar({ label, value, max, color }: { label: string; value: number;
 
 function StatCard({ label, value, sub, color }: { label: string; value: string | number; sub?: string; color?: string }) {
   return (
-    <div className="glass rounded-lg p-3 flex flex-col gap-0.5">
-      <span className="text-[10px] text-slate-500 uppercase tracking-widest">{label}</span>
-      <span className={cn('text-2xl font-bold', color ?? 'text-white')}>{value}</span>
+    <div className="v1-card p-3 flex flex-col gap-0.5">
+      <span className="v1-data-label">{label}</span>
+      <span className={cn('v1-data-value', color ?? 'text-white')}>{value}</span>
       {sub && <span className="text-[10px] text-slate-500">{sub}</span>}
     </div>
   );
@@ -120,7 +123,7 @@ function AIInsightPanel({ signal }: { signal: ConfluenceSignal }) {
   const hasTrade = signal.entry_zone_low && signal.stop_loss && signal.target_1;
 
   return (
-    <div className="glass rounded-xl p-4 space-y-4">
+    <div className="v1-card p-4 space-y-4">
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
@@ -135,10 +138,10 @@ function AIInsightPanel({ signal }: { signal: ConfluenceSignal }) {
 
       {/* AI Conclusion */}
       {signal.trade_reasoning && (
-        <div className="bg-indigo-900/20 border border-indigo-500/20 rounded-lg p-3">
+        <div className="v1-card p-3">
           <div className="flex items-center gap-1.5 mb-1.5">
             <Zap className="w-3 h-3 text-indigo-400" />
-            <span className="text-[10px] text-indigo-400 uppercase tracking-widest font-bold">AI Reasoning</span>
+            <span className="text-[10px] text-indigo-400 font-display uppercase tracking-widest font-bold">AI Reasoning</span>
           </div>
           <p className="text-slate-300 text-xs leading-relaxed">{signal.trade_reasoning}</p>
         </div>
@@ -146,10 +149,10 @@ function AIInsightPanel({ signal }: { signal: ConfluenceSignal }) {
 
       {/* 5-Factor Breakdown */}
       <div className="space-y-2">
-        <div className="text-[10px] text-slate-500 uppercase tracking-widest">Score Breakdown</div>
+        <div className="text-[10px] text-slate-500 font-display uppercase tracking-widest">Score Breakdown</div>
         <FactorBar label="Screener Confluence" value={signal.bullish_screener_count} max={10} color="bg-amber-500" />
         <FactorBar label="Trend Alignment"     value={signal.trend_alignment_score}   max={15} color="bg-emerald-500" />
-        <FactorBar label="Volume Strength"     value={signal.volume_score}            max={10} color="bg-blue-500" />
+        <FactorBar label="Volume Strength"     value={signal.volume_score}            max={10} color="bg-indigo-500" />
         <FactorBar label="Sector Momentum"     value={signal.sector_strength_score}   max={8}  color="bg-purple-500" />
         <FactorBar label="Fundamentals"        value={signal.fundamental_score}       max={12} color="bg-rose-500" />
       </div>
@@ -157,25 +160,25 @@ function AIInsightPanel({ signal }: { signal: ConfluenceSignal }) {
       {/* Trade Setup */}
       {hasTrade && (
         <div className="space-y-2">
-          <div className="text-[10px] text-slate-500 uppercase tracking-widest">Trade Setup</div>
+          <div className="text-[10px] text-slate-500 font-display uppercase tracking-widest">Trade Setup</div>
           <div className="grid grid-cols-2 gap-2">
-            <div className="bg-slate-800/50 rounded-lg p-2">
+            <div className="v1-card p-2">
               <div className="text-[10px] text-slate-500">Entry Zone</div>
-              <div className="text-xs font-mono text-white">
+              <div className="text-xs font-data text-white">
                 {signal.entry_zone_low?.toFixed(2)} – {signal.entry_zone_high?.toFixed(2)}
               </div>
             </div>
-            <div className="bg-rose-900/20 border border-rose-500/20 rounded-lg p-2">
+            <div className="v1-card-down p-2">
               <div className="text-[10px] text-slate-500">Stop Loss</div>
-              <div className="text-xs font-mono text-rose-400">{signal.stop_loss?.toFixed(2)}</div>
+              <div className="text-xs font-data text-rose-400">{signal.stop_loss?.toFixed(2)}</div>
             </div>
-            <div className="bg-emerald-900/20 border border-emerald-500/20 rounded-lg p-2">
+            <div className="v1-card-up p-2">
               <div className="text-[10px] text-slate-500">Target 1</div>
-              <div className="text-xs font-mono text-emerald-400">{signal.target_1?.toFixed(2)}</div>
+              <div className="text-xs font-data text-emerald-400">{signal.target_1?.toFixed(2)}</div>
             </div>
-            <div className="bg-emerald-900/20 border border-emerald-500/20 rounded-lg p-2">
+            <div className="v1-card-up p-2">
               <div className="text-[10px] text-slate-500">Target 2</div>
-              <div className="text-xs font-mono text-emerald-400">{signal.target_2?.toFixed(2)}</div>
+              <div className="text-xs font-data text-emerald-400">{signal.target_2?.toFixed(2)}</div>
             </div>
           </div>
           {signal.risk_reward && (
@@ -186,7 +189,7 @@ function AIInsightPanel({ signal }: { signal: ConfluenceSignal }) {
               <span className="text-slate-500">Timeframe</span>
               <span className={cn('text-xs font-bold',
                 signal.suggested_timeframe === 'INTRADAY' ? 'text-amber-400' :
-                signal.suggested_timeframe === 'SWING'    ? 'text-blue-400' : 'text-purple-400'
+                signal.suggested_timeframe === 'SWING'    ? 'text-indigo-400' : 'text-purple-400'
               )}>{signal.suggested_timeframe}</span>
             </div>
           )}
@@ -196,7 +199,7 @@ function AIInsightPanel({ signal }: { signal: ConfluenceSignal }) {
       {/* ML Probability */}
       {signal.ml_breakout_probability != null && (
         <div className="flex items-center gap-3">
-          <div className="text-[10px] text-slate-500 uppercase tracking-widest">ML Breakout Prob</div>
+          <div className="text-[10px] text-slate-500 font-display uppercase tracking-widest">ML Breakout Prob</div>
           <div className={cn('text-sm font-bold',
             signal.ml_breakout_probability > 0.7 ? 'text-emerald-400' :
             signal.ml_breakout_probability > 0.5 ? 'text-amber-400' : 'text-slate-400'
@@ -209,7 +212,7 @@ function AIInsightPanel({ signal }: { signal: ConfluenceSignal }) {
       {/* Active Screeners */}
       {screenerNames.length > 0 && (
         <div className="space-y-1.5">
-          <div className="text-[10px] text-slate-500 uppercase tracking-widest">Active Scanners ({screenerNames.length})</div>
+          <div className="text-[10px] text-slate-500 font-display uppercase tracking-widest">Active Scanners ({screenerNames.length})</div>
           <div className="flex flex-wrap gap-1.5">
             {screenerNames.slice(0, 8).map((name, i) => (
               <span key={`${signal.symbol}-${i}-${name}`} className="px-2 py-0.5 bg-indigo-900/30 border border-indigo-500/20 rounded text-[10px] text-indigo-300">
@@ -226,13 +229,13 @@ function AIInsightPanel({ signal }: { signal: ConfluenceSignal }) {
       {/* Screener Reliability from detail */}
       {detail?.screenerReliability && detail.screenerReliability.length > 0 && (
         <div className="space-y-1.5">
-          <div className="text-[10px] text-slate-500 uppercase tracking-widest">Scanner Reliability</div>
+          <div className="text-[10px] text-slate-500 font-display uppercase tracking-widest">Scanner Reliability</div>
           {detail.screenerReliability.slice(0, 4).map((r: any) => (
             <div key={r.scan_id} className="flex items-center justify-between text-[10px]">
               <span className="text-slate-400 truncate max-w-[140px]">{r.screener_name}</span>
               <div className="flex items-center gap-2">
                 <span className="text-slate-500">7d Win</span>
-                <span className={cn('font-mono', r.win_rate_7d > 0.6 ? 'text-emerald-400' : r.win_rate_7d > 0.4 ? 'text-amber-400' : 'text-slate-400')}>
+                <span className={cn('font-data', r.win_rate_7d > 0.6 ? 'text-emerald-400' : r.win_rate_7d > 0.4 ? 'text-amber-400' : 'text-slate-400')}>
                   {((r.win_rate_7d ?? 0) * 100).toFixed(0)}%
                 </span>
               </div>
@@ -294,7 +297,7 @@ export function SignalIntelligence() {
       {/* ── Header ──────────────────────────────────────────────────────────── */}
       <div className="flex items-center justify-between flex-wrap gap-3">
         <div>
-          <h1 className="text-xl font-bold text-white flex items-center gap-2">
+          <h1 className="v1-title-page flex items-center gap-2">
             <Zap className="w-5 h-5 text-amber-400" />
             Signal Intelligence Engine
           </h1>
@@ -320,7 +323,7 @@ export function SignalIntelligence() {
         <StatCard label="Total Signals"    value={stats?.total ?? 0}    sub="active screener stocks" />
         <StatCard label="Elite Conviction" value={stats?.elite ?? 0}    sub="score ≥ 80" color="text-amber-400" />
         <StatCard label="Strong Conviction" value={stats?.strong ?? 0}  sub="score 60–79" color="text-emerald-400" />
-        <StatCard label="Avg Score"        value={`${stats?.avgScore ?? 0}`} sub="across all signals" color="text-blue-400" />
+        <StatCard label="Avg Score"        value={`${stats?.avgScore ?? 0}`} sub="across all signals" color="text-indigo-400" />
       </div>
 
       {/* ── Filters ──────────────────────────────────────────────────────────── */}
@@ -346,7 +349,7 @@ export function SignalIntelligence() {
             className={cn(
               'px-3 py-1 rounded-full text-[10px] font-bold border transition-colors',
               timeframeFilter === tf
-                ? 'bg-blue-600 border-blue-500 text-white'
+                ? 'bg-indigo-600 border-indigo-500 text-white'
                 : 'border-slate-700 text-slate-400 hover:border-slate-500'
             )}
           >{tf}</button>
@@ -358,17 +361,17 @@ export function SignalIntelligence() {
             onChange={e => setMinScore(Number(e.target.value))}
             className="w-20 accent-indigo-500"
           />
-          <span className="text-white font-mono w-6">{minScore}</span>
+          <span className="text-white font-data w-6">{minScore}</span>
         </div>
       </div>
 
       {/* ── Main Content ─────────────────────────────────────────────────────── */}
       <div className="flex gap-4 items-start">
         {/* Left: Opportunities Table */}
-        <div className="flex-1 min-w-0 glass rounded-xl overflow-hidden">
+        <div className="flex-1 min-w-0 v1-card overflow-hidden">
           <div className="px-4 py-3 border-b border-slate-700/50 flex items-center gap-2">
             <Award className="w-4 h-4 text-amber-400" />
-            <span className="text-sm font-bold text-white">High Conviction Opportunities</span>
+            <span className="v1-title-card">High Conviction Opportunities</span>
             <span className="ml-auto text-[10px] text-slate-500">{signals.length} stocks</span>
           </div>
 
@@ -383,7 +386,7 @@ export function SignalIntelligence() {
             <div className="overflow-x-auto">
               <table className="w-full text-xs">
                 <thead>
-                  <tr className="border-b border-slate-700/50 text-[10px] text-slate-500 uppercase tracking-widest">
+                  <tr className="border-b border-slate-700/50 text-[10px] text-slate-500 font-display uppercase tracking-widest">
                     <th className="px-3 py-2 text-left">Symbol</th>
                     <th className="px-3 py-2 text-left">Conviction</th>
                     <th className="px-3 py-2 text-right cursor-pointer hover:text-white" onClick={() => toggleSort('confluence_score')}>
@@ -422,10 +425,10 @@ export function SignalIntelligence() {
                           <span className={cn('font-bold',
                             sig.confluence_score >= 80 ? 'text-amber-400' :
                             sig.confluence_score >= 60 ? 'text-emerald-400' :
-                            sig.confluence_score >= 40 ? 'text-blue-400' : 'text-slate-400'
+                            sig.confluence_score >= 40 ? 'text-indigo-400' : 'text-slate-400'
                           )}>{sig.confluence_score}</span>
                         </td>
-                        <td className="px-3 py-2 text-right font-mono text-slate-300">
+                        <td className="px-3 py-2 text-right font-data text-slate-300">
                           {sig.ml_breakout_probability != null
                             ? `${(sig.ml_breakout_probability * 100).toFixed(0)}%`
                             : <span className="text-slate-600">—</span>}
@@ -436,13 +439,13 @@ export function SignalIntelligence() {
                             <span className="text-rose-400 ml-1">-{sig.bearish_screener_count}</span>
                           )}
                         </td>
-                        <td className="px-3 py-2 text-right font-mono text-slate-300">
+                        <td className="px-3 py-2 text-right font-data text-slate-300">
                           {sig.entry_zone_high ? sig.entry_zone_high.toFixed(1) : '—'}
                         </td>
-                        <td className="px-3 py-2 text-right font-mono text-rose-400">
+                        <td className="px-3 py-2 text-right font-data text-rose-400">
                           {sig.stop_loss ? sig.stop_loss.toFixed(1) : '—'}
                         </td>
-                        <td className="px-3 py-2 text-right font-mono text-emerald-400">
+                        <td className="px-3 py-2 text-right font-data text-emerald-400">
                           {sig.target_1 ? sig.target_1.toFixed(1) : '—'}
                         </td>
                         <td className="px-3 py-2 text-right text-slate-300">
@@ -451,7 +454,7 @@ export function SignalIntelligence() {
                         <td className="px-3 py-2 text-center">
                           <span className={cn('text-[9px] font-bold px-1.5 py-0.5 rounded',
                             sig.suggested_timeframe === 'INTRADAY' ? 'bg-amber-900/30 text-amber-400' :
-                            sig.suggested_timeframe === 'SWING'    ? 'bg-blue-900/30 text-blue-400' :
+                            sig.suggested_timeframe === 'SWING'    ? 'bg-indigo-900/30 text-indigo-400' :
                                                                      'bg-purple-900/30 text-purple-400'
                           )}>
                             {sig.suggested_timeframe === 'INTRADAY' ? 'ID' :
@@ -488,10 +491,10 @@ export function SignalIntelligence() {
       {/* ── Bottom Row: Reliability Leaderboard + Sector Matrix ──────────────── */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         {/* Scanner Reliability Leaderboard */}
-        <div className="glass rounded-xl overflow-hidden">
+        <div className="v1-card overflow-hidden">
           <div className="px-4 py-3 border-b border-slate-700/50 flex items-center gap-2">
             <Star className="w-4 h-4 text-amber-400" />
-            <span className="text-sm font-bold text-white">Scanner Reliability Leaderboard</span>
+            <span className="v1-title-card">Scanner Reliability Leaderboard</span>
           </div>
           {reliability && reliability.length > 0 ? (
             <div className="divide-y divide-slate-800/50">
@@ -532,10 +535,10 @@ export function SignalIntelligence() {
         </div>
 
         {/* Sector Momentum Matrix */}
-        <div className="glass rounded-xl overflow-hidden">
+        <div className="v1-card overflow-hidden">
           <div className="px-4 py-3 border-b border-slate-700/50 flex items-center gap-2">
-            <BarChart3 className="w-4 h-4 text-blue-400" />
-            <span className="text-sm font-bold text-white">Sector Momentum Matrix</span>
+            <BarChart3 className="w-4 h-4 text-indigo-400" />
+            <span className="v1-title-card">Sector Momentum Matrix</span>
           </div>
           {sectorMatrix && sectorMatrix.length > 0 ? (
             <>
@@ -567,7 +570,7 @@ export function SignalIntelligence() {
                     <span className="text-slate-500 text-[10px]">{s.stock_count} stocks</span>
                     <span className={cn('font-bold',
                       s.avg_score >= 60 ? 'text-emerald-400' :
-                      s.avg_score >= 40 ? 'text-blue-400' : 'text-slate-400'
+                      s.avg_score >= 40 ? 'text-indigo-400' : 'text-slate-400'
                     )}>{s.avg_score}</span>
                     {s.high_conviction_count > 0 && (
                       <span className="text-amber-400 text-[10px]">★{s.high_conviction_count}</span>

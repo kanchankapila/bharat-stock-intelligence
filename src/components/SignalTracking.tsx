@@ -64,7 +64,7 @@ export const SignalTracking: React.FC = () => {
       <div className="p-6">
         <Card title="Signal Ledger">
           <div className="p-8 text-center bg-slate-900/50 border border-rose-500/30 rounded-2xl">
-            <p className="text-rose-400 font-mono text-sm">Error loading signals: {error.message}</p>
+            <p className="text-rose-400 font-data text-sm">Error loading signals: {error.message}</p>
           </div>
         </Card>
       </div>
@@ -99,7 +99,7 @@ export const SignalTracking: React.FC = () => {
                 key={days}
                 onClick={() => setDaysFilter(days)}
                 className={cn(
-                  "px-3 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-wider transition-all",
+                  "px-3 py-1.5 rounded-lg text-[10px] font-black font-display uppercase tracking-wider transition-all",
                   daysFilter === days 
                     ? "bg-indigo-600 text-white shadow-md" 
                     : "text-slate-400 hover:text-slate-200"

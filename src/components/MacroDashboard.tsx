@@ -35,29 +35,29 @@ export const MacroDashboard: React.FC = () => {
   return (
     <div className="space-y-6">
       {/* Macro tiles */}
-      <div className="bg-slate-900/40 border border-slate-800/50 rounded-xl p-5 backdrop-blur-sm">
+      <div className="v1-card p-5">
         <div className="flex items-center gap-2 mb-4">
           <Globe2 className="w-5 h-5 text-indigo-400" />
-          <h3 className="text-sm font-bold text-slate-100 uppercase tracking-widest">Macro Snapshot</h3>
+          <h3 className="v1-title-card">Macro Snapshot</h3>
         </div>
         {tilesLoading ? (
-          <p className="text-xs text-slate-500 font-mono">Loading macro data&hellip;</p>
+          <p className="text-xs text-slate-500 font-data">Loading macro data&hellip;</p>
         ) : tiles.length === 0 ? (
-          <p className="text-xs text-slate-500 font-mono">Macro data unavailable.</p>
+          <p className="text-xs text-slate-500 font-data">Macro data unavailable.</p>
         ) : (
           <div className="space-y-5">
             {grouped.map(({ group, items }) => (
               <div key={group}>
-                <p className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-2">{group}</p>
+                <p className="text-[10px] font-bold text-slate-500 font-display uppercase tracking-widest mb-2">{group}</p>
                 <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
                   {items.map((t: any) => {
                     const up = t.ret1d == null ? null : t.ret1d >= 0;
                     return (
                       <div key={t.symbol} className="bg-slate-950/50 border border-slate-800/60 rounded-lg p-3">
-                        <p className="text-[9px] text-slate-500 font-bold uppercase tracking-wider truncate">{t.label}</p>
-                        <p className="text-sm font-black text-slate-100 font-mono mt-1">{formatValue(t.close, t.unit)}</p>
+                        <p className="text-[9px] text-slate-500 font-bold font-display uppercase tracking-wider truncate">{t.label}</p>
+                        <p className="text-sm font-black text-slate-100 font-data mt-1">{formatValue(t.close, t.unit)}</p>
                         {up !== null && (
-                          <p className={cn("text-[10px] font-bold font-mono mt-0.5 flex items-center gap-1", up ? "text-emerald-400" : "text-rose-400")}>
+                          <p className={cn("text-[10px] font-bold font-data mt-0.5 flex items-center gap-1", up ? "text-emerald-400" : "text-rose-400")}>
                             {up ? <TrendingUp className="w-2.5 h-2.5" /> : <TrendingDown className="w-2.5 h-2.5" />}
                             {up ? '+' : ''}{t.ret1d.toFixed(2)}%
                           </p>
@@ -73,20 +73,20 @@ export const MacroDashboard: React.FC = () => {
       </div>
 
       {/* Economic calendar */}
-      <div className="bg-slate-900/40 border border-slate-800/50 rounded-xl p-5 backdrop-blur-sm">
+      <div className="v1-card p-5">
         <div className="flex items-center gap-2 mb-4">
           <CalendarClock className="w-5 h-5 text-amber-400" />
-          <h3 className="text-sm font-bold text-slate-100 uppercase tracking-widest">Economic Calendar — High Impact</h3>
+          <h3 className="v1-title-card">Economic Calendar — High Impact</h3>
         </div>
         {eventsLoading ? (
-          <p className="text-xs text-slate-500 font-mono">Loading calendar&hellip;</p>
+          <p className="text-xs text-slate-500 font-data">Loading calendar&hellip;</p>
         ) : events.length === 0 ? (
-          <p className="text-xs text-slate-500 font-mono">No high-impact events in this window.</p>
+          <p className="text-xs text-slate-500 font-data">No high-impact events in this window.</p>
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full text-left text-xs">
               <thead>
-                <tr className="text-[10px] text-slate-500 uppercase tracking-wider border-b border-slate-800/50">
+                <tr className="text-[10px] text-slate-500 font-display uppercase tracking-wider border-b border-slate-800/50">
                   <th className="py-2 pr-3 font-medium">Date</th>
                   <th className="py-2 pr-3 font-medium">Country</th>
                   <th className="py-2 pr-3 font-medium">Event</th>
@@ -98,15 +98,15 @@ export const MacroDashboard: React.FC = () => {
               <tbody className="divide-y divide-slate-800/30">
                 {events.map((e: any, i: number) => (
                   <tr key={i} className="hover:bg-slate-800/30">
-                    <td className="py-2 pr-3 font-mono text-slate-400">{e.event_date}</td>
+                    <td className="py-2 pr-3 font-data text-slate-400">{e.event_date}</td>
                     <td className="py-2 pr-3 text-slate-300">{e.country_name}</td>
                     <td className="py-2 pr-3 text-slate-200 font-medium flex items-center gap-1.5">
                       {Number(e.impact) >= 3 && <span className="w-1.5 h-1.5 rounded-full bg-rose-400 shrink-0" title="High impact" />}
                       {e.event_name}
                     </td>
-                    <td className="py-2 pr-3 text-right font-mono text-slate-400">{e.previous || '—'}</td>
-                    <td className="py-2 pr-3 text-right font-mono text-slate-400">{e.consensus || '—'}</td>
-                    <td className="py-2 text-right font-mono text-slate-200">{e.actual || '—'}</td>
+                    <td className="py-2 pr-3 text-right font-data text-slate-400">{e.previous || '—'}</td>
+                    <td className="py-2 pr-3 text-right font-data text-slate-400">{e.consensus || '—'}</td>
+                    <td className="py-2 text-right font-data text-slate-200">{e.actual || '—'}</td>
                   </tr>
                 ))}
               </tbody>

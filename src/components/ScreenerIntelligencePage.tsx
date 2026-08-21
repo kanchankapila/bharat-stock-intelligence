@@ -10,16 +10,16 @@ import { ScreenerRankingPanel } from './ScreenerRankingPanel';
 import { LegacyScoreBanner } from './CanonicalSourceNote';
 
 // ── Tier config ───────────────────────────────────────────────────────────────
-const TIER = {
-  A:        { bg: 'bg-emerald-500/15', border: 'border-emerald-500/40', text: 'text-emerald-400', label: 'Tier A' },
-  B:        { bg: 'bg-blue-500/15',    border: 'border-blue-500/40',    text: 'text-blue-400',    label: 'Tier B' },
-  C:        { bg: 'bg-amber-500/15',   border: 'border-amber-500/40',   text: 'text-amber-400',   label: 'Tier C' },
-  D:        { bg: 'bg-slate-700/30',   border: 'border-slate-600/40',   text: 'text-slate-400',   label: 'Tier D' },
-  Unranked: { bg: 'bg-slate-800/30',   border: 'border-slate-700/30',   text: 'text-slate-500',   label: 'Unranked' },
+const TIER_BADGE = {
+  A:        'v1-badge-s',
+  B:        'v1-badge-a',
+  C:        'v1-badge-b',
+  D:        'v1-badge-c',
+  Unranked: '',
 } as const;
 
-function tierCfg(t: string | null) {
-  return TIER[(t ?? 'Unranked') as keyof typeof TIER] ?? TIER.Unranked;
+function tierBadgeClass(t: string | null) {
+  return TIER_BADGE[(t ?? 'Unranked') as keyof typeof TIER_BADGE] ?? '';
 }
 
 // ── Category icon map ─────────────────────────────────────────────────────────
@@ -46,12 +46,12 @@ const CAT_ICON: Record<string, React.ElementType> = {
 };
 
 const SOURCE_COLORS: Record<string, string> = {
-  trendlyne:    'text-violet-400',
-  moneycontrol: 'text-blue-400',
-  etnow:        'text-amber-400',
-  ETnow:        'text-amber-400',
-  Trendlyne:    'text-violet-400',
-  MoneyControl: 'text-blue-400',
+  trendlyne:    'v1-text-secondary',
+  moneycontrol: 'v1-text-accent',
+  etnow:        'v1-text-neutral',
+  ETnow:        'v1-text-neutral',
+  Trendlyne:    'v1-text-secondary',
+  MoneyControl: 'v1-text-accent',
 };
 
 function pct(n: number | null | undefined) {
@@ -83,12 +83,7 @@ function CategoryCard({ cat, onClick, active }: {
   return (
     <button
       onClick={onClick}
-      className={cn(
-        'text-left rounded-xl border p-3 transition-all',
-        active
-          ? 'bg-indigo-500/15 border-indigo-500/50'
-          : 'bg-slate-900/60 border-slate-800/50 hover:border-slate-600/50'
-      )}
+      className={cn('v1-card text-left p-3', active && 'ring-2 ring-indigo-500/60')}
     >
       <div className="flex items-center gap-2 mb-2">
         <Icon className={cn('w-3.5 h-3.5 flex-shrink-0', active ? 'text-indigo-400' : 'text-slate-500')} />
@@ -96,19 +91,22 @@ function CategoryCard({ cat, onClick, active }: {
       </div>
       <div className="flex items-end justify-between">
         <div>
+          {/* ponytail: v1-data-value/label are sized for headline KPI strips (text-lg);
+              this grid packs 9 tiles per row, too narrow for that scale -- kept the original
+              compact sizing, only the card container (background/border) was unified. */}
           <p className={cn('text-sm font-bold', wr && parseFloat(wr) >= 60 ? 'text-emerald-400' : 'text-slate-300')}>
             {wr ? `${wr}%` : '—'}
           </p>
-          <p className="text-[10px] text-slate-500">avg win rate</p>
+          <p className="text-[10px] text-slate-500">win rate</p>
         </div>
         <div className="text-right">
           <p className="text-xs font-semibold text-slate-400">{cat.screener_count}</p>
-          <p className="text-[10px] text-slate-500">screeners</p>
+          <p className="text-[10px] text-slate-500">count</p>
         </div>
       </div>
       {cat.tier_ab_count > 0 && (
         <div className="mt-1.5 flex gap-1">
-          <span className="text-[9px] bg-blue-500/20 text-blue-400 px-1.5 py-0.5 rounded">
+          <span className="text-[9px] bg-indigo-500/20 text-indigo-400 px-1.5 py-0.5 rounded">
             {cat.tier_ab_count} A/B
           </span>
         </div>
@@ -119,7 +117,6 @@ function CategoryCard({ cat, onClick, active }: {
 
 // ── Screener row ──────────────────────────────────────────────────────────────
 function ScreenerRow({ row, selected, onClick }: { row: any; selected: boolean; onClick: () => void }) {
-  const tc = tierCfg(row.tier);
   const sc = SOURCE_COLORS[row.source] ?? 'text-slate-400';
 
   return (
@@ -135,16 +132,16 @@ function ScreenerRow({ row, selected, onClick }: { row: any; selected: boolean; 
         <p className={cn('text-[10px] mt-0.5', sc)}>{row.source}</p>
       </td>
       <td className="px-3 py-2.5">
-        <span className={cn('px-2 py-0.5 rounded-full text-[10px] font-bold', tc.bg, tc.text)}>
+        <span className={cn('v1-badge text-[10px]', tierBadgeClass(row.tier))}>
           {row.tier ?? 'Unranked'}
         </span>
       </td>
-      <td className="px-3 py-2.5 text-right font-mono">
+      <td className="px-3 py-2.5 text-right font-data">
         <span className={cn(row.win_rate >= 0.6 ? 'text-emerald-400' : 'text-slate-300')}>
           {pct(row.win_rate)}
         </span>
       </td>
-      <td className="px-3 py-2.5 text-right font-mono text-slate-300">{fmtScore(row.bayesian_score)}</td>
+      <td className="px-3 py-2.5 text-right font-data text-slate-300">{fmtScore(row.bayesian_score)}</td>
       <td className="px-3 py-2.5 text-right text-slate-400">{row.resolved_count}</td>
       <td className="px-3 py-2.5 text-slate-500 capitalize text-[10px]">
         {row.category?.replace(/_/g, ' ')}
@@ -161,14 +158,13 @@ function ScreenerDetail({ screenerId }: { screenerId: string }) {
   if (!data?.perf) return <div className="p-4 text-slate-500 text-xs">No data</div>;
 
   const p = data.perf as any;
-  const tc = tierCfg(p.tier);
 
   return (
     <div className="p-4 space-y-4 overflow-y-auto max-h-full">
       <div>
         <p className="text-sm font-semibold text-white leading-tight">{p.name}</p>
         <div className="flex items-center gap-2 mt-1">
-          <span className={cn('text-[10px] px-2 py-0.5 rounded-full font-bold', tc.bg, tc.text)}>
+          <span className={cn('v1-badge text-[10px]', tierBadgeClass(p.tier))}>
             {p.tier ?? 'Unranked'}
           </span>
           <span className={cn('text-[10px]', SOURCE_COLORS[p.source] ?? 'text-slate-400')}>{p.source}</span>
@@ -215,7 +211,7 @@ function ScreenerDetail({ screenerId }: { screenerId: string }) {
           <div className="space-y-1">
             {(data.recentAppearances as any[]).slice(0, 8).map((a: any, i: number) => (
               <div key={i} className="flex items-center justify-between text-[10px] py-1 border-b border-slate-800/50">
-                <span className="text-slate-300 font-mono">{a.symbol}</span>
+                <span className="text-slate-300 font-data">{a.symbol}</span>
                 <span className="text-slate-500">{a.appeared_date}</span>
                 {a.outcome_20d && (
                   <span className={cn(
@@ -278,7 +274,7 @@ export function ScreenerIntelligencePage() {
         {/* Header */}
         <div className="flex items-center justify-between px-5 py-3 border-b border-slate-800/50 flex-shrink-0">
           <div>
-            <h1 className="text-base font-semibold text-white flex items-center gap-2">
+            <h1 className="v1-title-page flex items-center gap-2">
               <BarChart2 className="w-4 h-4 text-indigo-400" />
               Screener Intelligence
             </h1>
@@ -341,12 +337,10 @@ export function ScreenerIntelligencePage() {
               key={t || 'all'}
               onClick={() => setFilterTier(t)}
               className={cn(
-                'text-[10px] px-2 py-0.5 rounded-full transition-colors',
+                'text-[10px]',
                 filterTier === t
-                  ? 'bg-indigo-600 text-white'
-                  : t && TIER[t as keyof typeof TIER]
-                  ? cn(TIER[t as keyof typeof TIER].bg, TIER[t as keyof typeof TIER].text)
-                  : 'bg-slate-800 text-slate-400 hover:text-slate-200'
+                  ? 'v1-btn-primary'
+                  : 'v1-btn-secondary'
               )}
             >{t || 'All'}</button>
           ))}

@@ -160,7 +160,7 @@ const PremiumScreenersPage: React.FC<PremiumScreenersPageProps> = ({ onSelectSto
             <Star className="w-5 h-5 text-amber-400" />
           </div>
           <div>
-            <h1 className="text-xl md:text-2xl font-black text-white uppercase tracking-wide">Premium Screeners</h1>
+            <h1 className="v1-title-page">Premium Screeners</h1>
             <p className="text-xs text-slate-300 mt-1">Premium Trendlyne screeners with stock-level intelligence cards.</p>
           </div>
         </div>
@@ -168,7 +168,7 @@ const PremiumScreenersPage: React.FC<PremiumScreenersPageProps> = ({ onSelectSto
 
       <div className="glass rounded-2xl border border-slate-800/60 p-4">
         <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3 mb-4">
-          <h2 className="text-sm font-black uppercase tracking-wider text-slate-200">Premium Screener Directory</h2>
+          <h2 className="v1-title-section">Premium Screener Directory</h2>
           <div className="relative w-full md:w-80">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-slate-400" />
             <input
@@ -194,14 +194,14 @@ const PremiumScreenersPage: React.FC<PremiumScreenersPageProps> = ({ onSelectSto
                     setSelectedStock(null);
                   }}
                   className={cn(
-                    'text-left glass rounded-xl border p-3 transition-all hover:border-amber-500/40',
-                    active ? 'border-amber-500/60 bg-amber-500/10' : 'border-slate-800/60 bg-slate-900/30'
+                    active ? 'v1-card-neutral' : 'v1-card',
+                    'text-left p-3 transition-all hover:border-amber-500/40'
                   )}
                 >
-                  <div className="text-[11px] font-black text-slate-100 uppercase tracking-wide whitespace-normal break-words leading-snug">
+                  <div className="text-[11px] font-black text-slate-100 font-display uppercase tracking-wide whitespace-normal break-words leading-snug">
                     {s.name}
                   </div>
-                  <div className="mt-1 text-[10px] text-slate-400 font-mono">screenpk: {s.screenpk}</div>
+                  <div className="mt-1 text-[10px] text-slate-400 font-data">screenpk: {s.screenpk}</div>
                 </button>
               );
             })}
@@ -210,10 +210,10 @@ const PremiumScreenersPage: React.FC<PremiumScreenersPageProps> = ({ onSelectSto
       </div>
 
       {selectedScreener && (
-        <div className="glass rounded-2xl border border-slate-800/60 p-4 space-y-4">
+        <div className="v1-card p-4 space-y-4">
           <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
             <div>
-              <h3 className="text-sm font-black text-white uppercase tracking-wider whitespace-normal break-words">{selectedScreener.name}</h3>
+              <h3 className="text-sm font-black text-white font-display uppercase tracking-wider whitespace-normal break-words">{selectedScreener.name}</h3>
               <p className="text-[11px] text-slate-400 mt-1">Screenpk {selectedScreener.screenpk} • Click any stock to view premium details.</p>
             </div>
             <div className="relative w-full md:w-72">
@@ -248,8 +248,8 @@ const PremiumScreenersPage: React.FC<PremiumScreenersPageProps> = ({ onSelectSto
                   >
                     <div className="flex items-start justify-between gap-2">
                       <div className="min-w-0">
-                        <div className="text-[12px] font-black text-white uppercase tracking-wide whitespace-normal break-words leading-tight">{stock.name}</div>
-                        <div className="text-[10px] text-slate-400 font-mono mt-1">{nse || stock.stockId}</div>
+                        <div className="text-[12px] font-black text-white font-display uppercase tracking-wide whitespace-normal break-words leading-tight">{stock.name}</div>
+                        <div className="text-[10px] text-slate-400 font-data mt-1">{nse || stock.stockId}</div>
                       </div>
                       <div className={cn('text-[11px] font-black', positive == null ? 'text-slate-400' : positive ? 'text-emerald-400' : 'text-rose-400')}>
                         {stock.changePercent == null ? '—' : `${positive ? '+' : ''}${stock.changePercent.toFixed(2)}%`}
@@ -258,17 +258,17 @@ const PremiumScreenersPage: React.FC<PremiumScreenersPageProps> = ({ onSelectSto
 
                     <div className="grid grid-cols-2 gap-2 mt-3">
                       <div className="rounded-lg border border-slate-800/60 bg-slate-950/35 p-2">
-                        <div className="text-[9px] text-slate-500 uppercase tracking-widest">Price</div>
+                        <div className="text-[9px] text-slate-500 font-display uppercase tracking-widest">Price</div>
                         <div className="text-sm font-black text-white">₹{Number(stock.ltp || 0).toLocaleString()}</div>
                       </div>
                       <div className="rounded-lg border border-slate-800/60 bg-slate-950/35 p-2">
-                        <div className="text-[9px] text-slate-500 uppercase tracking-widest">Score</div>
+                        <div className="text-[9px] text-slate-500 font-display uppercase tracking-widest">Score</div>
                         <div className="text-sm font-black text-amber-300">{Math.round(Number(stock.score || 0))}</div>
                       </div>
                     </div>
 
                     <div className="mt-3 rounded-lg border border-slate-800/60 bg-slate-950/35 p-2">
-                      <div className="text-[9px] text-slate-500 uppercase tracking-widest mb-1">Price Performance Durations</div>
+                      <div className="text-[9px] text-slate-500 font-display uppercase tracking-widest mb-1">Price Performance Durations</div>
                       <div className="flex flex-wrap gap-2">
                         <span className={cn('text-[10px] font-bold', positive == null ? 'text-slate-400' : positive ? 'text-emerald-400' : 'text-rose-400')}>
                           1D: {stock.changePercent == null ? '—' : `${positive ? '+' : ''}${stock.changePercent.toFixed(2)}%`}
@@ -282,7 +282,7 @@ const PremiumScreenersPage: React.FC<PremiumScreenersPageProps> = ({ onSelectSto
                     </div>
 
                     <div className="mt-3 rounded-lg border border-slate-800/60 bg-slate-950/35 p-2">
-                      <div className="text-[9px] text-slate-500 uppercase tracking-widest mb-1">Moneycontrol / MarketMojo Scores</div>
+                      <div className="text-[9px] text-slate-500 font-display uppercase tracking-widest mb-1">Moneycontrol / MarketMojo Scores</div>
                       <div className="grid grid-cols-2 gap-x-2 gap-y-1 text-[10px]">
                         <div className="text-slate-300">Moneycontrol Score: <span className="font-bold text-white">{formatMaybeNum(stock.mc_cp_net_score, 0)}</span></div>
                         <div className="text-slate-300">Piotroski F: <span className="font-bold text-white">{formatMaybeNum(stock.piotroski_f_score, 0)}/9</span></div>
@@ -302,7 +302,7 @@ const PremiumScreenersPage: React.FC<PremiumScreenersPageProps> = ({ onSelectSto
       {selectedStock && selectedSymbol && (
         <div className="glass rounded-2xl border border-amber-500/30 p-4 md:p-5 space-y-4">
           <div>
-            <h3 className="text-sm font-black text-white uppercase tracking-wider">Premium Stock Intelligence</h3>
+            <h3 className="v1-title-section">Premium Stock Intelligence</h3>
             <p className="text-xs text-slate-300 mt-1 whitespace-normal break-words">
               {selectedStock.name} ({selectedSymbol})
             </p>
@@ -310,7 +310,7 @@ const PremiumScreenersPage: React.FC<PremiumScreenersPageProps> = ({ onSelectSto
 
           <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-3">
             <div className="glass rounded-xl border border-slate-800/60 p-3">
-              <div className="text-[9px] uppercase tracking-widest text-slate-500">Analyst Rating</div>
+              <div className="text-[9px] font-display uppercase tracking-widest text-slate-500">Analyst Rating</div>
               <div className="text-sm font-black text-white mt-1 whitespace-normal break-words">
                 {analystRatingQ.data?.finalRating || '—'}
               </div>
@@ -318,7 +318,7 @@ const PremiumScreenersPage: React.FC<PremiumScreenersPageProps> = ({ onSelectSto
             </div>
 
             <div className="glass rounded-xl border border-slate-800/60 p-3">
-              <div className="text-[9px] uppercase tracking-widest text-slate-500">Consensus</div>
+              <div className="text-[9px] font-display uppercase tracking-widest text-slate-500">Consensus</div>
               <div className="text-sm font-black text-white mt-1">
                 {Array.isArray(consensusQ.data?.graphData) ? `${consensusQ.data.graphData.length} series` : '—'}
               </div>
@@ -326,7 +326,7 @@ const PremiumScreenersPage: React.FC<PremiumScreenersPageProps> = ({ onSelectSto
             </div>
 
             <div className="glass rounded-xl border border-slate-800/60 p-3">
-              <div className="text-[9px] uppercase tracking-widest text-slate-500">DVM Scores</div>
+              <div className="text-[9px] font-display uppercase tracking-widest text-slate-500">DVM Scores</div>
               <div className="text-[11px] text-slate-200 mt-1 whitespace-normal break-words">
                 {/* getTrendlyneDVM returns nested legs (durability/valuation/momentum), never
                     the flat d_score/v_score/m_score this previously read — those fields never
@@ -337,7 +337,7 @@ const PremiumScreenersPage: React.FC<PremiumScreenersPageProps> = ({ onSelectSto
             </div>
 
             <div className="glass rounded-xl border border-slate-800/60 p-3">
-              <div className="text-[9px] uppercase tracking-widest text-slate-500">Target Forecast</div>
+              <div className="text-[9px] font-display uppercase tracking-widest text-slate-500">Target Forecast</div>
               <div className="text-sm font-black text-white mt-1">
                 {forecastQ.data?.mean ? `₹${Number(forecastQ.data.mean).toLocaleString()}` : '—'}
               </div>
@@ -346,7 +346,7 @@ const PremiumScreenersPage: React.FC<PremiumScreenersPageProps> = ({ onSelectSto
           </div>
 
           <div className="glass rounded-xl border border-slate-800/60 p-3">
-            <div className="text-[9px] uppercase tracking-widest text-slate-500 mb-2">Other Critical Metrics</div>
+            <div className="text-[9px] font-display uppercase tracking-widest text-slate-500 mb-2">Other Critical Metrics</div>
             {metricsQ.isLoading ? (
               <div className="flex items-center gap-2 text-xs text-slate-400"><Loader className="w-3.5 h-3.5 animate-spin" /> Loading metrics...</div>
             ) : (

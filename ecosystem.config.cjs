@@ -230,5 +230,29 @@ module.exports = {
       merge_logs: true,
       time: true,
     },
+
+    // ------------------------------------------------------------------
+    // Port-drift check (every 15 min)
+    // ------------------------------------------------------------------
+    // Catches the "pm2 says online but nothing is actually listening" failure --
+    // root-caused live 2026-08-20 when a Docker Desktop crash left processes with
+    // no ancestry link to pm2 squatting 3000/8000/8002 for over an hour while every
+    // pm2 status check reported all three online. See check_port_drift.mjs's own
+    // header for the full incident and why ancestry (not interpreter path) is the
+    // only reliable signal here.
+    {
+      name: 'port-drift-check',
+      autorestart: false,
+      exec_mode: 'fork',
+      interpreter: 'node',
+      script: path.resolve(__dirname, 'scripts', 'check_port_drift.mjs'),
+      cron_restart: '*/15 * * * *',
+      kill_timeout: 30_000,
+      env: { ...dotenvVars },
+      out_file: path.resolve(__dirname, 'logs', 'pm2-out.log'),
+      error_file: path.resolve(__dirname, 'logs', 'pm2-err.log'),
+      merge_logs: true,
+      time: true,
+    },
   ],
 };

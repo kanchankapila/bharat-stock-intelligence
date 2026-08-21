@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
-  AreaChart, Area, XAxis, YAxis, ResponsiveContainer, Tooltip, CartesianGrid,
+  AreaChart, Area, XAxis, YAxis, ResponsiveContainer, Tooltip, CartesianGrid, BarChart, Bar,
 } from 'recharts';
 import { motion, AnimatePresence } from 'motion/react';
 import {
@@ -295,8 +295,8 @@ export const SignalHistoryModal: React.FC<{ symbol: string; onClose: () => void 
             </div>
           ) : (
             <div className="flex flex-col items-center justify-center py-16">
-              <BarChart2 size={28} style={{ color: '#1e293b' }} />
-              <p style={{ fontFamily: FONT_FAMILY_MONO, fontSize: 10, color: '#334155', marginTop: 10, letterSpacing: 2 }}>
+              <BarChart2 size={28} style={{ color: '#e2e8f0' }} />
+              <p style={{ fontFamily: FONT_FAMILY_MONO, fontSize: 10, color: '#64748b', marginTop: 10, letterSpacing: 2 }}>
                 NO HISTORY FOUND
               </p>
             </div>
@@ -327,13 +327,13 @@ const KpiChip: React.FC<{
       {icon}
       {label}
     </div>
-    <div style={{ fontFamily: FONT_FAMILY_MONO, fontSize: 18, fontWeight: 700, color: '#0f172a', letterSpacing: -0.5 }}>
+    <div style={{ fontFamily: FONT_FAMILY_MONO, fontSize: 18, fontWeight: 700, color: '#f8fafc', letterSpacing: -0.5 }}>
       {value}
     </div>
     {sub !== undefined && (
       <div style={{
         fontFamily: FONT_FAMILY_MONO, fontSize: 10,
-        color: up === true ? '#059669' : up === false ? '#dc2626' : '#64748b',
+        color: up === true ? emerald : up === false ? rose : '#64748b',
       }}>
         {sub}
       </div>
@@ -345,11 +345,11 @@ const KpiChip: React.FC<{
 const SectionLabel: React.FC<{ children: React.ReactNode }> = ({ children }) => (
   <div style={{
     fontFamily: FONT_FAMILY_DISPLAY, fontSize: 9, fontWeight: 700,
-    color: '#334155', letterSpacing: 4, textTransform: 'uppercase',
+    color: '#64748b', letterSpacing: 4, textTransform: 'uppercase',
     marginBottom: 10,
     display: 'flex', alignItems: 'center', gap: 6,
   }}>
-    <span style={{ display: 'inline-block', width: 16, height: 1, background: '#334155' }} />
+    <span style={{ display: 'inline-block', width: 16, height: 1, background: '#64748b' }} />
     {children}
     <span style={{ display: 'inline-block', flex: 1, height: 1, background: 'rgba(255,255,255,0.04)' }} />
   </div>
@@ -378,6 +378,21 @@ const DashboardPage: React.FC<DashboardPageProps> = ({
 
   const { data: niftyOhlc } = trpc.getOHLCData.useQuery({ symbol: 'in;NSX', dur: '1M' });
   const { data: vixData } = trpc.getIndiaVix.useQuery(undefined, { refetchInterval: 30000 });
+
+  // Quant Performance section (win-rate/Sharpe/alpha, FII-DII flow, feature importances, model
+  // registry + strategy performance) -- ported from v2's V2Dashboard, which had this and v1 did
+  // not (2026-08-20 v1 consolidation pass). Same 3 queries, same source data, restyled to this
+  // page's own .glass/KpiChip/SectionLabel language instead of v2's terminal-panel classes.
+  const { data: perfDashboardRaw } = trpc.getPerformanceDashboard.useQuery();
+  const perfDashboard = perfDashboardRaw as any;
+  const { data: fiiDiiRaw } = trpc.getFiiDiiFlow.useQuery({ days: 10 });
+  const { data: featureImportanceRaw } = trpc.getFeatureImportance.useQuery({ modelName: 'ensemble', topN: 8 });
+  const fiiDiiFlowData = useMemo(() => (fiiDiiRaw ?? []).slice().reverse().map((f: any) => ({
+    date: f.date, FII: f.fii_net ?? 0, DII: f.dii_net ?? 0,
+  })), [fiiDiiRaw]);
+  const featureImportanceData = useMemo(() => (featureImportanceRaw ?? []).map((f: any) => ({
+    name: String(f.feature_name).replace(/_/g, ' ').toUpperCase(), Weight: f.importance * 100,
+  })), [featureImportanceRaw]);
   const graphData = useMemo(() => {
     const candles: any[] = niftyOhlc?.data ?? [];
     return candles.slice(-30).map((d: any, i: number) => ({
@@ -573,7 +588,7 @@ const DashboardPage: React.FC<DashboardPageProps> = ({
           value={isGenerating ? `${queueProgress?.completed ?? 0}/${queueProgress?.total ?? 0}` : 'IDLE'}
           sub={isGenerating ? 'Analysing…' : 'Ready'}
           up={null}
-          accent={isGenerating ? amber : '#1e293b'}
+          accent={isGenerating ? amber : '#e2e8f0'}
           icon={<Radio size={9} />}
         />
         <KpiChip
@@ -631,7 +646,7 @@ const DashboardPage: React.FC<DashboardPageProps> = ({
                     borderRadius: 6, padding: '5px 8px', cursor: 'pointer',
                   }}
                 >
-                  <span style={{ fontFamily: FONT_FAMILY_DISPLAY, fontSize: 11, fontWeight: 700, color: '#1e293b', letterSpacing: 0.5 }}>
+                  <span style={{ fontFamily: FONT_FAMILY_DISPLAY, fontSize: 11, fontWeight: 700, color: '#e2e8f0', letterSpacing: 0.5 }}>
                     {s.symbol}
                   </span>
                   <span style={{ fontFamily: FONT_FAMILY_MONO, fontSize: 10, color: emerald }}>
@@ -655,7 +670,7 @@ const DashboardPage: React.FC<DashboardPageProps> = ({
                     borderRadius: 6, padding: '5px 8px', cursor: 'pointer',
                   }}
                 >
-                  <span style={{ fontFamily: FONT_FAMILY_DISPLAY, fontSize: 11, fontWeight: 700, color: '#1e293b', letterSpacing: 0.5 }}>
+                  <span style={{ fontFamily: FONT_FAMILY_DISPLAY, fontSize: 11, fontWeight: 700, color: '#e2e8f0', letterSpacing: 0.5 }}>
                     {s.symbol}
                   </span>
                   <span style={{ fontFamily: FONT_FAMILY_MONO, fontSize: 10, color: rose }}>
@@ -680,7 +695,7 @@ const DashboardPage: React.FC<DashboardPageProps> = ({
               <div>
                 <SectionLabel>NIFTY 50 — 30D</SectionLabel>
                 {graphData.length > 0 && (
-                  <div style={{ fontFamily: FONT_FAMILY_MONO, fontSize: 22, fontWeight: 700, color: '#0f172a', lineHeight: 1 }}>
+                  <div style={{ fontFamily: FONT_FAMILY_MONO, fontSize: 22, fontWeight: 700, color: '#f8fafc', lineHeight: 1 }}>
                     {graphData[graphData.length - 1].value.toLocaleString('en-IN', { maximumFractionDigits: 0 })}
                   </div>
                 )}
@@ -712,7 +727,7 @@ const DashboardPage: React.FC<DashboardPageProps> = ({
                   <Tooltip
                     contentStyle={{
                       background: '#ffffff', border: '1px solid rgba(0,0,0,0.08)',
-                      borderRadius: 8, fontFamily: FONT_FAMILY_MONO, fontSize: 10, color: '#0f172a',
+                      borderRadius: 8, fontFamily: FONT_FAMILY_MONO, fontSize: 10, color: '#f8fafc',
                     }}
                     formatter={(v: any) => [v.toLocaleString('en-IN', { maximumFractionDigits: 0 }), 'Nifty']}
                     labelFormatter={() => ''}
@@ -741,7 +756,7 @@ const DashboardPage: React.FC<DashboardPageProps> = ({
               <div className="flex items-center justify-between" style={{ marginBottom: 12 }}>
                 <div>
                   <SectionLabel>INDIA VIX</SectionLabel>
-                  <div style={{ fontFamily: FONT_FAMILY_MONO, fontSize: 22, fontWeight: 700, color: '#0f172a', lineHeight: 1 }}>
+                  <div style={{ fontFamily: FONT_FAMILY_MONO, fontSize: 22, fontWeight: 700, color: '#f8fafc', lineHeight: 1 }}>
                     {vixResult.last_trade_price?.toFixed(2)}
                   </div>
                 </div>
@@ -770,7 +785,7 @@ const DashboardPage: React.FC<DashboardPageProps> = ({
                     <Tooltip
                       contentStyle={{
                         background: '#ffffff', border: '1px solid rgba(0,0,0,0.08)',
-                        borderRadius: 8, fontFamily: FONT_FAMILY_MONO, fontSize: 10, color: '#0f172a',
+                        borderRadius: 8, fontFamily: FONT_FAMILY_MONO, fontSize: 10, color: '#f8fafc',
                       }}
                       formatter={(v: any) => [v.toFixed(2), 'VIX']}
                       labelFormatter={() => ''}
@@ -821,7 +836,7 @@ const DashboardPage: React.FC<DashboardPageProps> = ({
                 disabled={isGenerating}
                 style={{
                   fontFamily: FONT_FAMILY_MONO, fontSize: 8, letterSpacing: 2,
-                  color: isGenerating ? '#334155' : amber,
+                  color: isGenerating ? '#64748b' : amber,
                   background: 'transparent', border: 'none', cursor: isGenerating ? 'not-allowed' : 'pointer',
                   display: 'flex', alignItems: 'center', gap: 4,
                 }}
@@ -841,7 +856,7 @@ const DashboardPage: React.FC<DashboardPageProps> = ({
                     transition={{ duration: 0.4 }}
                   />
                 </div>
-                <div style={{ fontFamily: FONT_FAMILY_MONO, fontSize: 8, color: '#334155', marginTop: 3, textAlign: 'right' }}>
+                <div style={{ fontFamily: FONT_FAMILY_MONO, fontSize: 8, color: '#64748b', marginTop: 3, textAlign: 'right' }}>
                   {queueProgress.completed}/{queueProgress.total}
                 </div>
               </div>
@@ -860,7 +875,7 @@ const DashboardPage: React.FC<DashboardPageProps> = ({
               ) : (
                 <div className="flex flex-col items-center justify-center py-12">
                   <Zap size={24} style={{ color: `${amber}33` }} />
-                  <p style={{ fontFamily: FONT_FAMILY_MONO, fontSize: 9, color: '#334155', marginTop: 10, letterSpacing: 2 }}>
+                  <p style={{ fontFamily: FONT_FAMILY_MONO, fontSize: 9, color: '#64748b', marginTop: 10, letterSpacing: 2 }}>
                     ENGINE INITIALISING…
                   </p>
                 </div>
@@ -884,9 +899,9 @@ const DashboardPage: React.FC<DashboardPageProps> = ({
                       background: item.category === 'Economy' ? 'rgba(245,158,11,0.1)' : item.category === 'Stock' ? 'rgba(96,165,250,0.1)' : 'rgba(167,139,250,0.1)',
                       padding: '1px 5px', borderRadius: 3,
                     }}>{item.category}</span>
-                    <span style={{ fontFamily: FONT_FAMILY_MONO, fontSize: 8, color: '#334155' }}>{item.time}</span>
+                    <span style={{ fontFamily: FONT_FAMILY_MONO, fontSize: 8, color: '#64748b' }}>{item.time}</span>
                   </div>
-                  <p style={{ fontFamily: FONT_FAMILY_DISPLAY, fontSize: 11, fontWeight: 600, color: '#334155', lineHeight: 1.4, display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>
+                  <p style={{ fontFamily: FONT_FAMILY_DISPLAY, fontSize: 11, fontWeight: 600, color: '#64748b', lineHeight: 1.4, display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>
                     {item.title}
                   </p>
                 </div>
@@ -900,6 +915,113 @@ const DashboardPage: React.FC<DashboardPageProps> = ({
           data analysis; data already fed macro features, previously had no frontend surface). */}
       <div className="glass border border-slate-800/50 shadow-[0_4px_20px_rgba(0,0,0,0.02)]" style={{ borderRadius: 10, padding: '10px 16px', marginBottom: 12 }}>
         <MarketMoodGauge />
+      </div>
+
+      {/* ── Row 2.6: Quant Performance — see the query block above for provenance. ─────────── */}
+      <div style={{ display: 'flex', gap: 10, marginBottom: 12, flexWrap: 'wrap' }}>
+        <KpiChip
+          label="Ensemble Win Rate"
+          value={perfDashboard?.overall?.win_rate != null ? `${(perfDashboard.overall.win_rate * 100).toFixed(1)}%` : '—'}
+          accent={emerald}
+          icon={<Gauge size={11} />}
+        />
+        <KpiChip
+          label="Sharpe Ratio (1Y Ann.)"
+          value={perfDashboard?.overall?.sharpe_ratio != null ? perfDashboard.overall.sharpe_ratio.toFixed(2) : '—'}
+          accent={amber}
+          icon={<TrendingUp size={11} />}
+        />
+        <KpiChip
+          label="Active Trading Signals"
+          value={perfDashboard?.overall?.total_signals != null ? String(perfDashboard.overall.total_signals) : '—'}
+          accent="#64748b"
+          icon={<Radio size={11} />}
+        />
+        <KpiChip
+          label="Alpha vs Nifty 50"
+          value={perfDashboard?.overall?.alpha_vs_nifty != null ? `${perfDashboard.overall.alpha_vs_nifty >= 0 ? '+' : ''}${perfDashboard.overall.alpha_vs_nifty.toFixed(2)}%` : '—'}
+          accent={perfDashboard?.overall?.alpha_vs_nifty != null ? (perfDashboard.overall.alpha_vs_nifty >= 0 ? emerald : rose) : '#64748b'}
+          icon={<BarChart2 size={11} />}
+        />
+      </div>
+
+      <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: 10, marginBottom: 12 }}>
+        <div className="glass border border-slate-800/50 shadow-[0_4px_20px_rgba(0,0,0,0.02)]" style={{ borderRadius: 10, padding: '14px 16px' }}>
+          <SectionLabel>FII &amp; DII Daily Flow</SectionLabel>
+          {fiiDiiFlowData.length > 0 ? (
+            <div style={{ height: 220 }}>
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart data={fiiDiiFlowData}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.04)" vertical={false} />
+                  <XAxis dataKey="date" tick={{ fill: '#64748b', fontSize: 9 }} />
+                  <YAxis tick={{ fill: '#64748b', fontSize: 9 }} />
+                  <Tooltip contentStyle={{ backgroundColor: '#0d1117', border: '1px solid #1e293b' }} />
+                  <Bar dataKey="FII" fill={rose} radius={[2, 2, 0, 0]} name="FII Net" />
+                  <Bar dataKey="DII" fill={emerald} radius={[2, 2, 0, 0]} name="DII Net" />
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
+          ) : <div style={{ height: 220, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#64748b', fontSize: 10 }}>No flow data</div>}
+        </div>
+        <div className="glass border border-slate-800/50 shadow-[0_4px_20px_rgba(0,0,0,0.02)]" style={{ borderRadius: 10, padding: '14px 16px' }}>
+          <SectionLabel>Feature Importances</SectionLabel>
+          {featureImportanceData.length > 0 ? (
+            <div style={{ height: 220 }}>
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart data={featureImportanceData} layout="vertical">
+                  <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.04)" horizontal={false} />
+                  <XAxis type="number" hide />
+                  <YAxis dataKey="name" type="category" tick={{ fill: '#94a3b8', fontSize: 7 }} width={90} />
+                  <Tooltip contentStyle={{ backgroundColor: '#0d1117', border: '1px solid #1e293b' }} />
+                  <Bar dataKey="Weight" fill="#8a2be2" radius={[0, 2, 2, 0]} name="Weight %" />
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
+          ) : <div style={{ height: 220, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#64748b', fontSize: 10 }}>No features loaded</div>}
+        </div>
+      </div>
+
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 12 }}>
+        <div className="glass border border-slate-800/50 shadow-[0_4px_20px_rgba(0,0,0,0.02)]" style={{ borderRadius: 10, padding: '14px 16px' }}>
+          <SectionLabel>Active Model Registry</SectionLabel>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+            {(perfDashboard?.latestModel ?? []).map((m: any, i: number) => (
+              <div key={i} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '8px 10px', borderRadius: 8, background: 'rgba(255,255,255,0.02)', border: '1px solid rgba(255,255,255,0.04)' }}>
+                <div>
+                  <div style={{ fontSize: 11, fontWeight: 700, color: '#e2e8f0' }}>{m.model_name}</div>
+                  <div style={{ fontSize: 9, color: '#64748b', textTransform: 'uppercase' }}>{m.model_type}</div>
+                </div>
+                <div style={{ textAlign: 'right' }}>
+                  <div style={{ fontSize: 11, fontWeight: 700, color: '#818cf8' }}>AUC: {m.cv_roc_auc != null ? m.cv_roc_auc.toFixed(3) : 'N/A'}</div>
+                  <div style={{ fontSize: 9, color: '#64748b' }}>{m.training_samples} samples</div>
+                </div>
+              </div>
+            ))}
+            {(!perfDashboard?.latestModel || perfDashboard.latestModel.length === 0) && (
+              <div style={{ fontSize: 10, color: '#64748b', textAlign: 'center', padding: '12px 0' }}>No models registered</div>
+            )}
+          </div>
+        </div>
+        <div className="glass border border-slate-800/50 shadow-[0_4px_20px_rgba(0,0,0,0.02)]" style={{ borderRadius: 10, padding: '14px 16px' }}>
+          <SectionLabel>Top Strategy Performance</SectionLabel>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+            {(perfDashboard?.topSignals ?? []).map((s: any, i: number) => (
+              <div key={i} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '8px 10px', borderRadius: 8, background: 'rgba(255,255,255,0.02)', border: '1px solid rgba(255,255,255,0.04)' }}>
+                <div>
+                  <div style={{ fontSize: 11, fontWeight: 700, color: '#e2e8f0', textTransform: 'uppercase' }}>{s.strategy_name?.replace(/_/g, ' ')}</div>
+                  <div style={{ fontSize: 9, color: '#64748b' }}>{s.total_signals} total signals</div>
+                </div>
+                <div style={{ textAlign: 'right' }}>
+                  <div style={{ fontSize: 11, fontWeight: 700, color: emerald }}>{s.win_rate != null ? `${(s.win_rate * 100).toFixed(1)}% WR` : '—'}</div>
+                  <div style={{ fontSize: 9, color: '#64748b' }}>Sharpe: {s.sharpe_ratio != null ? s.sharpe_ratio.toFixed(2) : 'N/A'}</div>
+                </div>
+              </div>
+            ))}
+            {(!perfDashboard?.topSignals || perfDashboard.topSignals.length === 0) && (
+              <div style={{ fontSize: 10, color: '#64748b', textAlign: 'center', padding: '12px 0' }}>No strategy data</div>
+            )}
+          </div>
+        </div>
       </div>
 
       {/* ── Row 3: Index Overview + Global Markets ────────────────────────── */}

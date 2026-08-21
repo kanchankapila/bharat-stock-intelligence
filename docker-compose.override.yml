@@ -1,0 +1,130 @@
+# Containerized variant of the 4 app services (P-grade-hardening #2). ADDITIVE ONLY: the
+# pm2 bare-metal path (ecosystem.config.cjs) is untouched and still works. This file exists
+# so `docker compose up` can optionally bring up the whole stack reproducibly; nobody is
+# required to use it.
+#
+# Internal networking: these services reach timescaledb/redis by their COMPOSE SERVICE
+# NAME on the default project network, at the container's own port (timescaledb:5432, NOT
+# the host-mapped 5433; redis:6379). .env's POSTGRES_URL/REDIS_URL point at 127.0.0.1 for
+# the host-side pm2 processes -- that's wrong from inside a container, so these services
+# override both explicitly rather than inheriting .env's values verbatim.
+#
+#   docker build -f docker/python-base.Dockerfile -t bharat-python-base .   # once, or after
+#                                                                            # requirements.txt changes
+#   docker compose build && docker compose up -d
+#
+# python-base is a plain image (not a compose service -- it never runs, it's only ever
+# FROM'd) built once and reused by ml-api/chatbot/alphaquant-api: all three run under the
+# identical backend-python/requirements.txt in production -- see docker/python-base.Dockerfile's
+# comment for how that was confirmed, not assumed. `docker compose build` will fail with
+# "pull access denied for bharat-python-base" if the line above hasn't been run first.
+services:
+  bharat-server:
+    build:
+      context: .
+      dockerfile: docker/bharat-server.Dockerfile
+    container_name: bharat_server_docker
+    restart: unless-stopped
+    depends_on:
+      timescaledb:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      USE_POSTGRES: "true"
+      POSTGRES_URL: postgresql://${POSTGRES_USER:-bharat}:${POSTGRES_PASSWORD:-bharat}@timescaledb:5432/${POSTGRES_DB:-bharat_intel}
+      # redisConfig.ts's REDIS_BASE has NO REDIS_URL fallback -- unlike pgConfig.ts, it only
+      # ever reads these three individually. Live-verified 2026-08-20: a container given only
+      # REDIS_URL silently fell back to .env's REDIS_HOST=127.0.0.1 (the container's own
+      # loopback, not the redis service) and logged "Redis reconnecting..." forever while
+      # degrading to an in-memory cache with BullMQ disabled -- no crash, so it's easy to miss.
+      REDIS_HOST: redis
+      REDIS_PORT: "6379"
+      REDIS_PASSWORD: ${REDIS_PASSWORD:-bharatredis}
+      REDIS_URL: redis://:${REDIS_PASSWORD:-bharatredis}@redis:6379
+      PORT: "3000"
+    ports:
+      - "3000:3000"
+    env_file:
+      - .env
+
+  ml-api:
+    build:
+      context: .
+      dockerfile: docker/ml-api.Dockerfile
+    container_name: bharat_ml_api_docker
+    restart: unless-stopped
+    depends_on:
+      timescaledb:
+        condition: service_healthy
+    environment:
+      USE_POSTGRES: "true"
+      POSTGRES_URL: postgresql://${POSTGRES_USER:-bharat}:${POSTGRES_PASSWORD:-bharat}@timescaledb:5432/${POSTGRES_DB:-bharat_intel}
+      # redisConfig.ts's REDIS_BASE has NO REDIS_URL fallback -- unlike pgConfig.ts, it only
+      # ever reads these three individually. Live-verified 2026-08-20: a container given only
+      # REDIS_URL silently fell back to .env's REDIS_HOST=127.0.0.1 (the container's own
+      # loopback, not the redis service) and logged "Redis reconnecting..." forever while
+      # degrading to an in-memory cache with BullMQ disabled -- no crash, so it's easy to miss.
+      REDIS_HOST: redis
+      REDIS_PORT: "6379"
+      REDIS_PASSWORD: ${REDIS_PASSWORD:-bharatredis}
+      REDIS_URL: redis://:${REDIS_PASSWORD:-bharatredis}@redis:6379
+      PYTHON_API_PORT: "8000"
+    ports:
+      - "8000:8000"
+    env_file:
+      - .env
+
+  chatbot:
+    build:
+      context: .
+      dockerfile: docker/chatbot.Dockerfile
+    container_name: bharat_chatbot_docker
+    restart: unless-stopped
+    depends_on:
+      timescaledb:
+        condition: service_healthy
+    environment:
+      USE_POSTGRES: "true"
+      POSTGRES_URL: postgresql://${POSTGRES_USER:-bharat}:${POSTGRES_PASSWORD:-bharat}@timescaledb:5432/${POSTGRES_DB:-bharat_intel}
+      # redisConfig.ts's REDIS_BASE has NO REDIS_URL fallback -- unlike pgConfig.ts, it only
+      # ever reads these three individually. Live-verified 2026-08-20: a container given only
+      # REDIS_URL silently fell back to .env's REDIS_HOST=127.0.0.1 (the container's own
+      # loopback, not the redis service) and logged "Redis reconnecting..." forever while
+      # degrading to an in-memory cache with BullMQ disabled -- no crash, so it's easy to miss.
+      REDIS_HOST: redis
+      REDIS_PORT: "6379"
+      REDIS_PASSWORD: ${REDIS_PASSWORD:-bharatredis}
+      REDIS_URL: redis://:${REDIS_PASSWORD:-bharatredis}@redis:6379
+      CHATBOT_PORT: "8001"
+    ports:
+      - "8001:8001"
+    env_file:
+      - .env
+
+  alphaquant-api:
+    build:
+      context: .
+      dockerfile: docker/alphaquant-api.Dockerfile
+    container_name: bharat_alphaquant_api_docker
+    restart: unless-stopped
+    depends_on:
+      timescaledb:
+        condition: service_healthy
+    environment:
+      USE_POSTGRES: "true"
+      POSTGRES_URL: postgresql://${POSTGRES_USER:-bharat}:${POSTGRES_PASSWORD:-bharat}@timescaledb:5432/${POSTGRES_DB:-bharat_intel}
+      # redisConfig.ts's REDIS_BASE has NO REDIS_URL fallback -- unlike pgConfig.ts, it only
+      # ever reads these three individually. Live-verified 2026-08-20: a container given only
+      # REDIS_URL silently fell back to .env's REDIS_HOST=127.0.0.1 (the container's own
+      # loopback, not the redis service) and logged "Redis reconnecting..." forever while
+      # degrading to an in-memory cache with BullMQ disabled -- no crash, so it's easy to miss.
+      REDIS_HOST: redis
+      REDIS_PORT: "6379"
+      REDIS_PASSWORD: ${REDIS_PASSWORD:-bharatredis}
+      REDIS_URL: redis://:${REDIS_PASSWORD:-bharatredis}@redis:6379
+      PYTHON_PORT: "8002"
+    ports:
+      - "8002:8002"
+    env_file:
+      - .env

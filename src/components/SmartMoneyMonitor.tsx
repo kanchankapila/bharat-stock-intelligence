@@ -49,7 +49,7 @@ export const SmartMoneyMonitor: React.FC<Props> = ({ onSelectStock }) => {
             <Users className="w-5 h-5 text-emerald-400" />
             Smart Money MF/FII Flow Monitor
           </h2>
-          <p className="text-[10px] font-mono text-slate-500 uppercase tracking-widest mt-0.5">
+          <p className="text-[10px] font-data text-slate-500 font-display uppercase tracking-widest mt-0.5">
             {filterType === 'deals'
               ? 'Ranked institutional buy/sell deal activity (last 14 days)'
               : 'Quarterly change in institutional promoter, FII, and DII ownership'}
@@ -61,7 +61,7 @@ export const SmartMoneyMonitor: React.FC<Props> = ({ onSelectStock }) => {
           <button
             onClick={() => setFilterType('accumulation')}
             className={cn(
-              "px-3 py-1.5 rounded-md font-mono text-[10px] font-bold transition-all flex items-center gap-1",
+              "px-3 py-1.5 rounded-md font-data text-[10px] font-bold transition-all flex items-center gap-1",
               filterType === 'accumulation' ? "bg-emerald-600 text-white shadow-md shadow-emerald-600/10" : "text-slate-400 hover:text-slate-200"
             )}
           >
@@ -71,7 +71,7 @@ export const SmartMoneyMonitor: React.FC<Props> = ({ onSelectStock }) => {
           <button
             onClick={() => setFilterType('distribution')}
             className={cn(
-              "px-3 py-1.5 rounded-md font-mono text-[10px] font-bold transition-all flex items-center gap-1",
+              "px-3 py-1.5 rounded-md font-data text-[10px] font-bold transition-all flex items-center gap-1",
               filterType === 'distribution' ? "bg-rose-600 text-white shadow-md shadow-rose-600/10" : "text-slate-400 hover:text-slate-200"
             )}
           >
@@ -81,7 +81,7 @@ export const SmartMoneyMonitor: React.FC<Props> = ({ onSelectStock }) => {
           <button
             onClick={() => setFilterType('deals')}
             className={cn(
-              "px-3 py-1.5 rounded-md font-mono text-[10px] font-bold transition-all flex items-center gap-1",
+              "px-3 py-1.5 rounded-md font-data text-[10px] font-bold transition-all flex items-center gap-1",
               filterType === 'deals' ? "bg-indigo-600 text-white shadow-md shadow-indigo-600/10" : "text-slate-400 hover:text-slate-200"
             )}
           >
@@ -129,12 +129,12 @@ export const SmartMoneyMonitor: React.FC<Props> = ({ onSelectStock }) => {
                     animate={{ opacity: 1, y: 0 }}
                     exit={{ opacity: 0, y: -10 }}
                     transition={{ duration: 0.2 }}
-                    className="p-4 bg-slate-950/45 border border-slate-900 rounded-xl hover:border-slate-800/80 transition-all flex flex-col md:flex-row md:items-center justify-between gap-3 cursor-pointer"
+                    className="v1-card p-4 hover:border-slate-800/80 transition-all flex flex-col md:flex-row md:items-center justify-between gap-3 cursor-pointer"
                     onClick={() => onSelectStock?.(deal.symbol)}
                   >
                     <div className="md:w-1/3 space-y-1">
                       <div className="flex items-center gap-2">
-                        <span className="text-sm font-black text-white uppercase tracking-wider">{deal.symbol}</span>
+                        <span className="text-sm font-black text-white font-display uppercase tracking-wider">{deal.symbol}</span>
                         <span className={cn("text-[9px] font-black px-1.5 py-0.5 rounded border uppercase",
                           deal.action === 'buy' ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/20" : "bg-rose-500/10 text-rose-400 border-rose-500/20"
                         )}>
@@ -142,19 +142,19 @@ export const SmartMoneyMonitor: React.FC<Props> = ({ onSelectStock }) => {
                         </span>
                       </div>
                       <p className="text-[10px] text-slate-500 font-bold leading-tight truncate">{deal.counterparty ?? 'Unknown counterparty'}</p>
-                      <p className="text-[9px] text-slate-600 font-mono">{deal.deal_date}{deal.sector ? ` · ${deal.sector}` : ''}</p>
+                      <p className="text-[9px] text-slate-600 font-data">{deal.deal_date}{deal.sector ? ` · ${deal.sector}` : ''}</p>
                     </div>
                     <div className="flex items-center gap-4 md:gap-6">
                       {deal.deal_value_cr_1w != null && (
                         <div className="text-right">
-                          <p className="text-[9px] text-slate-500 font-mono uppercase">1W Value</p>
-                          <p className="text-sm font-black text-white font-mono">₹{deal.deal_value_cr_1w.toFixed(1)}cr</p>
+                          <p className="text-[9px] text-slate-500 font-data uppercase">1W Value</p>
+                          <p className="text-sm font-black text-white font-data">₹{deal.deal_value_cr_1w.toFixed(1)}cr</p>
                         </div>
                       )}
                       {deal.deals_count_1w != null && (
                         <div className="text-right">
-                          <p className="text-[9px] text-slate-500 font-mono uppercase">Deals (1W)</p>
-                          <p className="text-sm font-black text-white font-mono">{deal.deals_count_1w}</p>
+                          <p className="text-[9px] text-slate-500 font-data uppercase">Deals (1W)</p>
+                          <p className="text-sm font-black text-white font-data">{deal.deals_count_1w}</p>
                         </div>
                       )}
                     </div>
@@ -193,13 +193,13 @@ export const SmartMoneyMonitor: React.FC<Props> = ({ onSelectStock }) => {
                     animate={{ opacity: 1, y: 0 }}
                     exit={{ opacity: 0, y: -10 }}
                     transition={{ duration: 0.2 }}
-                    className="p-4 bg-slate-950/45 border border-slate-900 rounded-xl hover:border-slate-800/80 transition-all flex flex-col md:flex-row md:items-center justify-between gap-4 cursor-pointer"
+                    className="v1-card p-4 hover:border-slate-800/80 transition-all flex flex-col md:flex-row md:items-center justify-between gap-4 cursor-pointer"
                     onClick={() => onSelectStock?.(stock.symbol)}
                   >
                     {/* Left: Info */}
                     <div className="md:w-1/3 space-y-1">
                       <div className="flex items-center gap-2">
-                        <span className="text-sm font-black text-white uppercase tracking-wider">{stock.symbol}</span>
+                        <span className="text-sm font-black text-white font-display uppercase tracking-wider">{stock.symbol}</span>
                         <span className={cn("text-[9px] font-black px-1.5 py-0.5 rounded border uppercase",
                           stock.netFlow >= 0 ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/20" : "bg-rose-500/10 text-rose-400 border-rose-500/20"
                         )}>
@@ -208,7 +208,7 @@ export const SmartMoneyMonitor: React.FC<Props> = ({ onSelectStock }) => {
                       </div>
                       <p className="text-[10px] text-slate-500 font-bold leading-tight">{stock.name}</p>
                       {stock.asOfDate && (
-                        <p className="text-[9px] text-slate-600 font-mono">As of {stock.asOfDate}</p>
+                        <p className="text-[9px] text-slate-600 font-data">As of {stock.asOfDate}</p>
                       )}
                     </div>
 

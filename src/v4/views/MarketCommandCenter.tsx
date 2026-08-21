@@ -27,13 +27,15 @@ import { SectorCorrelationWidget } from '../components/SectorCorrelationWidget';
 import { InstitutionalDealFeed } from '../components/InstitutionalDealFeed';
 import { ConcallTakeawaysWidget } from '../components/ConcallTakeawaysWidget';
 import { SuperstarActivityFeed } from '../components/SuperstarActivityFeed';
+import { IndexKpiRow } from '../../v6/components/IndexKpiCard';
+import { BreadthDonut } from '../../v6/components/BreadthDonut';
 
 const REGIME_STYLE: Record<string, { color: string; bg: string; label: string }> = {
   BULL:     { color: 'text-emerald-400', bg: 'bg-emerald-500/10 border-emerald-500/25', label: 'BULL' },
   SIDEWAYS: { color: 'text-amber-400',   bg: 'bg-amber-500/10 border-amber-500/25',     label: 'SIDEWAYS' },
   BEAR:     { color: 'text-rose-400',    bg: 'bg-rose-500/10 border-rose-500/25',       label: 'BEAR' },
   HIGH_VOL: { color: 'text-orange-400',  bg: 'bg-orange-500/10 border-orange-500/25',   label: 'HIGH VOL' },
-  CRASH:    { color: 'text-red-500',     bg: 'bg-red-500/15 border-red-500/40',         label: 'CRASH' },
+  CRASH:    { color: 'text-rose-500',     bg: 'bg-rose-500/15 border-rose-500/40',         label: 'CRASH' },
 };
 
 const RegimeBadge: React.FC = () => {
@@ -105,9 +107,16 @@ export const MarketCommandCenter: React.FC<MarketCommandCenterProps> = ({ onSele
         <div className="flex flex-col gap-4">
           <div className="flex items-center gap-4 flex-wrap">
             <RegimeBadge />
-            <div className="flex-1 min-w-[220px] px-3 py-2 rounded-xl border border-slate-800 bg-slate-950/40">
+            <div className="flex-1 min-w-[220px] v1-card px-3 py-2">
               <MarketMoodGauge />
             </div>
+          </div>
+          {/* v1-style opening read: KPI cards (day-range bar, BULL/BEAR pill) + a breadth donut,
+              same visual language ScreenerBrowserPage/PortfolioTrackerPage already use this
+              session. Additive to the existing regime/mood/index-overview content below. */}
+          <div className="flex flex-wrap gap-3 items-stretch">
+            <IndexKpiRow onSelectIndex={onSelectIndex} />
+            <BreadthDonut />
           </div>
           <IndexOverview onSelectIndex={onSelectIndex} />
         </div>

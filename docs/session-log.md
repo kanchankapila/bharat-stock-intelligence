@@ -4933,3 +4933,300 @@ same-day re-triggering (3 catch-ups hours apart, each apparently completing/fail
 to free the active slot before the next restart re-evaluates from scratch) — that's a different
 mechanism than the concurrency collision this fix targets, and is exactly what the new digest
 section's catch-up-count flag exists to keep visible rather than guessed at further this session.
+
+## 2026-08-20 — restore-drill fix landed, a real port-squatting incident found and fixed live, a
+## Docker Desktop crash (self-inflicted) recovered, and both open measurement leads resolved
+
+Continuation of the production-grade-hardening work from the previous session (S110–S121), on
+the real production host. Three commits: `4cb780b`, `5e0bff0`, `f24ce12`.
+
+**`scripts/backup_pg.py --restore` fixed, live-verified.** The previous session's `pg_restore
+--clean` approach always failed against this TimescaleDB image: the extension is preloaded into
+every database via `template1`, and `--clean`'s `DROP EXTENSION`+`CREATE EXTENSION` inside one
+long-lived `pg_restore` session can't re-create an extension already loaded into that backend at
+fork time — `_timescaledb_internal` (just dropped) never comes back, and every compressed-chunk
+restore fails with "schema does not exist". Fixed by `DROP DATABASE`+`CREATE DATABASE` (the fresh
+DB gets the extension via `template1` automatically) then a plain `pg_restore` with no `--clean`.
+Live-verified: 215/215 tables, 24/24 hypertables, exact row-count match against source.
+`check_deploy_drift.mjs` also needed `shell: true` for its `pm2 jlist` call — `pm2` resolves to
+`pm2.cmd` on Windows, which `execFileSync` can't invoke without a shell (EINVAL otherwise).
+
+**A real, live port-squatting incident found and fixed twice — once for real, once as a false
+alarm I had to correct myself.** Built `scripts/check_port_drift.mjs` (a `deploy-drift`-style
+15-min pm2 job) after a memory-leak review turned up 3 orphaned processes — leftover from an
+earlier-session Docker Desktop crash, running under the wrong interpreter — squatting
+`ml-api`/`alphaquant-api`'s ports while pm2 reported both "online". First version of the check
+compared the LISTENING pid to pm2's own tracked pid for exact equality, which produced a second,
+self-inflicted incident: it also flagged pm2's own fork-mode wrapper (`ProcessContainerFork.js`
+always spawns the real `tsx`/node worker as a *child*, never runs it directly) and this repo's
+own venv launcher (`backend-python/venv/Scripts/python.exe` execs the real interpreter — the
+system Python311 install, per `pyvenv.cfg`'s `home` field — as a child too, confirmed by running a
+trivial no-app-code script through it) as "wrong-interpreter orphans." Repeatedly "killing the
+orphan" was actually killing the live, working server every time, which is worse than the bug it
+was meant to catch. Rewrote the check around **process ancestry** (walk the parent-pid chain back
+to pm2's tracked pid) instead of exact-pid/interpreter matching — the only signal that actually
+distinguishes a real squatter from a legitimate child. The corrected version caught the real
+incident and passes clean now. Wired into `ecosystem.config.cjs` (`port-drift-check`, `*/15 * * *
+*`) and `dataQualityChecks.ts` (`port-drift`, mirroring `deploy-drift`'s shape exactly).
+
+**Self-inflicted Docker Desktop crash, recovered.** A `taskkill /F` on Docker Desktop (part of
+the orphan-cleanup churn above) left its WSL2 data disk locked — `com.docker.backend.exe.log`
+showed `/dev/sdd is apparently in use by the system; will not make a filesystem here!` on
+restart, and the engine flapped between working and `500 Internal Server Error` on its own
+internal health pings for several minutes. Fixed with a full `wsl --shutdown` (releases all disk
+locks cleanly) before relaunching — confirmed stable only after 3 consecutive successful queries
+against Postgres, not the first one that happened to work. `bharat-server` needed a manual `pm2
+restart` afterward since it was mid-crash-loop against a Postgres that wasn't accepting
+connections yet. **Lesson for next time**: `taskkill /F` on Docker Desktop is not a safe
+"restart" — it skips the graceful WSL2 disk unmount, and the next launch can wedge on a stale
+lock. Prefer Docker Desktop's own quit/restart if it's responsive at all; `taskkill /F` +
+`wsl --shutdown` together is the correct recovery only once it's already unresponsive.
+
+**Both open leads in `measurement.md` resolved with fresh live measurements** (production-grade-
+hardening §4). Full numbers are in `measurement.md` itself, not duplicated here — summary: the
+capitulation triple (`screener_combo_finder.py --tier1`) reconfirmed at t=+3.48 (was t=+3.61,
+5 more days of data, same combo still wins). `win_probability` (`factor_edge.py`, properly
+powered this time at 53/49/33 dates per horizon vs. earlier 1-date `LOW-DATA` reads) has a real,
+horizon-growing rank_IC (+0.044→+0.077→+0.103) that replicates the 2026-08-15 preliminary read,
+but `hit_AUC` never clears this repo's own 0.55 `USABLE` bar (tops at 0.537) — real signal, not
+tradeable as scored. Both persisted/documented; the actual cost-aware portfolio backtest for
+`win_probability` and a per-year breakdown for the capitulation triple remain open, explicitly
+flagged as such rather than rounded up to "done."
+
+Verified: `npx tsc --noEmit` clean, `npx vitest run` 1044 passed / 41 skipped (0 failed) on this
+session's changes, all three new/fixed monitors (`pg-backup`, `deploy-drift`, `port-drift`)
+confirmed green via `job_heartbeat` on the real production host after full recovery, all 4 core
+services (`bharat-server`, `ml-api`, `alphaquant-api`; `chatbot`/`ollama` intentionally left down
+per user request to conserve memory) responding 200 on their real endpoints.
+
+**Explicitly deferred, not attempted**: production-grade-hardening §2 (containerize the 4
+services) — `docker/*.Dockerfile`, `docker-compose.override.yml`, `.dockerignore` exist from an
+earlier session but are untracked/unbuilt. A `docker compose build` attempt this session pushed
+host free memory from ~1GB to 0.08GB within a minute (the same threshold that caused the crash
+above) and was aborted before it repeated the incident — this host does not have headroom to
+build 4 more images while pm2 and the DB containers are all up. Left for a session with the app
+services stopped first, or a host with more RAM.
+
+## 2026-08-20 (cont.) — V6 frontend redesign, one real BullMQ retention gap, pg_stat_statements enabled
+
+Continuation of the same day's earlier production-grade-hardening session, switching to a
+frontend-redesign request (ui-ux-pro-max skill), which surfaced two backend/infra fixes along
+the way once the user asked for a broader memory/performance sweep.
+
+**Frontend.** `src/v6/pages/ScreenerBrowserPage.tsx` and `PortfolioTrackerPage.tsx` were migrated
+off raw Tailwind `slate/emerald/rose/amber/indigo` classes onto the `--v6-*` CSS variables
+`v6-theme.css` already defined but neither page used (flagged in memory the previous session).
+`ScreenerBrowserPage.tsx` then got an actual visual redesign, not just a token swap: a 4-tile KPI
+strip (Categories/Screeners Tracked/Weighted Avg Win Rate/Top Category — computed honestly from
+the same `screener_performance_v2` aggregate the page already fetched for its category chips, not
+fabricated), a labeled filter toolbar (Search/Source/Category/Tier/Horizon each get a micro-label
+instead of five unlabeled `<select>`s in a row), and tier badges switched from padded pills to a
+dot+letter treatment matching the dot idiom already used elsewhere in the shell (`RegimeChip`,
+`LiveClock`). Also reused the pre-existing-but-unused `.v6-bar-track`/`.v6-bar-fill` CSS on
+`PortfolioTrackerPage.tsx`'s two allocation bars instead of hand-rolled divs.
+
+The user then asked why v6 "doesn't look even close to v1" — traced to a real, previously
+undocumented fact: v6's actual `/dashboard` and `/market-command` routes render
+`MarketCommandCenter` (`src/v4/views/MarketCommandCenter.tsx`), a "v4"-era page with a spacious
+regime-banner/index-tile layout, not v1's dense KPI-card+breadth-donut opening section — "v6
+matches v1" was only ever true for the shell chrome (`V6Shell.tsx`/`v6-theme.css`), never the page
+content. Two Explore agents mapped v1's actual widgets (`MarketIndices.tsx`'s KPI cards,
+`DashboardPage.tsx`'s private unexported `BreadthGauge`) and the full v6 route table (only 2 of 32
+nav routes are v6-native; 25 render the identical component v1/v2/v3 use and can't be touched
+without affecting those shells too). Built two new reusable widgets in `src/v6/components/`
+(`IndexKpiCard.tsx`/`IndexKpiRow`, `BreadthDonut.tsx`) rather than reusing v1's components
+directly (they hardcode v1's raw Tailwind, not `--v6-*` tokens) — `BreadthDonut` deliberately
+queries the same canonical `trpc.getAdvanceDecline` that `MarketBreadthIntraday` already uses on
+that page, instead of v1's page-local non-canonical recompute from a `stocks` prop, so the two
+widgets can never disagree with each other. Wired additively into `MarketCommandCenter.tsx`
+(nothing existing removed); confirmed via `App.tsx`'s routing that this file is v6-exclusive, so
+v1/v2/v3 are unaffected (screenshotted v1's `/dashboard` before and after — byte-identical). The
+`getMarketOverview` day-range bar renders a neutral 50% fill rather than fabricate a number
+(the backend doesn't capture day-low/high from NiftyTrader's payload) — same real limitation v1's
+own bar already silently has (`MarketIndices.tsx:144`'s `55 + idx*14%` fake width).
+
+User then approved (via `AskUserQuestion`) a smaller follow-on: retrofitted the same
+progress-bar idiom onto `V5KpiStrip` (`src/v5/components/V5KpiStrip.tsx`, used by the 5 v5-reuse
+desk pages under v6) as a new opt-in `pct` field, using `--v5-*` CSS vars so it renders correctly
+under both `.v6-root` (dark, bridged) and the standalone `/v5` light-theme route — verified live
+in both. Applied only to 3 tiles with a genuine 0-100 bound (`RiskDeskPage`'s Regime Prob,
+`SignalReviewPage`'s Avg Confidence, `EarningsPulseDeskPage`'s Beat, computed as beat-rate).
+Deliberately NOT applied to `OptionsDeskPage`'s PCR (unbounded ratio) or
+`InstitutionalFlowDeskPage`'s Rs cr flows (unbounded currency) — no honest bound to show.
+
+**Backend: one real BullMQ retention gap, found and fixed.** User asked for a memory/performance
+audit (`/performance-audit` skill). Checked 8 candidate leak patterns across `cacheService.ts`,
+`sse.ts`, `sqlTranslate.ts`, `scoringService.ts`, `websocketService.ts` — all 7 non-BullMQ ones
+were already correctly bounded (TTL sweeps, cleanup-on-disconnect, small finite key spaces).
+Bracket-matched every `addJobWithCatchup(`/`*Queue.add(` call across `src/server/jobs/*.jobs.ts`
++ `queues.ts` (39 real calls, not grep-counted) to check for `removeOnComplete`/`removeOnFail` --
+**1 of 39 was missing it**: `unified-ranker-daily` (`queues.ts:2643`). No `new Queue()` in this
+file sets a `defaultJobOptions` fallback either, so BullMQ's real default (keep job data in Redis
+forever) applied to this one job alone. Fixed to match the other 38 call sites' `{ age: 3d }`/
+`{ age: 3d, count: 20 }` shape. Could not get a live before/after byte count -- Redis had just
+been flushed by that morning's Docker Desktop crash-and-restart (confirmed: `used_memory` was
+17.83MB, consistent with a fresh instance) -- stated as a limitation rather than a fabricated
+number.
+
+**Database: 7 real never-analyzed tables found and fixed; two false leads corrected before acting
+on them.** A first pass found 199 of 215 `public`-schema tables with zero planner statistics --
+alarming-looking, but re-filtered to tables with >100 rows and it collapsed to **7 real ones**
+(`intraday_recommendations_history` 308MB, `live_screener_ml_scores` 65MB,
+`unified_signal_outcomes` 64MB, `data_quality_history`, and 3 small `trendlyne_*` tables) -- the
+other 192 are tiny/empty, where missing stats are inconsequential. Ran `ANALYZE` on all 7 (safe,
+`ACCESS SHARE` lock only), verified `last_analyze` populated on each. Second false lead:
+`confluence_signals` (10.2GB, ~43% of the 24GB DB) looked like a compression-policy bug (6 of 9
+chunks uncompressed) until checking the actual policy (`compress_after: 30 days`, running
+correctly every 12h) against real chunk ages -- the oldest uncompressed chunk is 28 days old, not
+overdue, and the table's full chunk history (9 weekly chunks) only goes back to late June, meaning
+it simply hasn't existed long enough to have a backlog. User then asked whether old signals should
+be deleted given the system "has improved a lot over time" -- checked against a specific prior
+2026-08-15 decision (`db_stats_and_retention_2026_08_15` memory) before answering rather than
+giving a fresh opinion: broad retention on the historical/fundamentals tables was explicitly
+rejected there because `factor_backtest.py` needs 5+ years and several factors are marked
+"too thin to verdict" pending 12+ months of accumulation -- that reasoning hasn't changed. But
+`confluence_signals` specifically already has exactly the retention being asked about
+(`drop_after: 90 days`, running successfully, last run that same morning) -- not a gap, just
+previously unverified against live Redis/Postgres state in this conversation.
+
+**Enabled `pg_stat_statements`.** No query-cost visibility existed at all (checked: extension not
+installed). Added `pg_stat_statements` to `shared_preload_libraries` in `docker-compose.yml`
+alongside `timescaledb` (overwriting instead of appending would have silently broken every
+hypertable) plus `.max=5000`/`.track=all`. Recreated the container (`docker compose up -d
+timescaledb`, ready in ~2s), created the extension, verified live that it's collecting real query
+data. Proactively restarted `bharat-server`/`ml-api`/`alphaquant-api` afterward rather than let
+them crash-loop discovering the DB bounced (matching the exact failure mode from that morning's
+Docker crash) -- confirmed both back to 200 after a brief startup race.
+
+Verified throughout: `npx tsc --noEmit` clean after every `.tsx`/`.ts` change; `npx vitest run`
+109/109 files, 1048/1048 tests, 0 failed (re-run after the Docker blip that crash-looped all 3
+core pm2 services mid-suite -- restarted them, re-ran the 2 files that failed on the DB-connection
+blip standalone to confirm it was transient not a regression, then re-ran the full suite clean);
+`python -m pytest src/server/__tests__/ src/server/tests/` via `backend-python/venv` (bare
+`python` produced silent empty output, the known interpreter trap) -- 2057 passed, 230 skipped, 0
+failed, unrelated to anything touched here. Live screenshots for every visual change, driven
+through `run-bharat-stock-intelligence`'s `driver.mjs`.
+
+**Not done, flagged rather than silently skipped**: the 25 shared-component v6 routes (would
+change v1/v2/v3 too, not requested); frontend duplicate-query auditing across the 6 shells
+(`/shell-parity-audit` is the right tool, not re-derived here); `ml_ensemble.py`'s DataFrame
+fragmentation warning (real, but in `verify-gate.mjs`'s scoring-file gate list, needs backtest
+evidence even for a pure perf refactor); `confluence_signals`'s `compress_after` interval (no
+bug found, a genuine tuning tradeoff left for the user's call, not changed unprompted). 21st.dev
+Magic MCP never connected this session -- confirmed twice via `ToolSearch`, and the API key saved
+in `~/.claude.json` is dead (`Old Magic keys were reset`, confirmed by running the package
+directly) -- needs a real new key from the user, not fixable from inside the session.
+
+## 2026-08-20/21 — v1 promoted back to default with real nav/content parity, v7/v8 fully deleted, palette swept across every v1 page
+
+User asked to bring every v2-v6 feature into v1, make v1's design consistent, and make v1 the
+default. First pass was nav-level only: a full v1-vs-v2/v3/v4/v5/v6 route inventory (spawned as
+a background Explore agent) found v1's own `AppShell.tsx` nav already linked 45 of ~49 items
+every other shell had -- the real gap was just 9 components (2 genuinely v6-native --
+`ScreenerBrowserPage`, `PortfolioTrackerPage` -- plus 7 retrofit from v5: `PreMarketBriefing`,
+`OptionsDeskPage`, `InstitutionalFlowDeskPage`, `EarningsPulseDeskPage`, `RiskDeskPage`,
+`SignalReviewPage`, `V2Settings`) and 3 already-routed-but-nav-unlinked v1 pages (`IntradayPage`,
+`LiveMarketScreener`, `EODMarketScreener`). Wired all into `AppShell.tsx`'s `NAV_GROUPS` +
+`V1Routes.tsx`, reusing `v6-theme.css`'s existing `.v6-root` CSS-variable bridge (already
+purpose-built 2026-08-07 to alias v5's `--v5-*` tokens onto v1's own colors for exactly this
+case) so the retrofit pages render on-theme with zero styling changes. Flipped `App.tsx`'s
+no-saved-preference fallback from `'v6'`→`'v1'`, and fixed `AppShell.tsx`'s version-switcher
+accent, which had hardcoded the "recommended" indigo highlight onto Workbench regardless of the
+actual default (a real, if cosmetic, bug my own change would have made worse if left alone).
+
+**User then caught a real gap the nav-inventory approach structurally couldn't see**: "V2
+dashboard still has different cards from v1 Dashboard." Nav presence isn't the same claim as
+content identity -- some nav slots (Dashboard, Watchlist, Stock Details, Signal Tracking) render
+a *different underlying file* per shell, not the same component reused, and the first pass's
+inventory only checked "does v1 have a same-named nav item," never "is it the same file." Traced
+each: `DashboardPage.tsx` (v1) was missing 8 cards `V2Dashboard.tsx` had --
+`getPerformanceDashboard`/`getFiiDiiFlow`/`getFeatureImportance`-backed win-rate/Sharpe/alpha
+KPIs, an FII/DII flow chart, a feature-importance chart, a model-registry list, a
+strategy-performance list -- ported all 8 in v1's own `.glass`/`KpiChip`/`SectionLabel` idiom
+(not v2's `terminal-panel` classes) rather than copy-pasting v2's markup verbatim. v1's
+`/watchlist` route was missing `PriceAlertsPanel` entirely (App.tsx's shared route had it, v1's
+didn't) -- added. `V1StockDetails.tsx` was missing 3 of `V2StockDetails.tsx`'s 7 unique queries
+(`getAiInsights`, `getCompanyProfileAnalysis` -- both self-contained, ported as a new "AI
+Insights" tab); the other 4 either duplicate what v1's separate "Stock Intelligence Hub" nav
+item (`StockIntelligencePage`, 28 queries) already covers (`getFnOSignals`), or were deliberately
+declined: `getNiftyTraderData` is interwoven through ~15 places in `V2StockDetails.tsx` (peer
+comparison, industry financials, quarterly trends) -- not a bounded card, porting it unsafely
+would be worse than flagging it; `getQuantScores` was **not** ported on purpose --
+`scoring-authority.md` treats raw `quant_scores` as an input the UI must not surface as
+canonical, and v1 already shows the correct `getUnifiedScoreForSymbol` instead. Checked and
+ruled out as non-gaps: `SignalTracking`/`V2SignalTracking` (identical, one query each),
+V3Dashboard's home-mode (fully subsumed once `SignalHistoryModal`, already inline in
+`DashboardPage.tsx`, is accounted for), `/screener-v2` (orphaned route, zero nav link in any
+shell). Live-screenshotted every content fix except `V1StockDetails`' AI Insights tab -- `/details`
+turned out unreachable via any click flow in any shell today (`handleSelectStock` always opens
+the slide-out drawer instead, App.tsx:372, pre-existing and unrelated to this session) -- verified
+by source-parity (JSX copied verbatim from the already-proven `V2StockDetails`) and a clean `tsc`
+instead.
+
+**User then asked to delete v7 (`src/v7/`, "Aurora Desk") and v8 (`src/v8/`, "Fintech Slate")
+completely** -- both built earlier the same session, uncommitted. Checked every file each pulled
+in before deleting anything: `src/components/ui/` (5 shadcn-pattern primitives on
+`class-variance-authority`+`@radix-ui/react-slot`) and `src/components/dashboard/` (4 widgets)
+had zero consumers outside v8; `src/lib/marketStatus.ts` had zero consumers outside v7+v8;
+`src/styles/fintech-theme.css` only fed those same dashboard/ widgets and v8's shell -- all
+genuinely orphaned once v7/v8 go, deleted alongside rather than left as dead code. Uninstalled
+the 2 now-unused npm deps. Reverted `tsconfig.json`/`vite.config.ts`'s `@` path alias back to its
+original `.`(root) mapping -- confirmed zero remaining `@/` imports anywhere before reverting.
+**Deliberately kept** `index.html`'s Inter/JetBrains-Mono Google Fonts addition even though it
+was made during v7/v8 work: `v6-theme.css` (pre-existing, shipped, not part of this deletion)
+declares `font-family: 'Inter'`/`'JetBrains Mono'` and had been silently degrading to system
+fallback fonts for its entire life before this addition -- reverting the font link would have
+been a real regression to an unrelated, already-live shell. Grepped the whole repo for
+`v7|v8|V7Shell|V8Shell|FintechHomePage` after deletion -- zero hits.
+
+**User then asked for "look and feel of all pages in V1 same as Dashboard page."** Sampled ~10
+representative files first rather than rewriting blind: most v1 pages already share
+`DashboardPage.tsx`'s slate/indigo/amber/emerald/rose vocabulary closely (inherited from the
+shared global `index.css`), but a `grep`-based classification across all 63 files v1's nav
+reaches found **6 genuine systemic outliers** with near-zero on-palette Tailwind classes and
+dozens of off-palette ones: `AgentAuditorPage`/`AgentDataScientistPage`/`AgentStrategistPage`/
+`AgentOptimizerPage` (plain `gray`/`red`/`green`), `OptionsIntelligence`, `PortfolioAnalytics`,
+`StrategyBuilder` (plain `gray`/`blue`/`red`). Confirmed via context sampling before touching
+anything that `blue`/`red`/`green` were being used as generic accent/positive/negative roles
+(the same job `indigo`/`emerald`/`rose` already do elsewhere), not as a deliberate distinct
+semantic (e.g. a chart's 3rd data-series color) -- safe to recolor. Applied the same 1:1
+shade-preserving Tailwind swap (`gray→slate`, `blue→indigo`, `red→rose`, `green→emerald`) across
+**all 63** v1-reachable page files, not just the 6 outliers (341 total hits, mechanical and
+reversible) -- these files are shared with v2/v3/v6's own route trees too, so the fix improves
+consistency platform-wide, not just in v1. Found and fixed a second-order gap the Tailwind sweep
+couldn't see: 3 files had the *same* off-palette colors as **raw hex codes** in `recharts`
+stroke/fill props (`#60a5fa`, `#3b82f6`, etc. -- Tailwind's own hex values used as literal
+strings, not classes), swept those to their exact on-brand equivalents in
+`AgentAuditorPage`/`AgentDataScientistPage`/`AgentOptimizerPage`/`SmartMoneyPage`/`V1Backtest`/
+`V1StockDetails`. Deliberately left `DashboardPage.tsx` itself and `SentimentIntelligence.tsx`
+untouched -- the former is the reference file (a couple of its own hex constants, e.g.
+`#dc2626`, predate this session and aren't in scope), the latter's `#22c55e`/`#ef4444` are
+already `DashboardPage`'s own `emerald`/`rose` hex constants verbatim, a false positive in the
+hex sweep's wider net.
+
+**Live-verified throughout**, not just `tsc`/`vitest`: `run-bharat-stock-intelligence`'s
+`driver.mjs` screenshotted the default landing shell (confirmed v1, not v6), the 3 new desk
+pages (Screener Browser/Risk Desk/Portfolio Tracker -- all on-theme, zero console errors), the
+Dashboard's new Quant Performance section (all 4 new cards populated with real live data),
+Watchlist (`PriceAlertsPanel` present), and both recolored outlier pages (Portfolio Analytics,
+Data Scientist Agent -- confirmed the chart line is now indigo-400, not the stray light-blue hex
+that survived the first Tailwind-only sweep). `npx tsc --noEmit` clean and `npx vitest run`
+109/120 files, 1048/1089 tests, 0 failed, unchanged from session-start baseline, re-run after
+every logical change (7 times total across the session, never once regressed).
+
+**Not done, flagged rather than silently skipped**: this repo has ~30 more v1-reachable page
+files with real (if minority) off-palette hit counts before the sweep that weren't individually
+content-audited the way `PortfolioAnalytics`/`V1StockDetails` were -- the *palette* is now
+uniform everywhere, but layout/card-shape/typography consistency (e.g. matching `SectionLabel`'s
+exact divider-line treatment, `KpiChip`'s exact shape) was only verified on the pages this
+session directly touched, not swept structurally across all 63. `V3Dashboard`'s stock-detail-tab
+mode (used at `/details` for `dashboardVersion==='v3'` only) was traced by query-set comparison
+against `StockIntelligencePage`, not opened live, since v3 wasn't in scope this session. **A
+large, unrelated diff was present in `git status` throughout this session** (`server.ts`,
+`src/server/agents/*.py`, `ollama_client.py`/`ollamaManager.ts` deleted,
+`narrative_client.py`/`test_narrative_client.py` new, `src/services/aiService.ts`,
+`requirements.txt` -- an Ollama-to-different-LLM-client migration, not this session's work) --
+confirmed via `git log` that nothing was committed this session, so no risk of it being swept
+into a commit, but flagging it here per `concurrent_session_hazards_2026_08_12` memory: **commit
+only by explicit path** (`git add <file> <file> ...`), never `git add -A`, when this work does
+get committed.

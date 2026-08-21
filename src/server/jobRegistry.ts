@@ -209,6 +209,14 @@ export const JOB_REGISTRY: JobScheduleEntry[] = [
   // Same story for ml-weekly-retrain's (cron '0 5 * * 0') StepTracker sub-steps.
   { jobName: 'ml-ensemble-train', label: 'ML Weekly Retrain: Ensemble Train', cronPattern: '0 5 * * 0', graceMinutes: 400, critical: false },
   { jobName: 'strategy-optimizer', label: 'ML Weekly Retrain: Strategy Optimizer', cronPattern: '0 5 * * 0', graceMinutes: 400, critical: false },
+  // These three T.run() siblings (queues.ts) were missing from this list entirely, so they fell
+  // through to getStaleJobs()'s flat 26h legacy threshold instead of this file's cron-aware
+  // getLateJobs() -- false-positiving "STALE" every week between Sunday runs (found live
+  // 2026-08-21: backtest-optimizer logged STALE at ~77-83h while job_heartbeat showed
+  // last_status='success' from the prior Sunday, no real failure).
+  { jobName: 'exit-policy-train', label: 'ML Weekly Retrain: Exit Policy Train', cronPattern: '0 5 * * 0', graceMinutes: 400, critical: false },
+  { jobName: 'cs-ranker-train', label: 'ML Weekly Retrain: CS Ranker Train', cronPattern: '0 5 * * 0', graceMinutes: 400, critical: false },
+  { jobName: 'backtest-optimizer', label: 'ML Weekly Retrain: Backtest Optimizer', cronPattern: '0 5 * * 0', graceMinutes: 400, critical: false },
 
   // job-digest (queues.ts '45 18 * * *', runs all 7 days) had NO entry here and never called
   // recordHeartbeat() at all -- the one job whose entire purpose is monitoring every other job

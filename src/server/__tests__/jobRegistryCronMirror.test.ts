@@ -159,7 +159,7 @@ describe('JOB_REGISTRY cronPattern/everyMs mirror consistency', () => {
     'ml-ensemble-score', 'drift-detector', 'reward-engine', 'rl-agent-update',
     'signal-type-stats', 'news-symbol-link',
   ];
-  const mlWeeklyRetrainSubsteps = ['ml-ensemble-train', 'strategy-optimizer'];
+  const mlWeeklyRetrainSubsteps = ['ml-ensemble-train', 'strategy-optimizer', 'exit-policy-train', 'cs-ranker-train', 'backtest-optimizer'];
 
   const pinned: Array<{ jobName: string; marker: string; label: string }> = [
     // Legacy hand-rolled queues.ts registrations (not yet migrated to registerRepeatableJob).

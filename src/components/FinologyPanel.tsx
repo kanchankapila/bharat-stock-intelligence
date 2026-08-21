@@ -61,7 +61,7 @@ export function FinologyPanel({ symbol }: { symbol: string }) {
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
             <thead>
-              <tr className="text-left text-[11px] uppercase tracking-wider text-slate-500">
+              <tr className="text-left text-[11px] font-display uppercase tracking-wider text-slate-500">
                 <th className="py-1.5 pr-2">Peer</th>
                 <th className="py-1.5 px-2 text-right">Price</th>
                 <th className="py-1.5 px-2 text-right">Chg</th>

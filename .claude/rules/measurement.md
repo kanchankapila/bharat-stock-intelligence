@@ -272,8 +272,12 @@ Each of these was measured on the 5-year price panel with the spec above. Re-tes
 | **sector-neutral (industry-relative) value & momentum** | **every one worse than its raw parent; B/P +0.82→+0.46%/mo, t 2.08→1.12** | **rejected** — confound (smaller universe) ruled out with a registered control |
 | `gap_down` (reconstructed from price, top-50/25bps/21d rebal.) | net excess −1.33%/period, t=−3.54, 1/6 years positive; at 5d/15bps: −0.73%/period, t=−9.0, 0/6 years | **significantly negative net of costs** — ~90-93% one-way turnover every rebalance (gap-movers barely persist) drives 5.6-13.7%/yr cost drag that eats the gross edge. Supersedes the "Gap Down is the one positive setup" screener-membership reading (same-day descriptive, not tradeable — see `measurement-history.md`) |
 | `gap_up` (same construction, control) | net excess −1.45%/period, t=−3.55, 0/6 years positive | **significantly negative net of costs**, same magnitude/sign as `gap_down` — both directions are a turnover trap, not an edge either way |
-| **`earnings_beat_yoy`/`earnings_beat_qoq`** (PEAD-style post-earnings drift, `earnings_category_yoy`/`_qoq` from `mc_earnings_fetcher.py`'s `_backfill_rapid_features`, BP=+2/PT=+1/LR=0/WP=-1/NT=-2, wired into `factor_backtest.py` 2026-08-13) | 21d rebalance: **0 completed periods** — no result, insufficient runway. 5d/top-50/15bps (the shortest feasible horizon): 3 periods (0.06 years), net excess −0.78%/period, t=−1.79. | **NOT significant, and severely underpowered** — 3 periods is worse than `screener_breadth`'s already-flagged-as-low-power 9. Calendar-constrained: `earnings_category_yoy` has only 19 trading days of real depth (2026-07-20→2026-08-13) — the column is a recent addition, not deep history. Re-test only once it has ~12+ months, same bar as `screener_breadth`. **Separately: `pead_model.py`'s own `compute_pead_score()` is unusable regardless of history depth** — its two required inputs (`eps_growth_yoy`/`eps_growth_qoq`) are ~100% NULL across the entire panel (measured live: populated on 0 symbols except the 2 most recent dates), dead schema, same shape as `feature_store`'s `rev_growth`/`eps_growth` pair above. `earnings_category_yoy`/`_qoq` are the only genuinely-populated earnings-surprise columns on this panel, which is why they're what got tested instead. |
-| **`screener_combo_finder.py --tier1`'s "capitulation" triple (`gap_down` AND `open_eq_low` AND `top_loser`, next-session open→close, single day, not a rebalanced hold)** | Reviewed 2026-08-13 (`/measurement-integrity-review`): reproduced live, 425 days / 651 signal-rows, spread +0.53%/day net of 15bps, t=+3.61, p=0.0003, clears the 41-combination Bonferroni bar. **Robust**: winsorizing at 1/2/5% *strengthens* it (t 3.69–3.94); dropping the single most extreme day still gives t=3.49; dropping the top 3 most extreme days still gives t=3.25, p=0.0013. **6/6 years positive** (2021–2026), 3 of 6 individually significant. | **Not a contradiction of the `gap_down`/`gap_up` rows above** — different construct entirely: those rank/hold the top-K gapped names for a 21d rebalance and eat turnover-drag costs; this is a same-next-session open→close return on a much narrower, rarer AND'd condition (real capitulation — gapped down, opened at the low, AND already among the day's biggest losers — not just "gapped down"). Reads as a genuine short-horizon reversal/bounce off a panic day, not a continuation trade. **Two real gaps found, neither changes the verdict**: (1) the script has no winsorization step despite the panel spec requiring one — checked live, doesn't matter here, but should still be added for consistency; (2) `run_tier1`'s verdict logic (`is_edge = spread_pct > 0`) only ever surfaces the best *positive*-direction combo — the single most significant combo in the full 41-row table is actually negative-direction (`gap_down,open_eq_high`, t=−4.12, spread=−0.53%, stronger than the "winning" positive one), which the console output/verdict never highlights. Low signal density (~1.5 signals/day when it fires, ~651 stock-days across 5.5y) means this is thin — narrow enough to watch, not yet enough to call it capacity-proven at scale. `live_capitulation_screener.py`'s docstring says "See measurement.md" — this row is that entry. |
+| **`earnings_beat_yoy`/`earnings_beat_qoq`** (PEAD-style post-earnings drift, `earnings_category_yoy`/`_qoq` from `mc_earnings_fetcher.py`'s `_backfill_rapid_features`, BP=+2/PT=+1/LR=0/WP=-1/NT=-2, wired into `factor_backtest.py` 2026-08-13) | 21d rebalance: **0 completed periods** — no result, insufficient runway. 5d/top-50/15bps (the shortest feasible horizon): 3 periods (0.06 years), net excess −0.78%/period, t=−1.79. | **NOT significant, and severely underpowered** — 3 periods is worse than `screener_breadth`'s already-flagged-as-low-power 9. Calendar-constrained: `earnings_category_yoy` has only 19 trading days of real depth (2026-07-20→2026-08-13) — the column is a recent addition, not deep history. Re-test only once it has ~12+ months, same bar as `screener_breadth`. **⚠ CORRECTED 2026-08-20 — the line below calling `pead_model.py` dead was wrong and stale, and its own inputs have since (or already did) populate for real.** Checked live: `eps_growth_yoy`/`eps_growth_qoq` are populated on 2,483/2,522 rows in the last 14 days alone (not 0), and `pead_score` itself has real depth — 34,756 rows / 1,673 symbols / **37 dates** (2026-06-30→08-19), ~1,655-1,661 symbols on most weekdays. Graded properly via `factor_edge.py` rather than left unmeasured: 1d IC +0.029/AUC 0.505, 5d IC +0.026/AUC 0.517, 10d IC +0.027/AUC 0.521, 21d IC +0.027/AUC 0.520 (LOW-DATA, 16 dates) — **no edge at any horizon**, but a real, well-powered, honestly-measured null, not a dead/never-runs claim. Separately confirmed `pead_score` has **zero downstream readers** anywhere in the codebase (grep, not assumed) — real, correctly-functioning, measured-null output that nothing consumes is still pure waste, just not for the reason originally claimed. Retired the nightly schedule entry (`queues.ts`, was `pead_model.py` in `ml-daily-ops`) on that combined basis — no-edge AND unconsumed — 2026-08-20. (Original wrong claim, kept for the record: "`pead_model.py`'s own `compute_pead_score()` is unusable regardless of history depth — its two required inputs are ~100% NULL... populated on 0 symbols except the 2 most recent dates." Do not repeat this without re-checking live — same lesson as this file's own MASTER RULE.) `earnings_category_yoy`/`_qoq` remain the earnings-surprise columns actually wired into `factor_backtest.py`'s cost-aware harness above; `pead_score` was graded via the faster `factor_edge.py` screen only, matching the bar every other previously-ungraded engine got this session. |
+| **`win_probability`** (ML ensemble's own win-odds score, `technical_signals.win_probability`, wired into `factor_backtest.py` 2026-08-20 as `_add_win_probability`) | 21d rebalance: **fails outright**, only 59 eligible sessions (need ≥63) — same calendar constraint as `earnings_beat_yoy`. 5d/top-50/15bps (shortest feasible): 7 periods (0.14 years), net excess +1.52%/period, t=+1.54, 83.4% one-way turnover, 12.61%/yr cost drag. | **NOT significant** — full detail and the preceding `factor_edge.py` IC/AUC read (real IC, hit_AUC never clears 0.55) in this file's dedicated `win_probability` section above. Two independent disqualifiers point the same way: weak classification power AND a real turnover-cost drag, on a factor with only 7 periods of runway. Re-test once ~12+ months of history has accumulated, same bar as `earnings_beat_yoy`/`screener_breadth`. |
+| **`breakout_classifier.py` / `movement_predictor.py` / `cs_ranker.py` / `confluence_ml_engine.py`** (the 4 previously-ungraded `unified_ranker.py` engines) | **CORRECTED same day** — first pass graded 3 of 4 against the wrong target (generic 1/5/21d terminal return); re-graded against each model's own native label 2026-08-20T12:15: `breakout_probability` (native fwd-10d MFE≥6%) IC +0.153/AUC 0.583 at 19 dates (LOW-DATA, 1 short); `ml_breakout_probability` (native `signal_outcomes` WIN/LOSS h=7) IC +0.082/AUC 0.553 at 44 dates — **clears USABLE**; `movement_probability` (native same-day top-decile day-range) IC +0.410/AUC 0.894 traced to a real train/serve-skew bug in `score()` (fixed, all pre-fix values tainted, re-measure once ~20 fresh dates accumulate); `cs_score` (native 5d cross-sectional, correctly tested on the first pass) stands at no edge. | `ml_breakout_probability` is the strongest previously-ungraded result in this file and is next in line for the same cost-aware `factor_backtest.py` pass `win_probability` got. `breakout_probability` re-check in a few trading days once past 20 dates — do not downweight it in `unified_ranker.py`'s blend on the superseded first-pass verdict. Full detail, the leak-bug trace, and consumption footprint in this file's dedicated correction section above. |
+| **`screener_combo_finder.py --tier1`'s "capitulation" triple (`gap_down` AND `open_eq_low` AND `top_loser`, next-session open→close, single day, not a rebalanced hold)** | Reviewed 2026-08-13 (`/measurement-integrity-review`): reproduced live, 425 days / 651 signal-rows, spread +0.53%/day net of 15bps, t=+3.61, p=0.0003, clears the 41-combination Bonferroni bar. **Robust**: winsorizing at 1/2/5% *strengthens* it (t 3.69–3.94); dropping the single most extreme day still gives t=3.49; dropping the top 3 most extreme days still gives t=3.25, p=0.0013. **6/6 years positive** (2021–2026), 3 of 6 individually significant. | **Not a contradiction of the `gap_down`/`gap_up` rows above** — different construct entirely: those rank/hold the top-K gapped names for a 21d rebalance and eat turnover-drag costs; this is a same-next-session open→close return on a much narrower, rarer AND'd condition (real capitulation — gapped down, opened at the low, AND already among the day's biggest losers — not just "gapped down"). Reads as a genuine short-horizon reversal/bounce off a panic day, not a continuation trade. **Two real gaps found, neither changes the verdict**: (1) the script has no winsorization step despite the panel spec requiring one — checked live, doesn't matter here, but should still be added for consistency; (2) `run_tier1`'s verdict logic (`is_edge = spread_pct > 0`) only ever surfaces the best *positive*-direction combo — the single most significant combo in the full 41-row table is actually negative-direction (`gap_down,open_eq_high`, t=−4.12, spread=−0.53%, stronger than the "winning" positive one), which the console output/verdict never highlights. Low signal density (~1.5 signals/day when it fires, ~651 stock-days across 5.5y) means this is thin — narrow enough to watch, not yet enough to call it capacity-proven at scale. `live_capitulation_screener.py`'s docstring says "See measurement.md" — this row is that entry. **Re-confirmed 2026-08-20** (`screener_combo_finder.py --tier1` re-run live, production-grade-hardening §4): 430 days / 658 signal-rows (5 more days accumulated since the 2026-08-13 read), spread +0.5064%/day net of 0.15% round-trip cost, t=+3.48, p=0.0005 — same combo still wins, magnitude and significance essentially unchanged (t 3.61→3.48), and the negative-direction `gap_down,open_eq_high` combo the earlier review flagged as unhighlighted-but-stronger is *still* the single most significant row in the table (t=−4.05 this run, vs −4.12 previously). Cost accounting for this construct was already adequate at first measurement — it's a single next-session open→close round-trip, not a multi-period rebalance, so `gap_down`/`gap_up`'s turnover-drag concern (which is about *holding* a rebalanced position) doesn't apply the same way here; re-running under the exact same harness with a few more weeks of data was the right bar to clear, and it cleared it. **Done 2026-08-20** — both items closed, reusing the real signal-construction functions (not reimplemented): **per-year breakdown corrects the earlier "6/6 years positive" claim to 5/6.** 2021 t=+2.09, 2022 t=+0.67, 2023 t=+0.91, 2024 t=+1.99, 2025 t=+2.35 (all positive), **2026 YTD (50 days) is NEGATIVE, mean spread −0.13%/day, t=−0.49** — not significant either way (thin partial year, not a reversal, but the "6/6" line was wrong and is corrected here). **Capacity is genuinely small.** Per-signal ADTV: median ₹16.6cr, p10 ₹6.0cr (barely above the ₹5cr floor), p90 ₹108.4cr — these are real but modest-liquidity names, not blue chips. At a conservative 2% of ADTV per name (standard single-session-impact convention), median deployable capital is only **₹0.46cr/signal-day** (p90 ₹3.54cr); even a generous 10% of ADTV cap only reaches median ₹2.31cr/day (p90 ₹17.69cr). Signals cluster: median 1/day, mean 1.53/day, but a max of 28 on one day (301 of 430 days have exactly 1 signal). **Verdict: this is a real edge at a small-to-mid personal/prop-trading scale, not a strategy that scales to meaningful AUM** — capacity is the binding constraint here, not signal quality. Any live sizing should cap per-name exposure at a single-digit % of that day's ADTV and expect most days to offer exactly one qualifying name. |
+
+| **`mean_reversion_14`** (sign-flipped, equal-weighted z-score composite of the 14 Bonferroni-clearing `feature_store` columns above — go long the LOWEST/most-oversold readings instead of the highest, tested 2026-08-20 as the natural long-only-compatible construction; no short-selling infrastructure required) | `factor_backtest.py --factor mean_reversion_14 --rebalance 5 --top-k 50 --cost-bps 15`, live production, 278 periods / 5.52 years: net excess **+0.044%/period, t=+0.64 — NOT significant.** Only **2/6 years positive** (2025 +0.624%, 2026 +0.157%; 2021 −0.041%, 2022 −0.149%, 2023 −0.142%, 2024 −0.149%). Sharpe 1.02, CAGR 21.98% — indistinguishable from the universe benchmark's own 22.2%. | **The individual 14 factors' negative tail is real and strong (t=−3.15 to −9.28 each) — the naive mirror-image "buy the opposite" composite is NOT.** Same shape this file already documents for `high_vol`/`low_vol` ("both tails lose; the middle outperforms") — avoiding extreme overbought readings may be real, but actively buying extreme oversold readings does not symmetrically work; oversold-and-flat is not the same population as oversold-and-about-to-revert, and equal-weighting 14 heavily-correlated technical oscillators (stoch_k/stoch_d/williams_r/cci all measure closely related things) is closer to repeating one signal fourteen times than combining independent ones. **This is a fresh, direct confirmation of this file's own standing finding that combining/reweighting reduces performance in every case tested** — now true for this specific hypothesis too, not just the ones already in the table. **Deliberately NOT built into a live short-side sleeve or exclusion veto on this result** — building production code around a factor that just failed its own first honest test would repeat the exact build-first-measure-later pattern this file exists to prevent. The more promising, still-unbuilt next step, flagged not attempted: test whether EXCLUDING the top-decile-overbought names from the existing long-only buy pool (an avoid/veto, same shape as the already-validated `HIGH_VOL_VETO`) improves the platform's actual best factors, rather than trying to buy the opposite tail outright. |
 
 ### The `sql_translate` two-arg `date()`/`datetime()` fix (2026-08-16) changes NOTHING in the training data — measured before/after, not argued
 
@@ -372,6 +376,545 @@ to legacy `news_articles` with `sentiment_score = 1.0` and `impact = 'MEDIUM'`.
 
 No score, weight, threshold or classification formula changed; a dormant constant was corrected
 and a swallowed error made visible.
+
+### `win_probability` re-measured 2026-08-20, properly powered — real IC, but does not clear this repo's own USABLE bar
+
+Production-grade-hardening §4's "next step, in order" was: verify write-timing provenance (done
+2026-08-15 via `win_probability_scored_at`) → re-run h=1 non-overlapping → cost/turnover-aware
+portfolio run. This is the middle step, done live via `factor_edge.py` (the same harness already
+scheduled for `unified_ranker.py`'s own engine scores, e.g. `smart_money_score` above) rather than
+a hand-rolled query, so the result is directly comparable to every other row measured that way.
+
+`factor_edge.py --table technical_signals --scores win_probability --horizons 1,5,21`, live
+production, 2026-08-20T09:02 IST — **well-powered this time**, not the 1-date `LOW-DATA` reads
+seen elsewhere in this file: 80,496 rows / 2,269 symbols / 72 dates spanning 2026-05-16→08-20,
+75,558 rows matched to forward prices across 53/49/33 dates per horizon.
+
+| horizon | rank_IC | hit_AUC | n | dates | verdict |
+|---|---|---|---|---|---|
+| 1d | +0.044 | 0.492 | 73,368 | 53 | no edge |
+| 5d | +0.077 | 0.513 | 64,597 | 49 | no edge |
+| 21d | +0.103 | 0.537 | 29,483 | 33 | no edge |
+
+Top-decile-minus-bottom-decile quantile spread at 1d: **+0.17%** (Q4 mean fwd +0.12% vs Q0 −0.05%),
+same direction as the 2026-08-15 preliminary read.
+
+**Read this precisely, not as a flat "no edge."** `_verdict()` requires BOTH `abs(rank_IC) >= 0.03`
+AND `hit_AUC >= 0.55` to call anything `USABLE`. Every horizon here clears the IC bar — cleanly,
+and IC *grows* with horizon (0.044→0.077→0.103), the opposite of a decaying artifact — but AUC
+never clears 0.55, topping out at 0.537 on 21d. This is exactly the "AUC can be excellent and
+useless" class this file already warns about, inverted: here IC says something real is happening
+directionally, but AUC says the binary win/lose classification power is too weak to act on. The
+raw h=1 IC (+0.044) is close in magnitude to the original 2026-08-15 preliminary read
+(+0.0364, t=+2.58, 41 dates) — it replicates in sign and rough size with 53 dates instead of 41
+and a properly non-overlapping, provenance-verified sample, which is meaningful corroboration
+rather than a fresh coincidence. Persisted to `factor_edge_history` (`run_at=2026-08-20T09:02:32`).
+
+**Verdict for this repo's purposes: a real, small, well-powered directional signal that is not
+tradeable as scored today** — same shape as `delivery_pct`'s "real spread, dead net of costs"
+finding above, except here the disqualifier is classification power rather than cost.
+
+**Cost/turnover-aware portfolio run — done 2026-08-20, confirms the inference above as a real
+measurement, not just an educated guess.** Wired `win_probability` into `factor_backtest.py`
+(`_add_win_probability`, same point-in-time convention as `_add_earnings_category` — plain
+`(symbol, date)` merge, write-timing separately verified via `win_probability_scored_at`: ~14h
+after that date's UTC midnight, i.e. the same IST evening, well before the next-open entry this
+harness uses). 21d rebalance fails outright — `only 59 eligible sessions; need >= 63`, the same
+calendar constraint `earnings_beat_yoy` hit (this column's history only starts 2026-05-16, ~3
+months deep). At the shortest workable horizon, 5d/top-50/15bps:
+
+| periods | years | net excess/period | t-stat | annual cost drag | verdict |
+|---|---|---|---|---|---|
+| 7 | 0.14 | +1.52% | **1.54** | 12.61%/yr | **NOT significant (|t|<2). Do not trade this.** |
+
+83.4% one-way turnover per period — `win_probability` reshuffles which names rank highest fast
+enough that it's expensive to hold, same shape as `gap_down`/`gap_up`'s turnover-trap finding
+above, layered on top of the AUC weakness already found. **Both disqualifiers point the same
+way**: weak classification power (hit_AUC 0.492-0.537) AND a real cost/turnover drag, on top of
+only 7 periods of runway — even the +1.52%/period point estimate, if it held up with more data,
+would need to survive a >12%/yr cost headwind it isn't currently clearing. Re-test only once
+`win_probability` has ~12+ months of history, same bar this file already applies to
+`screener_breadth`/`earnings_beat_*`. Re-check via the historical saga below only if trying to
+understand *why* the write-timing/provenance question needed resolving before this could be
+trusted at all.
+
+### ⚠ SUPERSEDED same day, see the correction section immediately below — wrong grading horizon for 3 of 4
+
+### The 4 previously-ungraded `unified_ranker.py` engines — graded 2026-08-20, none clear USABLE
+
+Prompted by a "which of the ~30 models actually earn their runtime cost" review:
+`breakout_classifier.py`, `movement_predictor.py`, `confluence_ml_engine.py`, and `cs_ranker.py`
+had never been run through `factor_edge.py` or `factor_backtest.py` — no net-of-cost verdict, no
+IC/AUC read, anywhere in this repo. Graded the same way `win_probability` just was, live
+production 2026-08-20T12:03-12:05 IST.
+
+`factor_edge.py --table technical_signals --scores breakout_probability,movement_probability,cs_score --horizons 1,5,21 --persist`
+(80,517 rows / 2,269 symbols / 72 dates, 75,558 matched to forward prices):
+
+| score | horizon | rank_IC | hit_AUC | n | dates | verdict |
+|---|---|---|---|---|---|---|
+| `breakout_probability` | 1d | +0.008 | 0.486 | 59,020 | 28 | no edge |
+| `breakout_probability` | 5d | −0.007 | 0.496 | 50,249 | 24 | no edge |
+| `breakout_probability` | 21d | −0.013 | 0.492 | 15,261 | 8 | LOW-DATA |
+| `movement_probability` | 1d | −0.030 | 0.486 | 48,108 | 22 | no edge |
+| `movement_probability` | 5d | −0.031 | 0.489 | 39,339 | 18 | LOW-DATA |
+| `movement_probability` | 21d | −0.048 | 0.474 | 4,355 | 2 | LOW-DATA |
+| `cs_score` | 1d | +0.047 | 0.505 | 73,368 | 53 | no edge |
+| `cs_score` | 5d | +0.062 | 0.512 | 64,597 | 49 | no edge |
+| `cs_score` | 21d | +0.015 | 0.508 | 29,483 | 33 | no edge |
+
+`confluence_ml_engine.py`'s `ml_breakout_probability` lives in `confluence_signals`, a 30-min-cadence
+intraday table (4.49M rows / 52 dates, not one-row-per-symbol-per-day like `technical_signals`), so
+`factor_edge.py`'s `--table` CLI can't be pointed at it directly without either double-counting
+same-day snapshots or picking a look-ahead-biased entry point. Reduced to the EARLIEST
+`computed_at` per `(symbol, date)` — the most conservative, earliest-tradeable read — via a one-off
+script that imported `factor_edge.py`'s own `_forward_returns`/`_metrics`/`_verdict` rather than
+reimplementing the IC/AUC math, then persisted to `factor_edge_history` under
+`table_name='confluence_signals_daily_first'` so it's flagged as a different measurement shape than
+the other rows, deleted after the run (not a shipped tool):
+
+| score | horizon | rank_IC | hit_AUC | n | dates | verdict |
+|---|---|---|---|---|---|---|
+| `ml_breakout_probability` | 1d | +0.016 | 0.511 | 83,527 | 37 | no edge |
+| `ml_breakout_probability` | 5d | +0.040 | 0.526 | 74,140 | 33 | no edge |
+| `ml_breakout_probability` | 21d | +0.022 | 0.521 | 36,584 | 17 | LOW-DATA |
+
+**None of the four clear `USABLE` (needs `abs(rank_IC) >= 0.03` AND `hit_AUC >= 0.55`).** Two
+data points worth reading precisely rather than as a flat zero: `cs_score` (5d IC +0.062) and
+`ml_breakout_probability` (5d IC +0.040) both clear the IC bar alone — same "IC says something real,
+AUC says it's not classifiable" shape `win_probability` showed above, just weaker (AUC 0.512/0.526
+vs win_probability's 0.513/0.537). Three independent engines now show this identical ceiling
+(win_probability, cs_score, ml_breakout_probability), which strengthens rather than weakens the
+existing hypothesis that the AUC ceiling is a **label/target construction** problem shared across
+this codebase's ML pipeline, not a property of any one model. `movement_probability` and
+`breakout_probability` are flat negative/near-zero on both metrics — no directional signal at all,
+not even the weak kind.
+
+**Consumption check — this is the part that makes the finding actionable, not just descriptive.**
+Grepped `unified_ranker.py` for all four:
+- **`cs_score` and `breakout_probability` ARE live-blended** into `unified_score` today (`engine_scores['cs']`/`engine_scores['breakout']`, unified_ranker.py:2065-2092,2221) — i.e. two inputs to the canonical Buy/Sell call that every dashboard shell ultimately reads now have an external, well-powered (24-53 dates) "no edge" verdict.
+- **`movement_probability` is advisory-only by its own inline comment** (queues.ts:1102, "Advisory-only for now") — never read by `unified_ranker.py` at all. It trains, scores, and writes on a 30-min job for a value nothing downstream ever consumes beyond a freshness-coverage check (`dataQualityChecks.ts`) and a NEVER_FILL list (`densify_feature_matrix.py`). Pure runtime cost, zero output.
+- **`ml_breakout_probability` has no reader anywhere outside `confluence_ml_engine.py` itself** — not `unified_ranker.py`, not any other file. Same shape, fully inert.
+
+**Does not contradict `load_engine_edge_verdicts()`'s existing gate.** `unified_ranker.py`'s live
+`ENGINE_EDGE_SHRINK` mechanism (line 681 area) reads `factor_edge_history` filtered to
+`table_name='unified_recommendations'` — i.e. the ranker's OWN blended reporting columns
+(`cs_score`/`breakout_score` on `unified_recommendations`), not the raw `technical_signals` values
+graded above. Checked live: that table's own grading run (`run_at=2026-08-17T19:05:22`) is stuck at
+**1 date** for both (`LOW-DATA`) — same calendar-constraint shape as `smart_money_score`'s existing
+entry below, because `unified_recommendations_history` still only has a handful of provably
+pre-market dates. So the live auto-shrink gate has nothing to act on yet regardless. **The grading
+above is a different, much better-powered read of the same underlying question** (24-53 dates vs 1)
+— it measures whether the raw engine output has any signal at all, upstream of the ranker's own
+regime multipliers and crowding discount, and at this sample size it's a more decisive answer than
+the gate's own input currently can give.
+
+**Not escalated to a `factor_backtest.py` cost/turnover-aware run.** Unlike `win_probability`
+(real, *growing* IC that justified the extra cost-aware pass), none of these four clear even the
+fast IC+AUC screen — the two closest (`cs_score`, `ml_breakout_probability`) are weaker than
+`win_probability`'s already-tested-and-rejected 5d read. Per this file's own "already tested, do
+not re-run without a reason" discipline, spending a full cost-aware backtest on a result already
+below a rejected bar isn't warranted.
+
+### ⚠ CORRECTED 2026-08-20 — the section above graded 3 of 4 engines against the wrong target entirely
+
+The user's own instinct to check ("make sure it's configured properly, full potential of data,
+before verdict and decommission") caught a real methodology error, same session, before anything
+was decommissioned. `factor_edge.py`'s generic 1/5/21d terminal-return grid is the right tool for
+a factor with no native target of its own — it is the WRONG tool for a model with a specific,
+different trained target, and 3 of the 4 graded above have one:
+
+- `breakout_classifier.py`'s label is `forward-10-day MAX return >= +6%` (`HORIZON=10`,
+  `RET_THRESHOLD=0.06`, a path-based MFE event, defined in `build_breakout_labels`) — not a
+  1/5/21d terminal-return question.
+- `movement_predictor.py`'s label is `build_movement_labels`'s "was TODAY's day-range in the
+  top decile cross-sectionally" — a SAME-DAY volatility classification, not a forward return
+  question at all.
+- `confluence_ml_engine.py`'s label is `signal_outcomes`' own 7-day WIN/LOSS for
+  `signal_source='confluence'` — not the generic grid either.
+- `cs_ranker.py` is the one exception: `HORIZON_DAYS_LABEL=5`, a 5-day-forward cross-sectional
+  rank percentile vs NIFTY50 — genuinely matched by `factor_edge.py`'s 5d cross-sectional-excess
+  test. **Its "no edge" verdict above stands, correctly configured on the first pass.**
+
+Re-graded the other three against their actual native label, reusing each source file's own
+label-construction function (`build_breakout_labels`, `build_movement_labels`,
+`signal_outcomes` directly) rather than reimplementing the logic — live production,
+2026-08-20T12:15 IST:
+
+| score | native target | rank_IC | hit_AUC | n | dates | verdict |
+|---|---|---|---|---|---|---|
+| `breakout_probability` | fwd-10d max return ≥ +6% | +0.153 | 0.583 | 37,969 | 19 | LOW-DATA (1 date short of the 20-date reliability bar) |
+| `movement_probability` | same-day top-decile day-range | +0.410 | **0.894** | 31,611 | 23 | **USABLE by the numbers — but see the leak finding below, do not trust this AUC yet** |
+| `ml_breakout_probability` | `signal_outcomes` WIN/LOSS, h=7, source=confluence | +0.082 | 0.553 | 52,583 | 44 | **USABLE**, real and well-powered though weak |
+
+**Two of three flip completely once graded against the right target — this is a materially
+different picture than "0 of 4 have anything."** `breakout_probability` shows a real, large IC
+(+0.153) and AUC (0.583) at its own horizon, one date short of reliable. `ml_breakout_probability`
+clears `USABLE` outright with 44 dates behind it — genuinely the strongest previously-ungraded
+result in this file, and it deserves the same cost-aware `factor_backtest.py` follow-up
+`win_probability` got, which the superseded section above explicitly (and, per this correction,
+wrongly) declined to run.
+
+**`movement_probability`'s AUC=0.894 is NOT real — traced to an actual bug in the live scoring
+path, not a modeling success, and the fix is what makes this section's numbers trustworthy.**
+`load_training_data()` (`movement_predictor.py`) correctly applies `_lag_by_symbol()` before
+merging features against the same-day `moved` label — a row labelled date d carries date d-1's
+raw feature values, so training predicts "will today be a big-range day, using only what was
+knowable before today opened" — a legitimate, leak-free, one-day-ahead forecast. **`score()`, the
+live production path that actually populates `technical_signals.movement_probability`, called
+`compute_ohlcv_features(ohlcv)` directly and skipped the lag** — so the column live in production
+for all 23 dates measured above was generated using each day's OWN just-closed OHLCV bar to
+"predict" that same day's own range classification. That is a same-day leak, and it fully explains
+an AUC (0.894) implausibly higher than any other engine graded anywhere in this file — it is the
+train/serve-skew bug class this repo's `recurring-bugs.md` already tracks (`"Grouping training
+rows by day when scoring reads one snapshot is train/serve skew"`), just discovered here via the
+inverse route: not a low test score exposing a skew, but an impossibly HIGH one.
+
+**Fixed** (`movement_predictor.py`, `score()`): now composes `_lag_by_symbol(compute_ohlcv_features(ohlcv), ...)`
+identically to `load_training_data()`, so the live column is generated the same way the model was
+trained and validated. Negative-controlled (`test_movement_predictor.py::TestScoreUsesLaggedFeatures`
+— fails against the pre-fix raw-feature composition, confirmed by hand before landing). **Every
+`movement_probability` value written before this fix (all 23 dates, 2026-07-16→08-19) is tainted
+and must not be used to judge this model** — the column needs to accumulate fresh, correctly-lagged
+scores post-fix before a real verdict is possible. Re-check once ~20+ fresh dates have written
+under the fixed code path; until then this engine's true native-target AUC is unknown, not 0.894
+and not "no edge" — genuinely ungraded again, honestly this time.
+
+**Consumption reminder, unchanged by this correction:** `movement_probability` remains
+advisory-only (queues.ts:1102, zero readers in `unified_ranker.py`) and `ml_breakout_probability`
+still has zero readers outside its own writer — neither is live-blended into `unified_score`, so
+none of this changes what a user sees today. `cs_score`/`breakout_probability` ARE live-blended;
+`cs_score`'s no-edge verdict is unchanged and correctly configured, and `breakout_probability`'s
+new LOW-DATA-but-promising read means it should NOT be downweighted on the strength of the
+superseded section above — re-check in a few trading days once it crosses 20 dates.
+
+### The remaining 3 unified_ranker.py engines with no individual verdict — graded 2026-08-20
+
+The correction above only covered the 4 engines already flagged "ungraded" in an earlier pass.
+`unified_ranker.py` blends **8** engines total (`ENGINE_TO_SCORE_COL`); `screener`/`ml`/`cs`/
+`smart_money`/`breakout` all had a verdict somewhere in this file already — `confluence`,
+`technical`, and `dl` did not, checked by reading `_get_confluence_scores`/`_get_technical_scores`/
+`_get_dl_scores` directly for what table/column/formula each actually reads, live production:
+
+- **`dl` → `deep_learning_predictions.prob_up_5d`** (a BiLSTM, `dl_engine.py`). Native label is
+  explicit and unambiguous in the source (`target_ret_5d > 0` — a plain 5d terminal-return
+  direction; the table also carries `prob_up_1d`/`prob_up_15d` heads with matching `target_ret_1d`/
+  `target_ret_15d` labels), so no horizon-mismatch risk here — graded each head at its own native
+  horizon directly, 94,851 rows / 40 dates / 06-17→08-20:
+
+  | score | native horizon | rank_IC | hit_AUC | n | dates | verdict |
+  |---|---|---|---|---|---|---|
+  | `prob_up_1d` | 1d | −0.010 | 0.483 | 55,913 | 24 | no edge |
+  | `prob_up_5d` | 5d | +0.047 | 0.518 | 46,246 | 20 | no edge (marginal — right at both the IC and date-reliability boundary) |
+  | `prob_up_15d` | 15d | +0.018 | 0.509 | 31,752 | 14 | LOW-DATA |
+
+  `prob_up_5d` read at 15d (off its native horizon, for context only): IC +0.090, AUC 0.543,
+  14 dates — the same "IC grows with horizon" shape seen in `win_probability`/`ml_breakout_probability`
+  below, but too thin to verdict. **No native-target mismatch to correct here** — `dl_engine.py`
+  was, unusually for this file's history, built with its own graders in mind (3 explicit horizon
+  heads, each with a matching return-direction label) — the "no edge" verdict is on a properly
+  configured test.
+
+- **`technical` → `technical_signals.signal_score`** (trailing-3-day average of a 0-10 rule-based
+  composite, not an ML model with its own trained target — so the generic 1/5/21d grid IS the
+  right test, no mismatch risk). 80,519 rows / 72 dates / 05-16→08-20 — the best data depth of
+  any engine graded in this file:
+
+  | horizon | rank_IC | hit_AUC | n | dates | verdict |
+  |---|---|---|---|---|---|
+  | 1d | −0.003 | 0.499 | 73,368 | 53 | no edge |
+  | 5d | +0.012 | 0.501 | 64,597 | 49 | no edge |
+  | 21d | +0.029 | 0.506 | 29,483 | 33 | no edge |
+
+  Clean no-edge, well-powered at every horizon, right up against chance (AUC 0.499-0.506).
+
+- **`confluence` → the "non-screener" composite** (`trend_alignment_score + volume_score +
+  sector_strength_score + fundamental_score`, computed inline in `_get_confluence_scores` — not a
+  stored column, and NOT the same thing as `ml_breakout_probability` graded above or the raw
+  `confluence_score` the standalone Confluence page/`intraday_ranker.py` still use, which include
+  the screener component this engine deliberately drops per the 2026-08-05 decorrelation fix).
+  Also rule-based, no native-target mismatch risk. Replicated the exact SQL formula from
+  `unified_ranker.py:1531-1538` against the earliest daily snapshot per symbol (same shape as
+  `ml_breakout_probability`'s grading): 194,834 rows / 52 dates / 06-30→08-20:
+
+  | horizon | rank_IC | hit_AUC | n | dates | verdict |
+  |---|---|---|---|---|---|
+  | 1d | +0.019 | 0.511 | 83,693 | 37 | no edge |
+  | 5d | +0.056 | 0.533 | 74,306 | 33 | no edge |
+  | 21d | +0.067 | 0.543 | 36,750 | 17 | LOW-DATA |
+
+  Same shape again: IC and AUC both climbing with horizon, still short of `USABLE`, thinning out
+  past 5d.
+
+**`cs_score`/`technical_score` re-reviewed 2026-08-20 for a configuration/data cause behind
+"no edge" before accepting it** — same discipline that found real bugs behind `movement_probability`'s
+and `win_probability`'s prior verdicts. Neither turned one up:
+- `cs_ranker`'s active model (`model_registry` id 228, trained 2026-08-09) has correctly survived
+  3 consecutive retrains (08-16, 08-16, 08-17) that each came back with a LOWER self-reported CV
+  ROC-AUC (0.176 active vs 0.161/0.161/0.133 rejected) — `clears_promotion_bar`/`staleness_override_applies`
+  working as designed (needs `age_days>=7` AND `rejections>=10`; only 3 rejections logged, so no
+  stale-baseline deadlock). The `cs_score` grading above tested the best model the gate has ever
+  had available, not a stale one. **The declining trend across retrains is a real, unexplained
+  observation worth a future look** — not confirmed as a bug (self-reported CV-AUC on a thin,
+  5-day-forward, date-split holdout set is exactly the kind of metric this file already warns
+  never to trust blindly), just flagged rather than silently dropped.
+- `signal_score`'s inputs (`signal_type_stats`/`signal_type_weights`, read via `loadSignalWinRates`/
+  `loadLearnedWeights` in `technicalSignalsService.ts`) are genuinely populated and varied, live-checked:
+  312 stat rows across 20 signal types (win rates 0–91.7%), 858 weight rows across 21 types
+  (0.3×–2.0×, avg 0.91×) — not constants, not defaults, not the `mf_*`-style degenerate-input
+  shape that caused the factor-crowding bug elsewhere in this file.
+
+**Conclusion: leave both at their current `unified_ranker.py` weights.** Unlike `screener`
+(confirmed negative by two independent measurements), `cs_score`/`technical_score` are confirmed
+null with no configuration issue behind it — the existing `ENGINE_EDGE_SHRINK` gate is the right
+mechanism for them once their own `unified_recommendations`-level verdict clears LOW-DATA, same
+bar every other null-verdict engine in this file is held to.
+
+**All 8 `unified_ranker.py` engines now have an individual verdict somewhere in this file** —
+`screener_stock_score` via the extensive screener-testing work elsewhere in this file (0 of 1,563
+individual screeners survive correction; bullish consensus significantly negative), `ml_score` via
+`win_probability`'s dedicated section, `cs`/`breakout`/`smart_money`/`confluence`/`technical`/`dl`
+above. **None clears `USABLE` outright** except `ml_breakout_probability` (a ninth, sub-engine
+signal feeding `confluence_ml_engine.py`, not itself one of the 8 blended keys). The repeated
+IC-grows-with-horizon-but-AUC-stalls-near-0.52 shape now appears in five independent, architecturally
+different engines (`win_probability`'s LGBM ensemble, `cs_score`'s cross-sectional ranker,
+`ml_breakout_probability`'s classifier, `prob_up_5d`'s BiLSTM at 15d, the confluence composite at
+21d) — that consistency across unrelated model families is itself evidence worth weighing: it reads
+less like "eight separate weak models" and more like a shared ceiling, most plausibly the
+class of the label itself (short-horizon Indian-equity forward direction is close to
+efficiently-priced at this universe's liquidity floor) or a shared calendar constraint (every
+longer-horizon read in this list is also the thinnest-data read, so LOW-DATA and "genuinely weaker
+long-horizon edge" are still confounded and not yet separable with the history available).
+
+### The shared-ceiling pattern, tested rather than argued — 2026-08-20
+
+The paragraph above raised two live hypotheses (shared calendar confound vs. a real market-
+efficiency ceiling) without settling either. Tested both directly, plus a third that wasn't yet
+considered, live production 2026-08-20T12:5x IST.
+
+**H1 — are the 5 engines actually independent, or 5 restatements of the same underlying
+technical signal?** If redundant, their agreement is unsurprising (correlated tests of a null
+look correlated). Pulled all 5 raw scores onto shared `(symbol, date)` rows (58,363 rows / 36
+dates with all 5 present) and computed Spearman correlation between every pair:
+
+| pair | rho |
+|---|---|
+| `win_probability` vs `cs_score` | +0.004 |
+| `win_probability` vs `signal_score` | −0.128 |
+| `win_probability` vs `prob_up_5d` | +0.244 (the strongest pair in the matrix) |
+| `win_probability` vs `ml_breakout_probability` | +0.060 |
+| `cs_score` vs `signal_score` | −0.022 |
+| `cs_score` vs `ml_breakout_probability` | +0.014 |
+| `signal_score` vs `ml_breakout_probability` | +0.142 |
+
+**H1 is refuted, and refuted in the direction that makes the original finding STRONGER, not
+weaker.** True redundancy would show rho well above 0.5; instead every pair is near zero, one
+pair is weakly negative, and the strongest link (`win_probability`↔`prob_up_5d`, two of the most
+architecturally different engines here — a gradient-boosted ensemble and a BiLSTM) is still only
++0.244. These are five genuinely independent attempts at the same prediction problem, not one
+signal counted five times.
+
+**H2 — was the ~3-month measurement window (2026-05-16→08-20) an unusually low-dispersion,
+rangebound stretch that would mechanically cap every model's AUC regardless of true skill?**
+Computed daily cross-sectional std of 1d returns across the liquid universe, measurement window
+vs. the prior 16 months (2025-01-01→2026-05-15, `is_suspect`-excluded):
+
+- Measurement window: mean **3.284%**, median 2.551% (n=69 trading days)
+- Prior 16 months: mean **2.957%**, median 2.481% (n=340 trading days)
+- Ratio: **1.111** — the measurement window had MORE cross-sectional dispersion than the prior
+  16 months, not less.
+
+**H2 is refuted.** If anything there was more signal to find during this window than usual, not
+less — a low-dispersion-window explanation would need the ratio well below 1, and it's above.
+
+**H3 — is the observed AUC (~0.51–0.55) mechanically what a Spearman IC of ~0.05–0.10 always
+looks like through a binary-classification lens, or is something in the live data suppressing
+AUC specifically, beyond what the IC alone implies?** Simulated paired (score, forward-return)
+data via a Gaussian copula at each engine's measured Spearman IC and matched sample size, built
+the same `xs_N > 0` binary label `factor_edge.py`'s `_metrics()` uses, and compared simulated AUC
+to what was actually measured:
+
+| engine (horizon) | measured IC | measured AUC | simulated AUC (mean, 5–95% range) |
+|---|---|---|---|
+| `win_probability` (1d) | 0.044 | 0.492 | 0.521 [0.514, 0.527] — **measured below range** |
+| `win_probability` (5d) | 0.077 | 0.513 | 0.537 [0.530, 0.544] — **measured below range** |
+| `win_probability` (21d) | 0.103 | 0.537 | 0.549 [0.542, 0.557] — within range |
+| `cs_score` (5d) | 0.062 | 0.512 | 0.530 [0.524, 0.536] — **measured below range** |
+| `ml_breakout_probability` (native h7) | 0.082 | 0.553 | 0.539 [0.532, 0.546] — within range |
+| `prob_up_5d` (native 5d) | 0.047 | 0.518 | 0.522 [0.516, 0.529] — within range |
+| `confluence_non_screener` (21d) | 0.067 | 0.543 | 0.532 [0.526, 0.539] — within range |
+
+**H3 is mostly confirmed, with one real secondary finding.** For 4 of 7 reads (all the 21d/native
+non-1d/5d horizons), the measured AUC is exactly what a Gaussian-copula relationship predicts
+given that IC — **not a separate phenomenon at all.** A Spearman IC of 0.05–0.10 mechanically
+caps AUC around 0.52–0.55 for data this size; that ceiling is a property of the correlation
+magnitude itself, not a fixable measurement artifact, and no amount of tuning the AUC threshold
+or classification approach changes it — the fix would have to raise the IC itself (need roughly
+IC ≥ 0.15 before AUC durably clears 0.55–0.57 at this sample size). **The 3 reads that undershoot
+even the idealized simulation are all the SHORT-horizon ones (`win_probability` 1d/5d, `cs_score`
+5d)** — consistent with real short-horizon Indian-equity returns being more fat-tailed/skewed
+than a Gaussian copula assumes, making binary classification specifically (not rank correlation)
+harder at 1-5d than at 21d, where returns are closer to Gaussian by aggregation. A modest,
+genuine effect, not a bug.
+
+**The finding that actually matters most for what to do next didn't come from any of the three
+hypotheses above — it came from comparing the individual engines to `unified_score` itself.**
+Each of the 5 independently-built, uncorrelated engines carries real, positive, nonzero IC
+(0.044–0.103 depending on engine/horizon). `unified_score` — `unified_ranker.py`'s blend of all
+of them plus more — has 5d rank IC **≈ 0.0001** (the platform's own long-standing headline
+number, top of this file). **A sensible combination of several independent, weakly-positive,
+uncorrelated signals should show IC at least as good as its best component, typically better**
+(classic ensemble variance-reduction) — instead the blended output is indistinguishable from
+noise while its own ingredients individually are not. This does not contradict the existing
+"reweighting reduced performance in every case tested" finding elsewhere in this file — that
+finding is about adjusting the LINEAR weights, and the weights are not the only thing standing
+between the components and the blend. `unified_ranker.py` layers multiple non-linear steps on
+top of the linear weighted sum before `unified_score` is finalized — the crowding-discount
+multiplier (`factor_crowding_multiplier`, fired on 98.6% of the universe when `mf_*` inputs went
+constant, per `recurring-bugs.md`), regime-conditional multipliers, and veto/override logic
+(the reverted "Smart Money Override" that bypassed the `high_vol` veto, also in `recurring-bugs.md`)
+are exactly the kind of machinery that can take several individually-real weak signals and wash
+them out to zero without any single linear weight being wrong. **This is the next concrete
+research question this analysis surfaces**: not "do we need a better model" (five independent,
+real, if weak, ones already exist) but "what is the non-linear assembly logic between the
+component engines and `unified_score` doing to a set of inputs that individually aren't zero."
+Tracing that is a scoped, debuggable engineering question, not a market-efficiency dead end —
+not attempted in this pass; flagged here as the highest-value next step.
+
+### `screener`'s weight traced and shrunk 2026-08-20 — root cause of most of the gap, not all of it
+
+Traced the "highest-value next step" above rather than leaving it flagged. Read `unified_ranker.py`'s
+actual blend end to end: `REGIME_WEIGHTS` gives `screener` 0.20-0.40 in every regime — the single
+HEAVIEST-weighted engine of all 8, always. Two decisive tests, live production, same session:
+
+1. **A natural experiment already built into the schema.** `confluence_signals.confluence_score`
+   (raw, still used by the standalone Confluence page/`intraday_ranker.py`) is `screenerComponent
+   (0-60) + trend(0-15) + volume(0-10) + sector(0-8) + fundamental(0-12)` — the SAME four
+   non-screener sub-scores already graded above (the "confluence_non_screener" row), PLUS the
+   screener component `_get_confluence_scores` deliberately strips out. Grading the raw,
+   screener-included version against the stripped version, same construction, same dates:
+   screener-included is worse at every horizon (1d +0.019→+0.012, 5d +0.056→+0.040, 21d
+   +0.067→+0.044 rank IC) — direct, controlled evidence the screener component is actively
+   harmful, not just redundant, corroborating the existing "screener bullish consensus IC
+   -0.027, t=-2.36" finding from a completely different construction.
+2. **A from-scratch reconstruction of the linear blend itself.** Replicated `_normalize_to_100`
+   (percentile rank) and `_blend` (per-symbol renormalization over present engines) exactly,
+   using the 6 historically-reconstructable engines (`ml`/`cs`/`confluence`/`technical`/`dl`/
+   `breakout`, screener and smart_money excluded — no historical reconstruction available for
+   either) at BULL regime weights: **IC +0.037/+0.081/+0.100 at 1d/5d/21d, AUC up to 0.555 —
+   clears `USABLE` at 21d.** Dramatically higher than `unified_score`'s own live headline number
+   (5d rank IC ~=0.0001). This is what proved the components genuinely combine into something
+   real, and motivated tracing screener's weight specifically rather than concluding the blend
+   can't work at all.
+
+**Fixed**: applied this platform's own existing `ENGINE_EDGE_SHRINK = 0.5` policy (already used
+by `edge_adjusted_weights`/`load_engine_edge_verdicts` for exactly this situation, just gated on
+a `factor_edge_history` verdict against `unified_recommendations` that's stuck at 1 date and
+can't fire yet) directly to `screener`'s weight in every regime, redistributing the freed weight
+proportionally over the other 6 non-pinned engines. `breakout` deliberately excluded from the
+redistribution and pinned at its exact prior value in every regime — it has its own independent,
+audit-derived weight ceiling (`TestBreakoutWeightCeiling`, `scripts/check_load_bearing_
+constraints.py`'s `BREAKOUT_WEIGHT_CEILING`) for an unrelated reason (momentum measured
+net-negative after costs, mom21 -0.53%/5d t=-3.21), and a naive proportional scale-up would have
+silently pushed it above that ceiling in all 5 regimes. New weights, per regime:
+
+| regime | screener (was) | ml | cs | confluence | technical | dl | breakout (pinned) | smart_money |
+|---|---|---|---|---|---|---|---|---|
+| BULL | 0.15 (0.30) | 0.172 | 0.064 | 0.172 | 0.137 | 0.092 | 0.15 | 0.064 |
+| BEAR | 0.175 (0.35) | 0.214 | 0.065 | 0.214 | 0.109 | 0.109 | 0.05 | 0.065 |
+| HIGH_VOL | 0.10 (0.20) | 0.137 | 0.057 | 0.137 | 0.274 | 0.137 | 0.10 | 0.057 |
+| CRASH | 0.20 (0.40) | 0.221 | 0.068 | 0.172 | 0.110 | 0.110 | 0.05 | 0.068 |
+| SIDEWAYS | 0.16 (0.32) | 0.186 | 0.065 | 0.186 | 0.116 | 0.093 | 0.13 | 0.065 |
+
+Full derivation, exact reconstruction methodology, and both test scripts (deleted after use, per
+this file's convention): see `unified_ranker.py`'s `REGIME_WEIGHTS` comment block, which carries
+the same citation. Negative-controlled: the one test asserting the old screener weights
+(`test_regime_weights_sum_to_one`) was updated to the new values and a fixture riding a
+razor's-edge score (~70.02 under the old weights, discovered because it broke under the new
+ones) was strengthened to a genuinely unambiguous case rather than patched to merely pass again.
+173 tests across the unified-ranker test files pass under the new weights.
+
+**What this does NOT claim**: the reconstructed 6-engine blend (+0.037 to +0.100 IC) is still
+well short of proving `screener` alone explains the full gap down to `unified_score`'s live
+~0.0001 — the natural experiment showed a real but moderate drag (roughly 25-30% relative,
+not annihilation), and `screener` at its full 20-40% live weight is more dominant than its ~57%
+share of `confluence_score`'s internal composition, but the arithmetic wasn't carried that far.
+`quality_gate`/`RED_FLAG_VETO`/`HIGH_VOL_VETO` (the latter independently validated, t=-3.00, the
+platform's single most robust finding) sit downstream of the blend and were read but not
+individually measured for their effect on rank-IC specifically in this pass — they're selective,
+economically-defensible demotions rather than screener's broad, established-negative one, so
+they were deprioritized, not ruled out. **This could not be validated retroactively** — past
+`unified_recommendations` rows were generated under the old weights, so the real test is a fresh
+live `unified_ranker.py` run once deployed, re-graded via `factor_edge.py` against
+`unified_recommendations` the same way `win_probability`/`smart_money_score` were, once ~20+
+dates have accumulated. Re-check then, and read the veto/gate layers next if the gap remains
+larger than screener's traced share of it.
+
+### `win_probability`'s "AUC never clears 0.55" finding was itself a mismatched-target artifact — 2026-08-20
+
+Every grading of `win_probability` in this file so far — the original preliminary read, the
+2026-08-20 re-measurement, and the cross-engine "shared ceiling" H3 test above — tested it
+against **terminal cross-sectional excess return** (`factor_edge.py`'s standard construction).
+Read `ml_ensemble.py`'s `load_training_data()` to check what it's actually trained to predict,
+prompted by the same "verify the target before trusting the grade" instinct that already
+corrected `breakout_classifier`/`movement_predictor`/`confluence_ml_engine` earlier today. The
+default label is `so.outcome` (WIN/LOSS/STOP_LOSS) filtered to `signal_source = 'technical'` —
+checked live, **100% of that slice is `label_definition = 'path_barrier'`**, the path-based
+max-favorable-excursion rule this file's own panel-spec section already warns is structurally
+different from a terminal return (see "Accuracy comes from realized returns" section: technical-
+sourced path_barrier outcomes showed 88-91% win rate against confluence-sourced terminal_pct2's
+41-44%, same calendar window). `win_probability` was never trained to predict a terminal h-day
+return — grading it that way is the identical native-target mismatch already found and fixed for
+three other engines today.
+
+Re-graded against its own real training label — joining `technical_signals.win_probability` to
+`signal_outcomes.outcome` (`signal_source='technical'`, `label_definition='path_barrier'`,
+decisive WIN/LOSS only, same exclusion convention this file already applies), live production:
+
+| horizon | rank_IC (vs own label) | hit_AUC (vs own label) | n | dates | win rate overall | win rate top-decile-by-score |
+|---|---|---|---|---|---|---|
+| 1d | 0.120 | **0.617** | 10,145 | 60 | 39.5% | 55.9% |
+| 5d | 0.107 | **0.600** | 15,568 | 63 | 75.1% | 69.2% |
+| 15d | 0.106 | 0.552 | 19,715 | 60 | 87.9% | 89.7% |
+
+**1d and 5d both clear `USABLE` cleanly** (needs `|IC|>=0.03` AND `AUC>=0.55`) — a materially
+different result than every prior reading of this column, and the strongest classification power
+measured for any engine in this file. AUC is class-balance-invariant in principle, so this is a
+real, meaningful discriminative signal against what the model actually learned, not an artifact
+of the label's own skewed base rate.
+
+**Read this precisely — it does NOT reverse the "don't trade `win_probability`" verdict, and one
+number in the table above is a genuine caveat, not just color.** Three things:
+
+1. **The h=5d top-decile win rate (69.2%) is LOWER than the overall win rate (75.1%).** A
+   genuinely well-behaved predictor should show top-decile-by-score win rate strictly above the
+   base rate at every horizon; it does at 1d (55.9% vs 39.5%) and roughly at 15d (89.7% vs
+   87.9%, barely), but inverts at 5d. Consistent with a real but non-monotonic relationship, or
+   the model doing most of its work distinguishing the middle of the distribution rather than
+   cleanly separating the top decile — not investigated further this pass, but it means "AUC
+   0.60 at 5d" should not be read as "top-scored names win 60%+ of the time," which it doesn't.
+2. **`path_barrier`'s own base rate (75-88% "win" at 5d/15d) is itself inflated by the barrier
+   construction**, per this file's own already-established finding on that exact label
+   definition — a wide-target/tight-stop asymmetry can make "WIN" easy to achieve independent of
+   real predictive skill. A genuinely unskilled score could still show positive AUC against its
+   own easy-to-satisfy barrier if the barrier's resolution correlates with something the score
+   also picks up (e.g. volatility) without that translating into real money.
+3. **The already-completed cost/turnover-aware `factor_backtest.py` run stands, unaffected by
+   this correction**, because it graded real portfolio returns net of real costs, not the
+   path_barrier label: 5d/top-50/15bps, 7 periods, net excess +1.52%/period, t=+1.54 — **still
+   not significant**, 83.4% one-way turnover, 12.61%/yr cost drag. This correction changes "how
+   good is the model at its own question" (materially better than previously measured), not
+   "does trading on it make money after costs" (still no, on the evidence that already exists).
+
+**Net effect on this file's "shared ceiling" analysis above**: that H1/H2/H3 investigation
+correctly tested whether the measured terminal-return AUC/IC pairs were internally consistent
+with each other and with a Gaussian-copula relationship — that finding stands on its own terms
+(it was explicitly about the terminal-return readings). What changes is the standing
+characterization of `win_probability` specifically as "AUC ceiling 0.537, never above" — it can
+clear 0.55+ against the right target, and this repo's own dominant failure mode (grade first,
+question the label second) applied to its own flagship model exactly as it did to three others
+today. Same lesson, same day, fourth instance: check the native label before trusting a "no
+edge"/"weak AUC" verdict on any model with its own training target, not just factors with none.
 
 ### ⚠ RETRACTION WITHDRAWN 2026-08-15 — the retraction itself was wrong. Result stands, preliminary.
 

@@ -29,7 +29,7 @@ export const MaxPainAlerts: React.FC<Props> = ({ onSelectStock }) => {
           <Target className="w-5 h-5 text-rose-400" />
           Max Pain Strike Magnet Alerts
         </h2>
-        <p className="text-[10px] font-mono text-slate-500 uppercase tracking-widest mt-0.5">
+        <p className="text-[10px] font-data text-slate-500 font-display uppercase tracking-widest mt-0.5">
           Option open interest gravity pulls price towards Max Pain strike on expiry weeks
         </p>
       </div>
@@ -73,13 +73,13 @@ export const MaxPainAlerts: React.FC<Props> = ({ onSelectStock }) => {
                     animate={{ opacity: 1, scale: 1 }}
                     exit={{ opacity: 0, scale: 0.98 }}
                     transition={{ duration: 0.2 }}
-                    className="p-4 bg-slate-950/45 border border-slate-900 hover:border-slate-800/80 rounded-xl transition-all cursor-pointer flex flex-col sm:flex-row sm:items-center justify-between gap-4 group"
+                    className="v1-card p-4 hover:border-slate-800/80 transition-all cursor-pointer flex flex-col sm:flex-row sm:items-center justify-between gap-4 group"
                     onClick={() => onSelectStock?.(item.symbol)}
                   >
                     {/* Left Details */}
                     <div className="space-y-1 sm:w-1/3">
                       <div className="flex items-center gap-2">
-                        <span className="text-sm font-black text-white uppercase tracking-wider">{item.symbol}</span>
+                        <span className="text-sm font-black text-white font-display uppercase tracking-wider">{item.symbol}</span>
                         <span className={cn("text-[8px] font-black px-1.5 py-0.5 rounded border uppercase",
                           item.strength === 'Strong Magnet' ? "bg-rose-500/10 text-rose-400 border-rose-500/20 animate-pulse" : "bg-slate-900 text-slate-500 border-slate-850"
                         )}>
@@ -92,16 +92,16 @@ export const MaxPainAlerts: React.FC<Props> = ({ onSelectStock }) => {
                     {/* Middle Numbers */}
                     <div className="grid grid-cols-3 gap-4 flex-grow max-w-xs text-center sm:text-left">
                       <div>
-                        <span className="text-[8px] font-black text-slate-500 uppercase tracking-widest block">Prev Close</span>
-                        <span className="text-xs font-bold text-slate-200 font-mono">₹{item.ltp.toFixed(1)}</span>
+                        <span className="text-[8px] font-black text-slate-500 font-display uppercase tracking-widest block">Prev Close</span>
+                        <span className="text-xs font-bold text-slate-200 font-data">₹{item.ltp.toFixed(1)}</span>
                       </div>
                       <div>
-                        <span className="text-[8px] font-black text-slate-500 uppercase tracking-widest block">Max Pain</span>
-                        <span className="text-xs font-bold text-indigo-400 font-mono">₹{item.maxPain.toFixed(1)}</span>
+                        <span className="text-[8px] font-black text-slate-500 font-display uppercase tracking-widest block">Max Pain</span>
+                        <span className="text-xs font-bold text-indigo-400 font-data">₹{item.maxPain.toFixed(1)}</span>
                       </div>
                       <div>
-                        <span className="text-[8px] font-black text-slate-500 uppercase tracking-widest block">Distance</span>
-                        <span className={cn("text-xs font-black font-mono", isBullishMagnet ? "text-emerald-400" : "text-rose-400")}>
+                        <span className="text-[8px] font-black text-slate-500 font-display uppercase tracking-widest block">Distance</span>
+                        <span className={cn("text-xs font-black font-data", isBullishMagnet ? "text-emerald-400" : "text-rose-400")}>
                           {item.diffPct >= 0 ? '+' : ''}{item.diffPct.toFixed(2)}%
                         </span>
                       </div>
@@ -110,7 +110,7 @@ export const MaxPainAlerts: React.FC<Props> = ({ onSelectStock }) => {
                     {/* Right Recommendation Badge */}
                     <div className="flex items-center justify-between sm:justify-end gap-3 border-t sm:border-t-0 border-slate-900/40 pt-2 sm:pt-0">
                       <div className="text-right">
-                        <p className={cn("text-[9px] font-black uppercase tracking-wider", isBullishMagnet ? "text-emerald-400" : "text-rose-400")}>
+                        <p className={cn("text-[9px] font-black font-display uppercase tracking-wider", isBullishMagnet ? "text-emerald-400" : "text-rose-400")}>
                           {item.rec}
                         </p>
                         <p className="text-[8px] text-slate-550 font-bold mt-0.5">Potential reversion gap of {Math.abs(item.diffPct).toFixed(1)}%</p>

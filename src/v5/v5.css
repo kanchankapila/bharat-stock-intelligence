@@ -1,5 +1,10 @@
-@import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=IBM+Plex+Sans:wght@400;500;600&display=swap');
-
+/* Space Grotesk/IBM Plex Sans are loaded via index.html's <link> tag (merged in
+   alongside the other four families 2026-08-21) -- this file used to @import them
+   itself, but v5.css is now pulled in globally via src/index.css (not just when
+   V5App mounts), and a nested @import stops being first-in-stylesheet the moment
+   anything precedes its host file in the merged bundle. PostCSS/Vite warned
+   "@import must precede all other statements" on every dev reload as a result;
+   an index.html <link> has no such ordering constraint. */
 /*
  * v5's component library, retrofitted to CSS custom properties 2026-08-07 so it can render
  * correctly wherever it's nested -- both under .v5-root (the standalone /v5 workbench, unchanged
@@ -287,6 +292,13 @@
 .v5-kpi-value-positive { color: var(--v5-positive); }
 .v5-kpi-value-negative { color: var(--v5-negative); }
 .v5-kpi-value-warning { color: var(--v5-warning); }
+
+/* Opt-in day-range/confidence bar for a KpiItem carrying a genuine 0-100 `pct` -- mirrors
+   v6-theme.css's .v6-bar-track/.v6-bar-fill idiom so the two visual languages read as the
+   same design system despite being separate CSS files (v5's must keep working under .v5-root
+   too, unlike v6-theme.css which is .v6-root-only -- see this file's header comment). */
+.v5-kpi-bar-track { margin-top: 6px; height: 4px; border-radius: 99px; background: var(--v5-border); overflow: hidden; }
+.v5-kpi-bar-fill { height: 100%; border-radius: 99px; transition: width 0.5s ease; }
 
 .v5-section-head {
   display: flex;

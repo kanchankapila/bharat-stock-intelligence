@@ -47,12 +47,13 @@ export const IndexOverview: React.FC<{ className?: string; onSelectIndex?: (id: 
               key={idx.name} 
               onClick={() => isClickable && onSelectIndex(indexId, idx.name)}
               className={cn(
-                "p-4 bg-slate-950 border border-slate-800 rounded-2xl transition-all group relative overflow-hidden",
-                isClickable ? "cursor-pointer hover:border-blue-500/30 hover:shadow-lg hover:translate-y-[-1px]" : ""
+                parseFloat(idx.changePer) >= 0 ? "v1-card-up" : "v1-card-down",
+                "p-4 transition-all group relative overflow-hidden",
+                isClickable ? "cursor-pointer hover:shadow-lg hover:translate-y-[-1px]" : ""
               )}
             >
               <div className="flex justify-between items-start mb-2">
-                <h4 className="text-xs font-black text-slate-400 group-hover:text-white transition-colors uppercase tracking-widest">{idx.name}</h4>
+                <h4 className="text-xs font-black text-slate-400 group-hover:text-white transition-colors font-display uppercase tracking-widest">{idx.name}</h4>
                 <span className={cn(
                   "text-[9px] font-black px-1.5 py-0.5 rounded uppercase tracking-tighter",
                   parseFloat(idx.changePer) >= 0 ? "bg-emerald-500/10 text-emerald-400" : "bg-rose-500/10 text-rose-400"
@@ -99,10 +100,10 @@ export const PennyStockIntelligence: React.FC<{
         <table className="w-full">
           <thead>
             <tr className="border-b border-slate-800">
-              <th className="pb-3 text-left text-[9px] font-black text-slate-500 uppercase tracking-widest">Symbol</th>
-              <th className="pb-3 text-right text-[9px] font-black text-slate-500 uppercase tracking-widest">Price</th>
-              <th className="pb-3 text-right text-[9px] font-black text-slate-500 uppercase tracking-widest">Wk %</th>
-              <th className="pb-3 text-right text-[9px] font-black text-slate-500 uppercase tracking-widest">Vol Chg</th>
+              <th className="pb-3 text-left text-[9px] font-black text-slate-500 font-display uppercase tracking-widest">Symbol</th>
+              <th className="pb-3 text-right text-[9px] font-black text-slate-500 font-display uppercase tracking-widest">Price</th>
+              <th className="pb-3 text-right text-[9px] font-black text-slate-500 font-display uppercase tracking-widest">Wk %</th>
+              <th className="pb-3 text-right text-[9px] font-black text-slate-500 font-display uppercase tracking-widest">Vol Chg</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-800/50">
@@ -133,7 +134,7 @@ export const PennyStockIntelligence: React.FC<{
                       <p className="text-xs font-black text-white group-hover:text-amber-400 transition-colors uppercase cursor-pointer truncate max-w-[120px] leading-tight" onClick={() => onSelectStock(stock.symbol)}>
                         {stock.companyName || stock.name}
                       </p>
-                      <p className="text-[8px] font-black text-slate-500 uppercase tracking-widest mt-0.5">{stock.symbol}</p>
+                      <p className="text-[8px] font-black text-slate-500 font-display uppercase tracking-widest mt-0.5">{stock.symbol}</p>
                     </div>
                   </div>
                 </td>

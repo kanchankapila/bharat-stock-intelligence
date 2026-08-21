@@ -80,12 +80,12 @@ export const OptionChainView: React.FC<OptionChainViewProps> = ({ defaultSymbol,
     <div className="flex flex-col h-full space-y-6 animate-in fade-in duration-500">
       
       {/* ── Header & Search ──────────────────────────────────────────────────────── */}
-      <div className="flex flex-col md:flex-row justify-between items-center gap-4 bg-slate-900/40 p-4 rounded-xl border border-slate-800/50 backdrop-blur-sm">
+      <div className="flex flex-col md:flex-row justify-between items-center gap-4">
         <div className="flex items-center gap-3">
           <Activity className="w-6 h-6 text-indigo-400" />
           <div>
-            <h2 className="text-xl font-bold font-['Rajdhani'] text-slate-100 uppercase tracking-widest">Options Chain Intelligence</h2>
-            <p className="text-[10px] text-slate-400 font-mono tracking-widest uppercase">Live Derivatives Data</p>
+            <h2 className="text-xl font-bold text-slate-100 font-display uppercase tracking-widest">Options Chain Intelligence</h2>
+            <p className="text-[10px] text-slate-400 font-data tracking-widest uppercase">Live Derivatives Data</p>
           </div>
         </div>
 
@@ -94,7 +94,7 @@ export const OptionChainView: React.FC<OptionChainViewProps> = ({ defaultSymbol,
             type="button"
             onClick={() => setShowGreeks(v => !v)}
             className={cn(
-              "text-xs font-mono font-bold rounded-lg px-4 py-2 border transition-colors",
+              "text-xs font-data font-bold rounded-lg px-4 py-2 border transition-colors",
               showGreeks
                 ? "bg-indigo-500/20 border-indigo-500/50 text-indigo-300"
                 : "bg-slate-950 border-slate-800 text-slate-400 hover:text-slate-200"
@@ -108,7 +108,7 @@ export const OptionChainView: React.FC<OptionChainViewProps> = ({ defaultSymbol,
               setSelectedSymbol(e.target.value);
               onSymbolSelect?.(e.target.value);
             }}
-            className="bg-slate-950 border border-slate-800 text-slate-200 text-xs font-mono font-bold rounded-lg px-4 py-2 focus:ring-1 focus:ring-indigo-500 outline-none"
+            className="bg-slate-950 border border-slate-800 text-slate-200 text-xs font-data font-bold rounded-lg px-4 py-2 focus:ring-1 focus:ring-indigo-500 outline-none"
           >
             {fnoSymbols.map((sym: string) => (
               <option key={sym} value={sym}>{sym}</option>
@@ -123,32 +123,32 @@ export const OptionChainView: React.FC<OptionChainViewProps> = ({ defaultSymbol,
           <Activity className="w-8 h-8 animate-pulse" />
         </div>
       ) : !parsedData ? (
-        <div className="text-center p-8 text-slate-500 font-mono text-xs">No Option Chain Data Available</div>
+        <div className="text-center p-8 text-slate-500 font-data text-xs">No Option Chain Data Available</div>
       ) : (
         <>
           {/* ── Sentiment & Levels ────────────────────────────────────────────────── */}
           <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
 
             {/* Max Pain */}
-            <div className="p-5 bg-slate-900/30 border border-amber-500/20 rounded-xl backdrop-blur-md relative overflow-hidden">
+            <div className="v1-card-neutral p-5 relative overflow-hidden">
               <div className="absolute top-0 right-0 p-4 opacity-10"><Target className="w-16 h-16" /></div>
-              <p className="text-[10px] font-black text-amber-400 uppercase tracking-widest mb-1">Max Pain Strike</p>
+              <p className="text-[10px] font-black text-amber-400 font-display uppercase tracking-widest mb-1">Max Pain Strike</p>
               {maxPain ? (
                 <>
-                  <p className="text-3xl font-black text-slate-100 font-mono tracking-tighter">
+                  <p className="text-3xl font-black text-slate-100 font-data tracking-tighter">
                     ₹{maxPain.toLocaleString('en-IN')}
                   </p>
                   <div className="mt-4 pt-4 border-t border-slate-800/50 flex justify-between items-center">
                     <div>
                       <p className="text-[9px] font-bold text-slate-500 uppercase">Distance from Spot</p>
-                      <p className={cn("text-lg font-black font-mono", (maxPainDiffPct ?? 0) < 0 ? "text-emerald-400" : "text-rose-400")}>
+                      <p className={cn("text-lg font-black font-data", (maxPainDiffPct ?? 0) < 0 ? "text-emerald-400" : "text-rose-400")}>
                         {maxPainDiffPct !== null ? `${maxPainDiffPct >= 0 ? '+' : ''}${maxPainDiffPct.toFixed(2)}%` : '—'}
                       </p>
                     </div>
                     <div className="text-right">
                       <p className="text-[9px] font-bold text-slate-500 uppercase">Pull</p>
                       <p className={cn(
-                        "text-[10px] font-bold uppercase tracking-wider px-2 py-1 rounded mt-1",
+                        "text-[10px] font-bold font-display uppercase tracking-wider px-2 py-1 rounded mt-1",
                         (maxPainDiffPct ?? 0) < 0 ? "bg-emerald-500/10 text-emerald-400" : "bg-rose-500/10 text-rose-400"
                       )}>
                         {(maxPainDiffPct ?? 0) < 0 ? 'Upward' : 'Downward'}
@@ -157,15 +157,15 @@ export const OptionChainView: React.FC<OptionChainViewProps> = ({ defaultSymbol,
                   </div>
                 </>
               ) : (
-                <p className="text-sm text-slate-500 font-mono mt-2">Not available for this expiry</p>
+                <p className="text-sm text-slate-500 font-data mt-2">Not available for this expiry</p>
               )}
             </div>
 
             {/* Spot & PCR Dial */}
-            <div className="p-5 bg-slate-900/30 border border-slate-800/50 rounded-xl backdrop-blur-md relative overflow-hidden">
+            <div className="v1-card p-5 relative overflow-hidden">
               <div className="absolute top-0 right-0 p-4 opacity-10"><Target className="w-16 h-16" /></div>
-              <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-1">Underlying Spot</p>
-              <p className="text-3xl font-black text-slate-100 font-mono tracking-tighter">
+              <p className="text-[10px] font-black text-slate-500 font-display uppercase tracking-widest mb-1">Underlying Spot</p>
+              <p className="text-3xl font-black text-slate-100 font-data tracking-tighter">
                 ₹{parsedData?.spotPrice?.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
               </p>
               
@@ -173,14 +173,14 @@ export const OptionChainView: React.FC<OptionChainViewProps> = ({ defaultSymbol,
                 <div>
                   <p className="text-[9px] font-bold text-slate-500 uppercase">ATM PCR</p>
                   <p className={cn(
-                    "text-lg font-black font-mono",
+                    "text-lg font-black font-data",
                     totalPCR > 1 ? "text-emerald-400" : "text-rose-400"
                   )}>{totalPCR.toFixed(2)}</p>
                 </div>
                 <div className="text-right">
                   <p className="text-[9px] font-bold text-slate-500 uppercase">Status</p>
                   <p className={cn(
-                    "text-[10px] font-bold uppercase tracking-wider px-2 py-1 rounded mt-1",
+                    "text-[10px] font-bold font-display uppercase tracking-wider px-2 py-1 rounded mt-1",
                     totalPCR > 1 ? "bg-emerald-500/10 text-emerald-400" : "bg-rose-500/10 text-rose-400"
                   )}>
                     {totalPCR > 1 ? 'Bullish' : 'Bearish'}
@@ -190,17 +190,17 @@ export const OptionChainView: React.FC<OptionChainViewProps> = ({ defaultSymbol,
             </div>
 
             {/* Resistance Visualizer */}
-            <div className="p-5 bg-slate-900/30 border border-rose-500/20 rounded-xl backdrop-blur-md">
+            <div className="v1-card-down p-5">
               <div className="flex justify-between items-center mb-4">
-                <p className="text-[10px] font-black text-rose-400 uppercase tracking-widest flex items-center gap-1">
+                <p className="text-[10px] font-black text-rose-400 font-display uppercase tracking-widest flex items-center gap-1">
                   <ShieldAlert className="w-3 h-3" /> Major Resistance
                 </p>
-                <span className="text-[9px] font-mono text-slate-500">CALL OI</span>
+                <span className="text-[9px] font-data text-slate-500">CALL OI</span>
               </div>
               <div className="space-y-3">
                 {opDatas.sort((a: any, b: any) => b.callOi - a.callOi).slice(0, 3).map((row: any, i: number) => (
                   <div key={row.strikePrice} className="relative">
-                    <div className="flex justify-between text-xs font-mono mb-1 relative z-10">
+                    <div className="flex justify-between text-xs font-data mb-1 relative z-10">
                       <span className="text-slate-200">{row.strikePrice}</span>
                       <span className="text-rose-300">{formatNumber(row.callOi)}</span>
                     </div>
@@ -216,17 +216,17 @@ export const OptionChainView: React.FC<OptionChainViewProps> = ({ defaultSymbol,
             </div>
 
             {/* Support Visualizer */}
-            <div className="p-5 bg-slate-900/30 border border-emerald-500/20 rounded-xl backdrop-blur-md">
+            <div className="v1-card-up p-5">
               <div className="flex justify-between items-center mb-4">
-                <p className="text-[10px] font-black text-emerald-400 uppercase tracking-widest flex items-center gap-1">
+                <p className="text-[10px] font-black text-emerald-400 font-display uppercase tracking-widest flex items-center gap-1">
                   <ShieldAlert className="w-3 h-3" /> Major Support
                 </p>
-                <span className="text-[9px] font-mono text-slate-500">PUT OI</span>
+                <span className="text-[9px] font-data text-slate-500">PUT OI</span>
               </div>
               <div className="space-y-3">
                 {opDatas.sort((a: any, b: any) => b.putOi - a.putOi).slice(0, 3).map((row: any, i: number) => (
                   <div key={row.strikePrice} className="relative">
-                    <div className="flex justify-between text-xs font-mono mb-1 relative z-10">
+                    <div className="flex justify-between text-xs font-data mb-1 relative z-10">
                       <span className="text-slate-200">{row.strikePrice}</span>
                       <span className="text-emerald-300">{formatNumber(row.putOi)}</span>
                     </div>
@@ -244,35 +244,35 @@ export const OptionChainView: React.FC<OptionChainViewProps> = ({ defaultSymbol,
           </div>
 
           {/* ── Option Chain Grid ─────────────────────────────────────────────────── */}
-          <div className="bg-slate-900/40 border border-slate-800/50 rounded-xl backdrop-blur-md overflow-hidden">
+          <div className="v1-card overflow-hidden">
             <div className="overflow-x-auto hide-scrollbar">
               <table className="w-full text-left border-collapse">
                 <thead>
                   <tr>
-                    <th colSpan={showGreeks ? 8 : 4} className="p-3 text-center bg-rose-950/20 border-b border-r border-slate-800/50 text-[10px] font-bold text-rose-400 uppercase tracking-widest">CALLS</th>
-                    <th className="p-3 text-center bg-slate-900 border-b border-slate-800/50 text-[10px] font-bold text-slate-400 uppercase tracking-widest">STRIKE</th>
-                    <th colSpan={showGreeks ? 8 : 4} className="p-3 text-center bg-emerald-950/20 border-b border-l border-slate-800/50 text-[10px] font-bold text-emerald-400 uppercase tracking-widest">PUTS</th>
+                    <th colSpan={showGreeks ? 8 : 4} className="p-3 text-center bg-rose-950/20 border-b border-r border-slate-800/50 text-[10px] font-bold text-rose-400 font-display uppercase tracking-widest">CALLS</th>
+                    <th className="p-3 text-center bg-slate-900 border-b border-slate-800/50 text-[10px] font-bold text-slate-400 font-display uppercase tracking-widest">STRIKE</th>
+                    <th colSpan={showGreeks ? 8 : 4} className="p-3 text-center bg-emerald-950/20 border-b border-l border-slate-800/50 text-[10px] font-bold text-emerald-400 font-display uppercase tracking-widest">PUTS</th>
                   </tr>
                   <tr className="bg-slate-900/80">
-                    {showGreeks && <th className="p-3 text-[10px] text-slate-500 font-mono text-right font-medium">Δ</th>}
-                    {showGreeks && <th className="p-3 text-[10px] text-slate-500 font-mono text-right font-medium">Γ</th>}
-                    {showGreeks && <th className="p-3 text-[10px] text-slate-500 font-mono text-right font-medium">Θ</th>}
-                    {showGreeks && <th className="p-3 text-[10px] text-slate-500 font-mono text-right font-medium">Vega</th>}
-                    <th className="p-3 text-[10px] text-slate-400 font-mono text-right font-medium">OI (L)</th>
-                    <th className="p-3 text-[10px] text-slate-400 font-mono text-right font-medium">Chg OI</th>
-                    <th className="p-3 text-[10px] text-slate-400 font-mono text-center font-medium">Build Up</th>
-                    <th className="p-3 text-[10px] text-slate-400 font-mono text-right font-medium border-r border-slate-800/50">LTP</th>
+                    {showGreeks && <th className="p-3 text-[10px] text-slate-500 font-data text-right font-medium">Δ</th>}
+                    {showGreeks && <th className="p-3 text-[10px] text-slate-500 font-data text-right font-medium">Γ</th>}
+                    {showGreeks && <th className="p-3 text-[10px] text-slate-500 font-data text-right font-medium">Θ</th>}
+                    {showGreeks && <th className="p-3 text-[10px] text-slate-500 font-data text-right font-medium">Vega</th>}
+                    <th className="p-3 text-[10px] text-slate-400 font-data text-right font-medium">OI (L)</th>
+                    <th className="p-3 text-[10px] text-slate-400 font-data text-right font-medium">Chg OI</th>
+                    <th className="p-3 text-[10px] text-slate-400 font-data text-center font-medium">Build Up</th>
+                    <th className="p-3 text-[10px] text-slate-400 font-data text-right font-medium border-r border-slate-800/50">LTP</th>
 
-                    <th className="p-3 text-xs text-slate-200 font-black font-mono text-center border-x border-slate-800/50 bg-slate-800/20">PRICE</th>
+                    <th className="p-3 text-xs text-slate-200 font-black font-data text-center border-x border-slate-800/50 bg-slate-800/20">PRICE</th>
 
-                    <th className="p-3 text-[10px] text-slate-400 font-mono text-left font-medium border-l border-slate-800/50">LTP</th>
-                    <th className="p-3 text-[10px] text-slate-400 font-mono text-center font-medium">Build Up</th>
-                    <th className="p-3 text-[10px] text-slate-400 font-mono text-left font-medium">Chg OI</th>
-                    <th className="p-3 text-[10px] text-slate-400 font-mono text-left font-medium">OI (L)</th>
-                    {showGreeks && <th className="p-3 text-[10px] text-slate-500 font-mono text-left font-medium">Δ</th>}
-                    {showGreeks && <th className="p-3 text-[10px] text-slate-500 font-mono text-left font-medium">Γ</th>}
-                    {showGreeks && <th className="p-3 text-[10px] text-slate-500 font-mono text-left font-medium">Θ</th>}
-                    {showGreeks && <th className="p-3 text-[10px] text-slate-500 font-mono text-left font-medium">Vega</th>}
+                    <th className="p-3 text-[10px] text-slate-400 font-data text-left font-medium border-l border-slate-800/50">LTP</th>
+                    <th className="p-3 text-[10px] text-slate-400 font-data text-center font-medium">Build Up</th>
+                    <th className="p-3 text-[10px] text-slate-400 font-data text-left font-medium">Chg OI</th>
+                    <th className="p-3 text-[10px] text-slate-400 font-data text-left font-medium">OI (L)</th>
+                    {showGreeks && <th className="p-3 text-[10px] text-slate-500 font-data text-left font-medium">Δ</th>}
+                    {showGreeks && <th className="p-3 text-[10px] text-slate-500 font-data text-left font-medium">Γ</th>}
+                    {showGreeks && <th className="p-3 text-[10px] text-slate-500 font-data text-left font-medium">Θ</th>}
+                    {showGreeks && <th className="p-3 text-[10px] text-slate-500 font-data text-left font-medium">Vega</th>}
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-800/30">
@@ -287,12 +287,12 @@ export const OptionChainView: React.FC<OptionChainViewProps> = ({ defaultSymbol,
                         isATM ? "bg-indigo-950/20 border-y border-indigo-500/30 shadow-[0_0_15px_rgba(99,102,241,0.1)]" : ""
                       )}>
                         {/* Calls */}
-                        {showGreeks && <td className="p-3 text-[11px] font-mono text-slate-400 text-right">{row.callDelta?.toFixed(2) ?? '-'}</td>}
-                        {showGreeks && <td className="p-3 text-[11px] font-mono text-slate-400 text-right">{row.callGamma?.toFixed(4) ?? '-'}</td>}
-                        {showGreeks && <td className="p-3 text-[11px] font-mono text-slate-400 text-right">{row.callTheta?.toFixed(2) ?? '-'}</td>}
-                        {showGreeks && <td className="p-3 text-[11px] font-mono text-slate-400 text-right">{row.callVega?.toFixed(2) ?? '-'}</td>}
-                        <td className="p-3 text-[11px] font-mono text-slate-300 text-right">{formatNumber(row.callOi)}</td>
-                        <td className={cn("p-3 text-[11px] font-mono text-right", row.callOiChange > 0 ? "text-emerald-400" : "text-rose-400")}>
+                        {showGreeks && <td className="p-3 text-[11px] font-data text-slate-400 text-right">{row.callDelta?.toFixed(2) ?? '-'}</td>}
+                        {showGreeks && <td className="p-3 text-[11px] font-data text-slate-400 text-right">{row.callGamma?.toFixed(4) ?? '-'}</td>}
+                        {showGreeks && <td className="p-3 text-[11px] font-data text-slate-400 text-right">{row.callTheta?.toFixed(2) ?? '-'}</td>}
+                        {showGreeks && <td className="p-3 text-[11px] font-data text-slate-400 text-right">{row.callVega?.toFixed(2) ?? '-'}</td>}
+                        <td className="p-3 text-[11px] font-data text-slate-300 text-right">{formatNumber(row.callOi)}</td>
+                        <td className={cn("p-3 text-[11px] font-data text-right", row.callOiChange > 0 ? "text-emerald-400" : "text-rose-400")}>
                           {row.callOiChange > 0 ? '+' : ''}{formatNumber(row.callOiChange)}
                         </td>
                         <td className="p-3 text-center">
@@ -300,21 +300,21 @@ export const OptionChainView: React.FC<OptionChainViewProps> = ({ defaultSymbol,
                             {row.callBuiltup || '-'}
                           </span>
                         </td>
-                        <td className="p-3 text-[11px] font-mono text-right font-semibold border-r border-slate-800/50 text-slate-200">
+                        <td className="p-3 text-[11px] font-data text-right font-semibold border-r border-slate-800/50 text-slate-200">
                           {row.callLtp?.toFixed(2)}
                         </td>
                         
                         {/* Strike */}
                         <td className={cn(
-                          "p-3 text-sm font-black font-mono text-center border-x border-slate-800/50",
+                          "p-3 text-sm font-black font-data text-center border-x border-slate-800/50",
                           isATM ? "text-indigo-400 bg-indigo-950/40" : "text-slate-200 bg-slate-900/30"
                         )}>
                           {row.strikePrice}
-                          {isATM && <div className="text-[8px] font-sans uppercase tracking-widest text-indigo-300 mt-0.5">ATM</div>}
+                          {isATM && <div className="text-[8px] font-sans font-display uppercase tracking-widest text-indigo-300 mt-0.5">ATM</div>}
                         </td>
                         
                         {/* Puts */}
-                        <td className="p-3 text-[11px] font-mono text-left font-semibold border-l border-slate-800/50 text-slate-200">
+                        <td className="p-3 text-[11px] font-data text-left font-semibold border-l border-slate-800/50 text-slate-200">
                           {row.putLtp?.toFixed(2)}
                         </td>
                         <td className="p-3 text-center">
@@ -322,14 +322,14 @@ export const OptionChainView: React.FC<OptionChainViewProps> = ({ defaultSymbol,
                             {row.putBuiltup || '-'}
                           </span>
                         </td>
-                        <td className={cn("p-3 text-[11px] font-mono text-left", row.putOiChange > 0 ? "text-emerald-400" : "text-rose-400")}>
+                        <td className={cn("p-3 text-[11px] font-data text-left", row.putOiChange > 0 ? "text-emerald-400" : "text-rose-400")}>
                           {row.putOiChange > 0 ? '+' : ''}{formatNumber(row.putOiChange)}
                         </td>
-                        <td className="p-3 text-[11px] font-mono text-slate-300 text-left">{formatNumber(row.putOi)}</td>
-                        {showGreeks && <td className="p-3 text-[11px] font-mono text-slate-400 text-left">{row.putDelta?.toFixed(2) ?? '-'}</td>}
-                        {showGreeks && <td className="p-3 text-[11px] font-mono text-slate-400 text-left">{row.putGamma?.toFixed(4) ?? '-'}</td>}
-                        {showGreeks && <td className="p-3 text-[11px] font-mono text-slate-400 text-left">{row.putTheta?.toFixed(2) ?? '-'}</td>}
-                        {showGreeks && <td className="p-3 text-[11px] font-mono text-slate-400 text-left">{row.putVega?.toFixed(2) ?? '-'}</td>}
+                        <td className="p-3 text-[11px] font-data text-slate-300 text-left">{formatNumber(row.putOi)}</td>
+                        {showGreeks && <td className="p-3 text-[11px] font-data text-slate-400 text-left">{row.putDelta?.toFixed(2) ?? '-'}</td>}
+                        {showGreeks && <td className="p-3 text-[11px] font-data text-slate-400 text-left">{row.putGamma?.toFixed(4) ?? '-'}</td>}
+                        {showGreeks && <td className="p-3 text-[11px] font-data text-slate-400 text-left">{row.putTheta?.toFixed(2) ?? '-'}</td>}
+                        {showGreeks && <td className="p-3 text-[11px] font-data text-slate-400 text-left">{row.putVega?.toFixed(2) ?? '-'}</td>}
                       </tr>
                     );
                   })}

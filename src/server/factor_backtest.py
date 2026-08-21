@@ -262,6 +262,23 @@ FACTORS = {
     # above). See FEATURE_STORE_FACTORS / _add_feature_store for the exclusion rationale.
     **{f'fs_{c}': (lambda d, c=c: d[c]) for c in FEATURE_STORE_FACTORS},
 
+    # -- Mean-reversion composite (2026-08-20). The 14 fs_* columns above that clear Bonferroni
+    # are ALL negative long-only -- i.e. going long the highest readings on these
+    # overbought/high-momentum/high-volume indicators loses money. That's a real signal read
+    # backwards for a long-only portfolio, not "no signal" -- so test the natural long-only-
+    # compatible construction: go long the names with the LOWEST readings (oversold/calm)
+    # instead, sign-flipped, equal-weighted z-score sum of exactly the 14 Bonferroni-clearing
+    # columns (not all 23 -- the 9 that were never significant either way don't belong in a
+    # composite built to test THIS specific finding). No new short-selling infrastructure
+    # needed -- this is a standard long-only rank, same as every other factor in this file.
+    'mean_reversion_14': lambda d: -(
+        _z(d['stoch_d']) + _z(d['williams_r']) + _z(d['stoch_k']) + _z(d['cci'])
+        + _z(d['di_plus']) + _z(d['dist_sma20_pct']) + _z(d['vwap_dist_pct'])
+        + _z(d['volume_ratio_20d']) + _z(d['obv_slope']) + _z(d['atr_pct'])
+        + _z(d['volume_ratio_5d']) + _z(d['macd_hist']) + _z(d['mtf_alignment_score'])
+        + _z(d['bb_width'])
+    ),
+
     # -- PEAD (post-earnings-announcement drift), pre-registered (2026-08-13). Bernard/Thomas
     # (1989): stocks whose most recent result beat estimates continue drifting UP for weeks;
     # misses continue drifting down. pead_model.py's own compute_pead_score() is NOT usable --
@@ -274,6 +291,12 @@ FACTORS = {
     # is what gets tested here, not pead_score.
     'earnings_beat_yoy': lambda d: d['earnings_category_yoy'],
     'earnings_beat_qoq': lambda d: d['earnings_category_qoq'],
+
+    # -- win_probability (2026-08-20), the cost/turnover-aware portfolio run measurement.md's
+    # win_probability section names as the still-open step. Raw score, no sign flip -- higher
+    # win_probability is the model's own claim of higher win odds, so top-K = highest score is
+    # the natural long side. See _add_win_probability for the point-in-time/coverage notes.
+    'win_probability': lambda d: d['win_probability'],
 
     # -- Contested SCREENER families, reconstructed from price so their direction is
     # MEASURED rather than read off the screener's wording. Each is signed so that a
@@ -515,6 +538,7 @@ def load_price_panel(start: str = DEFAULT_START,
     px = _add_screener_breadth(px)
     px = _add_feature_store(px, start, end)
     px = _add_earnings_category(px, start, end)
+    px = _add_win_probability(px, start, end)
     px = px.drop(columns=['_dr', '_hi252', '_mkt', '_ticket'], errors='ignore')
 
     # TWO different eligibilities, and conflating them is what made the live screen stale:
@@ -919,6 +943,39 @@ def _add_earnings_category(px: pd.DataFrame, start: str, end: str) -> pd.DataFra
     print(f"[FactorBacktest] earnings_category: {len(ec):,} rows merged, {ec['date'].nunique()} "
           f"distinct dates. Coverage -- yoy={int(px['earnings_category_yoy'].notna().sum()):,}, "
           f"qoq={int(px['earnings_category_qoq'].notna().sum()):,}")
+    return px
+
+
+def _add_win_probability(px: pd.DataFrame, start: str, end: str) -> pd.DataFrame:
+    """Merge technical_signals.win_probability onto the panel -- the cost/turnover-aware
+    portfolio run measurement.md's win_probability section names as the still-open step
+    after its 2026-08-20 factor_edge.py re-measurement (real rank_IC, hit_AUC never clears
+    the 0.55 USABLE bar).
+
+    Same point-in-time convention as _add_earnings_category: technical_signals.date is the
+    trading day the row's win_probability describes. Write-timing verified live 2026-08-20
+    via win_probability_scored_at -- average ~14h after that date's UTC midnight, i.e. the
+    evening of the SAME IST calendar day, well before the next session's open this harness
+    enters at. win_probability_scored_at itself is only populated from 2026-08-15 onward
+    (added by migration 1787050000000), so it can't be used as a provenance FILTER over the
+    whole panel without discarding almost all history -- same tradeoff _add_earnings_category
+    already accepts for earnings_category_yoy/_qoq, not a new gap introduced here.
+    """
+    try:
+        wp = read_df(
+            "SELECT symbol, date, win_probability FROM technical_signals "
+            "WHERE win_probability IS NOT NULL AND date >= ? AND date <= ?",
+            (start, end),
+        )
+    except Exception as e:                                      # noqa: BLE001
+        print(f"[FactorBacktest] WARNING: win_probability unavailable ({str(e)[:80]}); skipped.", file=sys.stderr)
+        px['win_probability'] = np.nan
+        return px
+
+    wp['date'] = pd.to_datetime(wp['date']).dt.strftime('%Y-%m-%d')
+    px = px.merge(wp, on=['symbol', 'date'], how='left')
+    print(f"[FactorBacktest] win_probability: {len(wp):,} rows merged, {wp['date'].nunique()} "
+          f"distinct dates. Coverage -- {int(px['win_probability'].notna().sum()):,}")
     return px
 
 

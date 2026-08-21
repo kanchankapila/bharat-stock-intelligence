@@ -48,7 +48,7 @@ export const V1TechnicalAnalysis: React.FC<{ symbol: string }> = ({ symbol }) =>
             key={tf.id}
             onClick={() => setTimeframe(tf.id as any)}
             className={cn(
-              "px-4 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all border",
+              "px-4 py-1.5 rounded-lg text-[10px] font-black font-display uppercase tracking-widest transition-all border",
               timeframe === tf.id ? "bg-blue-600 border-blue-600 text-white shadow-lg" : "glass-strong border-slate-800/50 text-slate-400 hover:text-white"
             )}
           >
@@ -61,21 +61,21 @@ export const V1TechnicalAnalysis: React.FC<{ symbol: string }> = ({ symbol }) =>
         <Card title="TradingView Advanced TA" icon={Zap}>
           <div className="grid grid-cols-3 gap-4 text-center mb-6">
             <div className="p-4 glass-strong rounded-2xl border border-slate-800/50">
-              <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">Oscillators</p>
+              <p className="text-[10px] font-black text-slate-400 font-display uppercase tracking-widest mb-2">Oscillators</p>
               <p className={cn("text-xl font-black italic tracking-tighter uppercase",
                 tvTa.oscillators?.RECOMMENDATION?.includes('BUY') ? 'text-emerald-500' :
                 tvTa.oscillators?.RECOMMENDATION?.includes('SELL') ? 'text-rose-500' : 'text-amber-500'
               )}>{tvTa.oscillators?.RECOMMENDATION || 'NEUTRAL'}</p>
             </div>
             <div className="p-4 glass-strong rounded-2xl border border-slate-800/50">
-              <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">Summary</p>
+              <p className="text-[10px] font-black text-slate-400 font-display uppercase tracking-widest mb-2">Summary</p>
               <p className={cn("text-2xl font-black italic tracking-tighter uppercase",
                 tvTa.summary?.RECOMMENDATION?.includes('BUY') ? 'text-emerald-500' :
                 tvTa.summary?.RECOMMENDATION?.includes('SELL') ? 'text-rose-500' : 'text-amber-500'
               )}>{tvTa.summary?.RECOMMENDATION || 'NEUTRAL'}</p>
             </div>
             <div className="p-4 glass-strong rounded-2xl border border-slate-800/50">
-              <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">Moving Averages</p>
+              <p className="text-[10px] font-black text-slate-400 font-display uppercase tracking-widest mb-2">Moving Averages</p>
               <p className={cn("text-xl font-black italic tracking-tighter uppercase",
                 tvTa.moving_averages?.RECOMMENDATION?.includes('BUY') ? 'text-emerald-500' :
                 tvTa.moving_averages?.RECOMMENDATION?.includes('SELL') ? 'text-rose-500' : 'text-amber-500'
@@ -91,7 +91,7 @@ export const V1TechnicalAnalysis: React.FC<{ symbol: string }> = ({ symbol }) =>
               {indicators.map((ind: any) => (
                 <div key={ind.name} className="flex justify-between items-center p-3 glass-strong rounded-xl border border-slate-800/30">
                   <div>
-                    <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">{ind.name}</p>
+                    <p className="text-[10px] font-black text-slate-400 font-display uppercase tracking-widest">{ind.name}</p>
                     {Array.isArray(ind.value) ? (
                       <p className="text-xs font-bold text-slate-400 mt-0.5">Multiple Bands</p>
                     ) : (
@@ -118,7 +118,7 @@ export const V1TechnicalAnalysis: React.FC<{ symbol: string }> = ({ symbol }) =>
                 <div className="p-4 glass-strong border border-slate-800/50 rounded-2xl">
                    <div className="flex justify-between items-end mb-4">
                       <div>
-                         <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1">Momentum Oscillator</p>
+                         <p className="text-[9px] font-black text-slate-400 font-display uppercase tracking-widest mb-1">Momentum Oscillator</p>
                          <h4 className="text-xl font-black text-white italic tracking-tighter">MACD Line</h4>
                       </div>
                       <span className={cn(
@@ -153,10 +153,10 @@ export const V1TechnicalAnalysis: React.FC<{ symbol: string }> = ({ symbol }) =>
                 </div>
 
                 <div className="space-y-3">
-                   <h5 className="text-[10px] font-black text-slate-400 uppercase tracking-widest pl-1">Scanner Insights</h5>
+                   <h5 className="text-[10px] font-black text-slate-400 font-display uppercase tracking-widest pl-1">Scanner Insights</h5>
                    {technicalScan?.signals?.filter((s: any) => s.type === 'MACD').map((signal: any, idx: number) => (
                       <div key={idx} className="p-3 bg-blue-500/5 border border-blue-500/10 rounded-xl">
-                         <p className="text-[10px] font-black text-blue-400 uppercase tracking-widest mb-1">{signal.label}</p>
+                         <p className="text-[10px] font-black text-blue-400 font-display uppercase tracking-widest mb-1">{signal.label}</p>
                          <p className="text-[11px] text-slate-400 leading-relaxed italic">{signal.description}</p>
                       </div>
                    ))}
@@ -169,7 +169,7 @@ export const V1TechnicalAnalysis: React.FC<{ symbol: string }> = ({ symbol }) =>
                 {crossovers.map((cross: any) => (
                    <div key={cross.key} className="p-4 glass-strong border border-slate-800/50 rounded-2xl flex items-center justify-between">
                       <div>
-                         <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">{cross.period}</p>
+                         <p className="text-[10px] font-black text-slate-400 font-display uppercase tracking-widest mb-1">{cross.period}</p>
                          <p className="text-sm font-bold text-white leading-tight">{cross.displayValue}</p>
                       </div>
                       <span className={cn(
@@ -194,13 +194,13 @@ export const V1TechnicalAnalysis: React.FC<{ symbol: string }> = ({ symbol }) =>
             <div className="flex glass rounded-lg p-0.5 border border-slate-800/50">
               <button
                 onClick={() => setMaType('SMA')}
-                className={cn("px-3 py-1 rounded-md text-[9px] font-black uppercase tracking-widest transition-all", maType === 'SMA' ? "bg-slate-800 text-white" : "text-slate-400")}
+                className={cn("px-3 py-1 rounded-md text-[9px] font-black font-display uppercase tracking-widest transition-all", maType === 'SMA' ? "bg-slate-800 text-white" : "text-slate-400")}
               >
                 SMA
               </button>
               <button
                 onClick={() => setMaType('EMA')}
-                className={cn("px-3 py-1 rounded-md text-[9px] font-black uppercase tracking-widest transition-all", maType === 'EMA' ? "bg-slate-800 text-white" : "text-slate-400")}
+                className={cn("px-3 py-1 rounded-md text-[9px] font-black font-display uppercase tracking-widest transition-all", maType === 'EMA' ? "bg-slate-800 text-white" : "text-slate-400")}
               >
                 EMA
               </button>
@@ -211,7 +211,7 @@ export const V1TechnicalAnalysis: React.FC<{ symbol: string }> = ({ symbol }) =>
               {movingAverages.map((ma: any) => (
                  <div key={ma.name} className="flex justify-between items-center p-3 glass-strong rounded-xl border border-slate-800/30">
                     <div>
-                      <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">{ma.name}</p>
+                      <p className="text-[10px] font-black text-slate-400 font-display uppercase tracking-widest">{ma.name}</p>
                       <p className="text-xs font-bold text-white mt-0.5">₹{ma.value}</p>
                     </div>
                     <span className={cn(
@@ -230,7 +230,7 @@ export const V1TechnicalAnalysis: React.FC<{ symbol: string }> = ({ symbol }) =>
               {/* Custom patterns detected from chart data */}
               {detectedPatterns.length > 0 && (
                 <div className="space-y-3">
-                  <h5 className="text-[10px] font-black text-slate-400 uppercase tracking-widest pl-1">Chart Patterns Identified</h5>
+                  <h5 className="text-[10px] font-black text-slate-400 font-display uppercase tracking-widest pl-1">Chart Patterns Identified</h5>
                   {detectedPatterns.map((pattern, idx) => (
                     <div key={idx} className={cn(
                       "p-4 glass-strong border rounded-2xl relative overflow-hidden",
@@ -278,7 +278,7 @@ export const V1TechnicalAnalysis: React.FC<{ symbol: string }> = ({ symbol }) =>
 
               <div className="p-4 glass-strong border border-slate-800/50 rounded-2xl">
                  <div className="flex justify-between items-center mb-1">
-                    <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Volatility Status</span>
+                    <span className="text-[9px] font-black text-slate-400 font-display uppercase tracking-widest">Volatility Status</span>
                     <span className="text-[10px] font-black text-white uppercase">{technicalScan?.volatility?.label}</span>
                  </div>
                  <div className="h-1 bg-slate-800 rounded-full overflow-hidden">
@@ -306,7 +306,7 @@ export const V1TechnicalAnalysis: React.FC<{ symbol: string }> = ({ symbol }) =>
               const displayVal = typeof p.val === 'number' ? `₹${p.val.toFixed(2)}` : p.val;
               return (
                 <div key={p.label} className="p-4 glass-strong rounded-2xl border border-slate-800/50 text-center">
-                   <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1">{p.label}</p>
+                   <p className="text-[9px] font-black text-slate-400 font-display uppercase tracking-widest mb-1">{p.label}</p>
                    <p className="text-sm font-black text-white italic">{displayVal}</p>
                 </div>
               );

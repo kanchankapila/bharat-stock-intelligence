@@ -68,12 +68,12 @@ function fmtIstSchedule(iso: string | null | undefined): string {
   }
 }
 
-const STATE_CONFIG: Record<RunState, { label: string; color: string; bg: string; icon: any }> = {
-  never:   { label: 'Never Run', color: 'text-slate-400',  bg: 'bg-slate-800',    icon: Clock },
-  running: { label: 'Running',   color: 'text-blue-400',   bg: 'bg-blue-900/40',  icon: RefreshCw },
-  success: { label: 'OK',        color: 'text-emerald-400',bg: 'bg-emerald-900/30',icon: CheckCircle },
-  failed:  { label: 'Failed',    color: 'text-red-400',    bg: 'bg-red-900/30',   icon: XCircle },
-  stale:   { label: 'Stale',     color: 'text-amber-400',  bg: 'bg-amber-900/30', icon: AlertTriangle },
+const STATE_CONFIG: Record<RunState, { label: string; color: string; bg: string; border: string; card: string; pill: string; icon: any }> = {
+  never:   { label: 'Never Run', color: 'text-slate-400',  bg: 'bg-slate-800',     border: 'border-slate-700',      card: 'v1-card-accent',  pill: 'v1-stat-pill',         icon: Clock },
+  running: { label: 'Running',   color: 'text-indigo-400', bg: 'bg-indigo-900/40', border: 'border-indigo-700/40',  card: 'v1-card',         pill: 'v1-stat-pill',         icon: RefreshCw },
+  success: { label: 'OK',        color: 'text-emerald-400',bg: 'bg-emerald-900/30',border: 'border-emerald-700/40', card: 'v1-card-up',      pill: 'v1-stat-pill-up',      icon: CheckCircle },
+  failed:  { label: 'Failed',    color: 'text-rose-400',   bg: 'bg-rose-900/30',   border: 'border-rose-700/40',    card: 'v1-card-down',    pill: 'v1-stat-pill-down',    icon: XCircle },
+  stale:   { label: 'Stale',     color: 'text-amber-400',  bg: 'bg-amber-900/30',  border: 'border-amber-700/40',   card: 'v1-card-neutral', pill: 'v1-stat-pill-neutral', icon: AlertTriangle },
 };
 
 const CATEGORY_ICON: Record<string, any> = {
@@ -93,9 +93,7 @@ function ScriptCard({ script, onTrigger, triggering }: {
   const isRunning = script.runState === 'running' || triggering;
 
   return (
-    <div className={`rounded-xl border p-4 flex flex-col gap-3 transition-all
-      ${script.critical ? 'border-slate-700' : 'border-slate-800'}
-      bg-slate-900/70 hover:bg-slate-900`}>
+    <div className={`${state.card} p-4 flex flex-col gap-3`}>
 
       {/* Header */}
       <div className="flex items-start justify-between gap-2">
@@ -103,12 +101,12 @@ function ScriptCard({ script, onTrigger, triggering }: {
           <CatIcon className="w-4 h-4 text-slate-500 shrink-0" />
           <span className="text-sm font-semibold text-white whitespace-normal break-words leading-tight">{script.label}</span>
           {script.critical && (
-            <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-indigo-900/60 text-indigo-300 uppercase tracking-wider shrink-0">
+            <span className="v1-badge text-[9px] bg-indigo-900/60 border-indigo-700/40 text-indigo-300 font-display uppercase tracking-wider shrink-0">
               Critical
             </span>
           )}
         </div>
-        <span className={`flex items-center gap-1 text-[11px] font-bold px-2 py-0.5 rounded-full shrink-0 ${state.bg} ${state.color}`}>
+        <span className={`v1-badge text-[11px] shrink-0 ${state.bg} ${state.border} ${state.color}`}>
           <StateIcon className={`w-3 h-3 ${script.runState === 'running' ? 'animate-spin' : ''}`} />
           {state.label}
         </span>
@@ -123,7 +121,7 @@ function ScriptCard({ script, onTrigger, triggering }: {
           {Object.entries(script.stats).map(([k, v]) => (
             <div key={k} className="text-[11px]">
               <span className="text-slate-500 capitalize">{k}: </span>
-              <span className="text-slate-200 font-mono font-semibold">{String(v ?? '—')}</span>
+              <span className="text-slate-200 font-data font-semibold">{String(v ?? '—')}</span>
             </div>
           ))}
         </div>
@@ -131,7 +129,7 @@ function ScriptCard({ script, onTrigger, triggering }: {
 
       {/* Error */}
       {script.error && (
-        <div className="text-[11px] text-red-400 bg-red-900/20 rounded px-2 py-1 font-mono whitespace-pre-wrap break-words leading-snug">
+        <div className="text-[11px] text-rose-400 bg-rose-900/20 rounded px-2 py-1 font-data whitespace-pre-wrap break-words leading-snug">
           {script.error}
         </div>
       )}
@@ -153,8 +151,8 @@ function ScriptCard({ script, onTrigger, triggering }: {
             Next schedule: <span className="text-slate-400">{fmtIstSchedule(script.nextScheduledAt ?? null)}</span>
           </div>
           <div className="text-slate-600">
-            Runs: <span className="text-slate-400 font-mono">{script.runCount ?? 0}</span>
-            {' '}· Fails: <span className="text-slate-400 font-mono">{script.failCount ?? 0}</span>
+            Runs: <span className="text-slate-400 font-data">{script.runCount ?? 0}</span>
+            {' '}· Fails: <span className="text-slate-400 font-data">{script.failCount ?? 0}</span>
           </div>
           <div className="text-[10px] text-slate-600 whitespace-normal break-words">{script.schedule}</div>
         </div>
@@ -162,11 +160,7 @@ function ScriptCard({ script, onTrigger, triggering }: {
         <button
           onClick={() => onTrigger(script.id)}
           disabled={isRunning}
-          className={`flex items-center gap-1.5 text-[11px] font-semibold px-3 py-1.5 rounded-lg transition-all
-            ${isRunning
-              ? 'bg-slate-800 text-slate-600 cursor-not-allowed'
-              : 'bg-indigo-600 hover:bg-indigo-500 text-white active:scale-95'
-            }`}
+          className="v1-btn-primary text-[11px] gap-1.5 px-3 py-1.5"
         >
           {isRunning
             ? <RefreshCw className="w-3 h-3 animate-spin" />
@@ -228,7 +222,7 @@ export default function SystemMonitorPage() {
   };
 
   return (
-    <div className="min-h-screen bg-slate-950 p-4 md:p-6 space-y-6">
+    <div className="min-h-screen p-4 md:p-6 space-y-6">
 
       {/* Page header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
@@ -237,7 +231,7 @@ export default function SystemMonitorPage() {
             <Zap className="w-5 h-5 text-indigo-400" />
           </div>
           <div>
-            <h1 className="text-lg font-bold text-white">System Monitor</h1>
+            <h1 className="v1-title-page">System Monitor</h1>
             <p className="text-xs text-slate-400">Signal generation pipeline — script status & manual controls</p>
           </div>
         </div>
@@ -246,11 +240,7 @@ export default function SystemMonitorPage() {
           <span className="text-[10px] text-slate-600">
             Updated {dataUpdatedAt ? relTime(new Date(dataUpdatedAt).toISOString()) : '—'}
           </span>
-          <button
-            onClick={() => refetch()}
-            className="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white transition-colors"
-            title="Refresh"
-          >
+          <button onClick={() => refetch()} className="v1-btn-icon" title="Refresh">
             <RefreshCw className="w-4 h-4" />
           </button>
           <button
@@ -270,17 +260,17 @@ export default function SystemMonitorPage() {
       {/* Summary bar */}
       <div className="grid grid-cols-5 gap-3">
         {[
-          { label: 'OK',      val: summary.ok,      color: 'text-emerald-400', bg: 'bg-emerald-900/20', icon: CheckCircle },
-          { label: 'Running', val: summary.running,  color: 'text-blue-400',   bg: 'bg-blue-900/20',    icon: RefreshCw },
-          { label: 'Stale',   val: summary.stale,    color: 'text-amber-400',  bg: 'bg-amber-900/20',   icon: AlertTriangle },
-          { label: 'Failed',  val: summary.failed,   color: 'text-red-400',    bg: 'bg-red-900/20',     icon: XCircle },
-          { label: 'Never',   val: summary.never,    color: 'text-slate-400',  bg: 'bg-slate-800',      icon: Clock },
-        ].map(({ label, val, color, bg, icon: Icon }) => (
-          <div key={label} className={`rounded-xl p-3 flex items-center gap-2 ${bg}`}>
-            <Icon className={`w-4 h-4 ${color} shrink-0 ${label === 'Running' && val > 0 ? 'animate-spin' : ''}`} />
+          { label: 'OK',      val: summary.ok,      state: STATE_CONFIG.success },
+          { label: 'Running', val: summary.running, state: STATE_CONFIG.running },
+          { label: 'Stale',   val: summary.stale,   state: STATE_CONFIG.stale },
+          { label: 'Failed',  val: summary.failed,  state: STATE_CONFIG.failed },
+          { label: 'Never',   val: summary.never,   state: STATE_CONFIG.never },
+        ].map(({ label, val, state: s }) => (
+          <div key={label} className={`${s.pill} flex-row items-center gap-2 p-3`}>
+            <s.icon className={`w-4 h-4 ${s.color} shrink-0 ${label === 'Running' && val > 0 ? 'animate-spin' : ''}`} />
             <div>
-              <div className={`text-xl font-black ${color}`}>{val}</div>
-              <div className="text-[10px] text-slate-500 uppercase font-bold tracking-wide">{label}</div>
+              <div className={`v1-data-value ${s.color}`}>{val}</div>
+              <div className="v1-data-label">{label}</div>
             </div>
           </div>
         ))}
@@ -288,14 +278,14 @@ export default function SystemMonitorPage() {
 
       {/* Schedule + status matrix (IST) */}
       {(scripts || []).length > 0 && (
-        <div className="rounded-xl border border-slate-800 bg-slate-900/50 p-4">
-          <h3 className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-3 flex items-center gap-2">
+        <div className="v1-card p-4">
+          <h3 className="v1-title-card mb-3 flex items-center gap-2">
             <Clock className="w-3.5 h-3.5" /> Job Schedule Matrix (IST)
           </h3>
           <div className="overflow-x-auto">
             <table className="w-full text-left border-collapse">
               <thead>
-                <tr className="border-b border-slate-800 text-[10px] text-slate-500 uppercase tracking-wider">
+                <tr className="border-b border-slate-800 text-[10px] text-slate-500 font-display uppercase tracking-wider">
                   <th className="py-2 pr-3">Job</th>
                   <th className="py-2 pr-3">Category</th>
                   <th className="py-2 pr-3">Configured Schedule</th>
@@ -314,7 +304,7 @@ export default function SystemMonitorPage() {
                       <td className="py-2 pr-3 text-slate-400 whitespace-normal break-words">{s.schedule}</td>
                       <td className="py-2 pr-3 text-indigo-300 whitespace-normal break-words">{fmtIstSchedule(s.nextScheduledAt ?? null)}</td>
                       <td className="py-2 pr-3">
-                        <span className={`inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full ${state.bg} ${state.color}`}>
+                        <span className={`v1-badge text-[10px] ${state.bg} ${state.border} ${state.color}`}>
                           <MatrixStateIcon className={`w-3 h-3 ${s.runState === 'running' ? 'animate-spin' : ''}`} />
                           {state.label}
                         </span>
@@ -343,7 +333,7 @@ export default function SystemMonitorPage() {
           <div key={cat} className="space-y-3">
             <div className="flex items-center gap-2">
               <CatIcon className="w-4 h-4 text-slate-500" />
-              <h2 className="text-sm font-bold text-slate-300 uppercase tracking-widest">{cat}</h2>
+              <h2 className="v1-title-section">{cat}</h2>
               <div className="flex-1 h-px bg-slate-800" />
             </div>
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
@@ -361,8 +351,8 @@ export default function SystemMonitorPage() {
       })}
 
       {/* Schedule reference */}
-      <div className="rounded-xl border border-slate-800 bg-slate-900/50 p-4">
-        <h3 className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-3 flex items-center gap-2">
+      <div className="v1-card p-4">
+        <h3 className="v1-title-card mb-3 flex items-center gap-2">
           <Clock className="w-3.5 h-3.5" /> Auto-Schedule Reference
         </h3>
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2">

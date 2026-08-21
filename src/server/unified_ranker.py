@@ -108,14 +108,48 @@ HORIZON_MULT = {
 # real but is a DIFFERENT construction; a blend engine consumes the long-only top slice, which is
 # the one that loses. See measurement.md, which names this engine explicitly. The draft also left
 # BEAR and SIDEWAYS summing to 0.995 rather than 1.0.
+# `screener` shrunk 0.5x, 2026-08-20 -- same ENGINE_EDGE_SHRINK factor this file already
+# applies elsewhere for a demonstrated "no edge"/negative engine (see edge_adjusted_weights),
+# applied here directly rather than through that mechanism because its own gate reads
+# factor_edge_history against unified_recommendations, which is stuck at 1 date (LOW-DATA,
+# same calendar constraint as smart_money_score) and can't fire yet. `screener` was the
+# HEAVIEST-weighted engine of all 8 in every regime (0.20-0.40) despite two independent,
+# well-powered live measurements both finding it net-negative: measurement.md's own
+# "screener bullish consensus IC -0.027, t=-2.36" (0/552-1,563 individual screeners survive
+# correction), and a same-session natural experiment (2026-08-20) comparing
+# confluence_signals.confluence_score, which bakes in a screener sub-component, against the
+# identical construction with that component stripped out (_get_confluence_scores's own
+# 2026-08-05 "decorrelation fix") -- WITH screener graded consistently worse at every horizon
+# (1d +0.019->+0.012, 5d +0.056->+0.040, 21d +0.067->+0.044 rank IC). A from-scratch linear
+# reconstruction of this blend's other 6 engines (screener/smart_money excluded, otherwise
+# identical _normalize_to_100/_blend mechanics and BULL weights) measured real, USABLE-at-21d
+# IC (+0.037/+0.081/+0.100 at 1d/5d/21d) -- dramatically higher than unified_score's own
+# live headline number (5d rank IC ~=0.0001) -- which is what motivated tracing screener's
+# weight specifically rather than assuming the components can't be combined at all. Full
+# derivation: measurement.md, "The shared-ceiling pattern, tested rather than argued" section.
+# Freed weight redistributed proportionally over the other 6 non-pinned engines in each regime
+# (ml/cs/confluence/technical/dl/smart_money) -- the same mechanism this file's own comments
+# already describe for the cs/breakout and smart_money additions above. `breakout` is
+# deliberately EXCLUDED from the redistribution and stays pinned at its exact prior value in
+# every regime: TestBreakoutWeightCeiling (test_unified_ranker_regime.py) and
+# scripts/check_load_bearing_constraints.py's BREAKOUT_WEIGHT_CEILING both independently cap
+# it, for an unrelated reason (momentum measured net-negative after costs on this universe,
+# mom21 -0.53%/5d t=-3.21) -- naively scaling every non-screener engine up, breakout included,
+# would have pushed it above that ceiling in all 5 regimes. NOT a re-derivation of the whole
+# table from scratch -- a single, targeted, reversible shrink on the one component with a
+# direct negative-edge finding, leaving every other regime-conditional judgment call as-is.
+# Re-check via a fresh live unified_ranker.py run + factor_edge.py grading of the resulting
+# unified_score once ~20+ dates have accumulated under these weights -- this could not be
+# validated retroactively since past unified_recommendations rows were generated under the
+# old weights.
 REGIME_WEIGHTS = {
-    'BULL':     {'screener': 0.30, 'ml': 0.135,  'cs': 0.05, 'confluence': 0.135,  'technical': 0.108, 'dl': 0.072,  'breakout': 0.15, 'smart_money': 0.05},
-    'BEAR':     {'screener': 0.35, 'ml': 0.166,  'cs': 0.05, 'confluence': 0.166,  'technical': 0.084, 'dl': 0.084,  'breakout': 0.05, 'smart_money': 0.05},
-    'HIGH_VOL': {'screener': 0.20, 'ml': 0.12,   'cs': 0.05, 'confluence': 0.12,   'technical': 0.24,  'dl': 0.12,   'breakout': 0.10, 'smart_money': 0.05},
-    'CRASH':    {'screener': 0.40, 'ml': 0.162,  'cs': 0.05, 'confluence': 0.126,  'technical': 0.081, 'dl': 0.081,  'breakout': 0.05, 'smart_money': 0.05},
+    'BULL':     {'screener': 0.15,  'ml': 0.171818, 'cs': 0.063636, 'confluence': 0.171818, 'technical': 0.137455, 'dl': 0.091636, 'breakout': 0.15, 'smart_money': 0.063637},
+    'BEAR':     {'screener': 0.175, 'ml': 0.214417, 'cs': 0.064583, 'confluence': 0.214417, 'technical': 0.1085,   'dl': 0.1085,   'breakout': 0.05, 'smart_money': 0.064583},
+    'HIGH_VOL': {'screener': 0.10,  'ml': 0.137143, 'cs': 0.057143, 'confluence': 0.137143, 'technical': 0.274286, 'dl': 0.137143, 'breakout': 0.10, 'smart_money': 0.057142},
+    'CRASH':    {'screener': 0.20,  'ml': 0.220909, 'cs': 0.068182, 'confluence': 0.171818, 'technical': 0.110455, 'dl': 0.110455, 'breakout': 0.05, 'smart_money': 0.068181},
     # SIDEWAYS was silently falling back to BULL; a balanced blend is more appropriate for
     # a rangebound tape (lean slightly less on momentum/dl than BULL).
-    'SIDEWAYS': {'screener': 0.32, 'ml': 0.144,  'cs': 0.05, 'confluence': 0.144,  'technical': 0.09,  'dl': 0.072,  'breakout': 0.13, 'smart_money': 0.05},
+    'SIDEWAYS': {'screener': 0.16,  'ml': 0.185891, 'cs': 0.064545, 'confluence': 0.185891, 'technical': 0.116182, 'dl': 0.092945, 'breakout': 0.13, 'smart_money': 0.064546},
 }
 
 # Per-regime CATEGORY tilt (multipliers on CAT_BASE_WT). Rangebound/neutral = SIDEWAYS (no
