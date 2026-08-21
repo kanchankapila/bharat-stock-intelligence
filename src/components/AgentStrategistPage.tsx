@@ -59,7 +59,7 @@ export function AgentStrategistPage() {
       {isLoading && <p className="text-slate-400">Loading picks...</p>}
 
       {topNarrative && (
-        <div className="bg-purple-900/20 rounded-xl p-5 border border-purple-500/20">
+        <div className="v1-card p-5">
           <p className="text-sm font-semibold text-purple-300 mb-2">🎯 Strategy Brief — {TF_LABELS[tf]}</p>
           <p className="text-white leading-relaxed">{topNarrative}</p>
         </div>

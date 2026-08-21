@@ -100,7 +100,7 @@ function FactorBar({ label, value, max, color }: { label: string; value: number;
 
 function StatCard({ label, value, sub, color }: { label: string; value: string | number; sub?: string; color?: string }) {
   return (
-    <div className="glass rounded-lg p-3 flex flex-col gap-0.5">
+    <div className="v1-card p-3 flex flex-col gap-0.5">
       <span className="text-[10px] text-slate-500 font-display uppercase tracking-widest">{label}</span>
       <span className={cn('text-2xl font-bold', color ?? 'text-white')}>{value}</span>
       {sub && <span className="text-[10px] text-slate-500">{sub}</span>}
@@ -120,7 +120,7 @@ function AIInsightPanel({ signal }: { signal: ConfluenceSignal }) {
   const hasTrade = signal.entry_zone_low && signal.stop_loss && signal.target_1;
 
   return (
-    <div className="glass rounded-xl p-4 space-y-4">
+    <div className="v1-card p-4 space-y-4">
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
@@ -135,7 +135,7 @@ function AIInsightPanel({ signal }: { signal: ConfluenceSignal }) {
 
       {/* AI Conclusion */}
       {signal.trade_reasoning && (
-        <div className="bg-indigo-900/20 border border-indigo-500/20 rounded-lg p-3">
+        <div className="v1-card p-3">
           <div className="flex items-center gap-1.5 mb-1.5">
             <Zap className="w-3 h-3 text-indigo-400" />
             <span className="text-[10px] text-indigo-400 font-display uppercase tracking-widest font-bold">AI Reasoning</span>
@@ -159,21 +159,21 @@ function AIInsightPanel({ signal }: { signal: ConfluenceSignal }) {
         <div className="space-y-2">
           <div className="text-[10px] text-slate-500 font-display uppercase tracking-widest">Trade Setup</div>
           <div className="grid grid-cols-2 gap-2">
-            <div className="bg-slate-800/50 rounded-lg p-2">
+            <div className="v1-card p-2">
               <div className="text-[10px] text-slate-500">Entry Zone</div>
               <div className="text-xs font-data text-white">
                 {signal.entry_zone_low?.toFixed(2)} – {signal.entry_zone_high?.toFixed(2)}
               </div>
             </div>
-            <div className="bg-rose-900/20 border border-rose-500/20 rounded-lg p-2">
+            <div className="v1-card-down p-2">
               <div className="text-[10px] text-slate-500">Stop Loss</div>
               <div className="text-xs font-data text-rose-400">{signal.stop_loss?.toFixed(2)}</div>
             </div>
-            <div className="bg-emerald-900/20 border border-emerald-500/20 rounded-lg p-2">
+            <div className="v1-card-up p-2">
               <div className="text-[10px] text-slate-500">Target 1</div>
               <div className="text-xs font-data text-emerald-400">{signal.target_1?.toFixed(2)}</div>
             </div>
-            <div className="bg-emerald-900/20 border border-emerald-500/20 rounded-lg p-2">
+            <div className="v1-card-up p-2">
               <div className="text-[10px] text-slate-500">Target 2</div>
               <div className="text-xs font-data text-emerald-400">{signal.target_2?.toFixed(2)}</div>
             </div>
@@ -365,7 +365,7 @@ export function SignalIntelligence() {
       {/* ── Main Content ─────────────────────────────────────────────────────── */}
       <div className="flex gap-4 items-start">
         {/* Left: Opportunities Table */}
-        <div className="flex-1 min-w-0 glass rounded-xl overflow-hidden">
+        <div className="flex-1 min-w-0 v1-card overflow-hidden">
           <div className="px-4 py-3 border-b border-slate-700/50 flex items-center gap-2">
             <Award className="w-4 h-4 text-amber-400" />
             <span className="text-sm font-bold text-white">High Conviction Opportunities</span>
@@ -488,7 +488,7 @@ export function SignalIntelligence() {
       {/* ── Bottom Row: Reliability Leaderboard + Sector Matrix ──────────────── */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         {/* Scanner Reliability Leaderboard */}
-        <div className="glass rounded-xl overflow-hidden">
+        <div className="v1-card overflow-hidden">
           <div className="px-4 py-3 border-b border-slate-700/50 flex items-center gap-2">
             <Star className="w-4 h-4 text-amber-400" />
             <span className="text-sm font-bold text-white">Scanner Reliability Leaderboard</span>
@@ -532,7 +532,7 @@ export function SignalIntelligence() {
         </div>
 
         {/* Sector Momentum Matrix */}
-        <div className="glass rounded-xl overflow-hidden">
+        <div className="v1-card overflow-hidden">
           <div className="px-4 py-3 border-b border-slate-700/50 flex items-center gap-2">
             <BarChart3 className="w-4 h-4 text-indigo-400" />
             <span className="text-sm font-bold text-white">Sector Momentum Matrix</span>

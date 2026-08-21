@@ -166,7 +166,7 @@ function StockDeepDive({
       transition={{ duration: 0.25 }}
       className="overflow-hidden"
     >
-      <div className="glass-strong border border-slate-800/30 rounded-2xl p-5 mt-1 mb-2 overflow-hidden">
+      <div className="v1-card p-5 mt-1 mb-2 overflow-hidden">
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
           {/* Column 1: Score Breakdown */}
           <div className="space-y-3">
@@ -273,7 +273,7 @@ function StockDeepDive({
                   const ret  = dl[`exp_ret_${h}d`] as number | null;
                   const color = prob >= 0.65 ? 'text-emerald-400' : prob >= 0.50 ? 'text-amber-400' : 'text-rose-400';
                   return (
-                    <div key={h} className="flex-1 glass rounded-lg p-2 text-center">
+                    <div key={h} className="v1-card flex-1 p-2 text-center">
                       <div className="text-[9px] text-slate-500 mb-1">{h}D</div>
                       <div className={`text-sm font-bold ${color}`}>{(prob * 100).toFixed(0)}%↑</div>
                       {ret != null && (
@@ -317,7 +317,7 @@ function TopPicksTable({
   const sorted = [...picks].sort((a, b) => b.conviction_score - a.conviction_score).slice(0, 10);
 
   return (
-    <div className="glass-strong border border-slate-800/30 rounded-2xl overflow-hidden">
+    <div className="v1-card overflow-hidden">
       {/* Table Header */}
       <div className="px-4 py-3 border-b border-slate-800/30 grid grid-cols-[24px_1fr_60px_40px_60px_50px_50px_50px_50px_60px] gap-2 text-[9px] font-black font-display uppercase tracking-widest text-slate-500">
         <span>#</span>
@@ -404,7 +404,7 @@ function MarketContextBar({ report }: { report: ResearchReport }) {
   const fiiColor = report.fii_net_5d >= 0 ? 'text-emerald-400' : 'text-rose-400';
 
   return (
-    <div className="glass border border-slate-800/30 rounded-2xl px-4 py-3 flex flex-wrap items-center gap-4">
+    <div className="v1-card px-4 py-3 flex flex-wrap items-center gap-4">
       <RegimeBadge regime={report.market_regime} />
 
       <div className="flex items-center gap-1.5 text-xs">
@@ -453,7 +453,7 @@ function ResearchSidebar({
   return (
     <div className="space-y-4">
       {/* Avoid List */}
-      <div className="glass-strong border border-slate-800/30 rounded-2xl p-4 space-y-3">
+      <div className="v1-card p-4 space-y-3">
         <p className="text-[10px] font-black font-display uppercase tracking-widest text-slate-400 flex items-center gap-1">
           <AlertTriangle className="w-3 h-3 text-rose-400" /> Avoid List
         </p>
@@ -470,7 +470,7 @@ function ResearchSidebar({
       </div>
 
       {/* Watchlist Candidates */}
-      <div className="glass-strong border border-slate-800/30 rounded-2xl p-4 space-y-3">
+      <div className="v1-card p-4 space-y-3">
         <p className="text-[10px] font-black font-display uppercase tracking-widest text-slate-400 flex items-center gap-1">
           <Eye className="w-3 h-3 text-indigo-400" /> Watchlist Candidates
         </p>
@@ -500,7 +500,7 @@ function ResearchSidebar({
       </div>
 
       {/* Sector Rankings */}
-      <div className="glass-strong border border-slate-800/30 rounded-2xl p-4 space-y-3">
+      <div className="v1-card p-4 space-y-3">
         <p className="text-[10px] font-black font-display uppercase tracking-widest text-slate-400 flex items-center gap-1">
           <Trophy className="w-3 h-3 text-amber-400" /> Sector Rankings
         </p>
@@ -697,7 +697,7 @@ export default function HedgeFundResearch({ onAddWatchlist }: HedgeFundResearchP
       )}
 
       {!reportLoading && currentStatus === 'GENERATING' && (
-        <div className="glass-strong border border-indigo-500/20 rounded-2xl p-8 flex flex-col items-center gap-4 text-center">
+        <div className="v1-card p-8 flex flex-col items-center gap-4 text-center">
           <RefreshCw className="w-8 h-8 text-indigo-400 animate-spin" />
           <div>
             <p className="text-sm font-black text-white">Generating Research Report</p>
@@ -716,7 +716,7 @@ export default function HedgeFundResearch({ onAddWatchlist }: HedgeFundResearchP
       )}
 
       {!reportLoading && currentStatus === 'FAILED' && (
-        <div className="glass-strong border border-rose-500/20 rounded-2xl p-8 flex flex-col items-center gap-3 text-center">
+        <div className="v1-card-down p-8 flex flex-col items-center gap-3 text-center">
           <XCircle className="w-8 h-8 text-rose-400" />
           <div>
             <p className="text-sm font-black text-white">Generation Failed</p>
@@ -726,7 +726,7 @@ export default function HedgeFundResearch({ onAddWatchlist }: HedgeFundResearchP
       )}
 
       {!reportLoading && !reportRow && (
-        <div className="glass-strong border border-slate-800/30 rounded-2xl p-8 flex flex-col items-center gap-3 text-center">
+        <div className="v1-card p-8 flex flex-col items-center gap-3 text-center">
           <FlaskConical className="w-8 h-8 text-slate-500" />
           <div>
             <p className="text-sm font-black text-white">No Report Yet</p>
@@ -749,7 +749,7 @@ export default function HedgeFundResearch({ onAddWatchlist }: HedgeFundResearchP
 
             {/* Executive Summary */}
             {report.executive_summary && (
-              <div className="glass-strong border border-slate-800/30 rounded-2xl p-4">
+              <div className="v1-card p-4">
                 <p className="text-[10px] font-black font-display uppercase tracking-widest text-slate-400 mb-2 flex items-center gap-1">
                   <Activity className="w-3 h-3" /> Executive Summary
                 </p>
@@ -767,7 +767,7 @@ export default function HedgeFundResearch({ onAddWatchlist }: HedgeFundResearchP
                 {report.top_picks?.length > 0 ? (
                   <TopPicksTable picks={report.top_picks} blurbs={blurbs} onAddWatchlist={onAddWatchlist} dlBySymbol={dlBySymbol} currentRegime={currentRegime} />
                 ) : (
-                  <div className="glass-strong border border-slate-800/30 rounded-2xl p-6 text-center text-slate-500 text-xs">
+                  <div className="v1-card p-6 text-center text-slate-500 text-xs">
                     No picks available for this report.
                   </div>
                 )}

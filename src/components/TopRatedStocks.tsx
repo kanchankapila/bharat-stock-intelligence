@@ -54,7 +54,7 @@ const RankingList: React.FC<{
           transition={{ delay: index * 0.03 }}
           key={`${stock.symbol}-${stock.timeframe}`}
           onClick={() => onSelectStock(stock.symbol)}
-          className="glass-strong border border-slate-800/30 rounded-2xl p-4 hover:border-indigo-500/30 transition-all group relative overflow-hidden cursor-pointer animate-fade-in"
+          className="v1-card p-4 group relative overflow-hidden cursor-pointer"
         >
           <div className="flex justify-between items-center relative z-10">
             <div className="flex items-center gap-4">
@@ -228,27 +228,27 @@ const TopRatedStocks: React.FC<{
         </div>
 
         <div className="space-y-6">
-          <div className="glass/50 border border-slate-800/50 rounded-3xl p-6">
+          <div className="v1-card p-6">
             <h3 className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] mb-6 flex items-center gap-2">
               <Star className="w-3 h-3 text-indigo-500" />
               Methodology
             </h3>
             <div className="space-y-4">
-              <div className="p-3 glass-strong rounded-2xl border border-slate-800/50">
+              <div className="v1-card p-3">
                 <p className="text-[10px] font-black text-white uppercase mb-1 italic">FinBERT Sentiment Engine</p>
                 <p className="text-[10px] text-slate-400 leading-relaxed font-medium italic">
                   Utilizes ProsusAI FinBERT deep learning models to perform high-fidelity semantic analysis of screeners, neutralizing bias and identifying institutional intent.
                 </p>
               </div>
-              <div className="p-3 glass-strong rounded-2xl border border-slate-800/50">
+              <div className="v1-card p-3">
                 <p className="text-[10px] font-black text-white uppercase mb-1 italic">Weight Distribution</p>
                 <p className="text-[10px] text-slate-400 leading-relaxed font-medium italic">
                   Intraday rankings prioritize Volume Shockers and Breakouts. Long Term rankings prioritize ROE, Valuation, and Delivery.
                 </p>
               </div>
             </div>
-            
-            <div className="mt-6 p-4 bg-amber-500/10 border border-amber-500/20 rounded-2xl">
+
+            <div className="v1-card-neutral mt-6 p-4">
               <p className="text-[10px] font-black text-amber-500 font-display uppercase tracking-widest mb-1">Risk Warning</p>
               <p className="text-[10px] text-slate-300 italic leading-loose">
                 Intraday signals are volatile and should be verified with live price action before execution.
@@ -256,14 +256,14 @@ const TopRatedStocks: React.FC<{
             </div>
           </div>
 
-          <div className="glass/50 border border-slate-800/50 rounded-3xl p-6">
+          <div className="v1-card p-6">
             <h3 className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] mb-4">Discovery Metrics</h3>
             <div className="grid grid-cols-2 gap-3">
-              <div className="glass-strong p-3 rounded-2xl border border-slate-800/50 text-center">
+              <div className="v1-card p-3 text-center">
                 <p className="text-[9.5px] font-black text-slate-400 uppercase mb-1">LT Coverage</p>
                 <p className="text-lg font-black text-white">{longTermStocks?.length || 0}</p>
               </div>
-              <div className="glass-strong p-3 rounded-2xl border border-slate-800/50 text-center">
+              <div className="v1-card p-3 text-center">
                 <p className="text-[9.5px] font-black text-slate-400 uppercase mb-1">ID Signals</p>
                 <p className="text-lg font-black text-white">{intradayStocks?.length || 0}</p>
               </div>
