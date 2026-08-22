@@ -8,17 +8,24 @@ once ~12 months exist, by the cost-aware one.
 
 Why this exists, and what it is NOT:
 
-  Measured (equal weights, no fitting, per-date cross-sectional rank z-score, graded with
-  factor_edge.py's own _metrics), lagged one session so the entry is one a pre-market run
-  could actually take:
+  Graded by the SHIPPED harness (`factor_edge.py --table engine_composite_scores`), which is
+  the read that counts -- 82,402 rows / 66 dates, span 2026-05-23..08-21:
 
-      composite   1d IC +0.014 AUC 0.514 | 5d +0.046 / 0.538 | 21d +0.077 / 0.558  -> USABLE
-      unified_score (live canonical)                          | 21d +0.023 / 0.516  -> no edge
+      composite   1d IC +0.044 AUC 0.511 | 5d +0.083 / 0.526 | 21d +0.077 / 0.540 -> no edge
+      unified_score (live canonical)                         | 21d +0.023 / 0.516 -> no edge
 
-  It is the first cross-sectional score on this platform to clear USABLE (|IC|>=0.03 AND
-  AUC>=0.55 at >=20 dates), and it beats every one of its own components -- win_probability
-  has a higher IC (+0.113) but fails on AUC (0.544). That is a real ensemble effect: pairwise
-  Spearman between the six engines maxes at 0.293, most under 0.1.
+  ⚠ An earlier docstring here claimed "the first cross-sectional score to clear USABLE
+  (21d AUC 0.558)". THAT IS RETRACTED -- see measurement.md's "CORRECTION, same day" section.
+  It came from a one-off script over a slightly different matched universe starting a week
+  later; re-run through the shipped harness on MORE dates the IC reproduced exactly (+0.077 at
+  21d) but the AUC did not (0.540 on 30 dates vs 0.558 on 25), landing below the 0.55 bar. The
+  lesson is the reason that correction exists: a result computed in a one-off script must be
+  re-run through the shipped harness before it is written down as a verdict.
+
+  What survives is still the strongest cross-sectional result on this platform: 5d rank IC
+  +0.083 over 46 dates, ~7x unified_score's +0.012 and above every individual engine. The
+  ensemble effect is real (pairwise Spearman between the six engines maxes at 0.293, most
+  under 0.1); what it does not do is clear the classification bar.
 
   ⚠ It is NOT a validated tradeable edge and is deliberately NOT wired into unified_ranker.py.
   One-way turnover is 91% per 21d rebalance (3.3%/yr drag @15bps, 5.5% @25bps) and only 2-3

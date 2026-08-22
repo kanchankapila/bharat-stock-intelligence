@@ -686,6 +686,53 @@ efficiently-priced at this universe's liquidity floor) or a shared calendar cons
 longer-horizon read in this list is also the thinnest-data read, so LOW-DATA and "genuinely weaker
 long-horizon edge" are still confounded and not yet separable with the history available).
 
+### `factor_edge.py` grades close-to-close, but the panel spec mandates next-day OPEN entry — measured 2026-08-22, every IC in `factor_edge_history` is optimistic
+
+This file's own panel spec says, without qualification: **"Next-day OPEN entry. Signals computed
+off a close cannot be bought at that close."** `factor_edge.py` — the harness that produces every
+`factor_edge_history` verdict, and the one the "CORRECTION, same day" section immediately below
+calls "the read that counts" — does not do this. `_forward_returns()` selects only
+`symbol, date, close` from `stock_ohlcv` and computes `fwd_N = close.shift(-N) / close - 1`.
+There is no `open` in the query at all. So the measured return starts at the close of date *d*,
+a price no one holding a signal generated that evening could have transacted at.
+
+**This is not a look-ahead bug and the verdicts are not fabricated.** Write timing was checked
+live: `engine_composite_scores` rows for date *d* are stamped ~20:00 IST on *d*, i.e. after the
+15:30 close, so the score genuinely exists before the return window opens. The defect is
+narrower and entirely about *tradeability*: the harness credits a strategy with the overnight
+gap between *d*'s close and *d+1*'s open, which is exactly the move a next-day-open entry
+cannot capture. Mean absolute overnight gap on this universe, last 90 days, `is_suspect`
+excluded, gaps >25% dropped: **0.94%** — large next to a 5d IC of +0.083.
+
+**Measured directly on `engine_composite_scores` (82,402 rows, per-date then averaged,
+cross-sectional excess, same construction both ways — only the entry/exit price changes):**
+
+| horizon | IC close→close (what `factor_edge` reports) | IC next-open→open (panel spec) | delta | dates |
+|---|---|---|---|---|
+| 1d | +0.0451 | **+0.0210** | **−0.0241** | 49 |
+| 5d | +0.0839 | +0.0793 | −0.0046 | 45 |
+| 21d | +0.0800 | +0.0685 | −0.0115 | 29 |
+
+**Every horizon is overstated, and h=1 is overstated by more than half its value.** That is the
+expected shape: a fixed ~0.94% untradeable gap is a large fraction of a 1-day return and a small
+fraction of a 21-day one. The 5d reading — the headline "+0.083, highest on the platform" — is
+the most robust of the three, losing only 0.005.
+
+**Consequence, stated precisely, because it is easy to over-read.** No verdict in
+`factor_edge_history` flips on this: the composite is `no edge` under both conventions (the
+binding constraint there is AUC ~0.53, not IC), and every "no edge" engine graded by this
+harness is *more* firmly no-edge under the honest convention, not less. What changes is that
+**every IC number this harness has ever produced should be read as an upper bound**, and any
+future factor that clears a bar by a hair at short horizons must be re-checked at next-open
+before the verdict is believed. The h=1 column is the one to distrust most.
+
+**Deliberately NOT fixed in this pass.** Changing `_forward_returns()` rewrites the meaning of
+every historical row in `factor_edge_history`, so the correct sequence is to add an
+`--entry open` mode, re-grade in parallel, and record both — not to silently mutate a table
+whose earlier rows would then be incomparable with its later ones. Same discipline as this
+file's own "a bug in the measurement tooling is worse than no measurement, because it looks like
+evidence" entry: the fix to a harness needs at least as much care as the thing it measures.
+
 ### ⚠ CORRECTION, same day — the "USABLE" claim below does NOT survive the standard harness
 
 Written before the composite was persisted and re-graded through `factor_edge.py` itself. Once
