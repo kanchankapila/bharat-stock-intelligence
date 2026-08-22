@@ -1025,37 +1025,6 @@ export const monitorRouter = router({
       return { asOf: runRow?.created_at ?? null, stocks, mlEdgeProven };
     }),
 
-  // The ONE setup on this platform with a validated, cost-aware, positive forward edge --
-  // see measurement.md's "capitulation triple" entry (gap_down AND open_eq_low AND top_loser,
-  // next-session open->close, re-confirmed 2026-08-20 at t=+3.48/p=0.0005 across 430 days).
-  // Every other page-level score here (unified_score, win_probability, screener consensus)
-  // has been measured null-to-negative net of costs -- this procedure exists so the frontend
-  // has ONE place to show a signal alongside the actual evidence for it, rather than another
-  // unvalidated badge. Evidence comes from screener_combo_finder.py's own persisted backtest
-  // (app_settings.screener_combo_finder_tier1, same value getScreenerComboFinderStatus reads);
-  // live matches come from live_capitulation_screener.py's 15-min intraday scan, written under
-  // filter_key='todayCapitulation' into the existing live_screener_appearances table.
-  getCapitulationSignal: publicProcedure
-    .query(async () => {
-      const evidenceRow = await dbGet<{ value: string }>(
-        "SELECT value FROM app_settings WHERE key = 'screener_combo_finder_tier1'"
-      );
-      let evidence: any = null;
-      try { evidence = evidenceRow ? JSON.parse(evidenceRow.value) : null; } catch { evidence = null; }
-
-      const latestRun = await dbGet<{ id: number; timestamp: string }>(
-        "SELECT id, timestamp FROM live_screener_runs WHERE status IN ('SUCCESS','PARTIAL') ORDER BY id DESC LIMIT 1"
-      );
-      const matches = latestRun
-        ? await dbAll<{ symbol: string; price: number; change_per: number; volume: number }>(
-            "SELECT symbol, price, change_per, volume FROM live_screener_appearances WHERE run_id = ? AND filter_key = 'todayCapitulation'",
-            [latestRun.id]
-          )
-        : [];
-
-      return { asOf: latestRun?.timestamp ?? null, matches, evidence };
-    }),
-
   // Status of the currently-ACTIVE live_screener_intraday_clf model. The trained_at/cv_auc/
   // test_auc/etc. fields only change when a retrain clears its promotion-margin check against
   // the prior model -- but live_auc/live_edge_proven (2026-08-07) refresh on EVERY --train

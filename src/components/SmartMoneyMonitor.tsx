@@ -45,7 +45,7 @@ export const SmartMoneyMonitor: React.FC<Props> = ({ onSelectStock }) => {
       {/* Header & Controls */}
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-5 flex-shrink-0">
         <div>
-          <h2 className="v1-title-page flex items-center gap-2">
+          <h2 className="text-xl font-bold font-['Rajdhani'] flex items-center gap-2">
             <Users className="w-5 h-5 text-emerald-400" />
             Smart Money MF/FII Flow Monitor
           </h2>

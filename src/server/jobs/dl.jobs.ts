@@ -124,7 +124,7 @@ async function processDlRetrainWeekly(job: Job): Promise<{ success: boolean }> {
   // Explicit 24h timeout, not processDLPython's 6h default: a real full-universe BiLSTM
   // retrain (~2100 symbols, chunked training + walk-forward validation retraining
   // several more model copies) measured at ~15min for just 25 symbols on this machine's
-  // shared 8GB GPU under typical contention (other GPU jobs, e.g. FinBERT) -- extrapolated, a full
+  // shared 8GB GPU under typical contention (Ollama + other jobs) -- extrapolated, a full
   // run can run well past 6h. The 6h default is still correct for every OTHER
   // processDLPython caller (feature_engineering.py, dl_engine.py --mode infer,
   // backfill_ohlcv.py), so it's overridden per-call here rather than raised globally.

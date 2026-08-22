@@ -472,8 +472,8 @@ export const ScreenerBrowserPage: React.FC<{ onSelectStock?: (symbol: string) =>
     <div className="space-y-4">
       <div className="flex items-center justify-between flex-wrap gap-3">
         <div>
-          <h1 className="v1-title-page">Screener Browser</h1>
-          <p className="text-[11px] text-slate-400 mt-1">Explore 1,600+ screeners across 4 providers or look up which screeners a stock belongs to</p>
+          <h1 className="v6-title text-base text-[var(--v6-ink)]">Screener Browser</h1>
+          <p className="text-[11px] text-[var(--v6-faint)]">Explore 1,600+ screeners across 4 providers or look up which screeners a stock belongs to</p>
         </div>
         <div className="flex gap-0.5 p-0.5 bg-[var(--v6-bg-band)] rounded-xl">
           <button

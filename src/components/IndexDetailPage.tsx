@@ -65,7 +65,7 @@ export const IndexDetailPage: React.FC<{
         <div className="flex flex-wrap items-start justify-between gap-6">
           <div>
             <div className="flex items-center gap-3 mb-2">
-              <h1 className="v1-title-page">{indexName}</h1>
+              <h1 className="text-2xl font-black text-white uppercase tracking-tight">{indexName}</h1>
               <span className={cn("px-2 py-0.5 rounded text-[10px] font-black font-display uppercase tracking-widest",
                 isUp ? "bg-emerald-500/10 text-emerald-400" : "bg-rose-500/10 text-rose-400")}>
                 {isUp ? 'Bullish' : 'Bearish'}

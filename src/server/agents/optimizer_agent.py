@@ -16,7 +16,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 import requests
 from sqlalchemy import text
 from db_compat import get_engine, translate
-from narrative_client import get_narrative
+from ollama_client import get_narrative
 
 ENGINE = get_engine()
 ALPHAQUANT_URL = "http://127.0.0.1:8002/api/v1/optimize"

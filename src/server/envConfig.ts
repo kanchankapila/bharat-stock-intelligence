@@ -49,7 +49,7 @@ export function validateEnv(): void {
 
   // ── Soft gaps: degraded but functional ──────────────────────────────────────
   if (!process.env.GEMINI_API_KEY) {
-    WARN.push('GEMINI_API_KEY not set — AI stock-signal/profile analysis and the chatbot will fail (no local Ollama fallback since 2026-08-20).');
+    WARN.push('GEMINI_API_KEY not set — Gemini AI fallback is unavailable (Ollama-only).');
   }
 
   if (process.env.AI_PROVIDER === 'bedrock') {

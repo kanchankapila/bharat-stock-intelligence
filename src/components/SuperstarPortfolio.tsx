@@ -89,8 +89,10 @@ const SuperstarCard: React.FC<{
       whileHover={{ y: -2 }}
       whileTap={{ scale: 0.98 }}
       className={cn(
-        'w-full text-left v1-card transition-all duration-200 overflow-hidden group',
-        selected && 'border-indigo-500/60 bg-indigo-950/40 shadow-[0_0_24px_rgba(99,102,241,0.15)]'
+        'w-full text-left rounded-xl border transition-all duration-200 overflow-hidden group',
+        selected
+          ? 'border-indigo-500/60 bg-indigo-950/40 shadow-[0_0_24px_rgba(99,102,241,0.15)]'
+          : 'border-white/[0.06] bg-slate-900/60 hover:border-white/[0.12] hover:glass'
       )}
     >
       <div className="p-4">

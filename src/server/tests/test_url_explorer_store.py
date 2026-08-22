@@ -7,7 +7,7 @@ from url_explorer.normalizer import EndpointTemplate, ParamSpec
 @pytest.fixture(autouse=True)
 def _db():
     import psycopg2
-    from pg_test_support import _pg_dsn, _sa_url, pg_available, drop_throwaway_schema
+    from pg_test_support import _pg_dsn, _sa_url, pg_available
     if not pg_available():
         pytest.skip("live Postgres not reachable — set PGTEST_* or start the container")
     saved = {k: os.environ.get(k) for k in ("POSTGRES_URL", "USE_POSTGRES", "DATABASE_URL")}
@@ -22,12 +22,8 @@ def _db():
     import url_explorer.store as store; importlib.reload(store)
     store.ensure_schema()
     yield store
-    # MUST precede the DROP: pooled connections still scoped to this schema hold
-    # AccessShareLocks on its tables, and DROP SCHEMA CASCADE needs AccessExclusiveLock.
-    # reload() alone abandons the old engine cache with its sockets open. See dispose_engines().
-    db_compat.dispose_engines()
     try:
-        drop_throwaway_schema(admin, schema)
+        admin.cursor().execute(f'DROP SCHEMA IF EXISTS "{schema}" CASCADE')
     finally:
         admin.close()
     for k, v in saved.items():

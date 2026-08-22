@@ -94,27 +94,6 @@ def get_engine():
     return eng
 
 
-def dispose_engines() -> None:
-    """Close every pooled connection and clear the engine cache.
-
-    A fixture that repoints POSTGRES_URL at a throwaway schema MUST call this BEFORE its
-    `DROP SCHEMA ... CASCADE`. Pooled connections opened against that schema hold
-    AccessShareLocks on its tables; DROP SCHEMA needs AccessExclusiveLock, so it blocks
-    behind them for as long as the pool keeps them alive -- measured 2026-08-21 at 5-10
-    minutes per test, which is what made the Python suite look like it was stalling under
-    "memory pressure" when it was really waiting on a lock (free RAM was 5.4/23 GB).
-
-    `importlib.reload(db_compat)` does NOT do this: it rebinds the module and abandons the
-    old `_engines` dict with its sockets still open and its transactions still idle.
-    """
-    for eng in _engines.values():
-        try:
-            eng.dispose()
-        except Exception:  # best-effort teardown: a dead socket must not fail the fixture
-            pass
-    _engines.clear()
-
-
 # ─── Row: dual-access (name + positional) ──────────────────────────────────────
 
 class Row(dict):

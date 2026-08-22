@@ -1,6 +1,6 @@
 import { dbAll, dbRun } from './dbAsync';
 import { runPython } from './pythonRunner';
-import { analyzeCompanyProfile } from '../services/aiService';
+import { analyzeCompanyProfile, releaseOllamaModel } from '../services/aiService';
 
 // Company profile/fundamentals data is near-static, so trendlyne_overview_fetcher.py now
 // scrapes each NSE stock ONCE, ever (skips any symbol that already has a trendlyne_stock_profile
@@ -105,5 +105,6 @@ export async function syncAndAnalyzeCompanyProfiles() {
   }
 
   console.log(`[PROFILE SYNC] Completed. Success: ${successCount}, Failed: ${failCount}`);
+  await releaseOllamaModel();
   return { success: true, processed: successCount, failed: failCount };
 }

@@ -14,7 +14,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from sqlalchemy import text
 from db_compat import get_engine, translate
-from narrative_client import get_narrative
+from ollama_client import get_narrative
 
 ENGINE = get_engine()
 

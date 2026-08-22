@@ -217,18 +217,6 @@ const TABLE_FRESHNESS_CHECKS: TableFreshnessConfig[] = [
     category: 'options', critical: false, table: 'nt_index_change_oi', dateColumn: 'date', warnDays: 3, failDays: 5 },
   { id: 'so-stock-oi-summary-freshness', label: 'so_stock_oi_summary (Trendlyne per-stock max-pain/MWPL/PCR)',
     category: 'options', critical: false, table: 'so_stock_oi_summary', dateColumn: 'date', warnDays: 3, failDays: 5 },
-  // Per-stock FUTURES OI/positioning (mc_stock_futures_oi_fetcher.py, added 2026-08-21). Distinct
-  // from so_stock_oi_summary above, which is Trendlyne OPTIONS data and whose fut_oi column has
-  // been 100% NULL for its entire life -- this table is what actually captures long/short buildup,
-  // rollover and basis, the family measurement.md had recorded as "needs a new data source".
-  // Trading-day aware (default): stock futures only trade on NSE sessions.
-  { id: 'stock-futures-oi-freshness', label: 'stock_futures_oi_history (MC per-stock futures OI/buildup/rollover)',
-    category: 'options', critical: false, table: 'stock_futures_oi_history', dateColumn: 'date', warnDays: 3, failDays: 5 },
-  // engine_composite.py's equal-weight blend of the 6 raw engines. Research-only (measured
-  // "no edge" -- real IC, AUC short of 0.55), but it must keep accumulating or it can never be
-  // re-graded, and a silently-dead producer would look identical to one that is simply flat.
-  { id: 'engine-composite-freshness', label: 'engine_composite_scores (equal-weight raw-engine composite, research)',
-    category: 'ml', critical: false, table: 'engine_composite_scores', dateColumn: 'date', warnDays: 3, failDays: 5 },
 
   // flows
   // Watches insider_trades (Tickertape), NOT insider_transactions (NSE corporates-pit).
@@ -2021,11 +2009,6 @@ export const DATA_QUALITY_CHECKS: DataQualityCheck[] = [
     critical: true,
     // scripts/check_deploy_drift.mjs does the actual git/pm2 comparison (it needs `git log`
     // and `pm2 jlist`, neither of which belongs behind a SQL query) and stamps this row.
-    // NOTE: that script applies a 2h grace window (scripts/lib/deployDriftVerdict.mjs) before a
-    // commit newer than the running process counts as a finding -- it stamps SUCCESS while a
-    // just-landed commit is still inside it. Without that, this entry went red the instant
-    // anyone committed and stayed red until the next restart (measured 61/198 runs failed), and
-    // a `critical` check that is red by construction on every dev day stops being read.
     // "server N commits behind HEAD" is a recurring audit finding (AF-14) -- always caught
     // late by a human noticing, never by a check, because nothing compared the two before.
     sql: `SELECT last_status, last_error,

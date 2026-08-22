@@ -11,8 +11,10 @@ vi.mock('../dbAsync', () => ({
 }));
 
 const mockAnalyze = vi.fn().mockResolvedValue({ high_growth_scope: true, in_news_for_growth: false, growth_score: 80, reasoning: 'Strong fundamentals' });
+const mockRelease = vi.fn().mockResolvedValue(undefined);
 vi.mock('../../services/aiService', () => ({
   analyzeCompanyProfile: mockAnalyze,
+  releaseOllamaModel: mockRelease,
 }));
 
 const { syncAndAnalyzeCompanyProfiles } = await import('../companyProfileSyncService');
@@ -38,7 +40,7 @@ test('runs trendlyne_overview_fetcher.py before reading descriptions from the DB
   expect(mockRunPython.mock.invocationCallOrder[0]).toBeLessThan(mockDbAll.mock.invocationCallOrder[0]);
 });
 
-test('skips stocks with no description without calling the AI provider', async () => {
+test('skips stocks with no description without calling Ollama', async () => {
   mockDbAll.mockResolvedValue([{ symbol: 'XYZ', name: 'XYZ Ltd', company_description: null }]);
 
   const result = await syncAndAnalyzeCompanyProfiles();

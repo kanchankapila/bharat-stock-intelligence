@@ -22,10 +22,10 @@ export const MaxPainAlerts: React.FC<Props> = ({ onSelectStock }) => {
   );
 
   return (
-    <div className="flex flex-col h-[580px] v1-card p-5 text-slate-200">
+    <div className="flex flex-col h-[580px] glass border border-slate-800/50 rounded-2xl p-5 text-slate-200">
       {/* Header */}
       <div className="flex-shrink-0 mb-5">
-        <h2 className="v1-title-card flex items-center gap-2 text-lg">
+        <h2 className="text-xl font-bold font-['Rajdhani'] flex items-center gap-2">
           <Target className="w-5 h-5 text-rose-400" />
           Max Pain Strike Magnet Alerts
         </h2>

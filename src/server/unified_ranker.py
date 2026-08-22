@@ -143,49 +143,14 @@ HORIZON_MULT = {
 # validated retroactively since past unified_recommendations rows were generated under the
 # old weights.
 REGIME_WEIGHTS = {
-    'BULL':     {'screener': 0.075,  'ml': 0.190227, 'cs': 0.070454, 'confluence': 0.190227, 'technical': 0.152182, 'dl': 0.101454, 'breakout': 0.15, 'smart_money': 0.070456},
-    'BEAR':     {'screener': 0.0875, 'ml': 0.238625, 'cs': 0.071875, 'confluence': 0.238625, 'technical': 0.120750, 'dl': 0.120750, 'breakout': 0.05, 'smart_money': 0.071875},
-    'HIGH_VOL': {'screener': 0.05,   'ml': 0.145714, 'cs': 0.060714, 'confluence': 0.145714, 'technical': 0.291429, 'dl': 0.145714, 'breakout': 0.10, 'smart_money': 0.060715},
-    'CRASH':    {'screener': 0.10,   'ml': 0.250364, 'cs': 0.077273, 'confluence': 0.194727, 'technical': 0.125182, 'dl': 0.125182, 'breakout': 0.05, 'smart_money': 0.077272},
+    'BULL':     {'screener': 0.15,  'ml': 0.171818, 'cs': 0.063636, 'confluence': 0.171818, 'technical': 0.137455, 'dl': 0.091636, 'breakout': 0.15, 'smart_money': 0.063637},
+    'BEAR':     {'screener': 0.175, 'ml': 0.214417, 'cs': 0.064583, 'confluence': 0.214417, 'technical': 0.1085,   'dl': 0.1085,   'breakout': 0.05, 'smart_money': 0.064583},
+    'HIGH_VOL': {'screener': 0.10,  'ml': 0.137143, 'cs': 0.057143, 'confluence': 0.137143, 'technical': 0.274286, 'dl': 0.137143, 'breakout': 0.10, 'smart_money': 0.057142},
+    'CRASH':    {'screener': 0.20,  'ml': 0.220909, 'cs': 0.068182, 'confluence': 0.171818, 'technical': 0.110455, 'dl': 0.110455, 'breakout': 0.05, 'smart_money': 0.068181},
     # SIDEWAYS was silently falling back to BULL; a balanced blend is more appropriate for
     # a rangebound tape (lean slightly less on momentum/dl than BULL).
-    'SIDEWAYS': {'screener': 0.08,   'ml': 0.206836, 'cs': 0.071818, 'confluence': 0.206836, 'technical': 0.129273, 'dl': 0.103418, 'breakout': 0.13, 'smart_money': 0.071819},
+    'SIDEWAYS': {'screener': 0.16,  'ml': 0.185891, 'cs': 0.064545, 'confluence': 0.185891, 'technical': 0.116182, 'dl': 0.092945, 'breakout': 0.13, 'smart_money': 0.064546},
 }
-# SECOND screener shrink, 2026-08-21 (the first was 2026-08-20, same policy, same reason).
-# ENGINE_EDGE_SHRINK=0.5 applied again to `screener` only, freed weight redistributed
-# proportionally over the 6 non-pinned engines. `breakout` is pinned at its exact prior value
-# in every regime -- it has an independent audit-derived ceiling (BREAKOUT_WEIGHT_CEILING /
-# TestBreakoutWeightCeiling) and a naive proportional scale-up would silently breach it.
-# Screener went BULL 0.30 -> 0.15 -> 0.075; CRASH 0.40 -> 0.20 -> 0.10.
-#
-# Evidence, TWO independent measurements agreeing, neither of them a re-run of the other:
-#   1. factor_edge.py on unified_recommendations (35 dates): screener_stock_score rank IC
-#      -0.0326 @5d, -0.0160 @10d -- negative at both well-powered horizons, while
-#      technical_score is +0.031 and dl_score +0.059 on the identical rows.
-#   2. The natural experiment already in the schema (2026-08-20): confluence_score WITH its
-#      screener component grades worse than the same composite WITHOUT it at every horizon
-#      (5d +0.056 -> +0.040, 21d +0.067 -> +0.044).
-# Plus the standing population-level result: 0 of 1,563 individual screeners survive FDR or
-# Bonferroni, and bullish screener consensus is significantly NEGATIVE (t=-2.36).
-#
-# This is a REMOVAL of a measured-harmful input, not the addition of an unproven one -- the
-# distinction that makes it defensible under measurement.md's "reweighting is not a fix" rule,
-# which is about chasing gains by retuning, not about cutting a demonstrated negative.
-# Deliberately a shrink and not a drop to zero: at 21d screener reads +0.002 (LOW-DATA, 4
-# dates), so "harmful at every horizon" is not established, and zeroing an engine also changes
-# _blend's renormalization for symbols where other engines are missing.
-# Full derivation + the composite finding that motivated re-examining the blend: measurement.md.
-#
-# MEASURED SIDE EFFECT, live before/after on the same day and the same SIDEWAYS regime:
-# actionable Buys fell 81 -> 66 (-19%) while mean unified_score barely moved (43.55 -> 43.66).
-# This is recurring-bugs.md's "restricting/deflating a score upstream re-tunes every ABSOLUTE
-# threshold downstream" class -- the reweighting is rank-motivated, but DIRECTIONLESS_BUY_FLOOR
-# (70.0) and STRONG_BUY (80.0) are absolute, so a distributional shift in the upper tail changes
-# how many names clear them. Left as-is DELIBERATELY rather than re-tuning the floor to hold the
-# old count: no Buy call on this platform has ever demonstrated forward edge (unified_score 5d
-# IC +0.012, AUC 0.514 over 38 dates), so manufacturing more of them by loosening a floor would
-# be fitting the output to a target rather than to evidence. Flagged here so the next session
-# sees this was a known, chosen consequence and not an unnoticed regression.
 
 # Per-regime CATEGORY tilt (multipliers on CAT_BASE_WT). Rangebound/neutral = SIDEWAYS (no
 # tilt). In risk-off regimes (BEAR/CRASH) overweight valuation/quality/dividend and
@@ -441,46 +406,16 @@ def _finite_engine_map(name, raw):
 ZERO_DISPERSION_EPS = 1e-9
 ZERO_DISPERSION_MIN_SYMBOLS = 50   # below this a flat map is thin coverage, not a dead engine
 
-# A near-flat engine is as unrankable as a perfectly flat one, and after the percentile
-# normalization below it is strictly WORSE: _normalize_to_100 re-spreads any input, however
-# narrow, to a uniform 0-100, so an engine whose whole universe sits in a 5-point band has its
-# noise amplified to full weight instead of being harmlessly diluted. Under the old raw blend
-# that engine contributed a near-constant offset (measured 1.1% of ranking influence on a
-# 17.2% weight); normalized without this floor it would contribute 17.2% of pure noise. So
-# this floor is not an independent tightening — it is required BY the normalization.
-#
-# Threshold derived from the data, not picked (recurring-bugs.md: measure the null first).
-# Per-(engine, date) stddev over the 38 ranker-days with >=200 symbols, 2026-06-01..08-24,
-# 138 engine-days, bucketed by 2 on the 0-100 score scale:
-#   [0,2): 31   [2,4): 4   [4,6): 4   [6,8): 4   [8,10): 4   [10,12): 13   ... [28,30): 38
-# Bimodal: a collapsed mode massed under 2 and the healthy mode from ~10 up, with a sparse
-# valley between. 5.0 sits in that valley and errs toward keeping. It fires on real dates, not
-# only pathological ones: ml_score is under it on 13 of 38 days, dl_score 15, technical 7 --
-# the collapse is episodic (regime-dependent isotonic calibration), which is exactly why the
-# check has to be dynamic per run rather than an engine being removed from REGIME_WEIGHTS.
-ZERO_DISPERSION_MIN_SD = 5.0
-
-
-def _stddev(vals):
-    n = len(vals)
-    if n < 2:
-        return 0.0
-    mean = sum(vals) / n
-    return math.sqrt(sum((v - mean) ** 2 for v in vals) / (n - 1))
-
 
 def drop_zero_dispersion_engines(engine_maps):
-    """Remove engines whose scores carry no usable cross-sectional information.
+    """Remove engines whose scores carry no cross-sectional information at all.
 
-    Returns (kept_maps, dropped_engine_names). Missing/thinly-covered engines pass through.
+    Returns (kept_maps, dropped_engine_names). Missing/!=constant engines pass through.
     """
     kept, dropped = {}, []
     for name, m in engine_maps.items():
         vals = list(m.values())
-        if len(vals) >= ZERO_DISPERSION_MIN_SYMBOLS and (
-            (max(vals) - min(vals)) <= ZERO_DISPERSION_EPS
-            or _stddev(vals) < ZERO_DISPERSION_MIN_SD
-        ):
+        if len(vals) >= ZERO_DISPERSION_MIN_SYMBOLS and (max(vals) - min(vals)) <= ZERO_DISPERSION_EPS:
             dropped.append(name)
             continue
         kept[name] = m
@@ -2210,31 +2145,6 @@ class UnifiedRanker:
         # live run of this change.
         engine_maps_all = engine_maps
         engine_maps, _flat = drop_zero_dispersion_engines(engine_maps)
-        # Put every surviving engine on ONE scale before blending. Four engines
-        # (screener/cs/confluence/technical) were already percentile-rank normalized; the four
-        # probability engines (ml/dl/breakout/smart_money) return raw probability*100 and were
-        # not. _blend is a weighted AVERAGE, so mixing the two scales broke it two ways —
-        # measured live on the 2026-08-24 snapshot (2,075 symbols):
-        #
-        #  1. A weight was not an influence share. Influence is proportional to weight x
-        #     dispersion, so at BULL weights the real shares were confluence 23.7%, screener
-        #     21.0%, technical 14.2%, dl 12.7%, smart_money 10.9%, cs 8.5%, breakout 8.0% and
-        #     ml 1.1% -- ml being the joint-HEAVIEST engine (0.172) whose live range was
-        #     69.1-74.1, and smart_money getting 10.9% off a 0.064 weight purely by having the
-        #     widest raw spread. REGIME_WEIGHTS was tuning numbers that were not what it thought.
-        #  2. Missing-engine coverage became a signal, and the wrong one. _blend renormalizes
-        #     over present engines, so dropping an engine shifted a symbol's score by that
-        #     engine's MEAN OFFSET -- and the means ran 27.6 (smart_money) to 73.2 (ml). Live:
-        #     symbols with 3 engines averaged 28.31 and were classified 91 Sell / 0 Buy, and
-        #     the bottom-100 by unified_score averaged 4.94 engines against 6.75 universe-wide.
-        #     Thin coverage was being routed to Sell mechanically.
-        #
-        # Normalizing here makes every engine mean-50 and uniformly spread, so a weight is an
-        # influence share and a missing engine costs nothing but its own information. Applied to
-        # the BLEND view only: engine_maps_all stays raw so the persisted *_score columns remain
-        # the diagnostic they are meant to be, and so breakout's raw probability still drives
-        # position sizing against its own p80/p90 thresholds.
-        engine_maps_blend = {name: _normalize_to_100(m) for name, m in engine_maps.items()}
         if _flat:
             print(f"[UnifiedRanker] engines with ZERO cross-sectional dispersion dropped from "
                   f"the blend (weight redistributed): {', '.join(sorted(_flat))}", file=sys.stderr)
@@ -2274,11 +2184,8 @@ class UnifiedRanker:
             present = {e for e, m in engine_maps.items() if sym in m}
             has_data = {e for e, m in engine_maps_all.items() if sym in m}
             # renormalize weights over engines that actually have data for this symbol, so
-            # empty confluence/dl tables don't drag every score down to ~15. Blends the
-            # NORMALIZED view (see engine_maps_blend) -- engine_scores stays raw for reporting
-            # and for breakout's sizing thresholds below.
-            blend_scores = {e: m.get(sym, 0.0) for e, m in engine_maps_blend.items()}
-            unified = _blend(blend_scores, present, base_weights)
+            # empty confluence/dl tables don't drag every score down to ~15.
+            unified = _blend(engine_scores, present, base_weights)
 
             # ORDERING INVARIANT (2026-08-10): every ordinary score MULTIPLIER runs here,
             # BEFORE the single _classify call, and nothing may touch `unified` after it.
@@ -2585,15 +2492,14 @@ class UnifiedRanker:
                 INSERT INTO unified_recommendations_history
                 (symbol, computed_at, generated_at, regime, unified_score, conviction_level,
                  classification, screener_stock_score, ml_score, confluence_score,
-                 technical_score, cs_score, dl_score, breakout_score, smart_money_score,
+                 technical_score, cs_score, breakout_score, smart_money_score,
                  fundamental_score, engine_coverage_count, entry_zone_low, stop_loss,
                  target_1, position_size_pct, sector)
                 VALUES (:symbol, :computed_at, :generated_at, :regime, :unified_score,
                         :conviction_level, :classification, :screener_stock_score, :ml_score,
-                        :confluence_score, :technical_score, :cs_score, :dl_score,
-                        :breakout_score, :smart_money_score, :fundamental_score,
-                        :engine_coverage_count, :entry_zone_low, :stop_loss, :target_1,
-                        :position_size_pct, :sector)
+                        :confluence_score, :technical_score, :cs_score, :breakout_score,
+                        :smart_money_score, :fundamental_score, :engine_coverage_count,
+                        :entry_zone_low, :stop_loss, :target_1, :position_size_pct, :sector)
                 ON CONFLICT(symbol, generated_at) DO NOTHING
             ''', r)
         self.conn.commit()

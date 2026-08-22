@@ -69,7 +69,7 @@ src/
   App.tsx            main app, layout + tab routing
   v2/ … v6/          six dashboard experiences, all lazy-loaded, all reading the same tRPC surface
   components/        36+ shared React components
-  services/          marketService (live prices), aiService (routes to gemini/bedrockService — no local LLM since 2026-08-20)
+  services/          marketService (live prices), aiService (Ollama), geminiService (fallback)
   lib/trpc.ts        tRPC client
   data/              stocklist.ts (180 stocks, all provider mappings) · nseStocks.ts (2000+ NSE master)
 

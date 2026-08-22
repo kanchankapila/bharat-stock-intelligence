@@ -1,7 +1,7 @@
 """
 Data Scientist Agent
 Runs at 07:00 IST daily. Computes data quality metrics and writes a graded
-report + Gemini narrative to agent_data_scientist_reports.
+report + Ollama narrative to agent_data_scientist_reports.
 """
 import json
 import os
@@ -14,7 +14,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from sqlalchemy import text
 from db_compat import get_engine, translate
-from narrative_client import get_narrative
+from ollama_client import get_narrative
 
 ENGINE = get_engine()
 
@@ -98,7 +98,7 @@ def run() -> dict:
             issues.append({"severity": "MEDIUM",
                            "issue": f"OHLCV coverage below 80%: {ohlcv_coverage_pct:.1f}%"})
 
-        # ── narrative ──────────────────────────────────────────────────
+        # ── Ollama narrative ──────────────────────────────────────────────────
         prompt = (
             f"You are a quant data scientist. Given these metrics:\n"
             f"- OHLCV coverage: {ohlcv_coverage_pct:.1f}% ({stale_count} symbols stale)\n"

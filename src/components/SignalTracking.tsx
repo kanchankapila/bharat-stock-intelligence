@@ -75,7 +75,7 @@ export const SignalTracking: React.FC = () => {
     <div className="p-6 space-y-6">
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
-          <h1 className="v1-title-page">Signal Tracking</h1>
+          <h1 className="text-3xl font-semibold text-white">Signal Tracking</h1>
           <p className="mt-2 text-sm text-slate-400">Track all generated signals and their live growth performance.</p>
         </div>
         

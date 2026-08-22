@@ -46,17 +46,6 @@ def _seed(conn):
         "INSERT INTO stock_fundamentals (symbol, return_on_equity, piotroski_f_score) "
         "VALUES ('X',30.0,9)"
     )
-    # load_training_data()'s default label became 'triple_barrier' on 2026-08-21, which takes its
-    # target from signal_excursions.tb_label rather than signal_outcomes.outcome. Seeded here
-    # rather than pinning these tests to label='horizon': the point of this file is to guard the
-    # fundamentals as-of join against look-ahead on the query PRODUCTION actually runs, and the
-    # triple_barrier branch carries an extra join, so testing the legacy label would quietly stop
-    # covering the real path.
-    conn.execute(
-        "INSERT INTO signal_excursions "
-        "(symbol, signal_date, horizon_days, entry_price, horizon_close_pct, atr_pct, tb_label) "
-        "VALUES ('X','2024-06-01',15,100.0,3.0,2.0,1)"
-    )
     conn.commit()
 
 

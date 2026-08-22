@@ -365,7 +365,7 @@ export const MONITOR_SCRIPTS = [
     label: 'Company Profile & AI Sync',
     category: 'Data',
     critical: false,
-    description: 'Fetches Trendlyne company descriptions and scores high-growth potential via Gemini AI.',
+    description: 'Fetches Trendlyne company descriptions and scores high-growth potential via Ollama AI.',
     // Actually daily, all 7 days, 21:00 IST (sync.jobs.ts 'sync-company-profiles', 30 15 * * *)
     // -- shards the universe by day-of-year, one run/day needed for full coverage every ~7
     // days. Label corrected 2026-08-03 (was stale "Bi-weekly Sunday", pure display text with

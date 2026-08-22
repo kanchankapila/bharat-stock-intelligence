@@ -19,8 +19,6 @@ import pytest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from pg_test_support import drop_throwaway_schema
-
 psycopg2 = pytest.importorskip("psycopg2")
 
 SCHEMA = "t_nanpurge"
@@ -72,7 +70,7 @@ def conn():
     admin = psycopg2.connect(**PG)
     admin.autocommit = True
     cur = admin.cursor()
-    drop_throwaway_schema(admin, SCHEMA)
+    cur.execute(f"DROP SCHEMA IF EXISTS {SCHEMA} CASCADE")
     cur.execute(f"CREATE SCHEMA {SCHEMA}")
     cur.execute(f"""
         CREATE TABLE {SCHEMA}.unified_recommendations (
@@ -97,7 +95,7 @@ def conn():
         yield _Conn(work)
     finally:
         work.close()
-        drop_throwaway_schema(admin, SCHEMA)
+        cur.execute(f"DROP SCHEMA IF EXISTS {SCHEMA} CASCADE")
         admin.close()
         if _prev is None:
             os.environ.pop("USE_POSTGRES", None)

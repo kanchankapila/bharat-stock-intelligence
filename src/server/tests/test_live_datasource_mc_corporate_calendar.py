@@ -24,8 +24,6 @@ import sys
 from datetime import date
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
-
-from pg_test_support import drop_throwaway_schema
 sys.path.insert(0, os.path.dirname(__file__))
 
 try:
@@ -100,7 +98,7 @@ class TestMcCorporateCalendarFetcherLiveDataSource:
                                   password="bharat", dbname="bharat_intel")
         admin.autocommit = True
         acur = admin.cursor()
-        drop_throwaway_schema(admin, REAL_SCHEMA)
+        acur.execute(f"DROP SCHEMA IF EXISTS {REAL_SCHEMA} CASCADE")
         acur.execute(f"CREATE SCHEMA {REAL_SCHEMA}")
         acur.execute(f"""
             CREATE TABLE {REAL_SCHEMA}.nse_stocks (mcsymbol TEXT, symbol TEXT)
@@ -166,7 +164,7 @@ class TestMcCorporateCalendarFetcherLiveDataSource:
                 if REAL_SYMBOL in ex_div:
                     assert_numeric_and_finite(ts_row[0], context="technical_signals.days_to_ex_div")
         finally:
-            drop_throwaway_schema(admin, REAL_SCHEMA)
+            acur.execute(f"DROP SCHEMA IF EXISTS {REAL_SCHEMA} CASCADE")
             admin.close()
             if orig_use_postgres is None:
                 os.environ.pop("USE_POSTGRES", None)

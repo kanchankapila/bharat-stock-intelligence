@@ -145,36 +145,6 @@ def pg_memory_conn():
     return ConnWrapper(sa_conn)
 
 
-def drop_throwaway_schema(admin, schema: str) -> None:
-    """DROP a throwaway test schema, evicting anything still holding locks inside it first.
-
-    Why the eviction is required and not paranoia (measured live 2026-08-21): a test body that
-    opens a connection and never closes it leaves it `idle in transaction` holding
-    AccessShareLocks on that schema's tables. `DROP SCHEMA ... CASCADE` needs
-    AccessExclusiveLock, so it waits behind them -- observed at 5-10 MINUTES per test, which is
-    what made the Python suite look like it was stalling on "memory pressure" while free RAM was
-    5.4/23 GB. `db_compat.dispose_engines()` is the graceful half and should still be called
-    first, but it is NOT sufficient on its own: SQLAlchemy's Engine.dispose() replaces the pool
-    and deliberately does NOT close connections that are still checked out, which is exactly the
-    leaked-connection case.
-
-    Terminating is safe here precisely because the schema is a per-test uuid: any backend
-    holding a lock on a relation inside it is, by construction, this test's own leftover.
-    """
-    cur = admin.cursor()
-    cur.execute(
-        """
-        SELECT pg_terminate_backend(l.pid)
-        FROM pg_locks l
-        JOIN pg_class c ON c.oid = l.relation
-        JOIN pg_namespace n ON n.oid = c.relnamespace
-        WHERE n.nspname = %s AND l.pid <> pg_backend_pid()
-        """,
-        (schema,),
-    )
-    cur.execute(f'DROP SCHEMA IF EXISTS "{schema}" CASCADE')
-
-
 def drain_memory_conns() -> None:
     """Drop every schema pg_memory_conn() opened, restoring USE_POSTGRES in reverse order."""
     while _MEM_OPEN:
@@ -186,6 +156,6 @@ def drain_memory_conns() -> None:
                 os.environ["USE_POSTGRES"] = previous
             sa_conn.close()
             engine.dispose()
-            drop_throwaway_schema(admin, schema)
+            admin.cursor().execute(f'DROP SCHEMA IF EXISTS "{schema}" CASCADE')
         finally:
             admin.close()

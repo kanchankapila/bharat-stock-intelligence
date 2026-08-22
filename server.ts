@@ -50,6 +50,7 @@ import { fetchStockDataWithCache } from "./src/server/liveStockData";
 import { initCache } from "./src/server/cacheService";
 import { initQueues, shutdownQueues } from "./src/server/queues";
 import { startRedis, stopRedis } from "./src/server/redisManager";
+import { startOllama, stopOllama } from "./src/server/ollamaManager";
 import { wsSignalService } from "./src/server/websocketService";  // PHASE 3.2: WebSocket
 import log from "./src/server/logger";
 import { randomUUID } from "crypto";
@@ -85,6 +86,9 @@ async function startServer() {
   const app = express();
   const PORT = parseInt(process.env.PORT || '3000', 10);
 
+  // Initialise AI & Redis (gracefully managed)
+  await startOllama();
+  
   // Initialise Redis cache (gracefully falls back to in-memory if Redis is down)
   const cacheStarted = await initCache();
 
@@ -593,6 +597,7 @@ for (const sig of ['SIGTERM', 'SIGINT'] as NodeJS.Signals[]) {
     wsSignalService.shutdown();  // PHASE 3.2: Shutdown WebSocket
     await shutdownQueues();
     await stopRedis();
+    await stopOllama();
     process.exit(0);
   });
 }

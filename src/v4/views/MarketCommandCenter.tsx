@@ -99,7 +99,7 @@ export const MarketCommandCenter: React.FC<MarketCommandCenterProps> = ({ onSele
         <div className="flex items-center justify-between flex-wrap gap-2">
           <div className="flex items-center gap-2">
             <LayoutDashboard className="w-4 h-4 text-indigo-400" />
-            <h1 className="v1-title-page">Market Command Center</h1>
+            <h1 className="text-sm font-black text-slate-100 uppercase tracking-widest">Market Command Center</h1>
           </div>
           <LiveClock />
         </div>

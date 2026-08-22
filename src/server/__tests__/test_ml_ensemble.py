@@ -42,10 +42,7 @@ def test_load_training_data_includes_stop_loss(monkeypatch):
     ]
 
     monkeypatch.setattr('ml_ensemble.read_df', lambda q, p=None: pd.DataFrame(fake_rows))
-    # Pinned to label='horizon' explicitly: this test's subject is that label's own
-    # STOP_LOSS -> 0 mapping. The default moved to 'triple_barrier' on 2026-08-21, which
-    # reads se.tb_label and has no STOP_LOSS state to map.
-    df = load_training_data(label='horizon')
+    df = load_training_data()
 
     assert len(df) == 2, f"Expected 2 rows, got {len(df)}: STOP_LOSS row should not be dropped"
     stop_row = df[df.index == 1] if 1 in df.index else df.iloc[1:2]

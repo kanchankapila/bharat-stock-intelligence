@@ -10,20 +10,6 @@
    just had nothing to apply to. Importing here, globally, is the missing half of that fix. */
 @import "./v5/v5.css";
 
-/* v6-root already bridges --v5-*'s dark-theme COLORS onto v1's palette (v6-theme.css) -- it
-   never touched the v5/v6 FONT-FAMILY declarations, so every v5-origin desk page (Options/
-   Risk/Institutional Flow/Earnings/Signal Review/Screener Lab/Workstation/etc, reached from
-   v1 nav via V1Routes.tsx) rendered its own titles in Space Grotesk instead of this app's
-   Rajdhani -- correct colors, wrong typeface, still reading as "a different page". Written as
-   plain (unlayered) CSS, not inside @layer utilities below -- Tailwind's `@import "tailwindcss"`
-   puts utilities in a named layer, and CSS Cascade Layers gives ANY unlayered style (v5.css's
-   own plain .v5-title rule, imported two lines up) priority over every named layer regardless
-   of source order or specificity. The first attempt at this rule lived in @layer utilities and
-   silently lost to v5.css every time -- verified live via getComputedStyle, still Space Grotesk. */
-.v6-root .v5-title, .v6-root .v5-section-title {
-  font-family: var(--font-display);
-}
-
 @theme {
   --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
   --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
