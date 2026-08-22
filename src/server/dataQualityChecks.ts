@@ -2009,6 +2009,11 @@ export const DATA_QUALITY_CHECKS: DataQualityCheck[] = [
     critical: true,
     // scripts/check_deploy_drift.mjs does the actual git/pm2 comparison (it needs `git log`
     // and `pm2 jlist`, neither of which belongs behind a SQL query) and stamps this row.
+    // NOTE: that script applies a 2h grace window (scripts/lib/deployDriftVerdict.mjs) before a
+    // commit newer than the running process counts as a finding -- it stamps SUCCESS while a
+    // just-landed commit is still inside it. Without that, this entry went red the instant
+    // anyone committed and stayed red until the next restart (measured 61/198 runs failed), and
+    // a `critical` check that is red by construction on every dev day stops being read.
     // "server N commits behind HEAD" is a recurring audit finding (AF-14) -- always caught
     // late by a human noticing, never by a check, because nothing compared the two before.
     sql: `SELECT last_status, last_error,

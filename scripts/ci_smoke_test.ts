@@ -1,12 +1,12 @@
 /**
- * CI smoke test: boots the real tRPC router in-process (no Express/Redis/Ollama — those are
+ * CI smoke test: boots the real tRPC router in-process (no Express/Redis — those are
  * separate infra concerns already covered by graceful-degradation code paths) against a fresh
  * Postgres schema and calls a handful of read-only, DB-only procedures. Catches exactly the
  * "router code references a column schema.postgres.sql doesn't have" class of bug that unit
  * tests (mocked DB) and typecheck (no runtime DB access) both miss — see CLAUDE.md's migration-066
  * fcf_yield_approx incident for a real example of what this would have caught.
  *
- * Deliberately does NOT call startServer() — that boots Ollama, BullMQ workers, and background
+ * Deliberately does NOT call startServer() — that boots BullMQ workers and background
  * jobs that hit live external APIs (Yahoo/MoneyControl/etc.), none of which belong in CI and
  * would make this flaky. Every procedure below is chosen because it only reads from Postgres.
  *
