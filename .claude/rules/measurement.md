@@ -57,6 +57,57 @@ Any cross-sectional forward-return measurement on this data:
 - **Judge any datasource by dates PER SYMBOL and by its DENSE span, never by raw `min(date)`/`count(DISTINCT date)` over the whole table.** Both have misled this repo — a table can report years of span while being 4-5 rows per symbol, or "5 years" while dense coverage only starts 2 years in. Run both: `SELECT min(n), median(n), max(n) FROM (SELECT symbol, count(DISTINCT date) n FROM t GROUP BY 1)` and `SELECT extract(year FROM date), count(DISTINCT date) FROM t GROUP BY 1 ORDER BY 1`. Full incident: `docs/measurement-history.md`.
 - **Grade every candidate factor against BOTH tails**, not just AUC-vs-winners — an AUC computed only against winners cannot tell "predicts winners" from "predicts volatility" (this codebase has been fooled by that exact statistic twice; full writeup in history). Report three numbers: AUC vs the winning tail, AUC vs the losing tail, AUC of one tail against the other.
 
+## `win_probability`'s "trained on a narrow population, served universe-wide" claim does NOT hold — checked live 2026-08-22, not assumed
+
+`docs/ACCURACY_OVERHAUL_PROMPT.md`'s W2 claimed `ml_ensemble.load_training_data()` trains on
+`P(win | the technical scanner already fired)` — a narrow, pattern-matched population — while
+`scoring_engine.py`'s `win_prob_map` applies the resulting `win_probability` **universe-wide**
+(any `technical_signals` row scored in the last day), and proposed narrowing serving to match.
+
+**The serving-side half is real and confirmed**: on the latest scored date (2026-08-21), 2,196
+symbols carry a non-null `win_probability`, and of those only 397 (18%) have `signals_json IS NOT
+NULL` (an actual technical-scanner pattern match) — the remaining 1,799 (82%) are grid rows from
+`backfill_technical_features.py --full-today`, which score every liquid symbol daily regardless of
+whether any pattern fired (the `signals_json IS NOT NULL` filter was deliberately removed from
+`load_pending_signals()` on 2026-07-18 for exactly this reason — see `ml_ensemble.py`'s own
+comment there).
+
+**The training-side half of the claim is FALSE, checked directly rather than assumed.** The
+`triple_barrier` label's real eligibility gate is `signal_excursions.tb_label IS NOT NULL`, joined
+on `(symbol, signal_date)` — not `signals_json`. Measured on three matured dates (mature = the
+label's horizon has had time to resolve):
+
+| date | scored (`win_probability` not null) | pattern-fired (`signals_json` not null) | has `tb_label` |
+|---|---|---|---|
+| 2026-07-28 (25d back, fully matured) | 7,496 | 7 (0.1%) | 7,484 (**99.8%**) |
+| 2026-08-04 (18d back) | 3,607 | 39 (1.1%) | 3,508 (**97.3%**) |
+| 2026-08-10 (12d back, still maturing) | 2,198 | 354 (16.1%) | 1,652 (75.2%, rising as horizons resolve) |
+
+`outcome_resolver.py`'s pending-signal query (which ultimately populates `signal_outcomes`, the
+`so.signal_source='technical'` table `load_training_data()` filters on) has **no filter on
+`signals_json`** either — it resolves outcomes for every `technical_signals` row, grid rows
+included. So on any date old enough for its labels to have matured, the training-eligible
+population is **already ~97-99.8% of the served population**, not a narrow pattern-fired subset.
+Training and serving already draw from essentially the same universe; the 2026-07-18 grid-ensurer
+fix widened both sides together (serving directly, training indirectly via `outcome_resolver`
+having never filtered on `signals_json` to begin with).
+
+**Consequence: W2's proposed "Option B" (narrow `scoring_engine.py`'s `win_prob_map` to only
+pattern-fired symbols) would be a regression, not a fix** — it would artificially cut real,
+already-aligned coverage (the 82% grid-scored population) down to the 18% pattern-fired slice, to
+correct a population mismatch that does not currently exist. **Not implemented, on this evidence.**
+No `factor_backtest.py` run applies (this is a population-coverage question, not a factor/score
+change) — the applicable measurement is the table above, taken from live production.
+
+The one real, still-open question this surfaces: `win_probability`'s own measured edge (see the
+dedicated section below — real IC, AUC never clears 0.55 on the terminal-return grading, though it
+clears `USABLE` against its own native `path_barrier` label) was graded on whatever population
+happened to be scored on the sampled dates, without separating "grid row" from "pattern-fired
+row" as a control variable. Given the near-universal `tb_label` coverage above, that grading is
+probably not confounded by population mismatch — but nobody has explicitly re-run the
+`factor_edge.py` grade split by `signals_json IS NOT NULL` vs `NULL` to confirm the two
+sub-populations grade the same way. Flagged, not measured.
+
 ## Known state of the edge (as measured, not assumed)
 
 `unified_score` 5d rank IC ≈ 0.0001 (t=0.02). Short-horizon momentum is negative at three horizons. Bullish screener consensus is significantly negative (t=−2.36), and screener sentiment labels are themselves inverted (bullish minus bearish = −0.11pp, t=−4.61) because they're keyword-classified off the screener name, never validated against an outcome. `insider_net` re-runs mildly positive but not significant (t=1.73, see banner); `delivery_spike`, `ticket_size` are null-to-negative. No individual screener (0 of 552 tested) survives FDR or Bonferroni. The common bullish setups (Gap Up ≥2%, breakout>20d-high, volume shocker) are inverted at 1-day. **The "Gap Down is the one significantly positive setup" line here was retracted 2026-08-13** — it was a same-day descriptive screener-membership reading, not a tradeable one (see the "Screeners are DESCRIPTIVE, not predictive" finding in `measurement-history.md`); reconstructed from price and run through the real turnover/cost-aware harness (`factor_backtest.py --factor gap_down`), it is significantly NEGATIVE net of costs at every rebalance tested (21d t=−3.54, 5d t=−9.0), same magnitude and sign as `gap_up` (21d t=−3.55) — both directions are a turnover trap (~90-93% one-way turnover every period; almost no persistence in which names gapped) rather than an edge in either direction. See the "already tested" table. Sector-neutralising a factor destroys its edge here (opposite of the published US result) — see the "already tested" table. FnO/positioning factors (long/short buildup) cannot be reconstructed at all — no fetcher on this platform captures per-stock futures OI.
@@ -685,6 +736,87 @@ class of the label itself (short-horizon Indian-equity forward direction is clos
 efficiently-priced at this universe's liquidity floor) or a shared calendar constraint (every
 longer-horizon read in this list is also the thinnest-data read, so LOW-DATA and "genuinely weaker
 long-horizon edge" are still confounded and not yet separable with the history available).
+
+### The post-blend stack ABLATED, layer by layer — 2026-08-22. It is not destroying the edge; the ranker's own weighting is the biggest positive step, and the loss is elsewhere
+
+This closes the open question the 2026-08-22 blend A/B left behind (its caveat #1: reconstruction
+fidelity 0.5665, "this graded the blend in isolation, not the final ranking"). Tool:
+`src/server/assembly_ablation.py`, reusing `unified_ranker`'s own `_blend`/`_normalize_to_100`/
+`quality_gate`/`high_vol_cutoff`, `engine_composite`'s own rank-z construction, and
+`factor_edge`'s own `_forward_returns`/`_metrics`/`_verdict` — never a reimplementation.
+Cumulative arms in the ranker's own application order, **identical rows for every arm**,
+`>=₹1cr ADT20` floor, 43 dates (2026-06-01..08-21):
+
+| arm | h=1 IC | h=5 IC | h=21 IC | h=21 AUC | verdict @21d |
+|---|---|---|---|---|---|
+| `equal_weight` (engine_composite's construction) | +0.0170 | +0.0596 | +0.0515 | 0.5447 | no edge |
+| `regime_weighted` (+ REGIME_WEIGHTS) | +0.0186 | **+0.0709** | **+0.0680** | 0.5513 | **USABLE** |
+| `rw+quality` (+ quality_gate) | +0.0183 | +0.0696 | +0.0691 | 0.5521 | **USABLE** |
+| `rw+quality+redflag` (+ RED_FLAG_VETO) | +0.0217 | +0.0710 | +0.0549 | 0.5497 | no edge |
+| `rw+quality+redflag+highvol` (+ HIGH_VOL_VETO) | +0.0227 | +0.0716 | +0.0568 | 0.5524 | **USABLE** |
+| **`stored_unified_score`** (live, all layers) | +0.0235 | **+0.0260** | **+0.0276** | 0.5155 | no edge |
+
+**Four findings, in order of how much they change what this file already says.**
+
+1. **`REGIME_WEIGHTS` is the single biggest POSITIVE step, not a negative one.** Equal→regime
+   weighting adds +0.011 at h=5 and +0.017 at h=21 and is what carries the arm across the
+   `USABLE` line. That is the opposite of the standing "combining/reweighting reduced
+   performance in every case tested" prior — and it is a *fair* comparison, because both arms
+   use the identical six rank-z engine values and differ only in the weight vector. It also
+   partially vindicates the 2026-08-20 weight re-derivation, which the blend A/B had cast
+   doubt on.
+2. **The three vetoes/gates are approximately IC-neutral, and none is the culprit.** Across
+   h=5 the whole gate stack moves IC by +0.0007 (0.0709→0.0716). `red_flag` costs h=21 IC
+   (−0.013) and `high_vol` gives most of it back (+0.002 IC, +0.003 AUC). These are selective
+   multipliers — 27.7% / 17.7% / 16.7% prevalence, so they genuinely reorder — and they still
+   barely move rank IC. **Do not go looking for the missing edge in the veto layer.**
+3. **The whole loss is between the last reconstructed arm and the stored score:
+   h=5 +0.0716 → +0.0260, h=21 +0.0568 → +0.0276 — roughly two-thirds, in one step.** What
+   lives in that step and is NOT in any arm above: `factor_crowding` (not reconstructable —
+   `quant_scores` has one row per symbol, no history), the RL gate, the tradeable-universe
+   restriction, `edge_adjusted_weights`, and the `screener`/`smart_money` engines (no raw
+   historical source, absent from both arms by construction). **That set is now the
+   highest-value thing left to bisect**, and it is a much smaller search space than "the
+   assembly layer". Note `screener` sits in it and is independently measured negative, which
+   makes it the leading suspect — but this ablation does not prove that, and the crowding
+   multiplier is untestable without a `quant_scores` history table.
+4. **AUC behaves as it always does here** — 0.51-0.55, and the three `USABLE` verdicts all sit
+   at 21d where dates=22, barely over `MIN_DATES_RELIABLE`. Treat them as promising, not
+   established. Same IC-real-AUC-stalls ceiling this file documents across seven other engines.
+
+**⚠ Two artifacts corrected during this work, both of which produced confident WRONG answers
+first. Anyone reusing this tooling must know about them.**
+
+- **`unified_recommendations`' stored `*_score` columns are unusable as a historical panel.**
+  The AF-20260818-31 zero-vs-NULL artifact is worse than its ledger row suggests: measured live,
+  `ml_score = 0` on **36,400 of 72,223 rows** and `dl_score = 0` on **100% of some dates** —
+  a never-scored engine written as literal `0.0`. The guard only landed **2026-08-18**, leaving
+  **5 usable dates**. Feeding those zeros to `_normalize_to_100` re-spreads a constant-zero
+  engine over a full 0–100 rank, i.e. injects pure noise at a real weight. The first version of
+  this ablation did exactly that and reported a **negative** blend IC (−0.028 at h=5). Build any
+  historical engine panel from the RAW tables (`technical_signals`, `deep_learning_predictions`,
+  `confluence_signals`), as `engine_composite.py` already does.
+- **`ZERO_DISPERSION_MIN_SD = 5.0` is calibrated for 0–100 scores and must not be applied to raw
+  values.** On raw probabilities (`win_probability` is 0–1, sd ≈ 0.07) it drops nearly every
+  engine: a second version of this ablation dropped `ml` on 33 of 43 dates and `technical` on 33,
+  which flipped the equal-weight arm negative. A bug in the measurement script, not in the
+  ranker — the exact "a bug in the measurement tooling is worse than no measurement, because it
+  looks like evidence" class this file already warns about, hit twice in one sitting.
+
+**The liquidity floor was decisive, not cosmetic — and it killed a dramatic false finding.**
+Without it, the ranker's universe restriction looked like it was destroying the composite's edge:
+same `composite` column, same dates, h=5 IC **+0.0684 full universe vs +0.0123 restricted to the
+ranker's names**, with the excluded names carrying +0.0805. That reads as "the ranker throws away
+its own edge". **It is mostly liquidity.** 25-31% of both groups sit below ₹1cr ADT, and with the
+panel spec's floor applied the h=5 gap almost entirely closes: **+0.0575 full vs +0.0585
+restricted** — the ranker's universe is *marginally better*, not catastrophically worse. A real
+residual remains at h=21 (+0.0498 restricted vs +0.0988 excluded, liquid-only), worth a look on
+its own, but the headline effect was an artifact of measuring microcaps nobody can trade. This is
+the panel spec's own liquidity rule catching exactly what it exists to catch.
+
+**Persisted** to `factor_edge_history` under `table_name='assembly_ablation'`, one row per arm ×
+horizon, so it accumulates and can be re-graded rather than rotting as a one-off number.
+
 
 ### `factor_edge.py` grades close-to-close, but the panel spec mandates next-day OPEN entry — measured 2026-08-22, every IC in `factor_edge_history` is optimistic
 
