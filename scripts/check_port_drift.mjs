@@ -36,6 +36,11 @@ import 'dotenv/config';
 
 const isWin = process.platform === 'win32';
 
+// How long after pm2 forks a process it may still have no listening socket without that
+// counting as a finding. See the "nothing is listening" branch in main() for the measurement
+// (13.6s/14.0s/17.7s observed) and the full rationale.
+export const BOOT_GRACE_MS = 90 * 1000;
+
 // name -> { port, scriptMatch } -- scriptMatch is matched against the process command
 // line (case-insensitive substring), used only to find candidate orphans that never
 // won the port race at all (e.g. a one-shot script like dl_engine.py that holds no
@@ -177,7 +182,33 @@ async function main() {
     const listeningPid = ports[svc.port];
 
     if (listeningPid == null) {
-      problems.push(`${name}: pm2 reports online (pid ${pm2Pid}) but nothing is listening on port ${svc.port} at all.`);
+      // pm2 flips status to 'online' the moment it forks the process, which is BEFORE the
+      // service has bound its socket -- so every restart made this critical check fail for
+      // the length of the boot. Caught live 2026-08-22: a data-quality run landed 16 minutes
+      // into a restart and reported "nothing is listening on port 3000 at all" while the
+      // server was mid-boot and perfectly healthy. Same shape, and the same argument, as the
+      // deploy-drift grace window (scripts/lib/deployDriftVerdict.mjs): a `critical` check
+      // that is red by construction on every restart stops being read, which costs the real
+      // finding it exists for -- the 2026-08-20 incident where an untracked process squatted
+      // 3000/8000/8002 for over an hour.
+      //
+      // BOOT_GRACE_MS is measured, not guessed: three consecutive `pm2 restart
+      // bharat-server` runs bound port 3000 after 13.6s / 14.0s / 17.7s, so 90s is >5x the
+      // worst observed. Deliberately much shorter than deploy-drift's 2h -- this is a boot
+      // race, not a "someone forgot to deploy" gap, and the check runs every 15 minutes, so
+      // a genuine squatter is still reported on the very next cycle.
+      const uptimeMs = pm2Proc.pm2_env?.pm_uptime ? Date.now() - pm2Proc.pm2_env.pm_uptime : null;
+      if (uptimeMs != null && uptimeMs < BOOT_GRACE_MS) {
+        console.log(
+          `[port-drift] ${name}: nothing on port ${svc.port} yet, but the process is only ` +
+          `${(uptimeMs / 1000).toFixed(0)}s old (grace: ${BOOT_GRACE_MS / 1000}s) — still booting, not a finding.`
+        );
+        continue;
+      }
+      problems.push(
+        `${name}: pm2 reports online (pid ${pm2Pid}) but nothing is listening on port ${svc.port} at all` +
+        `${uptimeMs != null ? ` (process up ${(uptimeMs / 1000).toFixed(0)}s, past the ${BOOT_GRACE_MS / 1000}s boot grace)` : ''}.`
+      );
       continue;
     }
     if (!isSelfOrDescendant(listeningPid, pm2Pid, byPid)) {
