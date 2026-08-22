@@ -744,19 +744,20 @@ def fetch_actual_estimate_beats(con, max_pages: int = 25) -> None:
     # logical_trading_date(), not date.today() (2026-08-01) -- ml-daily-ops's step chain
     # regularly finishes after midnight IST, see as_of.logical_trading_date's docstring.
     today = logical_trading_date()
-    cur.execute("""
+    # Only the (?,?,?) row-shape is interpolated -- never a value. `sym` comes from our own
+    # nse_stocks.mcsymbol map, but that column has held junk before (nse_stocks.tlid held raw
+    # tickers for 412 rows), so a quote in it would have broken or rewritten this statement.
+    ordered = list(rows_by_symbol.items())
+    placeholders = ", ".join(["(?, ?, ?)"] * len(ordered))
+    params = [x for sym, (lbl, pct, _) in ordered for x in (sym, lbl, pct)]
+    cur.execute(f"""
         UPDATE technical_signals ts
         SET eps_beat_last_q = v.beat_label,
             mc_eps_vs_cons  = v.beat_pct
-        FROM (VALUES {}) AS v(symbol, beat_label, beat_pct)
+        FROM (VALUES {placeholders}) AS v(symbol, beat_label, beat_pct)
         WHERE ts.symbol = v.symbol
           AND ts.date = ?
-    """.format(
-        ", ".join(
-            f"('{sym}', {lbl}, {pct if pct is not None else 'NULL'})"
-            for sym, (lbl, pct, _) in rows_by_symbol.items()
-        )
-    ), (today,))
+    """, (*params, today))
     con.commit()
 
     beats  = sum(1 for lbl, _, _ in rows_by_symbol.values() if lbl == 1)

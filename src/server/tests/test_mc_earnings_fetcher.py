@@ -133,8 +133,49 @@ class TestFetchActualEstimateBeatsUsesLogicalTradingDate:
         updates = _updates(conn)
         assert len(updates) == 1
         _, params = updates[0]
-        # (today,) is the only bound param; symbol/label/pct are inlined via VALUES
-        assert params == ("2026-07-31",), (
+        # Every value is bound now (symbol/label/pct + today), not inlined -- the date is the
+        # LAST param, matching the trailing `ts.date = ?`.
+        assert params[-1] == "2026-07-31", (
             "fetch_actual_estimate_beats() must write against logical_trading_date()'s "
             "value, not date.today()"
         )
+        assert params == ("RELIANCE", 1, 5.2, "2026-07-31")
+
+
+class TestFetchActualEstimateBeatsBindsValues:
+    """The symbol/label/pct triples must be BOUND, never interpolated into the SQL text.
+
+    Until 2026-08-22 this built `FROM (VALUES {})` with an f-string --
+    `f"('{sym}', {lbl}, {pct})"` -- so a quote in nse_stocks.mcsymbol's mapped symbol would
+    terminate the string literal and the rest would be parsed as SQL. That column is
+    provider-derived and this repo has already shipped one where the values were not what the
+    name promised (nse_stocks.tlid held raw tickers for 412 of 2,234 rows).
+    """
+
+    def _run(self, monkeypatch, symbol):
+        monkeypatch.setattr(mef, "logical_trading_date", lambda: "2026-07-31")
+        monkeypatch.setattr(mef.time, "sleep", lambda *_: None)
+        conn = _FakeConn(fetchall_results=[[("RI", symbol)]])
+        item = ["RI", "", "", "", "", "", "", "Beats Estimate", "5.2"]
+        monkeypatch.setattr(mef, "_get", lambda url: {"list": [item]})
+        mef.fetch_actual_estimate_beats(conn, max_pages=1)
+        return _updates(conn)[0]
+
+    def test_symbol_is_bound_not_interpolated(self, monkeypatch):
+        sql, params = self._run(monkeypatch, "RELIANCE")
+        assert "'RELIANCE'" not in sql, "symbol was interpolated into the SQL text"
+        assert "RELIANCE" in params
+
+    def test_quote_in_symbol_cannot_reach_the_sql_text(self, monkeypatch):
+        # The classic payload. Pre-fix this landed verbatim in the statement; post-fix it is
+        # inert data in the parameter tuple.
+        evil = "X'); DROP TABLE technical_signals; --"
+        sql, params = self._run(monkeypatch, evil)
+        assert "DROP TABLE" not in sql, "injected SQL reached the statement text"
+        assert evil in params, "the payload must survive intact as a bound value"
+
+    def test_placeholder_count_matches_bound_values(self, monkeypatch):
+        sql, params = self._run(monkeypatch, "RELIANCE")
+        # 3 per row + 1 trailing date. A mismatch here is the bug that silently shifts
+        # every value one column to the left.
+        assert sql.count("?") == len(params) == 4

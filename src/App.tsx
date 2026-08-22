@@ -324,8 +324,8 @@ export default function App() {
       const provider = new GoogleAuthProvider();
       const result = await signInWithPopup(auth, provider);
 
+      // No `id` — the server derives it from the verified Firebase ID token (ctx.uid).
       await syncUserMutation.mutateAsync({
-        id: result.user.uid,
         email: result.user.email,
         name: result.user.displayName,
         photoURL: result.user.photoURL

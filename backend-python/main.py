@@ -68,9 +68,14 @@ except Exception:
 # ── App ───────────────────────────────────────────────────────────────────────
 app = FastAPI(title="Bharat Stock Intelligence — AI & Quant Engine")
 
+# This service has exactly one consumer -- alphaQuantClient.ts, server-to-server over
+# loopback -- so no browser ever issues a cross-origin request here and CORS grants nothing.
+# allow_origins=["*"] WITH allow_credentials=True was also self-contradictory: the CORS spec
+# forbids that pair, so browsers reject it anyway. Matches chatbot/app.py's scoped allowlist.
+_allowed_origin = os.environ.get("ALLOWED_ORIGIN", "http://localhost:3000")
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=[_allowed_origin, "http://localhost:5173"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -301,4 +306,10 @@ async def infer_dl():
 if __name__ == "__main__":
     import uvicorn
     port = int(os.environ.get("PYTHON_PORT", 8002))
-    uvicorn.run("main:app", host="0.0.0.0", port=port, reload=False)
+    # Loopback, matching python_api.py:71. Its only consumer is alphaQuantClient.ts on the
+    # same box (ALPHAQUANT_URL=http://127.0.0.1:8002), and the 17 routes below have no auth
+    # of their own -- binding 0.0.0.0 exposed all of them to anything that could reach this
+    # host. Override with ALPHAQUANT_HOST if the service is ever genuinely moved off-box,
+    # at which point it needs real auth first, not just a wider bind.
+    host = os.environ.get("ALPHAQUANT_HOST", "127.0.0.1")
+    uvicorn.run("main:app", host=host, port=port, reload=False)
