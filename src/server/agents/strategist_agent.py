@@ -1,7 +1,7 @@
 """
 Strategist Agent
 Runs at 08:30 IST daily. Produces ranked picks for 4 timeframes using
-quant_scores + confluence + regime alignment, with Ollama narratives.
+quant_scores + confluence + regime alignment, with Gemini narratives.
 """
 import json
 import sys
@@ -13,7 +13,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from sqlalchemy import text
 from db_compat import get_engine, translate
-from ollama_client import get_narrative
+from narrative_client import get_narrative
 
 ENGINE = get_engine()
 
@@ -194,7 +194,7 @@ def run() -> dict:
             scored.sort(key=lambda x: x["score"], reverse=True)
             top = scored[:PICKS_PER_TF]
 
-            # Build Ollama prompt for top 3
+            # Build narrative prompt for top 3
             top3_lines = "\n".join(
                 f"{i+1}. {p['symbol']} | Score: {p['score']:.0f} | "
                 f"Conviction: {p['conviction']}"

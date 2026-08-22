@@ -280,7 +280,7 @@ async function processAISignal(job: Job): Promise<void> {
   const { gateAISignal, getAISignalMinConfidence, gateOnQuant, getAISignalMinWinProb,
           upsertUnifiedSignal, checkSurveillanceGate } = await import('./signals');
 
-  // Cheap DB-only gates FIRST, before spending an Ollama/Gemini call. Both of these are
+  // Cheap DB-only gates FIRST, before spending a Gemini call. Both of these are
   // independent of the LLM's output, so if either would reject the signal there is no reason
   // to generate one at all — this is what actually cuts inference volume/cost, not the
   // after-the-fact gates below.
@@ -1530,7 +1530,7 @@ export async function initQueues(): Promise<boolean> {
       { 
         connection, 
         concurrency: 1,
-        lockDuration: 600000, // 10 minutes (Ollama can be very slow)
+        lockDuration: 600000, // 10 minutes
         lockRenewTime: 120000, // 2 minutes
       },
     );
@@ -1559,10 +1559,9 @@ export async function initQueues(): Promise<boolean> {
       processAISignal,
       {
         connection,
-        // Ollama now keeps the model resident between calls (OLLAMA_KEEP_ALIVE in aiService.ts,
-        // was `keep_alive: 0` forcing a full reload per stock) and the quant/surveillance gates
-        // run before the LLM call, so this no longer needs to be as conservative as when every
-        // single job paid a cold model load.
+        // AI provider is Gemini (Ollama removed 2026-08-20 — no local model-load cost to
+        // worry about) and the quant/surveillance gates run before the LLM call, so this
+        // stays conservative mainly to respect Gemini's own rate limits, not model-load time.
         concurrency: 2,
         lockDuration: 600000,    // 10 minutes
         lockRenewTime: 180000,   // 3 minutes renewal

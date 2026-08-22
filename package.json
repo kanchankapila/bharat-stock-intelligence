@@ -69,7 +69,6 @@
     "lightweight-charts": "^5.2.0",
     "lucide-react": "^0.546.0",
     "motion": "^12.23.24",
-    "ollama": "^0.6.3",
     "pg": "^8.21.0",
     "pm2": "^7.0.3",
     "react": "^19.0.1",
