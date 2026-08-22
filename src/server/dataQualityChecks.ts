@@ -2267,6 +2267,133 @@ export const DATA_QUALITY_CHECKS: DataQualityCheck[] = [
 
   // ── Generated from TABLE_FRESHNESS_CHECKS (see the factory + mandate comment above) ──────
   ...TABLE_FRESHNESS_CHECKS.map(makeFreshnessCheck),
+  {
+    id: 'ur-engine-score-zero-not-null',
+    label: 'unified_recommendations *_score columns write NULL (not 0.0) when an engine never scored a symbol',
+    category: 'scoring',
+    // NOT critical: this is a data-fidelity defect, not an outage. It never breaks a live
+    // score -- engine_scores/`unified` are computed from `present` BEFORE these reporting
+    // columns are built -- but it silently poisons any MEASUREMENT built on this table.
+    critical: false,
+    // AF-20260818-31. Five of the eight reporting columns lacked the
+    // `'X' in has_data else None` guard three siblings already had, so an engine that never
+    // scored a symbol wrote a literal 0.0. Fixed 2026-08-18 (unified_ranker.py:2454-2461,
+    // all 8 columns now guarded).
+    //
+    // Why it earns a standing check rather than "fixed, move on": the blast radius was only
+    // discovered on 2026-08-22, four days later, when an ablation built its historical panel
+    // from these columns and reported a NEGATIVE blend IC. ml_score was 0 on 36,400 of 72,223
+    // rows and dl_score on 100% of some dates; normalizing a constant-zero engine re-spreads
+    // it over a full 0-100 rank, i.e. injects pure noise at a real weight. A wrong number that
+    // looks plausible is this repo's most expensive failure mode (measurement.md: "a bug in
+    // the measurement tooling is worse than no measurement, because it looks like evidence").
+    //
+    // The test is a ZERO SPIKE, not any zero at all. Genuine zeros exist and must not alarm:
+    // verified live 2026-08-22, dl_score=0 rows have real prob_up_5d values rounding to 0.00,
+    // and smart_money_score=0 legitimately means "no deals". The artifact's signature is a
+    // whole ENGINE going zero at once (100%, or a systematically-unscored cohort), never a
+    // handful of rows.
+    //
+    // The floor is MEASURED against post-fix dates (2026-08-18+), not guessed: per-date
+    // genuine zero share maxes at smart_money 7.0%, dl 2.1%, breakout/cs 0.0%. 15% therefore
+    // sits above every genuine rate observed and an order of magnitude below the artifact's.
+    // A first version used 5% and WARNed on smart_money's legitimate 6.9% on the very first
+    // live run -- recurring-bugs.md is explicit that a check which cries wolf on correct data
+    // stops being read, which is the same argument the delivery-data check already lost once.
+    sql: `WITH latest AS (SELECT MAX(computed_at)::date AS d FROM unified_recommendations),
+               r AS (SELECT * FROM unified_recommendations
+                      WHERE computed_at::date = (SELECT d FROM latest))
+          SELECT (SELECT d FROM latest) AS d, count(*) AS n,
+                 count(*) FILTER (WHERE screener_stock_score = 0) AS z_screener,
+                 count(*) FILTER (WHERE ml_score = 0)             AS z_ml,
+                 count(*) FILTER (WHERE cs_score = 0)             AS z_cs,
+                 count(*) FILTER (WHERE confluence_score = 0)     AS z_confluence,
+                 count(*) FILTER (WHERE technical_score = 0)      AS z_technical,
+                 count(*) FILTER (WHERE dl_score = 0)             AS z_dl,
+                 count(*) FILTER (WHERE breakout_score = 0)       AS z_breakout,
+                 count(*) FILTER (WHERE smart_money_score = 0)    AS z_smart_money
+            FROM r`,
+    evaluate: (row) => {
+      const n = Number(row?.n ?? 0);
+      if (!n) return { status: 'warn', detail: 'No unified_recommendations rows to check' };
+      const engines = ['screener', 'ml', 'cs', 'confluence', 'technical', 'dl', 'breakout', 'smart_money'];
+      const spikes = engines
+        .map(e => ({ e, share: Number(row['z_' + e] ?? 0) / n }))
+        .filter(x => x.share >= 0.15)
+        .sort((a, b) => b.share - a.share);
+      if (!spikes.length) {
+        return { status: 'pass', detail: `No engine writes a zero spike on ${row.d} (${n} rows)` };
+      }
+      const worst = spikes[0];
+      const detail = spikes.map(x => `${x.e} ${(x.share * 100).toFixed(1)}%`).join(', ');
+      // >=50% of an entire engine at exactly 0 cannot be a real score distribution.
+      const status: 'fail' | 'warn' = worst.share >= 0.5 ? 'fail' : 'warn';
+      return {
+        status,
+        detail: `zero-score spike on ${row.d} (${n} rows): ${detail}. A never-scored engine ` +
+          'must write NULL, not 0.0 (AF-20260818-31) — check the has_data guards at ' +
+          'unified_ranker.py:2454-2461.',
+      };
+    },
+  },
+  {
+    id: 'ur-engine-dispersion-collapse',
+    label: 'How often each engine collapses below ZERO_DISPERSION_MIN_SD and is dropped from the blend',
+    category: 'scoring',
+    // NOT critical: dropping a collapsed engine is CORRECT behaviour, not a bug. The check
+    // exists because the RATE is the signal and nothing was reporting it.
+    critical: false,
+    // Measured 2026-08-22 over 38 ranker dates, cross-sectional sd on the real 0-100 scale:
+    //   dl BELOW 5.0 on 15/38 dates (39%), ml on 13/38 (34%), technical on 7/38 (18%),
+    //   confluence 1/38, and screener/cs/breakout/smart_money never.
+    // So the ranker genuinely runs without dl or ml about a third of the time. That is
+    // already documented as episodic (measurement.md: _get_ml_scores reads
+    // calibrated_win_probability, whose isotonic calibrator correctly flattens in a no-edge
+    // regime) -- but "correct behaviour" and "fine" are different claims, and until now the
+    // rate was invisible: engine_coverage_count records it per row and nothing aggregated it.
+    //
+    // A sustained rise means an engine is dying, not calibrating. Thresholds sit above the
+    // measured baseline (39%) so today's normal does not alarm: warn at 60% of the trailing
+    // 10 dates, fail at 80%.
+    //
+    // NOTE the scale: ZERO_DISPERSION_MIN_SD = 5.0 is calibrated for 0-100 engine scores and
+    // is meaningless against raw model outputs (win_probability is 0-1, sd ~0.07 -- every
+    // engine looks collapsed). A 2026-08-22 ablation applied it on the raw scale and dropped
+    // ml on 33 of 43 dates, flipping its own result negative. This check reads the stored
+    // 0-100 columns, which is the scale the constant was written for.
+    sql: `WITH d AS (SELECT DISTINCT computed_at::date AS dt FROM unified_recommendations
+                      ORDER BY 1 DESC LIMIT 10)
+          SELECT count(*) AS dates,
+                 count(*) FILTER (WHERE sd_ml   < 5.0) AS collapse_ml,
+                 count(*) FILTER (WHERE sd_dl   < 5.0) AS collapse_dl,
+                 count(*) FILTER (WHERE sd_tech < 5.0) AS collapse_technical
+            FROM (SELECT ur.computed_at::date AS dt,
+                         stddev_samp(ur.ml_score)        AS sd_ml,
+                         stddev_samp(ur.dl_score)        AS sd_dl,
+                         stddev_samp(ur.technical_score) AS sd_tech
+                    FROM unified_recommendations ur
+                   WHERE ur.computed_at::date IN (SELECT dt FROM d)
+                   GROUP BY 1 HAVING count(*) >= 50) x`,
+    evaluate: (row) => {
+      const dates = Number(row?.dates ?? 0);
+      if (dates < 5) return { status: 'pass', detail: `Only ${dates} ranker dates — too few to judge` };
+      const rates = ['ml', 'dl', 'technical']
+        .map(e => ({ e, rate: Number(row['collapse_' + e] ?? 0) / dates }))
+        .sort((a, b) => b.rate - a.rate);
+      const detail = rates.map(x => `${x.e} ${(x.rate * 100).toFixed(0)}%`).join(', ') +
+        ` of last ${dates} dates (baseline 2026-08-22: dl 39%, ml 34%, technical 18%)`;
+      const worst = rates[0];
+      if (worst.rate >= 0.8) {
+        return {
+          status: 'fail',
+          detail: `${worst.e} dropped from the blend on ${(worst.rate * 100).toFixed(0)}% of recent ` +
+            `dates — an engine collapsing this often is dying, not calibrating: ${detail}`,
+        };
+      }
+      if (worst.rate >= 0.6) return { status: 'warn', detail: `Engine dispersion collapse above baseline: ${detail}` };
+      return { status: 'pass', detail: `Engine dispersion collapse within baseline: ${detail}` };
+    },
+  },
 ];
 
 // Fail fast on a duplicate id — two checks silently overwriting the same

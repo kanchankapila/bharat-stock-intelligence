@@ -737,6 +737,86 @@ efficiently-priced at this universe's liquidity floor) or a shared calendar cons
 longer-horizon read in this list is also the thinnest-data read, so LOW-DATA and "genuinely weaker
 long-horizon edge" are still confounded and not yet separable with the history available).
 
+### `calibrated_win_probability`'s 2-value collapse is NOT a defect — measured 2026-08-22, and the obvious fix makes it WORSE
+
+Standing open item (memory: `ml_label_and_promotion_gate_2026_08_21`, "`calibrated_win_probability`
+has 1-8 distinct values across 2,190 stocks — open"). Closed here as **correct behaviour**, on
+evidence, not on argument.
+
+**The mechanism, traced rather than guessed.** `fit_calibrator`'s isotonic map is not degenerate:
+fitted on the live 48,047 resolved WIN/LOSS pairs it produces **26 distinct steps** across its
+full input range (0.002–0.996). The collapse is that a single day's cross-section of
+`win_probability` spans only ~0.69–0.74, which lands inside **1–2 of those steps** — so ~2,190
+stocks receive 2–7 distinct calibrated values. Raw `win_probability` meanwhile has healthy daily
+dispersion (sd 0.13–0.26). Downstream, `_get_ml_scores` reads the calibrated column, its
+cross-sectional sd on the 0–100 scale falls under `ZERO_DISPERSION_MIN_SD = 5.0`, and
+`drop_zero_dispersion_engines` drops `ml` from the blend entirely — measured on **13 of 38
+ranker dates (34%)**.
+
+That chain reads exactly like a bug, and the obvious fix is to preserve rank information inside
+each calibrated step (keep the calibrated LEVEL, break ties by raw ordering — a monotone ±1e-6
+nudge that cannot move the calibration). **Measured before shipping, and the result rejected it.**
+Same rows, ≥₹1cr ADT floor, per-date then averaged, 46 dates:
+
+| column | h=1 IC | h=5 IC | h=21 IC | h=21 AUC |
+|---|---|---|---|---|
+| **`cal` (current, collapsed)** | 0.0503 | **0.1116** | 0.1155 | 0.5220 |
+| `cal_tiebroken` (the proposed fix) | 0.0411 | **0.0858** | 0.1236 | 0.5387 |
+| `raw` | 0.0407 | 0.0867 | 0.1236 | 0.5385 |
+
+**Tie-breaking costs 23% of the h=5 IC (0.1116 → 0.0858) and buys +0.007 at h=21.** h=5 is the
+ranker's own swing focus (`ENGINE_EDGE_HORIZON = 5`). Note also that `cal_tiebroken` lands almost
+exactly on `raw` at every horizon — which is the tell that the tie-break is simply reintroducing
+the raw ordering, and that the raw ordering is the *worse* signal at 5d. The isotonic collapse is
+therefore doing real work: it is discarding within-band ordering that empirically does not
+predict at that horizon, which is precisely what an isotonic fit is supposed to do.
+
+**Consequence: leave `_get_ml_scores` reading `calibrated_win_probability`, and do not "fix" the
+collapse.** The engine being dropped from the blend on ~34% of dates is the intended downstream
+consequence of an honest no-edge signal, matching the rationale already written at
+`unified_ranker.py:1484-1500` (the 2026-08-10 HIGH_VOL trace: a near-constant calibrated value
+was carrying 12–24% regime weight in the ranking while the platform already knew the regime had
+no edge). `_blend`'s per-symbol renormalization then leans on the other engines, which is the
+designed behaviour.
+
+**What DID change: the rate is now monitored, because "correct" and "unchanged" are different
+claims.** Two `dataQualityChecks.ts` entries added 2026-08-22:
+- `ur-engine-dispersion-collapse` — collapse rate per engine over the trailing 10 ranker dates,
+  against the measured baseline (dl 39%, ml 34%, technical 18%, confluence 3%, and
+  screener/cs/breakout/smart_money never). Warns at 60%, fails at 80%. A sustained rise means an
+  engine is dying rather than calibrating, which nothing was reporting: `engine_coverage_count`
+  records it per row and nothing aggregated it.
+- `ur-engine-score-zero-not-null` — a zero-SPIKE detector for the AF-20260818-31 artifact
+  (below).
+
+⚠ **Scale trap, recorded because it already cost one wrong result.** `ZERO_DISPERSION_MIN_SD =
+5.0` is calibrated for **0–100 engine scores** and is meaningless against raw model outputs
+(`win_probability` is 0–1, sd ≈ 0.07 — every engine looks collapsed). The 2026-08-22 assembly
+ablation applied it on the raw scale, dropped `ml` on 33 of 43 dates and `technical` on 33, and
+flipped its own equal-weight arm negative. Anything measuring dispersion against this constant
+must read the stored 0–100 columns, not the raw tables.
+
+### AF-20260818-31's zero-vs-NULL artifact: fixed, verified, and now permanently monitored
+
+`unified_recommendations`' 8 reporting `*_score` columns all carry the
+`'X' in has_data else None` guard as of **2026-08-18** (`unified_ranker.py:2454-2461`). Verified
+live 2026-08-22: `screener`/`ml`/`confluence`/`technical` write zero on **0 rows** from 08-18
+onward, against 118–194 rows/day before. The residual zeros on `dl` (~1.9% of rows) and
+`smart_money` (~6.9%) are **genuine, not the artifact** — traced row by row: every `dl_score = 0`
+row has a real `deep_learning_predictions.prob_up_5d` value that rounds to 0.00 (near-zero
+probabilities, min 0.0, max 0.0377), and `smart_money_score = 0` legitimately means "no deals".
+
+**Do NOT delete or repair the pre-2026-08-18 rows.** Three reasons: (1) the correct value is
+unrecoverable — a `0.0` cannot be distinguished after the fact from a genuine zero without the
+engine's own source row for that date, and for `ml` the source (`technical_signals`) is itself
+upserted; (2) `unified_recommendations` rows are historical snapshots of what a past run actually
+produced, and rewriting them fabricates evidence into the table used to grade the ranker — the
+same reasoning that stopped `unified_recommendations_history.dl_score` being backfilled
+(migration `1787110000000`); (3) they remain *usable* for anything reading `unified_score`, which
+was never affected — `engine_scores`/`unified` are computed from `present` BEFORE the reporting
+columns are built. The correct handling is what this section provides: a dated boundary
+(**2026-08-18**) that every future measurement filters on, which is also what
+`assembly_ablation.py` does by sourcing its panel from the raw tables instead.
 ### The post-blend stack ABLATED, layer by layer — 2026-08-22. It is not destroying the edge; the ranker's own weighting is the biggest positive step, and the loss is elsewhere
 
 This closes the open question the 2026-08-22 blend A/B left behind (its caveat #1: reconstruction

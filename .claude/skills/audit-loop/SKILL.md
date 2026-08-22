@@ -34,6 +34,23 @@ stopped at N instances when a static check immediately found N+4 more.
   `TABLE_FRESHNESS_CHECKS` and the live schema matches `db/schema.postgres.sql`
   (`npm run schema:drift`). Cross-check `information_schema.tables` against the check list; an
   uncovered table is a blind spot, not evidence of health.
+- **Score-column fidelity** — fresh is not the same as *usable for measurement*, and this class
+  is invisible to every freshness/coverage check by construction. For any column a measurement
+  might later be built on, ask two questions:
+  1. **Does a missing value write NULL, or a sentinel like `0.0`?** Run
+     `SELECT count(*) FILTER (WHERE col = 0)::float/count(*) FROM t WHERE <latest date>` per score
+     column. A large round fraction on one value is not a real distribution. If a guard was added
+     later, **the fix date is a population boundary** — rows before it are a different dataset and
+     must be filtered out, not silently pooled. Live example: `ml_score = 0` on 36,400/72,223
+     rows (AF-20260818-31); an ablation panel built on it reported a *negative* IC.
+     Now standing: `ur-engine-score-zero-not-null`.
+  2. **What SCALE is any threshold you apply calibrated for?** `ZERO_DISPERSION_MIN_SD = 5.0`
+     is written for 0–100 scores; against raw probabilities (sd ≈ 0.07) every engine reads as
+     collapsed. Now standing: `ur-engine-dispersion-collapse`, which also reports the genuine
+     collapse rate (dl 39%, ml 34%, technical 18% of ranker dates).
+
+  Both entries are in `recurring-bugs.md`. Confirm both checks are PASSing and read their
+  `detail` — a rate that has drifted off its recorded baseline is a finding even while passing.
 - **Jobs** — every BullMQ registration in `queues.ts`/`jobs/*.jobs.ts` and every cron mirror has a
   `job_heartbeat` row with `last_success_at` recent relative to its own cadence, and its skip path
   (if any) does not fall through to the same "completed" handler a real run uses
