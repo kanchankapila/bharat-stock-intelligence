@@ -95,7 +95,11 @@ def _insert_rec(conn, symbol, signal_date, win_probability=None, status='ACTIVE'
     conn.execute(
         "INSERT INTO recommendation_log (symbol, rec_type, signal_date, generated_at, "
         "win_probability, source, status) VALUES (?, 'BUY', ?, ?, ?, 'technical_scan', ?)",
-        (symbol, signal_date, datetime.datetime.utcnow().isoformat(), win_probability, status),
+        # .replace(tzinfo=None): utcnow() returned a naive datetime; now(timezone.utc) returns an
+        # aware one whose .isoformat() appends "+00:00" -- stripped to keep this fixture's output
+        # byte-identical to before, since nothing here depends on the aware/naive distinction.
+        (symbol, signal_date, datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None).isoformat(),
+         win_probability, status),
     )
 
 

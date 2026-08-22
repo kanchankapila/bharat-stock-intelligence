@@ -1464,6 +1464,46 @@ follow-ups, neither of which is a code change: a deeper `analyst_estimates_histo
 second fiscal year in `working_capital_history` unblocks `ccc_trend`. `fcf_yield` and
 `created_at` are droppable whenever someone wants the schema tidy.
 
+### `build_features()`'s pandas fragmentation fix (2026-08-22) is NOT a scoring change — no `factor_backtest.py` run applies
+
+`ml_ensemble.py`'s `build_features()` assigns 400+ columns one at a time (`X['col'] = expr`),
+which trips pandas' `PerformanceWarning: DataFrame is highly fragmented` past its internal
+~100-block threshold — 612 distinct source lines, ~16,500 total warning instances across a full
+pytest run, purely from this one function (called from training, two scoring/backtest paths, and
+`incremental_update`). Found while investigating why a routine pytest run's output looked
+alarming (16k+ warning lines read, at a glance, like mass failure — it wasn't; 0 tests failed).
+
+Fixed by inserting `X = X.copy()` at 5 points spread across the function's ~50 section
+boundaries. `.copy()` is a pure identity operation — it duplicates the DataFrame's data
+byte-for-byte into freshly consolidated memory blocks, changing zero values — and its only
+effect is resetting pandas' block-fragmentation counter before the next stretch of assignments
+re-triggers the warning. **No feature's computed value changes, no column is added or removed,
+no weight/threshold/formula is touched.**
+
+**`factor_backtest.py` was deliberately NOT run, same reasoning as this file's
+`_log_recommendations`/`seed_screener_catalog`/`_next_generated_at` entries**: it measures
+price-panel factor edge and has no code path sensitive to `build_features()`'s internal memory
+layout. The applicable verification is a direct one, done: `test_ml_ensemble.py`,
+`test_exit_policy.py`, `test_ml_ensemble_pricefeed_fallback.py`,
+`test_ml_ensemble_promotion_label_and_edge.py`, `test_cs_ranker.py`,
+`test_analyst_estimates_snapshot.py`, `test_fundamentals_pit.py` (all callers of
+`build_features()` reachable from the test suite) — 80/80 passed, and the `PerformanceWarning`
+no longer appears in any of their output. **Warning volume measured, not asserted**: a full
+CI-identical run dropped from 16,526 warnings (pre-fix baseline) to 154 (post-fix) — the ~16.4k
+difference is entirely `PerformanceWarning` instances this fix removes.
+
+Full CI-identical suite re-run twice to confirm no regression, and each run told a different,
+useful part of the story: the first came back `1 failed, 2125 passed` —
+`test_mc_earnings_fetcher.py::TestFetchActualEstimateBeatsUsesLogicalTradingDate::test_write_targets_logical_trading_date`,
+a file this change never touches. Investigated rather than dismissed: passed standalone, passed
+with its whole file run alone, and passed within `src/server/tests/` run alone (1,658 tests) — a
+`src/server/__tests__/`/`tests/chatbot/`-interaction-dependent flake, not reproducible in
+isolation. A second full run came back **`2129 passed / 232 skipped / 0 failed`** — clean,
+including that exact test. Recorded honestly rather than claimed as fixed: this is a
+**pre-existing, non-deterministic flake, root cause not identified**, orthogonal to this change
+(3 of 4 attempts against the post-fix code were clean; the file's own logic and this diff share
+no code path). Worth a dedicated look if it recurs; not this session's finding to claim.
+
 ## Not testable — do not spend time here without a genuinely new angle
 
 - **Fundamentals, analyst, ownership and earnings factors**: every one of those tables has ~30 distinct dates, all starting 2026-06-30 (1–2 independent quarterly observations). Calendar constraint, not engineering — elapsed time or a backfill fixes it, nothing else does.

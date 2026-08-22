@@ -277,6 +277,12 @@ def build_features(df: pd.DataFrame) -> pd.DataFrame:
     X['analyst_buy_pct']   = (n_buy / n_analysts.replace(0, np.nan)).fillna(0.5).clip(0, 1)
     X['target_upside_pct'] = ((num('target_mean', np.nan) - cmp_) / cmp_.replace(0, np.nan) * 100).fillna(0)
 
+    # ponytail: periodic defrag. build_features assigns 400+ columns one at a time, which
+    # fragments pandas' internal block layout past its ~100-block PerformanceWarning threshold.
+    # .copy() is a pure identity op (no value change) that consolidates blocks back down --
+    # add when profiling shows a real cost, this just keeps the warning from firing repeatedly.
+    X = X.copy()
+
     # ── MC Vitals: financial distress scores (AS-OF from proprietary_scores_history) ──
     # Altman Z-Score: > 2.99 = safe zone, 1.23–2.99 = grey zone, < 1.23 = distress zone.
     # Neutral default 2.0 = mid-grey (avoids penalising stocks not yet in 150-stock batch).
@@ -428,6 +434,8 @@ def build_features(df: pd.DataFrame) -> pd.DataFrame:
     # Upside × signal conviction: high analyst target + strong signal = high-confidence entry
     X['analyst_x_score']    = X['analyst_upside_pct'].clip(0, 100) * X['signal_score'] / 100.0
 
+    X = X.copy()  # ponytail: periodic defrag, see the first occurrence above
+
     # ── Fundamental Profile (from trendlyne_overview_fetcher.py) ──
     # Quality factors: ROE/ROCE capture returns on capital; margins capture pricing power.
     X['roe_annual']      = num('roe_annual', 15.0).clip(0, 100) / 100.0
@@ -567,6 +575,8 @@ def build_features(df: pd.DataFrame) -> pd.DataFrame:
     # Interaction: rising estimates + strong score = high-conviction long
     X['eps_rev_x_score']  = X['eps_rev_3m'].clip(0, 30) / 30.0 * X['signal_score']
 
+    X = X.copy()  # ponytail: periodic defrag, see the first occurrence above
+
     # ── Sector-relative RS (from relative_strength.py extension) ──
     # Distinguishes sector leaders from laggards — absolute RS can't see this.
     X['rs_vs_sector_21d'] = num('rs_vs_sector_21d', 0.0).clip(-15, 15)
@@ -700,6 +710,8 @@ def build_features(df: pd.DataFrame) -> pd.DataFrame:
     X['fii_net_today']  = num('fii_net_today', 0.0).clip(-5000, 5000) / 5000.0
     X['fii_buying']     = (X['fii_net_today'] > 0.1).astype(float)
     X['fii_selling']    = (X['fii_net_today'] < -0.1).astype(float)
+
+    X = X.copy()  # ponytail: periodic defrag, see the first occurrence above
 
     # ── India VIX (from macro_asset_prices — used in regime detection only) ──
     # Normalised to [0,1] over the 8-35 observable range. Used for regime-conditional
@@ -849,6 +861,8 @@ def build_features(df: pd.DataFrame) -> pd.DataFrame:
     X['ccc_trend_norm']    = num('ccc_trend', 0.0).clip(-30, 30) / 30.0
     X['wc_bad']            = num('wc_deteriorating', 0.0).clip(0, 1)
     X['wc_good']           = num('wc_improving', 0.0).clip(0, 1)
+
+    X = X.copy()  # ponytail: periodic defrag, see the first occurrence above
 
     # ── Screener features (screener_features_fetcher.py) ─────────────────────
     # Aggregated signal from 1521 screeners: how many bullish/bearish, quality-weighted momentum,
