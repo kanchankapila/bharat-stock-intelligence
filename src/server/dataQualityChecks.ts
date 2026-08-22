@@ -217,6 +217,18 @@ const TABLE_FRESHNESS_CHECKS: TableFreshnessConfig[] = [
     category: 'options', critical: false, table: 'nt_index_change_oi', dateColumn: 'date', warnDays: 3, failDays: 5 },
   { id: 'so-stock-oi-summary-freshness', label: 'so_stock_oi_summary (Trendlyne per-stock max-pain/MWPL/PCR)',
     category: 'options', critical: false, table: 'so_stock_oi_summary', dateColumn: 'date', warnDays: 3, failDays: 5 },
+  // Per-stock FUTURES OI/positioning (mc_stock_futures_oi_fetcher.py, added 2026-08-21). Distinct
+  // from so_stock_oi_summary above, which is Trendlyne OPTIONS data and whose fut_oi column has
+  // been 100% NULL for its entire life -- this table is what actually captures long/short buildup,
+  // rollover and basis, the family measurement.md had recorded as "needs a new data source".
+  // Trading-day aware (default): stock futures only trade on NSE sessions.
+  { id: 'stock-futures-oi-freshness', label: 'stock_futures_oi_history (MC per-stock futures OI/buildup/rollover)',
+    category: 'options', critical: false, table: 'stock_futures_oi_history', dateColumn: 'date', warnDays: 3, failDays: 5 },
+  // engine_composite.py's equal-weight blend of the 6 raw engines. Research-only (measured
+  // "no edge" -- real IC, AUC short of 0.55), but it must keep accumulating or it can never be
+  // re-graded, and a silently-dead producer would look identical to one that is simply flat.
+  { id: 'engine-composite-freshness', label: 'engine_composite_scores (equal-weight raw-engine composite, research)',
+    category: 'ml', critical: false, table: 'engine_composite_scores', dateColumn: 'date', warnDays: 3, failDays: 5 },
 
   // flows
   // Watches insider_trades (Tickertape), NOT insider_transactions (NSE corporates-pit).

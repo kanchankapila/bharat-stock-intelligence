@@ -33,6 +33,7 @@ Run:  python ml_ensemble.py
 """
 
 import os, sys, json, math, datetime, argparse, pickle, shutil, warnings
+import re
 warnings.filterwarnings('ignore')
 
 import numpy as np
@@ -42,6 +43,7 @@ from db_compat import connect, read_df, use_postgres, ConnWrapper, now_utc_iso
 from as_of import as_of_join_sql
 from model_promotion import (clears_promotion_bar, rejections_since,
                               staleness_override_applies,
+                              live_edge_verdict, live_edge_is_unproven,
                               DEFAULT_STALENESS_MAX_DAYS, DEFAULT_STALENESS_MAX_REJECTIONS)
 
 # Script-relative, not os.getcwd()-relative (2026-08-09): the old cwd-relative join silently
@@ -54,6 +56,10 @@ ENSEMBLE_PATH = os.path.join(MODELS_DIR, 'ensemble.pkl')
 # Promotion bar: a retrain must beat the active model's purged-OOF CV AUC by this margin to go
 # live, else the current model is kept (rejected candidate is saved here + registered inactive).
 PROMOTION_MARGIN = 0.005
+# Where this ensemble's own output lands, and therefore which factor_edge_history reading tells
+# us whether the CURRENTLY ACTIVE model has any realized forward edge worth defending.
+LIVE_EDGE_TABLE  = 'technical_signals'
+LIVE_EDGE_COLUMN = 'win_probability'
 CANDIDATE_PATH = ENSEMBLE_PATH + '.candidate'
 
 # Finding #19 (2026-07-28 audit): previously only {'BULL':1.0,'SIDEWAYS':0.0,'BEAR':-1.0} —
@@ -1030,10 +1036,19 @@ def _table_columns(conn: ConnWrapper, table: str) -> list:
     return [r[1] for r in rows]
 
 
-def load_training_data(label: str = 'horizon') -> pd.DataFrame:
+def load_training_data(label: str = 'triple_barrier') -> pd.DataFrame:
     """Load labeled training rows. `label`:
-      - 'horizon'        → so.outcome ∈ {WIN,LOSS} thresholded at the horizon (default).
       - 'triple_barrier' → se.tb_label (vol-scaled first-touch label from signal_excursions).
+                           THE DEFAULT, and the only economically meaningful one: barriers are
+                           +2·ATR / -1·ATR with a ±0.15·ATR cost band, so a "win" means the trade
+                           actually cleared its stop and its costs (exit_labeler.py).
+      - 'horizon'        → so.outcome ∈ {WIN,LOSS}. Retained for reproducing historical runs
+                           ONLY. For signal_source='technical' this is label_definition=
+                           'path_barrier', a max-favourable-excursion rule: it books a win for a
+                           name that merely traded through a level intraday and gave it all back,
+                           which is why it reads an 88% win rate at h=15 and an average
+                           "return" of +18.8%. A model trained on it predicts volatility, not
+                           profit. Do not train on this.
     """
     # signal_source='technical' (2026-08): this whole query's feature set is a technical_signals
     # LEFT JOIN (rsi/adx/nifty_regime/etc.) -- without this filter, a confluence-sourced outcome
@@ -1098,14 +1113,14 @@ def load_training_data(label: str = 'horizon') -> pd.DataFrame:
                    ts.rev_growth_yoy_q, ts.np_growth_yoy_q,
                    ts.days_since_dividend, ts.last_dividend_amt,
                    ts.days_to_ex_div, ts.days_to_board_meeting, ts.upcoming_div_pct,
-                   ts.mc_52w_high_dist_pct, ts.mc_52w_low_dist_pct, ts.mc_days_from_52wh,
-                   ts.mc_cagr_3y, ts.mc_cagr_5y, ts.mc_cagr_10y, ts.mc_ind_pe, ts.mc_pe_vs_ind,
-                   ts.mc_consensus_pe, ts.mc_consensus_pb,
-                   ts.mc_ma30_dist_pct, ts.mc_ma50_dist_pct, ts.mc_ma150_dist_pct, ts.mc_ma200_dist_pct,
-                   ts.mc_del_pct_3d, ts.mc_del_pct_5d, ts.mc_del_pct_20d, ts.mc_del_acceleration,
-                   ts.mc_vol_ratio, ts.mc_circuit_dist_pct, ts.mc_fno_eligible,
-                   ts.mc_3d_return, ts.mc_ytd_return,
-                   ts.mc_price_cash, ts.mc_consensus_eps, ts.mc_eps_vs_cons, ts.mc_pe_fwd_discount,
+                   COALESCE(ts.mc_52w_high_dist_pct, mp.dist_52w_high) AS mc_52w_high_dist_pct, COALESCE(ts.mc_52w_low_dist_pct, mp.dist_52w_low) AS mc_52w_low_dist_pct, COALESCE(ts.mc_days_from_52wh, mp.days_from_52wh) AS mc_days_from_52wh,
+                   COALESCE(ts.mc_cagr_3y, mp.cagr_3y) AS mc_cagr_3y, COALESCE(ts.mc_cagr_5y, mp.cagr_5y) AS mc_cagr_5y, COALESCE(ts.mc_cagr_10y, mp.cagr_10y) AS mc_cagr_10y, COALESCE(ts.mc_ind_pe, mp.ind_pe) AS mc_ind_pe, COALESCE(ts.mc_pe_vs_ind, mp.pe_vs_ind) AS mc_pe_vs_ind,
+                   COALESCE(ts.mc_consensus_pe, mp.consensus_pe) AS mc_consensus_pe, COALESCE(ts.mc_consensus_pb, mp.consensus_pb) AS mc_consensus_pb,
+                   COALESCE(ts.mc_ma30_dist_pct, mp.ma30_dist_pct) AS mc_ma30_dist_pct, COALESCE(ts.mc_ma50_dist_pct, mp.ma50_dist_pct) AS mc_ma50_dist_pct, COALESCE(ts.mc_ma150_dist_pct, mp.ma150_dist_pct) AS mc_ma150_dist_pct, COALESCE(ts.mc_ma200_dist_pct, mp.ma200_dist_pct) AS mc_ma200_dist_pct,
+                   COALESCE(ts.mc_del_pct_3d, mp.del_pct_3d) AS mc_del_pct_3d, COALESCE(ts.mc_del_pct_5d, mp.del_pct_5d) AS mc_del_pct_5d, COALESCE(ts.mc_del_pct_20d, mp.del_pct_20d) AS mc_del_pct_20d, ts.mc_del_acceleration,
+                   COALESCE(ts.mc_vol_ratio, mp.vol_ratio) AS mc_vol_ratio, COALESCE(ts.mc_circuit_dist_pct, mp.circuit_dist_pct) AS mc_circuit_dist_pct, ts.mc_fno_eligible,
+                   COALESCE(ts.mc_3d_return, mp.ret_3d) AS mc_3d_return, COALESCE(ts.mc_ytd_return, mp.ret_ytd) AS mc_ytd_return,
+                   COALESCE(ts.mc_price_cash, mp.price_cash) AS mc_price_cash, COALESCE(ts.mc_consensus_eps, mp.consensus_eps) AS mc_consensus_eps, COALESCE(ts.mc_eps_vs_cons, mp.eps_vs_cons) AS mc_eps_vs_cons, COALESCE(ts.mc_pe_fwd_discount, mp.pe_fwd_discount) AS mc_pe_fwd_discount,
                    ts.mc_cp_bull_count, ts.mc_cp_bear_count, ts.mc_cp_net_score, ts.mc_cp_avg_target_pct,
                    ts.tl_vs_nifty_1m, ts.tl_vs_nifty_3m, ts.tl_vs_nifty_6m,
                    ts.tl_vs_ind_1m, ts.tl_vs_ind_3m,
@@ -1120,7 +1135,7 @@ def load_training_data(label: str = 'horizon') -> pd.DataFrame:
                    ts.mc_broker_buy_7d, ts.mc_broker_sell_7d, ts.mc_broker_upside,
                    ts.days_to_next_results, ts.earnings_category_yoy, ts.earnings_category_qoq,
                    ts.earnings_np_growth_yoy, ts.earnings_np_growth_qoq,
-                   ts.mc_eps_vs_cons, ts.positive_turnaround, ts.negative_turnaround,
+                   COALESCE(ts.mc_eps_vs_cons, mp.eps_vs_cons) AS mc_eps_vs_cons, ts.positive_turnaround, ts.negative_turnaround,
                    ts.earnings_shocker_flag, ts.earnings_shocker_gain,
                    ts.is_nifty50, ts.is_nifty100, ts.nifty_tier,
                    ts.pledge_chg_90d,
@@ -1206,6 +1221,22 @@ def load_training_data(label: str = 'horizon') -> pd.DataFrame:
                 ORDER BY ts2.date DESC
                 LIMIT 1
             ) ts ON TRUE
+            -- mc_pricefeed_daily carries the SAME MoneyControl fields as the ts.mc_*
+            -- columns above, but for every symbol on every trading day (2,243/date),
+            -- where the ts.mc_* copies land on roughly 1 date in 20 -- so over the
+            -- training panel those features were ~95% NULL and the model read them as a
+            -- single imputed constant. COALESCEd, not replaced: where the ts copy has a
+            -- value it still wins, so nothing that worked before changes.
+            -- Same <= date + 7-day-floor point-in-time convention as the ts LATERAL
+            -- above, deliberately -- one PIT rule for this query, not two.
+            LEFT JOIN LATERAL (
+                SELECT * FROM mc_pricefeed_daily mp2
+                WHERE mp2.symbol = so.symbol
+                  AND mp2.date <= so.signal_date
+                  AND mp2.date >= (so.signal_date::date - interval '7 days')::text
+                ORDER BY mp2.date DESC
+                LIMIT 1
+            ) mp ON TRUE
             {as_of_join_sql('fundamentals_history', 'fh', 'so', 'symbol', 'signal_date')}
             {as_of_join_sql('analyst_estimates_history', 'aeh', 'so', 'symbol', 'signal_date')}
             -- GDELT tone (-100..+100, typically -10..+10) scaled to the same -1..1 range as
@@ -1636,14 +1667,14 @@ def load_pending_signals() -> pd.DataFrame:
                    ts.rev_growth_yoy_q, ts.np_growth_yoy_q,
                    ts.days_since_dividend, ts.last_dividend_amt,
                    ts.days_to_ex_div, ts.days_to_board_meeting, ts.upcoming_div_pct,
-                   ts.mc_52w_high_dist_pct, ts.mc_52w_low_dist_pct, ts.mc_days_from_52wh,
-                   ts.mc_cagr_3y, ts.mc_cagr_5y, ts.mc_cagr_10y, ts.mc_ind_pe, ts.mc_pe_vs_ind,
-                   ts.mc_consensus_pe, ts.mc_consensus_pb,
-                   ts.mc_ma30_dist_pct, ts.mc_ma50_dist_pct, ts.mc_ma150_dist_pct, ts.mc_ma200_dist_pct,
-                   ts.mc_del_pct_3d, ts.mc_del_pct_5d, ts.mc_del_pct_20d, ts.mc_del_acceleration,
-                   ts.mc_vol_ratio, ts.mc_circuit_dist_pct, ts.mc_fno_eligible,
-                   ts.mc_3d_return, ts.mc_ytd_return,
-                   ts.mc_price_cash, ts.mc_consensus_eps, ts.mc_eps_vs_cons, ts.mc_pe_fwd_discount,
+                   COALESCE(ts.mc_52w_high_dist_pct, mp.dist_52w_high) AS mc_52w_high_dist_pct, COALESCE(ts.mc_52w_low_dist_pct, mp.dist_52w_low) AS mc_52w_low_dist_pct, COALESCE(ts.mc_days_from_52wh, mp.days_from_52wh) AS mc_days_from_52wh,
+                   COALESCE(ts.mc_cagr_3y, mp.cagr_3y) AS mc_cagr_3y, COALESCE(ts.mc_cagr_5y, mp.cagr_5y) AS mc_cagr_5y, COALESCE(ts.mc_cagr_10y, mp.cagr_10y) AS mc_cagr_10y, COALESCE(ts.mc_ind_pe, mp.ind_pe) AS mc_ind_pe, COALESCE(ts.mc_pe_vs_ind, mp.pe_vs_ind) AS mc_pe_vs_ind,
+                   COALESCE(ts.mc_consensus_pe, mp.consensus_pe) AS mc_consensus_pe, COALESCE(ts.mc_consensus_pb, mp.consensus_pb) AS mc_consensus_pb,
+                   COALESCE(ts.mc_ma30_dist_pct, mp.ma30_dist_pct) AS mc_ma30_dist_pct, COALESCE(ts.mc_ma50_dist_pct, mp.ma50_dist_pct) AS mc_ma50_dist_pct, COALESCE(ts.mc_ma150_dist_pct, mp.ma150_dist_pct) AS mc_ma150_dist_pct, COALESCE(ts.mc_ma200_dist_pct, mp.ma200_dist_pct) AS mc_ma200_dist_pct,
+                   COALESCE(ts.mc_del_pct_3d, mp.del_pct_3d) AS mc_del_pct_3d, COALESCE(ts.mc_del_pct_5d, mp.del_pct_5d) AS mc_del_pct_5d, COALESCE(ts.mc_del_pct_20d, mp.del_pct_20d) AS mc_del_pct_20d, ts.mc_del_acceleration,
+                   COALESCE(ts.mc_vol_ratio, mp.vol_ratio) AS mc_vol_ratio, COALESCE(ts.mc_circuit_dist_pct, mp.circuit_dist_pct) AS mc_circuit_dist_pct, ts.mc_fno_eligible,
+                   COALESCE(ts.mc_3d_return, mp.ret_3d) AS mc_3d_return, COALESCE(ts.mc_ytd_return, mp.ret_ytd) AS mc_ytd_return,
+                   COALESCE(ts.mc_price_cash, mp.price_cash) AS mc_price_cash, COALESCE(ts.mc_consensus_eps, mp.consensus_eps) AS mc_consensus_eps, COALESCE(ts.mc_eps_vs_cons, mp.eps_vs_cons) AS mc_eps_vs_cons, COALESCE(ts.mc_pe_fwd_discount, mp.pe_fwd_discount) AS mc_pe_fwd_discount,
                    ts.mc_cp_bull_count, ts.mc_cp_bear_count, ts.mc_cp_net_score, ts.mc_cp_avg_target_pct,
                    ts.tl_vs_nifty_1m, ts.tl_vs_nifty_3m, ts.tl_vs_nifty_6m,
                    ts.tl_vs_ind_1m, ts.tl_vs_ind_3m,
@@ -1658,7 +1689,7 @@ def load_pending_signals() -> pd.DataFrame:
                    ts.mc_broker_buy_7d, ts.mc_broker_sell_7d, ts.mc_broker_upside,
                    ts.days_to_next_results, ts.earnings_category_yoy, ts.earnings_category_qoq,
                    ts.earnings_np_growth_yoy, ts.earnings_np_growth_qoq,
-                   ts.mc_eps_vs_cons, ts.positive_turnaround, ts.negative_turnaround,
+                   COALESCE(ts.mc_eps_vs_cons, mp.eps_vs_cons) AS mc_eps_vs_cons, ts.positive_turnaround, ts.negative_turnaround,
                    ts.earnings_shocker_flag, ts.earnings_shocker_gain,
                    ts.is_nifty50, ts.is_nifty100, ts.nifty_tier,
                    ts.pledge_chg_90d,
@@ -1717,6 +1748,22 @@ def load_pending_signals() -> pd.DataFrame:
                    psh_ds.score_value AS dupont_score,
                    sfs.sector_pcr, sfs.total_call_oi AS sector_call_oi, sfs.total_put_oi AS sector_put_oi
             FROM technical_signals ts
+            -- mc_pricefeed_daily carries the SAME MoneyControl fields as the ts.mc_*
+            -- columns above, but for every symbol on every trading day (2,243/date),
+            -- where the ts.mc_* copies land on roughly 1 date in 20 -- so over the
+            -- training panel those features were ~95% NULL and the model read them as a
+            -- single imputed constant. COALESCEd, not replaced: where the ts copy has a
+            -- value it still wins, so nothing that worked before changes.
+            -- Same <= date + 7-day-floor point-in-time convention as the ts LATERAL
+            -- above, deliberately -- one PIT rule for this query, not two.
+            LEFT JOIN LATERAL (
+                SELECT * FROM mc_pricefeed_daily mp2
+                WHERE mp2.symbol = ts.symbol
+                  AND mp2.date <= ts.date
+                  AND mp2.date >= (ts.date::date - interval '7 days')::text
+                ORDER BY mp2.date DESC
+                LIMIT 1
+            ) mp ON TRUE
             LEFT JOIN stock_fundamentals sf ON sf.symbol = ts.symbol
             LEFT JOIN feature_store fs
                    ON fs.symbol = ts.symbol AND fs.date::text = ts.date AND fs.timeframe = 'D'
@@ -2681,16 +2728,20 @@ def _active_baseline(conn: ConnWrapper) -> dict | None:
     """id/cv_roc_auc/test_roc_auc/trained_at of the currently active ensemble, or None."""
     try:
         row = conn.execute(
-            "SELECT id, cv_roc_auc, test_roc_auc, trained_at FROM model_registry "
+            "SELECT id, cv_roc_auc, test_roc_auc, trained_at, notes FROM model_registry "
             "WHERE model_name = 'ensemble' AND is_active = 1 ORDER BY id DESC LIMIT 1"
         ).fetchone()
         if not row:
             return None
+        # The label is recorded only in the free-text notes ("label=triple_barrier; ..."), so it
+        # has to be parsed back out. Rows predating label tracking are all horizon-label runs.
+        m = re.search(r'label=([A-Za-z_]+)', row[4] or '')
         return {
             'id': row[0],
             'cv_auc': float(row[1]) if row[1] is not None else None,
             'test_auc': float(row[2]) if row[2] is not None else None,
             'trained_at': row[3],
+            'label': m.group(1) if m else 'horizon',
         }
     except Exception:
         conn.rollback()
@@ -2716,7 +2767,29 @@ def promote_or_register(conn: ConnWrapper, ensemble: dict) -> int:
     leak fix dropped the honest ceiling to ~0.70-0.73)."""
     new_cv_auc = float(ensemble.get('cv_auc') or 0.0)
     new_test_auc = ensemble.get('test_auc')
+    new_label = ensemble.get('label', 'horizon')
     baseline = _active_baseline(conn)
+
+    # Two ways a baseline's CV AUC stops being evidence about anything. Both are checked BEFORE
+    # the CV comparison decides, because in both cases the comparison itself is the bug:
+    #
+    #  (a) The baseline was trained on a DIFFERENT label. CV AUC is only comparable within one
+    #      target -- the triple-barrier label is a genuinely harder question than the horizon
+    #      label (real vol-scaled barriers and a cost band, ~36% base rate, vs. an MFE-flavoured
+    #      WIN/LOSS at ~88%), so its honest ceiling is lower. Gating a triple_barrier candidate
+    #      on a horizon baseline's number rejects it forever by construction, not on merit.
+    #  (b) The baseline's LIVE edge, graded against realized forward returns, is no better than
+    #      chance. Then its CV number measures overfit, not skill, and defending the incumbent
+    #      with it is exactly backwards. See live_edge_is_unproven() in model_promotion.py.
+    label_changed = baseline is not None and baseline['label'] != new_label
+    edge = live_edge_verdict(conn, LIVE_EDGE_TABLE, LIVE_EDGE_COLUMN)
+    edge_unproven, edge_reason = live_edge_is_unproven(edge)
+
+    # A candidate whose own CV AUC is NaN must never ride either override into production: with
+    # the CV comparison bypassed there is nothing else left to catch it, and `float(nan or 0.0)`
+    # is NaN, not 0.0 (NaN is truthy -- this codebase's own recurring `float(x or 0)` trap).
+    candidate_scored = math.isfinite(new_cv_auc)
+    baseline_untrustworthy = (label_changed or edge_unproven) and candidate_scored
 
     clears_cv_bar = clears_promotion_bar(new_cv_auc, baseline['cv_auc'] if baseline else None, PROMOTION_MARGIN)
     # Only enforce the test-AUC gate when both sides have a real reading to compare.
@@ -2734,7 +2807,7 @@ def promote_or_register(conn: ConnWrapper, ensemble: dict) -> int:
         staleness_override, age_days = staleness_override_applies(
             baseline['trained_at'], rejections, STALENESS_MAX_DAYS, STALENESS_MAX_REJECTIONS)
 
-    if baseline is not None and not clears_bar and not staleness_override:
+    if baseline is not None and not clears_bar and not staleness_override and not baseline_untrustworthy:
         try:
             with open(CANDIDATE_PATH, 'wb') as f:
                 pickle.dump(ensemble, f, protocol=pickle.HIGHEST_PROTOCOL)
@@ -2745,8 +2818,9 @@ def promote_or_register(conn: ConnWrapper, ensemble: dict) -> int:
             reasons.append(f"cv_auc={new_cv_auc:.4f} < active {baseline['cv_auc']:.4f}+{PROMOTION_MARGIN}")
         if not clears_test_gate:
             reasons.append(f"test_auc={new_test_auc} < active {baseline['test_auc']:.4f}-{TEST_AUC_TOLERANCE}")
-        note = (f"label={ensemble.get('label', 'horizon')}; REJECTED " + "; ".join(reasons) +
-                f" (baseline stale {age_days:.1f}d, {rejections} rejections so far)")
+        note = (f"label={new_label}; REJECTED " + "; ".join(reasons) +
+                f" (baseline stale {age_days:.1f}d, {rejections} rejections so far; "
+                f"baseline live edge: {edge_reason})")
         mid = register_model(conn, ensemble, activate=False, model_path=CANDIDATE_PATH, notes=note)
         print(f"[Ensemble] NOT promoted: {'; '.join(reasons)}. Live model kept; candidate at "
               f"{CANDIDATE_PATH}, registered inactive id={mid}.")
@@ -2762,6 +2836,15 @@ def promote_or_register(conn: ConnWrapper, ensemble: dict) -> int:
     save_ensemble(ensemble)
     if baseline is None:
         reason = "bootstrap (no active baseline)"
+    elif label_changed and baseline_untrustworthy:
+        reason = (f"LABEL CHANGED — baseline id={baseline['id']} was trained on "
+                   f"label={baseline['label']}, candidate on label={new_label}; CV AUCs are not "
+                   f"comparable across targets, so the CV bar is not applied "
+                   f"(candidate cv_auc={new_cv_auc:.4f})")
+    elif edge_unproven and baseline_untrustworthy:
+        reason = (f"LIVE EDGE OVERRIDE — baseline id={baseline['id']} cv_auc="
+                   f"{baseline['cv_auc']:.4f} is not defensible: {edge_reason}; adopting "
+                   f"candidate cv_auc={new_cv_auc:.4f}")
     elif staleness_override:
         reason = (f"STALENESS OVERRIDE — baseline id={baseline['id']} unbeaten {age_days:.1f}d "
                    f"across {rejections} rejections; adopting best-available candidate "
@@ -3116,7 +3199,7 @@ def check_drift(conn: ConnWrapper, auc_drop_threshold: float = 0.04,
 
 def run(do_train: bool = True, do_score: bool = True,
         retrain_full: bool = False, min_samples: int = 30,
-        label: str = 'horizon', do_tune: bool = False, dry_run: bool = False):
+        label: str = 'triple_barrier', do_tune: bool = False, dry_run: bool = False):
     try:
         from lightgbm import LGBMClassifier  # noqa: F401 — verify dependency at startup
     except ImportError:
@@ -3255,8 +3338,15 @@ def incremental_update_predictions_are_finite(preds) -> bool:
     return bool(np.isfinite(preds).all())
 
 
-def incremental_update(n_days: int = 3, n_rounds: int = 20, dry_run: bool = False) -> bool:
+def incremental_update(n_days: int = 3, n_rounds: int = 20, dry_run: bool = False,
+                       label: str = 'triple_barrier') -> bool:
     """Warm-start LGBM on last `n_days` of new resolved outcomes. Returns True if applied.
+
+    `label` MUST match what the live model was trained on. It previously hardcoded the horizon
+    label while the weekly retrain's default moved to triple_barrier -- warm-starting a
+    triple-barrier booster on horizon-label rows teaches it the opposite target a few hundred
+    rounds at a time, silently, with the held-out gate below comparing both sides on the same
+    wrong label so it cannot detect the mismatch.
 
     Gated (2026-08-14, ml-promotion-gate-review finding): unlike the weekly --train path, which
     routes through promote_or_register(), this used to overwrite the live ENSEMBLE_PATH
@@ -3283,7 +3373,7 @@ def incremental_update(n_days: int = 3, n_rounds: int = 20, dry_run: bool = Fals
     # The Postgres path uses a LATERAL JOIN with the same semantics; this SQLite correlated
     # subquery mirrors that behaviour for the SQLite training-data fallback.
     q = """
-        SELECT so.symbol, so.signal_date, so.horizon_days, so.outcome,
+        SELECT so.symbol, so.signal_date, so.horizon_days, {label_select},
                so.signal_score, so.signals_json,
                ts.rsi, ts.adx, ts.nifty_regime, ts.cmp, ts.sma200, ts.volume_ratio,
                ts.fii_3d_net, ts.above_sma200, ts.pcr_oi, ts.pcr_vol,
@@ -3300,11 +3390,23 @@ def incremental_update(n_days: int = 3, n_rounds: int = 20, dry_run: bool = Fals
                   WHERE ts2.symbol = so.symbol
                     AND ts2.date <= so.signal_date
               )
-        WHERE so.outcome IN ('WIN','LOSS')
+        {label_join}
+        WHERE {label_where}
           AND so.signal_date >= ?
           AND so.signal_source = 'technical'
         ORDER BY so.signal_date ASC
     """
+    if label == 'triple_barrier':
+        q = q.format(
+            label_select="se.tb_label AS outcome",
+            label_join=("LEFT JOIN signal_excursions se ON se.symbol = so.symbol "
+                        "AND se.signal_date = so.signal_date "
+                        "AND se.horizon_days = so.horizon_days"),
+            label_where="se.tb_label IS NOT NULL",
+        )
+    else:
+        q = q.format(label_select="so.outcome", label_join="",
+                     label_where="so.outcome IN ('WIN','LOSS')")
     df = read_df(q, (cutoff,))
     # Need enough rows for both a real incremental-training slice AND a held-out gate slice --
     # the old threshold (5) left no room for a holdout at all, which is exactly how this used to
@@ -3313,8 +3415,12 @@ def incremental_update(n_days: int = 3, n_rounds: int = 20, dry_run: bool = Fals
         print(f"[Ensemble] Only {len(df)} new outcomes — skipping incremental (need >=8 for a held-out gate).")
         return False
 
-    print(f"[Ensemble] Incremental: {len(df)} outcomes from last {n_days}d")
-    y = (df['outcome'] == 'WIN').astype(int).values
+    print(f"[Ensemble] Incremental: {len(df)} outcomes from last {n_days}d (label={label})")
+    if label == 'triple_barrier':
+        df = df[df['outcome'].notna()].copy()
+        y = pd.to_numeric(df['outcome'], errors='coerce').astype(int).values
+    else:
+        y = (df['outcome'] == 'WIN').astype(int).values
     X = build_features(df)
 
     with open(ENSEMBLE_PATH, 'rb') as f:
@@ -3458,12 +3564,14 @@ if __name__ == "__main__":
     parser.add_argument("--incr-rounds", type=int, default=20)
     parser.add_argument("--dry-run",     action="store_true")
     parser.add_argument("--min-samples", type=int, default=30)
-    parser.add_argument("--label", choices=['horizon', 'triple_barrier'], default='horizon',
-                        help="Training label: fixed-horizon WIN/LOSS (default) or triple-barrier")
+    parser.add_argument("--label", choices=['horizon', 'triple_barrier'], default='triple_barrier',
+                        help="Training label: triple-barrier (default, cost-aware) or the "
+                             "legacy fixed-horizon WIN/LOSS -- see load_training_data()")
     args = parser.parse_args()
 
     if args.incremental:
-        incremental_update(n_days=args.incr_days, n_rounds=args.incr_rounds, dry_run=args.dry_run)
+        incremental_update(n_days=args.incr_days, n_rounds=args.incr_rounds,
+                           dry_run=args.dry_run, label=args.label)
         sys.exit(0)
 
     if args.check_drift:

@@ -5230,3 +5230,154 @@ confirmed via `git log` that nothing was committed this session, so no risk of i
 into a commit, but flagging it here per `concurrent_session_hazards_2026_08_12` memory: **commit
 only by explicit path** (`git add <file> <file> ...`), never `git add -A`, when this work does
 get committed.
+
+---
+
+## 2026-08-21 — One economically meaningful ML label, a promotion gate that reads realized edge, and a constants sweep
+
+Three requested items, done in the order their dependencies forced rather than the order asked.
+Full derivation, every table, and the standing caveats: `.claude/rules/measurement.md`'s new
+"The ML training label switched to a cost-aware triple barrier" section. Bug classes added to
+`.claude/rules/recurring-bugs.md` (3 entries under "Models & measurement").
+
+**The finding that reframed the whole session: `cv_roc_auc=0.7664` — the incumbent's headline
+number and the best of all 59 registered ensemble candidates — was measuring how easy its label
+was, not how good the model is.** The default training label (`horizon` →
+`signal_outcomes.outcome`, 100% `label_definition='path_barrier'` for `signal_source='technical'`)
+is a max-favourable-excursion rule: **71.65% base rate**, median `return_pct` **+3.69% on a
+WIN/LOSS label**, and at h=15 an 88% win rate at an average "return" of +18.8%. It books a win for
+a name that merely traded through a level intraday and gave it all back, so the model learns
+volatility — which the ATR/vol features predict well — and CV looks excellent while
+`factor_edge_history` grades the same model's live output at `hit_auc` **0.493/0.512/0.535**.
+
+**1. Label (item 1).** Nothing had to be built. `exit_labeler.py` has written a López de Prado
+triple-barrier label (`tb_label`, vol-scaled 2:1 barriers with a `0.15·atr_pct` cost band) all
+along, populated on **294,518 of 333,177 `signal_excursions` rows**, and `ml_ensemble.py` already
+accepted `--label triple_barrier` — `queues.ts` just never passed it. Flipped the default and
+pinned it explicitly at both `queues.ts` call sites. Training set goes **54,211 → 180,849 rows**
+and base rate **0.7165 → 0.4007**. Contamination checked first: `horizon_close_pct` maxes at
++27,400% (RNAVAL, stale `entry_price`) but that's 183/333,177 = 0.055% and `tb_label` is ordinal,
+so it survives. Also made `incremental_update()` label-aware — it hardcoded the horizon label, so
+the daily warm-start would have taught a triple-barrier booster the opposite target with its own
+held-out gate blind to the mismatch (both sides on the same wrong label).
+
+**Trained live (`--train --dry-run`): CV (purged-OOF) 0.5203, held-out test 0.5384.** That lands
+exactly on the live realized number. The reported metric is now honest; the model is unchanged in
+quality.
+
+**2. Promotion gate (item 2) — had to ship in the same change, not as a follow-up.** A 0.52
+`triple_barrier` candidate can never clear a 0.7664 `horizon` baseline, **by construction, not on
+merit**, so flipping the label alone would have frozen promotion permanently and looked like
+"accuracy is stuck". `staleness_override_applies()` structurally cannot help: it needs
+`rejections>=10`, and a model that keeps *winning* on CV never accumulates any. Added
+`live_edge_verdict()` / `live_edge_is_unproven()` to `model_promotion.py` (the shared primitive,
+so the other six gated engines can use it) plus two overrides in `promote_or_register()`: **label
+changed** (metrics incomparable across targets) and **live edge unproven** (incumbent fails
+`factor_edge.py`'s own `_verdict()` bar, `|rank_IC|>=0.03 AND hit_AUC>=0.55` — thresholds reused,
+not re-picked, so the gate and `measurement.md` can never disagree). Three deliberate guards, each
+tested: never-graded ≠ no-edge; a reading under `MIN_DATES_RELIABLE=20` cannot override; and a NaN
+candidate `cv_auc` rides neither override (`float(nan or 0.0)` is NaN, not 0.0).
+
+**3. `mc_pricefeed_daily` as-of join (item 3).** Correctly ranked third — and the measured result
+is mixed, not the blanket win it looked like. **14 columns go 0.00% → 41.7–76.1%** populated
+(`mc_del_pct_3d/5d/20d`, `mc_ind_pe`, `mc_pe_vs_ind`, `mc_price_cash`, `mc_consensus_eps/pe/pb`,
+`mc_eps_vs_cons`, `mc_pe_fwd_discount`, `mc_circuit_dist_pct`, `mc_cagr_3y/5y/10y`); 11 others were
+**already 87.5–92.8%** covered (the existing 7-day lookback plus densify handles them) and gain
+only ~3pp. `analyst_estimates_history` needed nothing — it was already as-of joined at four sites.
+COALESCEd so `technical_signals` still wins where it has a value, same `<= signal_date` + 7-day
+floor PIT convention as the sibling LATERAL, applied to the training **and** scoring queries in one
+edit. Coverage only — **no edge claim**.
+
+**4. The constants question, swept on the actual training matrix rather than on
+`technical_signals`.** Of **421 features**, **116 carry no cross-sectional ranking information**:
+36 globally constant (the options block — only ~210 F&O names in a 2,200-symbol join; the
+analyst-revision block — the known calendar constraint; `is_nifty50/100`, pledge, working-capital),
+**28 market-wide by design and NOT bugs** (`india_10y`, `usdinr_ret`, `fii_net_today`,
+`nifty_basis`, `results_season` … identical for every stock on a date, so they cannot move a
+cross-sectional metric even in principle — ~7% of the budget spent on regime), and 52 flat on
+80–99% of dates (the fixable class: `eps_ttm`/`pe_ttm` at 93.1%, the `*_tl` block at 95.8%,
+`roe_annual`/`analyst_*` at nunique=2 / 98.6%). **Conclusion: the ceiling is not a missing data
+source** — consistent with this repo's standing "combining/reweighting reduced performance in every
+case tested" and shared-AUC-ceiling findings.
+
+**Verification.** `npx tsc --noEmit` clean. Full CI-identical Python suite
+(`src/server/__tests__/ src/server/tests/ tests/chatbot/`) green. 3 new test files (16 tests),
+**every one negative-controlled** — reverting each guard individually was confirmed to turn the
+corresponding test red (the override condition, the NaN guard, the never-graded guard, the
+`min_dates` floor, the `abs()` on rank_IC, the rollback-on-failed-SELECT, a single-column
+train/serve divergence, and a flipped PIT bound). Two pre-existing tests updated rather than
+patched-to-pass: `test_load_training_data_includes_stop_loss` pinned to `label='horizon'` (its
+subject is that label's own STOP_LOSS mapping), and `test_fundamentals_pit.py`'s fixture seeded
+with a `signal_excursions` row so its leak guard keeps covering the **production** query path
+instead of being pinned to a label production no longer uses. The parity test caught a genuine
+mistake in my own edit-locator (three `FROM technical_signals ts` queries exist; the first is not
+the scoring one) — the code was right, the test's locator was wrong, and it now locates by
+function name.
+
+**Not done, flagged rather than silently skipped.** (a) **Nothing was committed and nothing was
+deployed** — the retrained model was a `--dry-run`, so the live `ensemble.pkl` and
+`model_registry` are untouched; going live needs `--train --label triple_barrier` for real plus
+`pm2 restart` per the deploy rules. (b) **The real verification is a calendar constraint**: the new
+model must score live and be re-graded via `factor_edge.py` once ~20 fresh dates accumulate (~late
+Sept 2026) before any claim that this improved anything. (c) The dead SQLite branch of
+`load_training_data()` was left untouched (it is unreachable in production) so its `mc_*` columns
+lack the fallback — deliberate, not an oversight. (d) `mc_fno_eligible` is now trivially derivable
+from `fno_lot_size > 0` and `mc_del_acceleration` from the newly-populated `del_pct_3d/20d`; the
+first is safe, the second was skipped to avoid a formula that might disagree with the fetcher's own
+definition. (e) `signal_outcomes.entry_price` is stale/wrong for at least RNAVAL (2.30 vs a real
+~632), producing the +27,400% rows — real, separate, untouched. (f) **`calibrated_win_probability`
+collapses ~2,190 stocks into 1–8 distinct values on every date** while raw `win_probability` has
+253–1,686 — isotonic's correct output given a near-flat input, but it destroys ranking resolution
+for every downstream consumer of the calibrated column (sizing, the 0.55/0.40/0.30 bands). Found
+during the sweep, not investigated further, and worth its own session.
+
+**A large unrelated diff was present in `git status` throughout** (the Ollama-to-other-LLM-client
+migration, v1 design-system sweep, `unified_ranker.py` weights). Nothing was committed this
+session. When this work is committed it is **by explicit path only** — `src/server/ml_ensemble.py`,
+`src/server/model_promotion.py`, `src/server/queues.ts`,
+`src/server/tests/test_model_promotion_live_edge.py`,
+`src/server/tests/test_ml_ensemble_promotion_label_and_edge.py`,
+`src/server/tests/test_ml_ensemble_pricefeed_fallback.py`,
+`src/server/tests/test_fundamentals_pit.py`, `src/server/__tests__/test_ml_ensemble.py`,
+`.claude/rules/measurement.md`, `.claude/rules/recurring-bugs.md`, `docs/session-log.md` — never
+`git add -A`.
+
+### (cont.) deploy-drift given a 2h grace window — 2026-08-21
+
+Prompted by "why is it failing always". **Measured first: `port-drift` is NOT failing** — 170 runs
+/ 17 fails (10%), and it passes right now (`OK: every online pm2 service owns its expected port`).
+`deploy-drift` is 61/198 (31%) and **was failing for a true reason**: `f21e8d9` committed
+2026-08-21T14:04:21Z against a `bharat-server` started 13:17:01Z, still undeployed 4.6h later.
+
+The real defect was **zero tolerance**: `if (head.committedAt > proc.startedAt)` goes red the
+instant anyone commits and stays red until a restart, on an entry marked `critical: true` — red by
+construction on any active dev day, which is `recurring-bugs.md`'s "a check that cries wolf stops
+being read", and losing attention here costs the AF-14 finding it exists for.
+
+Added `scripts/lib/deployDriftVerdict.mjs` — `pass` / `pending` / `fail`, keyed on **how long HEAD
+has been ahead (`now - committedAt`)**, not the commit-vs-restart gap (that gap is frozen the
+moment the commit lands, so it cannot express "how long has this sat undeployed"). 2h default;
+`pending` stamps a heartbeat SUCCESS so no critical alert fires, but still prints.
+
+**Deliberately a separate module, not an `import.meta.url === argv[1]` guard inside the script**:
+pm2 launches it fork-mode with `interpreter: 'node'`, and a guard that ever evaluated false there
+would silently turn a critical monitor into a no-op — worse than the noise being fixed.
+
+9 tests (`src/server/__tests__/deployDriftGrace.test.ts`), negative-controlled 3 ways: removing the
+grace (4 fail), keying on the commit-vs-restart gap instead of time-since-commit (4 fail), and
+`Math.abs()` on the age (1 fail — caught by the clock-skew test written for exactly that). Live
+run confirms the new message: `undeployed for 4.6h (grace: 2.0h)`. `npx tsc --noEmit` clean,
+`npx vitest run` 110 files / 1066 tests passed.
+
+**NOT restarted, deliberately.** `f21e8d9` is genuinely undeployed and `pm2 restart bharat-server`
+is the correct fix — but pm2 runs from the **working tree**, and this tree carries a concurrent
+session's in-progress Ollama-removal migration (`server.ts`, `src/services/aiService.ts` -243
+lines, `src/server/ollamaManager.ts` DELETED, `monitor.router.ts`, `jobs/dl.jobs.ts`,
+`jobs/sync.jobs.ts`). A restart ships all of it. Left for the owner to decide.
+
+⚠ **Separately, and time-sensitive: the Python half of this session's ML work is ALREADY LIVE**
+without any restart — `runPython()` spawns a fresh interpreter that reads `ml_ensemble.py` from
+disk, so `ml-weekly-retrain` (cron `0 5 * * 0`, next 2026-08-23 05:00 UTC / 10:30 IST) will train
+on `triple_barrier` and evaluate through the new gate. Because the label changed, the
+`label_changed` override fires and it **will promote**, replacing live model id=220. That is the
+intended behaviour, but it happens on its own schedule whether or not anyone restarts.
