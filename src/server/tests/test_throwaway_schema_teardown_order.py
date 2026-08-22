@@ -41,6 +41,18 @@ EXEMPT = {
 }
 
 
+# Python 3.12 (PEP 701) stopped tokenizing an f-string as one STRING token: `f"DROP SCHEMA {x}"`
+# becomes FSTRING_START/FSTRING_MIDDLE/FSTRING_END, and the literal text lives in MIDDLE, not
+# STRING. Every fixture this file guards writes its SQL as an f-string, so checking only
+# tokenize.STRING passes on 3.11 (where this repo's dev venv sits) and finds nothing at all on
+# CI's 3.12 -- silently vacuous, not silently wrong, which is exactly what
+# test_scan_finds_the_files_it_is_meant_to_guard exists to catch (and did: CI failed loud).
+# getattr'd because FSTRING_MIDDLE doesn't exist as a tokenize constant before 3.12.
+_STRING_LIKE = {tokenize.STRING}
+if hasattr(tokenize, "FSTRING_MIDDLE"):
+    _STRING_LIKE.add(tokenize.FSTRING_MIDDLE)
+
+
 def _scan(src):
     """(has_raw_drop, uses_helper) from TOKENS, not raw text.
 
@@ -48,8 +60,8 @@ def _scan(src):
     looked correct until negative-controlled: a bare `DROP SCHEMA` pattern also matched the
     explanatory COMMENTS this fix added (failing already-correct files), and a
     `dispose_engines\\(\\)` pattern also matched the words inside that same comment (so deleting
-    the real call still PASSED). SQL lives in STRING tokens and calls are NAME tokens, so
-    tokenizing separates code from prose exactly.
+    the real call still PASSED). SQL lives in STRING (or, on 3.12+, FSTRING_MIDDLE) tokens and
+    calls are NAME tokens, so tokenizing separates code from prose exactly.
     """
     has_raw_drop = uses_helper = False
     try:
@@ -57,7 +69,7 @@ def _scan(src):
     except (tokenize.TokenError, IndentationError, SyntaxError):
         return False, False
     for i, t in enumerate(toks):
-        if t.type == tokenize.STRING and "DROP SCHEMA" in t.string:
+        if t.type in _STRING_LIKE and "DROP SCHEMA" in t.string:
             has_raw_drop = True
         if (t.type == tokenize.NAME and t.string == "drop_throwaway_schema"
                 and i + 1 < len(toks) and toks[i + 1].string == "("):
@@ -70,7 +82,7 @@ def _creates_throwaway_schema(src):
         toks = list(tokenize.generate_tokens(io.StringIO(src).readline))
     except (tokenize.TokenError, IndentationError, SyntaxError):
         return False
-    return any(t.type == tokenize.STRING and "CREATE SCHEMA" in t.string for t in toks)
+    return any(t.type in _STRING_LIKE and "CREATE SCHEMA" in t.string for t in toks)
 
 
 def _candidate_files():
