@@ -1683,6 +1683,52 @@ including that exact test. Recorded honestly rather than claimed as fixed: this 
 (3 of 4 attempts against the post-fix code were clean; the file's own logic and this diff share
 no code path). Worth a dedicated look if it recurs; not this session's finding to claim.
 
+### `build_features()` rewritten to single-pass construction (2026-08-22) — supersedes the periodic-`.copy()` interim fix above, still not a scoring change
+
+The periodic-`.copy()` fix above was explicitly the mitigation, not the fix: it silenced the
+warning by resetting pandas' block-fragmentation counter, but the 400+ sequential
+`X['col'] = expr` assignments were still there. Rewritten for real: `build_features()` now
+accumulates every feature into a plain `dict` (`feat['col'] = expr`, O(1), no pandas block
+machinery involved at all) and constructs the DataFrame **once** at the very end
+(`X = pd.DataFrame(feat, index=df.index)`), which also made the 5 `.copy()` checkpoints
+unnecessary — removed.
+
+Done as a scoped, mechanical text transform (Python script under `Bash`, not hand-edited line by
+line across ~880 lines) with safety assertions on every substitution count before writing:
+`X['` → `feat['` (408 occurrences), `X.get(` → `feat.get(` (3, the second-order-interaction
+fallback reads), `index=X.index` → `index=df.index` (3, same 3 lines) — checked first for any
+other whole-DataFrame usage of `X` (`.columns`, `.shape`, `.loc`, `in X`, etc.) that a blind
+substitution could silently break; none existed beyond the 3 `.get()` sites and one unrelated
+comment mentioning `predict_proba_ensemble()`'s own `X` parameter (a different function, left
+untouched).
+
+**Verified as zero-value-change two ways, not one:**
+1. A direct old-vs-new comparison — both versions loaded side by side via `importlib`, called on
+   the identical synthetic 50-row input (broad column coverage, including columns deliberately
+   left absent to exercise `num()`'s default path and the `.get()`/`feat.get()` fallback path,
+   plus the `len(df)==0` empty branch) — **421 columns, 0 differing values, exact match
+   (`atol=0, rtol=0`), including the empty-input branch's column set.** Not a unit test; a one-off
+   script, deleted after use per this file's own convention for such checks.
+2. The existing 80-test suite across every `build_features()` caller — 80/80 passed, unchanged
+   from the periodic-`.copy()` fix's own verification.
+
+**No `factor_backtest.py` run applies, same reasoning as the periodic-`.copy()` fix and this
+file's `_log_recommendations`/`seed_screener_catalog` entries** — a construction-method change
+with byte-identical output has nothing for a price-panel factor-edge measurement to detect.
+
+Full CI-identical suite re-run a third time on top of this change: **2140 passed / 232 skipped /
+0 failed / 154 warnings (980.79s)** — same warning count as the periodic-`.copy()` fix (confirms
+the single-pass rewrite doesn't reintroduce fragmentation elsewhere), and the
+`test_mc_earnings_fetcher.py` flake noted above did **not** recur this run either (4 of 5 total
+attempts across both fixes now clean — consistent with "non-deterministic, unrelated," not
+"caused by either change").
+
+**Performance was not benchmarked.** Every claim above is about correctness (identical values) and
+warning suppression (confirmed), not wall-clock speed — dict accumulation plus one final
+construction is expected to be faster than 400+ incremental DataFrame inserts (the textbook
+reason pandas recommends this pattern), but that expectation was not measured with a timer, and
+should not be quoted as a measured number.
+
 ## Not testable — do not spend time here without a genuinely new angle
 
 - **Fundamentals, analyst, ownership and earnings factors**: every one of those tables has ~30 distinct dates, all starting 2026-06-30 (1–2 independent quarterly observations). Calendar constraint, not engineering — elapsed time or a backfill fixes it, nothing else does.
