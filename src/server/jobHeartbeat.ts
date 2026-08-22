@@ -74,6 +74,20 @@ export async function recordHeartbeat(jobName: string, status: 'success' | 'fail
     // params follow placeholder order: VALUES(name,status,now,successAt,err,failInc),
     // then UPDATE(status, now, status, now, err, failInc)
     await dbRun(UPSERT_SQL, [jobName, status, now, successAt, err, failInc, status, now, status, now, err, failInc]);
+
+    // Append the run-level row. job_heartbeat above keeps only LIFETIME counters, so a fail
+    // rate computed from it can never be attributed to a time window -- i.e. it cannot answer
+    // "is this still failing after the fix?". Written here rather than at each job's own call
+    // site because every job already routes through this function; instrumenting the
+    // chokepoint covers all of them instead of the ones someone remembers to add.
+    // Separate try/catch on purpose: a failure appending history must not prevent the
+    // heartbeat upsert above from being observed as written.
+    try {
+      await dbRun(
+        `INSERT INTO job_run_history (job_name, status, ran_at, error) VALUES (?, ?, to_timestamp(? / 1000.0), ?)`,
+        [jobName, status, now, err],
+      );
+    } catch { /* history is diagnostic; never break a job for it */ }
   } catch {
     // Heartbeat must never break a job.
   }
