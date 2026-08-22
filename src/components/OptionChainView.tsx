@@ -84,7 +84,7 @@ export const OptionChainView: React.FC<OptionChainViewProps> = ({ defaultSymbol,
         <div className="flex items-center gap-3">
           <Activity className="w-6 h-6 text-indigo-400" />
           <div>
-            <h2 className="text-xl font-bold text-slate-100 font-display uppercase tracking-widest">Options Chain Intelligence</h2>
+            <h2 className="v1-title-card text-lg">Options Chain Intelligence</h2>
             <p className="text-[10px] text-slate-400 font-data tracking-widest uppercase">Live Derivatives Data</p>
           </div>
         </div>

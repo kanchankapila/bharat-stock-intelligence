@@ -391,7 +391,7 @@ export function BuyRecommendationsPage({ onSelectStock }: { onSelectStock: (sym:
       {/* Page header */}
       <div className="flex items-center justify-between flex-wrap gap-3">
         <div>
-          <h1 className="text-xl font-bold flex items-center gap-2">
+          <h1 className="v1-title-page flex items-center gap-2">
             <TrendingUp size={20} className="text-emerald-400" />
             Top Picks
             <CanonicalBadge />
