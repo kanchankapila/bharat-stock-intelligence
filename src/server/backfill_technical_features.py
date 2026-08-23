@@ -251,8 +251,9 @@ def run(limit: int | None = None):
                     (symbol, date, signal_score, signal_type,
                      rsi, sma50, sma200, macd, macd_signal,
                      bb_width, volume_ratio, above_sma200, adx,
-                     cmp, nifty_regime, fii_3d_net, computed_at)
-                VALUES (?,?,0,'BACKFILL',?,?,?,?,?,?,?,?,?,?,?,?,?)
+                     cmp, nifty_regime, fii_3d_net, computed_at,
+                     fii_10d_net, dii_3d_net, sector_ret_5d, sector_ret_21d)
+                VALUES (?,?,0,'BACKFILL',?,?,?,?,?,?,?,?,?,?,?,?,?,NULL,NULL,NULL,NULL)
                 ON CONFLICT (symbol, date) DO NOTHING
             """, (
                 symbol, sig_date,
@@ -314,8 +315,10 @@ def run_full_universe_today(min_price: float = 15.0) -> int:
                 (symbol, date, signal_score, signal_type,
                  rsi, sma50, sma200, macd, macd_signal,
                  bb_width, volume_ratio, above_sma200, adx, cmp,
-                 change_pct, nifty_regime, computed_at)
-            VALUES (?,?,0,'GRID',?,?,?,?,?,?,?,?,?,?,?,?,?)
+                 change_pct, nifty_regime, computed_at,
+                 fii_10d_net, dii_3d_net, sector_ret_5d, sector_ret_21d)
+            VALUES (?,?,0,'GRID',?,?,?,?,?,?,?,?,?,?,?,?,?,
+                    NULL,NULL,NULL,NULL)
             ON CONFLICT (symbol, date) DO NOTHING
         """, (
             symbol, latest, ind['rsi'], ind['sma50'], ind['sma200'],

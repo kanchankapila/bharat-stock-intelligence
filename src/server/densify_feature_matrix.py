@@ -54,6 +54,25 @@ NEVER_FILL = {
     # coverage (PEAD only applies to names with a recent earnings print), so there is
     # nothing for the filler to have been doing here. This is a guard, not a correction.
     'flyer_probability', 'movement_probability', 'pead_score', 'cs_score',
+    # Market-flow and relative-strength measures (2026-08-24). fii_10d_net /
+    # dii_3d_net are point-in-time institutional flow readings and
+    # sector_ret_5d/21d are daily recomputed cross-sectional returns — none can
+    # be carried forward without fabricating either a stale flow reading or a
+    # dead sector return. Their schema DEFAULTs were removed in migration
+    # 20260823235900 for exactly this reason; forward-fill would resurrect the
+    # same fabricated values through the back door.
+    'fii_10d_net', 'dii_3d_net', 'sector_ret_5d', 'sector_ret_21d',
+    # Option-chain walls (2026-08-23). These went from 100% "coverage" to ~7% when migration
+    # 1787130000000 replaced their fabricated DEFAULT 0 with a real NULL, which dropped them
+    # under SPARSE_COVERAGE_THRESHOLD and made them fill candidates for the first time.
+    # They must NOT be filled: a wall distance is a point-in-time reading off that day's
+    # so_option_chain, and only the ~154 F&O names have one at all. Forward-filling would
+    # carry an F&O name's stale wall onto days it has no chain, and (via ffill's per-symbol
+    # scope) present a reading as if it had been observed on each of those days -- the same
+    # fabrication the model-output entries above exist to prevent, and a strictly worse
+    # outcome than the zeros the migration just removed. Verified live: both columns appeared
+    # in sparse_columns() immediately after the migration.
+    'call_wall_dist_pct', 'put_wall_dist_pct', 'near_expiry_gamma',
     'close', 'cmp', 'open', 'high', 'low', 'volume', 'change_pct',
     'entry_zone', 'stop_loss', 'targets', 'setup_quality', 'time_horizon',
     'enrichment_ffill_age_days',   # this script's own bookkeeping column
