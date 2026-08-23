@@ -2605,6 +2605,18 @@ class UnifiedRanker:
             # a row instead of replacing one. DO NOTHING, not DO UPDATE: within a single run this
             # key cannot legitimately repeat, and silently rewriting a snapshot is the exact
             # failure this table exists to prevent.
+            #
+            # GRADER CONTRACT (pin for whoever writes the ~late-Sept canonical-ranker grading):
+            #   * Key everything on generated_at (timestamptz, real time-of-day). The text
+            #     computed_at column copied here is a LOGICAL SESSION LABEL -- post-midnight IST
+            #     runs legitimately stamp the prior trading day, so it carries NO usable
+            #     time-of-day and must not drive entry-timing or pre-market filters.
+            #   * Gradeable pre-market snapshot := MIN(generated_at) per (computed_at date,
+            #     symbol), keeping only dates whose min time < 03:45 UTC (09:15 IST open).
+            #     Live check 2026-08-23: 11 dates accumulated, 8 pass this filter.
+            #   * computed_at may legitimately be a weekend/holiday day (logical session),
+            #     so join outcomes on the NEXT TRADING DAY from stock_ohlcv, never on
+            #     computed_at + N calendar days.
             cur.execute('''
                 INSERT INTO unified_recommendations_history
                 (symbol, computed_at, generated_at, regime, unified_score, conviction_level,
