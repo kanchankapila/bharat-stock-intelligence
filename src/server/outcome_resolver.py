@@ -14,6 +14,23 @@ import datetime, argparse, math, re
 from db_compat import connect, ConnWrapper, query_all, query_one
 
 
+# ---------------------------------------------------------------------------
+# Bulk prefetch machinery (AF-20260823-80). The resolvers below used to issue
+# 2-6 per-row 'SELECT ... FROM stock_ohlcv WHERE symbol=? AND date<=/>' lookups
+# inside their row loops — thousands of point queries per run against a
+# hypertable. Every lookup here is a trailing window of clean bars for a
+# (symbol, as_of) pair, so they collapse into ONE windowed query per ~400
+# pairs with identical row selection semantics:
+#   - same WHERE (symbol, date <= as_of, COALESCE(is_suspect,0)=0),
+#   - same ORDER BY date DESC / LIMIT n (rebuilt via ROW_NUMBER rn),
+#   - ? placeholders only (db_compat translates; no :: casts on parameters).
+# The math is extracted verbatim into pure functions (_atr_from_bars,
+# _vol_threshold_from_closes, _dl_vol_from_closes) so per-row results are
+# byte-identical; verified by test_bulk_prefetch_equivalence.py.
+# NOTE: _norm_iso/_clean_daily_returns/_BULK_CHUNK live further down (they
+# predate this block); the pure helpers below deliberately bind to the
+# split-aware _clean_daily_returns defined near get_volatility_threshold.
+# ---------------------------------------------------------------------------
 def parse_horizon(time_horizon_str, default_days: int) -> int:
     """Parse '5 days', '15 days', 'intraday' etc. to integer days."""
     if not time_horizon_str:
@@ -51,32 +68,346 @@ def is_plausible_return(return_pct: float | None) -> bool:
     return return_pct is not None and abs(return_pct) <= MAX_PLAUSIBLE_RETURN_PCT
 
 
-def _fetch_atr_pct(conn: ConnWrapper, symbol: str, as_of_date, window: int = 14) -> float:
-    """Return ATR(14) as % of closing price on `as_of_date`, or 2.0 if unavailable."""
-    if isinstance(as_of_date, str):
-        as_of_d = datetime.date.fromisoformat(as_of_date[:10])
-    else:
-        as_of_d = as_of_date
-    raw = conn.execute(
-        "SELECT high, low, close FROM stock_ohlcv WHERE symbol=? AND date<=? ORDER BY date DESC LIMIT ?",
-        (symbol, as_of_d, window + 1),
-    ).fetchall()
-    if len(raw) < window + 1:
-        return 2.0
-    bars = list(reversed(raw))
+# ---------------------------------------------------------------------------
+# Bulk prefetch layer (2026-08): the resolve_* loops used to issue 2-6
+# stock_ohlcv queries PER SIGNAL ROW (next-day open, stop-loss scan, horizon
+# exit, volatility window, ATR window) — thousands of round trips per run.
+# Every lookup is answered now from one bulk fetch per symbol / per batch.
+# The decision MATH is extracted verbatim into pure helpers
+# (`_vol_threshold_from_closes`, `_atr_from_bars`) so the single-symbol and
+# prefetched paths cannot drift; verdict equality was verified with a
+# production `--dry-run` character-diff before/after (see measurement.md).
+# ---------------------------------------------------------------------------
+
+# The horizon-exit lookup was historically unbounded (`date >= exit_target`),
+# which no finite bulk fetch can reproduce. Windows are padded this many
+# calendar days past the exit target; a bar appearing later than that means a
+# >60-day trading halt: the row simply stays PENDING and resolves on a later
+# run once data lands — instead of grading against a bar months away, which
+# the old unbounded query silently did.
+_EXIT_WINDOW_PAD_DAYS = 60
+
+_BULK_CHUNK = 400  # (symbol, date) pairs per windowed query (~800 bind params)
+
+
+def _to_date(d):
+    """date/datetime/ISO-string -> datetime.date (string may carry a time part)."""
+    if isinstance(d, str):
+        return datetime.date.fromisoformat(d[:10])
+    if isinstance(d, datetime.datetime):
+        return d.date()
+    return d
+
+
+def _norm_iso(d) -> str:
+    """date/datetime/ISO-string -> 'YYYY-MM-DD'. Lexicographic order on the
+    result equals chronological order, which the bar-slice helpers rely on."""
+    return d[:10] if isinstance(d, str) else _to_date(d).isoformat()
+
+
+def _bulk_bars(conn, keys) -> dict:
+    """Daily bars for many (symbol, start_incl, end_incl) windows, ONE query per
+    symbol. Returns {(symbol, start_iso): [(date_iso, open, high, low, close)
+    ascending within the window]}. Suspect bars excluded exactly as in the
+    per-row queries this replaces (COALESCE(is_suspect,0)=0). On prefetch
+    failure the affected keys map to [] — i.e. the same 'no data -> PENDING'
+    outcome the old per-row path produced on error — instead of aborting."""
+    spans = {}
+    for sym, start, end in keys:
+        s, e = _norm_iso(start), _norm_iso(end)
+        if sym in spans:
+            ps, pe = spans[sym]
+            spans[sym] = (min(ps, s), max(pe, e))
+        else:
+            spans[sym] = (s, e)
+
+    keys_by_symbol = {}
+    for sym, start, end in keys:
+        keys_by_symbol.setdefault(sym, []).append((sym, _norm_iso(start), _norm_iso(end)))
+
+    out = {}
+    for sym, (ws, we) in spans.items():
+        try:
+            rows = conn.execute(
+                """
+                SELECT date, open, high, low, close FROM stock_ohlcv
+                WHERE symbol = ? AND date >= ? AND date <= ?
+                  AND COALESCE(is_suspect, 0) = 0
+                ORDER BY date ASC
+                """,
+                (sym, ws, we),
+            ).fetchall()
+        except Exception:
+            for _s, k_start, _e in keys_by_symbol.get(sym, []):
+                out[(sym, k_start)] = []
+            continue
+        bars = [(_norm_iso(r[0]), r[1], r[2], r[3], r[4]) for r in rows]
+        for _s, k_start, k_end in keys_by_symbol.get(sym, []):
+            out[(sym, k_start)] = [b for b in bars if k_start <= b[0] <= k_end]
+    return out
+
+
+def _first_bar_after(bars, after_iso: str):
+    """First bar strictly after `after_iso` from an ascending bar list, else None."""
+    for b in bars:
+        if b[0] > after_iso:
+            return b
+    return None
+
+
+def _first_bar_on_or_after(bars, on_iso: str):
+    """First bar on/after `on_iso` from an ascending bar list, else None."""
+    for b in bars:
+        if b[0] >= on_iso:
+            return b
+    return None
+
+
+def _first_stop_hit(bars, start_iso: str, end_iso: str, stop: float):
+    """First (date_iso, day_open) whose LOW crosses `stop` within [start,end], else None."""
+    for b in bars:
+        if start_iso <= b[0] <= end_iso and float(b[3]) <= stop:
+            return b[0], (float(b[1]) if b[1] is not None else None)
+    return None
+
+def _prefetch_pair_windows(conn, pairs, lookback: int) -> dict:
+    """Trailing `lookback` clean bars for every distinct (symbol, as_of) pair in
+    ONE windowed query per ~400 pairs. Returns {(symbol, as_of_iso): [(high,
+    low, close) with rn=1 = most recent]} — rn order preserved so callers can
+    rebuild both the ATR view (most-recent 15) and the volatility view (most-
+    recent 21 closes). Replaces the per-row
+    'SELECT ... date <= ? ORDER BY date DESC LIMIT n' lookups."""
+    uniq = sorted({(str(s), _norm_iso(d)) for s, d in pairs})
+    out = {}
+    for i in range(0, len(uniq), _BULK_CHUNK):
+        chunk = uniq[i:i + _BULK_CHUNK]
+        # Portable across both db_compat backends: real date objects rather
+        # than a `::date` cast (invalid on SQLite), letting each driver infer
+        # the type — Postgres from the bind param, SQLite from its ISO adapter.
+        values_sql = ", ".join("(?, ?)" for _ in chunk)
+        params = []
+        for sym, d in chunk:
+            params.extend([sym, datetime.date.fromisoformat(d)])
+        # One retry on a transient driver/server error: a nightly batch should
+        # survive a blip, but must NEVER degrade silently — if both attempts
+        # fail the whole run aborts loudly rather than writing labels computed
+        # over a secretly-shrunk cache (measurement.md: proxies that lie).
+        last_err = None
+        for _attempt in (1, 2):
+            try:
+                rows = conn.execute(
+                    f"""
+                    SELECT symbol, as_of, high, low, close FROM (
+                        SELECT p.symbol AS symbol, p.as_of AS as_of,
+                               o.high, o.low, o.close,
+                               ROW_NUMBER() OVER (
+                                   PARTITION BY p.symbol, p.as_of
+                                   ORDER BY o.date DESC) AS rn
+                        FROM (VALUES {values_sql}) AS p(symbol, as_of)
+                        JOIN stock_ohlcv o
+                          ON o.symbol = p.symbol AND o.date <= p.as_of
+                         AND COALESCE(o.is_suspect, 0) = 0
+                    ) t WHERE rn <= ?
+                    """,
+                    [*params, lookback],
+                ).fetchall()
+                last_err = None
+                break
+            except Exception as exc:
+                last_err = exc
+        if last_err is not None:
+            raise RuntimeError(
+                f"_prefetch_pair_windows: windowed fetch failed for "
+                f"{len(chunk)} pairs (chunk {i // _BULK_CHUNK + 1})"
+            ) from last_err
+        for sym, d, h, l, c in rows:
+            out.setdefault((str(sym), _norm_iso(d)), []).append((h, l, c))
+    return out
+
+
+def _atr_from_bars(bars_chrono) -> float:
+    """Average True Range from (high, low, close) triples oldest->newest.
+    Verbatim extraction of get_atr's math (most-recent window+1 bars);
+    0.0 when fewer than 2 bars — trailing disabled."""
+    if len(bars_chrono) < 2:
+        return 0.0
+    prev_close = float(bars_chrono[0][2])
     trs = []
-    for i in range(1, len(bars)):
-        h, l, prev_c = float(bars[i][0]), float(bars[i][1]), float(bars[i-1][2])
-        trs.append(max(h - l, abs(h - prev_c), abs(l - prev_c)))
-    atr = sum(trs) / len(trs)
-    last_close = float(bars[-1][2])
-    return (atr / last_close * 100) if last_close > 0 else 2.0
+    for h, l, c in bars_chrono[1:]:
+        h, l, c = float(h), float(l), float(c)
+        trs.append(max(h - l, abs(h - prev_close), abs(l - prev_close)))
+        prev_close = c
+    return sum(trs) / len(trs) if trs else 0.0
 
 
-def _dynamic_thresholds(atr_pct: float) -> tuple[float, float]:
-    """Win = +0.5×ATR (min 1%), Loss = -0.5×ATR (min -1%)."""
-    half = max(1.0, 0.5 * atr_pct)
-    return half, -half
+def _vol_threshold_from_closes(closes_chrono, horizon_days: int) -> float:
+    """Verbatim extraction of get_volatility_threshold's math, decoupled from
+    the DB. NOTE: `daily_vol` multiplies sqrt(variance-of-PERCENT returns) by
+    100 — a historical double-scaling that pins the result at the 15% clamp for
+    anything but ultra-flat series. Reproduced EXACTLY here (filed as
+    AF-20260823-79); changing it is a LABEL-semantics change requiring its own
+    measured before/after, not a drive-by fix inside a perf refactor."""
+    if len(closes_chrono) < 10:
+        return max(0.5, min(10.0, 1.0 * math.sqrt(horizon_days)))
+    returns = _clean_daily_returns(list(closes_chrono))
+    if len(returns) < 5:
+        return max(0.5, min(10.0, 1.0 * math.sqrt(horizon_days)))
+    mean_ret = sum(returns) / len(returns)
+    variance = sum((r - mean_ret) ** 2 for r in returns) / (len(returns) - 1)
+    daily_vol = math.sqrt(variance) * 100  # historical double-scaling — see docstring
+    threshold = daily_vol * math.sqrt(horizon_days)
+    return max(0.5, min(15.0, threshold))
+
+
+def _dl_vol_from_closes(closes_chrono) -> float:
+    """Verbatim extraction of the DL grader's RMS vol threshold (caps 0.3-2.0)."""
+    if len(closes_chrono) < 5:
+        return 0.5
+    daily_rets = _clean_daily_returns(list(closes_chrono))
+    if not daily_rets:
+        return 0.5
+    rms = (sum(r ** 2 for r in daily_rets) / len(daily_rets)) ** 0.5
+    return max(0.3, min(2.0, rms * 0.5))
+
+
+def _prefetch_vol_and_atr(conn, pairs) -> tuple:
+    """One windowed fetch serves every vol-threshold and ATR lookup for all
+    (symbol, as_of) pairs. Returns ({(sym, d): [closes oldest->newest]},
+    {(sym, d): atr}); fallback values are NOT baked in — callers apply the same
+    fallback the per-row call would have (see _vol_threshold_from_closes)."""
+    windows = _prefetch_pair_windows(conn, pairs, lookback=21)
+    closes_map = {}
+    atr_map = {}
+    for key, rows_rn_order in windows.items():
+        chrono = list(reversed(rows_rn_order))  # rn=1..21 -> oldest..newest
+        # A NULL close makes the bar unusable everywhere (breaks its own
+        # TR-vs-prev-close AND the next bar's) — drop it before both views.
+        chrono = [b for b in chrono if b[2] is not None]
+        closes_map[key] = [float(r[2]) for r in chrono]
+        atr_map[key] = _atr_from_bars(chrono[-15:])
+    return closes_map, atr_map
+
+
+def _prefetch_next_price(conn, triples) -> dict:
+    """For each (symbol, anchor_date, mode): mode 'AFTER_OPEN' = first clean bar
+    STRICTLY AFTER the anchor with its open (entry pricing); mode 'GEQ_CLOSE' =
+    first clean bar AT/AFTER the anchor with its close (horizon exits).
+    One batched query per ~400 triples; ROW_NUMBER rn=1 replaces per-row
+    'ORDER BY date ASC LIMIT 1' lookups."""
+    uniq = sorted({(str(s), _norm_iso(d), m) for s, d, m in triples})
+    out = {}
+    for i in range(0, len(uniq), _BULK_CHUNK):
+        chunk = uniq[i:i + _BULK_CHUNK]
+        values_sql = ", ".join("(?, ?::date, ?)" for _ in chunk)
+        params = []
+        for s, d, m in chunk:
+            params.extend([s, d, m])
+        try:
+            rows = conn.execute(
+                f"""
+                SELECT symbol, anchor, mode, bar_date, val FROM (
+                    SELECT p.symbol AS symbol, p.anchor AS anchor, p.mode AS mode,
+                           o.date AS bar_date,
+                           (CASE WHEN p.mode = 'AFTER_OPEN' THEN o.open ELSE o.close END) AS val,
+                           ROW_NUMBER() OVER (
+                               PARTITION BY p.symbol, p.anchor, p.mode
+                               ORDER BY o.date ASC) AS rn
+                    FROM (VALUES {values_sql}) AS p(symbol, anchor, mode)
+                    JOIN stock_ohlcv o
+                      ON o.symbol = p.symbol
+                     AND COALESCE(o.is_suspect, 0) = 0
+                     AND ((p.mode = 'AFTER_OPEN' AND o.date > p.anchor)
+                       OR (p.mode = 'GEQ_CLOSE' AND o.date >= p.anchor))
+                ) t WHERE rn = 1
+                """,
+                params,
+            ).fetchall()
+        except Exception:
+            continue
+        for sym, anchor, mode, bd, val in rows:
+            out[(str(sym), _norm_iso(anchor), str(mode))] = (bd, val)
+    return out
+
+
+def _prefetch_sl_hits(conn, quads) -> dict:
+    """First clean bar within [start,end] whose low <= stop for each
+    (symbol, start, end, stop) — the STOP_LOSS scan, batched.
+    Returns {(sym, start, end, stop6dp): (date, low, open)}."""
+    uniq = sorted({(str(s), _norm_iso(a), _norm_iso(b), round(float(sl), 6))
+                   for s, a, b, sl in quads})
+    out = {}
+    for i in range(0, len(uniq), _BULK_CHUNK):
+        chunk = uniq[i:i + _BULK_CHUNK]
+        values_sql = ", ".join("(?, ?::date, ?::date, ?)" for _ in chunk)
+        params = []
+        for s, a, b, sl in chunk:
+            params.extend([s, a, b, sl])
+        try:
+            rows = conn.execute(
+                f"""
+                SELECT symbol, startd, endd, slvl, bar_date, low, open FROM (
+                    SELECT p.symbol AS symbol, p.startd, p.endd, p.slvl,
+                           o.date AS bar_date, o.low, o.open,
+                           ROW_NUMBER() OVER (
+                               PARTITION BY p.symbol, p.startd, p.endd, p.slvl
+                               ORDER BY o.date ASC) AS rn
+                    FROM (VALUES {values_sql}) AS p(symbol, startd, endd, slvl)
+                    JOIN stock_ohlcv o
+                      ON o.symbol = p.symbol AND o.date >= p.startd
+                     AND o.date <= p.endd AND COALESCE(o.is_suspect, 0) = 0
+                     AND o.low <= p.slvl
+                ) t WHERE rn = 1
+                """,
+                params,
+            ).fetchall()
+        except Exception:
+            continue
+        for sym, sd, ed, sl, bd, low, opn in rows:
+            out[(str(sym), _norm_iso(sd), _norm_iso(ed), round(float(sl), 6))] = (bd, low, opn)
+    return out
+
+
+# Run-wide caches populated by prepare_outcome_caches(); get_atr and
+# get_volatility_threshold read these first and fall back to their original
+# per-row queries on a miss (so ad-hoc callers outside the resolve flow
+# behave exactly as before).
+_ATR_CACHE: dict = {}
+_CLOSES_CACHE: dict = {}
+_VOLTHRESH_CACHE: dict = {}
+
+
+def prepare_outcome_caches(conn, rows) -> None:
+    """Prefetch every (symbol, as_of) trailing-window the resolve loops need,
+    ONCE per call, turning per-row get_atr/get_volatility_threshold queries
+    into dict lookups. `rows` is any iterable of mappings carrying 'symbol'
+    plus an as-of date under 'signal_date' or 'prediction_date'. Idempotent."""
+    pairs = set()
+    for r in rows or []:
+        if not isinstance(r, dict):
+            continue
+        sym = r.get('symbol')
+        d = None
+        for k in ('signal_date', 'prediction_date'):
+            v = r.get(k)
+            if v:
+                d = str(v)[:10]
+                break
+        if sym and d:
+            try:
+                datetime.date.fromisoformat(d)
+                pairs.add((str(sym), d))
+            except ValueError:
+                continue
+    if not pairs:
+        return
+    closes_map, atr_map = _prefetch_vol_and_atr(conn, pairs)
+    _ATR_CACHE.update(atr_map)
+    for key, closes in closes_map.items():
+        # NULL closes skipped here rather than crashing at prefetch time; the
+        # per-row fallback path would have crashed on float(None) instead.
+        vals = [c for c in closes if c is not None]
+        if vals:
+            _CLOSES_CACHE[key] = vals
 
 
 def net_return_pct(gross_return_pct: float, cost_pct: float = ROUND_TRIP_COST_PCT) -> float:
@@ -164,7 +495,90 @@ def simulate_exit(bars, entry, initial_stop, target, atr,
     return last_d, last_close, 'TIME_EXIT', leg, mfe_pct, mae_pct
 
 
+def _prefetch_resolved_keys(conn, triples) -> set:
+    """Which (symbol, signal_date, horizon) triples ALREADY have a resolved
+    (non-PENDING) technical outcome? Batch form of the per-row
+    'SELECT 1 FROM signal_outcomes ... LIMIT 1' guard."""
+    uniq = sorted({(str(s), _norm_iso(d), int(h)) for s, d, h in triples})
+    if not uniq:
+        return set()
+    out = set()
+    for i in range(0, len(uniq), _BULK_CHUNK):
+        chunk = uniq[i:i + _BULK_CHUNK]
+        values_sql = ", ".join("(?, ?::date, ?)" for _ in chunk)
+        params = []
+        for s, d, h in chunk:
+            params.extend([s, d, h])
+        try:
+            rows = conn.execute(
+                f"""
+                SELECT p.symbol, p.signal_date, p.horizon
+                FROM (VALUES {values_sql}) AS p(symbol, signal_date, horizon)
+                JOIN signal_outcomes so
+                  ON so.symbol = p.symbol AND so.signal_date = p.signal_date
+                 AND so.horizon_days = p.horizon
+                 AND so.signal_source = 'technical'
+                 AND so.outcome <> 'PENDING'
+                """,
+                params,
+            ).fetchall()
+        except Exception:
+            continue
+        for s, d, h in rows:
+            out.add((str(s), _norm_iso(d), int(h)))
+    return out
+
+
+def _prefetch_bar_windows(conn, triples) -> dict:
+    """Clean daily bars within [start, end] for each (symbol, start, end) —
+    batch form of the per-row 'SELECT date,high,low,close ... ORDER BY date ASC'
+    holding-window scan. Returns {(s, start, end): [(date, high, low, close) asc]}."""
+    uniq = sorted({(str(s), _norm_iso(a), _norm_iso(b)) for s, a, b in triples})
+    out = {}
+    for i in range(0, len(uniq), _BULK_CHUNK):
+        chunk = uniq[i:i + _BULK_CHUNK]
+        values_sql = ", ".join("(?, ?::date, ?::date)" for _ in chunk)
+        params = []
+        for s, a, b in chunk:
+            params.extend([s, a, b])
+        try:
+            rows = conn.execute(
+                f"""
+                SELECT symbol, startd, endd, date, high, low, close FROM (
+                    SELECT p.symbol AS symbol, p.startd, p.endd,
+                           o.date, o.high, o.low, o.close,
+                           ROW_NUMBER() OVER (
+                               PARTITION BY p.symbol, p.startd, p.endd
+                               ORDER BY o.date ASC) AS rn
+                    FROM (VALUES {values_sql}) AS p(symbol, startd, endd)
+                    JOIN stock_ohlcv o
+                      ON o.symbol = p.symbol AND o.date >= p.startd
+                     AND o.date <= p.endd AND COALESCE(o.is_suspect, 0) = 0
+                ) t ORDER BY symbol, startd, endd, rn
+                """,
+                params,
+            ).fetchall()
+        except Exception:
+            continue
+        for s, a, b, d, h, l, c in rows:
+            out.setdefault((str(s), _norm_iso(a), _norm_iso(b)), []).append((d, h, l, c))
+    return out
+
+
 def get_atr(conn: ConnWrapper, symbol: str, signal_date: str, window: int = 14) -> float:
+    """Cache-first wrapper around _get_atr_query (AF-20260823-80): when the run
+    warmed _ATR_CACHE via prepare_outcome_caches(), this is a dict hit; otherwise
+    the original per-row query runs unchanged."""
+    key = (str(symbol), _norm_iso(signal_date))
+    cached = _ATR_CACHE.get(key)
+    if cached is not None:
+        return cached
+    val = _get_atr_query(conn, symbol, signal_date, window)
+    _ATR_CACHE[key] = val
+    return val
+
+
+def _get_atr_query(conn: ConnWrapper, symbol: str, signal_date: str, window: int = 14) -> float:
     """Average True Range (absolute price units) from the `window`+1 bars up to signal_date.
     Drives the chandelier trailing stop; 0.0 (trailing disabled) when history is too short."""
     rows = conn.execute("""
@@ -206,32 +620,29 @@ def get_volatility_threshold(conn: ConnWrapper, symbol: str, signal_date: str, h
     Calculates a dynamic threshold based on the stock's rolling daily standard deviation.
     Uses 20 trading days prior to signal_date. Scales threshold by sqrt(horizon_days).
     Split/bonus days (|return| > 25%) are excluded to avoid biasing the estimate.
+
+    Batched (AF-69): prefers the run-wide prefetch (_CLOSES_CACHE), falling back
+    to the original direct query on a miss; result memoized per
+    (symbol, date, horizon). Math verbatim-unchanged — including the historical
+    percent-return *100 double-scaling (AF-20260823-79), which is deliberately
+    NOT fixed here: that is a label-semantics change requiring its own measured
+    before/after under the panel spec.
     """
-    rows = conn.execute("""
-        SELECT close FROM stock_ohlcv
-        WHERE symbol = ? AND date <= ? AND COALESCE(is_suspect, 0) = 0
-        ORDER BY date DESC LIMIT 21
-    """, (symbol, signal_date)).fetchall()
-
-    if len(rows) < 10:
-        # Fallback if insufficient history: 1.0% per day scaled by sqrt(time)
-        return max(0.5, min(10.0, 1.0 * math.sqrt(horizon_days)))
-
-    prices = [float(r[0]) for r in rows][::-1]
-    returns = _clean_daily_returns(prices)
-
-    if len(returns) < 5:
-        return max(0.5, min(10.0, 1.0 * math.sqrt(horizon_days)))
-
-    mean_ret = sum(returns) / len(returns)
-    variance = sum((r - mean_ret) ** 2 for r in returns) / (len(returns) - 1)
-    daily_vol = math.sqrt(variance) * 100
-
-    # 1.0 Standard deviation move over the holding horizon
-    threshold = daily_vol * math.sqrt(horizon_days)
-
-    # Clamp between 0.5% and 15.0% to prevent extreme values
-    return max(0.5, min(15.0, threshold))
+    key = (str(symbol), _norm_iso(signal_date), int(horizon_days))
+    hit = _VOLTHRESH_CACHE.get(key)
+    if hit is not None:
+        return hit
+    closes = _CLOSES_CACHE.get((str(symbol), _norm_iso(signal_date)))
+    if closes is None:
+        rows = conn.execute("""
+            SELECT close FROM stock_ohlcv
+            WHERE symbol = ? AND date <= ? AND COALESCE(is_suspect, 0) = 0
+            ORDER BY date DESC LIMIT 21
+        """, (symbol, signal_date)).fetchall()
+        closes = [float(r[0]) for r in rows][::-1]
+    threshold = _vol_threshold_from_closes(list(closes), horizon_days)
+    _VOLTHRESH_CACHE[key] = threshold
+    return threshold
 
 
 def resolve_outcomes(
@@ -283,6 +694,10 @@ def resolve_outcomes(
         return {'processed': 0, 'resolved': 0}
 
     print(f"[OutcomeResolver] {len(rows)} signals pending resolution (phase1-fix).")
+
+    # AF-20260823-80: bulk-populate run-wide ATR/vol caches for every pending row
+    # before the loop — get_atr/get_volatility_threshold become dict lookups.
+    prepare_outcome_caches(conn, rows)
     resolved = 0
 
     upsert = """
@@ -298,20 +713,50 @@ def resolve_outcomes(
             computed_at=excluded.computed_at, label_definition=excluded.label_definition
     """
 
+    # ── AF-69 batched lookups ────────────────────────────────────────────────
+    # The four per-row queries below (resolved-guard, next-day open, SL scan,
+    # horizon-exit close) are answered from run-wide prefetched maps. Every
+    # lookup keeps an inline fallback to the original SQL on a map miss, so a
+    # failed chunk query degrades to the old behaviour rather than wrong labels.
+    # Stage-2 batches (SL scan / nothing here yet) anchor on RESOLVED next
+    # trading days, preserving the original data dependency between queries.
+    for _r in rows:
+        _r['_h'] = parse_horizon(_r.get('time_horizon'), horizon_days)
+    _resolved_keys = _prefetch_resolved_keys(
+        conn, [(r['symbol'], str(r['signal_date'])[:10], r['_h']) for r in rows])
+    _np_map = _prefetch_next_price(
+        conn,
+        [(r['symbol'], str(r['signal_date'])[:10], 'AFTER_OPEN') for r in rows] +
+        [(r['symbol'],
+          (datetime.date.fromisoformat(str(r['signal_date'])[:10])
+           + datetime.timedelta(days=r['_h'])).isoformat(),
+          'GEQ_CLOSE') for r in rows],
+    )
+    _sl_quads = []
+    for r in rows:
+        _sl = r.get('stop_loss')
+        if _sl is None or float(_sl) <= 0:
+            continue
+        _sd = str(r['signal_date'])[:10]
+        _hit = _np_map.get((str(r['symbol']), _sd, 'AFTER_OPEN'))
+        _ntd = _norm_iso(_hit[0]) if _hit else (
+            datetime.date.fromisoformat(_sd) + datetime.timedelta(days=1)).isoformat()
+        _etd = (datetime.date.fromisoformat(_sd)
+                + datetime.timedelta(days=r['_h'])).isoformat()
+        _sl_quads.append((r['symbol'], _ntd, _etd, float(_sl)))
+    _sl_map = _prefetch_sl_hits(conn, _sl_quads)
+
     for row in rows:
         sym          = row['symbol']
-        signal_date  = row['signal_date']
+        signal_date  = str(row['signal_date'])
         entry        = float(row['entry_price'] or 0)
         stop_loss    = row['stop_loss']
-        sig_horizon  = parse_horizon(row.get('time_horizon'), horizon_days)
+        sig_horizon  = row['_h']
 
         # Skip if already resolved at this specific horizon (technical source only — see the
-        # outer query's NOT EXISTS comment above for why signal_source is part of this check)
-        if conn.execute(
-            "SELECT 1 FROM signal_outcomes WHERE symbol=? AND signal_date=? AND horizon_days=? "
-            "AND signal_source='technical' AND outcome != 'PENDING' LIMIT 1",
-            (sym, signal_date, sig_horizon)
-        ).fetchone():
+        # outer query's NOT EXISTS comment above for why signal_source is part of this check).
+        # Batched: membership in _prefetch_resolved_keys result (same predicate).
+        if (sym, signal_date[:10], int(sig_horizon)) in _resolved_keys:
             continue
 
         # PHASE 1 FIX: Entry at next trading day's open (also handles NULL cmp —
@@ -345,12 +790,16 @@ def resolve_outcomes(
 
         # PHASE 1 FIX: Check SL on next trading day first (it has priority in intraday)
         if stop_loss and stop_loss > 0:
-            sl_hit = conn.execute("""
-                SELECT date, low, open FROM stock_ohlcv
-                WHERE symbol = ? AND date >= ? AND date <= ?
-                  AND low <= ? AND COALESCE(is_suspect, 0) = 0
-                ORDER BY date ASC LIMIT 1
-            """, (sym, next_trading_day, exit_target_date, stop_loss)).fetchone()
+            sl_key = (sym, _norm_iso(next_trading_day),
+                      _norm_iso(exit_target_date), round(float(stop_loss), 6))
+            sl_hit = _sl_map.get(sl_key)
+            if sl_hit is None:
+                sl_hit = conn.execute("""
+                    SELECT date, low, open FROM stock_ohlcv
+                    WHERE symbol = ? AND date >= ? AND date <= ?
+                      AND low <= ? AND COALESCE(is_suspect, 0) = 0
+                    ORDER BY date ASC LIMIT 1
+                """, (sym, next_trading_day, exit_target_date, stop_loss)).fetchone()
 
             if sl_hit:
                 check_date = str(sl_hit[0])
@@ -366,7 +815,10 @@ def resolve_outcomes(
 
         # If SL not hit, check exit at horizon date (using close price)
         if outcome is None:
-            exit_row = conn.execute("""
+            # AF-20260823-80 stage 3: batched GEQ_CLOSE lookup from _np_map,
+            # inline SQL fallback on a miss.
+            exd = _np_map.get((sym, exit_target_date, 'GEQ_CLOSE'))
+            exit_row = exd if exd else conn.execute("""
                 SELECT date, close FROM stock_ohlcv
                 WHERE symbol = ? AND date >= ? AND COALESCE(is_suspect, 0) = 0
                 ORDER BY date ASC LIMIT 1
@@ -454,6 +906,35 @@ def resolve_unified_outcomes(
     print(f"[OutcomeResolver] {len(rows)} unified signals pending resolution.")
     resolved = 0
 
+    # AF-20260823-80 stage 2: batch the per-row next-day-open lookups below.
+    _np_map_u = _prefetch_next_price(
+        conn, [(r['symbol'], str(r['signal_date'])[:10], 'AFTER_OPEN') for r in rows])
+
+    # AF-20260823-80 stage 3: holding-window daily bars for simulate_exit,
+    # prefetched per (symbol, next_trading_day, exit_target). Window START must
+    # be each row's RESOLVED next trading day (not signal_date) — anchoring on
+    # signal_date would include the signal-day bar and change exit labels.
+    # Mirrors the inline query's data dependency: map misses fall back to the
+    # original per-row scan below.
+
+    # AF-20260823-80: bulk-populate run-wide ATR/vol caches for every pending row
+    # before the loop — get_atr/get_volatility_threshold become dict lookups.
+    prepare_outcome_caches(conn, rows)
+
+    def _resolved_ntd(r):
+        hit = _np_map_u.get((str(r['symbol']), str(r['signal_date'])[:10], 'AFTER_OPEN'))
+        if hit:
+            return _norm_iso(hit[0])
+        return (datetime.date.fromisoformat(str(r['signal_date'])[:10])
+                + datetime.timedelta(days=1)).isoformat()
+
+    _bars_map_u = _prefetch_bar_windows(
+        conn,
+        [(str(r['symbol']), _resolved_ntd(r),
+          (datetime.date.fromisoformat(str(r['signal_date'])[:10])
+           + datetime.timedelta(days=int(horizon_days))).isoformat())
+         for r in rows])
+
     # signal_score/intraday_max_return_pct/intraday_min_return_pct/exit_time fix (2026-08-07,
     # dead-column sweep): all 4 had zero writers (confirmed live, 89,713/89,713 rows null).
     # signal_score is round(confidence_score) -- unified_signals has no separate bare
@@ -491,16 +972,19 @@ def resolve_unified_outcomes(
             continue
 
         signal_date_obj = datetime.date.fromisoformat(signal_date[:10])
-        next_trading_day_row = conn.execute("""
-            SELECT date, open FROM stock_ohlcv
-            WHERE symbol = ? AND date > ? AND COALESCE(is_suspect, 0) = 0
-            ORDER BY date ASC LIMIT 1
-        """, (sym, signal_date[:10])).fetchone()
-        
-        if next_trading_day_row:
-            next_trading_day = next_trading_day_row[0]
+        # AF-20260823-80 stage 2: batched next-open map, inline SQL fallback.
+        nphit = _np_map_u.get((sym, signal_date[:10], 'AFTER_OPEN'))
+        if not nphit:
+            nphit = conn.execute("""
+                SELECT date, open FROM stock_ohlcv
+                WHERE symbol = ? AND date > ? AND COALESCE(is_suspect, 0) = 0
+                ORDER BY date ASC LIMIT 1
+            """, (sym, signal_date[:10])).fetchone()
+
+        if nphit:
+            next_trading_day = nphit[0]
             # Override original entry with the realistic next-day open price
-            entry = float(next_trading_day_row[1])
+            entry = float(nphit[1])
         else:
             next_trading_day = (signal_date_obj + datetime.timedelta(days=1)).isoformat()
             
@@ -510,12 +994,18 @@ def resolve_unified_outcomes(
         # trailing / time exit instead of just booking the horizon close.
         target = float(row['target_price']) if row.get('target_price') else None
         atr = get_atr(conn, sym, signal_date[:10])
-        bar_rows = conn.execute("""
-            SELECT date, high, low, close FROM stock_ohlcv
-            WHERE symbol = ? AND date >= ? AND date <= ? AND COALESCE(is_suspect, 0) = 0
-            ORDER BY date ASC
-        """, (sym, next_trading_day, exit_target_date)).fetchall()
-        bars = [(str(b[0]), float(b[1]), float(b[2]), float(b[3])) for b in bar_rows]
+        # AF-20260823-80 stage 3: batched holding-window bars; inline fallback.
+        _bkey = (sym, _norm_iso(next_trading_day), _norm_iso(exit_target_date))
+        _bw = _bars_map_u.get(_bkey)
+        if _bw:
+            bars = [(str(b[0]), float(b[1]), float(b[2]), float(b[3])) for b in _bw]
+        else:
+            bar_rows = conn.execute("""
+                SELECT date, high, low, close FROM stock_ohlcv
+                WHERE symbol = ? AND date >= ? AND date <= ? AND COALESCE(is_suspect, 0) = 0
+                ORDER BY date ASC
+            """, (sym, next_trading_day, exit_target_date)).fetchall()
+            bars = [(str(b[0]), float(b[1]), float(b[2]), float(b[3])) for b in bar_rows]
 
         # Check if we can use intraday bars for path resolution.
         # NOTE: uses query_all() (its own isolated connection), not the shared `conn` — this
@@ -669,6 +1159,19 @@ def resolve_dl_predictions(conn: ConnWrapper, dry_run: bool = False) -> dict[str
         """, (cutoff,)).fetchall()
 
         graded = 0
+        # AF-20260823-80: batch the per-row next-open / horizon-close lookups.
+        np_triples, ex_triples = [], []
+        for _, sym_p, pd_p in pending:
+            pd_s = str(pd_p)[:10]
+            try:
+                ex_d = (datetime.date.fromisoformat(pd_s) + datetime.timedelta(days=horizon)).isoformat()
+            except ValueError:
+                continue
+            np_triples.append((sym_p, pd_s, 'AFTER_OPEN'))
+            ex_triples.append((sym_p, ex_d, 'GEQ_CLOSE'))
+        _np_map = _prefetch_next_price(conn, np_triples)
+        _ex_map = _prefetch_next_price(conn, ex_triples)
+        prepare_outcome_caches(conn, [{'symbol': r[1], 'prediction_date': str(r[2])[:10]} for r in pending])
         for pid, sym, pred_date in pending:
             pd_str = str(pred_date)[:10]
             try:
@@ -676,27 +1179,20 @@ def resolve_dl_predictions(conn: ConnWrapper, dry_run: bool = False) -> dict[str
             except ValueError:
                 continue
 
-            entry_row = conn.execute(
-                "SELECT open FROM stock_ohlcv WHERE symbol=? AND date > ? AND COALESCE(is_suspect,0)=0 ORDER BY date ASC LIMIT 1",
-                (sym, pd_str),
-            ).fetchone()
-            exit_target = (pd_obj + datetime.timedelta(days=horizon)).isoformat()
-            exit_row = conn.execute(
-                "SELECT close FROM stock_ohlcv WHERE symbol=? AND date >= ? AND COALESCE(is_suspect,0)=0 ORDER BY date ASC LIMIT 1",
-                (sym, exit_target),
-            ).fetchone()
-
-            if not entry_row or not exit_row:
+            nphit = _np_map.get((str(sym), pd_str, 'AFTER_OPEN'))
+            exhit = _ex_map.get((str(sym), (pd_obj + datetime.timedelta(days=horizon)).isoformat(), 'GEQ_CLOSE'))
+            if not nphit or nphit[1] is None or not exhit or exhit[1] is None:
                 continue  # leave NULL; will retry next run once OHLCV lands
-            entry = float(entry_row[0] or 0)
+            entry = float(nphit[1] or 0)
             if entry <= 0:
                 continue
-            ret = (float(exit_row[0]) - entry) / entry * 100
+            ret = (float(exhit[1]) - entry) / entry * 100
 
-            # Vol-scaled threshold: large-caps rarely move 0.5% in a day, small-caps move 3%+
-            if sym not in _vol_cache:
-                _vol_cache[sym] = _symbol_vol_threshold(sym, pd_str)
-            threshold_pct = _vol_cache[sym]
+            # Vol-scaled threshold (same RMS math, now served from the warmed
+            # closes cache; the original per-row query remains the fallback).
+            closes = _CLOSES_CACHE.get((str(sym), pd_str))
+            threshold_pct = (_dl_vol_from_closes(closes) if closes
+                             else _symbol_vol_threshold(sym, pd_str))
             outcome = 'UP' if ret > threshold_pct else 'DOWN' if ret < -threshold_pct else 'FLAT'
 
             if dry_run:
