@@ -64,7 +64,18 @@ RAW_TO_ENGINE = {
 MIN_ADT_CR = 1.0   # measurement.md panel spec
 
 ARMS = ['equal_weight', 'regime_weighted', 'rw+quality', 'rw+quality+redflag',
-        'rw+quality+redflag+highvol', 'stored_unified_score']
+        'rw+quality+redflag+highvol', 'rw7+screener', 'rw7+smartmoney', 'rw8+gates',
+        'stored_unified_score']
+
+# The two engines with no raw historical table. They are read from unified_recommendations'
+# stored columns ONLY for the `rw8+gates` arm, which exists to bisect the one step where the
+# whole IC loss sits (last reconstructed arm -> stored). screener is the leading suspect:
+# independently measured negative (IC -0.027, t=-2.36) and it is the engine the 2026-08-20
+# weight re-derivation shrank. Its stored column is far less zero-contaminated than ml's
+# (2-10% pre-fix vs 74%, and 0% from 2026-08-18), so unlike ml it is usable here -- but a
+# stored 0 is still ambiguous pre-fix, so it is treated as MISSING rather than as a real
+# bottom-rank score. See the zero-vs-NULL note in load_panel.
+STORED_ONLY_ENGINES = {'screener_stock_score': 'screener', 'smart_money_score': 'smart_money'}
 
 
 def load_panel(start):
@@ -86,9 +97,16 @@ def load_panel(start):
     for c in RAW_TO_ENGINE:
         if c in raw.columns:
             raw[c] = pd.to_numeric(raw[c], errors="coerce")
+    extra = ", ".join(STORED_ONLY_ENGINES)
     ur_df = read_df(
-        "SELECT symbol, computed_at::date AS date, regime, unified_score "
-        "FROM unified_recommendations WHERE computed_at::date >= ?", (start,))
+        f"SELECT symbol, computed_at::date AS date, regime, unified_score, {extra} "
+        f"FROM unified_recommendations WHERE computed_at::date >= ?", (start,))
+    for c in STORED_ONLY_ENGINES:
+        # A stored 0 is ambiguous before the 2026-08-18 has_data guard: it means either a real
+        # bottom score or "this engine never scored this symbol". Treating it as a real 0 is
+        # what made version 1 of this script report a negative IC. Treated as MISSING, so the
+        # symbol simply blends over its other engines -- the conservative reading.
+        ur_df[c] = pd.to_numeric(ur_df[c], errors="coerce").replace(0.0, float("nan"))
     ur_df["date"] = pd.to_datetime(ur_df["date"])
     ur_df["unified_score"] = pd.to_numeric(ur_df["unified_score"], errors="coerce")
     return raw.merge(ur_df, on=["symbol", "date"], how="inner")
@@ -183,6 +201,30 @@ def build_arms(df, qual, vol, red):
         w = pd.Series({e: weights.get(e, 0.0) for e in z.columns})
         wmat = present.mul(w, axis=1)
         gg["regime_weighted"] = (z.fillna(0.0) * wmat).sum(axis=1) / wmat.sum(axis=1)
+        # 8-engine variant: same rank-z treatment for the two stored-only engines, so
+        # `rw8+gates` vs `rw+quality+redflag+highvol` isolates exactly one thing -- adding
+        # screener + smart_money to an otherwise identical blend and gate stack.
+        z8 = z.copy()
+        for _col, _eng in STORED_ONLY_ENGINES.items():
+            if _col in gg.columns:
+                z8[_eng] = (gg[_col].rank(pct=True) - 0.5) / 0.2887
+        p8 = z8.notna()
+        w8 = pd.Series({e: weights.get(e, 0.0) for e in z8.columns})
+        m8 = p8.mul(w8, axis=1)
+        gg["rw8"] = (z8.fillna(0.0) * m8).sum(axis=1) / m8.sum(axis=1)
+        gg.loc[p8.sum(axis=1) < ec.MIN_ENGINES, "rw8"] = float("nan")
+        # Add each stored-only engine ALONE, to attribute the rw8 effect rather than
+        # reporting the pair and guessing which half caused it.
+        for _col, _eng in STORED_ONLY_ENGINES.items():
+            z7 = z.copy()
+            if _col in gg.columns:
+                z7[_eng] = (gg[_col].rank(pct=True) - 0.5) / 0.2887
+            p7 = z7.notna()
+            w7 = pd.Series({e: weights.get(e, 0.0) for e in z7.columns})
+            m7 = p7.mul(w7, axis=1)
+            key = "rw7_" + _eng
+            gg[key] = (z7.fillna(0.0) * m7).sum(axis=1) / m7.sum(axis=1)
+            gg.loc[p7.sum(axis=1) < ec.MIN_ENGINES, key] = float("nan")
         gg.loc[n_eng < ec.MIN_ENGINES, ["equal_weight", "regime_weighted"]] = float("nan")
         gg["n_engines"] = n_eng
         rows.append(gg)
@@ -227,6 +269,14 @@ def build_arms(df, qual, vol, red):
                        if (cut is not None and pd.notna(v) and v >= cut) else 1.0)
     d["hv_mult"] = hv_mult
     d["rw+quality+redflag+highvol"] = d["rw+quality+redflag"] * d["hv_mult"]
+    # Same gate stack applied to the 8-engine blend, so rw8+gates vs
+    # rw+quality+redflag+highvol isolates exactly one thing: adding screener + smart_money.
+    _gates = (d["qg"] * d["red"].map({True: ur.RED_FLAG_VETO_MULT, False: 1.0}) * d["hv_mult"])
+    d["rw7+screener"] = d["rw7_screener"] * _gates
+    d["rw7+smartmoney"] = d["rw7_smart_money"] * _gates
+    d["rw8+gates"] = (d["rw8"] * d["qg"]
+                      * d["red"].map({True: ur.RED_FLAG_VETO_MULT, False: 1.0})
+                      * d["hv_mult"])
 
     d["stored_unified_score"] = d["unified_score"]
     return d

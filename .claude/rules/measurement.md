@@ -894,6 +894,45 @@ residual remains at h=21 (+0.0498 restricted vs +0.0988 excluded, liquid-only), 
 its own, but the headline effect was an artifact of measuring microcaps nobody can trade. This is
 the panel spec's own liquidity rule catching exactly what it exists to catch.
 
+
+**BISECTED 2026-08-23 — `screener` causes 100% of the attributable loss, and `smart_money` is
+inert.** Finding 3 above said the whole IC drop sits in one step and named five suspects. Two of
+them are now separated by adding each stored-only engine ALONE to the identical 6-engine blend
+and gate stack (`rw7+screener` / `rw7+smartmoney` arms, same rows, same floor):
+
+| arm | h=5 IC | h=21 IC | h=21 AUC | verdict @21d |
+|---|---|---|---|---|
+| `rw+quality+redflag+highvol` (6 engines, baseline) | **+0.0716** | **+0.0568** | 0.5524 | **USABLE** |
+| `rw7+smartmoney` | **+0.0716** | **+0.0568** | 0.5524 | **USABLE** — *identical to 4 dp* |
+| `rw7+screener` | **+0.0434** | **+0.0165** | 0.5426 | no edge |
+| `rw8+gates` (both) | +0.0437 | +0.0165 | 0.5426 | no edge |
+| `stored_unified_score` | +0.0260 | +0.0276 | 0.5155 | no edge |
+
+**`screener` costs −0.028 at h=5 (39% of the IC) and −0.040 at h=21 (71%), and single-handedly
+destroys the `USABLE` verdict.** Adding `smart_money` on top changes nothing — `rw8` and
+`rw7+screener` agree to 3 decimals, and `rw7+smartmoney` is bit-identical to the baseline. That
+is consistent with its 19% coverage: it rarely participates in a blend at all.
+
+**This is now the THIRD independent measurement agreeing that `screener` is actively harmful**,
+by three unrelated constructions: (1) the direct factor test (bullish screener consensus, IC
+−0.027, t=−2.36); (2) the natural experiment inside `confluence_score` (the screener-included raw
+version is worse than the screener-stripped version at every horizon, 2026-08-20); (3) this
+ablation. The 2026-08-20 `ENGINE_EDGE_SHRINK` halving (0.30 → 0.15 in BULL) was directionally
+right and did not go far enough.
+
+**Deliberately NOT changed here.** Dropping or further shrinking `screener`'s weight is a live
+scoring change and belongs in the EVIDENCE lane with its own re-derivation, not as a side effect
+of a measurement pass — and `REGIME_WEIGHTS` was already re-derived once on 2026-08-20, so a
+second uncontrolled edit would make the two indistinguishable. Two caveats bound the result: the
+screener panel treats a stored `0` as MISSING (ambiguous before the 2026-08-18 guard, 2-10% of
+rows), and h=21 rests on 22 dates.
+
+**Residual after screener is accounted for: h=5 +0.0434 → +0.0260 stored (−0.017).** That is what
+`factor_crowding` + the RL gate + the tradeable-universe restriction + `edge_adjusted_weights`
+cost together — a much smaller and more mundane number than the +0.0716 → +0.0260 headline the
+unbisected version implied. `factor_crowding` remains untestable without a `quant_scores` history
+table.
+
 **Persisted** to `factor_edge_history` under `table_name='assembly_ablation'`, one row per arm ×
 horizon, so it accumulates and can be re-graded rather than rotting as a one-off number.
 

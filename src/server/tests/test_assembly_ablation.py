@@ -109,8 +109,14 @@ class TestArmsAreCumulativeInRankerOrder:
         # quality_gate -> RED_FLAG_VETO -> HIGH_VOL_VETO, the order run() applies them in.
         assert ab.ARMS == [
             "equal_weight", "regime_weighted", "rw+quality", "rw+quality+redflag",
-            "rw+quality+redflag+highvol", "stored_unified_score",
+            "rw+quality+redflag+highvol", "rw7+screener", "rw7+smartmoney", "rw8+gates",
+            "stored_unified_score",
         ]
+        # The two single-engine arms must be present and SEPARATE: adding screener and
+        # smart_money together showed a -0.028 h5 loss, but only splitting them proved
+        # screener causes 100% of it and smart_money is inert. A combined-only arm would
+        # have left that unattributed.
+        assert "rw7+screener" in ab.ARMS and "rw7+smartmoney" in ab.ARMS
         run_src = open(ur.__file__, encoding="utf-8").read()
         i_q = run_src.index("unified *= _qg")
         i_r = run_src.index("unified *= RED_FLAG_VETO_MULT")
