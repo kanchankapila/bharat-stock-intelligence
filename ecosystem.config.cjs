@@ -129,10 +129,42 @@ module.exports = {
     },
     {
       ...gfCron,
+      name: 'gf-stage3-dq-daily',
+      // 12:40 UTC — Task 3.7's 5 checks (corporate-actions/fundamentals/fii-dii/
+      // screener-membership freshness+coverage) had evaluateAllStage3Checks/
+      // persistStage3DqResult exported but no runner anywhere — dead code from
+      // an operational standpoint. run-dq-checks.ts mirrors stage4's own runner.
+      cron_restart: '40 12 * * 1-5',
+      args: 'greenfield/packages/ingestion/src/stage3/run-dq-checks.ts',
+    },
+    {
+      ...gfCron,
+      name: 'gf-stage4-dq-daily',
+      // 12:50 UTC — same gap, one stage over: run-dq-checks.ts existed and
+      // called evaluateAllStage4Checks correctly, just never scheduled.
+      cron_restart: '50 12 * * 1-5',
+      args: 'greenfield/packages/ingestion/src/stage4/run-dq-checks.ts',
+    },
+    {
+      ...gfCron,
       name: 'gf-ranker-daily',
       // 13:00 UTC = 18:30 IST — after features; shadow period clock ticks here
       cron_restart: '0 13 * * 1-5',
       args: 'greenfield/packages/ingestion/src/stage5/run-ranker.ts',
+    },
+    {
+      ...gfCron,
+      name: 'gf-divergence-daily',
+      // 13:15 UTC = 18:45 IST — after ranker; compares shadow recs against legacy
+      // unified_recommendations for the same session (descriptive only, per spec).
+      // Needs OLD_DATABASE_URL like the weekly transfer jobs below -- reads legacy.
+      cron_restart: '15 13 * * 1-5',
+      args: 'greenfield/packages/ingestion/src/stage5/run-divergence-analysis.ts',
+      env: {
+        ...dotenvVars,
+        DATABASE_URL: dotenvVars.GREENFIELD_DATABASE_URL ?? dotenvVars.DATABASE_URL,
+        OLD_DATABASE_URL: dotenvVars.DATABASE_URL,
+      },
     },
     {
       ...gfCron,

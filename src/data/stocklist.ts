@@ -2813,16 +2813,6 @@ const stockData: StockMapping[] = [
     "scripcode": 534091
   },
   {
-    "name": "Reliance Naval and Engineering",
-    "mcsymbol": "PS14",
-    "tlid": "",
-    "tlname": "",
-    "isin": "INE542F01012",
-    "symbol": "RNAVAL",
-    "stockid": "483277",
-    "companyid": ""
-  },
-  {
     "name": "IVRCL",
     "mcsymbol": "IVR",
     "tlid": "534",
@@ -3620,7 +3610,7 @@ const stockData: StockMapping[] = [
     "mcsymbol": "RCF",
     "tlid": "2064",
     "tlname": "spicejet-ltd",
-    "isin": "INE013A01015",
+    "isin": "INE285B01017",
     "symbol": "SPICEJET",
     "stockid": "",
     "companyid": "7876",
@@ -9153,15 +9143,14 @@ const stockData: StockMapping[] = [
     "scripcode": 517385
   },
   {
-    "name": "Abans Holdings",
-    "mcsymbol": "AH10",
+    "name": "Tanfac Industries",
+    "mcsymbol": "TI02",
     "tlid": "1349",
     "tlname": "tanfac-industries-ltd",
-    "isin": "INE00ZE01026",
+    "isin": "INE639B01023",
     "symbol": "TANFACIND",
     "stockid": "1003761",
     "companyid": "12952",
-    "tickertape_sid": "AHL",
     "fincode": 106854,
     "scripcode": 506854
   },
@@ -25572,18 +25561,6 @@ const stockData: StockMapping[] = [
     "scripcode": 0
   },
   {
-    "name": "RATEGAIN",
-    "mcsymbol": "RTT",
-    "tlid": "747240",
-    "tlname": "rategain-travel-technologies-ltd",
-    "isin": "",
-    "symbol": "RATEGAIN",
-    "stockid": "",
-    "companyid": "2020311",
-    "fincode": 303157,
-    "scripcode": 543417
-  },
-  {
     "name": "STRATMONT",
     "mcsymbol": "",
     "tlid": "82968",
@@ -25596,18 +25573,6 @@ const stockData: StockMapping[] = [
     "scripcode": 530495
   },
   {
-    "name": "KOPRAN",
-    "mcsymbol": "K01",
-    "tlid": "757",
-    "tlname": "kopran-ltd",
-    "isin": "",
-    "symbol": "KOPRAN",
-    "stockid": "",
-    "companyid": "11077",
-    "fincode": 124280,
-    "scripcode": 524280
-  },
-  {
     "name": "PANCHSHEEL",
     "mcsymbol": "",
     "tlid": "1000",
@@ -25618,18 +25583,6 @@ const stockData: StockMapping[] = [
     "companyid": "6036",
     "fincode": 131726,
     "scripcode": 531726
-  },
-  {
-    "name": "WOCKPHARMA",
-    "mcsymbol": "W05",
-    "tlid": "1527",
-    "tlname": "wockhardt-ltd",
-    "isin": "",
-    "symbol": "WOCKPHARMA",
-    "stockid": "",
-    "companyid": "3731",
-    "fincode": 132300,
-    "scripcode": 532300
   },
   {
     "name": "GVT&D",

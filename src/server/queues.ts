@@ -480,6 +480,34 @@ function withJobTimeout<T>(name: string, budgetMs: number, fn: () => Promise<T>)
   return Promise.race([fn(), timeout]).finally(() => clearTimeout(timer)) as Promise<T>;
 }
 
+/**
+ * ACTION_ITEMS #16 follow-up: a red-verified run must PAGE, not just paint the
+ * dashboard red — nobody watches BullMQ job results overnight, and surfacing
+ * failedSteps was introduced precisely to end silent-green runs. Reported-not-
+ * thrown stays the contract with BullMQ (a throw would re-run the whole
+ * hours-long chain), so this is the only active notification path. Delivery is
+ * fire-and-forget: an alert failure must never fail the job itself.
+ */
+async function alertFailedSteps(
+  jobName: string,
+  verdict: { ok: boolean; failedSteps?: string[] },
+): Promise<void> {
+  if (verdict.ok || !verdict.failedSteps?.length) return;
+  const shown = verdict.failedSteps.slice(0, 15);
+  const rest = verdict.failedSteps.length - shown.length;
+  const text =
+    `🚨 *${jobName} finished DEGRADED*\n` +
+    `${verdict.failedSteps.length} step(s) failed:\n` +
+    shown.map(s => `• ${s}`).join('\n') +
+    (rest > 0 ? `\n• …and ${rest} more` : '') +
+    `\n\nJob result: success=false (reported, not thrown). Dashboard monitor + server logs have detail.`;
+  try {
+    await telegramService.sendMarkdownMessage(text);
+  } catch (e) {
+    console.error('[QUEUE] failed-steps Telegram alert could not be delivered:', (e as Error).message);
+  }
+}
+
 async function processMlDailyOps(job: Job): Promise<{ success: boolean; failedSteps?: string[] }> {
   // 2026-08-06: skip the standalone 19:30 IST trigger on a trading holiday -- closed-day-early-
   // batch (queues.ts's QUEUE_CLOSED_DAY) already dispatches a 'closed-day-early'-named run at
@@ -1158,6 +1186,7 @@ async function processMlDailyOps(job: Job): Promise<{ success: boolean; failedSt
   // thrown -- this chain runs for hours and throwing would hand it to BullMQ's retry machinery
   // to re-run in full over one failed step.
   const verdict = T.finish();
+  await alertFailedSteps('ml-daily-ops', verdict);
   return { success: verdict.ok, failedSteps: verdict.failedSteps };
 }
 
@@ -1394,6 +1423,7 @@ async function processMlWeeklyRetrain(_job: Job): Promise<{ success: boolean; fa
     .catch(e => console.warn('[QUEUE] factor_edge (dl heads) failed:', (e as Error).message));
   // Same as ml-daily-ops above: report the tracker's real verdict rather than a blanket true.
   const verdict = T.finish();
+  await alertFailedSteps('ml-weekly-retrain', verdict);
   return { success: verdict.ok, failedSteps: verdict.failedSteps };
 }
 
