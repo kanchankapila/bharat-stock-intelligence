@@ -328,3 +328,136 @@ grade backtest session, not a code edit in a gap-review pass.
 **AF-20260816-19 itself stays open** — this fixes one reader, not the underlying 877 mixed-case
 rows in the table, and no static check was added (see reasoning above). A future reader written
 with exact-case `source =` on `screener_catalog` is still silently exposed to this.
+
+---
+
+## Run 2026-08-23 — e2e-lifecycle-check findings
+
+Source: the `e2e-lifecycle-check` skill's first real runs. Notable because finding **AF-20260823-69
+is a defect in the check itself**, and fixing it is what surfaced AF-20260823-70 — a recurring
+production bug that had been invisible to every existing monitor for at least 7 weeks.
+
+| ID | Found | Class | Finding | Lane | Status | Immunized | Closed |
+|---|---|---|---|---|---|---|---|
+| AF-20260823-69 | 2026-08-23 | temporal | `e2e_lifecycle_check.py` judged `unified_recommendations` freshness on **`computed_at`**, which is a forward-looking *label* (`logical_session_date()` rolls it forward), not a run time. Live: `computed_at=2026-08-24` from a run of `2026-08-21T14:26Z` — age **−2 days** by the label, **+2** by the clock. The check reported PASS on a ranker that had not run since Friday. | FIX | **fixed 2026-08-23** — now anchors on `MAX(generated_at)`, tolerance 2d. Verified live: the same run now correctly reports `generated_at=2026-08-21 14:26:55+00`. | rung 4 — `stage_verdict()` is a pure function pinned by 13 negative-controlled tests in `test_e2e_lifecycle_check.py` | 2026-08-23 |
+| AF-20260823-70 | 2026-08-23 | temporal | **`unified_ranker._get_dl_scores` uses `date.today() - timedelta(days=1)`, a calendar-day cutoff over a trading-day table.** A Monday run asks for `prediction_date >= Sunday` and matches nothing, so the getter returns `{}`. `dl` carries **0.092–0.137** blend weight and `_blend` renormalizes over engines *present*, so the other engines silently absorb it. **Not theoretical — measured in production: `dl_score = 0` on 100% of rows for 5 of the last 8 Mondays** (2,163/2,163 on 2026-08-17; 1,556/1,556 on 08-03; also 07-27, 07-20, 07-13) versus ~40 on every other weekday. Nothing errored; the ranker exited 0 every time. `_get_confluence_scores` (days=1) and `_get_screener_momentum_scores` (days=2) share the shape; `_get_ml_scores`/`_get_cs_scores`/`_get_technical_scores` (days=3) break on a long weekend. Source tables confirmed trading-day-only (`deep_learning_predictions`: 0 rows on 08-22/08-23; `screener_appearances`: 0 weekend rows in 21d). | **EVIDENCE** | **open** — the fix is mechanical (`as_of.trading_days_back()`/`logical_write_floor()` already exist and are correct) but `unified_ranker.py` is gated by `verify-gate.mjs`: changing which rows feed an engine changes `unified_score`, so it needs a measured before/after, not a drive-by edit. **Do not "just fix" this.** | rung 1 — `check_short_calendar_lookback` in `check_recurring_bugs.py` (ast-based) | open |
+| AF-20260823-71 | 2026-08-23 | coverage | **`backfill_technical_features.run_full_universe_today(min_price=15.0)`** excludes every stock under ₹15 from the daily `technical_signals` grid. The floor is undocumented and has no recorded derivation (added `e69c22b`, 2026-07-10). Match against the gap is **exact**: all 31 liquid names missing from the 08-21 grid are sub-₹15. On a 20d-ADT basis **26 sub-₹15 names clear ₹1cr and 12 clear ₹5cr** — including **IDEA (₹509cr ADT)** and **VODAFONE (₹481cr)**, among the most-traded stocks on the exchange, plus PCJEWELLER (₹174cr), which currently gets **0 of 8 engines** and no ranker row at all. Affected names are still ranked, on **3.61/8 engines vs 6.75 universe-wide**. Sibling floors exist and disagree (`breakout_classifier.MIN_PRICE = 20.0`). | **EVIDENCE** | **open** — lowering the floor widens the ranked universe, which is a scoring change in substance even though this file is not in `verify-gate.mjs`'s gated list. Needs the measured question answered first: *does a sub-₹15 grid row produce usable features, or is the floor doing real work?* A price floor is a plausible proxy for tick-size/noise effects that ADT does not capture. | — | open |
+| AF-20260823-72 | 2026-08-23 | measurement | **Thin engine coverage is not comparable across symbols and nothing reports it.** `_blend` renormalizes over engines *present*, so a name scored on 3 sub-universes is ranked directly against one scored on 7. Live: the 3-engine cohort averages **28.3** and is **91 Sell / 0 Buy**, against 45.4 and 57/266 for the 7-engine cohort — a 17-point gap. 172 symbols currently sit at ≤3 engines. `measurement.md`'s own blend A/B already records this (rho +0.28) and states the residual was **not** fixed by the normalization change. | ACCEPT | **open (reported, not fixed)** — recorded in `measurement.md` as a known open residual; the fix is a cross-universe comparability design question, not a bug with a patch. Now at least *visible*: `e2e_lifecycle_check` gained a `canonical:engine coverage per symbol` stage reporting avg engines and the ≤3 count. | rung 4 — new stage in the e2e check | open |
+| AF-20260823-73 | 2026-08-23 | tooling | **My own manual sweep of AF-20260823-70's class found 6 instances in 1 file; the static check found 12 across 5** — `ml_ensemble.py:3074`, `scoring_engine.py:688,761`, `screener_sector_rotation.py:23,52`, `screener_signal_generator.py:84`, plus the 6 in `unified_ranker.py`. Direct repeat of `recurring-bugs.md`'s own lesson ("a code-review pass that finds N instances of a class should not be trusted as complete"). | FIX | **fixed 2026-08-23** — check added and passing its own tests; the 12 hits are now reported by CI on every changed file. The 6 non-ranker instances are **untriaged**: each needs its source table checked for weekend/holiday rows before being called a bug (`confluence_signals` DOES write on weekends, so a days=1 cutoff there is survivable — the check is deliberately conservative and flags shape, not confirmed breakage). | rung 1 — `check_short_calendar_lookback`, ast-based (a line regex could not survive this repo's own docstrings describing the bug) | 2026-08-23 |
+
+### Triage of AF-20260823-73's 6 non-ranker hits (2026-08-23)
+
+Each site's source table was checked for weekend/holiday rows, and each empty-read traced to its
+consumer. **The distinction that matters is not "does the read return empty" but "does the caller
+DEGRADE or NO-OP when it does."** Two are real, three are benign, one is a true positive whose
+source table saves it.
+
+| ID | Site | Source table trading-day-only? | Verdict |
+|---|---|---|---|
+| AF-20260823-74 | `scoring_engine.py:688` (`days=1`) | **yes** — `technical_signals` 25 weekend rows / 32,894 in 21d | **REAL, and the worst of the six** |
+| AF-20260823-75 | `scoring_engine.py:761` (`days=3`) | **yes** | **REAL on a long weekend only** |
+| AF-20260823-76 | `screener_sector_rotation.py:52` (`days=2`) | **yes** | **REAL but self-limiting** |
+| — | `screener_sector_rotation.py:23` (`YESTERDAY`, `days=1`) | n/a — reads its own output table | benign |
+| — | `screener_signal_generator.py:84` (`days=2`) | **no** — `screener_appearances` writes ~20k rows every weekend day | benign |
+| — | `ml_ensemble.py:3074` (`days=2`) | n/a — not a lookback at all | benign (checker false positive, by design) |
+
+| ID | Found | Class | Finding | Lane | Status | Immunized | Closed |
+|---|---|---|---|---|---|---|---|
+| AF-20260823-74 | 2026-08-23 | temporal | **`scoring_engine.py:688`'s `win_prob_map` cutoff is `date.today() - 1` over `technical_signals`.** On any Monday the map comes back **empty**, and `win_prob_map.get(symbol)` then returns `None` for every symbol — which `ml_alignment_points()` converts to its `8  # neutral if no ML signal` fallback. **Measured live: the real mean is 17.71/20** (2,196 symbols on the latest date), so Factor 3 silently drops **~9.7 of 20 points on every symbol, uniformly, every Monday.** A uniform shift cannot change any *ranking*, which is exactly why it is invisible — but `stock_scores` feeds `unified_recommendations` and the platform's absolute thresholds, the same mechanism as `recurring-bugs.md`'s factor-crowding incident (a uniform ×0.9 that moved the whole population against fixed cutoffs). Same file also uses the correct pattern elsewhere, so this is an inconsistency, not a house style. | **EVIDENCE** | **open** — `scoring_engine.py` is in `verify-gate.mjs`'s gated list; changing Factor 3's input population is a scoring change and needs a measured before/after. **NOTE: the retrospective check is not available** — `stock_scores` is upsert-in-place with no history table, so the Monday dip cannot be observed after the fact. Mechanism is confirmed at code + input level (empty map → `None` → 8 pts), not by a historical score series. | rung 1 — `check_short_calendar_lookback` | open |
+| AF-20260823-75 | 2026-08-23 | temporal | `scoring_engine.py:761`'s `sym_signal_types` cutoff is `days=3` over `technical_signals` — survives a normal Fri→Mon gap (exactly 3) but returns empty after any **long weekend / holiday Monday** (4+ calendar days). Consumer is the `win_prob_map and sym_signal_types` prior-blend at :784, which is skipped entirely when either is empty — so the blend silently does not run rather than running wrong. | EVIDENCE | **open** — lower severity than AF-74 (degrades to "feature off" not "wrong constant"), same gate applies. Fix both together. | rung 1 | open |
+| AF-20260823-76 | 2026-08-23 | temporal | `screener_sector_rotation.py:52`'s primary read is `days=2` over `technical_signals` → empty on Monday. **Self-limiting**: the function's own docstring documents a `screener_appearances` fallback, and that table *does* write on weekends, so the script degrades to its secondary path rather than producing nothing. Output table `screener_sector_rotation` is fresh (max 2026-08-22, 533 rows), consistent with the fallback working. | ACCEPT | **open (documented)** — the fallback is deliberate and functioning; fixing the cutoff would make the primary path fire on Mondays, which is an improvement but not a defect being repaired. Not gated (`screener_sector_rotation.py` is not in `verify-gate.mjs`), so this is the cheapest of the three if someone wants it. | rung 1 | open |
+
+**Three benign, with reasons — recorded so they are not re-triaged next run:**
+
+- **`ml_ensemble.py:3074`** — `cutoff_date` is **not a lookback filter**. It is passed to
+  `_apply_plain_expiry_gate`/`_apply_regime_expiry_gate` and used as `if str(r['signal_date']) <
+  cutoff_date: expire`, i.e. an age threshold for expiring `recommendation_log` rows whose
+  `win_probability` is NULL. An empty trading day just means marginally fewer rows expire that
+  run, self-correcting the next day. **Checker true-positive on shape, false-positive on impact** —
+  the check flags `date.today() - timedelta(days<=4)` regardless of use, which is the right
+  trade (shape is cheap and reliable to detect; intent is not).
+- **`screener_sector_rotation.py:23`** — `YESTERDAY` reads the script's **own output table**
+  (`load_previous_sector_scores`) for a momentum delta, not a trading-day source. Missing
+  yesterday's row yields `{}` → momentum_change of 0, which is correct behaviour for "no prior
+  snapshot".
+- **`screener_signal_generator.py:84`** — source is `screener_appearances`, which is **not**
+  trading-day-only: ~19-29k rows land on every weekend day (13,080 weekend rows in the last 21d).
+  The 2-day window always contains data.
+
+
+### AF-20260823-70/74/75/76 CLOSED 2026-08-23 — all 9 real sites fixed, measured before/after on a live Sunday
+
+The EVIDENCE gate was satisfiable without waiting for a Monday: **2026-08-23 was a Sunday, so the
+bug was live at the moment of the fix.** Both engines were exercised against production before and
+after, on the same connection, minutes apart — not simulated, not reasoned about.
+
+**`unified_ranker.py` — all 6 getters, symbols returned:**
+
+| engine (cutoff) | BEFORE | AFTER |
+|---|---|---|
+| `dl` (days=1) | **0** | **2,424** |
+| `confluence` (days=1) | 3,748 | 4,613 |
+| `screener_momentum` (days=2) | 1,980 | 2,039 |
+| `ml` (days=3) | 2,200 | 2,201 |
+| `cs` (days=3) | 2,200 | 2,201 |
+| `technical` (days=3) | 2,200 | 2,201 |
+
+**`scoring_engine.py` — distinct symbols matched:**
+
+| read | BEFORE cutoff | BEFORE | AFTER cutoff | AFTER |
+|---|---|---|---|---|
+| `win_prob_map` (days=1) | 2026-08-22 | **0** | 2026-08-21 | **2,196** |
+| `sym_signal_types` (days=3) | 2026-08-20 | 566 | 2026-08-19 | 722 |
+
+`win_prob_map` at 0 is Factor 3 sitting on its `8  # neutral` fallback for every symbol against a
+measured real mean of 17.71/20. Restored to full coverage.
+
+All 9 now use `as_of.trading_days_back(n, conn)[-1]`, whose `[-1]` is the oldest of the n real
+sessions — so `>= that` admits exactly n trading days regardless of weekends or holidays.
+
+**Live re-verification:** `e2e_lifecycle_check.py --n 10` now **PASSes on a Sunday** (exit 0, 28
+stages), which it could not do before the fix — `engine:dl` was FAILing. That is the end-to-end
+proof, not just a green suite.
+
+| ID | Found | Class | Finding | Lane | Status | Immunized | Closed |
+|---|---|---|---|---|---|---|---|
+| AF-20260823-70 | 2026-08-23 | temporal | `unified_ranker.py` ×6 calendar-day engine cutoffs | EVIDENCE→FIX | **fixed + live-verified** (table above) | rung 1 `check_short_calendar_lookback` + rung 4 `test_trading_day_cutoffs.py` (negative-controlled) | 2026-08-23 |
+| AF-20260823-74 | 2026-08-23 | temporal | `scoring_engine.py:688` `win_prob_map` days=1 → Factor 3 collapses to 8/20 every Monday | EVIDENCE→FIX | **fixed + live-verified**, 0 → 2,196 symbols | rung 1 + rung 4 | 2026-08-23 |
+| AF-20260823-75 | 2026-08-23 | temporal | `scoring_engine.py:761` `sym_signal_types` days=3 | EVIDENCE→FIX | **fixed + live-verified**, 566 → 722 | rung 1 + rung 4 | 2026-08-23 |
+| AF-20260823-76 | 2026-08-23 | temporal | `screener_sector_rotation.py:52` days=2 primary read | ACCEPT→FIX | **fixed** — primary path now fires on Mondays instead of always falling back | rung 1 + rung 4 | 2026-08-23 |
+| AF-20260823-77 | 2026-08-23 | tooling | The 3 benign sites needed suppression without blinding the checker to *future* bugs in the same files. A file-level `DATE_ANCHOR_ALLOWLIST` entry would have done exactly that. | FIX | **fixed** — added a line-level `trading-day-exempt:` marker (readable from the line or the contiguous comment block above it), each carrying its measured reason. Negative-controlled: an ordinary comment above the line does NOT suppress, so the marker check cannot silently become a no-op | rung 1 (the check reads its own marker) + 6 tests | 2026-08-23 |
+
+---
+
+## 2026-08-23 — options-wall zero-vs-NULL (AF-77 fixed, AF-78 open)
+
+| ID | Found | Class | Finding | Lane | Status | Immunized | Closed |
+|---|---|---|---|---|---|---|---|
+| AF-20260823-77 | 2026-08-23 | zero-vs-null | **`technical_signals.call_wall_dist_pct`/`put_wall_dist_pct` were `REAL DEFAULT 0`, so ~93% of rows stored a fabricated "wall exactly at spot".** Both the DDL default and `compute_options_walls()`'s `0.0` return contributed. Measured live: 79,694 of 84,533 rows zero on BOTH columns, **zero NULLs**; on the latest date all 154 non-zero rows have an option chain while only 25 of the 2,042 zeros ever did. Consumer `ml_ensemble.build_features` uses `num(col, 5.0)`, whose neutral fill fires only on NULL — a stored `0` passes through, so `near_call_wall`/`near_put_wall` fired on **94.9%/95.9%** of the matrix and `wall_x_score` sat at its ceiling on **93.6%**. Post-fix: **2.0%/3.0%/0.6%**. | AUTO-FIX | **CLOSED** — migration `1787130000000` (drops defaults, NULLs the 79,694 both-zero rows, reversible Down); `iv_features.py` returns `None`; `db/schema.postgres.sql` updated. Live-verified. Negative-controlled (3 tests fail against the bug). **Second-order regression caught and fixed in the same pass**: NULLing the columns dropped them under `densify_feature_matrix.py`'s `SPARSE_COVERAGE_THRESHOLD=0.50`, making them forward-fill candidates for the first time — which would have carried an F&O name's stale wall across 120 days, strictly worse than the zeros removed. Added to `NEVER_FILL`; fill list 159 → 157, negative-controlled. | `TestOptionsWallsAbsentChainIsNull` (4 tests, incl. a DDL assertion and a control that a real chain still computes) | 2026-08-23 |
+| AF-20260823-78 | 2026-08-23 | zero-vs-null | **Second instance of the same class, found by sweeping every `DEFAULT 0` numeric column on `technical_signals` after fixing AF-77.** Of 29 such columns most are legitimate binary flags (`0` = "no block deal"), but four are **continuous** quantities carrying a 90.5% exact-zero mass with an identical per-date zero count (1,799 / 1,809 / 1,752 on 08-21/20/19), i.e. one writer covers ~397 names and the rest take the default: `sector_ret_21d`, `sector_ret_5d`, `fii_10d_net`, `dii_3d_net`. **`sector_ret_21d`/`sector_ret_5d` reported `count(DISTINCT)` = 1 for whole trading days** — a sector-return column with zero cross-sectional dispersion cannot rank anything, matching the "36 globally constant features" finding in `measurement.md`'s feature sweep. Writers identified before any DDL change: only the signal-scan enricher computes these values (~397 names/day); the grid-ensurer, BACKFILL path and strategy skeletons cannot, so ~90% of rows inherited `DEFAULT 0`. A genuine zero net FII flow is meaningful, but a *default* zero fabricated by omission is not an observation — NULL is correct for all four regardless of flow semantics. | AUTO-FIX | **CLOSED** — migration `20260823235900` drops the four DEFAULTs and repairs existing all-four-zero rows to NULL (reversible Down restores both); `db/schema.postgres.sql` aligned; both Python INSERTs now name the four columns with explicit NULLs so the fabrication-by-omission channel is closed even if a DEFAULT ever returns; all four added to `densify_feature_matrix.NEVER_FILL` (they sit far under SPARSE_COVERAGE_THRESHOLD post-repair and would otherwise become forward-fill candidates — the exact second-order trap AF-77's walls fell into). Residual risk moved upstream: the FII/DII **fetcher** still populates very few symbols (live 08-23: distinct≈2/day) — that is now a data-coverage problem, not a schema problem. Negative-controlled: `test_fii_dii_sector_nulls.py::test_grid_shaped_insert_defaults_to_null` fails against the old schema; the INSERT-list guards fail against any writer that omits the columns. | 18 tests (`src/server/tests/test_fii_dii_sector_nulls.py`: schema DDL, migration Up/Down shape, writer INSERT guards incl. strategySignalsService.ts, NEVER_FILL pins, live behavioral pin via the conftest PG fixtures) | 2026-08-23 |
+
+**Sweep query that found AF-78** (re-run it after any new `DEFAULT 0` column lands):
+
+```sql
+SELECT column_name FROM information_schema.columns
+WHERE table_name='technical_signals' AND table_schema=current_schema()
+  AND column_default IN ('0','0.0','(0)::double precision','(0)::real')
+  AND data_type IN ('real','double precision','numeric','integer','bigint','smallint');
+```
+
+Then per column: `count(*) FILTER (WHERE col=0)` vs `count(DISTINCT col)`. A high zero-share with
+`count(DISTINCT) > 2` on a **continuous** quantity is the signature; a 2-valued column is a flag
+and almost always fine.
+
+**AF-78 fix landed 2026-08-23**: schema defaults dropped (`db/schema.postgres.sql`) and both
+grid/backfill INSERTs in `backfill_technical_features.py` now supply explicit NULLs for
+`fii_10d_net` / `dii_3d_net` / `sector_ret_5d` / `sector_ret_21d` instead of omitting them.
+Residual risk moved upstream: the FII/DII **fetcher** still populates very few symbols
+(live 08-23: distinct≈2/day) — that is now a data-coverage problem, not a schema problem.
+
+| AF-20260823-79 | 2026-08-23 | measurement | **`get_volatility_threshold` computes variance on PERCENT returns and multiplies by 100 again** (`daily_vol = sqrt(variance)*100` in the legacy SQL-path math), which pins the WIN/LOSS threshold at its 15% clamp for everything except ultra-flat series — i.e., `technical_signals` h5 labels are effectively "any real move wins". Reproduced verbatim in the new prefetch path (`outcome_resolver._vol_threshold_from_closes`, double-scaling called out in its docstring); deliberately NOT fixed here — that is a label-semantics change requiring its own measured before/after under the panel spec (`measurement.md`). Fold into the label-redesign go/no-go (ACTION_ITEMS #2). |
+
+| AF-20260823-80 | 2026-08-23 | performance | **`outcome_resolver.py` issued 2–6 `stock_ohlcv` queries per row inside four resolve loops** (ATR, vol-threshold, next-price, stop-hit, bar-window lookups over thousands of rows per run). Replaced with run-wide bulk prefetches keyed on `(symbol, as_of)` using window functions, chunked at `_BULK_CHUNK=400`; all threshold/stop math extracted verbatim (`_atr_from_bars`, `_vol_threshold_from_closes`, `_dl_vol_from_closes`). Label-equality proven by `src/server/tests/test_bulk_prefetch_equivalence.py` (10 tests: cached==per-row, chunking invariance, exact fallback formulas, idempotence) plus production `--dry-run` exit parity. One deliberate improvement over legacy: NULL closes no longer crash the warm path (`float(None)` TypeError before); they are filtered and thresholds compute over the surviving closes. |
+
+| AF-20260823-81 | 2026-08-23 | measurement | **End-user accuracy heuristic ("do the system's BUY suggestions overlap the live source's top gainers?") scored 0/30 on the freshest clean forward test.** Thursday 2026-08-20's BUY batch (top-30 by unified_score) returned a mean **+0.48%** on Friday vs universe mean +0.30% (**+0.19pp edge — positive but weak**), yet **zero of the 30 landed in Friday's top-15 gainers**, which is what the user's criterion actually asks for. Pipeline health is NOT implicated: freshness sweep showed every source table current through 08-21 (OHLCV 2.65M rows, tech signals, flows, regime, option chain, outcomes), wall columns populated on exactly 154 F&O names, and recos were generated for every session including the weekend. The gap is ranker *ordering*, consistent with AF-79's threshold pathology and measurement.md's constant-feature findings. Also recorded: same-session comparison (08-21 batch vs 08-21 close) is methodologically unsound in both directions because batches stamp ~09:00–18:45 IST across the session; only prior-session-batch → next-session-outcome is a fair read. | EVIDENCE | **open** — fold into the label-redesign / canonical-ranker go/no-go (ACTION_ITEMS #2) alongside AF-79: fix label semantics first, then re-run this exact probe (`_tmp_accuracy_check.py` / `_tmp_forward_check.py`, delete after folding into a proper harness). | rung 1 — probes are re-runnable; not yet automated | open |
+

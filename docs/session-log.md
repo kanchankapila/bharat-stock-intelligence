@@ -5381,3 +5381,416 @@ disk, so `ml-weekly-retrain` (cron `0 5 * * 0`, next 2026-08-23 05:00 UTC / 10:3
 on `triple_barrier` and evaluate through the new gate. Because the label changed, the
 `label_changed` override fires and it **will promote**, replacing live model id=220. That is the
 intended behaviour, but it happens on its own schedule whether or not anyone restarts.
+
+## 2026-08-22 — stocklist.ts data-quality sweep: 4 duplicate rows, 2 corrupted ISINs, fixed
+
+Started as a check on the `ACCURACY_OVERHAUL_PROMPT.md` review's "172 stocks missing MC
+`stockid`" claim (asked to verify Trendlyne/ETnow gaps too, per user request) and found real,
+independent bugs in `stocklist.ts` itself along the way. **The stockid gap is NOT fixed** — see
+the retraction below — but three real data-quality bugs were found and fixed.
+
+**Bugs found and fixed, all independently confirmed live (MC autocomplete, NSE's own
+`nseStocks.ts`, or web search) before writing anything:**
+
+1. **4 duplicate-symbol rows** (`WOCKPHARMA`, `KOPRAN`, `RATEGAIN`, `RNAVAL`) — for 3 of the 4,
+   `getStockMapping()`'s `Map`-by-symbol construction (`stockMapping.ts:3`, last-write-wins in
+   array order) silently resolved to the **incomplete** duplicate (empty `isin`/`stockid`) for
+   every live lookup, confirmed by directly querying the Map before the fix. Deduped to the row
+   with more complete data.
+2. **SPICEJET carried RELCAPITAL's ISIN** (`INE013A01015`) — a real ISIN collision, confirmed
+   live: MC's own autocomplete for RELCAPITAL returns that exact ISIN with scripcode 500111,
+   matching RELCAPITAL's existing `mcsymbol: "RC"`. SpiceJet's real ISIN (`INE285B01017`,
+   scripcode 500285) confirmed via the same live MC query. `mcsymbol`/`stockid` left unresolved
+   rather than guessed.
+3. **TANFACIND's `name`/`isin`/`tickertape_sid` had been overwritten with Abans Holdings' data**
+   (shared `isin: INE00ZE01026` with the separate `AHL` row) while `symbol`/`tlid`/`tlname` stayed
+   correct for the real, actively-traded Tanfac Industries (confirmed still trading via web
+   search — Trendlyne, NSE, and multiple broker sites all show it live under `TANFACIND`,
+   `tlid=1349`, matching the untouched fields). Corrected via a live MC autocomplete query
+   (`mcsymbol: TI02`, `isin: INE639B01023`, scripcode 506854 — matches the row's pre-existing
+   `fincode`/`scripcode`, corroborating the fix).
+
+**Retracted: the "172 missing stockid, resolve via MC autocomplete" plan.** MC's
+`autosuggestion_solr.php` endpoint returns `sc_id`, which is the **`mcsymbol`** field (opaque
+short alphanumeric code, e.g. `ASF03`) — **not** the separate, purely-numeric `stockid` field
+`data-sources.md` documents (example `592009`) that MarketsMojo fetchers actually key on. An
+initial pass wrote `sc_id` values into `stockid` for 138 rows before this was caught (compared
+against known-good rows like `AUBANK: mcsymbol=ASF03, stockid=1002776` — completely different
+shapes) and reverted via `git checkout` before being committed. No working resolution path for
+the numeric `stockid` was found this session — MarketsMojo's own site is a Next.js SPA with no
+discovered search API, and blind-probing `frapi.marketsmojo.com` for a search endpoint returned
+only `400 Bad Request` on every guessed shape. **The 172-stock MarketsMojo coverage gap is still
+open** and needs either a real MarketsMojo search endpoint (not yet found) or a different MC
+page/API that surfaces the numeric ID (not yet found) — do not re-attempt via autocomplete
+`sc_id`, that path is confirmed wrong.
+
+**Verification:** `npx tsc --noEmit` clean; `npx vitest run` 112 files / 1071 passed / 41 skipped
+(counts shifted slightly from a concurrent session's work landing mid-session, unrelated to this
+change). Post-fix: 0 duplicate symbols, 0 ISIN collisions across all 2,000 rows (was 2,004 before
+dedup). `stockid` backfill work is discarded, not shipped.
+
+## 2026-08-22 (cont.) — P0 greenfield shadow track: containers started, preregistered, daily automation wired — and a real blocker found
+
+Resumed the two items left open from the accuracy-overhaul review (W2, P0):
+
+**W2 (win_probability population mismatch) — no code change; the premise didn't hold.** Measured
+the training-eligible population (`signal_excursions.tb_label` coverage) against the served
+population on three matured dates (07-28/08-04/08-10): 97-99.8% of served `win_probability` rows
+already have a `tb_label`. The overhaul doc's proposed fix (narrow serving to
+`signals_json IS NOT NULL` rows only) would have cut real coverage by ~82-93% to fix a mismatch
+that isn't there. Documented as a new section in `.claude/rules/measurement.md` immediately before
+"Known state of the edge", titled accordingly. Not implemented, on this evidence.
+
+**P0 (greenfield shadow forward track) — genuinely not started before today; now partially live.**
+`greenfield/infra/docker/docker-compose.yml`'s 3 containers (postgres:5434, redis:6380, minio:9000)
+were defined correctly but simply never running -- `docker compose up -d` brought all 3 healthy.
+Ran pending migrations, then `record-shadow-preregistration.ts 2026-08-24` (one-shot, irreversible
+per spec invariant 13): `min_dates=30, min_calendar_weeks=6, first_shadow_session=2026-08-24`.
+
+Advisor flagged that wiring this into the legacy `queues.ts` BullMQ scheduler was the wrong call --
+that file's job-scheduling machinery carries 6 recurrences of the skip-as-success bug class and a
+recently-fixed catch-up collision, none of which buys anything here since the shadow track shares
+no state with the legacy scheduler and has its own DQ check
+(`shadow-recommendation-freshness`) already in place as its monitor. Built instead:
+
+- `greenfield/scripts/run-shadow-daily.ps1` -- runs `run-ranker.ts` then
+  `run-divergence-analysis.ts` in sequence, logs to `greenfield/logs/shadow-daily-<date>.log`,
+  fails loud (throws) if either script exits non-zero. No retry/catch-up logic, deliberately --
+  a missed day just means the next run picks up whatever the latest `feature_snapshot` session is,
+  there's no backlog to lose.
+- `greenfield/scripts/register-shadow-task.ps1` -- registers a Windows scheduled task
+  (`Greenfield-ShadowDaily`, weekdays 17:00 local). Run once; re-running updates the registration.
+- Registered live: `schtasks /Query /TN Greenfield-ShadowDaily` confirms `Status: Ready`,
+  `Next Run Time: 24-08-2026 17:00:00` (correctly skips the current weekend).
+- Ran the wrapper by hand twice (once as the two scripts individually, once as the full wrapper)
+  to confirm it works end to end before trusting the registration: both produced
+  `[ranker] wrote 3095 recommendation rows (is_publishable=false)` and
+  `[divergence] recorded 4 audit_metric rows under shadow_divergence_*` cleanly.
+- `OLD_DATABASE_URL` is unset in `greenfield/.env`; `run-divergence-analysis.ts`'s hardcoded
+  fallback (`postgresql://bharat:bharat@127.0.0.1:5433/bharat_intel`) already matches production's
+  real `POSTGRES_URL` exactly (confirmed by diffing the two), so this isn't a live gap -- left as
+  the default rather than adding a redundant duplicate value to keep in sync.
+
+**⚠ Real blocker found, not fixed this session: the shadow track will NOT accumulate new
+gradeable dates yet.** Every run above -- by hand and via the registered task -- ranked
+`session=2026-08-12`, the same date every time. `market_bar` (greenfield's own OHLCV table,
+what `feature_snapshot` is computed from) tops out at `2026-08-11` (1,388 distinct sessions of
+history, so Stage 3's historical transfer ran once and never advanced since). Stage 3's ~11
+transfer scripts (`transfer-fundamentals.ts`, `transfer-fii-dii.ts`,
+`transfer-screener-membership.ts`, etc., under `packages/ingestion/src/stage3/`) and whatever
+feeds `market_bar` upstream have no scheduler either -- `apps/worker` is an empty stub, same gap
+this session already found at Stage 5, just one layer further back. **Today's automation makes
+Stage 5 correctly re-process whatever Stage 4 last produced, on schedule -- it does not make new
+data arrive.** Scoping and building a Stage 1-4 scheduler is a separate, materially larger task
+(15+ scripts, multiple external providers) and was deliberately NOT attempted here without it
+being separately asked for. Next session picking up P0: check `market_bar`/`feature_snapshot`'s
+`MAX(session_date)` first -- if still 2026-08-11/12, the real next step is scheduling Stage 3/4,
+not anything at Stage 5.
+
+**Verification:** both `.ps1` scripts are new files, no `.ts`/`.py` touched this leg, so the
+`tsc`/`vitest`/`pytest` gates don't apply to this specific change (already run clean earlier this
+session for the stocklist.ts work). The real verification is the two hand-run + one
+scheduled-task-registered executions above, all producing identical, correct output.
+
+## 2026-08-22 (cont. 2) — P0 correction: a full pm2-based scheduler already existed, just wasn't running
+
+Picked back up on "fix all what is missing and has issues." Before building anything new, checked
+`pm2 list` -- and found the earlier session's read of the situation was **wrong in a load-bearing
+way**: `ecosystem.config.cjs` already had a complete, correctly-sequenced greenfield job chain
+(`gf-bhavcopy-daily` 10:30 UTC -> `gf-fii-dii-daily` 12:00 -> `gf-features-daily` 12:30 ->
+`gf-ranker-daily` 13:00, plus 4 weekly transfer jobs), built by a concurrent session earlier the
+same day (`created at: 2026-08-22T07:41:15Z`). Every one of the 8 jobs was registered but
+**stopped, pid 0** -- their first launch-on-`pm2 start` attempt hit `ECONNREFUSED 127.0.0.1:5434`
+because the Docker containers weren't up yet at that moment, and since it's Saturday
+(cron is weekdays-only for the daily 4, Sat/Sun for the weekly 4), nothing had re-tried since.
+
+**The earlier session's Windows Task Scheduler job (`Greenfield-ShadowDaily`) and its two `.ps1`
+wrapper scripts were accordingly redundant and have been removed** (`schtasks /Delete`, `rm -rf
+greenfield/scripts/`) -- they duplicated `gf-ranker-daily` and would have raced it, writing
+`recommendation`/`audit_metric` rows twice on overlapping schedules. The pm2 ecosystem is the
+correct, already-integrated mechanism (same process manager as the 4 production services, proper
+log rotation, survives via `pm2 save`) and should have been checked for FIRST.
+
+**Two real gaps found in the existing ecosystem file and fixed:**
+1. **No `gf-divergence-daily`** -- the chain ran the ranker but never the divergence comparison
+   against legacy `unified_recommendations` (the actual point of P0's shadow track). Added at
+   13:15 UTC, right after the ranker, with `OLD_DATABASE_URL` set explicitly (same pattern as the
+   weekly transfer jobs) rather than relying on `run-divergence-analysis.ts`'s hardcoded fallback.
+2. **Stage 3's own 5 DQ checks (`evaluateAllStage3Checks`/`persistStage3DqResult`, Task 3.7) had
+   zero runner anywhere** -- referenced only by their own test file, dead code from an operational
+   standpoint (same shape as this repo's own `recurring-bugs.md` "backup script referenced by
+   NOTHING" entry). Wrote `stage3/run-dq-checks.ts` mirroring stage4's existing (also unscheduled)
+   `run-dq-checks.ts` exactly, and scheduled both: `gf-stage3-dq-daily` (12:40 UTC),
+   `gf-stage4-dq-daily` (12:50 UTC), sandwiched between features (12:30) and ranker (13:00).
+
+Both new pm2 apps registered and started (`pm2 start ecosystem.config.cjs --only ...`, `pm2 save`).
+`node -e "require('./ecosystem.config.cjs')"` confirms the file still parses; `npx tsc --noEmit`
+inside `greenfield/packages/ingestion` is clean on the new file.
+
+**Ran the whole chain by hand today (Saturday, so no daily cron would fire) to verify it actually
+works, not just that it's scheduled:**
+
+- `stage3/run-dq-checks.ts` (new): ran clean, correctly surfaced the SAME staleness the rest of
+  this entry describes -- `corporate-actions-freshness` warn (10 days behind), `fii-dii-freshness`
+  fail (10 days behind), `screener-membership-freshness` fail (9 days behind),
+  `fundamentals-coverage` warn (57.48% vs 95% threshold, a separate, real gap left for the weekly
+  jobs to close on their own schedule -- not chased further this pass to avoid piling more heavy
+  jobs onto a box already at 96-97% RAM from concurrent sessions).
+- `nse/run-full-backfill.ts` (existing, idempotent -- `ON CONFLICT DO NOTHING` + an
+  already-completed skip per date): ran live, 13.0 minutes, **7 new trading sessions
+  succeeded, 2,050 already-done dates correctly skipped, 0 failed**. `market_bar` advanced
+  **2026-08-11 -> 2026-08-21** (3,274,144 -> 3,297,228 rows). All 6 of the script's own DQ checks
+  came back `info` (bhavcopy-freshness 0 weekdays behind, symbol counts in range, 7.5% reject rate
+  under the 50% threshold, clean OHLC/delivery_pct sanity, calendar-continuity intact). One
+  legitimate catch worth noting, not a bug: the script's own stale-content detector correctly
+  rejected NSE serving 2026-08-14's file when 2026-08-16 was requested (a real rolled-over-content
+  case its header comment already anticipated) rather than silently accepting mislabeled data.
+- `stage4/run-compute-features.ts`: running as of this write-up (see next entry for the result).
+
+**Both new pm2 apps' own first-launch already ran once during `pm2 start`** (matching every
+other `gf-*` job's behavior) -- `gf-divergence-daily` produced `session=2026-08-12,
+rankCorrelation=-0.618` against stale data at that moment, which is expected and will self-correct
+once Monday's real cron chain runs against the now-current `market_bar`/`feature_snapshot`.
+
+**Not done this pass, deliberately:** the 4 weekly jobs (`gf-kayal-weekly`,
+`gf-fundamentals-weekly`, `gf-analyst-estimates-weekly`, `gf-insider-activity-weekly`) also failed
+their first launch this morning and won't retry until next Saturday's cron slot -- confirmed
+correctly configured, not manually forced today given the box's memory pressure (96-97% RAM) and
+`gf-kayal-weekly`'s 2-hour runtime. `fundamentals-coverage`'s 57.48% (vs 95% target) will close once
+they run. Also not attempted: any Telegram/dashboard-level alerting for greenfield's own dq_check
+table -- it's self-contained (queryable via `dq_check_result` in the greenfield DB) but not
+surfaced anywhere the main app's operators would see it. Flagged, not built -- a real gap but a
+separate, bigger scoping question (does greenfield need its own alert channel, or should
+`dataQualityChecks.ts` grow a cross-DB read) than "wire the daily chain."
+
+## 2026-08-22 (cont. 3) — full chain verified end-to-end against fresh, real data
+
+Completed the verification the previous entry left mid-flight:
+
+- `stage4/run-compute-features.ts`: 3,297,228-row full panel recomputed (it recomputes the whole
+  history every run, not just new dates — see the "not fixed" note below), **23,084 new rows
+  written**, exactly matching the 23,084 new `market_bar` rows the backfill added. `feature_snapshot`
+  now current through **2026-08-21**.
+- `stage5/run-ranker.ts`: `session=2026-08-21, 3354 feature_snapshot rows`, 3,110 ranked and
+  written as `recommendation` rows (`is_publishable=false`) — confirmed running off today's real
+  data, not the stale 08-12 snapshot every prior run in this session used.
+- `stage5/run-divergence-analysis.ts`: `session=2026-08-21`, 3,110 shadow rows vs 2,061 legacy
+  `unified_recommendations` rows, `rankCorrelation=-0.628 directionalAgreement=0.846
+  nCompared=78 nDecisiveBoth=52`, 4 `audit_metric` rows recorded. Same shape as the earlier
+  stale-data run (rankCorrelation was -0.618 then) — expected, since the ranker is still the
+  Task-5.0-mandated `momentum_63d`-only placeholder with no demonstrated edge, not yet the real
+  factor panel; the divergence numbers aren't meant to look good yet, only to be computed
+  correctly and land in `audit_metric` for the eventual promotion-gate read.
+
+All 10 `gf-*` pm2 apps confirmed present and correctly `stopped` (the expected between-fires state
+for a `cron_restart` job, not a fault — see the new `recurring-bugs.md` entry this session added on
+that exact point of confusion). Monday 2026-08-24's 10:30 UTC cron will run the real chain for the
+first time entirely on schedule, no manual intervention now that today's catch-up has landed.
+
+**Flagged, not fixed:** `compute-features.ts` recomputes the ENTIRE feature panel (all history,
+currently 3.3M rows) on every run to find the ~20-25K genuinely new rows — a compute-amplification
+pattern (not a correctness bug; writes correctly land only for new rows) in the same family as this
+repo's documented write-amplification incidents. Today's run took a few minutes at 3.3M rows; this
+will keep growing daily and is worth windowing to "only dates without a `feature_snapshot` row yet"
+before it becomes a real cost, but wasn't touched this pass — out of scope for "wire the schedule."
+
+Also updated `.claude/rules/recurring-bugs.md` with a new entry ("Registered ≠ running") capturing
+the pm2 `cron_restart`-launches-immediately-then-waits-for-its-next-slot-on-failure gotcha that
+caused the earlier misdiagnosis this session — see that file's "Environment & deploy" section.
+
+## 2026-08-23 — e2e-lifecycle-check skill, and the recurring Monday `dl` blackout it found
+
+**Built** `/e2e-lifecycle-check` (`src/server/e2e_lifecycle_check.py` + `.claude/skills/`): traces
+10 real stocks (default: the day's top movers *inside* `_restrict_to_tradeable_universe`) through
+27 stages — the 8 blended engines, `win_probability`/`feature_store`/`engine_composite_scores`,
+the RL Q-table and per-symbol gate verdict, reward-engine weights, outcome resolution,
+`stock_scores`/`quant_scores`, and the canonical `unified_recommendations` call.
+
+It calls `unified_ranker.py`'s **own** getters rather than reimplementing their SQL, and snapshots
+`_degraded_count` around each so a getter that swallowed an exception and returned `{}` fails
+rather than reading as healthy. **"It printed Buy/Sell/Hold" is deliberately not the pass
+condition** — on 2026-08-17 one missing table made `run()` classify the whole universe as Hold and
+exit 0. Verdict is per-stage on three axes: alive / fresh / coverage (coverage gaps reported, not
+fatal). Verdict logic is one pure function, `stage_verdict()`, pinned by 13 negative-controlled
+tests.
+
+### The check's first real finding was a bug in the check itself (AF-20260823-69)
+
+It judged `unified_recommendations` freshness on **`computed_at`** — which is a forward-looking
+*label*, not a run time, because `logical_session_date()` rolls it forward. Live: `computed_at =
+2026-08-24` written by a run of `2026-08-21T14:26Z`, i.e. **−2 days old by the label and +2 by the
+clock**. It reported PASS on a ranker that had not run since Friday. Same class as
+`recurring-bugs.md`'s `signal_generated_at` incident — a provenance column that does not mean what
+its name implies hands you a confident wrong answer, not an obviously broken one. Re-anchored on
+`MAX(generated_at)`.
+
+### Fixing that immediately exposed a real, recurring production bug (AF-20260823-70)
+
+`unified_ranker._get_dl_scores` uses `date.today() - timedelta(days=1)` — a **calendar-day** cutoff
+over a **trading-day** table. A Monday run asks for `prediction_date >= Sunday` and matches
+nothing, so the getter returns `{}`. `dl` carries 0.092–0.137 blend weight and `_blend`
+renormalizes over engines *present*, so the remaining engines silently absorb it.
+
+**Measured in production, not inferred:**
+
+| Monday (`computed_at`) | rows | `dl_score = 0` | |
+|---|---|---|---|
+| 2026-08-24 | 2,075 | 39 | 1.9% |
+| **2026-08-17** | 2,163 | **2,163** | **100%** |
+| 2026-08-10 | 2,201 | 51 | 2.3% |
+| **2026-08-03** | 1,556 | **1,556** | **100%** |
+| **2026-07-27 / 07-20 / 07-13** | — | all rows | **100%** |
+
+**5 of the last 8 Mondays lost the entire DL engine**, against ~40 zero rows on any other weekday.
+Nothing errored; the ranker exited 0 every time; no monitor saw it. `deep_learning_predictions` was
+confirmed trading-day-only (0 rows for 08-22/08-23), so this is the cutoff, not the model.
+
+**Deliberately NOT fixed.** `unified_ranker.py` is gated by `verify-gate.mjs`: changing which rows
+feed an engine changes `unified_score`, so it needs a measured before/after, not a drive-by edit —
+the exact pattern that got four prior unmeasured ranker changes reverted. `as_of.trading_days_back()`
+and `logical_write_floor()` already exist and are the right anchors. Carried as EVIDENCE-lane.
+
+### The static check found twice what the manual sweep did (AF-20260823-73)
+
+Hand-reading `unified_ranker.py` found 6 instances. `check_short_calendar_lookback` (new, in
+`scripts/check_recurring_bugs.py`) found **12 across 5 files** — also `ml_ensemble.py:3074`,
+`scoring_engine.py:688,761`, `screener_sector_rotation.py:23,52`, `screener_signal_generator.py:84`.
+Textbook repeat of that file's own lesson that a manual pass finding N should not be trusted as
+complete.
+
+**ast-based, not regex** — deliberately. Two regex attempts failed outright: this repo's own
+docstrings and comments describe the bug pattern verbatim, and a triple-quote-matching regex could
+not be written into the file it was meant to scan without terminating its own string literal. An
+AST walk cannot see inside a string literal at all. 7 new tests including the prose-is-not-the-bug
+case; negative-controlled (neutering the threshold fails 2).
+
+The 6 non-ranker hits are **untriaged** — each needs its source table checked for weekend rows
+first. `confluence_signals` *does* write on weekends, so a days=1 cutoff there survives; the check
+flags shape, not confirmed breakage.
+
+### Also recorded, not fixed
+
+- **AF-20260823-71** — `backfill_technical_features.run_full_universe_today(min_price=15.0)`, an
+  undocumented floor with no recorded derivation, excludes **every** sub-₹15 stock from the daily
+  grid. The match against the 31 liquid names missing from the 08-21 grid is exact. On 20d ADT, 26
+  sub-₹15 names clear ₹1cr and 12 clear ₹5cr — including **IDEA (₹509cr ADT)** and **VODAFONE
+  (₹481cr)**, plus PCJEWELLER (₹174cr) which gets 0 of 8 engines and no ranker row at all. EVIDENCE
+  lane: a price floor is a plausible proxy for tick-size/noise effects ADT does not capture, so
+  "does a sub-₹15 grid row produce usable features?" has to be answered before widening it.
+  Sibling floors disagree (`breakout_classifier.MIN_PRICE = 20.0`).
+- **AF-20260823-72** — the 3-engine cohort averages `unified_score` 28.3 and is **91 Sell / 0 Buy**
+  against 45.4 and 57/266 for the 7-engine cohort; 172 symbols sit at ≤3. Already a known open
+  residual in `measurement.md` (rho +0.28); now at least visible, via a new
+  `canonical:engine coverage per symbol` stage.
+
+Gates: `tsc` 0, `vitest` 1071 passed, `pytest` 2153 passed. `schema:drift` fails on
+`pg_stat_statements`/`_info` — **pre-existing**, verified by stashing this session's changes and
+re-running (fails identically). All four pm2 services online.
+
+### (cont.) Triaging the other 6 hits found a second real bug, as bad as the first
+
+All 12 sites the new check flagged were triaged the same day. **The distinction that decides
+severity is not "does the read return empty" but "does the caller DEGRADE or NO-OP when it does."**
+
+**`scoring_engine.py:688` (AF-20260823-74) is the worst of the six**, and arguably worse than the
+`dl` one. Its `win_prob_map` cutoff is `date.today() - 1` over `technical_signals` (trading-day
+only: 25 weekend rows in 32,894 over 21 days). On any Monday the map is empty, so every
+`win_prob_map.get(symbol)` returns `None`, and `ml_alignment_points()` converts that to its
+`8  # neutral if no ML signal` fallback. **The real measured mean is 17.71/20** across 2,196
+symbols on the latest date — so Factor 3 silently drops **~9.7 of 20 points on every symbol,
+uniformly, every Monday.**
+
+A uniform shift cannot change any *ranking*, which is precisely why nothing has ever caught it —
+but `stock_scores` feeds `unified_recommendations` and the platform's absolute Buy/Sell
+thresholds. Identical mechanism to `recurring-bugs.md`'s factor-crowding incident (a uniform ×0.9
+that was invisible to every rank-based diagnostic and moved the whole population against fixed
+cutoffs). ⚠ **Not retrospectively confirmable** — `stock_scores` is upsert-in-place with no history
+table, so the Monday dip cannot be observed after the fact. The mechanism is confirmed at code and
+input level, not by a historical score series; recorded that way rather than overclaimed.
+
+Two more real, both lower severity: `scoring_engine.py:761` (days=3, survives Fri→Mon but not a
+holiday Monday; degrades to "prior blend doesn't run" rather than "runs wrong") and
+`screener_sector_rotation.py:52` (days=2, but **self-limiting** — its documented
+`screener_appearances` fallback does write on weekends, and the output table is fresh at
+2026-08-22/533 rows, consistent with the fallback working).
+
+**Three benign, recorded with reasons so they are not re-triaged:** `ml_ensemble.py:3074` is not a
+lookback at all (it is an age threshold for expiring `recommendation_log` rows — a checker
+true-positive on shape, false-positive on impact, which is the right trade);
+`screener_sector_rotation.py:23` reads the script's own output table for a momentum delta; and
+`screener_signal_generator.py:84`'s source `screener_appearances` genuinely writes ~19-29k rows on
+every weekend day, so its 2-day window always has data.
+
+Net: of 12 flagged sites, **4 confirmed live defects** (1 in `unified_ranker`, 2 in
+`scoring_engine`, 1 self-limiting), 3 benign, 5 in `unified_ranker` sharing AF-20260823-70's
+shape. Both `scoring_engine.py` sites are EVIDENCE-lane — that file is in `verify-gate.mjs`'s
+gated list, so Factor 3's input population cannot be changed without a measured before/after.
+
+### (cont. 2) All 9 real calendar-cutoff sites fixed, measured live on a Sunday
+
+The EVIDENCE gate on `unified_ranker.py`/`scoring_engine.py` turned out to be satisfiable
+immediately rather than on the next Monday: **2026-08-23 is a Sunday, so the bug was firing at the
+moment of the fix.** Both engines were exercised against production before and after on the same
+connection, minutes apart.
+
+`unified_ranker.py` (symbols returned): `dl` **0 → 2,424**, `confluence` 3,748 → 4,613,
+`screener_momentum` 1,980 → 2,039, `ml`/`cs`/`technical` 2,200 → 2,201 each.
+`scoring_engine.py` (distinct symbols): `win_prob_map` **0 → 2,196**, `sym_signal_types` 566 → 722.
+
+`win_prob_map` at 0 is the whole of AF-20260823-74: Factor 3 sitting on its `8  # neutral` fallback
+for every symbol against a measured real mean of 17.71/20. All 9 sites now use
+`as_of.trading_days_back(n, conn)[-1]` — the oldest of n real sessions, so `>= that` admits exactly
+n trading days regardless of weekends or holidays.
+
+**Live end-to-end proof, not just a green suite:** `e2e_lifecycle_check.py --n 10` now PASSes on a
+Sunday (exit 0, 28 stages). Before the fix the same command FAILed on `engine:dl`.
+
+**Immunization, two rungs.** Rung 1 is the static check; rung 4 is
+`src/server/tests/test_trading_day_cutoffs.py`, which reuses the shipped check rather than
+reimplementing its rule (a test that rewrites the logic passes against unfixed source).
+Negative-controlled both ways: reverting one ranker line fails 2 tests; deleting the checker's
+comment-block lookup fails its exemption test.
+
+**The suppression design is the part worth remembering.** Three sites match the pattern without
+being the bug. A file-level `DATE_ANCHOR_ALLOWLIST` entry — the existing convention — would have
+blinded the check to any *future* genuine instance in those same files. Used a line-level
+`trading-day-exempt: <reason>` marker instead, readable from the line or the contiguous comment
+block above it, each carrying its measured justification. Its own control test asserts that an
+ordinary comment above a line does NOT suppress, so the marker check cannot silently degrade into
+a no-op that passes every commented site.
+
+## 2026-08-23 (cont.) — AF-78 closed with an 18-test guard suite, then the user's own accuracy heuristic measured: pipeline healthy, ranker ordering weak
+
+**AF-78 fix completed and immunized** (`src/server/tests/test_fii_dii_sector_nulls.py`, 18 tests,
+all passing against live PG via the conftest fixtures): schema DDL assertions, migration Up/Down
+shape, writer INSERT guards for both Python sites in `backfill_technical_features.py` plus a
+negative guard on `strategySignalsService.ts`'s skeleton writer, `NEVER_FILL` pins for all four
+columns, and a behavioral pin that inserts a grid-shaped row and asserts NULLs come back.
+Two test-authoring lessons: (1) the Down-migration assertion had to match the file's aligned
+`SET` block (`col = 0`, not `SET col = 0`) — alignment is legitimate SQL formatting; (2) the
+writer guards regex-scan every `INSERT INTO technical_signals ... ON CONFLICT` block and assert
+the count is exactly 2, so a third unlisted writer fails loudly instead of silently escaping.
+
+**A schema fact worth its own sentence: `technical_signals.date`, `fii_dii_flow.date`,
+`unified_recommendations.computed_at` are TEXT columns; only `stock_ohlcv.date` is a native
+date.** Discovered while writing the accuracy probe: binding a `datetime.date` against the text
+columns dies with PG's `text = date` operator error, and SQLAlchemy cannot parse `:p0::date`
+casts — ISO **string** binds are the correct form everywhere except `stock_ohlcv`.
+
+**The accuracy question, answered with the user's own criterion.** "If what we suggest as BUY
+overlaps the live data source's top gainers, the pipeline is working and accurate." Freshness
+sweep first: every source table current through Friday 08-21 (OHLCV 2.65M rows, tech signals,
+FII/DII flows, regime, option chain 491k rows, outcomes 633k), recos generated every session,
+walls on exactly 154 F&O names — **the pipeline is healthy end to end**. Same-session comparison
+is methodologically unsound (batches stamp 09:00–18:45 IST across the session, so pre/post-close
+is unknowable); the clean read is Thursday's batch → Friday's outcome: **+0.48% mean vs +0.30%
+universe (+0.19pp edge) but 0 of 30 BUYs in Friday's top-15 gainers.** By the user's criterion
+the suggestions were not accurate this session; by any return-based measure they were mildly
+better than the market. Recorded as AF-20260823-81 alongside AF-79's threshold pathology — fix
+labels first, then re-measure ordering. Probes kept as `_tmp_accuracy_check.py` /
+`_tmp_forward_check.py` until folded into a harness.
+
+Commits split by concern: cutoff fixes (previously staged), AF-77 walls migration, AF-78 flow/
+sector NULLs + suite, docs/logs, greenfield scheduling + stocklist cleanup, outcome-resolver
+bulk prefetch + tests, and the accuracy-probe finding.
+

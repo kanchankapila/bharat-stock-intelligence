@@ -126,13 +126,15 @@ git history.
     to legacy `news_articles` on *any* exception and sets `sentiment_score=1.0` (maximum bullish)
     for every article. Touches scoring math — decide the right fallback value + narrow the
     exception.
-16. **`processMlDailyOps` / `processMlWeeklyRetrain` job-level result.** `[verified 08-16,
-    partially closed]` The per-step half is done: sub-steps are wrapped in `T.run(...)` so the
-    dashboard reflects each one's real outcome, with an in-code comment saying this replaced "the
-    old blanket 'success'". **The job-level return is still an unconditional
-    `return { success: true }`** (`queues.ts:483` signature, L1136 return), so a run where every
-    Python step failed still completes green at the queue level. Remaining decision is the
-    degraded-vs-failed threshold and what that does to Telegram alerting.
+16. **`processMlDailyOps` / `processMlWeeklyRetrain` job-level result.** `[closed 2026-08-23]`
+    Both halves done. Job-level: `T.finish()`'s verdict flows into the BullMQ result
+    (`{ success: verdict.ok, failedSteps }` — reported, not thrown, so one failed step can't hand
+    the hours-long chain to BullMQ's retry machinery). Alerting half (the "what does Telegram do"
+    decision): `alertFailedSteps()` in `queues.ts` pages via
+    `telegramService.sendMarkdownMessage` whenever `failedSteps` is non-empty, on BOTH processors.
+    Threshold chosen: **any failed step alerts** — steps are already coarse-grained, and a quieter
+    threshold would re-open the silent-green door this item existed to close. Delivery is
+    fire-and-forget so an alert failure can never fail the job itself.
 
 ---
 
