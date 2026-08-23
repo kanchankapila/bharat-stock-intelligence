@@ -81,6 +81,9 @@ def load_first_appearances_today(con, qualifying_screeners: set) -> dict:
       1. Appeared in a qualifying screener today (or within last 2 days for syncs)
       2. Had no appearance in the same screener within the last REENTRY_COOLDOWN_DAYS
     """
+    # trading-day-exempt: source is screener_appearances, which is NOT trading-day-only --
+    # measured 13,080 weekend rows in the last 21d (~19-29k every Saturday and Sunday), so a
+    # 2-calendar-day window always contains data.
     window_start = (datetime.date.today() - datetime.timedelta(days=2)).isoformat()
     cooldown_start = (datetime.date.today() - datetime.timedelta(days=REENTRY_COOLDOWN_DAYS)).isoformat()
 

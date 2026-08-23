@@ -109,6 +109,7 @@ Usage:
   python scripts/check_recurring_bugs.py path/to/file.py   # check specific files
 """
 import argparse
+import ast
 import re
 import subprocess
 import sys
@@ -226,6 +227,94 @@ def check_date_anchor(path: Path, text: str) -> list[str]:
                 f"day the calendar date doesn't match an existing row "
                 f"(weekend/holiday/midnight-crossing run)."
             )
+    return findings
+
+
+# A cutoff of N calendar days must span the largest possible gap between REAL trading
+# sessions. A weekend alone is 3 (Fri->Mon), and India has ~15 holidays a year, so a long
+# weekend is 4. At or below that, the window can contain NO trading session at all.
+MIN_SAFE_CALENDAR_LOOKBACK = 4
+
+
+def check_short_calendar_lookback(path: Path, text: str) -> list[str]:
+    """Flags `date.today() - timedelta(days=N)` for small N used as a lookback cutoff.
+
+    Distinct from check_date_anchor above, which deliberately covers only the write-guard
+    shape and explicitly declines to flag read-side lookback windows. That exemption is right
+    in general -- a stale calendar day usually just shifts a window by one session -- but it
+    is wrong when N is small enough that the window can contain NO trading day at all. Then
+    the read returns {} and the caller silently degrades rather than erroring.
+
+    Live instance this was written for (AF-20260823-70): unified_ranker._get_dl_scores used
+    days=1, so a Monday run asked for `prediction_date >= Sunday` and matched nothing. `dl`
+    carries 0.092-0.137 blend weight and _blend renormalizes over the engines PRESENT, so the
+    other engines silently absorbed it. Measured in production: `dl_score` was 0 on 100% of
+    rows for 5 of the last 8 Mondays (2,163/2,163 on 2026-08-17) against ~40 on every other
+    weekday. Nothing errored and the ranker exited 0 every time.
+
+    Fix: as_of.trading_days_back(n, conn) or as_of.logical_write_floor(conn), both of which
+    read the exchange's own session list out of stock_ohlcv.
+
+    Uses ast rather than a line regex on purpose -- the pattern is trivially confused by
+    prose in a docstring describing the bug (this file and recurring-bugs.md both contain
+    such prose), and an AST walk cannot see inside a string literal at all.
+    """
+    if "tests" in path.parts or path.name in DATE_ANCHOR_ALLOWLIST:
+        return []
+    try:
+        tree = ast.parse(text)
+    except SyntaxError:
+        return []
+
+    def _is_today_call(node) -> bool:
+        return (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
+                and node.func.attr == "today")
+
+    def _timedelta_days(node):
+        """Return N for a timedelta(days=<int literal>) call, else None."""
+        if not isinstance(node, ast.Call):
+            return None
+        fn = node.func
+        name = fn.attr if isinstance(fn, ast.Attribute) else getattr(fn, "id", None)
+        if name != "timedelta":
+            return None
+        for kw in node.keywords:
+            if kw.arg == "days" and isinstance(kw.value, ast.Constant) \
+                    and isinstance(kw.value.value, int):
+                return kw.value.value
+        return None
+
+    findings = []
+    lines = text.splitlines()
+    for node in ast.walk(tree):
+        if not (isinstance(node, ast.BinOp) and isinstance(node.op, ast.Sub)):
+            continue
+        if not _is_today_call(node.left):
+            continue
+        days = _timedelta_days(node.right)
+        if days is None or days > MIN_SAFE_CALENDAR_LOOKBACK:
+            continue
+        # Line-level opt-out, deliberately NOT a file-level allowlist entry: three real sites
+        # match this shape without being the bug (an age threshold for expiring rows, a read of
+        # a script's own output table, a source table that genuinely writes on weekends), and
+        # exempting their whole FILE would blind the check to any future genuine instance in it.
+        # Each suppression must carry its reason on the same line. Triage: AF-20260823-73.
+        # The marker may sit on the line itself or anywhere in the contiguous comment block
+        # directly above it -- the reason usually needs more room than a trailing comment.
+        i = node.lineno - 1
+        exempt = "trading-day-exempt:" in lines[i]
+        j = i - 1
+        while not exempt and j >= 0 and lines[j].strip().startswith("#"):
+            exempt = "trading-day-exempt:" in lines[j]
+            j -= 1
+        if exempt:
+            continue
+        findings.append(
+            f"{_display_path(path)}:{node.lineno}: `date.today() - timedelta(days={days})` "
+            f"as a lookback cutoff. A Fri->Mon gap is 3 calendar days and a long weekend is "
+            f"4, so this window can contain NO trading session and the read silently returns "
+            f"empty. Use as_of.trading_days_back()/logical_write_floor()."
+        )
     return findings
 
 
@@ -632,6 +721,7 @@ def main() -> int:
     for path in py_files:
         text = path.read_text(encoding="utf-8", errors="ignore")
         all_findings.extend(check_date_anchor(path, text))
+        all_findings.extend(check_short_calendar_lookback(path, text))
         all_findings.extend(check_raw_percent_s(path, text))
         all_findings.extend(check_nan_self_inequality(path, text))
         all_findings.extend(check_multiword_pg_cast(path, text))

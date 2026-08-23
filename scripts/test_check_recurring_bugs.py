@@ -479,3 +479,128 @@ class TestDiffRefResolution:
 
     def test_a_real_ref_still_returns_file_paths(self):
         assert isinstance(crb._diff_python_files("HEAD", staged=False), list)
+
+
+class TestShortCalendarLookback:
+    """AF-20260823-70: `date.today() - timedelta(days=N)` for small N over a trading-day
+    table. A Fri->Mon gap is 3 calendar days, so days<=4 can select NO trading session at
+    all and the read silently returns empty rather than erroring."""
+
+    def test_fires_on_one_day_cutoff(self):
+        text = (
+            "def _get_dl_scores(self):\n"
+            "    cutoff = (date.today() - timedelta(days=1)).isoformat()\n"
+            "    return self.conn.execute(\n"
+            "        'SELECT symbol FROM deep_learning_predictions "
+            "WHERE prediction_date >= ?', (cutoff,)).fetchall()\n"
+        )
+        findings = crb.check_short_calendar_lookback(_p("unified_ranker.py"), text)
+        assert len(findings) == 1
+        assert "days=1" in findings[0]
+
+    def test_fires_at_the_boundary_but_not_past_it(self):
+        """4 calendar days is a long weekend; 5 clears it. The boundary is the whole point
+        of the check, so it is pinned rather than left to the constant's definition."""
+        mk = lambda n: (
+            "cutoff = (date.today() - timedelta(days=%d)).isoformat()\n"
+            "rows = conn.execute('SELECT x FROM t WHERE date >= ?', (cutoff,))\n" % n
+        )
+        assert len(crb.check_short_calendar_lookback(_p(), mk(4))) == 1
+        assert crb.check_short_calendar_lookback(_p(), mk(5)) == []
+
+    def test_long_lookbacks_are_not_flagged(self):
+        """A 30/90-day window absorbs any weekend or holiday -- flagging it would make the
+        check noise, and noise is how a check stops being read."""
+        text = (
+            "cutoff = (date.today() - timedelta(days=30)).isoformat()\n"
+            "rows = conn.execute('SELECT x FROM t WHERE date >= ?', (cutoff,))\n"
+        )
+        assert crb.check_short_calendar_lookback(_p(), text) == []
+
+    def test_prose_describing_the_bug_is_not_the_bug(self):
+        """The real false positive this check had to survive: recurring-bugs.md's own
+        signature text, and this repo's habit of documenting a fix in the docstring right
+        above the fixed code. An ast walk cannot see inside a string literal at all, which
+        is why this check is ast-based and not a line regex."""
+        text = (
+            'def f():\n'
+            '    """Was `date.today() - timedelta(days=1)`, which broke every Monday.\n'
+            '    Now uses as_of.logical_write_floor(). See date >= cutoff below.\n'
+            '    """\n'
+            '    cutoff = as_of.logical_write_floor(conn)\n'
+            "    rows = conn.execute('SELECT x FROM t WHERE date >= ?', (cutoff,))\n"
+        )
+        assert crb.check_short_calendar_lookback(_p(), text) == []
+
+    def test_comment_mentioning_the_pattern_is_not_flagged(self):
+        text = (
+            "# cutoff = (date.today() - timedelta(days=1)).isoformat()  # old, broken\n"
+            "cutoff = as_of.logical_write_floor(conn)\n"
+            "rows = conn.execute('SELECT x FROM t WHERE date >= ?', (cutoff,))\n"
+        )
+        assert crb.check_short_calendar_lookback(_p(), text) == []
+
+    def test_tests_directory_is_exempt(self):
+        text = (
+            "cutoff = (date.today() - timedelta(days=1)).isoformat()\n"
+            "rows = conn.execute('SELECT x FROM t WHERE date >= ?', (cutoff,))\n"
+        )
+        p = crb.REPO_ROOT / "src" / "server" / "tests" / "test_thing.py"
+        assert crb.check_short_calendar_lookback(p, text) == []
+
+    def test_unparseable_file_does_not_crash_the_run(self):
+        """A syntax error elsewhere in the repo must not take the whole checker down."""
+        assert crb.check_short_calendar_lookback(_p(), "def broken(:\n") == []
+
+
+class TestShortCalendarLookbackExemption:
+    """The line-level opt-out must be exactly that -- an opt-out for ONE site with a stated
+    reason, not a blanket off-switch. Negative-controlled: remove the marker and the same file
+    must be flagged again."""
+
+    SRC = (
+        "import datetime\n"
+        "def f(con):\n"
+        "    cutoff = (datetime.date.today() - datetime.timedelta(days=1)).isoformat()\n"
+        "    return con.execute('SELECT x FROM t WHERE date >= ?', (cutoff,))\n"
+    )
+
+    def _run(self, tmp_path, src):
+        p = tmp_path / "sample.py"
+        p.write_text(src, encoding="utf-8")
+        return crb.check_short_calendar_lookback(p, src)
+
+    def test_flags_a_short_lookback(self, tmp_path):
+        assert len(self._run(tmp_path, self.SRC)) == 1
+
+    def test_marker_on_the_same_line_suppresses(self, tmp_path):
+        src = self.SRC.replace(
+            "    cutoff = (datetime",
+            "    cutoff = (datetime",
+        ).replace(".isoformat()\n", ".isoformat()  # trading-day-exempt: reason\n", 1)
+        assert self._run(tmp_path, src) == []
+
+    def test_marker_in_the_comment_block_above_suppresses(self, tmp_path):
+        src = self.SRC.replace(
+            "    cutoff = (datetime",
+            "    # trading-day-exempt: source writes on weekends too\n    cutoff = (datetime",
+        )
+        assert self._run(tmp_path, src) == []
+
+    def test_an_unrelated_comment_above_does_NOT_suppress(self, tmp_path):
+        """The control: a comment block alone must not exempt anything, or the marker check
+        would be a no-op that silently passes every commented site."""
+        src = self.SRC.replace(
+            "    cutoff = (datetime",
+            "    # just an ordinary explanatory comment\n    cutoff = (datetime",
+        )
+        assert len(self._run(tmp_path, src)) == 1
+
+    def test_a_safe_lookback_is_not_flagged(self, tmp_path):
+        src = self.SRC.replace("days=1", "days=30")
+        assert self._run(tmp_path, src) == []
+
+    def test_prose_in_a_docstring_is_not_flagged(self, tmp_path):
+        """ast-based on purpose: this repo's own rule files and docstrings describe the bug."""
+        src = 'def f():\n    """Do not use date.today() - timedelta(days=1) here."""\n    return 1\n'
+        assert self._run(tmp_path, src) == []

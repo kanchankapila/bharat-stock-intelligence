@@ -3071,6 +3071,9 @@ def _propagate_and_gate_recommendation_log(conn: ConnWrapper) -> None:
           AND date(signal_date) >= date('now', '-14 days')
     """)
     default_threshold = regime_threshold(conn)   # fallback for rows with no stamped nifty_regime
+    # trading-day-exempt: not a lookback -- this is an AGE THRESHOLD passed to the expiry
+    # gates, used as `if signal_date < cutoff_date: expire`. An empty trading day just means
+    # marginally fewer recommendation_log rows expire this run, self-correcting the next.
     cutoff_date = (datetime.date.today() - datetime.timedelta(days=2)).isoformat()
 
     from ml_calibration import is_edge_adjustment_enabled

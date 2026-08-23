@@ -9,6 +9,7 @@ from nlp_engine import NLPScreenerInference, NLP_VERSION
 from typing import Dict, Any, List
 
 from db_compat import get_engine, connect as db_connect, now_utc_iso
+import as_of
 from technical_analysis_engine import compute_atr_barriers
 
 
@@ -685,7 +686,14 @@ class AlphaQuantScoringEngine:
         win_prob_map: Dict[str, float] = {}
         win_prob_regime_map: Dict[str, str] = {}
         try:
-            wp_cutoff = (datetime.date.today() - datetime.timedelta(days=1)).isoformat()
+            # NOT date.today()-1: technical_signals is trading-day-only, so on any Monday
+            # that window contains no session and this returns []. win_prob_map is then
+            # empty, every .get(symbol) below yields None, and ml_alignment_points() falls
+            # back to its `8  # neutral` branch -- dropping Factor 3 from a measured mean
+            # of 17.71/20 to 8/20 on EVERY symbol, uniformly. A uniform shift cannot move
+            # a ranking, which is why nothing caught it, but it shifts the whole population
+            # against this file's absolute thresholds. See recurring-bugs.md.
+            wp_cutoff = as_of.trading_days_back(1, db_connect())[-1].isoformat()
             with self.engine.connect() as conn:
                 wp_rows = conn.execute(text("""
                     SELECT DISTINCT ON (symbol) symbol, nifty_regime,
@@ -758,7 +766,9 @@ class AlphaQuantScoringEngine:
                     "SELECT signal_type, AVG(weight) FROM signal_type_weights GROUP BY signal_type"
                 )).fetchall()
                 type_weight = {r[0]: float(r[1]) for r in stw if r[0]}
-                sig_cutoff = (datetime.date.today() - datetime.timedelta(days=3)).isoformat()
+                # Trading days, not calendar days -- days=3 survives Fri->Mon exactly but
+                # returns empty after any holiday Monday, silently skipping the prior blend.
+                sig_cutoff = as_of.trading_days_back(3, db_connect())[-1].isoformat()
                 sig_rows = conn.execute(text("""
                     SELECT symbol, signals_json FROM technical_signals
                     WHERE date >= :cutoff AND signals_json IS NOT NULL

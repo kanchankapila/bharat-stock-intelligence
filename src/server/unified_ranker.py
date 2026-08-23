@@ -1455,7 +1455,11 @@ class UnifiedRanker:
 
     def _get_screener_momentum_scores(self):
         """Load screener_momentum_score from technical_signals (stamped by screener_features_fetcher)."""
-        cutoff = (date.today() - timedelta(days=2)).isoformat()
+        # Calendar days cannot span a trading-day gap: Fri->Mon is 3 calendar days and a
+        # long weekend is 4, so a short date.today() window can contain NO session, this
+        # read returns {}, and _blend silently renormalizes over the engines that remain.
+        # Measured: dl_score was 0 on 100% of rows for 5 of 8 Mondays. recurring-bugs.md.
+        cutoff = as_of.trading_days_back(2, self.conn)[-1].isoformat()
         try:
             rows = self.conn.execute(
                 "SELECT symbol, screener_momentum_score FROM technical_signals "
@@ -1479,7 +1483,11 @@ class UnifiedRanker:
     def _get_ml_scores(self):
         # technical_signals.date is a text column; compare against a Python-computed cutoff
         # string (date('now',...) translates to a real date on Postgres -> text>=date error).
-        cutoff = (date.today() - timedelta(days=3)).isoformat()
+        # Calendar days cannot span a trading-day gap: Fri->Mon is 3 calendar days and a
+        # long weekend is 4, so a short date.today() window can contain NO session, this
+        # read returns {}, and _blend silently renormalizes over the engines that remain.
+        # Measured: dl_score was 0 on 100% of rows for 5 of 8 Mondays. recurring-bugs.md.
+        cutoff = as_of.trading_days_back(3, self.conn)[-1].isoformat()
         try:
             # Was AVG(win_probability) (raw) — inconsistent with _get_win_probabilities above,
             # which already reads the regime-fair calibrated value for sizing. This 'ml' score
@@ -1551,7 +1559,11 @@ class UnifiedRanker:
             return {}
 
     def _get_cs_scores(self):
-        cutoff = (date.today() - timedelta(days=3)).isoformat()
+        # Calendar days cannot span a trading-day gap: Fri->Mon is 3 calendar days and a
+        # long weekend is 4, so a short date.today() window can contain NO session, this
+        # read returns {}, and _blend silently renormalizes over the engines that remain.
+        # Measured: dl_score was 0 on 100% of rows for 5 of 8 Mondays. recurring-bugs.md.
+        cutoff = as_of.trading_days_back(3, self.conn)[-1].isoformat()
         try:
             rows = self.conn.execute(
                 "SELECT symbol, AVG(cs_score) AS s FROM technical_signals "
@@ -1625,7 +1637,11 @@ class UnifiedRanker:
         # the standalone Confluence page, intraday_ranker.py, etc.) -- only what THIS engine
         # feeds into the unified blend changes. Percentile-normalized to 0-100 like
         # _get_technical_scores, since the raw sum tops out around 45, not 100.
-        cutoff = (date.today() - timedelta(days=1)).isoformat()
+        # Calendar days cannot span a trading-day gap: Fri->Mon is 3 calendar days and a
+        # long weekend is 4, so a short date.today() window can contain NO session, this
+        # read returns {}, and _blend silently renormalizes over the engines that remain.
+        # Measured: dl_score was 0 on 100% of rows for 5 of 8 Mondays. recurring-bugs.md.
+        cutoff = as_of.trading_days_back(1, self.conn)[-1].isoformat()
         try:
             rows = self.conn.execute(
                 "SELECT symbol, "
@@ -1644,7 +1660,11 @@ class UnifiedRanker:
             return {}
 
     def _get_technical_scores(self):
-        cutoff = (date.today() - timedelta(days=3)).isoformat()
+        # Calendar days cannot span a trading-day gap: Fri->Mon is 3 calendar days and a
+        # long weekend is 4, so a short date.today() window can contain NO session, this
+        # read returns {}, and _blend silently renormalizes over the engines that remain.
+        # Measured: dl_score was 0 on 100% of rows for 5 of 8 Mondays. recurring-bugs.md.
+        cutoff = as_of.trading_days_back(3, self.conn)[-1].isoformat()
         try:
             rows = self.conn.execute(
                 "SELECT symbol, AVG(signal_score) AS s FROM technical_signals WHERE date >= ? GROUP BY symbol",
@@ -1659,7 +1679,11 @@ class UnifiedRanker:
             return {}
 
     def _get_dl_scores(self):
-        cutoff = (date.today() - timedelta(days=1)).isoformat()
+        # Calendar days cannot span a trading-day gap: Fri->Mon is 3 calendar days and a
+        # long weekend is 4, so a short date.today() window can contain NO session, this
+        # read returns {}, and _blend silently renormalizes over the engines that remain.
+        # Measured: dl_score was 0 on 100% of rows for 5 of 8 Mondays. recurring-bugs.md.
+        cutoff = as_of.trading_days_back(1, self.conn)[-1].isoformat()
         try:
             rows = self.conn.execute(
                 "SELECT symbol, prob_up_5d AS probability FROM deep_learning_predictions WHERE prediction_date >= ?",

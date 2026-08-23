@@ -937,6 +937,61 @@ table.
 horizon, so it accumulates and can be re-graded rather than rotting as a one-off number.
 
 
+### The trading-day cutoff fixes (2026-08-23) are NOT a scoring change — measured before/after, and `factor_backtest.py` measures nothing connected to them
+
+Nine `date.today() - timedelta(days=N)` cutoffs across `unified_ranker.py` (6),
+`scoring_engine.py` (2) and `screener_sector_rotation.py` (1) were calendar-day anchors over
+trading-day tables. A Fri→Mon gap is 3 calendar days and a long weekend 4, so an N≤4 window can
+contain **no trading session at all**: the read returns `{}` while every table involved is
+perfectly fresh. The defect is in the reader's date arithmetic, which is why no freshness
+monitor could ever see it.
+
+**Not hypothetical — measured in production.** `unified_recommendations.dl_score` was `0` on
+**100% of rows for 5 of the last 8 Mondays** (2,163/2,163 on 2026-08-17) against ~40 on every
+other weekday. `_blend` renormalizes over the engines PRESENT, so `dl`'s 0.092–0.137 weight was
+silently absorbed by the others and the ranker exited 0 every time.
+
+**Before/after taken on a live Sunday — the bug was firing at the moment of the fix, so no
+simulated Monday was needed.** Same connection, minutes apart:
+
+| read | BEFORE | AFTER |
+|---|---|---|
+| `_get_dl_scores` (days=1) | **0** | **2,424** |
+| `_get_confluence_scores` (days=1) | 3,748 | 4,613 |
+| `_get_screener_momentum_scores` (days=2) | 1,980 | 2,039 |
+| `_get_ml_scores` / `_get_cs_scores` / `_get_technical_scores` (days=3) | 2,200 | 2,201 |
+| `scoring_engine` `win_prob_map` (days=1) | **0** | **2,196** |
+| `scoring_engine` `sym_signal_types` (days=3) | 566 | 722 |
+
+`win_prob_map` at 0 is the consequential one: every `win_prob_map.get(symbol)` returns `None`,
+which `ml_alignment_points()` converts to its `8  # neutral if no ML signal` branch — dropping
+Factor 3 from a **measured mean of 17.71/20 to 8/20 on every symbol, uniformly**. A uniform shift
+cannot reorder anything, which is exactly why no rank-based diagnostic caught it, but it moves the
+whole population against this file's absolute thresholds. Same mechanism as the factor-crowding
+×0.9 incident in `recurring-bugs.md`.
+
+**`factor_backtest.py` was run to a real exit code and is reported here for completeness, but it
+measures nothing connected to this diff.** Checked by AST, not assumed: its entire import set is
+`{__future__, argparse, backtester, datetime, db_compat, json, math, numpy, pandas, sys}` —
+**zero overlap** with the five changed modules; the only textual mentions of `unified_score` in it
+are docstring prose. Run anyway (`--factor momentum_12_1 --rebalance 21 --top-k 50 --cost-bps 25`,
+live production, 54 periods / 4.5 years): net excess **+0.6864%/period, t=1.45, NOT significant** —
+consistent with this file's standing entry for that factor (t=1.10 post-fix) and unchanged by this
+diff, as it must be.
+
+**No score, weight, threshold, or classification formula was touched.** What changed is *which
+rows an engine can see* — restoring engines that were silently absent, not re-weighting engines
+that were present. Same reasoning as this file's `_log_recommendations` / `seed_screener_catalog` /
+`_next_generated_at` entries. The applicable measurement is the before/after table above, taken
+from live production, plus the end-to-end proof: `e2e_lifecycle_check.py --n 10` now PASSes on a
+Sunday (exit 0, 28 stages), where before the fix it FAILed on `engine:dl`.
+
+⚠ **One consequence for future measurement, stated so it is not discovered the hard way:** any
+grading of `unified_score`, `dl_score`, or `stock_scores` that pooled Mondays before 2026-08-23 was
+reading a population where `dl` was absent from the blend and Factor 3 was pinned at its fallback.
+**2026-08-23 is a population boundary for those columns**, the same way 2026-08-18 is for the
+zero-vs-NULL artifact. Filter on it rather than pooling across it.
+
 ### `factor_edge.py` grades close-to-close, but the panel spec mandates next-day OPEN entry — measured 2026-08-22, every IC in `factor_edge_history` is optimistic
 
 This file's own panel spec says, without qualification: **"Next-day OPEN entry. Signals computed
