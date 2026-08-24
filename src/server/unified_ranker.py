@@ -142,14 +142,48 @@ HORIZON_MULT = {
 # unified_score once ~20+ dates have accumulated under these weights -- this could not be
 # validated retroactively since past unified_recommendations rows were generated under the
 # old weights.
+# THIRD targeted shrink, 2026-08-24: `ml` halved (ENGINE_EDGE_SHRINK=0.5), freed weight
+# redistributed proportionally over the other 6 non-pinned engines; `breakout` pinned at its
+# exact prior value in every regime (same mechanism and policy as the 2026-08-20 and
+# 2026-08-21 screener shrinks documented below). Why ml: its persisted engine score averages
+# a window of isotonic-CALIBRATED win probabilities (_get_ml_scores read
+# COALESCE(calibrated_win_probability, ...) until today), and the calibrators collapse
+# dispersion by design when a regime has no live edge (HIGH_VOL emitted ~0.78 for ~90% of
+# the universe -- see that function's own 2026-08-10 note). A near-constant input carries
+# blend weight without contributing cross-sectional rank information and dilutes the
+# composite (blended AUC@5d measured 0.5206 vs confluence_score's own 0.5812 on identical
+# rows). Today's companion fix switches that read back to raw win_probability, so this table
+# encodes "the engine we actually have"; the shrink and the input fix were verified TOGETHER
+# because arm-testing ran against persisted (collapsed) scores.
+#
+# Evidence gate, run BEFORE editing (measurement.md rule: never reweight from argument alone):
+#   python src/server/_tmp_weight_arms.py -- mechanical candidate transforms scored on the
+#   IDENTICAL panel/labels/metrics as blend_walkforward.py (59,756 rows, 24 sessions,
+#   2026-06-30..2026-08-13), paired t-stats over daily rank-IC deltas vs BASE:
+#     BASE              mean IC 0.0405, 18/24 days positive, 6 top-30 gainer hits
+#     A  ml x0.5        mean IC 0.0424, dIC +0.0019, paired t=+2.05, 19/24 days  <- SHIPPED
+#     B  ml+dl both x0.5  IC 0.0379, dIC -0.0027, t=-1.82                       <- rejected
+#     C  ml x0.5 + give freed share straight to confluence  IC 0.0420, dIC +0.0014, t=+0.78
+#   Only arm A cleared the pre-declared bar (dIC > 0 AND |t| >= ~2), so ONLY arm A ships.
+#   Confluence rises here as a CONSEQUENCE of proportional redistribution (BULL
+#   0.190227 -> 0.214195), NOT because it was hand-picked -- arm C, the hand-picked variant,
+#   failed its own significance test. dl explicitly KEEPS its weight: demoting it (arm B)
+#   measurably hurt (it holds the best engine IC, +0.059 @5d), contradicting the earlier
+#   "observation-only" hypothesis -- the hypothesis was tested and lost.
+#
+# Known consequence, accepted (same class as the 2026-08-21 note below): shrinking one
+# engine's share shifts the unified_score distribution and therefore how many names clear
+# DIRECTIONAL_BUY_FLOOR-style absolute thresholds. Left alone for the same reason as then.
+# Re-check via a fresh blend_walkforward.py run once ~20+ further sessions accumulate; if
+# the dIC advantage reverses on the larger sample, revert is a one-commit operation.
 REGIME_WEIGHTS = {
-    'BULL':     {'screener': 0.075,  'ml': 0.190227, 'cs': 0.070454, 'confluence': 0.190227, 'technical': 0.152182, 'dl': 0.101454, 'breakout': 0.15, 'smart_money': 0.070456},
-    'BEAR':     {'screener': 0.0875, 'ml': 0.238625, 'cs': 0.071875, 'confluence': 0.238625, 'technical': 0.120750, 'dl': 0.120750, 'breakout': 0.05, 'smart_money': 0.071875},
-    'HIGH_VOL': {'screener': 0.05,   'ml': 0.145714, 'cs': 0.060714, 'confluence': 0.145714, 'technical': 0.291429, 'dl': 0.145714, 'breakout': 0.10, 'smart_money': 0.060715},
-    'CRASH':    {'screener': 0.10,   'ml': 0.250364, 'cs': 0.077273, 'confluence': 0.194727, 'technical': 0.125182, 'dl': 0.125182, 'breakout': 0.05, 'smart_money': 0.077272},
+    'BULL':     {'screener': 0.08445,  'ml': 0.107098, 'cs': 0.079331, 'confluence': 0.214195, 'technical': 0.171356, 'dl': 0.114237, 'breakout': 0.15, 'smart_money': 0.079333},
+    'BEAR':     {'screener': 0.100068, 'ml': 0.136449, 'cs': 0.082198, 'confluence': 0.272899, 'technical': 0.138093, 'dl': 0.138093, 'breakout': 0.05, 'smart_money': 0.0822},
+    'HIGH_VOL': {'screener': 0.054404, 'ml': 0.079274, 'cs': 0.066062, 'confluence': 0.158549, 'technical': 0.317099, 'dl': 0.158549, 'breakout': 0.10, 'smart_money': 0.066063},
+    'CRASH':    {'screener': 0.115177, 'ml': 0.144181, 'cs': 0.089001, 'confluence': 0.224281, 'technical': 0.144181, 'dl': 0.144181, 'breakout': 0.05, 'smart_money': 0.088998},
     # SIDEWAYS was silently falling back to BULL; a balanced blend is more appropriate for
     # a rangebound tape (lean slightly less on momentum/dl than BULL).
-    'SIDEWAYS': {'screener': 0.08,   'ml': 0.206836, 'cs': 0.071818, 'confluence': 0.206836, 'technical': 0.129273, 'dl': 0.103418, 'breakout': 0.13, 'smart_money': 0.071819},
+    'SIDEWAYS': {'screener': 0.090793, 'ml': 0.11737, 'cs': 0.081507, 'confluence': 0.23474, 'technical': 0.146713, 'dl': 0.11737, 'breakout': 0.13, 'smart_money': 0.081507},
 }
 # SECOND screener shrink, 2026-08-21 (the first was 2026-08-20, same policy, same reason).
 # ENGINE_EDGE_SHRINK=0.5 applied again to `screener` only, freed weight redistributed
@@ -1459,8 +1493,13 @@ class UnifiedRanker:
         hedge in run() -- this only makes the ML leg honest, it doesn't remove the hedge that
         already covers for it in no-edge regimes."""
         cutoff = (date.today() - timedelta(days=30)).isoformat()
+        # Raw win_probability FIRST (fix 2026-08-24): isotonic calibration collapses
+        # dispersion when a regime has no live edge (~90% of HIGH_VOL rows sat pinned
+        # near ~0.78), so preferring calibrated_win_probability made this average
+        # near-constant -- sizing every name off a constant silently erases per-symbol
+        # conviction even though the number looks stable.
         rows = self.conn.execute(
-            "SELECT symbol, nifty_regime, COALESCE(calibrated_win_probability, win_probability) AS p "
+            "SELECT symbol, nifty_regime, COALESCE(win_probability, calibrated_win_probability) AS p "
             "FROM technical_signals WHERE date >= ? AND win_probability IS NOT NULL",
             (cutoff,)
         ).fetchall()
@@ -1607,8 +1646,12 @@ class UnifiedRanker:
             # that knowledge. Shrinking here too collapses a no-edge regime's near-constant
             # score toward neutral (50), so _blend's per-symbol renormalization leans on the
             # OTHER engines instead of diluting the ranking with what amounts to noise.
+            # Raw-first swap (2026-08-24), matching the sizing query above: isotonic
+            # calibration collapses dispersion in no-edge regimes, so the calibrated
+            # column handed this engine a near-constant input that still carried its
+            # full regime weight while contributing no cross-sectional rank information.
             rows = self.conn.execute(
-                "SELECT symbol, nifty_regime, COALESCE(calibrated_win_probability, win_probability) AS p "
+                "SELECT symbol, nifty_regime, COALESCE(win_probability, calibrated_win_probability) AS p "
                 "FROM technical_signals WHERE date >= ?",
                 (cutoff,),
             ).fetchall()

@@ -173,3 +173,104 @@ class TestThresholdOverride:
             return {"drift_score": 2.0}          # would be 0.85x under the default 1.5
         monkeypatch.setattr(dd, "query_one", fake)
         assert dd.get_drift_multiplier() == 1.0
+
+
+class TestWriteTrainingMetrics:
+    """Layer 3 plumbing (2026-08-24): walk_forward_validate() computed a held-out
+    roc_auc on every training run but nothing ever wrote it to dl_model_performance,
+    leaving the API's AUC history permanently NULL and check_accuracy_drift without
+    a fresh baseline. These pin the write contract against regressions."""
+
+    def test_persists_acc_and_auc_under_the_given_date_with_real_version(self, monkeypatch):
+        captured = {}
+
+        def fake_execute(sql, params):
+            captured["sql"] = sql
+            captured["params"] = params
+
+        monkeypatch.setattr(dd, "execute", fake_execute)
+
+        dd.write_training_metrics({"directional_accuracy": 0.61, "roc_auc": 0.583,
+                                   "n_test": 900},
+                                  eval_date="2026-08-24", model_version="lstm_v7")
+
+        assert "INSERT INTO dl_model_performance" in captured["sql"]
+        # The schema's ON CONFLICT target must be preserved verbatim -- a different
+        # target would collide with the daily drift row or fail outright.
+        assert "(model_name, eval_date, horizon_days)" in captured["sql"]
+        # 6 bound params: model_name, model_version, eval_date, acc, auc, n.
+        # horizon_days=5 is inline SQL, not a placeholder.
+        name, version, day, acc, auc, n = captured["params"]
+        assert (name, version, day) == ("LSTM_TFT_ENSEMBLE", "lstm_v7", "2026-08-24")
+        assert (acc, auc, n) == (0.61, 0.583, 900)
+
+    def test_nan_and_missing_metrics_become_null_not_zero(self, monkeypatch):
+        # A failed validation run reports NaN -- persisting it as 0.0 would poison
+        # ORDER BY ... LIMIT 1 monitors and any human reading the table.
+        captured = {}
+        monkeypatch.setattr(dd, "execute",
+                            lambda sql, params: captured.update(params=params))
+
+        dd.write_training_metrics({"directional_accuracy": float("nan"),
+                                   "roc_auc": None}, eval_date="2026-08-24")
+
+        _, _, _, acc, auc, n = captured["params"]
+        assert acc is None and auc is None and n is None
+
+    def test_db_failure_is_swallowed_so_training_is_never_failed_by_a_monitor_write(self, monkeypatch):
+        def boom(*a, **k):
+            raise RuntimeError("DB down")
+        monkeypatch.setattr(dd, "execute", boom)
+        dd.write_training_metrics({"roc_auc": 0.6})  # must not raise
+
+
+class TestCheckAucDrift:
+    """The monitor half of Layer 3: surface absolute serving-quality decay; never gate."""
+
+    @staticmethod
+    def _row(auc, day="2026-08-20"):
+        return {"roc_auc": auc, "eval_date": day}
+
+    def test_above_floor_is_ok(self, monkeypatch):
+        monkeypatch.setattr(dd, "query_one", lambda *a, **k: self._row(0.60))
+        result = dd.check_auc_drift(min_roc_auc=0.55)
+        assert result["status"] == "OK"
+        assert result["held_out_roc_auc"] == 0.60
+
+    def test_below_floor_reports_degraded_without_raising_or_exiting(self, monkeypatch):
+        monkeypatch.setattr(dd, "query_one", lambda *a, **k: self._row(0.51))
+        result = dd.check_auc_drift(min_roc_auc=0.55)
+        assert result["status"] == "DEGRADED"
+
+    def test_no_persisted_data_yet_reads_no_data_not_degraded(self, monkeypatch):
+        monkeypatch.setattr(dd, "query_one", lambda *a, **k: None)
+        assert dd.check_auc_drift(min_roc_auc=0.55)["status"] == "NO_DATA"
+
+    def test_query_failure_degrades_gracefully_like_every_other_monitor_here(self, monkeypatch):
+        def boom(*a, **k):
+            raise RuntimeError("DB down")
+        monkeypatch.setattr(dd, "query_one", boom)
+        assert dd.check_auc_drift(min_roc_auc=0.55)["status"] == "QUERY_FAILED"
+
+    def test_default_floor_consults_app_settings_via_threshold_helper(self, monkeypatch):
+        called = {}
+        base = {"roc_auc": 0.60, "eval_date": "2026-08-20"}
+
+        def fake(key, default):
+            called[key] = True
+            return default
+
+        monkeypatch.setattr(dd, "_threshold", fake)
+        monkeypatch.setattr(dd, "query_one", lambda *a, **k: dict(base))
+        result = dd.check_auc_drift()
+
+        assert called.get("dl_min_roc_auc"), (
+            "floor must be settings-overridable like every other threshold in this module"
+        )
+        assert result["status"] == "OK"
+
+    def test_even_a_collapsed_auc_cannot_emit_emergency_retrain(self, monkeypatch):
+        # Guard the design decision: this is a monitor. If it ever grows an exit(1),
+        # it starts fighting model_promotion's relative bars + staleness override.
+        monkeypatch.setattr(dd, "query_one", lambda *a, **k: self._row(0.01))
+        assert dd.check_auc_drift()["status"] != "EMERGENCY_RETRAIN"

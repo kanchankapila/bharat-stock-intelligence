@@ -47,8 +47,11 @@ def main():
 
     section("1. Intraday emission gate -- live status")
     ranker = IntradayRanker(conn=conn)
-    avg_pnl, n = ranker._emission_edge()
-    allowed, reason = ranker._emission_allowed()
+    # Per-direction since the SHORT-gate split: _emission_allowed(direction) returns
+    # (allowed, reason, avg_pnl, n), and each direction publishes only when its OWN
+    # trailing realised edge clears the bar -- long edge says nothing about short.
+    allowed, reason, avg_pnl, n = ranker._emission_allowed("LONG")
+    short_allowed, short_reason, short_avg, short_n = ranker._emission_allowed("SHORT")
     print(f"  Lookback window:        {EMISSION_GATE_LOOKBACK_DAYS}d")
     print(f"  Min trades required:    {EMISSION_GATE_MIN_TRADES}")
     print(f"  Min avg PnL required:   {EMISSION_GATE_MIN_AVG_PNL:+.2f}%/trade")
@@ -56,6 +59,11 @@ def main():
     print(f"  Resolved trades (n):    {n}")
     print(f"  GATE STATE:             {'OPEN -- Buy/Strong-Buy publishing' if allowed else 'CLOSED -- downgraded to Hold'}")
     print(f"  Reason:                 {reason}")
+    print(f"  [SHORT] avg PnL / n:    "
+          + (f"{short_avg:+.4f}%/trade over {short_n} trades" if short_avg is not None
+             else f"n/a over {short_n} resolved trades"))
+    print(f"  GATE STATE (SHORT):     {'OPEN -- Sell/Strong-Sell publishing' if short_allowed else 'CLOSED -- downgraded to Hold'}")
+    print(f"  Reason (SHORT):         {short_reason}")
     if allowed:
         print(
             "\n  *** The gate has FLIPPED OPEN since the 2026-07-31 audit found it closed. ***\n"

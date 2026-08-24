@@ -3,6 +3,49 @@
 Historical record, split out of CLAUDE.md on 2026-08-11 (it was 64% of that file and was being loaded into every context window).
 
 **Not loaded automatically.** Read a specific entry when you need the history behind a decision. Durable lessons extracted from here live in `.claude/rules/`; if you find one that isn't there, add it.
+## 2026-08-24 -- ml engine halved on arm-test evidence, isotonic collapse fixed at the read, DL ROC-AUC finally monitored
+
+Three changes shipped as one unit because they were measured as one unit (the arm harness ran
+against the persisted, still-collapsed scores):
+
+- **`REGIME_WEIGHTS`: third targeted shrink -- `ml` x0.5, freed weight redistributed
+  proportionally over the other six non-pinned engines; `breakout` pinned at its exact prior
+  value per regime** (same mechanism/policy as the two screener shrinks). NOT the original plan
+  (demote `dl`) -- that hypothesis was tested and lost: mechanical A/B arms over the IDENTICAL
+  panel/labels/metrics as `blend_walkforward.py` (59,756 rows, 24 sessions, paired daily-IC
+  t-stats): BASE mean rank IC 0.0405; **A `ml`x0.5 IC 0.0424, dIC +0.0019, t=+2.05 -- SHIPPED**
+  (only arm clearing dIC>0 AND |t|>=~2); B `ml`+`dl`x0.5 IC 0.0379, t=-1.82 -- rejected (`dl`
+  holds the best single-engine IC +0.059 @5d); C hand-fed-to-confluence variant IC 0.0420,
+  t=+0.78 -- rejected, so confluence's rise here is a CONSEQUENCE of proportional
+  redistribution, not hand-picking. Known accepted consequence (same class as 2026-08-21):
+  absolute-score thresholds shift with the distribution; re-run `blend_walkforward.py` after
+  ~20 further sessions, revert is one commit.
+- **Isotonic-collapse fix at BOTH read sites** (~L1500 sizing, ~L1653 ranking in
+  `unified_ranker.py`, not the stale L1463/L1611 from memory): `COALESCE(win_probability,
+  calibrated_win_probability)` -- the calibrators collapse dispersion when a regime has no live
+  edge (HIGH_VOL pinned ~90% of rows near ~0.78), so calibrated-first made the ml score
+  near-constant: blend weight with zero cross-sectional rank information (blended AUC@5d 0.5206
+  vs confluence's own 0.5812 on identical rows). The optional per-regime edge-shrink machinery
+  above these queries is untouched and stays off by default.
+- **DL held-out metrics plumbed into monitoring.** `walk_forward_validate()` always computed
+  `roc_auc` but NOTHING ever wrote `dl_model_performance.directional_accuracy/roc_auc` (the
+  daily INSERT writes `drift_score` only) -- the router/UI served an all-NULL AUC history.
+  Added: `drift_detector.write_training_metrics()` (persists under today's date,
+  `model_version='lstm_vN'` so the `(model_name, eval_date, horizon_days)` conflict target
+  never collides with the 'current' drift row; NaN skipped, DB errors swallowed); called from
+  `dl_engine.train_lstm()` post-validation; `drift_detector.check_auc_drift()` compares the
+  latest held-out AUC against a settings-overridable floor (`app_settings` key
+  `dl_min_roc_auc`, default 0.55) -- deliberately a MONITOR that can never emit
+  EMERGENCY_RETRAIN, because promotion decisions belong to model_promotion's relative bars +
+  staleness override. 9 new tests in `tests/test_drift_detector.py`; 23/23 green.
+
+Also fixed while gating: `scripts/check_load_bearing_constraints.py` section 1 still called the
+pre-split 2-tuple `_emission_edge()/_emission_allowed()` API -- crashed before sections 2+
+(the breakout-ceiling pin this very reweight must pass) could run. Now uses per-direction
+`_emission_allowed("LONG"/"SHORT")` 4-tuples and reports both gates. Verified live: checker
+green end-to-end (all five regimes at/below the audit ceiling), regime suite 32/32,
+full `unified_ranker.py` production run scored 2,049 stocks under SIDEWAYS with
+`degraded_count: 0`.
 
 ## 2026-08-20 (cont.) — `/production-grade-hardening` skill created
 

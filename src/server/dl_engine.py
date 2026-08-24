@@ -502,6 +502,19 @@ def train_lstm(version: int = 1) -> Dict:
             print(f"[DL] Walk-forward validation failed (non-fatal): {e}")
             print(f"[DL] Training completed successfully; metrics unavailable")
 
+    # Persist held-out metrics so monitoring finally sees what training computed. Before
+    # 2026-08-24 NOTHING wrote dl_model_performance's directional_accuracy/roc_auc columns
+    # (drift_detector only ever wrote drift_score), so the router/UI served an all-NULL AUC
+    # history and drift_detector.check_accuracy_drift had no fresh baseline. Runs even when
+    # validation failed above: NaN metrics are skipped inside write_training_metrics, and
+    # that function swallows its own DB errors -- a monitoring write must never fail a
+    # completed training run.
+    try:
+        from drift_detector import write_training_metrics
+        write_training_metrics(metrics, model_version=f"lstm_v{version}")
+    except Exception as me:
+        print(f"[DL] Held-out metric persistence skipped: {me}")
+
     MODEL_DIR.mkdir(parents=True, exist_ok=True)
     path = MODEL_DIR / f"lstm_v{version}.pt"
 

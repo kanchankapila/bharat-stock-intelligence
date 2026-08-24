@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 """
-Two-layer drift detection:
+Three-layer drift detection:
   Layer 1: PSI on feature distributions (feature drift)
   Layer 2: Rolling 30-day directional accuracy (prediction drift)
-Writes drift_score to dl_model_performance.
+  Layer 3: Held-out ROC-AUC vs the promotion bar (from persisted training metrics)
+Writes drift_score / directional_accuracy / roc_auc to dl_model_performance.
 
 KNOWN LIMITATION -- the PSI thresholds below are a measured point-in-time calibration, not a
 self-maintaining one. They were derived from this panel's own null distribution on 2026-08-15
@@ -250,6 +251,85 @@ def get_drift_multiplier() -> float:
         return 1.0
 
 
+# ---------------------------------------------------------------------------
+# Layer 3: held-out ROC-AUC vs an absolute quality floor.
+#
+# Gap fixed 2026-08-24: walk_forward_validate() has always computed a held-out
+# roc_auc, but nothing ever persisted it -- the INSERT above only writes
+# drift_score, so dl_model_performance's directional_accuracy/roc_auc columns
+# stayed NULL forever, check_accuracy_drift never found a fresh baseline, and
+# the API served an empty AUC history. Two additions:
+#   * write_training_metrics(): called from dl_engine.train_lstm() immediately
+#     after training; persists the held-out metrics under TODAY's date with
+#     model_version='lstm_vN' (the daily drift row keeps 'current', so the
+#     ON CONFLICT target (model_name, eval_date, horizon_days) never collides).
+#     NaN metrics are skipped -- a failed validation run must not look like data.
+#   * check_auc_drift(): compares the most recent persisted held-out AUC against
+#     an absolute floor. Deliberately a MONITOR, not a second gate: promotion
+#     decisions stay in model_promotion.py (relative bars + staleness override);
+#     this only records that serving quality shows evidence of decay.
+# ---------------------------------------------------------------------------
+PROMOTION_AUC_FLOOR = 0.55  # settings-overridable via app_settings key 'dl_min_roc_auc'
+
+
+def write_training_metrics(metrics: dict, eval_date=None, model_version: str = "current") -> None:
+    """Persist walk_forward_validate()'s held-out metrics into dl_model_performance."""
+    day = eval_date or datetime.today().strftime("%Y-%m-%d")
+    acc = metrics.get("directional_accuracy")
+    auc = metrics.get("roc_auc")
+    n   = metrics.get("n_test") or metrics.get("sample_count")
+
+    def _clean(x):
+        if x is None or (isinstance(x, float) and math.isnan(x)):
+            return None
+        return float(x)
+
+    try:
+        execute(
+            """INSERT INTO dl_model_performance
+               (model_name, model_version, eval_date, horizon_days,
+                directional_accuracy, roc_auc, sample_count)
+               VALUES (?, ?, ?, 5, ?, ?, ?)
+               ON CONFLICT(model_name, eval_date, horizon_days) DO UPDATE SET
+                 model_version=excluded.model_version,
+                 directional_accuracy=excluded.directional_accuracy,
+                 roc_auc=excluded.roc_auc,
+                 sample_count=excluded.sample_count""",
+            ("LSTM_TFT_ENSEMBLE", model_version, day,
+             _clean(acc), _clean(auc), int(n) if n else None))
+        print(f"[DRIFT] persisted held-out metrics for {day}: "
+              f"acc={_clean(acc)} auc={_clean(auc)} n={n}")
+    except Exception as e:
+        # Monitoring write: swallow-and-log so it can never fail a finished training run.
+        print(f"[DRIFT] held-out metric persistence failed (non-fatal): {e}")
+
+
+def check_auc_drift(min_roc_auc=None) -> dict:
+    """Latest persisted held-out ROC-AUC vs the absolute floor (monitor only)."""
+    if min_roc_auc is None:
+        min_roc_auc = _threshold("dl_min_roc_auc", PROMOTION_AUC_FLOOR)
+    try:
+        row = query_one(
+            "SELECT roc_auc, eval_date FROM dl_model_performance "
+            "WHERE model_name = ? AND roc_auc IS NOT NULL "
+            "ORDER BY eval_date DESC LIMIT 1", ("LSTM_TFT_ENSEMBLE",))
+    except Exception as e:
+        return {"status": "QUERY_FAILED", "error": str(e)}
+    if not row:
+        return {"status": "NO_DATA",
+                "note": "no held-out roc_auc persisted yet; "
+                        "next `dl_engine.py --mode train` run populates it"}
+    if isinstance(row, (list, tuple)):
+        auc_val, day = row[0], row[1]
+    else:
+        auc_val, day = row["roc_auc"], row["eval_date"]
+    auc    = float(auc_val)
+    status = "OK" if auc >= min_roc_auc else "DEGRADED"
+    print(f"[DRIFT] AUC monitor: {auc:.4f} on {day} vs floor {min_roc_auc:.2f} -> {status}")
+    return {"status": status, "held_out_roc_auc": auc,
+            "eval_date": str(day), "floor": min_roc_auc}
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--model", default="LSTM_TFT_ENSEMBLE")
@@ -257,6 +337,11 @@ if __name__ == "__main__":
 
     r1 = check_feature_drift(args.model)
     r2 = check_accuracy_drift(args.model)
+    # Monitor-only: a DEGRADED AUC must NOT exit(1) -- retrain decisions belong to
+    # model_promotion (relative bars + staleness override), not to an absolute floor.
+    r3 = check_auc_drift()
+    print(f"[DRIFT] AUC monitor: {r3.get('status')}"
+          + (f" held_out_auc={r3['held_out_roc_auc']:.4f}" if "held_out_roc_auc" in r3 else ""))
 
     if r1.get("status") == "EMERGENCY_RETRAIN" or r2.get("status") == "EMERGENCY_RETRAIN":
         print("[DRIFT] EMERGENCY_RETRAIN required")
