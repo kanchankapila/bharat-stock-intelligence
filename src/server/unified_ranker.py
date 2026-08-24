@@ -802,6 +802,20 @@ def is_engine_edge_adjustment_enabled(conn) -> bool:
         return False
 
 
+def is_ic_tilt_enabled(conn) -> bool:
+    """Gate for ic_tilted_weights(): app_settings 'engine_ic_tilt_enabled', default OFF
+    (missing row), same convention as every other ranker flag here. When ON it supersedes
+    is_engine_edge_adjustment_enabled (run() enforces the precedence)."""
+    try:
+        row = conn.execute(
+            "SELECT value FROM app_settings WHERE key = 'engine_ic_tilt_enabled'"
+        ).fetchone()
+        return bool(row) and row['value'] == 'true'
+    except Exception as e:
+        print(f"[UnifiedRanker] is_ic_tilt_enabled unavailable: {e}", file=sys.stderr)
+        return False
+
+
 def load_engine_edge_verdicts(conn, regime: str, horizon: int = ENGINE_EDGE_HORIZON) -> dict:
     """engine -> verdict ('USABLE'/'no edge'/'LOW-DATA'/None) from the most recent
     factor_edge.py run against unified_recommendations, for this regime falling back to
@@ -845,6 +859,93 @@ def edge_adjusted_weights(base_weights: dict, verdicts: dict) -> dict:
     if total <= 0:
         return dict(base_weights)
     return {e: w / total * sum(base_weights.values()) for e, w in adjusted.items()}
+
+
+# ── IC-tilted engine weights (successor to binary edge_adjusted_weights) ──────
+# Why this exists (AF-20260823-81 close-out): edge_adjusted_weights is BINARY -- it halves
+# any engine whose persisted 5d verdict reads 'no edge'. Measured live 2026-08-24, every
+# engine except dl grades 'no edge' at h=5 (dl +0.059 IC, technical +0.031, breakout +0.026,
+# ml/cs/screener/confluence negative), so the binary rule halves nearly everything and the
+# freed weight flows proportionally to LOW-DATA engines with NO evidence -- reallocation
+# toward the unproven, not toward the proven. The magnitude information (the actual signed
+# rank IC) is thrown away exactly where it is informative.
+#
+# ic_tilted_weights instead rescales each engine's share by its own measured 5d rank IC,
+# clamped to [1+ENGINE_TILT_CLAMP, 1+ENGINE_TILT_CLAMP] so a single strong (or pathological)
+# estimate cannot dominate, floored at 0 so a negatively-loaded engine never enters the buy
+# blend inverted (a negative-IC engine is DROPPED here, not flipped -- sign flips are a
+# different decision requiring their own evidence), and renormalized. Engines below
+# ENGINE_IC_MIN_DATES distinct dates carry no reliable estimate (factor_edge's own
+# MIN_DATES_RELIABLE bar) and pass through untouched.
+#
+# Gate: app_settings 'engine_ic_tilt_enabled' (default OFF, like every predecessor). When
+# ON it SUPERSEDES engine_edge_adjustment_enabled -- the two must not stack (shrink-then-
+# tilt would double-count the same evidence). run() enforces the precedence.
+ENGINE_IC_MIN_DATES = 20
+ENGINE_TILT_CLAMP = 0.75   # max |deviation| of an engine's multiplier from 1.0
+
+
+def load_latest_engine_ics(conn, horizon: int = ENGINE_EDGE_HORIZON,
+                           table_name: str = 'unified_recommendations__open_entry') -> dict:
+    """engine -> {'ic': float, 'dates': int} from the most recent factor_edge_history run
+    for this table/horizon (regime 'ALL'), or {} when nothing has ever been graded.
+    Missing engines simply stay absent -- callers decide what absence means.
+    Defaults to the __open_entry grades: that is the panel-spec entry convention
+    (enter at next open, exit at the open N sessions later -- no untradeable overnight
+    gap credit) and what blend_walkforward.py measures against, so tilt multipliers must
+    come from the same label definition the harness validates. Close-entry rows stay
+    available under table_name='unified_recommendations'."""
+    try:
+        row = conn.execute(
+            "SELECT MAX(run_at) AS r FROM factor_edge_history "
+            "WHERE table_name = ? AND horizon_days = ? AND regime = 'ALL'",
+            (table_name, int(horizon))).fetchone()
+        run_at = row['r'] if row else None
+        if not run_at:
+            return {}
+        out = {}
+        rows = conn.execute(
+            "SELECT score_col, rank_ic, dates FROM factor_edge_history "
+            "WHERE run_at = ? AND table_name = ? AND horizon_days = ? AND regime = 'ALL'",
+            (run_at, table_name, int(horizon))).fetchall()
+        for r in rows:
+            for engine, col in ENGINE_TO_SCORE_COL.items():
+                if col == r['score_col'] and r['rank_ic'] is not None and r['dates'] is not None:
+                    out[engine] = {'ic': float(r['rank_ic']), 'dates': int(r['dates'])}
+        return out
+    except Exception as e:
+        print(f"[UnifiedRanker] load_latest_engine_ics unavailable: {e}", file=sys.stderr)
+        return {}
+
+
+def ic_tilted_weights(base_weights: dict, engine_ics: dict,
+                      min_dates: int = ENGINE_IC_MIN_DATES,
+                      clamp: float = ENGINE_TILT_CLAMP) -> tuple:
+    """Pure function -> (weights, report). Rescale each engine's share by
+    min(1 + ic, 1 + clamp), floored at 0 -- an anti-predictive engine is shrunk toward
+    zero-weight and only reaches literal 0 (dropped) once its IC <= -1; it is never
+    inverted. Engines whose estimate carries >= min_dates distinct dates qualify;
+    everything else passes through untouched. Renormalizes to the original total.
+    Returns the ORIGINAL dict unchanged (identity, not copy-equal) when no engine qualifies."""
+    report = {}
+    touched = False
+    adjusted = {}
+    for e, w in base_weights.items():
+        info = engine_ics.get(e) or {}
+        ic, dates = info.get('ic'), info.get('dates', 0)
+        if ic is None or dates is None or dates < min_dates:
+            adjusted[e] = w
+            continue
+        mult = max(0.0, min(1.0 + ic, 1.0 + clamp))
+        # 1 - clamp floor: a strongly negative IC drives the multiplier to 0 (dropped),
+        # never negative (an anti-predictive engine must not enter the blend inverted).
+        adjusted[e] = w * mult
+        report[e] = {'ic': round(ic, 4), 'dates': dates, 'mult': round(mult, 4)}
+        touched = True
+    total = sum(adjusted.values())
+    if not touched or total <= 0:
+        return dict(base_weights), {}
+    return ({e: w / total * sum(base_weights.values()) for e, w in adjusted.items()}, report)
 
 
 #: Selectivity band the Buy floor is expected to land in, as a fraction of the scored
@@ -2161,10 +2262,20 @@ class UnifiedRanker:
         regime, _conf     = self._get_regime()
         regime_for_weights = self._effective_regime_for_weights(regime)
         base_weights      = REGIME_WEIGHTS.get(regime_for_weights, REGIME_WEIGHTS['BULL'])
-        if is_engine_edge_adjustment_enabled(self.conn):
+        if is_engine_edge_adjustment_enabled(self.conn) and not is_ic_tilt_enabled(self.conn):
             verdicts = load_engine_edge_verdicts(self.conn, regime_for_weights)
             base_weights = edge_adjusted_weights(base_weights, verdicts)
             print(f"[UnifiedRanker] engine edge adjustment applied: {verdicts}", file=sys.stderr)
+        # IC-tilt supersedes the binary shrink when both flags are set -- running both would
+        # apply the same factor_edge evidence twice (shrink-then-tilt double-counts).
+        if is_ic_tilt_enabled(self.conn):
+            engine_ics = load_latest_engine_ics(self.conn, horizon=ENGINE_EDGE_HORIZON)
+            base_weights, tilt_report = ic_tilted_weights(base_weights, engine_ics)
+            if tilt_report:
+                print(f"[UnifiedRanker] IC-tilt applied: {tilt_report}", file=sys.stderr)
+            else:
+                print("[UnifiedRanker] IC-tilt enabled but no engine carries a reliable "
+                      "(>=20-date) estimate yet -- weights unchanged.", file=sys.stderr)
         event_triggers_map = self._get_event_triggers(today)
         fund_scores       = self._get_fundamental_scores()
         quality_metrics   = self._get_quality_metrics()
