@@ -1328,16 +1328,24 @@ async function processMlWeeklyRetrain(_job: Job): Promise<{ success: boolean; fa
   // Sunday — so it needs real headroom; 10min was SIGTERM-killing it most weeks (2026-07-19).
   await runPython('exit_labeler.py', [], 30 * 60_000)
     .catch(e => console.warn('[QUEUE] exit_labeler failed:', (e as Error).message));
-  // Retrain the exit policy models. 10min was SIGTERM-killing this deterministically (not
-  // just under contention) once signal_excursions grew to ~145k rows -- GradientBoosting
-  // fits 4 models (2 targets x split-fit + refit-all) at n_estimators=300, measured 703s
-  // uncontended on 2026-07-26. Same growing-dataset timeout pattern already hit once before
-  // by exit_labeler.py just above (bumped 10min -> 30min on 2026-07-19); mirrored here.
+  // Retrain the exit policy models. Growing-dataset timeout history: 10min killed it
+  // deterministically once signal_excursions reached ~145k rows (bumped to 20min on
+  // 2026-07-26, measured 703s uncontended at that size); by the 2026-08-23 run the table had
+  // grown to 362k trainable rows (+151%) and 20min became deterministic too -- killed at
+  // exactly 1,200,000ms two weeks running (2026-08-17 silently, 2026-08-23 surfaced via
+  // job_heartbeat), leaving the live model >1 week stale both times. Re-timed standalone
+  // 2026-08-24: ~2,090s (~35min) wall at 362k trainable rows (309k after the fundamentals
+  // as-of join) -- confirmed past capacity, not contention; bumped 20min -> 45min, which
+  // leaves headroom for roughly another doubling. If it times out again, re-time the script
+  // standalone first (contention vs capacity) -- GradientBoosting fits 4 models (2 targets x
+  // split-fit + refit-all) at n_estimators=300, so runtime scales with row count. Safe to
+  // extend: no chain-level budget wraps this processor (only ml-daily-ops/quant-eod-sync get
+  // withJobTimeout) and this worker's 6h lockDuration dwarfs the added 25min.
   // T.run (not a bare .catch), ml-promotion-gate-review 2026-08-19: exit_policy writes a
   // promotion decision to model_registry on every run, and this step's --train call has already
   // timed out silently in production (2026-08-17) with nothing surfacing it beyond this log line
   // -- same fix already applied to ml-ensemble-train/strategy-optimizer/backtest-optimizer below.
-  await T.run('exit-policy-train', () => runPython('exit_policy.py', ['--train'], 20 * 60_000));
+  await T.run('exit-policy-train', () => runPython('exit_policy.py', ['--train'], 45 * 60_000));
   // --tune runs Optuna hyperparameter search (this is what took the model from AUC 0.70 to
   // 0.757 in the first place) — without it, every scheduled retrain silently falls back to
   // untuned defaults, which measured ~0.20 AUC worse on held-out test in one observed run.
