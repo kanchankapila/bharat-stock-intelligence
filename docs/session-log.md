@@ -5794,3 +5794,44 @@ Commits split by concern: cutoff fixes (previously staged), AF-77 walls migratio
 sector NULLs + suite, docs/logs, greenfield scheduling + stocklist cleanup, outcome-resolver
 bulk prefetch + tests, and the accuracy-probe finding.
 
+## 2026-08-24 — IC-tilt wired to real grades, measured, and the gate correctly left OFF; AF-79 label double-scaling fixed
+
+**The wiring gap:** `unified_ranker.load_latest_engine_ics` read its point-in-time engine grades
+from `unified_recommendations` by default — but per the panel spec (`measurement.md`) and
+`blend_walkforward.py`, the measurement-valid grades are the **open-entry** rows in
+`unified_recommendations__open_entry`. Close-entry grades leak outcome information relative to
+what a same-day blend could know, so the tilt (AF-20260823-81's successor to the binary
+edge_adjusted_weights) never bound in production. Default flipped to `__open_entry`;
+close-entry rows remain reachable via explicit parameter. Re-stamped `computed_at` to the
+logical session date with stale same-day row purging so a rerun cleanly regenerates a session
+block instead of accumulating duplicate stamps.
+
+**Grades refreshed, then measured honestly:** full `factor_edge.py` refresh over all 9 scores,
+h=5/10/21, by-regime, `--entry open`, persisted run_at 2026-08-23T22:40:12. Open-entry h=5
+ALL-regime rank ICs: **dl +0.053** (best), technical +0.028, breakout +0.024 (low-data), ml
+−0.003, screener −0.037, confluence −0.046 (BEAR 5d: −0.170). Every AUC < 0.55 — under the old
+binary rule *everything* reads "no edge", which is exactly why the graded tilt exists. But the
+walk-forward verdict on the tilt itself is negative-so-far: binding only from ~Aug-11 onward
+(20-session embargo eats the rest), base mean rank-IC **0.0405 vs tilt 0.0401**, top-30 gainer
+hits 6→6, mean edge +0.055pp→+0.041pp. **Gate `engine_ic_tilt_enabled` stays OFF**; re-judge
+once more post-fix sessions accumulate behind the binding window. Immunized regardless:
+`src/server/tests/test_ranker_ic_tilt.py` (11 tests: multiplier math incl. independently
+recomputed renormalization, drop-not-invert semantics, clamp ceiling, evidence gate, loader
+table mapping, gate precedence over edge_adjusted_weights).
+
+**AF-20260823-79 fixed as its own measured change:** the percent-return x100 double-scaling is
+gone from BOTH paths (`_vol_threshold_from_closes` and `get_volatility_threshold`); threshold is
+now daily % stdev x sqrt(horizon), clamped [0.5, 15]. Pinned by
+`test_vol_threshold_af79_true_percent_vol_scaling` plus updated clamp assertions;
+`test_bulk_prefetch_equivalence.py` now carries 12 tests, all green. Historical labels on disk
+were graded under the old clamped threshold and are deliberately left untouched.
+
+**Housekeeping:** Monday's prediction block regenerated live (2,049 stocks scored, SIDEWAYS,
+degraded_count 0; the purge path removed 29 stale same-day rows first) and `/e2e-lifecycle-check`
+returns PASS end-to-end on the fresh data. The five throwaway probes (`_probe_af81_state*.py`,
+`_probe_schemes.py`, `_tmp_accuracy_check.py`, `_tmp_forward_check.py`) were deleted
+uncommitted — their methodology survives in the AF-81 finding row, complete enough to rebuild.
+
+Commits split by concern: ranker tilt wiring + guard tests; AF-79 label scaling + equivalence
+suite; docs/session-log. Full suite at commit time: 1739 passed / 232 skipped.
+
