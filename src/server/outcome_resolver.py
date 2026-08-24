@@ -241,12 +241,15 @@ def _atr_from_bars(bars_chrono) -> float:
 
 
 def _vol_threshold_from_closes(closes_chrono, horizon_days: int) -> float:
-    """Verbatim extraction of get_volatility_threshold's math, decoupled from
-    the DB. NOTE: `daily_vol` multiplies sqrt(variance-of-PERCENT returns) by
-    100 — a historical double-scaling that pins the result at the 15% clamp for
-    anything but ultra-flat series. Reproduced EXACTLY here (filed as
-    AF-20260823-79); changing it is a LABEL-semantics change requiring its own
-    measured before/after, not a drive-by fix inside a perf refactor."""
+    """Volatility-scaled WIN/LOSS threshold from a trailing close window.
+
+    AF-20260823-79 RESOLVED (2026-08-24): this used to multiply
+    sqrt(variance-of-PERCENT returns) by 100 a second time -- _clean_daily_returns
+    already returns percent units -- which pinned every non-flat series at the 15%
+    clamp, i.e. h5 labels degenerated to 'any real move wins'. That preserved a legacy
+    bug through a perf refactor on purpose; it is now fixed as its own measured change:
+    daily_vol is the true daily % stdev, threshold = daily_vol * sqrt(horizon), same
+    clamp band [0.5%, 15%] and same short-history fallback formula as before."""
     if len(closes_chrono) < 10:
         return max(0.5, min(10.0, 1.0 * math.sqrt(horizon_days)))
     returns = _clean_daily_returns(list(closes_chrono))
@@ -254,7 +257,8 @@ def _vol_threshold_from_closes(closes_chrono, horizon_days: int) -> float:
         return max(0.5, min(10.0, 1.0 * math.sqrt(horizon_days)))
     mean_ret = sum(returns) / len(returns)
     variance = sum((r - mean_ret) ** 2 for r in returns) / (len(returns) - 1)
-    daily_vol = math.sqrt(variance) * 100  # historical double-scaling — see docstring
+    # _clean_daily_returns returns PERCENT returns; no second x100 (AF-20260823-79).
+    daily_vol = math.sqrt(variance)
     threshold = daily_vol * math.sqrt(horizon_days)
     return max(0.5, min(15.0, threshold))
 
@@ -623,10 +627,9 @@ def get_volatility_threshold(conn: ConnWrapper, symbol: str, signal_date: str, h
 
     Batched (AF-69): prefers the run-wide prefetch (_CLOSES_CACHE), falling back
     to the original direct query on a miss; result memoized per
-    (symbol, date, horizon). Math verbatim-unchanged — including the historical
-    percent-return *100 double-scaling (AF-20260823-79), which is deliberately
-    NOT fixed here: that is a label-semantics change requiring its own measured
-    before/after under the panel spec.
+    (symbol, date, horizon). Threshold math is the AF-20260823-79-corrected scaling (daily % stdev x
+    sqrt(horizon), clamped [0.5, 15]); the historical percent-return *100
+    double-scaling was removed on 2026-08-24 as its own measured label change.
     """
     key = (str(symbol), _norm_iso(signal_date), int(horizon_days))
     hit = _VOLTHRESH_CACHE.get(key)

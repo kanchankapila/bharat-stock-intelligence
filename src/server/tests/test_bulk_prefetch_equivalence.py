@@ -115,8 +115,33 @@ def test_vol_threshold_excludes_suspect_bar_identically():
     warm(conn, ['SUSP2'])
     hot = orc.get_volatility_threshold(conn, 'SUSP2', SIGNAL_DATE, 5)
     assert hot == pytest.approx(cold)
-    # AF-20260823-79 (preserved verbatim, see _vol_threshold_from_closes):
-    # percent-return variance x 100 pins ANY non-flat series at the 15%
+    # AF-20260823-79 FIXED (2026-08-24): percent returns are no longer re-scaled x100,
+    # so a normal-vol window sits well below the old pinned 15% clamp.
+    assert hot < 15.0
+
+
+def test_vol_threshold_af79_true_percent_vol_scaling():
+    """AF-20260823-79 resolution: threshold = daily %% stdev * sqrt(horizon), clamped
+    [0.5, 15]. A +-3%% zig-zag used to land at EXACTLY 15.0 (double-scaling); now it
+    must equal the true scaled vol and stay far below the clamp."""
+    import outcome_resolver as orc
+    closes = [100.0, 103.0, 97.0, 103.0, 97.0, 103.0, 97.0, 103.0, 97.0,
+              103.0, 97.0, 103.0]
+    th = orc._vol_threshold_from_closes(closes, horizon_days=5)
+    rets = [(closes[i] - closes[i - 1]) / closes[i - 1] * 100 for i in range(1, len(closes))]
+    mean = sum(rets) / len(rets)
+    var = sum((r - mean) ** 2 for r in rets) / (len(rets) - 1)
+    import math
+    expected = max(0.5, min(15.0, math.sqrt(var) * math.sqrt(5)))
+    assert th == pytest.approx(expected, rel=1e-9)
+    # the old bug pinned this exact series at the clamp:
+    assert th < 15.0
+
+
+def test_vol_threshold_flat_series_floors_at_half_percent():
+    import outcome_resolver as orc
+    th = orc._vol_threshold_from_closes([100.0] * 21, horizon_days=5)
+    assert th == pytest.approx(0.5)
 
 
 def test_vol_threshold_short_history_fallback_formula():
@@ -435,10 +460,6 @@ def test_prepare_outcome_caches_idempotent():
     first_atr = dict(orc._ATR_CACHE)
     warm(conn, ['IDEM'])
     assert orc._ATR_CACHE == first_atr
-
-    # clamp — including this spike-free window. Encoded as-is so that the day
-    # AF-79 is fixed, this test fails loudly and gets re-measured.
-    assert hot == 15.0
 
 
 
