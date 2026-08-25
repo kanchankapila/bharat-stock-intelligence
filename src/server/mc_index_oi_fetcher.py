@@ -240,6 +240,20 @@ def _fetch_and_store(sc_id: str, expiry: str, date: str, fetched_at: str) -> int
         oi_date = max(mc_results.keys(), default=date)
         date_block = mc_results.get(oi_date) or {}
         raw_rows = date_block.get("list") or []
+        # 2026-08-25: when MC's freshest block is STALE relative to the requested trading
+        # date (their API serves T-1 data through much of day T), these rows used to be
+        # upserted onto oi_date anyway -- overwriting the row nt_oi_snapshot_fetcher had
+        # already written for that same key hours earlier, while the CURRENT session got
+        # nothing. Measured live: index_option_oi froze at 2026-08-21 for three runs
+        # (08-22 00:08 / 08-24 15:09 / 08-24 20:39 all "succeeded") purely as backdated
+        # overwrites, while sibling index_max_pain stayed fresh. A stale block must write
+        # nothing rather than clobber another provider's session.
+        if oi_date < date:
+            log.warning(
+                "%s expiry=%s: MC's freshest OI block is %s (< requested %s); skipping "
+                "rather than backdating over an already-written session",
+                index_name, expiry, oi_date, date)
+            return 0
     if not raw_rows:
         # Fallback: flat list under data
         flat = data.get("oiData") or data.get("oi_data") or []

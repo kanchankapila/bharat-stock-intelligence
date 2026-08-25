@@ -11,6 +11,7 @@ Each repair is idempotent and can be run independently:
   --holidays        populate market_holidays from observed trading gaps
   --news-link       build an indexed news_symbol_link table from symbols_json
   --labels          add label_definition/producer to signal_outcomes + flag implausible returns
+  --feature-store-columns  add feature_store flow/fundamental columns feature_engineering writes
   --nan-recommendations  delete unified_recommendations rows with a non-finite unified_score
   --ghost-recommendations delete unified_recommendations rows for symbols with no price history
   --weekend-recommendations delete unified_recommendations snapshots dated to a closed day
@@ -358,6 +359,62 @@ def repair_labels(conn: ConnWrapper, dry: bool) -> None:
     conn.commit()
 
 
+def repair_feature_store_columns(conn: ConnWrapper, dry: bool) -> None:
+    """Schema catch-up: feature_store columns feature_engineering writes but live PG lacks.
+
+    Found 2026-08-24 via the Gap #4 verification probe (_tmp_verify.py): the writer's
+    upsert lists 94 columns, live table had 86 -- every process_symbol() run has been
+    failing with UndefinedColumn since the Gap #4/#5 writer expansion landed, so
+    feature_store stopped receiving ANY fresh rows (not just the new ones).
+
+    Nine missing columns:
+      iv_skew, insider_buy_pct_90d, block_deal_net_qty, call_wall_dist_pct,
+      put_wall_dist_pct, near_expiry_gamma, sector_ret_5d, sector_ret_21d,
+      price_to_book  (legacy `pb` predates the writer and has never received a row --
+      0 non-null values table-wide -- so feature_engineering writes only
+      price_to_book; dl_engine.FEATURE_COLS was repointed from `pb` to
+      `price_to_book` on 2026-08-24 at the same list position, keeping checkpoint
+      shape).
+    Mirrored into db/schema.postgres.sql so bootstrap/DR restores match; bare
+    ADD COLUMN is metadata-only here and safe under Timescale compression
+    (.claude/commands/migration-safety-review.md). No data backfill: these are
+    point-in-time measurements, NEVER_FILL doctrine applies.
+    """
+    _log("feature_store: adding missing flow/fundamental columns ...")
+    stmts = [
+        "ALTER TABLE feature_store ADD COLUMN IF NOT EXISTS iv_skew DOUBLE PRECISION",
+        "ALTER TABLE feature_store ADD COLUMN IF NOT EXISTS insider_buy_pct_90d DOUBLE PRECISION",
+        "ALTER TABLE feature_store ADD COLUMN IF NOT EXISTS block_deal_net_qty DOUBLE PRECISION",
+        "ALTER TABLE feature_store ADD COLUMN IF NOT EXISTS call_wall_dist_pct DOUBLE PRECISION",
+        "ALTER TABLE feature_store ADD COLUMN IF NOT EXISTS put_wall_dist_pct DOUBLE PRECISION",
+        "ALTER TABLE feature_store ADD COLUMN IF NOT EXISTS near_expiry_gamma DOUBLE PRECISION",
+        "ALTER TABLE feature_store ADD COLUMN IF NOT EXISTS sector_ret_5d DOUBLE PRECISION",
+        "ALTER TABLE feature_store ADD COLUMN IF NOT EXISTS sector_ret_21d DOUBLE PRECISION",
+        "ALTER TABLE feature_store ADD COLUMN IF NOT EXISTS price_to_book DOUBLE PRECISION",
+    ]
+    if not dry:
+        for s in stmts:
+            conn.execute(s)
+        conn.commit()
+    have = {
+        r[0]
+        for r in conn.execute(
+            "SELECT column_name FROM information_schema.columns "
+            "WHERE table_schema = current_schema() AND table_name = 'feature_store'"
+        ).fetchall()
+    }
+    want = [
+        "iv_skew", "insider_buy_pct_90d", "block_deal_net_qty", "call_wall_dist_pct",
+        "put_wall_dist_pct", "near_expiry_gamma", "sector_ret_5d", "sector_ret_21d",
+        "price_to_book",
+    ]
+    missing = [c for c in want if c not in have]
+    _log(f"  post-check: {len(want) - len(missing)}/{len(want)} present"
+         + (f", STILL MISSING: {missing}" if missing else ""))
+    if missing and not dry:
+        raise RuntimeError(f"feature_store schema catch-up failed for {missing}")
+
+
 # ── entry point ──────────────────────────────────────────────────────────────
 
 def repair_nan_recommendations(conn: ConnWrapper, dry: bool) -> None:
@@ -559,6 +616,7 @@ TASKS = {
     'holidays': repair_holidays,
     'news_link': repair_news_link,
     'labels': repair_labels,
+    'feature_store_columns': repair_feature_store_columns,
     'nan_recommendations': repair_nan_recommendations,
     'ghost_recommendations': repair_ghost_recommendations,
     'weekend_recommendations': repair_weekend_recommendations,

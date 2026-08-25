@@ -40,13 +40,18 @@ class TestNextMonthExpiry:
 
 
 class TestAtmIvFromChain:
-    def _row(self, strike, call_ltp, expiry="2026-08-25"):
+    def _row(self, strike, call_ltp, expiry=None):
+        # Default expiry = next month's inferred expiry. A hardcoded past date makes T<=0,
+        # where the BS inversion legitimately returns None and every assertion below would
+        # date-bomb (this file itself did exactly that on 2026-08-25).
+        if expiry is None:
+            expiry = str(_next_month_expiry(datetime.date.today()))
         return {"strike_price": strike, "calls_ltp": call_ltp, "expiry_date": expiry}
 
     def test_picks_strike_closest_to_spot(self):
         oc = [self._row(1080, 25.0), self._row(1095, 21.65), self._row(1110, 18.0)]
         iv, expiry = _atm_iv_from_chain(oc, spot=1096.5)
-        assert expiry == "2026-08-25"
+        assert expiry == oc[0]["expiry_date"]
         # ATM strike (1095) should be used, not 1080 or 1110 -- IV should come back as a
         # plausible annualised vol (0 < iv < 2.0), not None (a real call price was supplied).
         assert iv is not None and 0 < iv < 2.0
@@ -55,7 +60,7 @@ class TestAtmIvFromChain:
         oc = [self._row(1095, 0.0)]
         iv, expiry = _atm_iv_from_chain(oc, spot=1095.0)
         assert iv is None
-        assert expiry == "2026-08-25"
+        assert expiry == oc[0]["expiry_date"]
 
 
 class TestImpliedVol:

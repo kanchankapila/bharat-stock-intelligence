@@ -190,11 +190,18 @@ const SKIP_LIVE_TABLES = new Set(["pgmigrations"]);
 async function fetchLiveSchema(): Promise<SchemaMap> {
   const { getPool } = await import("../src/server/pgClient");
   const pool = getPool();
+  // Ordinary BASE TABLEs only -- generatePgSchemaFromLive.ts deliberately emits relkind='r'
+  // relations and nothing else, so extension-created VIEWS (pg_stat_statements/_info) must be
+  // excluded here too or they report as permanent "live but not in file" phantom drift the
+  // regen tool can never clear (found 2026-08-25 after the extension was enabled on live).
   const { rows } = await pool.query<{ table_name: string; column_name: string }>(
-    `SELECT table_name, column_name
-     FROM information_schema.columns
-     WHERE table_schema = 'public'
-     ORDER BY table_name, column_name`
+    `SELECT c.table_name, c.column_name
+     FROM information_schema.columns c
+     JOIN information_schema.tables t
+       ON t.table_schema = c.table_schema AND t.table_name = c.table_name
+      AND t.table_type = 'BASE TABLE'
+     WHERE c.table_schema = 'public'
+     ORDER BY c.table_name, c.column_name`
   );
   const map: SchemaMap = new Map();
   for (const row of rows) {

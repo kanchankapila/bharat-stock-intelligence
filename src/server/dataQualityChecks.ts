@@ -193,7 +193,7 @@ const TABLE_FRESHNESS_CHECKS: TableFreshnessConfig[] = [
   { id: 'so-option-chain-freshness', label: 'so_option_chain (Trendlyne live options chain)',
     category: 'options', critical: false, table: 'so_option_chain', dateColumn: 'date', warnDays: 3, failDays: 5 },
   { id: 'index-option-oi-freshness', label: 'index_option_oi (MC index OI/max-pain)',
-    category: 'options', critical: false, table: 'index_option_oi', dateColumn: 'date', warnDays: 3, failDays: 5 },
+    category: 'options', critical: false, table: 'index_option_oi', dateColumn: 'date', warnDays: 1, failDays: 3 },
   { id: 'nt-index-pcr-ts-freshness', label: 'nt_index_pcr_ts (NiftyTrader PCR/VIX)',
     category: 'options', critical: false, table: 'nt_index_pcr_ts', dateColumn: 'fetched_at', warnDays: 3, failDays: 5 },
   { id: 'stock-option-features-freshness', label: 'stock_option_features (per-stock option chain features)',
@@ -244,8 +244,16 @@ const TABLE_FRESHNESS_CHECKS: TableFreshnessConfig[] = [
     category: 'flows', critical: false, table: 'insider_trades', dateColumn: 'date_iso', warnDays: 14 },
   { id: 'bulk-block-deals-recency', label: 'bulk_block_deals (delivery-trend NSE bulk/block feed)',
     category: 'flows', critical: false, table: 'bulk_block_deals', dateColumn: 'deal_date', warnDays: 14 },
+  // Tightened from 3/5 to 1/3 on 2026-08-25: this table froze at 2026-08-21 through three
+  // consecutive "successful" runs (mc_index_oi-style backdated upserts on the TS side are
+  // impossible here, but a fetcher can still exit 0 without advancing THIS table -- NSE
+  // publishes the MTO file late and deliveryFetcher.ts returns an empty map silently when
+  // it isn't there yet) while the generic 3/5-day threshold stayed green the whole time.
+  // One trading day of silence IS the defect signature for a table that lands daily.
   { id: 'stock-delivery-volume-freshness', label: 'stock_delivery_volume (MTO delivery %)',
-    category: 'flows', critical: false, table: 'stock_delivery_volume', dateColumn: 'date', warnDays: 3, failDays: 5 },
+    category: 'flows', critical: false, table: 'stock_delivery_volume', dateColumn: 'date',
+    emptyDetail: 'stock_delivery_volume is empty — NSE MTO fetch has never written a row',
+    warnDays: 1, failDays: 3 },
   { id: 'mf-stock-holdings-recency', label: 'mf_stock_holdings (per-stock MF ownership, monthly disclosure)',
     category: 'flows', critical: false, table: 'mf_stock_holdings', dateColumn: 'as_of_date', warnDays: 45 },
   // Empty because the UPSTREAM SOURCE IS DEAD, not because the fetcher is broken. AMFI's

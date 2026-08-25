@@ -95,17 +95,15 @@ def _insert_blocks(src_path):
 
 @pytest.mark.parametrize("block", _insert_blocks("backfill_technical_features.py"),
                          ids=["backfill-run", "grid-ensurer"])
-def test_backfill_inserts_list_all_four_columns_with_explicit_nulls(block):
-    """These two writers cannot compute the four values; omitting the columns from the INSERT
-    list is what let DEFAULT 0 fabricate ~90% of the table. They must spell out the columns and
-    bind NULL so the omission can never silently return."""
-    for col in FOUR_COLS:
+def test_insert_names_every_flow_sector_column_explicitly(block):
+    """Omitting a column from the INSERT list is how DEFAULT 0 fabricated ~90% of the
+    table (AF-78) -- every writer must name these columns explicitly. Updated 2026-08-25:
+    the grid-ensurer now binds REAL computed values (_flow_nets rolling nets + equal-weight
+    sector momentum) instead of literal NULLs, so the no-fabrication guarantee moved to
+    test_flow_sector_backfill_wiring.py's unit tests plus that script's own repair pass."""
+    for col in ["fii_3d_net"] + FOUR_COLS:
         assert re.search(rf"\b{col}\b", block.split("VALUES")[0]), (
             f"INSERT column list omits {col}")
-    # All four values arrive as literal NULLs, positioned after the bound parameters.
-    vals = block.split("VALUES")[1]
-    assert len(re.findall(r"\bNULL\b", vals)) >= 4, (
-        "VALUES must carry explicit NULLs for the four flow/sector columns")
 
 
 def test_strategy_skeleton_writer_never_touches_feature_columns():

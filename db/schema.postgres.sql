@@ -641,19 +641,6 @@ CREATE TABLE IF NOT EXISTS "feature_store" (
   "nifty_vix" DOUBLE PRECISION,
   "nifty_pe" DOUBLE PRECISION,
   "advance_decline_ratio" DOUBLE PRECISION,
-  -- Schema catch-up, 2026-08-24: feature_engineering writes these (Gap #4/#5 flow /
-  -- smart-money / sector-momentum / valuation columns) but the live table predated them,
-  -- which made every feature_store upsert fail with UndefinedColumn. Kept in sync via
-  -- data_integrity_repair.py --feature-store-columns.
-  "iv_skew" DOUBLE PRECISION,
-  "insider_buy_pct_90d" DOUBLE PRECISION,
-  "block_deal_net_qty" DOUBLE PRECISION,
-  "call_wall_dist_pct" DOUBLE PRECISION,
-  "put_wall_dist_pct" DOUBLE PRECISION,
-  "near_expiry_gamma" DOUBLE PRECISION,
-  "sector_ret_5d" DOUBLE PRECISION,
-  "sector_ret_21d" DOUBLE PRECISION,
-  "price_to_book" DOUBLE PRECISION,
   "nifty_ret_5d" DOUBLE PRECISION,
   "nifty_ret_21d" DOUBLE PRECISION,
   "us_10y_yield" DOUBLE PRECISION,
@@ -671,6 +658,15 @@ CREATE TABLE IF NOT EXISTS "feature_store" (
   "target_dir_15d" BIGINT,
   "computed_at" TIMESTAMPTZ DEFAULT now(),
   "ret_12m_ex1m" DOUBLE PRECISION,
+  "iv_skew" DOUBLE PRECISION,
+  "insider_buy_pct_90d" DOUBLE PRECISION,
+  "block_deal_net_qty" DOUBLE PRECISION,
+  "call_wall_dist_pct" DOUBLE PRECISION,
+  "put_wall_dist_pct" DOUBLE PRECISION,
+  "near_expiry_gamma" DOUBLE PRECISION,
+  "sector_ret_5d" DOUBLE PRECISION,
+  "sector_ret_21d" DOUBLE PRECISION,
+  "price_to_book" DOUBLE PRECISION,
   PRIMARY KEY ("symbol", "date", "timeframe")
 );
 CREATE INDEX idx_fs_date ON public.feature_store USING btree (date);
@@ -1774,6 +1770,19 @@ CREATE TABLE IF NOT EXISTS "moneycontrol_screeners" (
 );
 CREATE INDEX idx_mc_scan_id ON public.moneycontrol_screeners USING btree (scan_id);
 CREATE UNIQUE INDEX uq_moneycontrol_screeners_scan_id ON public.moneycontrol_screeners USING btree (scan_id);
+
+-- ── mover_snapshots ─────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS "mover_snapshots" (
+  "source" TEXT NOT NULL,
+  "trade_date" TEXT NOT NULL,
+  "symbol" TEXT NOT NULL,
+  "rank" INTEGER,
+  "pct_change" DOUBLE PRECISION,
+  "metric_value" DOUBLE PRECISION,
+  "captured_at" TEXT,
+  "payload_json" TEXT,
+  PRIMARY KEY ("source", "trade_date", "symbol")
+);
 
 -- ── ndtv_fno_basis ─────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS "ndtv_fno_basis" (
@@ -4034,6 +4043,7 @@ CREATE TABLE IF NOT EXISTS "unified_recommendations_history" (
   "position_size_pct" DOUBLE PRECISION,
   "sector" TEXT,
   "dl_score" DOUBLE PRECISION,
+  "win_probability" DOUBLE PRECISION,
   PRIMARY KEY ("symbol", "generated_at")
 );
 CREATE INDEX idx_urh_computed_generated ON public.unified_recommendations_history USING btree (computed_at, generated_at);

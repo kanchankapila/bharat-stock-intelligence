@@ -2698,6 +2698,14 @@ class UnifiedRanker:
         for r in results:
             r['position_size_pct'] = round(position_sizes.get(r['symbol'], 0.0) * 100, 2)
 
+        # win_probability into each result row for unified_recommendations_history (the raw
+        # meta-label behind position_size_pct; see migration 1787140000000). .get() keeps the
+        # row NULL for symbols the ensemble had no finite probability for.
+        for r in results:
+            wp = win_probs.get(r['symbol'])
+            if wp is not None and math.isfinite(wp):
+                r['win_probability'] = float(wp)
+
         cur = self.conn.cursor()
         for r in results:
             cur.execute('''
@@ -2777,13 +2785,13 @@ class UnifiedRanker:
                  classification, screener_stock_score, ml_score, confluence_score,
                  technical_score, cs_score, dl_score, breakout_score, smart_money_score,
                  fundamental_score, engine_coverage_count, entry_zone_low, stop_loss,
-                 target_1, position_size_pct, sector)
+                 target_1, position_size_pct, sector, win_probability)
                 VALUES (:symbol, :computed_at, :generated_at, :regime, :unified_score,
                         :conviction_level, :classification, :screener_stock_score, :ml_score,
                         :confluence_score, :technical_score, :cs_score, :dl_score,
                         :breakout_score, :smart_money_score, :fundamental_score,
                         :engine_coverage_count, :entry_zone_low, :stop_loss, :target_1,
-                        :position_size_pct, :sector)
+                        :position_size_pct, :sector, :win_probability)
                 ON CONFLICT(symbol, generated_at) DO NOTHING
             ''', r)
         self.conn.commit()

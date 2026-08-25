@@ -91,6 +91,7 @@ def make_db():
             smart_money_score REAL,
             fundamental_score REAL, engine_coverage_count INTEGER, entry_zone_low REAL,
             stop_loss REAL, target_1 REAL, position_size_pct REAL, sector TEXT,
+            win_probability REAL,
             PRIMARY KEY (symbol, generated_at)
         );
         CREATE TABLE unified_signals (
@@ -556,13 +557,19 @@ class TestUnifiedRankerRun:
 
     def test_regime_weights_sum_to_one(self):
         from unified_ranker import REGIME_WEIGHTS
-        # screener shrunk 0.5x TWICE on the same policy and the same kind of evidence:
+        # screener was shrunk 0.5x TWICE on the same policy and the same kind of evidence:
         # 2026-08-20 (0.30 -> 0.15 BULL, 0.40 -> 0.20 CRASH) and again 2026-08-21
         # (-> 0.075 / 0.10) after factor_edge put screener_stock_score at rank IC -0.033 @5d
         # and -0.016 @10d on 35/30 dates while technical/dl were positive on identical rows.
+        # On 2026-08-24 (commit 0c666ec) ml was halved on its own arm evidence (dIC +0.0019,
+        # t=+2.05) and every regime re-normalized, lifting screener back up (BULL 0.08445,
+        # CRASH 0.115177 -- renormalization redistributes freed mass). Pin the POLICY
+        # invariant instead of a renormalization-sensitive number: screener stays below HALF
+        # its original pre-evidence weight (BULL 0.30, CRASH 0.40) in every regime. Climbing
+        # back above that line requires new measurement, not arithmetic.
         # See measurement.md and REGIME_WEIGHTS' own comment block.
-        assert REGIME_WEIGHTS['BULL']['screener'] == 0.075
-        assert REGIME_WEIGHTS['CRASH']['screener'] == 0.10
+        assert REGIME_WEIGHTS['BULL']['screener'] <= 0.15 + 1e-9
+        assert REGIME_WEIGHTS['CRASH']['screener'] <= 0.20 + 1e-9
         for regime, weights in REGIME_WEIGHTS.items():
             assert abs(sum(weights.values()) - 1.0) < 1e-9, f"{regime} weights don't sum to 1"
         # breakout is PINNED by an independent audit-derived ceiling; a proportional

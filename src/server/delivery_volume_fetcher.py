@@ -154,20 +154,39 @@ def upsert_rows(rows: list[dict], con) -> None:
 
 
 def backfill_technical_signals(today: str, con) -> int:
-    """Copy today's delivery_pct into technical_signals for the ML pipeline."""
+    """Copy delivery_pct into technical_signals for the ML pipeline.
+
+    Heals BOTH `today` and the previous sourced session (2026-08-25): MTO files are
+    typically published ~18:00-19:30 IST and this runs in the evening chain, but a
+    15:30 IST intraday scan can already have written that day's grid rows with an
+    empty deliveryMap (deliveryFetcher.ts returns Map() silently when NSE hasn't
+    published yet). Measured live 2026-08-24: delivery_pct was 0/2,198 rows on the
+    Monday grid even though Friday's data existed and tonight's fetch succeeded --
+    the copy only ever targeted `today`'s rows, so the gap persisted until the next
+    day. Writing the prior session too closes that window without any second job.
+    """
     cur = con.cursor()
-    cur.execute("""
-        UPDATE technical_signals
-        SET delivery_pct = (
-            SELECT delivery_pct FROM stock_delivery_volume
-            WHERE symbol = technical_signals.symbol AND date = ?
-            LIMIT 1
-        )
-        WHERE date = ?
-    """, (today, today))
-    updated = cur.rowcount
+    total = 0
+    sessions = [str(r['d'])[:10] for r in con.execute(
+        "SELECT DISTINCT date AS d FROM stock_delivery_volume "
+        "WHERE date <= ? ORDER BY d DESC LIMIT 2", (today,)).fetchall()]
+    if today not in sessions:
+        sessions = [today] + sessions
+    for d in dict.fromkeys(sessions):
+        cur.execute("""
+            UPDATE technical_signals
+            SET delivery_pct = (
+                SELECT delivery_pct FROM stock_delivery_volume
+                WHERE symbol = technical_signals.symbol AND date = ?
+                LIMIT 1
+            )
+            WHERE date = ? AND delivery_pct IS NULL
+        """, (d, d))
+        n = cur.rowcount
+        total += max(n, 0)
+        print(f"[Delivery] {d}: filled delivery_pct on {n} technical_signals rows")
     con.commit()
-    return updated
+    return total
 
 
 def main() -> None:

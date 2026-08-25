@@ -14,6 +14,19 @@ Computed indicators:
   above_sma200, adx, nifty_regime, sector_ret_5d, sector_ret_21d,
   fii_3d_net, signal_score (0), signal_type (BACKFILL)
 
+--full-today (grid-ensurer) also fills the market-wide flow columns
+(fii_3d_net / fii_10d_net / dii_3d_net) and cross-sectional sector returns
+(sector_ret_5d / sector_ret_21d) onto every GRID row it creates (2026-08-25).
+These five were left NULL by this script since they were added, and stayed alive
+only through densify_feature_matrix.py's forward-fill — until 5a97df3 put them
+in NEVER_FILL (correctly: a stale flow reading is a fabricated reading), which
+silently removed their only bulk producer. Measured live 2026-08-24, the first
+trading day after that commit: fii_3d_net fell from ~1,642 rows/day to 309 (the
+signal-scan subset), fii_10d_net/dii_3d_net to the same 309, sector_ret_5d/21d
+to 0. All three engines that consume them (dl_engine FEATURE_COLS,
+ml_ensemble build_features, cs_ranker/exit_policy SELECTs) read them straight
+off technical_signals, so the gap fed straight into training/inference.
+
 Usage:
   python backfill_technical_features.py
   python backfill_technical_features.py --limit 500   # process first 500 pairs
@@ -273,13 +286,83 @@ def run(limit: int | None = None):
     print(f"[Backfill] Done: {written} ts rows written, {skipped} skipped (insufficient OHLCV)")
 
 
+def _flow_nets(fii_by_date: dict, grid_date: str):
+    """Rolling FII/DII nets as of grid_date from sessions STRICTLY BEFORE it.
+
+    Session T's FII/DII figure is published after T's close, so a value stamped on
+    T's grid row must be built from sessions <= T-1 — feature_engineering's
+    FII_LAG_DAYS=1 shift is the training-side convention; mirroring it keeps live
+    rows consistent with what the trainer sees. NULL sessions (holidays) are skipped
+    by the filter, not treated as zero. Returns (fii_3d, fii_10d, dii_3d), all None
+    when fewer than 3 published sessions precede grid_date."""
+    prior = sorted(d for d in fii_by_date if d < grid_date)
+    if len(prior) < 3:
+        return None, None, None
+    last3 = prior[-3:]
+    last10 = prior[-10:]
+
+    def _sum(idx: int, window: list) -> float:
+        vals = [fii_by_date[d][idx] for d in window]
+        vals = [v for v in vals if v is not None]
+        return sum(vals) if vals else None
+
+    return _sum(0, last3), _sum(0, last10), _sum(1, last3)
+
+
+def _load_flow_sector_inputs(con) -> dict:
+    """One-shot load of what run_full_universe_today's per-row fills need.
+
+    Returns {'fii_by_date': {iso_date: (fii_net, dii_net)},
+             'sector_mom': {iso_date: {sector: (r5, r21)}}}.
+    """
+    fii_by_date: dict = {}
+    for r in con.execute(
+        "SELECT date::text AS d, fii_net, dii_net FROM fii_dii_flow ORDER BY date ASC"
+    ).fetchall():
+        # fii_dii_flow.date is TEXT (regime_detector.py rule #6); normalize so lookup keys
+        # match the stock_ohlcv-derived grid dates exactly.
+        fii_by_date[str(r['d'])[:10]] = (r['fii_net'], r['dii_net'])
+
+    sector_mom: dict = {}
+    # Same equal-weight per-sector mean technicalSignalsService.getSectorMomentum() and
+    # feature_engineering._compute_sector_momentum compute: LAG over each member's own bar
+    # calendar, suspect bars excluded, AVG skips NULLs so warm-up days simply drop out.
+    rows = con.execute("""
+        WITH daily_close AS (
+            SELECT o.symbol, o.date::text AS d, n.sector, o.close AS c,
+                   LAG(o.close, 5)  OVER (PARTITION BY o.symbol ORDER BY o.date) AS prev5,
+                   LAG(o.close, 21) OVER (PARTITION BY o.symbol ORDER BY o.date) AS prev21
+            FROM stock_ohlcv o
+            JOIN nse_stocks n ON n.symbol = o.symbol AND n.sector IS NOT NULL
+            WHERE COALESCE(o.is_suspect,0)=0
+              AND o.date >= CURRENT_DATE - INTERVAL '75 days'
+        )
+        SELECT d, sector,
+               AVG(100.0 * (c / NULLIF(prev5, 0)  - 1)) AS r5,
+               AVG(100.0 * (c / NULLIF(prev21, 0) - 1)) AS r21
+        FROM daily_close
+        GROUP BY d, sector
+    """).fetchall()
+    for r in rows:
+        if r['r5'] is None and r['r21'] is None:
+            continue
+        sector_mom.setdefault(str(r['d'])[:10], {})[str(r['sector'])] = (r['r5'], r['r21'])
+    return {'fii_by_date': fii_by_date, 'sector_mom': sector_mom}
+
+
 def run_full_universe_today(min_price: float = 15.0) -> int:
     """Grid-ensurer: guarantee a technical_signals row exists for EVERY liquid stock on
     the latest OHLCV date, with the core OHLCV-derived indicators. The signal scan only
     writes rows for stocks that produced a tradable pattern (14-800/day), so most of the
     universe had no feature row on most days — starving the ensemble/ranker of a complete
     cross-section. This fills the gap (ON CONFLICT DO NOTHING, so the scan's richer rows
-    are left intact); the RS/HV/aVWAP engines then enrich the full grid."""
+    are left intact); the RS/HV/aVWAP engines then enrich the full grid.
+
+    Also fills the five market-wide columns densify_feature_matrix can never carry
+    (NEVER_FILL since 5a97df3): fii_3d_net/fii_10d_net/dii_3d_net rolled from
+    fii_dii_flow's published nets, and sector_ret_5d/21d from the same equal-weight
+    sector mean the scan writes — so GRID rows carry real values instead of relying on
+    a forward-fill that no longer exists."""
     con = connect()
     latest = logical_write_floor(con)
     if not latest:
@@ -293,6 +376,10 @@ def run_full_universe_today(min_price: float = 15.0) -> int:
                    [(str(x['date'])[:10], x) for x in reversed(regime_rows)] if d <= latest),
                   'SIDEWAYS') if regime_rows else 'SIDEWAYS'
 
+    inputs = _load_flow_sector_inputs(con)
+    fii_by_date = inputs['fii_by_date']
+    sector_mom = inputs['sector_mom']
+
     rows = con.execute(
         "SELECT symbol, date, open, high, low, close, volume FROM stock_ohlcv "
         "WHERE date >= ? AND COALESCE(is_suspect,0)=0 ORDER BY symbol, date ASC",
@@ -302,36 +389,84 @@ def run_full_universe_today(min_price: float = 15.0) -> int:
     for r in rows:
         by_symbol[r['symbol']].append({**dict(r), 'date': str(r['date'])[:10]})
 
+    symbol_sector = {r['symbol']: r['sector'] for r in con.execute(
+        "SELECT symbol, sector FROM nse_stocks WHERE sector IS NOT NULL").fetchall()}
+
     now_str = datetime.now().isoformat()
     written = 0
+    filled_sector = 0
+    f3_day, f10_day, d3_day = _flow_nets(fii_by_date, latest)
     for symbol, ohlcv in by_symbol.items():
         if len(ohlcv) < 22 or ohlcv[-1]['date'] != latest:
             continue  # need history + a bar for the latest session
         if (ohlcv[-1]['close'] or 0) < min_price:
             continue
         ind = compute_indicators(ohlcv)
+        sec = symbol_sector.get(symbol)
+        r5, r21 = (sector_mom.get(latest, {}).get(sec, (None, None))
+                   if sec else (None, None))
+        if r5 is not None:
+            filled_sector += 1
         con.execute("""
             INSERT INTO technical_signals
                 (symbol, date, signal_score, signal_type,
                  rsi, sma50, sma200, macd, macd_signal,
                  bb_width, volume_ratio, above_sma200, adx, cmp,
                  change_pct, nifty_regime, computed_at,
-                 fii_10d_net, dii_3d_net, sector_ret_5d, sector_ret_21d)
+                 fii_3d_net, fii_10d_net, dii_3d_net,
+                 sector_ret_5d, sector_ret_21d)
             VALUES (?,?,0,'GRID',?,?,?,?,?,?,?,?,?,?,?,?,?,
-                    NULL,NULL,NULL,NULL)
+                    ?,?,?,
+                    ?,?)
             ON CONFLICT (symbol, date) DO NOTHING
         """, (
             symbol, latest, ind['rsi'], ind['sma50'], ind['sma200'],
             ind['macd'], ind['macd_signal'], ind['bb_width'], ind['volume_ratio'],
             ind['above_sma200'], ind['adx'], ind['cmp'],
             round((ohlcv[-1]['close'] / ohlcv[-2]['close'] - 1) * 100, 2) if len(ohlcv) >= 2 and ohlcv[-2]['close'] else None,
-            regime, now_str))
+            regime, now_str,
+            f3_day, f10_day, d3_day,
+            r5, r21))
         written += 1
         if written % 2000 == 0:
             con.commit()
     con.commit()
+    # ── Repair pass ──────────────────────────────────────────────────────────────
+    # ON CONFLICT DO NOTHING leaves pre-existing rows untouched, so a day gridded before
+    # this filler existed (or by a partial run) keeps its NULLs forever. Backfill the
+    # market-wide columns onto any GRID row of `latest` still missing them. Flows are
+    # market-wide constants for the day; sector returns resolve per symbol.
+    if f3_day is not None:
+        missing = con.execute(
+            "SELECT COUNT(*) AS c FROM technical_signals "
+            "WHERE date=? AND signal_type='GRID' AND fii_3d_net IS NULL",
+            (latest,)).fetchone()['c']
+        if missing:
+            con.execute(
+                "UPDATE technical_signals SET fii_3d_net=?, fii_10d_net=?, dii_3d_net=? "
+                "WHERE date=? AND signal_type='GRID' AND fii_3d_net IS NULL",
+                (f3_day, f10_day, d3_day, latest))
+            print(f"[Grid] repaired flow nets on {missing} pre-existing GRID rows")
+    sec_fixes = []
+    for r in con.execute(
+        "SELECT symbol FROM technical_signals "
+        "WHERE date=? AND signal_type='GRID' AND sector_ret_5d IS NULL",
+        (latest,)).fetchall():
+        s = symbol_sector.get(r['symbol'])
+        vals = sector_mom.get(latest, {}).get(s) if s else None
+        if vals:
+            sec_fixes.append((vals[0], vals[1], r['symbol'], latest))
+    if sec_fixes:
+        con.executemany(
+            "UPDATE technical_signals SET sector_ret_5d=?, sector_ret_21d=? "
+            "WHERE symbol=? AND date=? AND signal_type='GRID' AND sector_ret_5d IS NULL",
+            sec_fixes)
+        print(f"[Grid] repaired sector returns on {len(sec_fixes)} rows")
+    con.commit()
     total = con.execute("SELECT COUNT(*) AS c FROM technical_signals WHERE date=?", (latest,)).fetchone()['c']
     print(f"[Grid] {latest}: ensured {written} rows; technical_signals now has {total} rows for the day.")
+    print(f"[Grid] flow nets: fii_3d={f3_day} fii_10d={f10_day} dii_3d={d3_day}; "
+          f"sector returns filled on {filled_sector}/{written}")
     return written
 
 
