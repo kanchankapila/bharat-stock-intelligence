@@ -70,9 +70,55 @@ def pg_available() -> bool:
         return False
     try:
         psycopg2.connect(connect_timeout=3, **_pg_dsn()).close()
-        return True
     except Exception:
         return False
+    # Opportunistic hygiene: reap schemas orphaned by earlier crashed/killed runs (see
+    # below). Best-effort only -- a failed sweep never gates availability.
+    purge_orphan_schemas()
+    return True
+
+
+def purge_orphan_schemas() -> int:
+    """DROP leftover throwaway schemas from crashed/killed pytest runs.
+
+    Why this has to exist: drain_memory_conns()/drop_throwaway_schema() only run when
+    teardown executes. A hard crash -- Ctrl-C mid-suite, killed CI worker, closed laptop
+    -- skips them, and every t_* schema minted so far stays in the target database
+    forever. They hold nothing, but they POLLUTE: any information_schema/pg_tables
+    listing that filters on table name alone reads each row once per orphan. Measured
+    2026-08-25: twelve orphans made information_schema.columns report index_option_oi's
+    columns twelve times over, which briefly looked like schema drift.
+
+    Safety: only the exact `t_` + 12-hex pattern THIS module mints can match, so a
+    production schema can never collide (a uuid4 hex collision with a concurrent run is
+    vanishingly impossible). A short statement_timeout keeps a schema whose leftover
+    connections still hold locks from stalling the sweep indefinitely; the blocked DROP
+    raises, is swallowed, and is retried on some later sweep once the blocker exits.
+
+    Returns the number of schemas actually dropped. Every failure is swallowed: this is
+    janitorial work called opportunistically from pg_available(), and it must never be
+    the reason a test cannot run.
+    """
+    try:
+        import psycopg2
+
+        conn = psycopg2.connect(**_pg_dsn())
+        conn.autocommit = True
+        cur = conn.cursor()
+        cur.execute("SET statement_timeout TO '2s'")
+        cur.execute("SELECT nspname FROM pg_namespace WHERE nspname ~ '^t_[0-9a-f]{12}$'")
+        names = [r[0] for r in cur.fetchall()]
+        dropped = 0
+        for name in names:
+            try:
+                cur.execute(f'DROP SCHEMA "{name}" CASCADE')
+                dropped += 1
+            except Exception:
+                pass  # locked (another process's live schema) or already gone: skip
+        conn.close()
+        return dropped
+    except Exception:
+        return 0
 
 
 # ─── pg_memory_conn(): what this suite uses instead of sqlite3.connect(':memory:') ─────────
