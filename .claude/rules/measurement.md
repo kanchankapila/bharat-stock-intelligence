@@ -1903,6 +1903,31 @@ construction is expected to be faster than 400+ incremental DataFrame inserts (t
 reason pandas recommends this pattern), but that expectation was not measured with a timer, and
 should not be quoted as a measured number.
 
+### First real DL walk-forward AUC in 17 attempts (roc_auc=0.6493), and the saturation guard rejected promotion anyway — 2026-08-25
+
+The widened-set BiLSTM retrain (features 78→85: `sector_ret_5d`/`sector_ret_21d` with sector-momentum
+backfill, plus width-agnostic checkpoint loading) completed over the full universe: **2,153 symbols /
+667,723 sequences / ~4h29m, clean exit.** For the first time since the NULL streak began, the
+walk-forward validation produced real metrics instead of the silent sub-4,300-row validation-pool NaN
+path that auto-rejected 16+ consecutive retrains (v4→v19) with `cv_roc_auc: NULL`: **roc_auc=0.6493,
+directional_accuracy=0.609, 6 folds.** The relative-AUC bar itself PASSED against the active champion
+v3 — and the candidate was REJECTED anyway: **frac_saturated=0.536 tripped MAX_SATURATION_FRAC=0.5**, i.e.
+54% of walk-forward predictions sat within 1% of 0 or 1 — overconfident outputs despite good rank
+ordering. This was the guard's first live firing since it was added 2026-08-10 after the then-promoted
+v4 jumped to 70% saturated predictions, and it fired exactly as designed: champion v3 kept
+(`lstm_version=3` unchanged in `dl_model_config.json`, serving verified post-gate — `dl_engine.py
+--mode infer` wrote 2,425 predictions for 2026-08-25), candidate weights left on disk at
+`ml_models/lstm_v4.pt` with registry row `is_active=0` (on-disk presence still ≠ regression; it
+overwrites an older rejected v4). Scoped commit `5a97df3`; tests green before commit
+(`test_dl_engine.py` 23/23, `test_feature_engineering_batch.py` 6/6).
+
+Caveats stated, not smoothed over: **6 folds is thin** (wide CI around 0.6493); one training run, no
+seed variance; and per the "Accuracy comes from realized returns, never a proxy" rule at the top of
+this file, **a held-out CV AUC is still a proxy** — it is the gate's input, not evidence of live edge
+(the `dl` engine's own realized grade remains the marginal "no edge" reading in the `_get_dl_scores`
+entry above, unchanged by this rejection). If saturation persists across future retrains, the next
+lever is label/loss-side calibration, **not gate tampering** — the bar that fired is doing its job.
+
 ## Not testable — do not spend time here without a genuinely new angle
 
 - **Fundamentals, analyst, ownership and earnings factors**: every one of those tables has ~30 distinct dates, all starting 2026-06-30 (1–2 independent quarterly observations). Calendar constraint, not engineering — elapsed time or a backfill fixes it, nothing else does.
