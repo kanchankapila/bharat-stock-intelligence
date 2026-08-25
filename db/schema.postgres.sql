@@ -3192,7 +3192,7 @@ CREATE TABLE IF NOT EXISTS "technical_scans" (
 -- ── technical_signals ─────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS "technical_signals" (
   "symbol" TEXT NOT NULL,
-  "date" TEXT NOT NULL,
+  "date" DATE NOT NULL,
   "signals_json" TEXT,
   "signal_score" BIGINT DEFAULT 0,
   "rsi" DOUBLE PRECISION,

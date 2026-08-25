@@ -96,6 +96,17 @@ export const QUEUE_TRENDLYNE_INTRADAY   = 'trendlyne-intraday';
 export const QUEUE_ML_DAILY_OPS        = 'ml-daily-ops';
 export const QUEUE_ML_WEEKLY_RETRAIN   = 'ml-weekly-retrain';
 export const QUEUE_INTRADAY_FETCHER    = 'intraday-fetcher';
+// Ground-truth mover screener capture (see mover_screener_fetcher.py): persists the day's
+// Top Gainers/Losers, gap-up/down, price-shocker lists into mover_snapshots before they
+// scroll away -- the ground truth for reverse_engineering_study.py.
+export const QUEUE_MOVER_CAPTURE       = 'mover-screener-capture';
+// Intraday slot capture of the NT live cross-section (mover_screener_fetcher.py
+// --intraday): one POST -> ntlive_<HHMM>_market + local screens, several times a day.
+export const QUEUE_MOVER_INTRADAY      = 'mover-intraday-capture';
+let moverQueue: Queue | undefined;
+let moverWorker: Worker | undefined;
+let moverIntradayQueue: Queue | undefined;
+let moverIntradayWorker: Worker | undefined;
 export { QUEUE_RESEARCH_PREMARKET, QUEUE_RESEARCH_POSTCLOSE, QUEUE_OUTCOME_RESOLVER } from './jobs/operations.jobs';
 export { QUEUE_SCREENER_PERFORMANCE, QUEUE_COMPANY_PROFILES_SYNC, QUEUE_TICKERTAPE_SCORECARD } from './jobs/sync.jobs';
 export { QUEUE_NSE_SYNC } from './jobs/sync.jobs';
@@ -432,6 +443,23 @@ async function processIntradayFetcher(_job: Job): Promise<{ skipped: boolean }> 
   // Fetches 15m bars for all 2328 NSE stocks (last 24h) — ~4 min per run.
   await runPython('intraday_fetcher.py', ['--lookback-days', '1'], 600_000)
     .catch(e => console.warn('[QUEUE] intraday_fetcher failed:', (e as Error).message));
+  return { skipped: false };
+}
+
+async function processMoverCapture(_job: Job): Promise<{ skipped: boolean }> {
+  // Movers lists only exist on trading days; skip weekends/holidays like intraday-fetcher.
+  if (!(await isMarketOpen())) {
+    console.log('[QUEUE] mover-screener-capture skipped — outside NSE market hours');
+    return { skipped: true };
+  }
+  // ~2 min: five lightweight JSON list endpoints + one OHLCV pass.
+  await runPython('mover_screener_fetcher.py', [], 5 * 60_000)
+    .then(() => recordHeartbeat('mover-screener-capture', 'success'))
+    .catch(e => {
+      console.warn('[QUEUE] mover_screener_fetcher failed:', (e as Error).message);
+      recordHeartbeat('mover-screener-capture', 'failed', (e as Error).message);
+      throw e;
+    });
   return { skipped: false };
 }
 
@@ -2250,6 +2278,104 @@ export async function initQueues(): Promise<boolean> {
     intradayFetcherWorker.on('failed', (_, err) => {
       console.error('[QUEUE] intraday-fetcher failed:', err.message);
       recordHeartbeat('intraday-fetcher', 'failed', err?.message);
+    });
+
+    // ── Mover screener capture (3:35 PM IST weekdays, after close): persists Top
+    // Gainers/Losers (1d+1w), MarketsMojo movers, NiftyTrader gaps, MC price-shockers
+    // plus computed gap/open=high/open=low/volume-shocker/breakout classes for today
+    // into mover_snapshots. Ground truth for reverse_engineering_study.py; lists scroll
+    // away within a day, so the capture is the only durable record.
+    moverQueue = new Queue(QUEUE_MOVER_CAPTURE, { connection });
+    const moverRep = await moverQueue.getRepeatableJobs();
+    for (const r of moverRep) await moverQueue.removeRepeatableByKey(r.key);
+    await moverQueue.add('mover-capture-daily', {}, {
+      repeat: { pattern: '35 10 * * 1-5', tz: 'Etc/UTC' },
+      jobId: 'mover-capture-daily',
+      removeOnComplete: 3,
+      removeOnFail: 3,
+    });
+    moverWorker = new Worker(
+      QUEUE_MOVER_CAPTURE,
+      processMoverCapture,
+      { connection, concurrency: 1, lockDuration: 10 * 60 * 1000, lockRenewTime: 2 * 60 * 1000 },
+    );
+    moverWorker.on('completed', (_job, result?: { skipped?: boolean }) => {
+      console.log('[QUEUE] mover-screener-capture completed');
+      if (result?.skipped) return;
+      recordHeartbeat('mover-screener-capture', 'success');
+    });
+    moverWorker.on('failed', (_, err) => {
+      console.error('[QUEUE] mover-screener-capture failed:', err.message);
+      recordHeartbeat('mover-screener-capture', 'failed', err?.message);
+    });
+
+    // ── Mover INTRADAY slot capture (hourly 10:00-14:00 IST weekdays + holiday guard):
+    // one NT live cross-section POST -> ntlive_<HHMM>_market + local screens per slot.
+    // Slots are cohorts the study scores against same-day EOD outcomes ("what did the
+    // 11:30 gain5 cohort look like by close?"). Hourly, not */15 -- each slot is a full
+    // universe snapshot (~2.3k rows) and the study needs distinct times, not noise.
+    moverIntradayQueue = new Queue(QUEUE_MOVER_INTRADAY, { connection });
+    const miRep = await moverIntradayQueue.getRepeatableJobs();
+    for (const r of miRep) await moverIntradayQueue.removeRepeatableByKey(r.key);
+    await moverIntradayQueue.add('mover-intraday-slot', {}, {
+      repeat: { pattern: '0 4-8 * * 1-5', tz: 'Etc/UTC' },   // 09:30/10:30/11:30/12:30/13:30 IST
+      jobId: 'mover-intraday-slot',
+      removeOnComplete: 3,
+      removeOnFail: 3,
+    });
+    moverIntradayWorker = new Worker(
+      QUEUE_MOVER_INTRADAY,
+      async () => {
+        if (await shouldSkipOnTradingHoliday({ name: 'mover-intraday-slot' })) {
+          return { skipped: true };
+        }
+        await runPython('mover_screener_fetcher.py', ['--intraday'], 240_000);
+        return { skipped: false };
+      },
+      { connection, concurrency: 1, lockDuration: 6 * 60 * 1000, lockRenewTime: 2 * 60 * 1000 },
+    );
+    moverIntradayWorker.on('completed', (_job, result?: { skipped?: boolean }) => {
+      console.log('[QUEUE] mover-intraday-capture completed');
+      if (result?.skipped) return;   // skip must not stamp over a real failure's heartbeat
+      recordHeartbeat('mover-intraday-capture', 'success');
+    });
+    moverIntradayWorker.on('failed', (_, err) => {
+      console.error('[QUEUE] mover-intraday-capture failed:', err.message);
+      recordHeartbeat('mover-intraday-capture', 'failed', err?.message);
+    });
+
+    // ── Mover STUDY (weekly, Sunday 12:00 IST = 06:30 UTC): rebuilds computed classes
+    // over 250 sessions then runs reverse_engineering_study.py (rank-IC, cohort lift,
+    // engine hit-rate -- now including the ntlive_<HHMM>_* slot cohorts vs EOD outcomes).
+    // addJobWithCatchup: if the box is down Sunday morning, the study still runs once on
+    // next startup instead of silently skipping a week.
+    const QUEUE_MOVER_STUDY = 'mover-reverse-engineering-study';
+    const moverStudyQueue = new Queue(QUEUE_MOVER_STUDY, { connection });
+    await addJobWithCatchup(moverStudyQueue, 'mover-study-weekly', {}, {
+      repeat: { pattern: '30 6 * * 0', tz: 'Etc/UTC' },   // Sunday 12:00 IST, market closed
+      jobId: 'mover-study-weekly',
+      removeOnComplete: 2,
+      removeOnFail: 3,
+    });
+    const moverStudyWorker = new Worker(
+      QUEUE_MOVER_STUDY,
+      async () => {
+        // Backfill first so calc_* classes cover everything the study window reads;
+        // the study itself is read-only except its own results table.
+        await runPython('mover_screener_fetcher.py', ['--backfill-days', '250'], 1_800_000);
+        await runPython('reverse_engineering_study.py', ['--days', '250'], 1_800_000);
+        return { skipped: false };
+      },
+      { connection, concurrency: 1, lockDuration: 75 * 60 * 1000, lockRenewTime: 5 * 60 * 1000 },
+    );
+    moverStudyWorker.on('completed', (_job, result?: { skipped?: boolean }) => {
+      console.log('[QUEUE] mover-study-weekly completed');
+      if (result?.skipped) return;
+      recordHeartbeat('mover-study-weekly', 'success');
+    });
+    moverStudyWorker.on('failed', (_, err) => {
+      console.error('[QUEUE] mover-study-weekly failed:', err.message);
+      recordHeartbeat('mover-study-weekly', 'failed', err?.message);
     });
 
     // ── GDELT sentiment (daily, 19:00 UTC = 12:30 AM IST, every day incl. weekends -- news
