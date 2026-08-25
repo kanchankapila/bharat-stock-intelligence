@@ -60,7 +60,14 @@ _FEATURE_STORE_CONFLICT = (
             "atr_pct", "bb_upper", "bb_lower", "bb_width", "bb_pct", "hist_vol_21d",
             "hist_vol_63d", "vol_regime", "volume_ratio_20d", "volume_ratio_5d", "obv",
             "obv_slope", "vwap", "vwap_dist_pct", "trend_1d", "trend_1w", "trend_1m",
-            "mtf_alignment_score", "fii_3d_net", "fii_10d_net", "dii_3d_net", "trailing_pe",
+            "mtf_alignment_score",
+            "pcr_oi", "pcr_vol", "iv_rank", "iv_skew", "delivery_pct",
+            "insider_buy_pct_90d", "block_deal_net_qty",
+            "call_wall_dist_pct", "put_wall_dist_pct", "near_expiry_gamma", "max_pain",
+            "sector_ret_5d", "sector_ret_21d",
+            "nifty_pe", "advance_decline_ratio",
+            "price_to_book", "rev_growth", "eps_growth",
+            "fii_3d_net", "fii_10d_net", "dii_3d_net", "trailing_pe",
             "roe", "debt_to_equity", "op_margins", "piotroski_f", "earnings_yield",
             "nifty_vix", "nifty_ret_5d", "nifty_ret_21d", "us_10y_yield", "dxy",
             "crude_ret_5d", "gold_ret_5d", "sp500_ret_5d", "news_sentiment_score",
@@ -235,7 +242,10 @@ class FeatureEngineer:
         hist = read_as_of_history(
             "fundamentals_history", symbol,
             ["return_on_equity", "debt_to_equity", "operating_margins",
-             "piotroski_f_score", "earnings_yield"],
+             "piotroski_f_score", "earnings_yield",
+             # Gap #4: valuation/growth fields present in fundamentals_history but never
+             # merged (only the five legacy columns were requested before).
+             "price_to_book", "revenue_growth", "earnings_growth"],
         )
         if hist.empty:
             return feat
@@ -263,6 +273,15 @@ class FeatureEngineer:
         ey = merged["earnings_yield"]
         feat["earnings_yield"] = ey / 100.0
         feat["trailing_pe"] = np.where(ey.notna() & (ey != 0), 100.0 / ey, np.nan)
+        # Gap #4 follow-up (2026-08-24): price_to_book/revenue_growth/earnings_growth were
+        # added to the read list above during the Gap #4 fix but never assigned -- fetched
+        # every run and silently dropped, leaving the feature_store columns permanently
+        # NULL (the same fetched-but-dead shape as the flow columns). revenue_growth /
+        # earnings_growth arrive as decimal fractions (RELIANCE 2026-08-21: 0.297 / -0.224);
+        # price_to_book is a plain ratio (~1.96).
+        feat["price_to_book"] = merged["price_to_book"]
+        feat["rev_growth"]    = merged["revenue_growth"]
+        feat["eps_growth"]    = merged["earnings_growth"]
         return feat
 
     # Max trading days a forward-filled macro/sentiment value may carry before it reads as
@@ -335,6 +354,234 @@ class FeatureEngineer:
             )
         return feat
 
+    # Columns pulled from technical_signals (options flow / delivery / smart money / sector
+    # momentum). technical_signals populates each field only on dates its upstream fetcher
+    # ran, so everything is joined as-is with NO forward-fill: carrying Friday's PCR/IV/
+    # delivery into next week would fabricate exactly the freshness signal these columns
+    # encode (the same NEVER_FILL doctrine densify_feature_matrix.py applies to the
+    # technical_signals side of the same tables).
+    FLOW_COLUMNS = (
+        "delivery_pct", "pcr_oi", "pcr_vol", "iv_rank", "iv_skew",
+        "insider_buy_pct_90d", "block_deal_net_qty",
+        "call_wall_dist_pct", "put_wall_dist_pct", "near_expiry_gamma",
+        "sector_ret_5d", "sector_ret_21d",
+    )
+
+    # Per-process memo for _compute_sector_momentum: every symbol in a sector issues the
+    # IDENTICAL window query, so cache (sector, start, end) -> DataFrame. Bounded (14 mapped
+    # sectors x a handful of distinct date windows per run); each entry is dates x 2 floats.
+    _SECTOR_MOM_CACHE: dict = {}
+
+    def _compute_sector_momentum(self, feat: pd.DataFrame, symbol: str) -> pd.DataFrame:
+        """Universal fallback producer for sector_ret_5d/21d -- HOLE-FILL ONLY.
+
+        Mirrors technicalSignalsService.getSectorMomentum(): the equal-weight mean of
+        (close_t / close_{t-lookback} - 1) * 100 across all nse_stocks members of the
+        symbol's sector, i.e. PERCENT units like every stored upstream value (live
+        2026-08-24: technical_signals holds -1.98/-0.48-scale values; feature_store min
+        -4.34). Implementation notes / deliberate deviations from the TS SQL:
+          * LAG(close, N) over the trading-day calendar == the TS subquery's
+            `date < d ORDER BY date DESC LIMIT 1 OFFSET N-1` (5th/21st prior bar) without
+            the correlated per-row scan.
+          * COALESCE(is_suspect,0)=0 excludes bars ohlcv_quality flagged -- the TS service
+            predates that table; feeding known-bad closes into a sector mean would poison
+            every member symbol's value for that day.
+          * NULLIF(denominator, 0) guards divide-by-zero (same shape the TS query risks).
+        Applies ONLY where the technical_signals join left NaN (upstream absence -- the
+        backfill inserted explicit NULLs, coverage was 47.6% of D rows); never clobbers a
+        real value. Symbols with no nse_stocks sector mapping (61/2,424) stay NaN.
+        """
+        if feat.empty:
+            return feat
+        sec = read_df(
+            "SELECT sector FROM nse_stocks WHERE symbol=? AND sector IS NOT NULL LIMIT 1",
+            (symbol,),
+        )
+        if sec.empty or not sec.iloc[0]["sector"]:
+            return feat
+        sector = str(sec.iloc[0]["sector"])
+        start = feat.index.min().strftime("%Y-%m-%d")
+        end   = feat.index.max().strftime("%Y-%m-%d")
+        # Fetch from 40 calendar days earlier so LAG(close, 21) sees real history: computing
+        # the lag INSIDE a start-bounded window starves the first ~21 window dates of
+        # lookback (their whole-sector AVG degenerates to NULL). The warm-up rows are
+        # trimmed below; only requested dates are ever emitted.
+        widened_start = (pd.Timestamp(start) - pd.Timedelta(days=40)).strftime("%Y-%m-%d")
+
+        cache_key = (sector, widened_start, end)
+        mom = self._SECTOR_MOM_CACHE.get(cache_key)
+        if mom is None:
+            mom = read_df(
+                """SELECT date,
+                          AVG(100.0 * (close / NULLIF(prev5, 0)  - 1)) AS sector_ret_5d,
+                          AVG(100.0 * (close / NULLIF(prev21, 0) - 1)) AS sector_ret_21d
+                   FROM (
+                       SELECT symbol, date, close,
+                              LAG(close, 5)  OVER (PARTITION BY symbol ORDER BY date) AS prev5,
+                              LAG(close, 21) OVER (PARTITION BY symbol ORDER BY date) AS prev21
+                       FROM stock_ohlcv
+                       WHERE symbol IN (SELECT symbol FROM nse_stocks WHERE sector=?)
+                         AND COALESCE(is_suspect, 0)=0
+                         AND date BETWEEN ? AND ?
+                   ) t
+                   WHERE t.date >= ?
+                   GROUP BY date ORDER BY date""",
+                (sector, widened_start, end, start),
+            )
+            if mom.empty:
+                mom = pd.DataFrame(columns=["date", "sector_ret_5d", "sector_ret_21d"])
+                mom = mom.set_index("date")
+            else:
+                mom["date"] = pd.to_datetime(mom["date"])
+                mom = mom.set_index("date").sort_index()
+                # An all-NULL AVG arrives as Python None -> object dtype, which explodes
+                # later .loc assignment into the float64 feature column (pandas 3 refuses
+                # the silent upcast). Coerce to real NaN floats at the boundary.
+                for c in ("sector_ret_5d", "sector_ret_21d"):
+                    mom[c] = pd.to_numeric(mom[c], errors="coerce")
+            self._SECTOR_MOM_CACHE[cache_key] = mom
+
+        for col in ("sector_ret_5d", "sector_ret_21d"):
+            # to_numeric: an empty/all-NULL cache column is object-dtype; assigning that
+            # into feat's float64 column trips pandas 3's silent-upcast TypeError.
+            filled = pd.to_numeric(mom[col].reindex(feat.index), errors="coerce")
+            if col in feat.columns:
+                holes = feat[col].isna()
+                feat.loc[holes, col] = filled[holes]
+            else:
+                feat[col] = filled
+        return feat
+
+    def _merge_flow_features(self, feat: pd.DataFrame, symbol: str) -> pd.DataFrame:
+        """Options-flow / delivery / smart-money / sector-momentum features.
+
+        Gap #4 root cause: dl_engine has always SELECTed pcr_oi/pcr_vol/iv_rank/
+        delivery_pct/max_pain/... from feature_store, but feature_engineering never wrote
+        any of them -- every DL training row consumed COALESCE(col, 0) zeros. Source is
+        technical_signals (the same per-symbol daily grid the ensemble joins directly);
+        it carries every flow column EXCEPT max_pain, whose only per-symbol home is
+        so_stock_oi_summary (symbol/date/expiry grain -- the same table fno.router.ts
+        reads). Take the NEAREST expiry per day, mirroring that router's
+        DISTINCT ON ... ORDER BY expiry ASC. Coverage is sparse by construction (the
+        Trendlyne chain fetcher only began populating the table in Jul 2026), so older
+        dates stay NULL -- NEVER_FILL, same doctrine as the flow columns above.
+
+        Accepted gaps (2026-08-24 audit): near_expiry_gamma is genuinely sparse upstream
+        (RELIANCE last 45 sessions: 36/41 stored values are exact zeros -- the chain
+        engine writes it mainly on gamma-flip days). sector_ret_5d/21d had NO live
+        producer: the only writer, backfill_technical_features.py, inserted both as
+        explicit NULLs, leaving feature_store coverage at 47.6% of D rows (395k/831k).
+        Fixed same day by _compute_sector_momentum() below -- a universal fallback that
+        derives both columns straight from stock_ohlcv ⋈ nse_stocks for EVERY symbol with
+        a mapped sector, applied here as HOLE-FILL ONLY (upstream absence, not poison:
+        unlike iv_skew's constant-0 placeholder there is no wrong value to preserve, but
+        equally no reason to clobber a real value if technical_signals ever grows one).
+
+        iv_skew: technical_signals carries it as a CONSTANT 0.0 placeholder (live
+        2026-08-24: 33/33 stored values exactly 0.0 -- a fabricated neutral, the exact
+        zero-poisoning shape this pipeline fights). Replace it outright with a real
+        derivation from so_stock_oi_summary: nearest-expiry (iv_put - iv_call) per date,
+        the same table and read pattern as the max_pain fallback above (and as
+        fno.router.ts). Full replacement, not hole-fill: the upstream placeholder is
+        wrong everywhere it exists, so preserving it preserves the poison. Dates without
+        chain coverage become NaN -- NEVER_FILL, left to the scaler path's NaN handling
+        like every other sparse column.
+        """
+        ts = read_df(
+            f"SELECT date, {', '.join(self.FLOW_COLUMNS)} FROM technical_signals "
+            "WHERE symbol=? AND date>=? ORDER BY date",
+            (symbol, feat.index.min().strftime("%Y-%m-%d")),
+        )
+        if not ts.empty:
+            ts["date"] = pd.to_datetime(ts["date"])
+            ts = ts.set_index("date").reindex(feat.index)
+            for col in self.FLOW_COLUMNS:
+                feat[col] = ts[col]
+
+        feat = self._compute_sector_momentum(feat, symbol)
+
+        # max_pain hole-fill from so_stock_oi_summary: nearest expiry wins per date.
+        # Hole-fill only -- never overwrites a value technical_signals supplied
+        # (FLOW_COLUMNS has no max_pain today, but keep the guard in case it ever does).
+        mp = read_df(
+            """SELECT date, max_pain FROM (
+                   SELECT date, max_pain,
+                          ROW_NUMBER() OVER (PARTITION BY date
+                                             ORDER BY expiry ASC) AS rn
+                   FROM so_stock_oi_summary
+                   WHERE symbol=? AND max_pain IS NOT NULL AND date >= ?
+               ) ranked WHERE rn = 1 ORDER BY date""",
+            (symbol, feat.index.min().strftime("%Y-%m-%d")),
+        )
+        if not mp.empty:
+            mp["date"] = pd.to_datetime(mp["date"])
+            mp = mp.set_index("date")
+            mp = mp[mp.index.notnull()].reindex(feat.index)["max_pain"]
+            # Hole-fill only -- never overwrite a value technical_signals supplied
+            # (FLOW_COLUMNS has no max_pain today, but keep the guard).
+            if "max_pain" in feat:
+                feat["max_pain"] = feat["max_pain"].fillna(mp)
+            else:
+                feat["max_pain"] = mp
+
+        # iv_skew: technical_signals carries it as a CONSTANT 0.0 placeholder (live
+        # 2026-08-24: 33/33 stored values exactly 0.0 -- a fabricated neutral, the exact
+        # zero-poisoning shape this pipeline fights). Replace it outright with a real
+        # derivation from so_stock_oi_summary: nearest-expiry (iv_put - iv_call) per date,
+        # the same table and read pattern as the max_pain fallback above (and as
+        # fno.router.ts). Full replacement, not hole-fill: the upstream placeholder is
+        # wrong everywhere it exists, so preserving it preserves the poison. Dates without
+        # chain coverage become NaN -- NEVER_FILL, left to the scaler path's NaN handling
+        # like every other sparse column.
+        skew = read_df(
+            """SELECT date, (iv_put - iv_call) AS iv_skew FROM (
+                   SELECT date, iv_put, iv_call,
+                          ROW_NUMBER() OVER (PARTITION BY date
+                                             ORDER BY expiry ASC) AS rn
+                   FROM so_stock_oi_summary
+                   WHERE symbol=? AND iv_call IS NOT NULL AND iv_put IS NOT NULL
+                     AND date >= ?
+               ) ranked WHERE rn = 1 ORDER BY date""",
+            (symbol, feat.index.min().strftime("%Y-%m-%d")),
+        )
+        if not skew.empty:
+            skew["date"] = pd.to_datetime(skew["date"])
+            skew = skew.set_index("date")
+            skew = skew[skew.index.notnull()].reindex(feat.index)["iv_skew"]
+            feat["iv_skew"] = skew
+        return feat
+
+    def _merge_market_context(self, feat: pd.DataFrame) -> pd.DataFrame:
+        """Market-level regime context: NIFTY50 P/E (index_valuation) and the
+        advance/decline ratio (market_breadth).
+
+        Unlike the per-symbol flow fields these are published every trading day and remain
+        meaningful across a weekend/holiday gap, so they use the same bounded reindex-ffill
+        as the macro merges (FFILL_LIMIT_DAYS caps how stale a carried value may get).
+        """
+        pe = read_df(
+            "SELECT date, pe FROM index_valuation WHERE index_name='NIFTY50' ORDER BY date"
+        )
+        if not pe.empty:
+            pe["date"] = pd.to_datetime(pe["date"])
+            pe = pe.set_index("date")
+            pe = pe[pe.index.notnull()]
+            feat["nifty_pe"] = pe["pe"].reindex(
+                feat.index, method="ffill", limit=self.FFILL_LIMIT_DAYS
+            )
+
+        breadth = read_df(
+            "SELECT date, adv_decline_ratio FROM market_breadth ORDER BY date"
+        )
+        if not breadth.empty:
+            breadth["date"] = pd.to_datetime(breadth["date"])
+            breadth = breadth.set_index("date")
+            breadth = breadth[breadth.index.notnull()]
+            feat["advance_decline_ratio"] = breadth["adv_decline_ratio"].reindex(
+                feat.index, method="ffill", limit=self.FFILL_LIMIT_DAYS
+            )
+        return feat
+
     # ── Normalization ────────────────────────────────────────────────────────
 
     def _fit_scaler(self, feat: pd.DataFrame, train_frac: float = 0.8) -> RobustScaler:
@@ -395,6 +642,10 @@ class FeatureEngineer:
             feat = self._merge_fundamentals(feat, symbol)
             feat = self._merge_macro(feat)
             feat = self._merge_sentiment(feat, symbol)
+            # Gap #4: options-flow/smart-money/sector + market context -- never merged
+            # before, so dl_engine trained on zeros for every one of these columns.
+            feat = self._merge_flow_features(feat, symbol)
+            feat = self._merge_market_context(feat)
 
             # Fit scaler on training window, apply to all
             scaler = self._fit_scaler(feat)
@@ -414,6 +665,12 @@ class FeatureEngineer:
                         hist_vol_21d, hist_vol_63d, vol_regime,
                         volume_ratio_20d, volume_ratio_5d, obv, obv_slope, vwap, vwap_dist_pct,
                         trend_1d, trend_1w, trend_1m, mtf_alignment_score,
+                        pcr_oi, pcr_vol, iv_rank, iv_skew, delivery_pct,
+                        insider_buy_pct_90d, block_deal_net_qty,
+                        call_wall_dist_pct, put_wall_dist_pct, near_expiry_gamma, max_pain,
+                        sector_ret_5d, sector_ret_21d,
+                        nifty_pe, advance_decline_ratio,
+                        price_to_book, rev_growth, eps_growth,
                         fii_3d_net, fii_10d_net, dii_3d_net,
                         trailing_pe, roe, debt_to_equity, op_margins, piotroski_f, earnings_yield,
                         nifty_vix, nifty_ret_5d, nifty_ret_21d,
@@ -431,6 +688,12 @@ class FeatureEngineer:
                         :hist_vol_21d,:hist_vol_63d,:vol_regime,
                         :volume_ratio_20d,:volume_ratio_5d,:obv,:obv_slope,:vwap,:vwap_dist_pct,
                         :trend_1d,:trend_1w,:trend_1m,:mtf_alignment_score,
+                        :pcr_oi,:pcr_vol,:iv_rank,:iv_skew,:delivery_pct,
+                        :insider_buy_pct_90d,:block_deal_net_qty,
+                        :call_wall_dist_pct,:put_wall_dist_pct,:near_expiry_gamma,:max_pain,
+                        :sector_ret_5d,:sector_ret_21d,
+                        :nifty_pe,:advance_decline_ratio,
+                        :price_to_book,:rev_growth,:eps_growth,
                         :fii_3d_net,:fii_10d_net,:dii_3d_net,
                         :trailing_pe,:roe,:debt_to_equity,:op_margins,:piotroski_f,:earnings_yield,
                         :nifty_vix,:nifty_ret_5d,:nifty_ret_21d,
@@ -485,6 +748,21 @@ class FeatureEngineer:
                     "target_ret_15d": d.get("target_ret_15d"),
                     "target_dir_1d": d.get("target_dir_1d"), "target_dir_5d": d.get("target_dir_5d"),
                     "target_dir_15d": d.get("target_dir_15d"),
+                    "pcr_oi": d.get("pcr_oi"), "pcr_vol": d.get("pcr_vol"),
+                    "iv_rank": d.get("iv_rank"), "iv_skew": d.get("iv_skew"),
+                    "delivery_pct": d.get("delivery_pct"),
+                    "insider_buy_pct_90d": d.get("insider_buy_pct_90d"),
+                    "block_deal_net_qty": d.get("block_deal_net_qty"),
+                    "call_wall_dist_pct": d.get("call_wall_dist_pct"),
+                    "put_wall_dist_pct": d.get("put_wall_dist_pct"),
+                    "near_expiry_gamma": d.get("near_expiry_gamma"),
+                    "max_pain": d.get("max_pain"),
+                    "sector_ret_5d": d.get("sector_ret_5d"),
+                    "sector_ret_21d": d.get("sector_ret_21d"),
+                    "nifty_pe": d.get("nifty_pe"),
+                    "advance_decline_ratio": d.get("advance_decline_ratio"),
+                    "price_to_book": d.get("price_to_book"),
+                    "rev_growth": d.get("rev_growth"), "eps_growth": d.get("eps_growth"),
                 })
 
             if rows_to_insert:
@@ -509,6 +787,12 @@ class FeatureEngineer:
                     hist_vol_21d, hist_vol_63d, vol_regime,
                     volume_ratio_20d, volume_ratio_5d, obv, obv_slope, vwap, vwap_dist_pct,
                     trend_1d, trend_1w, trend_1m, mtf_alignment_score,
+                    pcr_oi, pcr_vol, iv_rank, iv_skew, delivery_pct,
+                    insider_buy_pct_90d, block_deal_net_qty,
+                    call_wall_dist_pct, put_wall_dist_pct, near_expiry_gamma, max_pain,
+                    sector_ret_5d, sector_ret_21d,
+                    nifty_pe, advance_decline_ratio,
+                    price_to_book, rev_growth, eps_growth,
                     fii_3d_net, fii_10d_net, dii_3d_net,
                     trailing_pe, roe, debt_to_equity, op_margins, piotroski_f, earnings_yield,
                     nifty_vix, nifty_ret_5d, nifty_ret_21d,
@@ -526,6 +810,12 @@ class FeatureEngineer:
                     :hist_vol_21d,:hist_vol_63d,:vol_regime,
                     :volume_ratio_20d,:volume_ratio_5d,:obv,:obv_slope,:vwap,:vwap_dist_pct,
                     :trend_1d,:trend_1w,:trend_1m,:mtf_alignment_score,
+                    :pcr_oi,:pcr_vol,:iv_rank,:iv_skew,:delivery_pct,
+                    :insider_buy_pct_90d,:block_deal_net_qty,
+                    :call_wall_dist_pct,:put_wall_dist_pct,:near_expiry_gamma,:max_pain,
+                    :sector_ret_5d,:sector_ret_21d,
+                    :nifty_pe,:advance_decline_ratio,
+                    :price_to_book,:rev_growth,:eps_growth,
                     :fii_3d_net,:fii_10d_net,:dii_3d_net,
                     :trailing_pe,:roe,:debt_to_equity,:op_margins,:piotroski_f,:earnings_yield,
                     :nifty_vix,:nifty_ret_5d,:nifty_ret_21d,
@@ -580,6 +870,21 @@ class FeatureEngineer:
                 "target_ret_15d": d.get("target_ret_15d"),
                 "target_dir_1d": d.get("target_dir_1d"), "target_dir_5d": d.get("target_dir_5d"),
                 "target_dir_15d": d.get("target_dir_15d"),
+                "pcr_oi": d.get("pcr_oi"), "pcr_vol": d.get("pcr_vol"),
+                "iv_rank": d.get("iv_rank"), "iv_skew": d.get("iv_skew"),
+                "delivery_pct": d.get("delivery_pct"),
+                "insider_buy_pct_90d": d.get("insider_buy_pct_90d"),
+                "block_deal_net_qty": d.get("block_deal_net_qty"),
+                "call_wall_dist_pct": d.get("call_wall_dist_pct"),
+                "put_wall_dist_pct": d.get("put_wall_dist_pct"),
+                "near_expiry_gamma": d.get("near_expiry_gamma"),
+                "max_pain": d.get("max_pain"),
+                "sector_ret_5d": d.get("sector_ret_5d"),
+                "sector_ret_21d": d.get("sector_ret_21d"),
+                "nifty_pe": d.get("nifty_pe"),
+                "advance_decline_ratio": d.get("advance_decline_ratio"),
+                "price_to_book": d.get("price_to_book"),
+                "rev_growth": d.get("rev_growth"), "eps_growth": d.get("eps_growth"),
             })
         if rows_to_insert:
             con.executemany(SQL, rows_to_insert)
@@ -715,6 +1020,10 @@ def _compute_symbol_unscaled(args: tuple):
         feat = fe._merge_fundamentals(feat, symbol)
         feat = fe._merge_macro(feat)
         feat = fe._merge_sentiment(feat, symbol)
+        # Gap #4: same exogenous merges as process_symbol -- workers must produce the
+        # identical unscaled frame or the two write paths diverge.
+        feat = fe._merge_flow_features(feat, symbol)
+        feat = fe._merge_market_context(feat)
         return (symbol, feat)
     except Exception as e:
         print(f"[FE] ERROR {symbol}: {e}", flush=True)

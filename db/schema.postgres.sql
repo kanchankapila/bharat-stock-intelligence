@@ -641,6 +641,19 @@ CREATE TABLE IF NOT EXISTS "feature_store" (
   "nifty_vix" DOUBLE PRECISION,
   "nifty_pe" DOUBLE PRECISION,
   "advance_decline_ratio" DOUBLE PRECISION,
+  -- Schema catch-up, 2026-08-24: feature_engineering writes these (Gap #4/#5 flow /
+  -- smart-money / sector-momentum / valuation columns) but the live table predated them,
+  -- which made every feature_store upsert fail with UndefinedColumn. Kept in sync via
+  -- data_integrity_repair.py --feature-store-columns.
+  "iv_skew" DOUBLE PRECISION,
+  "insider_buy_pct_90d" DOUBLE PRECISION,
+  "block_deal_net_qty" DOUBLE PRECISION,
+  "call_wall_dist_pct" DOUBLE PRECISION,
+  "put_wall_dist_pct" DOUBLE PRECISION,
+  "near_expiry_gamma" DOUBLE PRECISION,
+  "sector_ret_5d" DOUBLE PRECISION,
+  "sector_ret_21d" DOUBLE PRECISION,
+  "price_to_book" DOUBLE PRECISION,
   "nifty_ret_5d" DOUBLE PRECISION,
   "nifty_ret_21d" DOUBLE PRECISION,
   "us_10y_yield" DOUBLE PRECISION,

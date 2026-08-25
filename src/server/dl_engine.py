@@ -49,7 +49,13 @@ MODEL_DIR = Path(__file__).parent / "ml_models"
 CONFIG_PATH = MODEL_DIR / "dl_model_config.json"
 
 SEQUENCE_LEN = 60
-N_FEATURES   = 78
+# 78 legacy channels + 7 added 2026-08-24 (see FEATURE_COLS tail). Positions 0-77 are
+# frozen: the champion checkpoint lstm_v3.pt was trained at this width, and until a wider
+# candidate clears the promotion bar, run_inference() loads and runs it via the
+# width-agnostic loader (_checkpoint_input_width) reading ONLY the first N_FEATURES_LEGACY
+# columns of every batch. Bumping this constant alone must never break daily inference.
+N_FEATURES        = 85
+N_FEATURES_LEGACY = 78
 
 # Defensive winsorization bound for raw engineered features fed to the LSTM (2026-08-06).
 # nan_to_num below only catches true NaN/+-inf; it does nothing for an extreme-but-finite
@@ -87,8 +93,30 @@ FEATURE_COLS = [
     # one-hot trend_1d (3): UP, DOWN, SIDEWAYS encoded as floats above, use numeric
     # mtf cols already numeric; pad to 84
     "pcr_oi","pcr_vol","iv_rank","delivery_pct",
-    "pb","rev_growth","eps_growth","advance_decline_ratio","nifty_pe",
+    # price_to_book (NOT legacy "pb"): feature_store.pb has never been written by
+    # feature_engineering -- 0 non-null values across the entire table -- so this slot has
+    # been a COALESCE(0) constant since inception. price_to_book went live 2026-08-24
+    # (_merge_fundamentals Gap #4 follow-up, sourced PIT from fundamentals_history).
+    # Same list position => identical tensor width, so existing checkpoints and the saved
+    # scaler stay valid; the channel simply starts reading real data.
+    "price_to_book","rev_growth","eps_growth","advance_decline_ratio","nifty_pe",
     "max_pain",
+    # ── 2026-08-24 widening (+7, positions 78-84) ──────────────────────────────
+    # APPENDED, never inserted: positions 0-77 stay byte-identical so a pre-widening
+    # champion checkpoint scores identically through the width-agnostic loader
+    # (_checkpoint_input_width + loaders' FEATURE_COLS[:width] slice).
+    # All 7 locked through the density gate (fresh non-null coverage on fs_recent):
+    # ret_12m_ex1m ~100% / iv_skew 78% / call_wall_dist_pct 76% / put_wall_dist_pct 75%
+    # / insider_buy_pct_90d 28% / block_deal_net_qty 24% (fresh to 8/21) /
+    # near_expiry_gamma 24% (accepted sparse gap -- see _merge_flow_features docstring).
+    # sector_ret_5d/21d deliberately NOT added: their fallback producer
+    # (_compute_sector_momentum) landed same day but the columns are ~constant per sector,
+    # near-duplicating momentum channels already present; revisit only with evidence.
+    "ret_12m_ex1m",
+    "iv_skew",
+    "call_wall_dist_pct","put_wall_dist_pct",
+    "insider_buy_pct_90d","block_deal_net_qty",
+    "near_expiry_gamma",
 ]
 
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -99,6 +127,46 @@ if DEVICE.type == "cuda":
           f"{torch.cuda.get_device_properties(0).total_memory // 1024**2} MB VRAM (cudnn disabled)")
 else:
     print("[DL] Device: cpu")
+
+
+# ── Checkpoint width handling ────────────────────────────────────────────────
+
+# Input width of the currently cached checkpoint (set by run_inference when it loads a
+# model; None outside inference). The sequence loaders slice FEATURE_COLS to this so a
+# legacy-width champion keeps running unchanged after the feature widening.
+_INFERENCE_INPUT_WIDTH: int | None = None
+
+
+def _checkpoint_input_width(state_dict: Dict) -> int:
+    """Infer a BiLSTMModel checkpoint's input width from its own weights.
+
+    lstm1.weight_ih_l0 has shape (4*hidden, n_features) -- bidirectional LSTM weight
+    tensors are stored per direction, so the forward direction's input projection carries
+    exactly the channel count the model was trained with. Width-agnostic loading keeps
+    daily inference alive when today's N_FEATURES no longer matches the ACTIVE champion:
+    after the 2026-08-24 widening (78 -> 85) the promoted config can still point at a
+    pre-widening checkpoint until a wider candidate clears the promotion bar, and
+    constructing a default-width model for it used to crash load_state_dict with a
+    size-mismatch RuntimeError -- killing every deep_learning_predictions write for the
+    whole stale-champion window.
+    """
+    w = state_dict.get("lstm1.weight_ih_l0")
+    if w is None or w.dim() != 2:
+        raise RuntimeError(
+            "Checkpoint has no recognisable lstm1.weight_ih_l0 tensor -- cannot infer "
+            "input width. Is this actually a BiLSTMModel state_dict?"
+        )
+    return int(w.shape[1])
+
+
+def _resolve_input_width(n_features: int = None) -> int:
+    """Column count the sequence loaders should emit: an explicit argument wins (training
+    always passes N_FEATURES so it never inherits a stale champion's narrower width);
+    otherwise follow the active checkpoint's input width if one is loaded in-process;
+    otherwise today's N_FEATURES."""
+    if n_features is not None:
+        return int(n_features)
+    return _INFERENCE_INPUT_WIDTH or N_FEATURES
 
 
 # ── Model Architecture ───────────────────────────────────────────────────────
@@ -162,13 +230,15 @@ def _onehot_vol_regime(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def load_symbol_sequences(
-    symbol: str, seq_len: int = SEQUENCE_LEN
+    symbol: str, seq_len: int = SEQUENCE_LEN, n_features: int = None
 ) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, List[str]]:
     """
     Returns: X (N, seq_len, n_feat), y_dir5 (N,), y_dir15 (N,), y_ret5 (N,), dates list
     Only returns rows where all target columns are non-null (training mode).
+    n_features overrides the emitted column count (see _resolve_input_width); training
+    callers must pass N_FEATURES explicitly.
     """
-    feat_cols = FEATURE_COLS[:N_FEATURES]
+    feat_cols = FEATURE_COLS[:_resolve_input_width(n_features)]
     numeric_cols = [c for c in feat_cols if c not in _VOL_ONEHOT]
     cols_sql = ", ".join(
         f'COALESCE(CAST("{c}" AS REAL), 0.0) as "{c}"' if c in ("trend_1d", "trend_1w", "trend_1m")
@@ -227,10 +297,14 @@ def load_symbol_sequences(
 
 
 def load_inference_sequence(
-    symbol: str, seq_len: int = SEQUENCE_LEN
+    symbol: str, seq_len: int = SEQUENCE_LEN, n_features: int = None
 ) -> Tuple[np.ndarray, str]:
-    """Load last seq_len rows for inference. Returns (1, seq_len, n_feat) and latest date."""
-    feat_cols = FEATURE_COLS[:N_FEATURES]
+    """Load last seq_len rows for inference. Returns (1, seq_len, n_feat) and latest date.
+    Defaults to the ACTIVE CHECKPOINT's input width (not today's N_FEATURES): loaders
+    always build the full widened frame, then slice, so a legacy-width champion reads
+    FEATURE_COLS[:78] -- byte-identical to its training-time columns because the widening
+    appended, never inserted."""
+    feat_cols = FEATURE_COLS[:_resolve_input_width(n_features)]
     numeric_cols = [c for c in feat_cols if c not in _VOL_ONEHOT]
     cols_sql = ", ".join(
         f'COALESCE(CAST("{c}" AS REAL), 0.0) as "{c}"' if c in ("trend_1d", "trend_1w", "trend_1m")
@@ -459,7 +533,11 @@ def train_lstm(version: int = 1) -> Dict:
 
     for i, sym in enumerate(symbols):
         try:
-            X, y5, y15, yr5, _ = load_symbol_sequences(sym)
+            # Explicit N_FEATURES: training data MUST be today's full widened width even if
+            # an old legacy-width champion happens to be loaded in-process -- otherwise a
+            # candidate trained after the 2026-08-24 widening would silently inherit the
+            # active checkpoint's narrower column count via _resolve_input_width().
+            X, y5, y15, yr5, _ = load_symbol_sequences(sym, n_features=N_FEATURES)
             if len(X) > 0:
                 chunk_X.append(X); chunk_y5.append(y5)
                 chunk_y15.append(y15); chunk_yr5.append(yr5)
@@ -587,12 +665,30 @@ def run_inference(prediction_date: str = None) -> None:
         or _DL_MODEL_CACHE.get('path') != str(model_path)
         or _DL_MODEL_CACHE.get('mtime') != mtime
     ):
-        _m = BiLSTMModel().to(DEVICE)
-        _m.load_state_dict(torch.load(model_path, map_location=DEVICE, weights_only=True))
+        state_dict = torch.load(model_path, map_location=DEVICE, weights_only=True)
+        # Width-agnostic loading (2026-08-24 feature widening): infer the input width from
+        # the checkpoint itself instead of assuming BiLSTMModel() == N_FEATURES. The daily
+        # inference chain runs the ACTIVE champion, which after the 78→85 widening can
+        # legitimately be either width -- a pre-widening checkpoint (e.g. lstm_v3.pt) while
+        # no retrained candidate has cleared the +0.005 AUC promotion bar yet. Constructing
+        # the default-width model here used to crash every load_state_dict with a
+        # size-mismatch RuntimeError and take down ALL deep_learning_predictions writes for
+        # as long as the stale champion stayed active.
+        ckpt_width = _checkpoint_input_width(state_dict)
+        _m = BiLSTMModel(n_features=ckpt_width).to(DEVICE)
+        _m.load_state_dict(state_dict)
         _m.eval()
-        _DL_MODEL_CACHE = {'model': _m, 'path': str(model_path), 'mtime': mtime}
+        _DL_MODEL_CACHE = {'model': _m, 'path': str(model_path), 'mtime': mtime,
+                           'input_width': ckpt_width}
 
     model = _DL_MODEL_CACHE['model']
+    # Feed the model the column count IT was trained on, not today's N_FEATURES: loaders
+    # always build the full widened frame, then slice. A legacy 78-input champion reads
+    # FEATURE_COLS[:78] -- byte-identical to its training-time columns because the widening
+    # appended, never inserted. A promoted 85-input candidate reads all of them.
+    input_width = _DL_MODEL_CACHE.get('input_width', getattr(model.lstm1, "input_size"))
+    global _INFERENCE_INPUT_WIDTH
+    _INFERENCE_INPUT_WIDTH = input_width
 
     con = connect()
     symbols = [r[0] for r in con.execute(

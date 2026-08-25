@@ -63,6 +63,12 @@ CREATE TABLE IF NOT EXISTS feature_store (
     target_ret_1d REAL, target_ret_5d REAL, target_ret_15d REAL,
     target_dir_1d REAL, target_dir_5d REAL, target_dir_15d REAL,
     ret_12m_ex1m REAL,
+    pcr_oi REAL, pcr_vol REAL, iv_rank REAL, iv_skew REAL, delivery_pct REAL,
+    insider_buy_pct_90d REAL, block_deal_net_qty REAL,
+    call_wall_dist_pct REAL, put_wall_dist_pct REAL, near_expiry_gamma REAL, max_pain REAL,
+    sector_ret_5d REAL, sector_ret_21d REAL,
+    nifty_pe REAL, advance_decline_ratio REAL,
+    price_to_book REAL, rev_growth REAL, eps_growth REAL,
     computed_at TEXT,
     PRIMARY KEY (symbol, date, timeframe)
 )
@@ -138,6 +144,10 @@ class TestBatchWrites:
         fe._merge_fundamentals = lambda feat, sym: feat
         fe._merge_macro = lambda feat: feat
         fe._merge_sentiment = lambda feat, sym: feat
+        # Gap #4 exogenous merges hit technical_signals/nse_stocks/so_stock_oi_summary --
+        # none of which exist in this fixture's sandbox. Stubbed like every other merge.
+        fe._merge_flow_features = lambda feat, sym: feat
+        fe._merge_market_context = lambda feat: feat
         fe._fit_scaler = lambda feat, **kw: MagicMock(
             transform=lambda X: X.values
         )
@@ -211,6 +221,10 @@ class TestBatchWrites:
         fe._merge_fundamentals = lambda feat, sym: feat
         fe._merge_macro = lambda feat: feat
         fe._merge_sentiment = lambda feat, sym: feat
+        # Gap #4 exogenous merges hit technical_signals/nse_stocks/so_stock_oi_summary --
+        # none of which exist in this fixture's sandbox. Stubbed like every other merge.
+        fe._merge_flow_features = lambda feat, sym: feat
+        fe._merge_market_context = lambda feat: feat
         fe._fit_scaler = lambda feat, **kw: MagicMock(
             transform=lambda X: X.values
         )
@@ -310,5 +324,9 @@ class TestZeroRowsGuard:
              patch("pickle.dump"):
             fe._fit_scaler = lambda feat, **kw: MagicMock(transform=lambda X: X.values)
             fe._apply_scaler = lambda feat, scaler: feat
+            # Gap #4 exogenous merges need technical_signals etc.; stub so the write path
+            # under test stays hermetic.
+            fe._merge_flow_features = lambda feat, sym: feat
+            fe._merge_market_context = lambda feat: feat
             # Should not raise.
             fe.run_full_pipeline(symbols=["TATA"])

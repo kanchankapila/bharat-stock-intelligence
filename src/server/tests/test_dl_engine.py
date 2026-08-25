@@ -259,7 +259,7 @@ class TestWalkForwardValidation:
         fake_y15  = np.random.randint(0, 2, 400).astype(np.int64)
         fake_yr5  = np.random.randn(400).astype(np.float32)
 
-        def fake_load(sym, seq_len=60):
+        def fake_load(sym, seq_len=60, n_features=None):
             return fake_seqs, fake_y5, fake_y15, fake_yr5, ["2024-01-01"] * 400
 
         sentinel = {"directional_accuracy": 0.55, "roc_auc": 0.58, "n_folds": 3}
@@ -312,3 +312,79 @@ class TestResolvePredictionDateUsesLogicalTradingDate:
             with pytest.raises(RuntimeError, match="No model at"):
                 dl_engine.run_inference()
         mock_resolve.assert_called_once_with(None)
+
+
+class TestCheckpointWidthAgnosticLoading:
+    """2026-08-24 feature widening (N_FEATURES 78 -> 85): the ACTIVE champion checkpoint
+    can legitimately be either width -- run_inference() must infer each checkpoint's own
+    input width from its weights instead of assuming today's N_FEATURES, or every
+    load_state_dict dies with a size-mismatch RuntimeError for as long as a pre-widening
+    champion (e.g. lstm_v3.pt) stays active because no wider candidate cleared the
+    promotion bar. The loaders must likewise slice FEATURE_COLS to the checkpoint's
+    width so a legacy champion reads byte-identical columns (widening appended, never
+    inserted)."""
+
+    def _state_dict(self, n_features):
+        return dl_engine.BiLSTMModel(n_features=n_features).state_dict()
+
+    def test_checkpoint_width_inferred_from_weights_for_both_widths(self):
+        """lstm1.weight_ih_l0 is (4*hidden, n_features): its second dim IS the trained
+        input width, whatever today's constant says."""
+        assert dl_engine._checkpoint_input_width(self._state_dict(78)) == 78
+        assert dl_engine._checkpoint_input_width(self._state_dict(85)) == 85
+
+    def test_resolve_input_width_precedence(self, monkeypatch):
+        """Explicit argument wins (training must never inherit a stale champion's
+        narrower width); otherwise follow the cached champion; else today's N_FEATURES."""
+        monkeypatch.setattr(dl_engine, "_INFERENCE_INPUT_WIDTH", 78)
+        assert dl_engine._resolve_input_width(None) == 78
+        assert dl_engine._resolve_input_width(85) == 85
+        monkeypatch.setattr(dl_engine, "_INFERENCE_INPUT_WIDTH", None)
+        assert dl_engine._resolve_input_width(None) == dl_engine.N_FEATURES
+
+    def test_load_inference_sequence_emits_requested_width(self, monkeypatch):
+        """The loader builds the full widened frame then slices: requesting the legacy
+        width yields exactly 78 channels even though FEATURE_COLS now has 85."""
+        n = dl_engine.SEQUENCE_LEN
+        data = {"date": dl_engine.pd.date_range("2026-01-01", periods=n),
+                "vol_regime": ["LOW"] * n}
+        for c in dl_engine.FEATURE_COLS:
+            if c != "vol_regime":
+                data[c] = [0.0] * n
+        fake_df = dl_engine.pd.DataFrame(data)
+
+        monkeypatch.setattr(dl_engine, "read_df", lambda *a, **k: fake_df)
+        monkeypatch.setattr(dl_engine, "_INFERENCE_INPUT_WIDTH", None)
+        X, latest_date = dl_engine.load_inference_sequence("FAKESYM", n_features=78)
+        assert X is not None and X.shape == (1, n, 78)
+        assert np.isfinite(X).all()
+
+    def test_run_inference_loads_legacy_width_champion_without_crash(self, tmp_path, monkeypatch):
+        """End-to-end wiring: a 78-input checkpoint on disk + an 85-wide module constant
+        must still construct a 78-input model and reach inference. Before the fix this
+        crashed in load_state_dict before writing any prediction."""
+        sd = self._state_dict(78)
+        (tmp_path / "lstm_v7.pt").write_bytes(b"")
+        monkeypatch.setattr(dl_engine, "MODEL_DIR", tmp_path)
+        monkeypatch.setattr(dl_engine, "_load_config", lambda: {"lstm_version": 7})
+        monkeypatch.setattr(dl_engine, "_DL_MODEL_CACHE", None)
+        monkeypatch.setattr(dl_engine.torch, "load", lambda *a, **k: sd)
+
+        captured = {}
+        real_ctor = dl_engine.BiLSTMModel
+
+        def ctor(*a, **k):
+            captured["width"] = k.get("n_features", a[0] if a else dl_engine.N_FEATURES)
+            return real_ctor(*a, **k)
+
+        monkeypatch.setattr(dl_engine, "BiLSTMModel", ctor)
+        mock_conn = MagicMock()
+        mock_conn.execute.return_value.fetchall.return_value = []
+        monkeypatch.setattr(dl_engine, "connect", lambda: mock_conn)
+
+        dl_engine.run_inference()
+
+        assert captured["width"] == 78, (
+            "run_inference must size the model from the checkpoint's own width, "
+            f"not today's N_FEATURES={dl_engine.N_FEATURES}"
+        )

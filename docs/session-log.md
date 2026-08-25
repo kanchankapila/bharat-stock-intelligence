@@ -3,6 +3,33 @@
 Historical record, split out of CLAUDE.md on 2026-08-11 (it was 64% of that file and was being loaded into every context window).
 
 **Not loaded automatically.** Read a specific entry when you need the history behind a decision. Durable lessons extracted from here live in `.claude/rules/`; if you find one that isn't there, add it.
+
+## 2026-08-25 — Widened-set DL retrain finished: first real AUC in 17 attempts (0.6493), and the saturation guard rejected promotion exactly as designed
+
+The full-universe retrain launched ~19:59 UTC the prior evening completed cleanly after ~4h29m
+(2,153 symbols, 667,723 sequences, clean exit, `dl_retrain_running` released, regime piggyback ran,
+registry row written). Mid-run scare resolved cheaply: the trainer looked hung because children
+showed CPU≈0 — but Win32_Process's `.CPU` property is unreliable here; raw `UserModeTime`/
+`KernelModeTime` showed PID 40152 consuming ~13 CPU-hours ≈ 9 cores continuously. **Windows note:
+trust the raw counters, not `.CPU`, when judging liveness of venv python pairs.**
+
+- **Walk-forward validation produced real metrics for the first time since the NULL streak began**
+  — `roc_auc=0.6493`, `directional_accuracy=0.609`, 6 folds. That ends 16+ consecutive retrains
+  (v4→v19) auto-rejected with `cv_roc_auc: NULL` from the silent sub-4,300-row validation-pool NaN
+  path: the 78→85 feature widening plus the sector_ret backfill restored enough usable rows for
+  validation to run.
+- **The AUC bar passed; the saturation guard vetoed anyway** — `frac_saturated=0.536 > 0.5`: 54%
+  of walk-forward predictions sat within 1% of 0 or 1 (overconfident outputs despite good rank
+  ordering). First live firing of the MAX_SATURATION_FRAC guard added 2026-08-10 after the then-
+  promoted v4 jumped to 70% saturated predictions; correct outcome either way — champion v3 kept
+  (`lstm_version=3` unchanged in dl_model_config.json), candidate weights left on disk at
+  `ml_models/lstm_v4.pt` (overwrites an old rejected v4 — on-disk presence still ≠ regression),
+  registry row `is_active=0`. If saturation persists across future retrains, next lever is
+  label/loss-side calibration, not gate tampering.
+- Post-gate E2E verified: `dl_engine.py --mode infer` wrote 2,425 predictions for 2026-08-25
+  serving v3. `test_dl_engine.py` 23/23 and `test_feature_engineering_batch.py` 6/6 green before
+  the scoped commit (dl_engine, feature_engineering, both tests, schema.postgres.sql, this log).
+
 ## 2026-08-24 -- ml engine halved on arm-test evidence, isotonic collapse fixed at the read, DL ROC-AUC finally monitored
 
 Three changes shipped as one unit because they were measured as one unit (the arm harness ran
@@ -5877,4 +5904,102 @@ uncommitted — their methodology survives in the AF-81 finding row, complete en
 
 Commits split by concern: ranker tilt wiring + guard tests; AF-79 label scaling + equivalence
 suite; docs/session-log. Full suite at commit time: 1739 passed / 232 skipped.
+
+
+## 2026-08-24 (cont.) — DL feature widening landed: width-agnostic checkpoint loading FIRST, then 78→85 (+7); sector_ret fallback closed the 47.6% hole
+
+**Order of operations held:** `_checkpoint_input_width()` (dl_engine.py) infers a checkpoint's
+input dim from `lstm1.weight_ih_l0.shape[1]`; `run_inference()` sizes each model from its OWN
+checkpoint and stores that width on the model cache; both sequence loaders slice
+`FEATURE_COLS[:width]`, defaulting to the cached champion's width at inference and requiring
+explicit `N_FEATURES` at training (`load_symbol_sequences(..., n_features=N_FEATURES)` in
+train_lstm). Only after that did N_FEATURES go 78→85 with 7 density-gated features appended
+(positions 0–77 byte-identical). The subtlety worth keeping: making only the loader
+width-agnostic is NOT enough — post-bump it would emit 85-wide tensors against the still-active
+78-wide lstm_v3.pt. New `TestCheckpointWidthAgnosticLoading` (4 tests) pins inference-from-
+weights for both widths, precedence (explicit > champion > constant), loader slicing, and an
+end-to-end "legacy checkpoint loads without crash" wiring test. Full dl suites: 37 passed.
+
+**sector_ret_5d/21d got a real producer:** `FeatureEngineer._compute_sector_momentum()` mirrors
+technicalSignalsService.getSectorMomentum() (percent units confirmed by live probe:
+technical_signals holds −1.98/−0.48-scale values) with is_suspect exclusion, NULLIF guards,
+per-(sector,window) memo cache, HOLE-FILL ONLY semantics, and a 40-day lookback warm-up so
+LAG(close,21) sees pre-window history (live check caught the starved-window bug AND an
+object-dtype TypeError from all-NULL AVG rows → pd.to_numeric at both boundaries). Backfilled
+today: 2,416 rows written; latest-date sector coverage 2,368/2,416 = 98% (was 47.6%
+table-wide). Deliberately NOT added to FEATURE_COLS (near-constant per sector, duplicates
+momentum channels).
+
+**Pre-existing failures fixed en route:** test_feature_engineering_batch.py's fixture DDL
+predated the carried-over Gap #4 write columns and its three tests didn't stub the two new
+merge methods — extended the sandbox DDL (mirroring schema.postgres.sql) and stubbed
+`_merge_flow_features`/`_merge_market_context`; suite now 6/6.
+
+**Findings recorded, not all fixed:** feature_store.sector_ret_5d history holds exact-0.0 rows
+(committed-era schema defaults) and literal NaN floats (Postgres 'NaN' sorts above every
+number, poisoning MAX over "non-null" rows) — neutralized at DL load by nan_to_num(0), left in
+history. iv_skew's technical_signals constant-0.0 placeholder was ALREADY replaced in-tree this
+session-lineage (so_stock_oi_summary nearest-expiry iv_put−iv_call). The resumption note's DL
+cadence claim was wrong in one place: dl-feature-refresh runs 17:00 IST; it is INFERENCE at
+05:00 IST (`30 23 * * 1-5`) — corrected in memory. A dead `dl_retrain_running='1'` lock
+(acquired 14:45, no process alive, heartbeat last-success ~Aug 17) was cleared manually after
+a Win32_Process sweep; Windows venv python.exe shows as launcher+child pairs — don't misread
+that as concurrent trainers.
+
+**Open at close of session:** retrain relaunched (PID 33572, step 1 running); promotion gate
+(+0.005 AUC vs v3's stored 0.58, saturation ≤50%, non-finite weight refusal) will decide
+whether the first 85-wide candidate becomes champion; daily inference keeps serving v3 either
+way.
+
+
+## dl_feature_widening_2026_08_24
+
+*BiLSTM widened 78->85 features; width-agnostic checkpoint loading landed FIRST so the stale-width champion keeps serving; sector_ret fallback producer closed the 47.6%-coverage hole; live cadences reverse-engineered from jobs/dl.jobs.ts (correcting an earlier claim)*
+
+**BiLSTM job cadences, verified against src/server/jobs/dl.jobs.ts cron patterns
+(2026-08-24; corrects the earlier "feature-refresh after 5 AM IST" framing):**
+- `dl-macro-daily` -> QUEUE_DL_MACRO_FETCH, cron `30 2 * * 1-5` = 08:00 IST weekdays.
+- `dl-feature-daily` -> QUEUE_DL_FEATURE_REFRESH, cron `30 11 * * 1-5` = **17:00 IST weekdays**
+  (after close data lands; queues.ts L2596 notes it reads stock_ohlcv at 17:00).
+- `dl-infer-daily` -> QUEUE_DL_INFERENCE, cron `30 23 * * 1-5` = **05:00 IST next weekday**
+  (deliberately NOT pinned to a fixed downstream time -- see L179 comment on variance).
+- `dl-regime-daily` -> `15 11 * * 1-5` = 16:45 IST.
+- `dl-retrain-weekly` -> `0 6 * * 0` = Sunday 11:30 IST (early-closed-day scheduling), plus a
+  drift-triggered emergency path (`dl-retrain-emergency`, last success Aug 14).
+
+**Width widening order-of-operations (the standing-order lesson):** N_FEATURES 78->85 (+7:
+ret_12m_ex1m, iv_skew, call/put_wall_dist_pct, insider_buy_pct_90d, block_deal_net_qty,
+near_expiry_gamma -- all density-gated first) was made safe by landing width-agnostic loading
+BEFORE anything consumed the new width: `_checkpoint_input_width()` infers the input dim from
+`lstm1.weight_ih_l0.shape[1]`; loaders slice `FEATURE_COLS[:width]` where width follows the
+CACHED CHAMPION at inference (explicit N_FEATURES at training, so candidates never inherit the
+champion's narrower width). Key subtlety: making only the LOADER width-agnostic is insufficient --
+after the bump it would emit 85-wide tensors against a 78-wide champion. The slice must follow
+the checkpoint, not the constant. Positions 0-77 frozen byte-identical (append-only widening)
+so the legacy champion scores identically until a wider candidate clears the +0.005 AUC bar.
+
+**sector_ret_5d/21d had no live producer** (backfill_technical_features inserted explicit
+NULLs; coverage 47.6% of D rows). New `FeatureEngineer._compute_sector_momentum()` mirrors
+technicalSignalsService.getSectorMomentum() -- percent units (`*100`), equal-weight sector mean
+via LAG(close,N) over stock_ohlcv JOIN nse_stocks -- with three deviations worth remembering:
+is_suspect bars excluded (TS predates ohlcv_quality), NULLIF denominators, HOLE-FILL ONLY.
+Two live-caught gotchas: (1) LAG must see pre-window history or the first ~21 dates degenerate
+to NULL -- fetch from start minus 40 days then trim; (2) all-NULL AVG rows arrive as Python None
+-> object dtype -> pandas 3 TypeError on `.loc` assignment into float64 -- coerce at the
+boundary with pd.to_numeric. Post-backfill latest-date coverage: 98% (was 47.6% table-wide).
+sector_ret_5d/21d were deliberately NOT added to FEATURE_COLS: near-constant per sector,
+near-duplicating existing momentum channels.
+
+**Live-data surprises in feature_store.sector_ret_5d** (pre-fix rows): exact `0.0`s stamped
+2026-08-24 from the committed-era writer's schema defaults, plus literal NaN floats stored
+(`MAX(col)` over "non-null" rows returns NaN -- Postgres 'NaN' sorts above every number).
+Both are poison-shaped history the DL-side nan_to_num(0) already neutralizes at load.
+
+**Dead-lock judgement call:** found `dl_retrain_running='1'` acquired 14:45 same day with NO
+trainer process alive (Win32_Process sweep) and dl-trainer heartbeat last-success ~Aug 17 --
+cleared it manually rather than waiting out the 25h STALE_LOCK_SECONDS, after verifying the
+process table. Windows venv note for that sweep: each venv Scripts python.exe shows as TWO
+processes (launcher -> real base-interpreter child); don't misread the pair as concurrent
+trainers. Also: `job_heartbeat` columns are last_status/last_run_at/last_success_at (BIGINT
+epoch ms) + last_error -- not last_success/last_failure_at.
 
