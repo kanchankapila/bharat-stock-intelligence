@@ -4,6 +4,27 @@ Historical record, split out of CLAUDE.md on 2026-08-11 (it was 64% of that file
 
 **Not loaded automatically.** Read a specific entry when you need the history behind a decision. Durable lessons extracted from here live in `.claude/rules/`; if you find one that isn't there, add it.
 
+## 2026-08-25 -- AF-20260823-81 walk-forward harness completed and pinned by a 21-test guard suite
+
+`blend_walkforward.py` refactored into testable module-level helpers (`daily_engine_ic`,
+`estimate_ics_asof`, `arm_metrics`), NaN-blend rows dropped explicitly, empty-result guidance added;
+`test_blend_walkforward.py` covers the normalize/blend mirrors, IC machinery, loaders, and runs two
+end-to-end cases through real `main()` against Postgres (60 syms x 90 sessions planted world,
+order-preserving copies of quality into every engine -- both arms must recover the edge).
+
+- **Midrank mirror fix:** `_normalize_to_100_series` was missing the `-0.5`
+  (`(average_rank - 0.5)/n * 100`, matching the ranker exactly). Feeds only `spearmanr`
+  (monotone-invariant), so the recorded gate numbers were never wrong.
+- **Latent loader bug caught by its own test:** `_load_panel` deduped on the raw `computed_at`
+  timestamp, so intraday re-stamps escaped the per-symbol-day dedupe AND missed the
+  midnight-keyed price join (silent double-count in the daily cross-section). Now
+  `.dt.normalize()`s to session date first; no-op for current midnight-stamped production data.
+- Production insert shape pinned by tests: `unified_recommendations` requires
+  `conviction_level` (NOT NULL, no default) alongside symbol/computed_at/regime/unified_score.
+- Gate verdict unchanged: TILT ~= BASE, `engine_ic_tilt_enabled` stays OFF; harness provenance
+  comment tells future sessions to re-run rather than recall.
+
+
 ## 2026-08-25 — Widened-set DL retrain finished: first real AUC in 17 attempts (0.6493), and the saturation guard rejected promotion exactly as designed
 
 The full-universe retrain launched ~19:59 UTC the prior evening completed cleanly after ~4h29m
