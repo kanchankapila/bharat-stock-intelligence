@@ -1929,10 +1929,11 @@ export const DATA_QUALITY_CHECKS: DataQualityCheck[] = [
     critical: false,
     sql: `WITH latest AS (
             SELECT * FROM technical_signals
-            -- date is a native DATE (2026-08-25 migration): compare it to a DATE. The previous
-            -- form cast CURRENT_DATE to text instead, which is exactly "date < text".
-            WHERE date::text < CURRENT_DATE
-              AND date = (SELECT MAX(date) FROM technical_signals WHERE date::text < CURRENT_DATE)
+            -- date is a native DATE (2026-08-25 migration): compare it to CURRENT_DATE
+            -- directly. Casting either side to text here produces exactly
+            -- "operator does not exist: text < date".
+            WHERE date < CURRENT_DATE
+              AND date = (SELECT MAX(date) FROM technical_signals WHERE date < CURRENT_DATE)
           ), kv AS (
             SELECT key, COUNT(*) FILTER (WHERE value <> 'null'::jsonb) AS non_null
             FROM latest t, LATERAL jsonb_each(to_jsonb(t))

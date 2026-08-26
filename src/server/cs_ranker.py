@@ -470,7 +470,7 @@ def score_batch() -> int:
                psh_oo.score_value AS ohlson_o
         FROM technical_signals ts
         LEFT JOIN stock_fundamentals sf ON sf.symbol = ts.symbol
-        {as_of_join_sql('analyst_estimates_history', 'aeh', 'ts', 'symbol', 'date')}
+        {as_of_join_sql('analyst_estimates_history', 'aeh', 'ts', 'symbol', 'date', False)}
         LEFT JOIN proprietary_scores_history psh_az
                ON psh_az.symbol = ts.symbol
               AND psh_az.source = 'moneycontrol'
@@ -478,7 +478,7 @@ def score_batch() -> int:
               AND psh_az.date = (
                   SELECT MAX(p2.date) FROM proprietary_scores_history p2
                   WHERE p2.symbol = ts.symbol AND p2.source = 'moneycontrol'
-                    AND p2.score_type = 'altman_z_score' AND p2.date <= ts.date
+                    AND p2.score_type = 'altman_z_score' AND p2.date <= ts.date::text
               )
         LEFT JOIN proprietary_scores_history psh_oo
                ON psh_oo.symbol = ts.symbol
@@ -487,7 +487,7 @@ def score_batch() -> int:
               AND psh_oo.date = (
                   SELECT MAX(p2.date) FROM proprietary_scores_history p2
                   WHERE p2.symbol = ts.symbol AND p2.source = 'moneycontrol'
-                    AND p2.score_type = 'ohlson_o_score' AND p2.date <= ts.date
+                    AND p2.score_type = 'ohlson_o_score' AND p2.date <= ts.date::text
               )
         WHERE ts.cs_score IS NULL
           AND ts.win_probability IS NOT NULL
