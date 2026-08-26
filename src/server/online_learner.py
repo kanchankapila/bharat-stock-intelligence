@@ -79,7 +79,7 @@ def load_recent_outcomes(window_days: int, min_new: int) -> pd.DataFrame:
                psh_oo.score_value AS ohlson_o
         FROM signal_outcomes so
         LEFT JOIN technical_signals ts
-               ON ts.symbol = so.symbol AND ts.date = so.signal_date
+               ON ts.symbol = so.symbol AND so.signal_date = ts.date::text
         {as_of_join_sql('fundamentals_history', 'fh', 'so', 'symbol', 'signal_date')}
         LEFT JOIN stock_fundamentals sf ON sf.symbol = so.symbol
         {as_of_join_sql('analyst_estimates_history', 'aeh', 'so', 'symbol', 'signal_date')}

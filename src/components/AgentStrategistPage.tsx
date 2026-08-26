@@ -24,22 +24,24 @@ export function AgentStrategistPage() {
   const topNarrative = picks[0]?.narrative;
 
   return (
-    <div className="p-6 space-y-6 max-w-5xl mx-auto">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="v1-title-page flex items-center gap-2">
+    <div className="v1-page space-y-6">
+      <div className="v1-header">
+        <div className="v1-header-left">
+          <h1 className="v1-title-page flex items-center gap-2.5">
             <Target className="w-6 h-6 text-purple-400" /> Strategist Agent
           </h1>
-          {data?.runDate && <p className="text-sm text-slate-400 mt-1">Run date: {data.runDate}</p>}
+          {data?.runDate && <p className="text-sm text-slate-400 mt-1 font-data">Run date: {data.runDate}</p>}
         </div>
-        <button
-          onClick={() => runMutation.mutate()}
-          disabled={runMutation.isPending}
-          className="flex items-center gap-2 px-4 py-2 bg-purple-600 hover:bg-purple-500 rounded-lg text-white text-sm disabled:opacity-50"
-        >
-          <RefreshCw className={`w-4 h-4 ${runMutation.isPending ? 'animate-spin' : ''}`} />
-          Run Now
-        </button>
+        <div className="v1-header-actions">
+          <button
+            onClick={() => runMutation.mutate()}
+            disabled={runMutation.isPending}
+            className="v1-btn-primary"
+          >
+            <RefreshCw className={`w-4 h-4 ${runMutation.isPending ? 'animate-spin' : ''}`} />
+            Run Now
+          </button>
+        </div>
       </div>
 
       <div className="flex gap-2">
@@ -47,8 +49,8 @@ export function AgentStrategistPage() {
           <button
             key={t}
             onClick={() => setTf(t)}
-            className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
-              tf === t ? 'bg-purple-600 text-white' : 'bg-white/5 text-slate-400 hover:bg-white/10'
+            className={`px-4 py-2 rounded-lg text-xs font-semibold font-display tracking-wide transition-colors ${
+              tf === t ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-500/20' : 'v1-btn-secondary'
             }`}
           >
             {TF_LABELS[t]}
@@ -56,24 +58,24 @@ export function AgentStrategistPage() {
         ))}
       </div>
 
-      {isLoading && <p className="text-slate-400">Loading picks...</p>}
+      {isLoading && <div className="v1-card p-6 text-sm text-slate-400 font-data animate-pulse">Loading picks...</div>}
 
       {topNarrative && (
         <div className="v1-card p-5">
-          <p className="text-sm font-semibold text-purple-300 mb-2">🎯 Strategy Brief — {TF_LABELS[tf]}</p>
-          <p className="text-white leading-relaxed">{topNarrative}</p>
+          <p className="v1-title-card text-purple-300 mb-2">🎯 Strategy Brief — {TF_LABELS[tf]}</p>
+          <p className="text-slate-100 text-sm leading-relaxed">{topNarrative}</p>
         </div>
       )}
 
       {picks.length === 0 && !isLoading && (
-        <p className="text-slate-500 text-sm">No picks for {TF_LABELS[tf]} today.</p>
+        <div className="v1-card p-6 text-slate-400 text-sm font-data">No picks for {TF_LABELS[tf]} today.</div>
       )}
 
       {picks.length > 0 && (
-        <div className="overflow-x-auto">
+        <div className="v1-card p-5 overflow-x-auto">
           <table className="w-full text-sm">
-            <thead>
-              <tr className="text-slate-400 border-b border-white/10">
+            <thead className="text-xs text-slate-400 border-b border-white/10 font-display uppercase tracking-wider">
+              <tr>
                 <th className="text-left py-3 pr-4">#</th>
                 <th className="text-left py-3 pr-4">Symbol</th>
                 <th className="text-left py-3 pr-4">Conviction</th>
@@ -85,27 +87,27 @@ export function AgentStrategistPage() {
                 <th className="text-right py-3">Score</th>
               </tr>
             </thead>
-            <tbody>
+            <tbody className="divide-y divide-white/5 font-data text-xs">
               {picks.map((p: any) => (
-                <tr key={p.id} className="border-b border-white/5 hover:bg-white/5">
+                <tr key={p.id} className="hover:bg-white/5 transition-colors">
                   <td className="py-3 pr-4 text-slate-500">{p.rank}</td>
-                  <td className="py-3 pr-4 font-semibold text-white">{p.symbol}</td>
+                  <td className="py-3 pr-4 font-bold text-white">{p.symbol}</td>
                   <td className="py-3 pr-4">
-                    <span className={`px-2 py-0.5 rounded border text-xs font-medium ${CONVICTION_COLOR[p.conviction]}`}>
+                    <span className={`px-2 py-0.5 rounded border text-[10px] font-bold ${CONVICTION_COLOR[p.conviction]}`}>
                       {p.conviction}
                     </span>
                   </td>
                   <td className="py-3 pr-4 text-right text-slate-300">₹{p.entry_zone_low}–{p.entry_zone_high}</td>
-                  <td className="py-3 pr-4 text-right text-rose-400">₹{p.stop_loss}</td>
-                  <td className="py-3 pr-4 text-right text-emerald-400">₹{p.target_1}</td>
-                  <td className="py-3 pr-4 text-right text-emerald-400">₹{p.target_2}</td>
-                  <td className="py-3 pr-4 text-right text-emerald-400">₹{p.target_3}</td>
+                  <td className="py-3 pr-4 text-right text-rose-400 font-bold">₹{p.stop_loss}</td>
+                  <td className="py-3 pr-4 text-right text-emerald-400 font-bold">₹{p.target_1}</td>
+                  <td className="py-3 pr-4 text-right text-emerald-400 font-bold">₹{p.target_2}</td>
+                  <td className="py-3 pr-4 text-right text-emerald-400 font-bold">₹{p.target_3}</td>
                   <td className="py-3 text-right">
                     <div className="flex items-center justify-end gap-2">
                       <div className="w-16 h-1.5 bg-white/10 rounded-full overflow-hidden">
                         <div className="h-full bg-purple-400 rounded-full" style={{ width: `${Math.min(p.composite_score, 100)}%` }} />
                       </div>
-                      <span className="text-slate-300 w-8 text-right">{p.composite_score?.toFixed(0)}</span>
+                      <span className="v1-data-value text-slate-300 text-xs w-8 text-right">{p.composite_score?.toFixed(0)}</span>
                     </div>
                   </td>
                 </tr>

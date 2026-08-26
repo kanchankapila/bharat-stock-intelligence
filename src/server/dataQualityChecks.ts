@@ -709,9 +709,12 @@ export const DATA_QUALITY_CHECKS: DataQualityCheck[] = [
     sql: `SELECT
             (SELECT MAX(date) FROM technical_signals) AS last_date,
             (SELECT COUNT(*) FROM technical_signals
-               WHERE date = (SELECT MAX(date) FROM technical_signals WHERE date < date('now'))) AS total,
+               -- ts.date is a native Postgres DATE since the 2026-08-25 migration; the other
+               -- date columns here are TEXT and sqlTranslate renders date('now',...) as ::text,
+               -- so cast THIS column side to match (stripped as a no-op on SQLite).
+               WHERE date::text = (SELECT MAX(date)::text FROM technical_signals WHERE date::text < date('now'))) AS total,
             (SELECT COUNT(win_probability) FROM technical_signals
-               WHERE date = (SELECT MAX(date) FROM technical_signals WHERE date < date('now'))) AS scored`,
+               WHERE date::text = (SELECT MAX(date)::text FROM technical_signals WHERE date::text < date('now'))) AS scored`,
     evaluate: (row, now) => {
       // technical-signals-daily only runs 8:30am-4pm IST on NSE trading days (queues.ts), so a
       // plain calendar-day gap false-fails every Monday morning purely from the Sat/Sun gap --
@@ -734,8 +737,10 @@ export const DATA_QUALITY_CHECKS: DataQualityCheck[] = [
     label: 'technical_signals value-range invariants (RSI 0-100, win-prob 0-1)',
     category: 'signals',
     critical: true,
+    // date is a native DATE (2026-08-25 migration); date('now','-3 days') translates to ::text,
+    // so compare like-for-like with date::text (see sqlTranslate.ts's header).
     sql: `SELECT COUNT(*) AS bad FROM technical_signals
-          WHERE date >= date('now','-3 days') AND (
+          WHERE date::text >= date('now','-3 days') AND (
             (rsi IS NOT NULL AND (rsi < 0 OR rsi > 100)) OR
             (win_probability IS NOT NULL AND (win_probability < 0 OR win_probability > 1)) OR
             (calibrated_win_probability IS NOT NULL AND (calibrated_win_probability < 0 OR calibrated_win_probability > 1))
@@ -752,7 +757,7 @@ export const DATA_QUALITY_CHECKS: DataQualityCheck[] = [
     category: 'signals',
     critical: false,
     sql: `SELECT COUNT(DISTINCT signal_score) AS distinct_scores, COUNT(*) AS total
-          FROM technical_signals WHERE date >= date('now','-3 days')`,
+          FROM technical_signals WHERE date::text >= date('now','-3 days')`,
     evaluate: (row) => {
       const total = Number(row?.total) || 0;
       const distinct = Number(row?.distinct_scores) || 0;
@@ -1924,7 +1929,10 @@ export const DATA_QUALITY_CHECKS: DataQualityCheck[] = [
     critical: false,
     sql: `WITH latest AS (
             SELECT * FROM technical_signals
-            WHERE date = (SELECT MAX(date) FROM technical_signals WHERE date < CURRENT_DATE::text)
+            -- date is a native DATE (2026-08-25 migration): compare it to a DATE. The previous
+            -- form cast CURRENT_DATE to text instead, which is exactly "date < text".
+            WHERE date::text < CURRENT_DATE
+              AND date = (SELECT MAX(date) FROM technical_signals WHERE date::text < CURRENT_DATE)
           ), kv AS (
             SELECT key, COUNT(*) FILTER (WHERE value <> 'null'::jsonb) AS non_null
             FROM latest t, LATERAL jsonb_each(to_jsonb(t))

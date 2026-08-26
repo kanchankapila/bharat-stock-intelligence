@@ -350,7 +350,7 @@ def daily_update(conn: ConnWrapper, dry_run: bool = False,
 
         outcomes = conn.execute("""
             SELECT so.return_pct, so.outcome FROM signal_outcomes so
-            JOIN technical_signals ts ON ts.symbol=so.symbol AND ts.date=so.signal_date
+            JOIN technical_signals ts ON ts.symbol=so.symbol AND so.signal_date=ts.date::text
             WHERE so.signal_date = ?
               AND so.outcome IN ('WIN','LOSS','NEUTRAL','STOP_LOSS')
               AND ts.nifty_regime = ?
@@ -421,7 +421,7 @@ def backfill_episodes(conn: ConnWrapper, lookback_days: int = 180, dry_run: bool
                so.signal_score, ts.nifty_regime, ns.sector
         FROM signal_outcomes so
         LEFT JOIN technical_signals ts
-               ON ts.symbol = so.symbol AND ts.date = so.signal_date
+               ON ts.symbol = so.symbol AND so.signal_date = ts.date::text
         LEFT JOIN nse_stocks ns ON ns.symbol = so.symbol
         WHERE so.outcome IN ('WIN','LOSS','NEUTRAL','STOP_LOSS')
           AND so.signal_date >= ?

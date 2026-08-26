@@ -1,11 +1,9 @@
-"""
-Dual-mode data-access layer for the Python engines (Phase 3 / P3f).
+﻿"""
+PostgreSQL-only data-access layer for the Python engines (Phase 3 / P3f).
 
 The Python analog of the TypeScript `dbAsync` facade. Exposes a small synchronous API
 (connect / query_all / query_one / query_scalar / execute / executemany / transaction /
-read_df / get_engine) that routes to either SQLite or PostgreSQL, selected by the
-USE_POSTGRES env var. Engines converted to this API keep running on SQLite today; the
-SQLite->Postgres cutover is then a single env flip — no further code change.
+read_df / get_engine) backed exclusively by PostgreSQL via SQLAlchemy + psycopg2.
 
 Everything executes through a SQLAlchemy `text()` connection so dialect/paramstyle
 differences are handled by SQLAlchemy and the sql_translate translator. Rows are returned
@@ -14,8 +12,7 @@ access (row[0]), matching the sqlite3.Row surface the engines already rely on.
 
 Conversion notes for P3f:
   - Pass parameters as a positional tuple/list: query_all(sql, [a, b]).
-  - For an inserted id on Postgres, add `RETURNING id` and read it (lastrowid is SQLite-only).
-  - `conn.row_factory = sqlite3.Row` lines become unnecessary — remove them.
+  - For an inserted id on Postgres, add `RETURNING id` and read it.
   - SQLite-only SQL (INSERT OR REPLACE, strftime, PRAGMA table_info) must be hand-converted.
 """
 import os
@@ -41,19 +38,20 @@ if "db_compat:_dotenv_loaded" not in _sys.modules:
         pass
 
 try:  # works whether run as a script (src/server on sys.path) or imported as a package
-    from sql_translate import translate, build_params, use_postgres
+    from sql_translate import translate, build_params
 except ImportError:  # pragma: no cover
-    from .sql_translate import translate, build_params, use_postgres
+    from .sql_translate import translate, build_params
 
 
-# ─── Connection URL / engine ───────────────────────────────────────────────────
+# PostgreSQL is the only database (SQLite fully decommissioned 2026-08-16).
+# ~30 Python engines still `from db_compat import use_postgres`; this shim keeps them
+# working and reads as the cleared-for-takeoff signal. Both URL resolution and every
+# query path are hard-wired to Postgres — this symbol is a compatibility no-op.
+def use_postgres() -> bool:
+    return True
 
-def _sqlite_url() -> str:
-    env = os.environ.get("DATABASE_URL")
-    if env and env.startswith("sqlite"):
-        return env
-    db_path = Path(__file__).resolve().parent.parent.parent / "database.sqlite"
-    return f"sqlite:///{db_path}"
+
+# --- Connection URL / engine ---
 
 
 def _pg_url() -> str:
@@ -78,7 +76,7 @@ def _pg_url() -> str:
 
 
 def database_url() -> str:
-    return _pg_url() if use_postgres() else _sqlite_url()
+    return _pg_url()
 
 
 _engines: dict = {}
@@ -115,7 +113,7 @@ def dispose_engines() -> None:
     _engines.clear()
 
 
-# ─── Row: dual-access (name + positional) ──────────────────────────────────────
+# â”€â”€â”€ Row: dual-access (name + positional) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 class Row(dict):
     """Mapping + sequence, mirroring sqlite3.Row. Supports name access (row['col']),
@@ -159,11 +157,11 @@ def _one(result):
     return Row(cols, tuple(r)) if r is not None else None
 
 
-# ─── Cursor / connection wrappers (legacy sqlite3 surface) ─────────────────────
+# â”€â”€â”€ Cursor / connection wrappers (legacy sqlite3 surface) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 class _EmptyResult:
     """Stand-in for a SQLAlchemy CursorResult when executemany() is called with zero
-    rows — sqlite3 treats that as a no-op, but passing an empty list to
+    rows â€” sqlite3 treats that as a no-op, but passing an empty list to
     Connection.execute() makes SQLAlchemy compile a single no-params execution instead
     of "executemany with 0 iterations", raising a spurious missing-bind-parameter error."""
     rowcount = 0
@@ -372,7 +370,7 @@ def connect() -> ConnWrapper:
     return ConnWrapper(get_engine().connect())
 
 
-# ─── Convenience helpers (open + use + close internally) ───────────────────────
+# â”€â”€â”€ Convenience helpers (open + use + close internally) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 def now_utc_iso() -> str:
     """Timezone-aware UTC timestamp string, safe to write into any TIMESTAMPTZ column.
@@ -417,49 +415,35 @@ def safe_alter(conn_or_none, ddl: str) -> bool:
 
     On PostgreSQL: rewrites the statement to use ``IF NOT EXISTS`` syntax,
     e.g. ``ALTER TABLE t ADD COLUMN IF NOT EXISTS col TYPE``. This is a
-    completely silent no-op when the column is already present — no server-log
+    completely silent no-op when the column is already present â€” no server-log
     ERROR, no transaction abort.
 
-    On SQLite: uses a plain try/except (SQLite does not support IF NOT EXISTS
-    for ADD COLUMN, but its errors don't abort the transaction anyway).
-
     Args:
-        conn_or_none: Accepted for API compatibility, ignored on Postgres path.
+        conn_or_none: Accepted for API compatibility, ignored (Postgres-only).
         ddl:          The DDL string, e.g.
                       ``"ALTER TABLE technical_signals ADD COLUMN foo REAL"``
 
     Returns:
-        True  — column was added (or IF NOT EXISTS made it a no-op on PG).
-        False — column already existed on SQLite (error silenced).
+        True  â€” column was added (or IF NOT EXISTS made it a no-op on PG).
+        False â€” the DDL still failed after IF NOT EXISTS (warning printed).
     """
-    if use_postgres():
-        # Inject "IF NOT EXISTS" between "ADD COLUMN" and the column name.
-        # Works for any case variant of "add column".
-        import re as _re
-        pg_ddl = _re.sub(
-            r"(?i)\bADD\s+COLUMN\b",
-            "ADD COLUMN IF NOT EXISTS",
-            ddl,
-            count=1,
-        )
-        try:
-            with get_engine().begin() as conn:
-                conn.execute(text(pg_ddl))
-            return True
-        except Exception as exc:
-            # Fallback: eat any remaining error (e.g., other DDL constraint)
-            print(f"[db_compat] safe_alter warning: {exc}")
-            return False
-    else:
-        # SQLite path — simple try/except
-        try:
-            if conn_or_none is not None:
-                conn_or_none.execute(ddl)
-            else:
-                execute(ddl)
-            return True
-        except Exception:
-            return False
+    # Inject "IF NOT EXISTS" between "ADD COLUMN" and the column name.
+    # Works for any case variant of "add column".
+    import re as _re
+    pg_ddl = _re.sub(
+        r"(?i)\bADD\s+COLUMN\b",
+        "ADD COLUMN IF NOT EXISTS",
+        ddl,
+        count=1,
+    )
+    try:
+        with get_engine().begin() as conn:
+            conn.execute(text(pg_ddl))
+        return True
+    except Exception as exc:
+        # Fallback: eat any remaining error (e.g., other DDL constraint)
+        print(f"[db_compat] safe_alter warning: {exc}")
+        return False
 
 
 def execute_returning(sql, params=()):
@@ -483,7 +467,7 @@ def read_df(sql, params=()):
         return pd.read_sql(text(translate(sql)), conn, params=build_params(params))
 
 
-# ─── Transactions ──────────────────────────────────────────────────────────────
+# â”€â”€â”€ Transactions â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 class _Tx:
     def __init__(self, conn):
@@ -528,7 +512,7 @@ def transaction():
 # pg_advisory_lock is session-scoped: the unlock MUST run on the exact same physical
 # backend connection that took the lock. query_one()/execute() each check a connection
 # out of the pool and return it immediately, so a naive acquire-via-query_one +
-# release-via-execute pair almost always runs on two different pooled connections —
+# release-via-execute pair almost always runs on two different pooled connections â€”
 # the unlock then silently no-ops (that session never held the lock) and the lock stays
 # held by whatever connection acquired it, orphaned in the pool until it happens to be
 # reused for the same lock name. Pin one checked-out connection per held lock instead.
@@ -540,11 +524,8 @@ def try_advisory_lock(name: str) -> bool:
 
     Uses a Postgres session-level advisory lock keyed off a stable hash of
     `name`; returns False immediately (non-blocking) if another process
-    already holds it. No-op (always True) on SQLite — advisory locks are a
-    Postgres-only primitive and the SQLite dev path is single-process.
+    already holds it.
     """
-    if not use_postgres():
-        return True
     conn = get_engine().connect()
     try:
         row = conn.execute(text(translate("SELECT pg_try_advisory_lock(?)")), build_params((_advisory_lock_key(name),))).fetchone()
@@ -560,8 +541,6 @@ def try_advisory_lock(name: str) -> bool:
 
 
 def release_advisory_lock(name: str) -> None:
-    if not use_postgres():
-        return
     conn = _advisory_conns.pop(name, None)
     if conn is None:
         return

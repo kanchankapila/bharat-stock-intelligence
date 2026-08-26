@@ -680,7 +680,7 @@ def resolve_outcomes(
            AND NOT EXISTS (
                SELECT 1 FROM signal_outcomes so2
                WHERE so2.symbol = ts.symbol
-                 AND so2.signal_date = ts.date
+                 AND so2.signal_date = ts.date::text
                  AND so2.horizon_days = ?
                  AND so2.signal_source = 'technical'
                  AND so2.outcome IN ('WIN','LOSS','NEUTRAL','STOP_LOSS')

@@ -259,15 +259,15 @@ export const mlRouter = router({
       const sourceSummary = await dbAll<any>(`
         SELECT 'TECHNICAL' AS signal_source,
                COUNT(*) AS total_signals,
-               SUM(CASE WHEN date >= date('now', '-7 days') THEN 1 ELSE 0 END) AS active_signals,
-               SUM(CASE WHEN date < date('now', '-7 days') THEN 1 ELSE 0 END) AS completed_signals,
+               SUM(CASE WHEN date::text >= date('now', '-7 days') THEN 1 ELSE 0 END) AS active_signals,
+               SUM(CASE WHEN date::text < date('now', '-7 days') THEN 1 ELSE 0 END) AS completed_signals,
                AVG(signal_score) AS avg_confidence_score,
                AVG(rsi) AS avg_technical_score,
                AVG(adx) AS avg_quant_score,
                AVG(cmp) AS avg_entry_price,
                AVG(julianday('now') - julianday(date)) AS avg_age_days
         FROM technical_signals
-        WHERE date >= date('now', '-30 days')
+        WHERE date::text >= date('now', '-30 days')
         GROUP BY signal_source
         UNION ALL
         SELECT 'CONFLUENCE' AS signal_source,
@@ -343,7 +343,7 @@ export const mlRouter = router({
                ROUND(COALESCE(100.0 * (lp.close - ts.cmp) / NULLIF(ts.cmp, 0), 0.0), 4) AS growth_pct
         FROM technical_signals ts
         LEFT JOIN latest_price lp ON lp.symbol = ts.symbol
-        WHERE ts.date >= date('now', '-30 days')
+        WHERE ts.date::text >= date('now', '-30 days')
           AND ts.signal_score >= 5
         ORDER BY ts.date DESC
         LIMIT ?
@@ -546,7 +546,9 @@ export const mlRouter = router({
         SELECT so.return_pct, so.outcome, so.entry_price, so.exit_price,
                so.signal_date, ts.rsi
         FROM signal_outcomes so
-        LEFT JOIN technical_signals ts ON so.symbol = ts.symbol AND so.signal_date = ts.date
+        LEFT JOIN technical_signals ts ON so.symbol = ts.symbol
+          -- ts.date is a native DATE (2026-08-25 migration); signal_outcomes.signal_date is TEXT.
+          AND so.signal_date = ts.date::text
         WHERE so.symbol = ?
           AND so.outcome IN ('WIN', 'LOSS', 'NEUTRAL')
           AND so.signal_source = 'technical'
@@ -632,7 +634,7 @@ export const mlRouter = router({
         SELECT ts.nifty_regime AS regime, ts.win_probability AS prob,
                CASE WHEN so.outcome = 'WIN' THEN 1 ELSE 0 END AS y
         FROM signal_outcomes so JOIN technical_signals ts
-          ON ts.symbol = so.symbol AND ts.date = so.signal_date
+          ON ts.symbol = so.symbol AND so.signal_date = ts.date::text
         WHERE so.outcome IN ('WIN', 'LOSS') AND ts.win_probability IS NOT NULL
           AND so.signal_date >= ? AND so.signal_source = 'technical'
       `, [cutoff]) as Array<{ regime: string | null; prob: number; y: number }>;

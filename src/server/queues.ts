@@ -700,7 +700,11 @@ async function processMlDailyOps(job: Job): Promise<{ success: boolean; failedSt
   await Promise.allSettled([
     runPython('moneycontrol_fetcher.py', [], 900_000)
       .catch(e => console.warn('[QUEUE] moneycontrol_fetcher failed:', (e as Error).message)),
-    runPython('technical_analysis_engine.py', [], 120_000)
+    // technical_analysis_engine sweeps the full universe (trend/RSI/MACD/Bollinger/pattern
+    // detection → unified_signals) and can exceed 120 s on a RAM-pressured box (measured
+    // timeout 2026-08-26 00:07). 300 s matches the default pythonRunner limit and the
+    // overhead of the 5-slot concurrency pool.
+    runPython('technical_analysis_engine.py', [], 300_000)
       .catch(e => console.warn('[QUEUE] technical_analysis_engine failed:', (e as Error).message)),
     T.run('finbert-scorer', () => runPython('finbert_scorer.py', ['--days', '1'], 180_000)),
   ]);
@@ -723,7 +727,9 @@ async function processMlDailyOps(job: Job): Promise<{ success: boolean; failedSt
     .catch(e => console.warn('[QUEUE] ohlcv_quality flag failed:', (e as Error).message));
 
   // Cross-sectional relative strength from (cleaned) OHLCV → technical_signals.rs_rank_21d/63d.
-  await runPython('relative_strength.py', [], 180_000)
+  // 180 s is tight on this RAM-pressured box (measured timeout 2026-08-26 00:20); 300 s
+  // matches the pythonRunner default and the slot-pool overhead.
+  await runPython('relative_strength.py', [], 300_000)
     .catch(e => console.warn('[QUEUE] relative_strength failed:', (e as Error).message));
 
   // Cross-sectional ownership flow: sector-relative + universe-rank of MF net flow already

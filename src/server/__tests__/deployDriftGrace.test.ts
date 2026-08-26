@@ -50,9 +50,17 @@ describe('driftVerdict', () => {
     // 2h grace). 10h is used here purely to make the asserted string unambiguous.
     const now = after(HEAD.committedAt, 10 * 3_600_000);
     const v = driftVerdict(HEAD, online(new Date('2026-08-21T13:17:01.957Z')), now);
+    expect(v.status).toBe('restart');
+    expect(v.detail).toContain('undeployed for 10.0h');
+  });
+
+  it('reports FAIL (not restart) between the grace window and the auto-restart threshold', () => {
+    // 3h undeployed: past grace, so a finding — but below AUTO_RESTART_AFTER_MS, so the
+    // caller is still expected to alert rather than act.
+    const now = after(HEAD.committedAt, 3 * 3_600_000);
+    const v = driftVerdict(HEAD, online(ago(HEAD.committedAt, 60 * 60_000)), now);
     expect(v.status).toBe('fail');
     expect(v.detail).toContain('pm2 restart bharat-server');
-    expect(v.detail).toContain('undeployed for 10.0h');
   });
 
   it('flips from pending to fail exactly at the grace boundary', () => {

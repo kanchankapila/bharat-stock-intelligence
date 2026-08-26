@@ -33,6 +33,8 @@ from datetime import date
 
 import requests
 
+import tl_fetch
+
 from db_compat import connect
 from as_of import logical_write_floor
 from fetch_utils import (retry_get, FetchTracker, filter_numeric_tlids,
@@ -378,8 +380,12 @@ def main() -> None:
 
     stocks = cap_to_run_budget(stocks, "TLPriceAnalysis", requests_per_row=1)
     print(f"[TLPriceAnalysis] Fetching price-performance-analysis for {len(stocks)} stocks in batches of {BATCH_SIZE} ({BATCH_GAP_SEC}s gap)...")
-    session = requests.Session()
-    session.headers.update(HEADERS)
+    # 2026-08-26: curl_cffi Chrome-TLS-impersonated session via tl_fetch (see
+    # trendlyne_adv_tech_fetcher.py for the rationale); HEADERS applied only on the
+    # plain-requests fallback so Scrapling's own browser-consistent header set wins.
+    session = tl_fetch.create_session()
+    if not isinstance(session, tl_fetch.TLSession):
+        session.headers.update(HEADERS)
     today = date.today()  # real calendar date -- extract_features() needs this for the seasonal-month lookup
     # But the technical_signals UPDATE below needs the last COMPLETED trading session, not the
     # calendar date: this job runs Tuesday evening (trendlyne-midweek), and any day the grid-ensurer

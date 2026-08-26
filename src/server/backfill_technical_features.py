@@ -172,11 +172,11 @@ def run(limit: int | None = None):
           AND NOT EXISTS (
               SELECT 1 FROM technical_signals ts
               WHERE ts.symbol = so.symbol
-                AND ts.date <= so.signal_date
+                AND ts.date <= so.signal_date::date
                 -- keep in step with ml_ensemble.py's feature lateral (7d tolerates a
                 -- holiday+weekend closure); a narrower window here would report gaps the
                 -- trainer does not actually have.
-                AND ts.date >= (so.signal_date::date - interval '7 days')::text
+                AND ts.date >= (so.signal_date::date - interval '7 days')
           )
         ORDER BY so.signal_date DESC
     """).fetchall()

@@ -1103,12 +1103,27 @@ export const StockIntelligencePage: React.FC<StockIntelligencePageProps> = ({
   const isWatched = symbol ? watchlist.includes(symbol) : false;
 
   return (
-    <div className="space-y-4 pb-10">
+    <div className="v1-page space-y-6 pb-10">
       <V4QuickNav />
-      <SymbolSearch onSelect={setSymbol} />
+
+      {/* Header */}
+      <div className="v1-header">
+        <div className="v1-header-left">
+          <h1 className="v1-title-page flex items-center gap-2.5">
+            <Compass className="w-6 h-6 text-indigo-400" />
+            Stock Intelligence
+          </h1>
+          <p className="text-sm text-slate-400">Deep fundamental, technical, ownership, and F&O analysis per NSE stock</p>
+        </div>
+        <div className="v1-header-actions">
+          <SymbolSearch onSelect={setSymbol} />
+        </div>
+      </div>
 
       {!symbol ? (
-        <div className="text-center py-20 text-slate-500 text-sm">Search for a stock above to view its full intelligence profile.</div>
+        <div className="v1-card p-16 text-center text-slate-400 text-sm font-data">
+          Search for a stock above to view its full intelligence profile.
+        </div>
       ) : (
         <>
           <StockHeaderCard symbol={symbol} stockMeta={stockMeta} isWatched={isWatched} onToggleWatchlist={onToggleWatchlist} userId={userId} />

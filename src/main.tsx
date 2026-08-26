@@ -1,4 +1,4 @@
-import { StrictMode, useState } from 'react';
+import { StrictMode, Suspense, lazy, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { BrowserRouter, Route, Routes } from 'react-router-dom';
 import { QueryCache, QueryClient, QueryClientProvider } from "@tanstack/react-query";
@@ -10,6 +10,10 @@ import { auth } from "./lib/firebase";
 import V5App from './v5/V5App.tsx';
 import App from './App';
 import './index.css';
+
+// Standalone design-direction concept (no shell, no backend, all data simulated client-side).
+const ConceptLedger = lazy(() => import('./concept/ConceptLedger'));
+
 
 // No-op without VITE_SENTRY_DSN. Init before render so it can capture render-time errors too.
 initSentry();
@@ -76,6 +80,7 @@ const Main = () => {
         <BrowserRouter>
           <Routes>
             <Route path="/v5" element={<V5App />} />
+            <Route path="/concept" element={<Suspense fallback={null}><ConceptLedger /></Suspense>} />
             <Route path="/*" element={<App />} />
           </Routes>
         </BrowserRouter>

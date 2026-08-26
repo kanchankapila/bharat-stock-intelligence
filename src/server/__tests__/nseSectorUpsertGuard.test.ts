@@ -6,7 +6,10 @@ const { dbExec, dbRun, dbGet, dbAll } = await import('../dbAsync');
 const { syncNSEStocksToDatabase } = await import('../nseService');
 const { nseStocksData } = await import('../../data/nseStocks');
 
-async function waitForRow(symbol: string, predicate: (r: any) => boolean, timeoutMs = 5000) {
+async function waitForRow(symbol: string, predicate: (r: any) => boolean, timeoutMs = 20_000) {
+  // Default raised 5s -> 20s: under a full `npx vitest run` this suite co-runs with the `live`
+  // project against the same Postgres (pool budget 45-60 incl. pm2 services), and syncNSEStocksToDatabase
+  // re-inserts all ~2,366 stocks; polling sometimes starved past 5s and failed intermittently.
   const start = Date.now();
   while (Date.now() - start < timeoutMs) {
     const row = await dbGet<any>('SELECT * FROM nse_stocks WHERE symbol = ?', [symbol]);

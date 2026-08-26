@@ -41,7 +41,7 @@ from datetime import date, timedelta
 
 import requests
 
-from db_compat import connect, translate, use_postgres
+from db_compat import connect, translate
 from fetch_utils import retry_get
 import sys
 
@@ -134,8 +134,7 @@ def compute_delivery_trend(con) -> int:
     today = (row[0] if row else None) or date.today().isoformat()
     cutoff = (date.fromisoformat(today) - timedelta(days=30)).isoformat()
 
-    if use_postgres():
-        cur.execute("""
+    cur.execute("""
             UPDATE technical_signals ts
             SET delivery_trend_30d = sub.trend
             FROM (
@@ -154,24 +153,6 @@ def compute_delivery_trend(con) -> int:
             WHERE ts.symbol = sub.symbol
               AND ts.date   = :today
         """, {"cutoff": cutoff, "today": today})
-    else:
-        cur.execute("""
-            UPDATE technical_signals
-            SET delivery_trend_30d = (
-                SELECT cur.delivery_pct - avg30.avg_pct
-                FROM stock_delivery_volume cur
-                JOIN (
-                    SELECT symbol, AVG(delivery_pct) AS avg_pct
-                    FROM stock_delivery_volume
-                    WHERE date >= ? AND date < ?
-                    GROUP BY symbol
-                ) avg30 ON avg30.symbol = cur.symbol
-                WHERE cur.symbol = technical_signals.symbol
-                  AND cur.date   = ?
-                LIMIT 1
-            )
-            WHERE date = ?
-        """, (cutoff, today, today, today))
 
     updated = cur.rowcount
     con.commit()
@@ -251,8 +232,7 @@ def upsert_deals(rows: list[dict], con) -> int:
     cur = con.cursor()
     count = 0
     for r in rows:
-        if use_postgres():
-            cur.execute("""
+        cur.execute("""
                 INSERT INTO bulk_block_deals
                     (symbol, deal_date, deal_type, client_name, buy_sell, quantity, price, value_cr)
                 VALUES (:symbol, :deal_date, :deal_type, :client_name, :buy_sell, :quantity, :price, :value_cr)
@@ -268,21 +248,6 @@ def upsert_deals(rows: list[dict], con) -> int:
                 "buy_sell": r["buy_sell"], "quantity": r["quantity"],
                 "price": r["price"], "value_cr": r["value_cr"],
             })
-        else:
-            cur.execute("""
-                INSERT INTO bulk_block_deals
-                    (symbol, deal_date, deal_type, client_name, buy_sell, quantity, price, value_cr)
-                VALUES (?,?,?,?,?,?,?,?)
-                ON CONFLICT (symbol, deal_date, client_name, deal_type) DO UPDATE SET
-                    buy_sell   = excluded.buy_sell,
-                    quantity   = excluded.quantity,
-                    price      = excluded.price,
-                    value_cr   = excluded.value_cr,
-                    fetched_at = CURRENT_TIMESTAMP
-            """, (
-                r["symbol"], r["deal_date"], r["deal_type"], r["client_name"],
-                r["buy_sell"], r["quantity"], r["price"], r["value_cr"],
-            ))
         count += 1
     con.commit()
     return count
@@ -300,56 +265,29 @@ def backfill_deal_flags(con) -> int:
     cutoff = (date.today() - timedelta(days=5)).isoformat()
     cur = con.cursor()
 
-    if use_postgres():
-        cur.execute("""
-            UPDATE technical_signals ts
-            SET block_deal_flag      = sub.flag,
-                block_deal_direction = sub.direction
-            FROM (
-                SELECT
-                    symbol,
-                    CASE WHEN SUM(value_cr) > 20 THEN 1 ELSE 0 END AS flag,
-                    CASE
-                        WHEN SUM(CASE WHEN buy_sell='BUY'  THEN value_cr ELSE 0 END) >
-                             SUM(CASE WHEN buy_sell='SELL' THEN value_cr ELSE 0 END)
-                        THEN 1
-                        WHEN SUM(CASE WHEN buy_sell='SELL' THEN value_cr ELSE 0 END) >
-                             SUM(CASE WHEN buy_sell='BUY'  THEN value_cr ELSE 0 END)
-                        THEN -1
-                        ELSE 0
-                    END AS direction
-                FROM bulk_block_deals
-                WHERE deal_date >= :cutoff
-                GROUP BY symbol
-            ) sub
-            WHERE ts.symbol = sub.symbol
-              AND ts.date   = :today
-        """, {"cutoff": cutoff, "today": today})
-    else:
-        cur.execute("""
-            UPDATE technical_signals
-            SET block_deal_flag = (
-                SELECT CASE WHEN SUM(value_cr) > 20 THEN 1 ELSE 0 END
-                FROM bulk_block_deals
-                WHERE symbol = technical_signals.symbol AND deal_date >= ?
-            ),
-            block_deal_direction = (
-                SELECT
-                    CASE
-                        WHEN SUM(CASE WHEN buy_sell='BUY'  THEN value_cr ELSE 0 END) >
-                             SUM(CASE WHEN buy_sell='SELL' THEN value_cr ELSE 0 END)
-                        THEN 1
-                        WHEN SUM(CASE WHEN buy_sell='SELL' THEN value_cr ELSE 0 END) >
-                             SUM(CASE WHEN buy_sell='BUY'  THEN value_cr ELSE 0 END)
-                        THEN -1
-                        ELSE 0
-                    END
-                FROM bulk_block_deals
-                WHERE symbol = technical_signals.symbol AND deal_date >= ?
-            )
-            WHERE date = ?
-        """, (cutoff, cutoff, today))
-
+    cur.execute("""
+        UPDATE technical_signals ts
+        SET block_deal_flag      = sub.flag,
+            block_deal_direction = sub.direction
+        FROM (
+            SELECT symbol,
+                CASE WHEN SUM(value_cr) > 20 THEN 1 ELSE 0 END AS flag,
+                CASE
+                    WHEN SUM(CASE WHEN buy_sell='BUY'  THEN value_cr ELSE 0 END) >
+                         SUM(CASE WHEN buy_sell='SELL' THEN value_cr ELSE 0 END)
+                    THEN 1
+                    WHEN SUM(CASE WHEN buy_sell='SELL' THEN value_cr ELSE 0 END) >
+                         SUM(CASE WHEN buy_sell='BUY'  THEN value_cr ELSE 0 END)
+                    THEN -1
+                    ELSE 0
+                END AS direction
+            FROM bulk_block_deals
+            WHERE deal_date >= :cutoff
+            GROUP BY symbol
+        ) sub
+        WHERE ts.symbol = sub.symbol
+          AND ts.date   = :today
+    """, {"cutoff": cutoff, "today": today})
     updated = cur.rowcount
     con.commit()
     return updated
@@ -406,8 +344,7 @@ def compute_short_proxy(con) -> int:
     row = cur.fetchone()
     today = (row[0] if row else None) or date.today().isoformat()
 
-    if use_postgres():
-        cur.execute("""
+    cur.execute("""
             UPDATE technical_signals ts
             SET short_interest_proxy = sub.proxy
             FROM (
@@ -422,21 +359,6 @@ def compute_short_proxy(con) -> int:
             WHERE ts.symbol = sub.symbol
               AND ts.date   = :today
         """, {"today": today})
-    else:
-        cur.execute("""
-            UPDATE technical_signals
-            SET short_interest_proxy = (
-                SELECT
-                    total_puts_oi / NULLIF(total_calls_oi + total_puts_oi, 0)
-                FROM nt_fno_dashboard
-                WHERE symbol = technical_signals.symbol
-                  AND date   = (SELECT MAX(date) FROM nt_fno_dashboard)
-                  AND total_calls_oi IS NOT NULL
-                  AND total_puts_oi  IS NOT NULL
-                LIMIT 1
-            )
-            WHERE date = ?
-        """, (today,))
 
     updated = cur.rowcount
     con.commit()

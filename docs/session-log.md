@@ -1,3 +1,4 @@
+2026 logging, Broker-confirmed Direct Issues edits backend assert-cycle reaffirm basics top—subqueue mismatch.
 # Session Log — Bharat Stock Intelligence
 
 Historical record, split out of CLAUDE.md on 2026-08-11 (it was 64% of that file and was being loaded into every context window).
@@ -6017,10 +6018,64 @@ near-duplicating existing momentum channels.
 Both are poison-shaped history the DL-side nan_to_num(0) already neutralizes at load.
 
 **Dead-lock judgement call:** found `dl_retrain_running='1'` acquired 14:45 same day with NO
+
 trainer process alive (Win32_Process sweep) and dl-trainer heartbeat last-success ~Aug 17 --
 cleared it manually rather than waiting out the 25h STALE_LOCK_SECONDS, after verifying the
 process table. Windows venv note for that sweep: each venv Scripts python.exe shows as TWO
 processes (launcher -> real base-interpreter child); don't misread the pair as concurrent
 trainers. Also: `job_heartbeat` columns are last_status/last_run_at/last_success_at (BIGINT
 epoch ms) + last_error -- not last_success/last_failure_at.
+
+
+**2026-08-25 — six deterministic unit failures fixed (native-DATE vs TEXT-date SQL); suite green twice consecutively.**
+
+`npx vitest run` had been failing 6 tests across `signalOutcomesServiceSource` (5) and
+`signalReportCard` (1) with PG 42883 type mismatches, plus intermittent NSE/digest flakes:
+
+1. `date >= text`: `getSignalReportCard` compared `technical_signals.date` (**native DATE**,
+   schema.postgres.sql) against `date('now','-N days')`, which sqlTranslate deliberately renders
+   as `::text` for the TEXT-majority columns. Fixed at the call sites per sqlTranslate.ts's own
+   documented convention (`date::text >= date('now',...)`) — sourceSummary CASE/WHERE,
+   activeSignalGrowth WHERE.
+2. `text = date`: `computeSignalOutcomes`' dedup guard correlated TEXT `signal_outcomes.signal_date`
+   = DATE `ts.date` cross-table. No translator can know column types; fixed with
+   `so.signal_date = ts.date::text`.
+3. Intermittent NSE `waitForRow` timeouts + digest suite: the `unit` project (single fork,
+   pool max=22) co-runs with the `live` project against the SAME Postgres while four pm2
+   services hold ~45 connections; new connections were briefly refused with 53300 "too many
+   clients", which `isTransientConnError` did NOT treat as retryable. Now in the regex, and
+   NSE poll default raised 5s→20s. Both suites passed clean isolated before any change —
+   negative control confirmed the deterministic 6 were unrelated to them.
+
+Verified: targeted suites 46/46, then FULL `npx vitest run` green twice consecutively
+(112 passed / 11 skipped / 0 failed), `tsc --noEmit` clean, bharat-server restarted.
+Lesson: the error string itself (`text = date` vs `date >= text`) names which side needed the
+cast — read it before guessing; and `julianday()` was NOT the problem despite looking
+suspicious (the translator already maps it; its test proves it).
+
+**2026-08-25 (later same day) — /concept design-direction page shipped.**
+Standalone editorial-broadsheet concept at `/concept` (src/concept/, lazy route in main.tsx):
+Fraunces/Archivo/IBM Plex Mono on warm paper, seeded deterministic SVG charts, zero backend/
+Firebase calls, all styles scoped under .concept-root so none of the six shells are touched.
+Ships as its own lazy chunk (~30kB JS + 11kB CSS). Build green.
+
+**2026-08-25 (evening) — bharat-server EADDRINUSE crash-loop fixed (↺233+); drift checks hardened.**
+
+Root cause chain, all measured live: a leaked tsx worker from a PREVIOUS pm2 generation held
+:3000; every new boot died on EADDRINUSE ~20s in (after Redis/BullMQ/job init) — longer than
+min_uptime(10s), so pm2 counted each crash "stable" and restarted FOREVER, host RAM 96.5%.
+The drift jobs detected the squatter every 15 min but never acted. Fixes: server.ts got an
+explicit httpServer.on('error') handler (EADDRINUSE now exits fast with an actionable message
+instead of an uncaughtException stack per boot); check_port_drift.mjs got opt-in auto-heal
+PORT_DRIFT_AUTOHEAL=1 (set on the pm2 job in ecosystem.config.cjs) that kills ONLY port-holding
+trees with no ancestry link to any online pm2 pid; both drift scripts' sh() rewritten cmd.exe
+/d /s /c argv-style — DEP0190 warnings gone from pm2-err.log, both scripts verified exit 0 with
+correct verdicts, auto-heal negative-controlled against the healthy state (kills nothing).
+FinBERT enrichment runPython timeout 60s→180s (the other recurring error in today's logs —
+model load on a RAM-pressured box doesn't fit 60s; failure mode is silent ai_scored=0 backlog
+growth). GEMINI_API_KEY warning is REAL (key unset since 2026-08-20 per its own text) — left
+alone deliberately. Recovery order that worked: pm2 stop FIRST → taskkill /F /T every stray
+server.ts tree → start once → verify ancestry chain Daemon→wrapper→worker owns :3000 → pm2 save.
+Restarting into a squatted port just burns another generation.
+
 

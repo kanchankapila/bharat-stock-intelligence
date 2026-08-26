@@ -263,3 +263,67 @@ class TestMainNoDataExitCode:
         with pytest.raises(SystemExit) as exc:
             self._run_main_for_date(monkeypatch, "2026-08-07")
         assert exc.value.code == 1
+
+
+# ── publication-lag lookback (2026-08-26) ───────────────────────────────────────
+# NSE publishes sec_bhavdata_full_*.csv in stages and some days very late; a same-evening
+# request for today's file routinely 404s while yesterday's serves fine. The scheduled (no
+# --date) path walks back to the newest published file instead of failing the ml-daily-ops
+# step. Explicit --date stays strict (tests above).
+
+def test_fetch_latest_walks_back_to_the_newest_published_file(monkeypatch):
+    import datetime
+    import nse_bhavcopy_fetcher as nbf
+
+    calls = []
+
+    def fake_fetch(d):
+        calls.append(d)
+        return nbf.parse_bhavcopy(_csv("25-Aug-2026")) if d == datetime.date(2026, 8, 25) else []
+
+    monkeypatch.setattr(nbf, "fetch_bhavcopy", fake_fetch)
+    rows, requested = nbf.fetch_latest_bhavcopy(today=datetime.date(2026, 8, 26))
+    assert rows and {r["date"] for r in rows} == {"2026-08-25"}
+    assert requested == datetime.date(2026, 8, 25)
+    assert calls == [datetime.date(2026, 8, 26), datetime.date(2026, 8, 25)], (
+        "must probe today first, then walk back one day at a time"
+    )
+
+
+def test_fetch_latest_returns_empty_after_exhausting_lookback(monkeypatch):
+    import datetime
+    import nse_bhavcopy_fetcher as nbf
+
+    probed = []
+    monkeypatch.setattr(nbf, "fetch_bhavcopy", lambda d: probed.append(d) or [])
+    rows, _ = nbf.fetch_latest_bhavcopy(max_lookback=2, today=datetime.date(2026, 8, 26))
+    assert rows == []
+    assert len(probed) == 3, "lookback=N probes exactly N+1 candidate days (today + N back)"
+
+
+def test_scheduled_main_no_longer_fails_when_only_yesterday_published(monkeypatch):
+    """The exact 2026-08-26 incident: today's file 404s at run time. The scheduled path must
+    store the newest available session and exit 0 rather than failing ml-daily-ops."""
+    import datetime
+    import nse_bhavcopy_fetcher as nbf
+
+    stored = {}
+
+    def fake_store(conn, rows):
+        stored["rows"] = rows
+        return len(rows)
+
+    fake_conn = _FakeConn()
+    fake_conn.close = lambda: None
+    monkeypatch.setattr(nbf, "connect", lambda: fake_conn)
+    monkeypatch.setattr(nbf, "ensure_schema", lambda conn: None)
+    monkeypatch.setattr(nbf, "store_bhavcopy", fake_store)
+    monkeypatch.setattr(nbf, "run_one",
+                        lambda conn, d: (_ for _ in ()).throw(AssertionError("run_one must not be used")))
+    yesterdays = nbf.parse_bhavcopy(_csv("25-Aug-2026"))
+    monkeypatch.setattr(nbf, "fetch_latest_bhavcopy",
+                        lambda max_lookback=nbf.BHAV_PUBLICATION_LAG_DAYS: (yesterdays, datetime.date(2026, 8, 25)))
+    monkeypatch.setattr(sys, "argv", ["nse_bhavcopy_fetcher.py"])  # no --date: scheduled path
+    nbf.main()  # must not raise SystemExit
+    assert stored.get("rows") == yesterdays
+

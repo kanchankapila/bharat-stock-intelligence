@@ -26,14 +26,14 @@ export function AgentDataScientistPage() {
   }));
 
   return (
-    <div className="p-6 space-y-6 max-w-5xl mx-auto">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="v1-title-page flex items-center gap-2">
+    <div className="v1-page space-y-6">
+      <div className="v1-header">
+        <div className="v1-header-left">
+          <h1 className="v1-title-page flex items-center gap-2.5">
             <Database className="w-6 h-6 text-indigo-400" /> Data Scientist Agent
           </h1>
           {latest && (
-            <p className="text-sm text-slate-400 mt-1">
+            <p className="text-sm text-slate-400 mt-1 font-data">
               Last run: {latest.run_date} · Grade:{' '}
               <span className={`font-bold ${GRADE_COLOR[latest.quality_grade]}`}>
                 {latest.quality_grade}
@@ -41,26 +41,28 @@ export function AgentDataScientistPage() {
             </p>
           )}
         </div>
-        <button
-          onClick={() => runMutation.mutate()}
-          disabled={runMutation.isPending}
-          className="flex items-center gap-2 px-4 py-2 bg-indigo-600 hover:bg-indigo-500 rounded-lg text-white text-sm disabled:opacity-50"
-        >
-          <RefreshCw className={`w-4 h-4 ${runMutation.isPending ? 'animate-spin' : ''}`} />
-          Run Now
-        </button>
+        <div className="v1-header-actions">
+          <button
+            onClick={() => runMutation.mutate()}
+            disabled={runMutation.isPending}
+            className="v1-btn-primary"
+          >
+            <RefreshCw className={`w-4 h-4 ${runMutation.isPending ? 'animate-spin' : ''}`} />
+            Run Now
+          </button>
+        </div>
       </div>
 
-      {isLoading && <p className="text-slate-400">Loading...</p>}
+      {isLoading && <div className="v1-card p-6 text-sm text-slate-400 font-data animate-pulse">Loading Agent Report...</div>}
 
       {latest && (
         <>
-          <div className={`rounded-xl p-5 border border-white/10 ${GRADE_BG[latest.quality_grade]}`}>
-            <p className="text-sm font-semibold text-slate-300 mb-2">🧠 Agent Analysis</p>
-            <p className="text-white leading-relaxed">{latest.narrative || 'No narrative available.'}</p>
+          <div className={`v1-card p-5 ${GRADE_BG[latest.quality_grade]}`}>
+            <p className="v1-title-card text-slate-300 mb-2">🧠 Agent Analysis</p>
+            <p className="text-slate-100 text-sm leading-relaxed">{latest.narrative || 'No narrative available.'}</p>
           </div>
 
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+          <div className="v1-grid-4">
             {[
               { label: 'Quality Score', value: `${latest.data_quality_score?.toFixed(0)}/100`, sub: `Grade ${latest.quality_grade}` },
               { label: 'OHLCV Coverage', value: `${latest.ohlcv_coverage_pct?.toFixed(1)}%`, sub: `${latest.stale_symbols_count} stale` },
@@ -69,21 +71,21 @@ export function AgentDataScientistPage() {
             ].map(m => (
               <div key={m.label} className="v1-card p-4">
                 <p className="v1-data-label">{m.label}</p>
-                <p className="v1-data-value text-white mt-1">{m.value}</p>
-                <p className="text-xs text-slate-500 mt-1">{m.sub}</p>
+                <p className="v1-data-value text-xl text-white mt-1">{m.value}</p>
+                <p className="text-xs text-slate-400 font-data mt-1">{m.sub}</p>
               </div>
             ))}
           </div>
 
           {issues.length > 0 && (
-            <div className="bg-white/5 rounded-xl p-4 border border-yellow-500/30">
-              <p className="text-sm font-semibold text-yellow-400 mb-3 flex items-center gap-2">
+            <div className="v1-card v1-card-neutral p-4">
+              <p className="v1-title-card text-amber-400 mb-3 flex items-center gap-2">
                 <AlertTriangle className="w-4 h-4" /> Issues Flagged
               </p>
               <ul className="space-y-2">
                 {issues.map((iss: any, i: number) => (
-                  <li key={i} className="flex items-start gap-2 text-sm">
-                    <span className={`px-2 py-0.5 rounded text-xs font-medium ${iss.severity === 'HIGH' ? 'bg-rose-900 text-rose-300' : 'bg-yellow-900 text-yellow-300'}`}>
+                  <li key={i} className="flex items-start gap-2 text-xs font-data">
+                    <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${iss.severity === 'HIGH' ? 'bg-rose-900/60 text-rose-300' : 'bg-amber-900/60 text-amber-300'}`}>
                       {iss.severity}
                     </span>
                     <span className="text-slate-300">{iss.issue}</span>
@@ -93,7 +95,7 @@ export function AgentDataScientistPage() {
             </div>
           )}
           {issues.length === 0 && (
-            <div className="flex items-center gap-2 text-emerald-400 text-sm">
+            <div className="v1-card v1-card-up p-4 flex items-center gap-2 text-emerald-400 text-xs font-semibold">
               <CheckCircle className="w-4 h-4" /> No issues flagged today
             </div>
           )}
@@ -101,14 +103,14 @@ export function AgentDataScientistPage() {
       )}
 
       {chartData.length > 1 && (
-        <div className="v1-card p-4">
+        <div className="v1-card p-5">
           <p className="v1-title-card mb-4">30-Day Quality Score Trend</p>
-          <ResponsiveContainer width="100%" height={160}>
+          <ResponsiveContainer width="100%" height={180}>
             <LineChart data={chartData}>
               <XAxis dataKey="date" tick={{ fontSize: 10, fill: '#94a3b8' }} />
               <YAxis domain={[0, 100]} tick={{ fontSize: 10, fill: '#94a3b8' }} />
-              <Tooltip contentStyle={{ background: '#1e293b', border: '1px solid #334155' }} />
-              <Line type="monotone" dataKey="score" stroke="#818cf8" strokeWidth={2} dot={false} name="Quality Score" />
+              <Tooltip contentStyle={{ background: '#0a0b10', borderColor: 'rgba(255,255,255,0.1)', color: '#fff' }} />
+              <Line type="monotone" dataKey="score" stroke="#6366f1" strokeWidth={2} dot={false} name="Quality Score" />
             </LineChart>
           </ResponsiveContainer>
         </div>

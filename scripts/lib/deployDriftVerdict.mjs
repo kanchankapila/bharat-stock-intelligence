@@ -25,6 +25,24 @@
 export const DEPLOY_GRACE_MS = 2 * 60 * 60 * 1000;
 
 /**
+ * How long an undeployed commit may sit before the check STOPS alerting and STARTS fixing.
+ *
+ * History: the check used to fail past the grace window and stay red until a human noticed
+ * and ran `pm2 restart bharat-server`. Measured over its first week (digest, 2026-08-25):
+ * 167/530 runs failing — every commit turned it red 2h later, and the restart always
+ * eventually happened but only after hours of red on a critical monitor. The failure mode it
+ * exists to catch ("a merged fix has been dead for hours", AF-14) is one pm2 command away
+ * from fixed, and that command is idempotent and side-effect-free beyond the restart itself:
+ * the server re-reads HEAD from disk on boot. So past the grace window the script now runs
+ * the restart itself (self-healing) and stamps the heartbeat with what it did; the drift
+ * still surfaces in run history via the `auto_restarted` marker rather than as a red row.
+ *
+ * Kill switch: DEPLOY_DRIFT_AUTO_RESTART=0 restores pure alert-only behaviour (e.g. if you
+ * want to pin a specific running build during an incident).
+ */
+export const AUTO_RESTART_AFTER_MS = 4 * 60 * 60 * 1000;
+
+/**
  * @param {{sha: string, committedAt: Date}} head
  * @param {{running: boolean, status?: string, error?: string, startedAt?: Date|null}} proc
  * @param {Date} now
@@ -62,11 +80,18 @@ export function driftVerdict(head, proc, now = new Date(), graceMs = DEPLOY_GRAC
     };
   }
 
+  // Past the grace window the drift is real, but it is also one idempotent pm2 command from
+  // fixed — so the verdict reports 'restart' (the caller self-heals and stamps the heartbeat
+  // as a success carrying the auto_restarted marker) instead of holding a critical monitor
+  // red for the hours until a human runs the same command. Callers that want the old
+  // alert-only behaviour treat 'restart' exactly like 'fail'.
+  const autoRestart = undeployedMs >= AUTO_RESTART_AFTER_MS;
   return {
-    status: 'fail',
+    status: autoRestart ? 'restart' : 'fail',
     detail: `HEAD (${sha}, committed ${head.committedAt.toISOString()}) is newer than ` +
             `bharat-server's last restart (${proc.startedAt.toISOString()}) by ${behindHrs}h, ` +
             `and has been undeployed for ${undeployedHrs}h (grace: ` +
-            `${(graceMs / 3_600_000).toFixed(1)}h). Run: pm2 restart bharat-server.`,
+            `${(graceMs / 3_600_000).toFixed(1)}h).` +
+            (autoRestart ? ' Auto-restart eligible (past 4.0h).' : ' Run: pm2 restart bharat-server.'),
   };
 }

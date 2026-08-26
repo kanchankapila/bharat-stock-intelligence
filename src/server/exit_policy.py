@@ -75,7 +75,7 @@ def load_exit_training_data() -> pd.DataFrame:
                fh.operating_margins, fh.return_on_equity, fh.revenue_growth,
                fh.earnings_growth, fh.earnings_yield, fh.price_to_book, fh.market_cap
         FROM signal_excursions se
-        JOIN technical_signals ts ON ts.symbol = se.symbol AND ts.date = se.signal_date
+        JOIN technical_signals ts ON ts.symbol = se.symbol AND ts.date = se.signal_date::date
         {as_of_join_sql('fundamentals_history', 'fh', 'se', 'symbol', 'signal_date')}
         WHERE se.mfe_pct IS NOT NULL AND se.mae_pct IS NOT NULL
         ORDER BY se.signal_date

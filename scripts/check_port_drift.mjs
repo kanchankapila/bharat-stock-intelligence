@@ -53,11 +53,13 @@ const SERVICES = {
 };
 
 function sh(cmd, args) {
-  // shell:true -- same rationale as check_deploy_drift.mjs: pm2 resolves to pm2.cmd, a
-  // batch wrapper execFileSync can't invoke directly on Windows without going through a
-  // shell. Args below are hardcoded literals, never externally-supplied input, so the
-  // unescaped-arg risk shell:true warns about doesn't apply.
-  return execFileSync(cmd, args, { encoding: 'utf8', shell: true, maxBuffer: 8 * 1024 * 1024 }).trim();
+  // pm2 resolves to pm2.cmd (a batch wrapper) on Windows; .cmd files are not real executables,
+  // so we route through cmd.exe explicitly -- cmd.exe IS a real executable, so args go through
+  // as an argv array WITHOUT shell:true. Same rationale as check_deploy_drift.mjs's sh(): works
+  // where plain execFileSync('pm2') threw EINVAL, and silences the DEP0190 warning that
+  // shell:true + args emitted into pm2-err.log on every run (2026-08-25).
+  return execFileSync('cmd.exe', ['/d', '/s', '/c', cmd, ...args],
+    { encoding: 'utf8', maxBuffer: 8 * 1024 * 1024 }).trim();
 }
 
 // powershell.exe is a real executable (unlike pm2.cmd), so this deliberately runs WITHOUT
@@ -169,6 +171,9 @@ async function main() {
   const procs = pm2List();
   const ports = listeningPorts();
   const allProcs = allInterpreterProcesses();
+  // Auto-heal BEFORE reporting: if this run kills a squatter, the findings below still record
+  // the state as of scan time (one FAIL heartbeat), and the next cycle reports clean.
+  autoHealPortSquatters(procs, ports, allProcs);
   const byPid = new Map(allProcs.map(p => [String(p.pid), p]));
   const problems = [];
 
@@ -253,6 +258,40 @@ async function main() {
 
   console.log('[port-drift] OK: every online pm2 service owns its expected port, no orphan interpreter processes found.');
   await recordHeartbeat(true, '');
+}
+
+/**
+ * Auto-heal for the measured failure mode of 2026-08-25: a pm2 restart on this host leaves the
+ * previous generation's tsx worker alive holding :3000, the new boot dies on EADDRINUSE ~20s in
+ * (longer than min_uptime, so pm2 never counts it as unstable), and pm2 restarts forever —
+ * ↺233 observed before intervention. The drift checks DETECT this state every 15 minutes but
+ * never acted on it. This does: kill ONLY process trees whose ancestry has NO link to any
+ * currently-online pm2-tracked pid — exactly the squatter definition check_port_drift's own
+ * header documents. The live server's tsx child always chains back to its pm2 fork wrapper,
+ * so a healthy generation is untouched by construction. Off by default; opt in per-host with
+ * PORT_DRIFT_AUTOHEAL=1 because killing processes is not a default behavior.
+ */
+function autoHealPortSquatters(procs, portsByPort, allInterpreterProcs) {
+  if (process.env.PORT_DRIFT_AUTOHEAL !== '1') return;
+  const byPid = new Map(allInterpreterProcs.map(p => [String(p.pid), p]));
+  const onlinePm2Pids = procs.filter(p => p.pm2_env?.status === 'online').map(p => p.pid);
+  for (const [name, svc] of Object.entries(SERVICES)) {
+    const listeningPid = portsByPort[svc.port];
+    if (!listeningPid) continue;
+    const linked = onlinePm2Pids.some(root => isSelfOrDescendant(listeningPid, root, byPid));
+    if (linked) continue;
+    const squatter = byPid.get(String(listeningPid));
+    console.error(
+      `[port-drift] AUTOHEAL: port ${svc.port} (${name}) held by ${listeningPid}` +
+      `${squatter ? ` (${squatter.commandLine.slice(0, 120)})` : ''}, which has no ancestry ` +
+      `link to any online pm2 process — killing that tree so pm2 can rebind.`
+    );
+    try {
+      execFileSync('taskkill', ['/F', '/T', '/PID', String(listeningPid)], { encoding: 'utf8' });
+    } catch (err) {
+      console.error(`[port-drift] AUTOHEAL: taskkill ${listeningPid} failed: ${err.message.slice(0, 200)}`);
+    }
+  }
 }
 
 main().catch((err) => {

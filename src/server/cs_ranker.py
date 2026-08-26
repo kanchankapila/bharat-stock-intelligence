@@ -110,7 +110,7 @@ def load_cs_training_data() -> pd.DataFrame:
                psh_oo.score_value AS ohlson_o
         FROM signal_outcomes so
         LEFT JOIN technical_signals ts
-               ON ts.symbol = so.symbol AND ts.date = so.signal_date
+               ON ts.symbol = so.symbol AND ts.date = so.signal_date::date
         {as_of_join_sql('fundamentals_history', 'fh', 'so', 'symbol', 'signal_date')}
         LEFT JOIN stock_fundamentals sf ON sf.symbol = so.symbol
         {as_of_join_sql('analyst_estimates_history', 'aeh', 'so', 'symbol', 'signal_date')}

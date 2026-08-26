@@ -67,8 +67,8 @@ export const ToDoPage: React.FC = () => {
 
   if (!user) {
     return (
-      <div className="p-6 max-w-5xl mx-auto">
-        <div className="glass/50 border border-slate-800/50 rounded-2xl p-8 text-center text-sm text-slate-400 font-data">
+      <div className="v1-page space-y-6">
+        <div className="v1-card p-8 text-center text-sm text-slate-400 font-data">
           Sign in to view and manage your ideas.
         </div>
       </div>
@@ -76,23 +76,25 @@ export const ToDoPage: React.FC = () => {
   }
 
   return (
-    <div className="p-6 max-w-5xl mx-auto space-y-8">
+    <div className="v1-page space-y-6">
       {/* Header */}
-      <div className="flex justify-between items-end">
-        <div>
-          <h1 className="v1-title-page italic tracking-tighter uppercase flex items-center gap-3">
-            <Lightbulb className="w-8 h-8 text-amber-500 fill-amber-500/20" />
+      <div className="v1-header">
+        <div className="v1-header-left">
+          <h1 className="v1-title-page flex items-center gap-3">
+            <Lightbulb className="w-7 h-7 text-amber-400 fill-amber-400/20" />
             Implementation Ideas
           </h1>
-          <p className="text-slate-400 text-xs font-bold font-display uppercase tracking-widest mt-1">Capture and track future platform enhancements</p>
+          <p className="text-slate-400 text-xs font-display uppercase tracking-widest mt-1">Capture and track future platform enhancements</p>
         </div>
-        <button 
-          onClick={() => setIsAdding(!isAdding)}
-          className="bg-indigo-600 hover:bg-indigo-700 text-white px-6 py-2.5 rounded-xl text-sm font-black font-display uppercase tracking-widest transition-all flex items-center gap-2"
-        >
-          <Plus className="w-4 h-4" />
-          {isAdding ? 'Close Form' : 'New Idea'}
-        </button>
+        <div className="v1-header-actions">
+          <button 
+            onClick={() => setIsAdding(!isAdding)}
+            className="v1-btn-primary"
+          >
+            <Plus className="w-4 h-4" />
+            {isAdding ? 'Close Form' : 'New Idea'}
+          </button>
+        </div>
       </div>
 
       {/* Add Form */}
@@ -103,72 +105,72 @@ export const ToDoPage: React.FC = () => {
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: -20 }}
           >
-            <Card className="p-6 glass border-indigo-500/30">
+            <div className="v1-card p-6 border-indigo-500/30">
               <form onSubmit={handleAdd} className="space-y-4">
                 <div className="grid grid-cols-1 md:grid-cols-6 gap-4">
                   <div className="md:col-span-3">
-                    <label className="text-[10px] font-black text-slate-400 font-display uppercase tracking-widest mb-1.5 block">Title</label>
+                    <label className="v1-data-label block mb-1.5">Title</label>
                     <input 
                       type="text"
                       value={newIdea.title}
                       onChange={e => setNewIdea({...newIdea, title: e.target.value})}
                       placeholder="e.g. Implement WebSocket streaming"
-                      className="w-full glass-strong border border-slate-800/50 rounded-xl px-4 py-2.5 text-sm text-white focus:outline-none focus:ring-1 focus:ring-indigo-500 transition-all"
+                      className="v1-input text-sm"
                     />
                   </div>
                   <div className="md:col-span-1.5">
-                    <label className="text-[10px] font-black text-slate-400 font-display uppercase tracking-widest mb-1.5 block">Priority</label>
+                    <label className="v1-data-label block mb-1.5">Priority</label>
                     <select 
                       value={newIdea.priority}
                       onChange={e => setNewIdea({...newIdea, priority: e.target.value as any})}
-                      className="w-full glass-strong border border-slate-800/50 rounded-xl px-4 py-2.5 text-sm text-white focus:outline-none focus:ring-1 focus:ring-indigo-500 transition-all"
+                      className="v1-input text-sm"
                     >
-                      <option value="LOW">Low</option>
-                      <option value="MEDIUM">Medium</option>
-                      <option value="HIGH">High</option>
+                      <option value="LOW" className="bg-slate-900 text-slate-200">Low</option>
+                      <option value="MEDIUM" className="bg-slate-900 text-slate-200">Medium</option>
+                      <option value="HIGH" className="bg-slate-900 text-slate-200">High</option>
                     </select>
                   </div>
                   <div className="md:col-span-1.5">
-                    <label className="text-[10px] font-black text-slate-400 font-display uppercase tracking-widest mb-1.5 block">Initial Status</label>
+                    <label className="v1-data-label block mb-1.5">Initial Status</label>
                     <select 
                       value={newIdea.status}
                       onChange={e => setNewIdea({...newIdea, status: e.target.value as any})}
-                      className="w-full glass-strong border border-slate-800/50 rounded-xl px-4 py-2.5 text-sm text-white focus:outline-none focus:ring-1 focus:ring-indigo-500 transition-all"
+                      className="v1-input text-sm"
                     >
-                      <option value="PENDING">Pending</option>
-                      <option value="IN_PROGRESS">In Progress</option>
-                      <option value="COMPLETED">Completed</option>
+                      <option value="PENDING" className="bg-slate-900 text-slate-200">Pending</option>
+                      <option value="IN_PROGRESS" className="bg-slate-900 text-slate-200">In Progress</option>
+                      <option value="COMPLETED" className="bg-slate-900 text-slate-200">Completed</option>
                     </select>
                   </div>
                 </div>
                 <div>
-                  <label className="text-[10px] font-black text-slate-400 font-display uppercase tracking-widest mb-1.5 block">Description</label>
+                  <label className="v1-data-label block mb-1.5">Description</label>
                   <textarea 
                     value={newIdea.description}
                     onChange={e => setNewIdea({...newIdea, description: e.target.value})}
                     placeholder="Briefly describe the implementation details..."
                     rows={3}
-                    className="w-full glass-strong border border-slate-800/50 rounded-xl px-4 py-2.5 text-sm text-white focus:outline-none focus:ring-1 focus:ring-indigo-500 transition-all resize-none"
+                    className="v1-input text-sm resize-none"
                   />
                 </div>
                 <div className="flex justify-end gap-3">
                   <button 
                     type="button"
                     onClick={() => setIsAdding(false)}
-                    className="text-slate-400 hover:text-white px-4 py-2 text-xs font-bold font-display uppercase tracking-widest transition-colors"
+                    className="v1-btn-secondary"
                   >
                     Cancel
                   </button>
                   <button 
                     type="submit"
                     disabled={!newIdea.title || addMutation.isPending}
-                    className="bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white px-6 py-2 rounded-xl text-xs font-black font-display uppercase tracking-widest transition-all"
+                    className="v1-btn-primary"
                   >
                     {addMutation.isPending ? 'Saving...' : 'Save Idea'}
                   </button>
                 </div>
               </form>
-            </Card>
+            </div>
           </motion.div>
         )}
       </AnimatePresence>

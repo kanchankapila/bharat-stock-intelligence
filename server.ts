@@ -575,6 +575,26 @@ async function startServer() {
   const httpServer = createHttpServer(app);
   wsSignalService.initialize(httpServer);
 
+  // A failed bind MUST be handled here. Without a server 'error' listener, Node escalates
+  // EADDRINUSE to an uncaughtException; and because this server initializes Redis/BullMQ/
+  // jobs BEFORE listen(), each doomed boot lives ~20s -- longer than pm2's min_uptime (10s)
+  // -- so pm2 counts every crash as a "stable" start and restarts FOREVER. Measured live
+  // 2026-08-25: ↺233 restarts against a leaked tsx worker from a previous pm2 generation
+  // that still held port 3000 (on Windows, killing the pm2 fork wrapper does not reliably
+  // reap its tsx grandchild). Exit immediately with the actual cause instead of a bare
+  // EADDRINUSE stack trace per boot.
+  httpServer.on("error", (err: NodeJS.ErrnoException) => {
+    if (err.code === "EADDRINUSE") {
+      console.error(
+        `[SERVER] FATAL: port ${PORT} is already in use -- another instance or a leaked ` +
+        `worker from a previous restart is still listening. Find it with ` +
+        `"netstat -ano | findstr :${PORT}", kill that PID tree (taskkill /F /T /PID <pid>), ` +
+        `or "pm2 stop bharat-server" first, then start again.`
+      );
+    }
+    process.exit(1);
+  });
+
   httpServer.listen(PORT, "0.0.0.0", () => {
     console.log(`🚀 Server running on http://localhost:${PORT}`);
     console.log(`📡 WebSocket signals available on ws://localhost:${PORT}/signals`);

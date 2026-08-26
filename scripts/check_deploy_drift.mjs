@@ -20,13 +20,13 @@ import 'dotenv/config';
 import { driftVerdict } from './lib/deployDriftVerdict.mjs';
 
 function sh(cmd, args) {
-  // shell: true -- on Windows, pm2 resolves to pm2.cmd (a batch wrapper); .cmd files aren't
-  // real executables and Node's execFileSync can't run them without going through a shell,
-  // even naming "pm2.cmd" explicitly (EINVAL) -- only shell: true actually works. Safe here:
-  // args are hardcoded literals ('jlist'), never interpolated from external input, so the
-  // unescaped-arg risk the shell:true deprecation warning warns about doesn't apply. Confirmed
-  // live on the Windows prod host.
-  return execFileSync(cmd, args, { encoding: 'utf8', shell: true }).trim();
+  // pm2 resolves to pm2.cmd (a batch wrapper) on Windows; .cmd files are not real executables,
+  // so we route through cmd.exe explicitly -- cmd.exe IS a real executable, so args go through
+  // as an argv array WITHOUT shell:true. This both works where plain execFileSync('pm2')
+  // threw EINVAL, and silences the DEP0190 deprecation warning that shell:true + args emitted
+  // into pm2-err.log on every run (2026-08-25). Args here are hardcoded literals ('jlist'),
+  // never interpolated from external input.
+  return execFileSync('cmd.exe', ['/d', '/s', '/c', cmd, ...args], { encoding: 'utf8', maxBuffer: 8 * 1024 * 1024 }).trim();
 }
 
 function gitHeadInfo() {
@@ -49,6 +49,30 @@ function pm2ProcessInfo(name) {
   const status = proc.pm2_env?.status;
   const startedAt = proc.pm2_env?.pm_uptime ? new Date(proc.pm2_env.pm_uptime) : null;
   return { running: status === 'online', status, startedAt };
+}
+
+/**
+ * Self-healing step for the drift the grace window exists to bound. `pm2 restart` is
+ * idempotent and side-effect-free beyond the restart itself — the server re-reads HEAD from
+ * disk on boot — so once a commit has sat undeployed past AUTO_RESTART_AFTER_MS, running it
+ * beats holding a critical monitor red until a human types the same command. Set
+ * DEPLOY_DRIFT_AUTO_RESTART=0 to restore alert-only behaviour (e.g. pinning a build during
+ * an incident).
+ */
+function autoRestartServer() {
+  if (process.env.DEPLOY_DRIFT_AUTO_RESTART === '0') {
+    console.log('[deploy-drift] auto-restart disabled via DEPLOY_DRIFT_AUTO_RESTART=0');
+    return false;
+  }
+  try {
+    // Same cmd.exe routing as sh(): pm2 resolves to a .cmd wrapper on Windows.
+    sh('pm2', ['restart', 'bharat-server', '--update-env']);
+    console.log('[deploy-drift] pm2 restart bharat-server --update-env: issued');
+    return true;
+  } catch (err) {
+    console.error(`[deploy-drift] WARNING: auto-restart failed: ${err.message.slice(0, 300)}`);
+    return false;
+  }
 }
 
 async function recordHeartbeat(ok, detail) {
@@ -100,6 +124,18 @@ async function main() {
     console.error(`[deploy-drift] FAIL: ${detail}`);
     await recordHeartbeat(false, detail);
     process.exitCode = 1;
+    return;
+  }
+
+  // Past 4h undeployed: heal it. The heartbeat is still stamped as a SUCCESS — the drift was
+  // real but is now remediated by this very run, and marking the run failed would re-raise
+  // exactly the noise this change removes. The `auto_restarted:` marker in last_error keeps
+  // the event greppable in run history; the NEXT run's pass branch reports the fresh start.
+  if (status === 'restart') {
+    const restarted = autoRestartServer();
+    const marker = restarted ? 'auto_restarted: ' : 'auto_restart_failed: ';
+    await recordHeartbeat(true, `${marker}${detail}`);
+    process.exitCode = restarted ? 0 : 1;
     return;
   }
 

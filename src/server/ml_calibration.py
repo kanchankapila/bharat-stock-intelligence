@@ -68,7 +68,7 @@ def recalibrate_win_probabilities(conn: ConnWrapper, min_samples: int = 200,
                ts.win_probability AS p,
                CASE WHEN so.outcome = 'WIN' THEN 1 ELSE 0 END AS y
         FROM signal_outcomes so
-        JOIN technical_signals ts ON ts.symbol = so.symbol AND ts.date = so.signal_date
+        JOIN technical_signals ts ON ts.symbol = so.symbol AND so.signal_date = ts.date::text
         WHERE so.outcome IN ('WIN', 'LOSS') AND ts.win_probability IS NOT NULL
           AND ts.win_probability <> 0.5 AND so.signal_source = 'technical'
     """).fetchall()
@@ -135,7 +135,7 @@ def per_regime_auc(conn: ConnWrapper, min_n: int = 50) -> dict:
         SELECT ts.nifty_regime AS regime, ts.win_probability AS p,
                CASE WHEN so.outcome = 'WIN' THEN 1 ELSE 0 END AS y
         FROM signal_outcomes so JOIN technical_signals ts
-          ON ts.symbol = so.symbol AND ts.date = so.signal_date
+          ON ts.symbol = so.symbol AND so.signal_date = ts.date::text
         WHERE so.outcome IN ('WIN', 'LOSS') AND ts.win_probability IS NOT NULL
           AND ts.win_probability <> 0.5          -- exclude unscored 0.5 defaults (see recalibrate)
           AND so.signal_source = 'technical'
@@ -161,7 +161,7 @@ def regime_readiness(conn: ConnWrapper, min_regime_days: int = 20, min_regime_ep
     rows = conn.execute("""
         SELECT ts.nifty_regime AS regime, ts.date AS d
         FROM signal_outcomes so JOIN technical_signals ts
-          ON ts.symbol = so.symbol AND ts.date = so.signal_date
+          ON ts.symbol = so.symbol AND so.signal_date = ts.date::text
         WHERE so.outcome IN ('WIN', 'LOSS') AND ts.win_probability IS NOT NULL
           AND ts.win_probability <> 0.5          -- exclude unscored 0.5 defaults (see recalibrate)
           AND so.signal_source = 'technical'
@@ -215,7 +215,7 @@ def _pooled_auc(conn: ConnWrapper, min_n: int = 50):
         SELECT ts.win_probability AS p,
                CASE WHEN so.outcome = 'WIN' THEN 1 ELSE 0 END AS y
         FROM signal_outcomes so JOIN technical_signals ts
-          ON ts.symbol = so.symbol AND ts.date = so.signal_date
+          ON ts.symbol = so.symbol AND so.signal_date = ts.date::text
         WHERE so.outcome IN ('WIN', 'LOSS') AND ts.win_probability IS NOT NULL
           AND ts.win_probability <> 0.5 AND so.signal_source = 'technical'
     """).fetchall()

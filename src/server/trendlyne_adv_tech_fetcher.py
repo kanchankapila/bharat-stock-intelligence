@@ -41,6 +41,8 @@ from datetime import date
 
 import requests
 
+import tl_fetch
+
 from db_compat import connect
 from as_of import logical_write_floor
 from fetch_utils import (retry_get, FetchTracker, filter_numeric_tlids,
@@ -549,8 +551,13 @@ def main() -> None:
         return
     stocks = cap_to_run_budget(stocks, "TLAdvTech", requests_per_row=1)
     print(f"[TLAdvTech] Processing {len(stocks)} stocks in batches of {BATCH_SIZE} ({BATCH_GAP_SEC}s gap)...")
-    session = requests.Session()
-    session.headers.update(HEADERS)
+    # 2026-08-26: tl_fetch.create_session() returns a curl_cffi Chrome-TLS-impersonated
+    # session (Scrapling's Fetcher, fetcher-only) instead of plain python-requests — the WAF
+    # bot rule fingerprints TLS, and the legacy urllib ClientHello was the cheapest signal it
+    # had. TRENDLYNE_USE_SCRAPLING=0 reverts to requests+HEADERS with no code change.
+    session = tl_fetch.create_session()
+    if not isinstance(session, tl_fetch.TLSession):
+        session.headers.update(HEADERS)
     ok = 0
     skipped = 0
     done = 0

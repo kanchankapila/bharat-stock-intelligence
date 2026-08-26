@@ -301,7 +301,7 @@ def write_training_metrics(metrics: dict, eval_date=None, model_version: str = "
               f"acc={_clean(acc)} auc={_clean(auc)} n={n}")
     except Exception as e:
         # Monitoring write: swallow-and-log so it can never fail a finished training run.
-        print(f"[DRIFT] held-out metric persistence failed (non-fatal): {e}")
+        print(f"[DRIFT] held-out metric persistence failed (non-fatal): {e}", file=sys.stderr)
 
 
 def check_auc_drift(min_roc_auc=None) -> dict:

@@ -91,19 +91,28 @@ interface MarketCommandCenterProps {
 // full pages) — this page's job is composition and prioritization, not new math.
 export const MarketCommandCenter: React.FC<MarketCommandCenterProps> = ({ onSelectStock, onSelectIndex, userId }) => {
   return (
-    <div className="space-y-6 pb-10">
+    <div className="v1-page space-y-6 pb-10">
       <V4QuickNav />
 
-      {/* Hero: title + live clock, then indices/regime/breadth in a unified gradient shell */}
-      <div className="rounded-2xl border border-slate-800 bg-gradient-to-br from-indigo-950/30 via-slate-900/60 to-slate-950/80 p-4 space-y-4">
-        <div className="flex items-center justify-between flex-wrap gap-2">
-          <div className="flex items-center gap-2">
-            <LayoutDashboard className="w-4 h-4 text-indigo-400" />
-            <h1 className="v1-title-page">Market Command Center</h1>
-          </div>
+      {/* Header */}
+      <div className="v1-header">
+        <div className="v1-header-left">
+          <h1 className="v1-title-page flex items-center gap-2.5">
+            <LayoutDashboard className="w-6 h-6 text-indigo-400" />
+            Market Command Center
+          </h1>
+          <p className="text-sm text-slate-400">
+            Real-time market regime, sector momentum, F&O positioning, and pre-trading-day briefing
+          </p>
+        </div>
+        <div className="v1-header-actions flex items-center gap-3">
+          <RegimeBadge />
           <LiveClock />
         </div>
+      </div>
 
+      {/* Hero: indices/regime/breadth */}
+      <div className="v1-card p-4 space-y-4">
         <div className="flex flex-col gap-4">
           <div className="flex items-center gap-4 flex-wrap">
             <RegimeBadge />
@@ -111,9 +120,7 @@ export const MarketCommandCenter: React.FC<MarketCommandCenterProps> = ({ onSele
               <MarketMoodGauge />
             </div>
           </div>
-          {/* v1-style opening read: KPI cards (day-range bar, BULL/BEAR pill) + a breadth donut,
-              same visual language ScreenerBrowserPage/PortfolioTrackerPage already use this
-              session. Additive to the existing regime/mood/index-overview content below. */}
+          {/* v1-style opening read: KPI cards + a breadth donut */}
           <div className="flex flex-wrap gap-3 items-stretch">
             <IndexKpiRow onSelectIndex={onSelectIndex} />
             <BreadthDonut />
@@ -122,12 +129,11 @@ export const MarketCommandCenter: React.FC<MarketCommandCenterProps> = ({ onSele
         </div>
       </div>
 
-      {/* Market Breadth (Intraday) — replaces the old compact Advance/Decline strip with the
-          fuller live chart, same shared widget used on Dashboard and the Index Detail page */}
+      {/* Market Breadth (Intraday) */}
       <div>
         <div className="flex items-center gap-2 mb-3">
           <BarChart3 className="w-4 h-4 text-indigo-400" />
-          <h2 className="text-xs font-black text-slate-200 uppercase tracking-widest">Market Breadth</h2>
+          <h2 className="v1-title-section">Market Breadth</h2>
         </div>
         <MarketBreadthIntraday ex="N" refetchInterval={10000} />
       </div>
@@ -163,7 +169,7 @@ export const MarketCommandCenter: React.FC<MarketCommandCenterProps> = ({ onSele
       <div>
         <div className="flex items-center gap-2 mb-3">
           <BarChart3 className="w-4 h-4 text-indigo-400" />
-          <h2 className="text-xs font-black text-slate-200 uppercase tracking-widest">Sector Rotation</h2>
+          <h2 className="v1-title-section">Sector Rotation</h2>
         </div>
         <SectorHeatmap />
       </div>
@@ -179,14 +185,14 @@ export const MarketCommandCenter: React.FC<MarketCommandCenterProps> = ({ onSele
         <div>
           <div className="flex items-center gap-2 mb-3">
             <TrendingUp className="w-4 h-4 text-indigo-400" />
-            <h2 className="text-xs font-black text-slate-200 uppercase tracking-widest">Top Movers</h2>
+            <h2 className="v1-title-section">Top Movers</h2>
           </div>
           <TopMoversIntelligence onSelectStock={onSelectStock ?? (() => {})} userId={userId} />
         </div>
         <div>
           <div className="flex items-center gap-2 mb-3">
             <Flame className="w-4 h-4 text-indigo-400" />
-            <h2 className="text-xs font-black text-slate-200 uppercase tracking-widest">Intraday Breakouts</h2>
+            <h2 className="v1-title-section">Intraday Breakouts</h2>
           </div>
           <IntradayBreakouts onSelectStock={onSelectStock ?? (() => {})} />
         </div>

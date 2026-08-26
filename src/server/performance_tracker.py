@@ -73,7 +73,7 @@ class PerformanceTracker:
                 ns.sector
             FROM signal_outcomes so
             LEFT JOIN technical_signals ts
-                   ON ts.symbol = so.symbol AND ts.date = so.signal_date
+                   ON ts.symbol = so.symbol AND so.signal_date = ts.date::text
             LEFT JOIN nse_stocks ns ON ns.symbol = so.symbol
             WHERE so.outcome IN ('WIN', 'LOSS', 'NEUTRAL')
               AND so.return_pct IS NOT NULL

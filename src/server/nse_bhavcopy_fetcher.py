@@ -124,6 +124,37 @@ def fetch_bhavcopy(d: datetime.date) -> list:
     return parse_bhavcopy(resp.text)
 
 
+# How many sessions back the scheduled (no --date) run may walk when today's file 404s.
+# NSE publishes the full bhavcopy CSV in stages and some days very late — a same-evening
+# request routinely 404s for hours (measured live 2026-08-26: sec_bhavdata_full_26082026.csv
+# still absent at 18:50 IST while the previous day's file served fine). The old behaviour
+# treated that as a hard step failure; but the file for date-1 is equally fresh data by
+# tomorrow morning, so walking back beats failing. Bounded at 5 sessions (~one week) so a
+# genuinely broken pipeline surfaces as a failure again rather than silently re-serving
+# ancient rows forever.
+BHAV_PUBLICATION_LAG_DAYS = 5
+
+
+def fetch_latest_bhavcopy(max_lookback: int = BHAV_PUBLICATION_LAG_DAYS, today=None):
+    """Fetch the newest available bhavcopy at or before `today`, tolerating NSE's late publishes.
+
+    Returns (rows, requested_date) where rows is [] only if nothing published within
+    `max_lookback` calendar days. Each candidate day is probed exactly once — a 404 means
+    "this day's file isn't up yet", not "retry harder", so there is no backoff loop here.
+    `today` is injectable for tests; defaults to the real clock.
+    """
+    d = today or datetime.date.today()
+    for _ in range(max_lookback + 1):
+        rows = fetch_bhavcopy(d)
+        if rows:
+            # Rows are keyed off each file's own DATE1 column (parse_bhavcopy), so what we
+            # store is always the file's true session even if the archive re-served an older
+            # one — see run_one's re-serve guard.
+            return rows, d
+        d -= datetime.timedelta(days=1)
+    return [], d
+
+
 # ── schema ───────────────────────────────────────────────────────────────────
 
 def ensure_schema(conn: ConnWrapper) -> None:
@@ -298,8 +329,31 @@ def main():
             backfill(conn, a.start, a.end, a.monthly)
         else:
             ensure_schema(conn)
-            d = datetime.date.fromisoformat(a.date) if a.date else datetime.date.today()
-            n = run_one(conn, d)
+            if a.date:
+                d = datetime.date.fromisoformat(a.date)
+                n = run_one(conn, d)
+            else:
+                # Scheduled path (BullMQ cron/catchup, no --date): tolerate NSE's staged/late
+                # publication by walking back to the newest PUBLISHED file. The 2026-08-09
+                # weekend incident below is the same class of problem — 'today' resolving to
+                # something with no file must not fail the ml-daily-ops step when the data
+                # itself is fine one session earlier. run_one still keys rows off each file's
+                # own DATE1 and refuses to count a re-served file as the requested date's
+                # session, so walking back cannot double-count or invent rows.
+                rows, requested = fetch_latest_bhavcopy()
+                if rows:
+                    _log(f"latest published file: requested {requested}, "
+                         f"{len(rows)} equity securities parsed")
+                    n = store_bhavcopy(conn, rows)
+                    file_dates = {r['date'] for r in rows}
+                    if requested.isoformat() not in file_dates:
+                        _log(f"{requested}: archive served {sorted(file_dates)[0]}'s file "
+                             f"(no session on this date) -- upserted under their own date")
+                else:
+                    n = 0
+                    d = datetime.date.today()
+                    _log(f"no bhavcopy published in the last "
+                         f"{BHAV_PUBLICATION_LAG_DAYS} days -- upstream outage likely")
             if not n:
                 if d.weekday() >= 5:
                     # Sat/Sun structurally never has a bhavcopy -- this fires routinely from

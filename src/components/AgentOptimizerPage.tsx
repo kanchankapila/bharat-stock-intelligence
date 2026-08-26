@@ -20,34 +20,36 @@ export function AgentOptimizerPage() {
   }));
 
   return (
-    <div className="p-6 space-y-6 max-w-5xl mx-auto">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="v1-title-page flex items-center gap-2">
+    <div className="v1-page space-y-6">
+      <div className="v1-header">
+        <div className="v1-header-left">
+          <h1 className="v1-title-page flex items-center gap-2.5">
             <Settings className="w-6 h-6 text-teal-400" /> Optimizer Agent
           </h1>
-          {latest && <p className="text-sm text-slate-400 mt-1">Last run: {latest.run_date} · Trigger: {latest.trigger}</p>}
+          {latest && <p className="text-sm text-slate-400 mt-1 font-data">Last run: {latest.run_date} · Trigger: {latest.trigger}</p>}
         </div>
-        <button
-          onClick={() => runMutation.mutate()}
-          disabled={runMutation.isPending}
-          className="flex items-center gap-2 px-4 py-2 bg-teal-600 hover:bg-teal-500 rounded-lg text-white text-sm disabled:opacity-50"
-        >
-          <RefreshCw className={`w-4 h-4 ${runMutation.isPending ? 'animate-spin' : ''}`} />
-          Run Now
-        </button>
+        <div className="v1-header-actions">
+          <button
+            onClick={() => runMutation.mutate()}
+            disabled={runMutation.isPending}
+            className="v1-btn-primary"
+          >
+            <RefreshCw className={`w-4 h-4 ${runMutation.isPending ? 'animate-spin' : ''}`} />
+            Run Now
+          </button>
+        </div>
       </div>
 
-      {isLoading && <p className="text-slate-400">Loading...</p>}
+      {isLoading && <div className="v1-card p-6 text-sm text-slate-400 font-data animate-pulse">Loading optimizer report...</div>}
 
       {latest && (
         <>
-          <div className="bg-teal-900/20 rounded-xl p-5 border border-teal-500/20">
-            <p className="text-sm font-semibold text-teal-300 mb-2">⚙️ Optimization Report</p>
-            <p className="text-white leading-relaxed">{latest.narrative || 'No narrative.'}</p>
+          <div className="v1-card p-5">
+            <p className="v1-title-card text-teal-300 mb-2">⚙️ Optimization Report</p>
+            <p className="text-slate-100 text-sm leading-relaxed">{latest.narrative || 'No narrative.'}</p>
           </div>
 
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+          <div className="v1-grid-4">
             {[
               { label: 'Baseline Win Rate', value: `${latest.baseline_win_rate?.toFixed(1)}%` },
               { label: 'New Win Rate', value: `${latest.new_win_rate?.toFixed(1)}%` },
@@ -56,32 +58,32 @@ export function AgentOptimizerPage() {
             ].map(m => (
               <div key={m.label} className="v1-card p-4">
                 <p className="v1-data-label">{m.label}</p>
-                <p className="v1-data-value text-white mt-1">{m.value}</p>
+                <p className="v1-data-value text-xl text-white mt-1">{m.value}</p>
               </div>
             ))}
           </div>
 
           {Object.keys(changes).length > 0 && (
-            <div className="v1-card p-4 overflow-x-auto">
+            <div className="v1-card p-5 overflow-x-auto">
               <p className="v1-title-card mb-3">Weight Changes</p>
               <table className="w-full text-sm">
-                <thead>
-                  <tr className="text-slate-400 border-b border-white/10">
+                <thead className="text-xs text-slate-400 border-b border-white/10 font-display uppercase tracking-wider">
+                  <tr>
                     <th className="text-left py-2 pr-4">Signal Type</th>
                     <th className="text-right py-2 pr-4">Before</th>
                     <th className="text-right py-2 pr-4">After</th>
                     <th className="text-right py-2">Δ</th>
                   </tr>
                 </thead>
-                <tbody>
+                <tbody className="divide-y divide-white/5 font-data text-xs">
                   {Object.entries(changes).map(([sig, { before, after }]) => {
                     const delta = after - before;
                     return (
-                      <tr key={sig} className="border-b border-white/5">
-                        <td className="py-2 pr-4 text-slate-300">{sig}</td>
+                      <tr key={sig} className="hover:bg-white/5 transition-colors">
+                        <td className="py-2 pr-4 text-slate-300 font-semibold">{sig}</td>
                         <td className="py-2 pr-4 text-right text-slate-400">{before.toFixed(3)}</td>
-                        <td className="py-2 pr-4 text-right text-white">{after.toFixed(3)}</td>
-                        <td className={`py-2 text-right font-medium ${delta > 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                        <td className="py-2 pr-4 text-right text-white font-bold">{after.toFixed(3)}</td>
+                        <td className={`py-2 text-right font-bold ${delta > 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
                           {delta > 0 ? '+' : ''}{delta.toFixed(3)}
                         </td>
                       </tr>
@@ -93,10 +95,10 @@ export function AgentOptimizerPage() {
           )}
 
           {Object.keys(underperforming).length > 0 && (
-            <div className="bg-rose-900/20 rounded-xl p-4 border border-rose-500/20">
-              <p className="text-sm font-semibold text-rose-300 mb-2">⚠️ Underperforming Timeframes</p>
+            <div className="v1-card v1-card-down p-4">
+              <p className="v1-title-card text-rose-300 mb-2">⚠️ Underperforming Timeframes</p>
               {Object.entries(underperforming).map(([tf, rate]: any) => (
-                <p key={tf} className="text-sm text-slate-300">{tf}: {Number(rate).toFixed(1)}% win rate</p>
+                <p key={tf} className="text-xs text-slate-300 font-data">{tf}: {Number(rate).toFixed(1)}% win rate</p>
               ))}
             </div>
           )}
@@ -104,13 +106,13 @@ export function AgentOptimizerPage() {
       )}
 
       {chartData.length > 1 && (
-        <div className="v1-card p-4">
+        <div className="v1-card p-5">
           <p className="v1-title-card mb-4">Win Rate Trend (30 days)</p>
-          <ResponsiveContainer width="100%" height={160}>
+          <ResponsiveContainer width="100%" height={180}>
             <LineChart data={chartData}>
               <XAxis dataKey="date" tick={{ fontSize: 10, fill: '#94a3b8' }} />
               <YAxis domain={[0, 100]} tick={{ fontSize: 10, fill: '#94a3b8' }} />
-              <Tooltip contentStyle={{ background: '#1e293b', border: '1px solid #334155' }} />
+              <Tooltip contentStyle={{ background: '#0a0b10', borderColor: 'rgba(255,255,255,0.1)', color: '#fff' }} />
               <Legend />
               <Line type="monotone" dataKey="baseline" stroke="#f97316" strokeWidth={2} dot={false} name="Baseline %" />
               <Line type="monotone" dataKey="new" stroke="#14b8a6" strokeWidth={2} dot={false} name="Post-Optimize %" />
@@ -120,7 +122,7 @@ export function AgentOptimizerPage() {
       )}
 
       {!latest && !isLoading && (
-        <p className="text-slate-500 text-sm">No optimizer runs yet. Run the agent after the auditor completes.</p>
+        <div className="v1-card p-6 text-slate-400 text-sm font-data">No optimizer runs yet. Run the agent after the auditor completes.</div>
       )}
     </div>
   );

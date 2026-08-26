@@ -75,7 +75,11 @@ export function getPool(): Pool {
 /** True for transient pool/socket errors where the query never reached the server. */
 function isTransientConnError(err: unknown): boolean {
   const msg = (err as { message?: string })?.message ?? '';
-  return /connection terminated|connection timeout|ECONNRESET|ETIMEDOUT|Client has encountered a connection error|server closed the connection/i.test(
+  // 53300 "too many clients already": under load (unit + live vitest projects co-running with
+  // the four pm2 services against one Postgres) new connections are briefly refused -- same
+  // shape as the connection-terminated case below, safe to retry because SELECTs are
+  // idempotent and pgExecute's caller decides for writes.
+  return /connection terminated|connection timeout|ECONNRESET|ETIMEDOUT|Client has encountered a connection error|server closed the connection|too many clients already/i.test(
     msg,
   );
 }

@@ -156,10 +156,10 @@ const V1Routes = ({
                             <Route path="/money-flow" element={<MoneyFlowPage />} />
                             <Route path="/top-rated" element={<TopRatedStocks onSelectStock={onSelectStock} watchlist={watchlist} onToggleWatchlist={onToggleWatchlist} />} />
                             <Route path="/intraday" element={<IntradayPage onSelectStock={onSelectStock} />} />
-                            <Route path="/premarket" element={<div className="p-4 sm:p-6 max-w-6xl mx-auto"><PreMarketBriefing /></div>} />
+                            <Route path="/premarket" element={<PreMarketBriefing />} />
                             <Route path="/indices" element={<IndicesPage onSelectStock={onSelectStock} selectedIndex={selectedIndex} setSelectedIndex={setSelectedIndex} />} />
                             <Route path="/market-map" element={
-                                <div className="p-6 space-y-6">
+                                <div className="v1-page space-y-6">
                                     <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                                         <SectorPerformance />
                                         <SectorHeatmap />
@@ -174,13 +174,13 @@ const V1Routes = ({
                             <Route path="/premium-screeners" element={<PremiumScreenersPage onSelectStock={onSelectStock} />} />
                             <Route path="/live-screener" element={<LiveMarketScreener onSelectStock={onSelectStock} />} />
                             <Route path="/eod-screener" element={<EODMarketScreener onSelectStock={onSelectStock} />} />
-                            <Route path="/discover" element={<div className="p-6"><NSEStockDiscovery onSelectStock={onSelectStock} /></div>} />
+                            <Route path="/discover" element={<NSEStockDiscovery onSelectStock={onSelectStock} />} />
                             <Route path="/smart-money" element={<SmartMoneyPage onSelectStock={onSelectStock} />} />
                             <Route path="/institutional-flow" element={<InstitutionalFlowDeskPage />} />
                             <Route path="/earnings" element={<EarningsPage onSelectStock={onSelectStock} />} />
                             <Route path="/earnings-desk" element={<EarningsPulseDeskPage onSelectSymbol={onSelectStock} />} />
                             <Route path="/fno-scanners" element={<FnOIntelligenceCenter onSelectStock={onSelectStock} />} />
-                            <Route path="/options" element={<div className="p-6"><OptionsIntelligence /></div>} />
+                            <Route path="/options" element={<OptionsIntelligence />} />
                             <Route path="/options-desk" element={<OptionsDeskPage onSelectSymbol={onSelectStock} />} />
                             <Route path="/risk" element={<RiskDeskPage onSelectSymbol={onSelectStock} />} />
                             <Route path="/todays-picks" element={<TodaysPicks onSelectStock={onSelectStock} />} />

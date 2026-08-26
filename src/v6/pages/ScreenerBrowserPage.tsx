@@ -16,9 +16,9 @@ const SOURCE_LABEL: Record<string, string> = {
 };
 
 const SENTIMENT_STYLE: Record<string, string> = {
-  bullish: 'bg-[var(--v6-positive-soft)] text-[var(--v6-positive)] border-[var(--v6-positive)]',
-  bearish: 'bg-[var(--v6-negative-soft)] text-[var(--v6-negative)] border-[var(--v6-negative)]',
-  neutral: 'bg-[var(--v6-bg-band)] text-[var(--v6-muted)] border-[var(--v6-border-strong)]',
+  bullish: 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30',
+  bearish: 'bg-rose-500/15 text-rose-400 border-rose-500/30',
+  neutral: 'bg-slate-800/60 text-slate-400 border-slate-700/50',
 };
 
 function fmtPct(n: number | null | undefined): string {
@@ -59,50 +59,46 @@ const FactorCard: React.FC<{
   const expired = snap.entryStatus === 'entry_passed';
   return (
     <Card dense title={meta.title} icon={TrendingUp} action={
-      <span className={`text-[10px] font-mono ${expired ? 'text-[var(--v6-faint)]' : 'text-[var(--v6-highlight)]'}`}>
+      <span className={`text-[10px] font-data ${expired ? 'text-slate-500' : 'text-amber-400'}`}>
         {expired ? 'EXPIRED' : 'PAPER TRADE'} · AS OF {snap.asOf}
       </span>
     }>
       {expired ? (
-        <p className="text-[11px] text-[var(--v6-negative)]/90 mb-3">
+        <p className="text-[11px] text-rose-400 mb-3">
           Not actionable — the entry open for this list{snap.entrySession ? ` (${snap.entrySession})` : ''} has already traded. Shown as a record of the last generated signal; wait for the next refresh.
         </p>
       ) : (
-        <p className="text-[11px] text-[var(--v6-faint)] mb-1">{meta.blurb} Entry is the next session's open.</p>
+        <p className="text-[11px] text-slate-400 mb-1">{meta.blurb} Entry is the next session's open.</p>
       )}
-      {/* The decay caveat travels with the picks on purpose -- both factors fade to ~zero in
-          2026 and that is the single most important thing about them. */}
-      <p className="text-[11px] text-[var(--v6-highlight)] mb-3">
+      <p className="text-[11px] text-amber-400/90 mb-3">
         Decaying: excess has fallen toward zero through 2025-26, and neither clears a
         multiple-testing bar across the 18 factors tested. Not the canonical Alpha score, and
         not a buy recommendation.
       </p>
       <div className={`overflow-x-auto ${expired ? 'opacity-50' : ''}`}>
         <table className="w-full text-xs">
-          <thead><tr className="text-[10px] text-[var(--v6-faint)] uppercase border-b border-[var(--v6-border)]">
+          <thead><tr className="text-[10px] text-slate-400 font-display uppercase tracking-wider border-b border-white/10">
             <th className="text-left py-2">Rank</th><th className="text-left py-2">Symbol</th>
             <th className="text-right py-2">{meta.scoreLabel}</th>
             <th className="text-right py-2">20D ADT</th><th className="text-right py-2">Close</th>
           </tr></thead>
           <tbody>{snap.picks.slice(0, 10).map((pick, index) => {
-            // Below ~Rs 5cr ADT the backtest's 25bps/side cost assumption is optimistic, so
-            // flag it on the row rather than presenting every name as equally tradeable.
             const thin = pick.adt20 != null && pick.adt20 < 50_000_000;
             return (
-              <tr key={pick.symbol} className="border-b border-[var(--v6-border)]">
-                <td className="py-2 text-[var(--v6-faint)] font-mono">{index + 1}</td>
+              <tr key={pick.symbol} className="border-b border-white/5 hover:bg-white/5 transition-colors">
+                <td className="py-2 text-slate-500 font-data">{index + 1}</td>
                 <td className="py-2">
                   <button onClick={() => onSelectStock?.(pick.symbol)}
-                          className="font-bold text-[var(--v6-ink)] hover:text-[var(--v6-accent-ink)]">{pick.symbol}</button>
-                  {thin && <span className="ml-1.5 text-[9px] font-mono text-[var(--v6-highlight)]" title="Below Rs 5cr ADT: real slippage will exceed the 25bps/side the backtest assumed">THIN</span>}
+                          className="font-bold text-slate-100 hover:text-indigo-300 font-display">{pick.symbol}</button>
+                  {thin && <span className="ml-1.5 text-[9px] font-data text-amber-400" title="Below Rs 5cr ADT: real slippage will exceed the 25bps/side the backtest assumed">THIN</span>}
                 </td>
-                <td className="py-2 text-right font-mono text-[var(--v6-positive)]">
+                <td className="py-2 text-right font-data text-emerald-400">
                   {snap.factor === 'momentum_12_1' ? fmtPct(pick.r12_1 ?? pick.score) : fmtNum(pick.score)}
                 </td>
-                <td className="py-2 text-right font-mono text-[var(--v6-muted)]">
+                <td className="py-2 text-right font-data text-slate-400">
                   {pick.adt20 == null ? '—' : `₹${(pick.adt20 / 10_000_000).toFixed(1)}cr`}
                 </td>
-                <td className="py-2 text-right font-mono text-[var(--v6-ink-soft)]">{fmtNum(pick.close)}</td>
+                <td className="py-2 text-right font-data text-slate-200">{fmtNum(pick.close)}</td>
               </tr>
             );
           })}</tbody>
@@ -114,7 +110,7 @@ const FactorCard: React.FC<{
 
 const FactorPaperScreen: React.FC<{ onSelectStock?: (symbol: string) => void }> = ({ onSelectStock }) => {
   const { data, isLoading } = trpc.getFactorPaperPicks.useQuery(undefined, { staleTime: 5 * 60_000 });
-  if (isLoading) return <Card dense title="Factor Paper Screens" icon={TrendingUp}><p className="text-xs text-[var(--v6-faint)] font-mono">Loading scheduled factor snapshots…</p></Card>;
+  if (isLoading) return <Card dense title="Factor Paper Screens" icon={TrendingUp}><p className="text-xs text-slate-400 font-data">Loading scheduled factor snapshots…</p></Card>;
   const snaps = data?.factors?.length
     ? data.factors
     // Fallback for a snapshot written before the multi-factor key split.
@@ -136,25 +132,25 @@ const StockSearchBox: React.FC<{ onSelect: (symbol: string) => void }> = ({ onSe
   const results = data?.stocks ?? [];
   return (
     <div className="relative max-w-md">
-      <div className="flex items-center gap-2 glass rounded-xl px-3 py-2.5">
-        <Search className="w-4 h-4 text-[var(--v6-faint)]" />
+      <div className="flex items-center gap-2 glass rounded-xl px-3 py-2.5 border border-white/10">
+        <Search className="w-4 h-4 text-slate-400" />
         <input
           value={q}
           onChange={(e) => setQ(e.target.value)}
           placeholder="Search a stock to see every screener it currently appears in…"
-          className="bg-transparent outline-none text-sm text-[var(--v6-ink)] placeholder:text-[var(--v6-faint)] w-full"
+          className="bg-transparent outline-none text-sm text-slate-200 placeholder:text-slate-500 w-full"
         />
       </div>
       {q.length >= 1 && results.length > 0 && (
-        <div className="absolute z-20 mt-1 w-full max-h-80 overflow-y-auto glass-strong rounded-xl border border-[var(--v6-border)] terminal-scrollbar">
+        <div className="absolute z-20 mt-1 w-full max-h-80 overflow-y-auto glass-strong rounded-xl border border-white/10 terminal-scrollbar">
           {results.map((s: any) => (
             <button
               key={s.symbol}
               onClick={() => { onSelect(s.symbol); setQ(''); }}
-              className="w-full text-left px-3 py-2 text-xs text-[var(--v6-ink-soft)] hover:bg-[var(--v6-accent-soft)] hover:text-white flex justify-between"
+              className="w-full text-left px-3 py-2 text-xs text-slate-300 hover:bg-indigo-500/20 hover:text-white flex justify-between"
             >
-              <span className="font-bold">{s.symbol}</span>
-              <span className="text-[var(--v6-faint)] truncate ml-2">{s.name}</span>
+              <span className="font-bold font-display">{s.symbol}</span>
+              <span className="text-slate-400 truncate ml-2 font-sans">{s.name}</span>
             </button>
           ))}
         </div>
@@ -178,9 +174,9 @@ const StockScreenerMembership: React.FC<{ symbol: string; onSelectStock?: (symbo
     return Array.from(groups.entries());
   }, [screeners]);
 
-  if (isLoading) return <p className="text-xs text-[var(--v6-faint)] font-mono">Checking every screener source for {symbol}…</p>;
+  if (isLoading) return <p className="text-xs text-slate-400 font-data">Checking every screener source for {symbol}…</p>;
   if (screeners.length === 0) {
-    return <p className="text-xs text-[var(--v6-faint)] font-mono">{symbol} does not currently appear in any tracked screener.</p>;
+    return <p className="text-xs text-slate-400 font-data">{symbol} does not currently appear in any tracked screener.</p>;
   }
 
   const bullish = screeners.filter((s: any) => (s.sentiment ?? 'neutral') === 'bullish').length;
@@ -190,19 +186,19 @@ const StockScreenerMembership: React.FC<{ symbol: string; onSelectStock?: (symbo
     <div className="space-y-4">
       <div className="flex items-center gap-4">
         {onSelectStock ? (
-          <button onClick={() => onSelectStock(symbol)} className="text-sm font-bold text-[var(--v6-ink)] hover:text-[var(--v6-accent-ink)]" title={`Open ${symbol}'s full profile`}>
+          <button onClick={() => onSelectStock(symbol)} className="text-sm font-bold font-display text-white hover:text-indigo-400" title={`Open ${symbol}'s full profile`}>
             {symbol}
           </button>
         ) : (
-          <h3 className="text-sm font-bold text-[var(--v6-ink)]">{symbol}</h3>
+          <h3 className="text-sm font-bold font-display text-white">{symbol}</h3>
         )}
-        <span className="text-[11px] text-[var(--v6-faint)]">{screeners.length} screener{screeners.length === 1 ? '' : 's'} right now</span>
-        {bullish > 0 && <span className="flex items-center gap-1 text-[11px] text-[var(--v6-positive)]"><TrendingUp className="w-3 h-3" /> {bullish} bullish</span>}
-        {bearish > 0 && <span className="flex items-center gap-1 text-[11px] text-[var(--v6-negative)]"><TrendingDown className="w-3 h-3" /> {bearish} bearish</span>}
+        <span className="text-[11px] text-slate-400 font-data">{screeners.length} screener{screeners.length === 1 ? '' : 's'} right now</span>
+        {bullish > 0 && <span className="flex items-center gap-1 text-[11px] text-emerald-400 font-data"><TrendingUp className="w-3 h-3" /> {bullish} bullish</span>}
+        {bearish > 0 && <span className="flex items-center gap-1 text-[11px] text-rose-400 font-data"><TrendingDown className="w-3 h-3" /> {bearish} bearish</span>}
       </div>
       {bySource.map(([source, rows]) => (
         <div key={source}>
-          <p className="text-[10px] font-bold text-[var(--v6-faint)] uppercase tracking-widest mb-2">{SOURCE_LABEL[source] ?? source} ({rows.length})</p>
+          <p className="text-[10px] font-bold text-slate-400 font-display uppercase tracking-widest mb-2">{SOURCE_LABEL[source] ?? source} ({rows.length})</p>
           <div className="flex flex-wrap gap-2">
             {rows.map((s: any, i: number) => {
               const sentiment = s.sentiment ?? 'neutral';
@@ -242,7 +238,7 @@ const StatTile: React.FC<{ label: string; value: string; sub?: string }> = ({ la
 
 const FilterField: React.FC<{ label: string; className?: string; children: React.ReactNode }> = ({ label, className, children }) => (
   <div className={className}>
-    <label className="block text-[9px] font-bold text-[var(--v6-faint)] uppercase tracking-wider mb-1">{label}</label>
+    <label className="block text-[9px] font-bold text-slate-400 font-display uppercase tracking-wider mb-1">{label}</label>
     {children}
   </div>
 );
@@ -297,7 +293,7 @@ const ScreenerBrowser: React.FC<{ onSelectStock?: (symbol: string) => void }> = 
       <LegacyScoreBanner note="Tier, Win Rate, Avg Return, and Alpha are precomputed per-screener in screener_performance_v2. A from-scratch remeasurement of this same table found its win-rate figures didn't reproduce (one screener read 100%, remeasured at 65%), and 0 of 1,563 individual screeners tested clear a false-discovery correction -- treat this as a browse of what a screener currently flags, not a graded prediction. Check Alpha / Buy Recs for the canonical, regime-aware view." />
 
       {!categoryStatsQ.isLoading && categories.length > 0 && (
-        <div className="v6-stats-grid">
+        <div className="v1-grid-4">
           <StatTile label="Categories" value={String(categoryCount)} sub={`${horizon} horizon`} />
           <StatTile label="Screeners Tracked" value={totalScreeners.toLocaleString('en-IN')} sub="across all categories" />
           <StatTile label="Weighted Avg Win Rate" value={fmtPct(weightedWinRate)} sub="screener_performance_v2" />
@@ -306,20 +302,20 @@ const ScreenerBrowser: React.FC<{ onSelectStock?: (symbol: string) => void }> = 
       )}
 
       {/* Filter bar */}
-      <div className="v1-card p-3 space-y-2">
-        <div className="flex items-center gap-1.5">
-          <Filter className="w-3 h-3 text-[var(--v6-faint)]" />
-          <p className="text-[10px] font-bold text-[var(--v6-faint)] uppercase tracking-widest">Filters</p>
+      <div className="v1-card p-4 space-y-3">
+        <div className="flex items-center gap-2">
+          <Filter className="w-4 h-4 text-indigo-400" />
+          <h3 className="v1-data-label">Filters</h3>
         </div>
-        <div className="flex flex-wrap items-end gap-2">
+        <div className="flex flex-wrap items-end gap-3">
           <FilterField label="Search" className="flex-1 min-w-[220px]">
-            <div className="flex items-center gap-2 bg-[var(--v6-bg)] border border-[var(--v6-border)] rounded-lg px-3 py-2">
-              <Search className="w-3.5 h-3.5 text-[var(--v6-faint)] shrink-0" />
+            <div className="flex items-center gap-2 bg-slate-950/60 border border-white/10 rounded-lg px-3 py-2">
+              <Search className="w-3.5 h-3.5 text-slate-400 shrink-0" />
               <input
                 value={nameQuery}
                 onChange={(e) => setNameQuery(e.target.value)}
                 placeholder="Filter screener names on this page…"
-                className="bg-transparent outline-none text-xs text-[var(--v6-ink)] placeholder:text-[var(--v6-faint)] w-full"
+                className="bg-transparent outline-none text-xs text-white placeholder:text-slate-500 w-full"
               />
             </div>
           </FilterField>
@@ -327,23 +323,23 @@ const ScreenerBrowser: React.FC<{ onSelectStock?: (symbol: string) => void }> = 
             <select
               value={source}
               onChange={(e) => { setSource(e.target.value as SourceFilter); resetPage(); }}
-              className="bg-[var(--v6-bg)] border border-[var(--v6-border)] text-[var(--v6-ink-soft)] text-xs font-semibold rounded-lg px-3 py-2 focus:outline-none"
+              className="bg-slate-950/60 border border-white/10 text-slate-200 text-xs font-semibold rounded-lg px-3 py-2 focus:outline-none"
             >
-              <option value="all">All Sources</option>
-              <option value="trendlyne">Trendlyne</option>
-              <option value="moneycontrol">MoneyControl</option>
-              <option value="etnow">ETnow</option>
+              <option value="all" className="bg-slate-900 text-slate-200">All Sources</option>
+              <option value="trendlyne" className="bg-slate-900 text-slate-200">Trendlyne</option>
+              <option value="moneycontrol" className="bg-slate-900 text-slate-200">MoneyControl</option>
+              <option value="etnow" className="bg-slate-900 text-slate-200">ETnow</option>
             </select>
           </FilterField>
           <FilterField label="Category">
             <select
               value={category}
               onChange={(e) => { setCategory(e.target.value); resetPage(); }}
-              className="bg-[var(--v6-bg)] border border-[var(--v6-border)] text-[var(--v6-ink-soft)] text-xs font-semibold rounded-lg px-3 py-2 focus:outline-none max-w-[180px]"
+              className="bg-slate-950/60 border border-white/10 text-slate-200 text-xs font-semibold rounded-lg px-3 py-2 focus:outline-none max-w-[180px]"
             >
-              <option value="">All Categories</option>
+              <option value="" className="bg-slate-900 text-slate-200">All Categories</option>
               {Array.from(new Set(categories.map((c: any) => c.category).filter(Boolean))).map((c: any) => (
-                <option key={c} value={c}>{c}</option>
+                <option key={c} value={c} className="bg-slate-900 text-slate-200">{c}</option>
               ))}
             </select>
           </FilterField>
@@ -351,23 +347,23 @@ const ScreenerBrowser: React.FC<{ onSelectStock?: (symbol: string) => void }> = 
             <select
               value={tier}
               onChange={(e) => { setTier(e.target.value as TierFilter); resetPage(); }}
-              className="bg-[var(--v6-bg)] border border-[var(--v6-border)] text-[var(--v6-ink-soft)] text-xs font-semibold rounded-lg px-3 py-2 focus:outline-none"
+              className="bg-slate-950/60 border border-white/10 text-slate-200 text-xs font-semibold rounded-lg px-3 py-2 focus:outline-none"
             >
-              <option value="ALL">All Tiers</option>
-              <option value="A">Tier A</option>
-              <option value="B">Tier B</option>
-              <option value="C">Tier C</option>
-              <option value="D">Tier D</option>
-              <option value="Unranked">Unranked</option>
+              <option value="ALL" className="bg-slate-900 text-slate-200">All Tiers</option>
+              <option value="A" className="bg-slate-900 text-slate-200">Tier A</option>
+              <option value="B" className="bg-slate-900 text-slate-200">Tier B</option>
+              <option value="C" className="bg-slate-900 text-slate-200">Tier C</option>
+              <option value="D" className="bg-slate-900 text-slate-200">Tier D</option>
+              <option value="Unranked" className="bg-slate-900 text-slate-200">Unranked</option>
             </select>
           </FilterField>
           <FilterField label="Horizon">
             <select
               value={horizon}
               onChange={(e) => { setHorizon(e.target.value as Horizon); resetPage(); }}
-              className="bg-[var(--v6-bg)] border border-[var(--v6-border)] text-[var(--v6-ink-soft)] text-xs font-semibold rounded-lg px-3 py-2 focus:outline-none"
+              className="bg-slate-950/60 border border-white/10 text-slate-200 text-xs font-semibold rounded-lg px-3 py-2 focus:outline-none"
             >
-              {HORIZONS.map((h) => <option key={h} value={h}>{h} horizon</option>)}
+              {HORIZONS.map((h) => <option key={h} value={h} className="bg-slate-900 text-slate-200">{h} horizon</option>)}
             </select>
           </FilterField>
         </div>
@@ -398,14 +394,14 @@ const ScreenerBrowser: React.FC<{ onSelectStock?: (symbol: string) => void }> = 
       {/* Results table */}
       <Card dense title={`Screeners (${filteredRows.length}${nameQuery ? ` of ${rows.length} on this page` : ''})`} icon={ListFilter}>
         {leaderboardQ.isLoading ? (
-          <p className="text-xs text-[var(--v6-faint)] font-mono">Loading screener leaderboard…</p>
+          <p className="text-xs text-slate-400 font-data">Loading screener leaderboard…</p>
         ) : filteredRows.length === 0 ? (
-          <p className="text-xs text-[var(--v6-faint)] font-mono">No screeners match these filters.</p>
+          <p className="text-xs text-slate-400 font-data">No screeners match these filters.</p>
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full text-xs">
               <thead>
-                <tr className="text-[10px] text-[var(--v6-faint)] uppercase tracking-wider border-b border-[var(--v6-border)]">
+                <tr className="text-[10px] text-slate-400 font-display uppercase tracking-wider border-b border-white/10">
                   <th className="text-left py-2 pr-3">Name</th>
                   <th className="text-left py-2 px-3">Source</th>
                   <th className="text-left py-2 px-3">Category</th>
@@ -418,14 +414,14 @@ const ScreenerBrowser: React.FC<{ onSelectStock?: (symbol: string) => void }> = 
               </thead>
               <tbody>
                 {filteredRows.map((r: any) => {
-                  const tierColor = TIER_COLOR[r.tier as string] ?? 'var(--v6-faint)';
+                  const tierColor = TIER_COLOR[r.tier as string] ?? '#94a3b8';
                   return (
-                  <tr key={`${r.source}-${r.screener_id}`} className="border-b border-[var(--v6-border)] hover:bg-[var(--v6-bg-band)]">
-                    <td className="py-2.5 pr-3 font-bold text-[var(--v6-ink)] max-w-[220px] truncate" title={r.name}>{r.name}</td>
-                    <td className="py-2.5 px-3 text-[var(--v6-muted)]">{SOURCE_LABEL[r.source] ?? r.source}</td>
-                    <td className="py-2.5 px-3 text-[var(--v6-faint)] truncate max-w-[140px]" title={r.subcategory}>{r.category ?? '—'}</td>
+                  <tr key={`${r.source}-${r.screener_id}`} className="border-b border-white/5 hover:bg-white/5 transition-colors">
+                    <td className="py-2.5 pr-3 font-bold text-slate-100 font-display max-w-[220px] truncate" title={r.name}>{r.name}</td>
+                    <td className="py-2.5 px-3 text-slate-300 font-sans">{SOURCE_LABEL[r.source] ?? r.source}</td>
+                    <td className="py-2.5 px-3 text-slate-400 font-sans truncate max-w-[140px]" title={r.subcategory}>{r.category ?? '—'}</td>
                     <td className="py-2.5 px-3 text-center">
-                      <span className="inline-flex items-center gap-1.5 text-[10px] font-bold" style={{ color: tierColor }}>
+                      <span className="inline-flex items-center gap-1.5 text-[10px] font-bold font-data" style={{ color: tierColor }}>
                         <span
                           className="w-1.5 h-1.5 rounded-full shrink-0"
                           style={{ background: tierColor, boxShadow: r.tier ? `0 0 4px ${tierColor}` : 'none' }}
@@ -433,10 +429,10 @@ const ScreenerBrowser: React.FC<{ onSelectStock?: (symbol: string) => void }> = 
                         {r.tier ?? '—'}
                       </span>
                     </td>
-                    <td className="text-right py-2.5 px-3 font-mono text-[var(--v6-ink-soft)]">{fmtPct(r.win_rate)}</td>
-                    <td className={cn('text-right py-2.5 px-3 font-mono', r.avg_return == null ? 'text-[var(--v6-faint)]' : r.avg_return >= 0 ? 'text-[var(--v6-positive)]' : 'text-[var(--v6-negative)]')}>{fmtNum(r.avg_return)}%</td>
-                    <td className={cn('text-right py-2.5 px-3 font-mono', r.alpha == null ? 'text-[var(--v6-faint)]' : r.alpha >= 0 ? 'text-[var(--v6-positive)]' : 'text-[var(--v6-negative)]')}>{fmtNum(r.alpha)}%</td>
-                    <td className="text-right py-2.5 pl-3 font-mono text-[var(--v6-faint)]">{r.total_appearances ?? '—'}</td>
+                    <td className="text-right py-2.5 px-3 font-data text-slate-200">{fmtPct(r.win_rate)}</td>
+                    <td className={cn('text-right py-2.5 px-3 font-data', r.avg_return == null ? 'text-slate-400' : r.avg_return >= 0 ? 'text-emerald-400' : 'text-rose-400')}>{fmtNum(r.avg_return)}%</td>
+                    <td className={cn('text-right py-2.5 px-3 font-data', r.alpha == null ? 'text-slate-400' : r.alpha >= 0 ? 'text-emerald-400' : 'text-rose-400')}>{fmtNum(r.alpha)}%</td>
+                    <td className="text-right py-2.5 pl-3 font-data text-slate-400">{r.total_appearances ?? '—'}</td>
                   </tr>
                   );
                 })}
@@ -444,17 +440,17 @@ const ScreenerBrowser: React.FC<{ onSelectStock?: (symbol: string) => void }> = 
             </table>
           </div>
         )}
-        <div className="flex items-center justify-between mt-3 pt-3 border-t border-[var(--v6-border)]">
+        <div className="flex items-center justify-between mt-3 pt-3 border-t border-white/10">
           <button
             disabled={offset === 0}
             onClick={() => setOffset(Math.max(0, offset - LIMIT))}
-            className="flex items-center gap-1 text-xs font-semibold text-[var(--v6-muted)] hover:text-[var(--v6-ink)] disabled:opacity-30"
+            className="flex items-center gap-1 text-xs font-semibold text-slate-400 hover:text-white disabled:opacity-30 transition-colors"
           ><ChevronLeft className="w-3.5 h-3.5" /> Prev</button>
-          <span className="text-[11px] text-[var(--v6-faint)]">Showing {offset + 1}–{offset + rows.length}</span>
+          <span className="text-[11px] text-slate-400 font-data">Showing {offset + 1}–{offset + rows.length}</span>
           <button
             disabled={rows.length < LIMIT}
             onClick={() => setOffset(offset + LIMIT)}
-            className="flex items-center gap-1 text-xs font-semibold text-[var(--v6-muted)] hover:text-[var(--v6-ink)] disabled:opacity-30"
+            className="flex items-center gap-1 text-xs font-semibold text-slate-400 hover:text-white disabled:opacity-30 transition-colors"
           >Next <ChevronRight className="w-3.5 h-3.5" /></button>
         </div>
       </Card>
@@ -469,21 +465,25 @@ export const ScreenerBrowserPage: React.FC<{ onSelectStock?: (symbol: string) =>
   const [stockSymbol, setStockSymbol] = useState<string | null>(null);
 
   return (
-    <div className="space-y-4">
-      <div className="flex items-center justify-between flex-wrap gap-3">
-        <div>
-          <h1 className="v1-title-page">Screener Browser</h1>
-          <p className="text-[11px] text-slate-400 mt-1">Explore 1,600+ screeners across 4 providers or look up which screeners a stock belongs to</p>
+    <div className="v1-page space-y-6">
+      <div className="v1-header">
+        <div className="v1-header-left">
+          <h1 className="v1-title-page flex items-center gap-2.5">
+            <Layers3 className="w-6 h-6 text-indigo-400" /> Screener Browser
+          </h1>
+          <p className="text-sm text-slate-400 mt-1">Explore 1,600+ screeners across 4 providers or look up which screeners a stock belongs to</p>
         </div>
-        <div className="flex gap-0.5 p-0.5 bg-[var(--v6-bg-band)] rounded-xl">
-          <button
-            onClick={() => setMode('screeners')}
-            className={cn('flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-colors', mode === 'screeners' ? 'bg-[var(--v6-accent)] text-white' : 'text-[var(--v6-muted)] hover:text-[var(--v6-ink)]')}
-          ><Layers3 className="w-3.5 h-3.5" /> Browse Screeners</button>
-          <button
-            onClick={() => setMode('stocks')}
-            className={cn('flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-colors', mode === 'stocks' ? 'bg-[var(--v6-accent)] text-white' : 'text-[var(--v6-muted)] hover:text-[var(--v6-ink)]')}
-          ><Search className="w-3.5 h-3.5" /> Stock Lookup</button>
+        <div className="v1-header-actions">
+          <div className="flex gap-1 p-1 bg-slate-900/80 rounded-xl border border-white/10">
+            <button
+              onClick={() => setMode('screeners')}
+              className={cn('flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold font-display transition-colors', mode === 'screeners' ? 'bg-indigo-600 text-white' : 'text-slate-400 hover:text-white')}
+            ><Layers3 className="w-3.5 h-3.5" /> Browse Screeners</button>
+            <button
+              onClick={() => setMode('stocks')}
+              className={cn('flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold font-display transition-colors', mode === 'stocks' ? 'bg-indigo-600 text-white' : 'text-slate-400 hover:text-white')}
+            ><Search className="w-3.5 h-3.5" /> Stock Lookup</button>
+          </div>
         </div>
       </div>
 
@@ -497,13 +497,13 @@ export const ScreenerBrowserPage: React.FC<{ onSelectStock?: (symbol: string) =>
               <StockScreenerMembership symbol={stockSymbol} onSelectStock={onSelectStock} />
             </Card>
           ) : (
-            <div className="flex flex-col items-center justify-center py-12 text-center gap-3">
-              <div className="w-12 h-12 rounded-xl flex items-center justify-center" style={{ background: 'rgba(99,102,241,0.1)', border: '1px solid rgba(99,102,241,0.15)' }}>
-                <Search className="w-6 h-6 text-[var(--v6-accent-ink)]" />
+            <div className="v1-card flex flex-col items-center justify-center py-12 text-center gap-3">
+              <div className="w-12 h-12 rounded-xl flex items-center justify-center bg-indigo-500/10 border border-indigo-500/20">
+                <Search className="w-6 h-6 text-indigo-400" />
               </div>
               <div>
-                <p className="text-sm font-semibold text-[var(--v6-ink-soft)]">Search a stock above</p>
-                <p className="text-xs text-[var(--v6-faint)] mt-1">See every Trendlyne, MoneyControl, ETnow, and ET Marketstats<br />screener that stock currently belongs to, with bullish/bearish tagging.</p>
+                <p className="text-sm font-semibold text-slate-200">Search a stock above</p>
+                <p className="text-xs text-slate-400 mt-1">See every Trendlyne, MoneyControl, ETnow, and ET Marketstats<br />screener that stock currently belongs to, with bullish/bearish tagging.</p>
               </div>
             </div>
           )}

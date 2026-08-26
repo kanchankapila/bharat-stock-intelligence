@@ -1212,7 +1212,7 @@ def load_training_data(label: str = 'triple_barrier') -> pd.DataFrame:
             LEFT JOIN LATERAL (
                 SELECT * FROM technical_signals ts2
                 WHERE ts2.symbol = so.symbol
-                  AND ts2.date <= so.signal_date
+                  AND ts2.date <= so.signal_date::date
                   -- 7 days, not 3: the window only has to tolerate market closures (a long
                   -- weekend plus an adjacent holiday exceeds 3 days and used to return NO
                   -- feature row at all). Column sparsity is handled upstream by
@@ -1223,7 +1223,7 @@ def load_training_data(label: str = 'triple_barrier') -> pd.DataFrame:
                   -- label match a technical-indicator snapshot up to a month stale, and 30
                   -- days doesn't even reach quarterly fundamentals' true cadence anyway. If
                   -- fundamentals staleness is a real problem, fix densify_feature_matrix.py.)
-                  AND ts2.date >= (so.signal_date::date - interval '7 days')::text
+                  AND ts2.date >= (so.signal_date::date - interval '7 days')
                 ORDER BY ts2.date DESC
                 LIMIT 1
             ) ts ON TRUE
@@ -3063,7 +3063,10 @@ def _propagate_and_gate_recommendation_log(conn: ConnWrapper) -> None:
             SELECT COALESCE(ts.calibrated_win_probability, ts.win_probability)
             FROM technical_signals ts
             WHERE ts.symbol = recommendation_log.symbol
-              AND ts.date = recommendation_log.signal_date
+              -- ts.date is a native DATE (2026-08-25 migration); recommendation_log.signal_date
+              -- is TEXT -- compare like-for-like or PG raises "operator does not exist: date = text",
+              -- which surfaces as the /api/score-pending HTTP 500.
+              AND recommendation_log.signal_date = ts.date::text
             LIMIT 1
         )
         WHERE source = 'technical_scan'

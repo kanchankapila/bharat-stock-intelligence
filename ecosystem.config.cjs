@@ -280,7 +280,7 @@ module.exports = {
       script: path.resolve(__dirname, 'scripts', 'check_port_drift.mjs'),
       cron_restart: '*/15 * * * *',
       kill_timeout: 30_000,
-      env: { ...dotenvVars },
+      env: { ...dotenvVars, PORT_DRIFT_AUTOHEAL: '1' },
       out_file: path.resolve(__dirname, 'logs', 'pm2-out.log'),
       error_file: path.resolve(__dirname, 'logs', 'pm2-err.log'),
       merge_logs: true,

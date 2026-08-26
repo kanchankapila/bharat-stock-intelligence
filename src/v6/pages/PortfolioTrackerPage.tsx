@@ -25,11 +25,9 @@ function todayISO(): string {
   return new Date().toISOString().slice(0, 10);
 }
 function toneClass(n: number | null | undefined): string {
-  if (n == null || !Number.isFinite(n)) return 'text-[var(--v6-muted)]';
-  return n >= 0 ? 'text-[var(--v6-positive)]' : 'text-[var(--v6-negative)]';
+  if (n == null || !Number.isFinite(n)) return 'text-slate-400';
+  return n >= 0 ? 'text-emerald-400' : 'text-rose-400';
 }
-// Same null-safety as toneClass(), for KpiCard's tone enum -- an undefined/errored `totals` must
-// render neutral, not a false "up" (see AF-20260818-32: `(n ?? 0) >= 0` always reads as "up").
 function pnlTone(n: number | null | undefined): 'up' | 'down' | 'neutral' {
   if (n == null || !Number.isFinite(n)) return 'neutral';
   return n >= 0 ? 'up' : 'down';
@@ -38,13 +36,17 @@ function pnlTone(n: number | null | undefined): 'up' | 'down' | 'neutral' {
 // ─── Shared bits ────────────────────────────────────────────────────────────
 
 const KpiCard: React.FC<{ label: string; value: string; sub?: string; tone?: 'up' | 'down' | 'neutral' }> = ({ label, value, sub, tone = 'neutral' }) => (
-  <div className="glass rounded-xl px-4 py-3 border border-[var(--v6-border)]">
-    <p className="text-[10px] font-bold text-[var(--v6-faint)] uppercase tracking-widest mb-1">{label}</p>
+  <div className={cn(
+    "v1-stat-pill p-4 flex flex-col justify-between min-h-[90px]",
+    tone === 'up' && "v1-stat-pill-up",
+    tone === 'down' && "v1-stat-pill-down"
+  )}>
+    <p className="v1-data-label">{label}</p>
     <p className={cn(
-      'text-lg font-bold font-mono',
-      tone === 'up' ? 'text-[var(--v6-positive)]' : tone === 'down' ? 'text-[var(--v6-negative)]' : 'text-[var(--v6-ink)]',
+      'v1-data-value text-xl mt-1',
+      tone === 'up' ? 'text-emerald-400' : tone === 'down' ? 'text-rose-400' : 'text-white',
     )}>{value}</p>
-    {sub && <p className="text-[10px] text-[var(--v6-faint)] mt-0.5">{sub}</p>}
+    {sub && <p className="text-[10px] text-slate-500 font-data mt-1">{sub}</p>}
   </div>
 );
 
@@ -618,41 +620,48 @@ export const PortfolioTrackerPage: React.FC<{ userId?: string | null; onSelectSt
 
   if (!userId) {
     return (
-      <div className="flex flex-col items-center justify-center py-20 text-center gap-5">
-        <div className="w-16 h-16 rounded-2xl flex items-center justify-center" style={{ background: 'rgba(99,102,241,0.12)', border: '1px solid rgba(99,102,241,0.2)' }}>
-          <Briefcase className="w-8 h-8 text-[var(--v6-accent-ink)]" />
+      <div className="v1-page space-y-6">
+        <div className="v1-card p-10 flex flex-col items-center justify-center text-center gap-5">
+          <div className="w-16 h-16 rounded-2xl flex items-center justify-center bg-indigo-500/10 border border-indigo-500/20">
+            <Briefcase className="w-8 h-8 text-indigo-400" />
+          </div>
+          <div className="space-y-1.5">
+            <h2 className="v1-title-page text-2xl">Portfolio Tracker</h2>
+            <p className="text-sm text-slate-400 max-w-sm">Track your stocks and mutual funds with live P&L, sector allocation, and performance analytics.</p>
+          </div>
+          <div className="flex flex-col gap-2 text-left text-xs font-data text-slate-300 bg-black/30 border border-white/10 rounded-xl p-4 max-w-xs w-full">
+            <div className="flex items-center gap-2"><span className="text-emerald-400 font-bold">✓</span> Live unrealized P&amp;L</div>
+            <div className="flex items-center gap-2"><span className="text-emerald-400 font-bold">✓</span> Realized gain/loss history</div>
+            <div className="flex items-center gap-2"><span className="text-emerald-400 font-bold">✓</span> Sector allocation breakdown</div>
+            <div className="flex items-center gap-2"><span className="text-emerald-400 font-bold">✓</span> Best &amp; worst performers</div>
+          </div>
+          <p className="text-xs text-slate-500 font-data">Sign in with Google to get started.</p>
         </div>
-        <div className="space-y-1.5">
-          <h2 className="text-lg font-bold text-[var(--v6-ink)]">Portfolio Tracker</h2>
-          <p className="text-sm text-[var(--v6-muted)] max-w-xs">Track your stocks and mutual funds with live P&L, sector allocation, and performance analytics.</p>
-        </div>
-        <div className="flex flex-col gap-2 text-left text-xs text-[var(--v6-faint)] bg-[var(--v6-bg-band)] border border-[var(--v6-border)] rounded-xl p-4 max-w-xs w-full">
-          <div className="flex items-center gap-2"><span className="text-[var(--v6-positive)] font-bold">✓</span> Live unrealized P&amp;L</div>
-          <div className="flex items-center gap-2"><span className="text-[var(--v6-positive)] font-bold">✓</span> Realized gain/loss history</div>
-          <div className="flex items-center gap-2"><span className="text-[var(--v6-positive)] font-bold">✓</span> Sector allocation breakdown</div>
-          <div className="flex items-center gap-2"><span className="text-[var(--v6-positive)] font-bold">✓</span> Best &amp; worst performers</div>
-        </div>
-        <p className="text-xs text-[var(--v6-faint)]">Sign in with Google to get started.</p>
       </div>
     );
   }
 
   return (
-    <div className="space-y-4">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="v1-title-page">Portfolio</h1>
-          <p className="text-[11px] text-slate-400 mt-1">Track positions, P&amp;L, and sector allocation</p>
+    <div className="v1-page space-y-6">
+      <div className="v1-header">
+        <div className="v1-header-left">
+          <h1 className="v1-title-page flex items-center gap-2.5">
+            <Briefcase className="w-6 h-6 text-indigo-400" />
+            Portfolio Tracker
+          </h1>
+          <p className="text-xs text-slate-400 mt-1">Track positions, P&amp;L, and sector allocation</p>
         </div>
-        <div className="flex gap-1 p-0.5 bg-[var(--v6-bg-band)] rounded-xl">
-          <button
-            onClick={() => setTab('stocks')}
-            className={cn('flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-colors', tab === 'stocks' ? 'bg-[var(--v6-accent)] text-white' : 'text-[var(--v6-muted)] hover:text-[var(--v6-ink)]')}
-          ><Briefcase className="w-3.5 h-3.5" /> Stocks</button>
-          <button
-            onClick={() => setTab('mf')}
-            className={cn('flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-colors', tab === 'mf' ? 'bg-[var(--v6-accent)] text-white' : 'text-[var(--v6-muted)] hover:text-[var(--v6-ink)]')}
-          ><PiggyBank className="w-3.5 h-3.5" /> MF</button>
+        <div className="v1-header-actions">
+          <div className="flex gap-1 p-1 bg-slate-900/80 border border-white/10 rounded-xl">
+            <button
+              onClick={() => setTab('stocks')}
+              className={cn('v1-btn-ghost text-xs px-3 py-1.5 rounded-lg', tab === 'stocks' ? 'bg-indigo-600 text-white font-bold' : 'text-slate-400 hover:text-slate-200')}
+            ><Briefcase className="w-3.5 h-3.5" /> Stocks</button>
+            <button
+              onClick={() => setTab('mf')}
+              className={cn('v1-btn-ghost text-xs px-3 py-1.5 rounded-lg', tab === 'mf' ? 'bg-indigo-600 text-white font-bold' : 'text-slate-400 hover:text-slate-200')}
+            ><PiggyBank className="w-3.5 h-3.5" /> MF</button>
+          </div>
         </div>
       </div>
 

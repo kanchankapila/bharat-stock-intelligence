@@ -8,6 +8,10 @@ nse
 beautifulsoup4
 frozendict
 curl_cffi
+# Fetcher-only (no scraping/spiders): curl_cffi Chrome-TLS-impersonated HTTP client used by
+# tl_fetch.py for trendlyne.com's AWS WAF. After installing/upgrading, browsers are NOT
+# required — only `Fetcher` is imported, so `scrapling install` is unnecessary here.
+scrapling[fetchers]
 rich
 psycopg2-binary
 ipython

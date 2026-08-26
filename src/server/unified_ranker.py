@@ -2699,12 +2699,17 @@ class UnifiedRanker:
             r['position_size_pct'] = round(position_sizes.get(r['symbol'], 0.0) * 100, 2)
 
         # win_probability into each result row for unified_recommendations_history (the raw
-        # meta-label behind position_size_pct; see migration 1787140000000). .get() keeps the
-        # row NULL for symbols the ensemble had no finite probability for.
+        # meta-label behind position_size_pct; see migration 1787140000000). Explicit None,
+        # NOT a missing key (fix 2026-08-25): SQLAlchemy's bind resolution treats an absent
+        # dict key as an ERROR ("A value is required for bind parameter 'win_probability'",
+        # sqlalche.me/e/20/cd3x), not as NULL -- so every symbol the ensemble had no finite
+        # probability for aborted the whole persist loop BEFORE self.conn.commit(), losing the
+        # entire run's main-table upserts with it (10 failures logged 2026-08-25 alone). A
+        # bound None lands as a genuine NULL, which is what the original comment here always
+        # claimed happened.
         for r in results:
             wp = win_probs.get(r['symbol'])
-            if wp is not None and math.isfinite(wp):
-                r['win_probability'] = float(wp)
+            r['win_probability'] = float(wp) if (wp is not None and math.isfinite(wp)) else None
 
         cur = self.conn.cursor()
         for r in results:

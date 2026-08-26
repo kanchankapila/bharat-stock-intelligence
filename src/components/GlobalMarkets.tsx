@@ -87,7 +87,7 @@ export const GlobalMarkets: React.FC<{ className?: string }> = ({ className }) =
               </div>
               
               <div className="mb-1.5">
-                <span className="text-sm font-black text-white tabular-nums tracking-tighter">
+                <span className="v1-data-value text-sm text-white">
                   {idx.price}
                 </span>
               </div>
@@ -95,17 +95,17 @@ export const GlobalMarkets: React.FC<{ className?: string }> = ({ className }) =
               {(() => {
                 const tz = lookupExchangeTimeZone(idx.name) ?? lookupExchangeTimeZone(idx.region);
                 return tz ? (
-                  <div className="text-[7px] font-bold text-slate-600 font-display uppercase tracking-wide mb-1 tabular-nums">
+                  <div className="text-[9px] font-bold text-slate-500 font-data uppercase tracking-wide mb-1">
                     {currentTimeInZone(tz)} local
                   </div>
                 ) : null;
               })()}
 
               <div className={cn(
-                "flex items-center gap-1 text-[10px] font-black",
-                isUp ? "text-emerald-400" : "text-rose-400"
+                "flex items-center gap-1 text-xs font-bold font-data",
+                isUp ? "v1-text-bullish" : "v1-text-bearish"
               )}>
-                {isUp ? <ArrowUpRight className="w-3 h-3" /> : <ArrowDownRight className="w-3 h-3" />}
+                {isUp ? <ArrowUpRight className="w-3.5 h-3.5" /> : <ArrowDownRight className="w-3.5 h-3.5" />}
                 {idx.percentChange}%
               </div>
             </motion.div>

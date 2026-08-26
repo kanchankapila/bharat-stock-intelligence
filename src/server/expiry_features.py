@@ -14,7 +14,7 @@ after in the same daily-ops chain.
 
 Run:  python expiry_features.py
 """
-from db_compat import connect, use_postgres
+from db_compat import connect
 
 
 def ensure_schema(con) -> None:
@@ -41,48 +41,34 @@ def backfill_days_to_expiry(con) -> None:
     for every symbol on every run (the severe smear bug, not just the milder latest-row one).
     """
     cur = con.cursor()
-    if use_postgres():
-        cur.execute("""
-            UPDATE technical_signals ts
-            SET days_to_expiry = subq.days,
-                is_expiry_day  = CASE WHEN subq.days = 0 THEN 1 ELSE 0 END
-            FROM (
-                SELECT symbol, (MIN(expiry::date) - CURRENT_DATE) AS days
-                FROM nt_fno_expiry
-                WHERE expiry >= CURRENT_DATE::text
-                GROUP BY symbol
-            ) subq
-            WHERE ts.symbol = subq.symbol
-              AND ts.date = CURRENT_DATE::text
-        """)
-        # Clear stale values for symbols that dropped out of the F&O universe (delisted from
-        # F&O, or nt_fno_expiry's own refresh temporarily has no rows for them).
-        cur.execute("""
-            UPDATE technical_signals ts
-            SET days_to_expiry = NULL, is_expiry_day = NULL
-            WHERE ts.date = CURRENT_DATE::text
-              AND ts.days_to_expiry IS NOT NULL
-              AND NOT EXISTS (
-                  SELECT 1 FROM nt_fno_expiry e
-                  WHERE e.symbol = ts.symbol AND e.expiry >= CURRENT_DATE::text
-              )
-        """)
-    else:
-        cur.execute("""
-            UPDATE technical_signals
-            SET days_to_expiry = (
-                    SELECT CAST(MIN(julianday(e.expiry) - julianday('now')) AS INTEGER)
-                    FROM nt_fno_expiry e
-                    WHERE e.symbol = technical_signals.symbol
-                      AND e.expiry >= date('now')
-                )
-            WHERE date = date('now')
-        """)
-        cur.execute("""
-            UPDATE technical_signals
-            SET is_expiry_day = CASE WHEN days_to_expiry = 0 THEN 1 ELSE 0 END
-            WHERE days_to_expiry IS NOT NULL AND date = date('now')
-        """)
+    # nt_fno_expiry.expiry is TEXT -> compare against current_date::text;
+    # technical_signals.date is native DATE -> compare against bare CURRENT_DATE
+    # (the old CURRENT_DATE::text raised `date = text` and updated 0 rows every run).
+    cur.execute("""
+        UPDATE technical_signals ts
+        SET days_to_expiry = subq.days,
+            is_expiry_day  = CASE WHEN subq.days = 0 THEN 1 ELSE 0 END
+        FROM (
+            SELECT symbol, (MIN(expiry::date) - CURRENT_DATE) AS days
+            FROM nt_fno_expiry
+            WHERE expiry >= CURRENT_DATE::text
+            GROUP BY symbol
+        ) subq
+        WHERE ts.symbol = subq.symbol
+          AND ts.date = CURRENT_DATE
+    """)
+    # Clear stale values for symbols that dropped out of the F&O universe (delisted from
+    # F&O, or nt_fno_expiry's own refresh temporarily has no rows for them).
+    cur.execute("""
+        UPDATE technical_signals ts
+        SET days_to_expiry = NULL, is_expiry_day = NULL
+        WHERE ts.date = CURRENT_DATE
+          AND ts.days_to_expiry IS NOT NULL
+          AND NOT EXISTS (
+              SELECT 1 FROM nt_fno_expiry e
+              WHERE e.symbol = ts.symbol AND e.expiry >= CURRENT_DATE::text
+          )
+    """)
     con.commit()
 
 
