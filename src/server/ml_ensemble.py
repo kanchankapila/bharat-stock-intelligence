@@ -1087,7 +1087,7 @@ def load_training_data(label: str = 'triple_barrier') -> pd.DataFrame:
                    ts.delivery_pct,
                    ts.sector_ret_5d, ts.sector_ret_21d,
                    ts.sector_global_corr_21d,
-                   ts.iv_rank, ts.iv_skew,
+                   ts.iv_rank, ts.iv_skew, ts.call_wall_dist_pct, ts.put_wall_dist_pct, ts.near_expiry_gamma,
                    ts.rs_rank_21d, ts.rs_rank_63d,
                    ts.insider_buy_pct_90d,
                    ts.opening_range_break,
@@ -1399,7 +1399,7 @@ def load_training_data(label: str = 'triple_barrier') -> pd.DataFrame:
                    ts.delivery_pct,
                    ts.sector_ret_5d, ts.sector_ret_21d,
                    ts.sector_global_corr_21d,
-                   ts.iv_rank, ts.iv_skew,
+                   ts.iv_rank, ts.iv_skew, ts.call_wall_dist_pct, ts.put_wall_dist_pct, ts.near_expiry_gamma,
                    ts.rs_rank_21d, ts.rs_rank_63d,
                    ts.insider_buy_pct_90d,
                    ts.opening_range_break,
@@ -1641,7 +1641,7 @@ def load_pending_signals() -> pd.DataFrame:
                    ts.delivery_pct,
                    ts.sector_ret_5d, ts.sector_ret_21d,
                    ts.sector_global_corr_21d,
-                   ts.iv_rank, ts.iv_skew,
+                   ts.iv_rank, ts.iv_skew, ts.call_wall_dist_pct, ts.put_wall_dist_pct, ts.near_expiry_gamma,
                    ts.rs_rank_21d, ts.rs_rank_63d,
                    ts.insider_buy_pct_90d,
                    ts.opening_range_break,
@@ -3398,7 +3398,7 @@ def incremental_update(n_days: int = 3, n_rounds: int = 20, dry_run: bool = Fals
                    ts.fii_3d_net, ts.above_sma200, ts.pcr_oi, ts.pcr_vol,
                    ts.fii_10d_net, ts.dii_3d_net, ts.delivery_pct,
                    ts.sector_ret_5d, ts.sector_ret_21d,
-                   ts.iv_rank, ts.iv_skew, ts.rs_rank_21d, ts.rs_rank_63d,
+                   ts.iv_rank, ts.iv_skew, ts.call_wall_dist_pct, ts.put_wall_dist_pct, ts.near_expiry_gamma, ts.rs_rank_21d, ts.rs_rank_63d,
                    ts.insider_buy_pct_90d,
                    ts.opening_range_break, ts.vwap_deviation_pct, ts.first_hour_vol_share
             FROM signal_outcomes so
@@ -3423,7 +3423,7 @@ def incremental_update(n_days: int = 3, n_rounds: int = 20, dry_run: bool = Fals
                    ts.fii_3d_net, ts.above_sma200, ts.pcr_oi, ts.pcr_vol,
                    ts.fii_10d_net, ts.dii_3d_net, ts.delivery_pct,
                    ts.sector_ret_5d, ts.sector_ret_21d,
-                   ts.iv_rank, ts.iv_skew, ts.rs_rank_21d, ts.rs_rank_63d,
+                   ts.iv_rank, ts.iv_skew, ts.call_wall_dist_pct, ts.put_wall_dist_pct, ts.near_expiry_gamma, ts.rs_rank_21d, ts.rs_rank_63d,
                    ts.insider_buy_pct_90d,
                    ts.opening_range_break, ts.vwap_deviation_pct, ts.first_hour_vol_share
             FROM signal_outcomes so
