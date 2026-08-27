@@ -22,6 +22,7 @@ import argparse
 import json
 import sys
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
@@ -34,6 +35,10 @@ from marketsmojo_technical_fetcher import HEADERS, load_sid_map  # noqa: E402
 BASE_URL = "https://frapi.marketsmojo.com/apiv1/financials/get-financials"
 RATE_LIMIT_SEC = 0.5
 MAX_PAGES = 8  # confirmed real data through page 5 for HDFCBANK; page 6 already empty
+# Same host/rate profile as marketsmojo_technical_fetcher.py, which measured 8 concurrent
+# workers with zero throttling. Each worker here walks its own up-to-8-page sequence with its
+# own intra-symbol RATE_LIMIT_SEC pacing -- cross-symbol parallelism is orthogonal to that.
+MAX_WORKERS = 8
 
 # AF-20260816-20: this is quarterly-cadence data (queues.ts's own comment: "the vendor only
 # restates these on results/filing days") fetched by a WEEKLY job -- a symbol checked earlier
@@ -202,8 +207,7 @@ def run(symbols: list[str] | None = None, full: bool = False) -> None:
     )
     skipped_fresh = 0
 
-    total_rows = 0
-    ok = 0
+    pending = []
     for symbol in symbols:
         if symbol in recently_checked:
             skipped_fresh += 1
@@ -212,16 +216,31 @@ def run(symbols: list[str] | None = None, full: bool = False) -> None:
         if not sid:
             print(f"  [marketsmojo financials] {symbol}: no stockid mapping, skipped")
             continue
-        rows = fetch_financials_history(sid, session)
-        mark_checked(conn, symbol)
-        if not rows:
-            print(f"  [marketsmojo financials] {symbol}: empty response")
-            continue
-        known = None if full else load_known_values(conn, symbol)
-        n = write_financials_history(conn, symbol, rows, fetched_at, known)
-        total_rows += n
-        ok += 1
-        print(f"  [marketsmojo financials] {symbol}: {n} cells")
+        pending.append((symbol, sid))
+
+    def _fetch_one(item):
+        symbol, sid = item
+        return symbol, fetch_financials_history(sid, session)
+
+    total_rows = 0
+    ok = 0
+    # Fetch in parallel (network only, each worker walking its own up-to-MAX_PAGES sequence);
+    # DB reads/writes (mark_checked, load_known_values, write_financials_history) stay
+    # single-threaded on the main thread as futures resolve -- same pattern as
+    # mc_pricefeed_fetcher.py / marketsmojo_fintrend_fetcher.py.
+    with ThreadPoolExecutor(max_workers=MAX_WORKERS) as pool:
+        futures = [pool.submit(_fetch_one, item) for item in pending]
+        for fut in as_completed(futures):
+            symbol, rows = fut.result()
+            mark_checked(conn, symbol)
+            if not rows:
+                print(f"  [marketsmojo financials] {symbol}: empty response")
+                continue
+            known = None if full else load_known_values(conn, symbol)
+            n = write_financials_history(conn, symbol, rows, fetched_at, known)
+            total_rows += n
+            ok += 1
+            print(f"  [marketsmojo financials] {symbol}: {n} cells")
 
     conn.close()
     print(

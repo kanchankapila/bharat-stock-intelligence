@@ -21,11 +21,19 @@ import datetime
 import argparse
 import requests
 import pandas as pd
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from sqlalchemy import text
 
 from db_compat import get_engine
 from fetch_utils import retry_get, FetchTracker
 import sys
+
+# Live-measured 2026-08-28 against NiftyTrader's option-chain endpoint (fetch_symbol_niftytrader,
+# the active path -- NOT the legacy/unused NSE fetch_symbol method, which sits behind Akamai and
+# is untested here): 4 concurrent workers, 4/4 ok, ~3.3x speedup, zero errors. Kept modest (this
+# universe is a small, bounded Nifty-50-ish list, not the ~2000-stock scale) rather than jumping
+# straight to the 8 workers validated for other providers.
+MAX_WORKERS = 4
 
 # MoneyControl Nifty index OI endpoints
 MC_EXPIRY_DATES_URL = (
@@ -534,20 +542,35 @@ class PCRFetcher:
         else:
             print("[GEX] GEX fetch failed — nothing saved")
 
+    def _fetch_one_paced(self, sym: str, delay: float) -> dict | None:
+        rec = self.fetch_symbol_niftytrader(sym)
+        time.sleep(delay)
+        return rec
+
     def run(self, symbols: list[str], delay: float = 1.5):
         print(f"[PCR] Fetching {len(symbols)} symbols at {datetime.datetime.now()}")
         results = []
         tracker = FetchTracker("pcr_fetcher")
 
-        for i, sym in enumerate(symbols):
-            print(f"[PCR] ({i+1}/{len(symbols)}) {sym}...")
-            rec = self.fetch_symbol_niftytrader(sym)
-            tracker.record(sym, ok=rec is not None)
-            if rec:
-                results.append(rec)
-                pcr_str = f"{rec['pcr']:.3f}" if rec['pcr'] is not None else "N/A"
-                print(f"[PCR]   PCR={pcr_str}  call_oi={rec['call_oi']:,}  put_oi={rec['put_oi']:,}")
-            time.sleep(delay)
+        # Parallel fetch (network only) -- tracker.record()/results.append() stay on the main
+        # thread as futures resolve. `delay` now paces each WORKER's own successive calls
+        # (still meaningful under concurrency) rather than serializing every request platform-
+        # wide. FetchTracker's abort_after_consecutive_fails is unset here (default None), so
+        # there's no consecutive-count semantic to preserve across threads -- only the aggregate
+        # fail-rate finish() check, which is safe to accumulate this way.
+        with ThreadPoolExecutor(max_workers=MAX_WORKERS) as pool:
+            futures = {pool.submit(self._fetch_one_paced, sym, delay): sym for sym in symbols}
+            done = 0
+            for fut in as_completed(futures):
+                sym = futures[fut]
+                done += 1
+                rec = fut.result()
+                print(f"[PCR] ({done}/{len(symbols)}) {sym}...")
+                tracker.record(sym, ok=rec is not None)
+                if rec:
+                    results.append(rec)
+                    pcr_str = f"{rec['pcr']:.3f}" if rec['pcr'] is not None else "N/A"
+                    print(f"[PCR]   PCR={pcr_str}  call_oi={rec['call_oi']:,}  put_oi={rec['put_oi']:,}")
 
         saved = self.save(results)
         print(f"\n[PCR] Done. Saved {saved}/{len(symbols)} symbols to stock_options_oi.")

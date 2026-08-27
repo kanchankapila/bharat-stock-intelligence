@@ -19,6 +19,7 @@ symbol resolution and headers are shared with marketsmojo_technical_fetcher.py.
 import argparse
 import sys
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import date
 from pathlib import Path
 
@@ -31,6 +32,10 @@ from marketsmojo_technical_fetcher import HEADERS, load_sid_map  # noqa: E402
 BASE_URL = "https://frapi.marketsmojo.com/stocks/finTrendGraph"
 CID = 34
 RATE_LIMIT_SEC = 0.5
+# marketsmojo_technical_fetcher.py's own comment measured 8 concurrent workers against this
+# same frapi.marketsmojo.com host with zero throttling (2.02s/symbol serial -> ~0.28s/symbol
+# parallel). Same rate/host profile, same MAX_WORKERS.
+MAX_WORKERS = 8
 
 
 def fetch_fintrend_history(sid: str, session: requests.Session, exchange: int = 0) -> list[dict] | None:
@@ -112,21 +117,31 @@ def run(symbols: list[str] | None = None, full: bool = False) -> None:
     if known is not None:
         print(f"[marketsmojo fintrend] {len(known)} symbols known -- fetching new dates only")
 
-    total_rows = 0
-    ok = 0
-    for symbol in symbols:
+    def _fetch_one(symbol):
         sid = sid_map.get(symbol)
         if not sid:
-            print(f"  [marketsmojo fintrend] {symbol}: no stockid mapping, skipped")
-            continue
-        rows = fetch_fintrend_history(sid, session)
-        if not rows:
-            print(f"  [marketsmojo fintrend] {symbol}: empty response")
-            continue
-        n = write_fintrend_history(conn, symbol, rows, fetched_at, known)
-        total_rows += n
-        ok += 1
-        print(f"  [marketsmojo fintrend] {symbol}: {n} rows")
+            return symbol, None, "no stockid mapping"
+        return symbol, fetch_fintrend_history(sid, session), None
+
+    total_rows = 0
+    ok = 0
+    # Fetch in parallel (network only); DB writes stay single-threaded on the main thread as
+    # futures resolve -- matches mc_pricefeed_fetcher.py's batch pattern, avoids any
+    # DB-connection thread-safety hazard from writing off multiple worker threads.
+    with ThreadPoolExecutor(max_workers=MAX_WORKERS) as pool:
+        futures = [pool.submit(_fetch_one, symbol) for symbol in symbols]
+        for fut in as_completed(futures):
+            symbol, rows, skip_reason = fut.result()
+            if skip_reason:
+                print(f"  [marketsmojo fintrend] {symbol}: {skip_reason}, skipped")
+                continue
+            if not rows:
+                print(f"  [marketsmojo fintrend] {symbol}: empty response")
+                continue
+            n = write_fintrend_history(conn, symbol, rows, fetched_at, known)
+            total_rows += n
+            ok += 1
+            print(f"  [marketsmojo fintrend] {symbol}: {n} rows")
 
     conn.close()
     print(f"[marketsmojo fintrend] done -- {total_rows} rows, {ok}/{len(symbols)} symbols succeeded")

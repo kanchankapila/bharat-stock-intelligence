@@ -25,6 +25,7 @@ import re
 import sys
 import time
 from calendar import monthrange
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import date
 
 import requests
@@ -35,6 +36,9 @@ from marketsmojo_technical_fetcher import HEADERS, load_sid_map  # noqa: E402
 
 BASE_URL = "https://frapi.marketsmojo.com/Stocks_Shareholding/get_results"
 RATE_LIMIT_SEC = 0.5
+# Same host/rate profile as marketsmojo_technical_fetcher.py, which measured 8 concurrent
+# workers with zero throttling (2.02s/symbol serial -> ~0.28s/symbol parallel).
+MAX_WORKERS = 8
 
 _TITLE_RE = re.compile(r"[^a-z0-9]+")
 
@@ -170,21 +174,30 @@ def run(symbols: list[str] | None = None, full: bool = False) -> None:
     if known is not None:
         print(f"[marketsmojo shareholding] {len(known)} (symbol,category) pairs known -- fetching new periods only")
 
-    total_rows = 0
-    ok = 0
-    for symbol in symbols:
+    def _fetch_one(symbol):
         sid = sid_map.get(symbol)
         if not sid:
-            print(f"  [marketsmojo shareholding] {symbol}: no stockid mapping, skipped")
-            continue
-        rows = fetch_shareholding_history(sid, session)
-        if not rows:
-            print(f"  [marketsmojo shareholding] {symbol}: empty response")
-            continue
-        n = write_shareholding_history(conn, symbol, rows, fetched_at, known)
-        total_rows += n
-        ok += 1
-        print(f"  [marketsmojo shareholding] {symbol}: {n} rows")
+            return symbol, None, "no stockid mapping"
+        return symbol, fetch_shareholding_history(sid, session), None
+
+    total_rows = 0
+    ok = 0
+    # Fetch in parallel (network only); DB writes stay single-threaded on the main thread --
+    # same pattern as mc_pricefeed_fetcher.py / marketsmojo_fintrend_fetcher.py.
+    with ThreadPoolExecutor(max_workers=MAX_WORKERS) as pool:
+        futures = [pool.submit(_fetch_one, symbol) for symbol in symbols]
+        for fut in as_completed(futures):
+            symbol, rows, skip_reason = fut.result()
+            if skip_reason:
+                print(f"  [marketsmojo shareholding] {symbol}: {skip_reason}, skipped")
+                continue
+            if not rows:
+                print(f"  [marketsmojo shareholding] {symbol}: empty response")
+                continue
+            n = write_shareholding_history(conn, symbol, rows, fetched_at, known)
+            total_rows += n
+            ok += 1
+            print(f"  [marketsmojo shareholding] {symbol}: {n} rows")
 
     conn.close()
     print(f"[marketsmojo shareholding] done -- {total_rows} rows, {ok}/{len(symbols)} symbols succeeded")

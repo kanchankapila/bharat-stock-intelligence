@@ -56,6 +56,7 @@ import argparse
 import json
 import sys
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import requests
 
@@ -65,6 +66,9 @@ from fetch_utils import retry_get
 BASE = "https://investsights.in/api/v2/market-pulse/stock"
 SOURCE = "investsights"
 RATE_LIMIT_SEC = 0.3
+# Live-measured 2026-08-28 against this host (investsights_fundamentals_fetcher.py's own
+# probe): 8 concurrent workers, 16/16 ok, 5.62x speedup, zero errors introduced.
+MAX_WORKERS = 8
 
 HEADERS = {
     "User-Agent": (
@@ -165,18 +169,33 @@ def run(symbol_filter: str | None = None, limit: int = 200) -> dict:
         ensure_schema(conn)
         universe = _load_universe(conn, symbol_filter, limit)
         _log(f"fetching filings/documents for {len(universe)} symbols...")
-        for symbol in universe:
-            result["attempted"] += 1
+
+        def _fetch_one(symbol):
             try:
                 payload = fetch_documents(session, symbol)
-                rows = parse_rows(symbol, payload)
-                n = store_rows(conn, rows)
-                if n:
-                    result["symbols_stored"] += 1
-                    result["rows_stored"] += n
+                time.sleep(RATE_LIMIT_SEC)
+                return symbol, payload, None
             except Exception as e:
-                _log(f"{symbol}: failed ({e})")
-            time.sleep(RATE_LIMIT_SEC)
+                return symbol, None, e
+
+        # Fetch in parallel (network only); parse_rows()/store_rows() stay single-threaded on
+        # the main thread as futures resolve -- same pattern as investsights_fundamentals_fetcher.py.
+        with ThreadPoolExecutor(max_workers=MAX_WORKERS) as pool:
+            futures = [pool.submit(_fetch_one, symbol) for symbol in universe]
+            for fut in as_completed(futures):
+                symbol, payload, err = fut.result()
+                result["attempted"] += 1
+                if err is not None:
+                    _log(f"{symbol}: failed ({err})")
+                    continue
+                try:
+                    rows = parse_rows(symbol, payload)
+                    n = store_rows(conn, rows)
+                    if n:
+                        result["symbols_stored"] += 1
+                        result["rows_stored"] += n
+                except Exception as e:
+                    _log(f"{symbol}: failed ({e})")
         _log(f"done: {result['symbols_stored']}/{result['attempted']} symbols, "
              f"{result['rows_stored']} filing rows")
     finally:
