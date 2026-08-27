@@ -114,7 +114,10 @@ def _num(v, default=None):
 
 def compute_ccc(balance: list[dict] | None, quarterly: list[dict] | None) -> list[dict]:
     """balance: ET_Stats Balance.list (annual, most-recent-first).
-    quarterly: ET_Stats Quarterly.list (quarterly, most-recent-first, 8 back).
+    quarterly: ET_Stats Quarterly.list (quarterly, most-recent-first; caller must request
+    enough (last=20) to cover every fiscal year in `balance` -- the default last=5 is 5
+    QUARTERS, not 5 years, and silently limits every symbol to its single most recent
+    fiscal year (found 2026-08-27, see process_stock()'s call site comment).
     Returns one row per fiscal year that has both a balance-sheet snapshot
     and exactly 4 matching quarterly P&L rows, most-recent fiscal year first.
 
@@ -232,8 +235,16 @@ def update_technical_signals(symbol: str, features: dict, con, today: str | None
 # ── Per-stock processing ──────────────────────────────────────────────────────────
 
 def process_stock(symbol: str, company_id: str, today: str, session: requests.Session, con) -> dict:
+    # Balance defaults to last=5 (5 FISCAL YEARS, annual cadence). Quarterly's SAME default of
+    # 5 means 5 QUARTERS (~1.25y) -- nowhere near enough to complete a 4-quarter match for any
+    # fiscal year but the most recent, so compute_ccc()'s per-year loop below silently `continue`s
+    # every older Balance year for lack of matching quarters. This was the reason ccc_trend/
+    # wc_deteriorating/wc_improving never computed for ANY symbol (every one had exactly 1
+    # working_capital_history row) -- not a real data gap, live-verified: ET_Stats' own endpoint
+    # already returns 20 quarters back to 2021-09-30 on request, covering Balance's full 5-year
+    # span. last=20 = 5 years x 4 quarters, matching Balance's own depth.
     balance = fetch_et_stats(company_id, "Balance", session)
-    quarterly = fetch_et_stats(company_id, "Quarterly", session)
+    quarterly = fetch_et_stats(company_id, "Quarterly", session, last=20)
 
     ccc_rows = compute_ccc(balance, quarterly)
     if not ccc_rows:
