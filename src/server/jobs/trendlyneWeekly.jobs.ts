@@ -200,7 +200,7 @@ export async function registerTrendlyneWeeklyJobs(connection: any) {
     // runs on ALL Sundays (weekly); working_capital + mf_stock_holdings only on the first
     // Sunday of the month. Weekly cadence (168h gap) is unchanged by the hour-of-day move, so
     // financial-ratios/working-capital's staleLimitHours in monitorScripts.ts need no change.
-    repeat: { pattern: '30 0 * * 0' },
+    repeat: { pattern: '30 0 * * 6' }, // Saturday 06:00 IST (00:30 UTC)
     jobId: 'trendlyne-ratios-monthly-weekly-check',
     removeOnComplete: 3,
     removeOnFail: 3,

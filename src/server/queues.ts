@@ -2256,7 +2256,7 @@ export async function initQueues(): Promise<boolean> {
     // repeatable's `next` to detect a slot missed by a restart) — removing it here first would
     // erase that signal before the helper ever sees it.
     await addJobWithCatchup(mlWeeklyRetrainQueue, 'ml-weekly-retrain', {}, {
-      repeat: { pattern: '0 5 * * 0' }, // Sunday 10:30 IST (05:00 UTC) — early on the closed day, after fundamentals
+      repeat: { pattern: '0 5 * * 6' }, // Saturday 10:30 IST (05:00 UTC) — early on the closed day, after fundamentals
       jobId: 'ml-weekly-retrain',
       removeOnComplete: 2, removeOnFail: 3,
     });
@@ -2881,13 +2881,9 @@ export async function initQueues(): Promise<boolean> {
       'unified-ranker-daily',
       {},
       {
-        // 07:30 IST (02:00 UTC), pre-open. Was 15:45 IST (just after close) — but that ran
-        // the canonical ranker BEFORE its own inputs refreshed: stock_scores (stock-scoring
-        // 22:30 IST), technical_signals ML features + win_probability (ml-daily-ops 19:30 IST)
-        // and OHLCV (stock-refresh 16:00 IST) all land AFTER 15:45, so unified_recommendations
-        // was always built on ~1-day-stale scores. Running pre-open consumes the fully-refreshed
-        // prior-session features and has the fresh ranking ready before the 09:15 open.
-        repeat:  { pattern: '0 2 * * 1-5' },
+        // 22:30 IST (17:00 UTC), post-close. Was 07:30 IST (02:00 UTC) — pre-open next day.
+        // Moved to 22:30 IST so all daily recommendations, digests, and ranker updates complete before 23:30 IST.
+        repeat:  { pattern: '0 17 * * 1-5' },
         jobId:   'unified-ranker-daily-repeatable',
         attempts: 2,
         backoff:  { type: 'fixed', delay: 60_000 },
@@ -2999,7 +2995,7 @@ export async function initQueues(): Promise<boolean> {
     const dataQualityRepeatables = await dataQualityDailyQueue.getRepeatableJobs();
     for (const r of dataQualityRepeatables) await dataQualityDailyQueue.removeRepeatableByKey(r.key);
     await addJobWithCatchup(dataQualityDailyQueue, 'data-quality-daily-run', {}, {
-      repeat: { pattern: '10 3 * * *' },
+      repeat: { pattern: '30 17 * * *' }, // 11:00 PM IST (17:30 UTC), daily after unified-ranker & digests
       jobId: 'data-quality-daily-repeatable',
       removeOnComplete: 3,
       removeOnFail: 3,

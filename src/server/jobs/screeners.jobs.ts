@@ -209,7 +209,7 @@ export async function registerScreenerJobs(connection: any) {
     connection,
     queueName: QUEUE_STOCK_SCORING,
     jobName: 'score-all',
-    repeat: { pattern: '0 17 * * 1-5' }, // 10:30 PM IST (17:00 UTC), Mon-Fri after daily ops
+    repeat: { pattern: '0 15 * * 1-5' }, // 8:30 PM IST (15:00 UTC), Mon-Fri after daily ops
     jobId: 'score-all-repeatable',
     removeOnComplete: 5,
     removeOnFail: 3,
@@ -313,7 +313,7 @@ export async function registerScreenerJobs(connection: any) {
     queueName: QUEUE_FUNDAMENTALS_SYNC,
     jobName: 'sync-fundamentals-weekly',
     data: { phase2Only: false },
-    repeat: { pattern: '0 3 * * 0' }, // Sunday 08:30 IST (03:00 UTC) — early on the closed day, not Mon 03:30 IST
+    repeat: { pattern: '0 3 * * 6' }, // Saturday 08:30 IST (03:00 UTC) — early on the closed day, not Sunday
     jobId: 'fundamentals-sync-weekly',
     removeOnComplete: 3,
     removeOnFail: 3,
@@ -328,7 +328,7 @@ export async function registerScreenerJobs(connection: any) {
     connection,
     queueName: QUEUE_QUANT_SCORING,
     jobName: 'quant-score-daily',
-    repeat: { pattern: '30 17 * * 1-5' }, // 11:00 PM IST (17:30 UTC), Mon-Fri after stock scoring
+    repeat: { pattern: '20 15 * * 1-5' }, // 8:50 PM IST (15:20 UTC), Mon-Fri after stock scoring
     jobId: 'quant-scoring-daily',
     removeOnComplete: 3,
     removeOnFail: 3,

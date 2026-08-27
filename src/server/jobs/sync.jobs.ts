@@ -217,7 +217,7 @@ export async function registerSyncJobs(connection: any) {
     //
     // 21:00 UTC (not 20:30) so it clears ohlcv-gap-fill-weekly, which fires Fri 20:30 UTC
     // = Sat 2:00 AM IST -- the one day-of-week where these two would otherwise collide.
-    repeat: { pattern: '0 21 * * 1-5' },
+    repeat: { pattern: '30 16 * * 1-5' }, // 10:00 PM IST (16:30 UTC)
     jobId: 'screener-performance-daily',
     removeOnComplete: 3,
     removeOnFail: 3,
@@ -289,8 +289,8 @@ export async function registerSyncJobs(connection: any) {
     connection,
     queueName: QUEUE_NSE_SYNC,
     jobName: 'nse-sync-weekly',
-    // Weekly on Sunday at 2 AM UTC (7:30 AM IST) for low load time.
-    repeat: { pattern: '0 2 * * 0' },
+    // Weekly on Saturday at 2 AM UTC (7:30 AM IST) for low load time.
+    repeat: { pattern: '0 2 * * 6' },
     jobId: 'nse-sync-weekly-repeatable',
     removeOnComplete: { age: 86400 },   // Keep for 1 day
     removeOnFail: { age: 604800 },      // Keep failures for 7 days

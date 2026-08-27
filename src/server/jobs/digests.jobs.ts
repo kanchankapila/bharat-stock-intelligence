@@ -38,7 +38,7 @@ export async function registerDigestJobs(connection: any) {
     connection,
     queueName: QUEUE_JOB_DIGEST,
     jobName: 'job-digest-daily',
-    repeat: { pattern: '45 18 * * *' }, // 12:15 AM IST next day (18:45 UTC), covers late-night jobs
+    repeat: { pattern: '20 17 * * *' }, // 10:50 PM IST (17:20 UTC), covers daily post-market jobs
     jobId: 'job-digest-daily-repeatable',
     removeOnComplete: 3,
     removeOnFail: 3,
@@ -55,10 +55,9 @@ export async function registerDigestJobs(connection: any) {
     connection,
     queueName: QUEUE_RECOMMENDATIONS_DIGEST,
     jobName: 'recommendations-digest-daily',
-    // 8:15 AM IST (02:45 UTC), Mon-Fri -- scheduled 45 min after unified-ranker
-    // ('0 2 * * 1-5' = 07:30 IST) so it reads that day's freshly-built ranking, and before
-    // the 09:15 IST open so the picks are actionable.
-    repeat: { pattern: '45 2 * * 1-5' },
+    // 10:40 PM IST (17:10 UTC), Mon-Fri -- scheduled after unified-ranker
+    // ('0 17 * * 1-5' = 22:30 IST) so it reads that day's freshly-built ranking
+    repeat: { pattern: '10 17 * * 1-5' },
     jobId: 'recommendations-digest-daily-repeatable',
     removeOnComplete: 3,
     removeOnFail: 3,

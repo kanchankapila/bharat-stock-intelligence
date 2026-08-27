@@ -304,11 +304,10 @@ export const MONITOR_SCRIPTS = [
     staleLimitHours: 26,
     // Dedicated DL Inference queue. 2026-08-06: primary trigger is now dl.jobs.ts's
     // featureRefresh.worker completion chain (fires the moment feature_store actually has
-    // fresh data, typically hours before the fallback below) -- '30 23' = 5:00 AM IST is a
-    // fallback-only cron for the rare case the chain never fired. Was '30 18' = 12:00 AM IST
-    // (moved 2026-07-31 off '0 17' = 10:30 PM IST, where it collided with stock-scoring).
+    // fresh data, typically hours before the fallback below) -- '0 16' = 9:30 PM IST is a
+    // fallback-only cron for the rare case the chain never fired.
     // Keep in lockstep with queues.ts.
-    cronPatterns: ['30 23 * * 1-5'],
+    cronPatterns: ['0 16 * * 1-5'],
     graceMinutes: 45,
   },
   {
@@ -353,11 +352,11 @@ export const MONITOR_SCRIPTS = [
     description: 'Fills screener_appearances returns, computes Bayesian tiers (A/B/C/D), classifies new screeners via Ollama',
     // Was labelled "Daily 6 PM" but the queue used `every: 24h`, which drifts on every
     // restart — it actually last succeeded at 5:42 AM IST. Pinned to a real cron 2026-07-31.
-    schedule: 'Daily 2:30 AM IST',
+    schedule: 'Daily 10:00 PM IST',
     pyScript: 'screener_performance.py',
     queueName: 'screener-performance',
     staleLimitHours: 26,
-    cronPatterns: ['0 21 * * 1-5'],
+    cronPatterns: ['30 16 * * 1-5'],
     graceMinutes: 180,
   },
   {

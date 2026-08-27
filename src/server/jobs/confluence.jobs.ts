@@ -130,9 +130,8 @@ export async function registerConfluenceJobs() {
     connection: makeConnection(),
     queueName: QUEUE_CONFLUENCE_OUTCOMES,
     jobName: 'confluence-outcomes-daily',
-    // 11:30 PM IST (18:00 UTC). Moved off 11:00 PM (2026-07-31) so it no longer shares a
-    // slot with quant-scoring; the evening tail is now one job per 30 min.
-    repeat: { pattern: '0 18 * * 1-5' },
+    // 9:10 PM IST (15:40 UTC), Mon-Fri after quant scoring
+    repeat: { pattern: '40 15 * * 1-5' },
     // No jobId in the original registration -- see the note on confluence-compute above.
     removeOnComplete: 3,
     removeOnFail: 3,

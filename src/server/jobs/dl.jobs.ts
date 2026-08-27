@@ -182,7 +182,7 @@ export async function registerDlJobs(connection: any) {
     // closed-day-early-batch (7:10 AM) and unified-ranker (7:30 AM), not at the old midnight
     // slot, since a fallback that only fires on a genuine miss doesn't need to run any earlier
     // than "before the next thing that might want it."
-    repeat: { pattern: '30 23 * * 1-5' },
+    repeat: { pattern: '0 16 * * 1-5' }, // 9:30 PM IST (16:00 UTC)
     jobId: 'dl-infer-daily',
     removeOnComplete: 3,
     removeOnFail: 3,
@@ -227,7 +227,7 @@ export async function registerDlJobs(connection: any) {
     connection,
     queueName: QUEUE_DL_RETRAIN_WEEKLY,
     jobName: 'dl-retrain-weekly',
-    repeat: { pattern: '0 6 * * 0' }, // Sunday 11:30 IST (06:00 UTC) — early on the closed day, after ml retrain
+    repeat: { pattern: '0 6 * * 6' }, // Saturday 11:30 IST (06:00 UTC) — early on the closed day, after ml retrain
     jobId: 'dl-retrain-weekly',
     removeOnComplete: 2,
     removeOnFail: 3,

@@ -169,8 +169,8 @@ module.exports = {
     {
       ...gfCron,
       name: 'gf-kayal-weekly',
-      // 02:00 UTC Sunday = 07:30 IST Sunday — 1,052 screenpks × ~6s each
-      cron_restart: '0 2 * * 0',
+      // 02:00 UTC Saturday = 07:30 IST Saturday — 1,052 screenpks × ~6s each
+      cron_restart: '0 2 * * 6',
       kill_timeout: 7_200_000,  // 2h
       args: 'greenfield/packages/ingestion/src/stage3/transfer-screener-membership.ts',
       env: {
@@ -231,8 +231,8 @@ module.exports = {
     {
       ...gfCron,
       name: 'pg-backup-nightly',
-      // 20:00 UTC = 01:30 IST — after ml-daily-ops' chain has finished writing.
-      cron_restart: '0 20 * * *',
+      // 17:45 UTC = 23:15 IST — daily after all rankers, digests, and DQ checks complete.
+      cron_restart: '45 17 * * *',
       kill_timeout: 3_600_000,  // 1h — a full -Fc dump of a multi-GB TimescaleDB instance
       interpreter: VENV_PY,
       script: path.resolve(__dirname, 'scripts', 'backup_pg.py'),
