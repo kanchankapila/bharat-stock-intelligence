@@ -471,6 +471,23 @@ class StrategyOptimizer:
                   "NOT saving to screener_weight_history or applying to scoring_engine/screener_master.")
             return result
 
+        # Reconnect before writing. self.conn has been held open since __init__, including
+        # across the differential_evolution call above (potentially several minutes of pure
+        # CPU work) -- a connection idle that long can be closed server-side (Postgres
+        # idle/network timeout) without pool_pre_ping ever catching it, since pre_ping only
+        # validates a connection at POOL CHECKOUT and this one was checked out once and never
+        # returned. Live-observed twice (2026-08-25, 2026-08-26): save_to_history's INSERT
+        # failing with "server closed the connection unexpectedly" right after optimise()
+        # returned. Reconnecting here forces a fresh, pre_ping-validated connection for the
+        # write phase.
+        # Guarded on hasattr rather than unconditional: test_strategy_optimizer.py builds
+        # StrategyOptimizer via __new__ (bypassing __init__/self.conn entirely) and monkeypatches
+        # the three write methods below to no-ops, so there is nothing real to reconnect there.
+        # In production __init__ always sets self.conn, so the guard is a no-op and this always runs.
+        if hasattr(self, 'conn'):
+            self.conn.close()
+            self.conn = connect()
+
         self.save_to_history(result, overrides)
         self.apply_to_scoring_engine(result)
         if apply:
