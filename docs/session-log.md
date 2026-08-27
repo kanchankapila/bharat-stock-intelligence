@@ -5,6 +5,37 @@ Historical record, split out of CLAUDE.md on 2026-08-11 (it was 64% of that file
 
 **Not loaded automatically.** Read a specific entry when you need the history behind a decision. Durable lessons extracted from here live in `.claude/rules/`; if you find one that isn't there, add it.
 
+## 2026-08-27 -- mover_snapshots closed the mandate gap: live_datasource test + freshness check
+
+`/revise-claude-md` review of everything since 2026-08-25 found `mover_screener_fetcher.py`
+(added `ede3259`, 938 lines, 5 provider integrations) shipped with a 433-line unit-test file
+but zero `@pytest.mark.live_datasource` tests and no `dataQualityChecks.ts` freshness entry --
+data-sources.md calls both mandatory for every new fetcher. Closed both: added
+`test_live_datasource_mover_screener.py` (5 classes, one per live provider surface -- NT top
+gainers, NT EOD screener, MarketsMojo, ET TechnicalScreeners, MC price shockers; excludes the
+classic ET gainers endpoint, documented dead upstream since 2026-08-25, and the Prime-gated NT
+live screener, no token in a test env) and `mover-snapshots-freshness` (1/3-day thresholds,
+matching stock-delivery-volume-freshness's "one silent trading day is the defect" reasoning).
+All 10 new live tests pass against real endpoints + a real throwaway Postgres schema; existing
+31 unit tests and 111 dataQualityChecks tests unaffected; `tsc --noEmit` clean.
+
+**Found while verifying, not fixed here:** the new check will fire WARN in production right
+now. `MAX(trade_date) FROM mover_snapshots` is `2026-08-25`, two calendar days behind. Traced
+via `job_heartbeat`: `mover-intraday-capture` (hourly during market hours) has run cleanly
+since 08-26 (5/5 success, matches its window), but `mover-screener-capture` -- the daily
+post-close job that's the ONLY writer of `calc_*` classes and the primary EOD live capture,
+cron `35 10 * * 1-5` UTC (~16:05 IST) -- has **zero heartbeat rows at all** since being added
+in `ede3259` on 08-25. Its cron slot has passed at least once (08-26 close) with no recorded
+run. Most likely `pm2 restart bharat-server` hasn't happened since `ede3259`/`2e5ded0`/`bfe5b7c`
+landed (CLAUDE.md's "committed != deployed"), but that wasn't confirmed live and no restart was
+performed as part of this session -- flag for whoever next touches this service.
+
+Two rule-file additions from the same review, already applied: `recurring-bugs.md`'s date-cast
+entry got the two 08-26-evening variants (both-sides-DATE unnecessary cast; `incremental_
+update()`'s unbranched SQLite fallback) that were derived in memory but missing from the
+enforced file; and a new bullet for the Trendlyne WAF TLS-fingerprint fix (`tl_fetch.py`,
+distinct root cause from the already-documented request-count-allowance problem).
+
 ## 2026-08-25 -- AF-20260823-81 walk-forward harness completed and pinned by a 21-test guard suite
 
 `blend_walkforward.py` refactored into testable module-level helpers (`daily_engine_ic`,
