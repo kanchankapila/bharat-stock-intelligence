@@ -31,6 +31,12 @@ PG = dict(host="127.0.0.1", port=5433, user="bharat", password="bharat", dbname=
 SCHEMA_SQL = pathlib.Path(__file__).resolve().parents[2] / "db" / "schema.postgres.sql"
 assert SCHEMA_SQL.exists(), f"schema.postgres.sql not found at {SCHEMA_SQL}"
 
+# Fixed, arbitrary classid for the two-int pg_advisory_lock() form (see purge_orphan_schemas
+# and conftest._pg_session_schema). Distinct from db_compat.try_advisory_lock's single-bigint
+# form -- Postgres tags the two forms differently in pg_locks (field2/field3 differ), so this
+# cannot collide with a cron-overlap lock even by coincidence.
+PG_TEST_SCHEMA_LOCK_NS = 913_070_042
+
 
 def _pg_dsn() -> dict:
     """Connection settings, env-overridable so CI's service container works unchanged.
@@ -83,17 +89,54 @@ def purge_orphan_schemas() -> int:
 
     Why this has to exist: drain_memory_conns()/drop_throwaway_schema() only run when
     teardown executes. A hard crash -- Ctrl-C mid-suite, killed CI worker, closed laptop
-    -- skips them, and every t_* schema minted so far stays in the target database
-    forever. They hold nothing, but they POLLUTE: any information_schema/pg_tables
-    listing that filters on table name alone reads each row once per orphan. Measured
-    2026-08-25: twelve orphans made information_schema.columns report index_option_oi's
-    columns twelve times over, which briefly looked like schema drift.
+    -- skips them, and every t_*/pytest_* schema minted so far stays in the target
+    database forever. They hold nothing, but they POLLUTE: any information_schema/
+    pg_tables listing that filters on table name alone reads each row once per orphan.
+    Measured 2026-08-25: twelve orphans made information_schema.columns report
+    index_option_oi's columns twelve times over, which briefly looked like schema drift.
 
-    Safety: only the exact `t_` + 12-hex pattern THIS module mints can match, so a
-    production schema can never collide (a uuid4 hex collision with a concurrent run is
-    vanishingly impossible). A short statement_timeout keeps a schema whose leftover
-    connections still hold locks from stalling the sweep indefinitely; the blocked DROP
-    raises, is swallowed, and is retried on some later sweep once the blocker exits.
+    Widened 2026-08-27 (weekend-audit, AF-20260827-07): this only ever reaped `t_*`
+    (pg_schema's own pattern) -- it never covered `pytest_*` (_pg_session_schema's
+    pattern, one per pytest SESSION rather than per test), so a killed session-scoped
+    run leaked a much larger schema (212 tables) that this sweep could never see. Found
+    live: 17 `pytest_*` orphans had accumulated in production, running their own
+    compression/retention background jobs and racing the nightly pg_dump backup.
+
+    Safety, corrected 2026-08-27 then 2026-08-28: an EARLIER version of this docstring
+    claimed `DROP SCHEMA ... CASCADE` against a schema still in active use always
+    raises. That is FALSE, disproved the same session by direct incident: a live
+    `pytest_*` session schema was dropped from a separate connection while its own
+    pytest run was between statements, with no error -- corrupting that run (see
+    AF-20260827-13). The FIRST fix for that (a relation-lock check: skip a name if
+    `pg_locks` shows a DIFFERENT backend holding a lock on one of its tables right now)
+    was NOT a mitigation -- it was still broken by construction, and reproduced
+    DETERMINISTICALLY on every single full-suite run afterward, not rarely. Root
+    cause, traced 2026-08-28: a relation lock only exists while a transaction is
+    actively open. `_pg_session_schema` applies 400+ DDL statements over an autocommit
+    connection (each one's lock releases the instant it commits), then that schema
+    sits idle between individual tests for the rest of a run that can last tens of
+    minutes -- "no relation lock held right now" is the NORMAL state of a schema very
+    much still owned by a live session, not evidence of abandonment. Any OTHER test's
+    unrelated `pg_memory_conn()` call anywhere later in the same run triggers this
+    sweep and reliably catches that window.
+
+    Fixed for real by checking a SESSION ADVISORY LOCK instead of a relation lock.
+    `_pg_session_schema` and `pg_memory_conn()` each take
+    `pg_advisory_lock(PG_TEST_SCHEMA_LOCK_NS, hashtext(schema))` on the same connection
+    that owns the schema for its whole lifetime -- an advisory lock survives idle gaps
+    between statements (it is not tied to any transaction), and is released
+    automatically the instant that connection closes or crashes, so it cannot go
+    stale the way a hand-rolled "last seen" timestamp could. This is the same
+    survives-idle-time property `db_compat.try_advisory_lock` already relies on for
+    cross-process cron-overlap guarding (see its own docstring) -- applied here to a
+    different question (schema ownership vs. job overlap) with a distinct classid so
+    the two can never collide. Only the exact `t_`/`pytest_` + 12-hex patterns THIS
+    module mints can match, so a production schema can never collide either. The
+    relation-lock check is kept alongside as a second, harmless signal (a schema is
+    "in use" if EITHER check says so) -- it just stops being the ONLY signal. A short
+    statement_timeout keeps a schema whose leftover connections still hold table locks
+    from stalling the sweep indefinitely; the blocked DROP raises, is swallowed, and
+    is retried on some later sweep once the blocker exits.
 
     Returns the number of schemas actually dropped. Every failure is swallowed: this is
     janitorial work called opportunistically from pg_available(), and it must never be
@@ -106,10 +149,35 @@ def purge_orphan_schemas() -> int:
         conn.autocommit = True
         cur = conn.cursor()
         cur.execute("SET statement_timeout TO '2s'")
-        cur.execute("SELECT nspname FROM pg_namespace WHERE nspname ~ '^t_[0-9a-f]{12}$'")
+        cur.execute(
+            "SELECT nspname FROM pg_namespace WHERE nspname ~ '^(t_|pytest_)[0-9a-f]{12}$'"
+        )
         names = [r[0] for r in cur.fetchall()]
+        # Ownership guard (see docstring): the PRIMARY signal is the session advisory
+        # lock the owning connection took at CREATE SCHEMA time -- it survives idle
+        # gaps between statements, unlike a relation lock, so it does not falsely flag
+        # a schema as orphaned just because nothing is mid-transaction right now.
+        cur.execute(
+            "SELECT DISTINCT n.nspname FROM pg_namespace n "
+            "JOIN pg_locks l ON l.locktype = 'advisory' AND l.classid = %s "
+            "  AND l.objid = hashtext(n.nspname)::oid "
+            "WHERE l.pid <> pg_backend_pid()",
+            (PG_TEST_SCHEMA_LOCK_NS,),
+        )
+        in_use = {r[0] for r in cur.fetchall()}
+        # Relation-lock check kept as a second, harmless signal alongside the advisory
+        # lock above -- a schema counts as "in use" if EITHER says so.
+        cur.execute(
+            "SELECT DISTINCT n.nspname FROM pg_locks l "
+            "JOIN pg_class c ON l.relation = c.oid "
+            "JOIN pg_namespace n ON c.relnamespace = n.oid "
+            "WHERE l.pid <> pg_backend_pid()"
+        )
+        in_use |= {r[0] for r in cur.fetchall()}
         dropped = 0
         for name in names:
+            if name in in_use:
+                continue
             try:
                 cur.execute(f'DROP SCHEMA "{name}" CASCADE')
                 dropped += 1
@@ -174,7 +242,11 @@ def pg_memory_conn():
     schema = f"t_{uuid.uuid4().hex[:12]}"
     admin = psycopg2.connect(**_pg_dsn())
     admin.autocommit = True
-    admin.cursor().execute(f'CREATE SCHEMA "{schema}"')
+    admin_cur = admin.cursor()
+    admin_cur.execute(f'CREATE SCHEMA "{schema}"')
+    # See purge_orphan_schemas: a session advisory lock, not a relation lock, is what proves
+    # this schema is still owned by a live backend once the test's own DML goes idle.
+    admin_cur.execute("SELECT pg_advisory_lock(%s, hashtext(%s))", (PG_TEST_SCHEMA_LOCK_NS, schema))
 
     engine = create_engine(_sa_url(schema), future=True)
     sa_conn = engine.connect()

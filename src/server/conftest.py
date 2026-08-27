@@ -35,6 +35,7 @@ def pytest_configure(config):
 
 from pg_test_support import (  # noqa: E402
     PG,
+    PG_TEST_SCHEMA_LOCK_NS,
     SCHEMA_SQL,
     _MEM_NODE,
     _PG_UNAVAILABLE,
@@ -192,6 +193,13 @@ def _pg_session_schema():
     conn.autocommit = True
     cur = conn.cursor()
     cur.execute(f'CREATE SCHEMA "{schema}"')
+    # Claim ownership for this connection's whole lifetime (see purge_orphan_schemas'
+    # matching check) -- a session advisory lock survives idle/no-transaction gaps
+    # between DDL/DML statements, unlike a relation lock. `_apply_schema` below runs
+    # 400+ individually-autocommitted statements, and this schema then sits idle
+    # between every later test that uses it -- a relation-lock-only "in use" check
+    # reads either state as orphaned and reaps its own owning session's schema.
+    cur.execute("SELECT pg_advisory_lock(%s, hashtext(%s))", (PG_TEST_SCHEMA_LOCK_NS, schema))
     try:
         _apply_schema(cur, schema)
         cur.execute("SELECT count(*) FROM pg_tables WHERE schemaname = %s", (schema,))
