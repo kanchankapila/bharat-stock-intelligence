@@ -66,18 +66,49 @@ export class TelegramNotificationService {
     }
 
     const url = `https://api.telegram.org/bot${botToken}/sendMessage`;
-    try {
-      await axios.post(url, {
-        chat_id: chatId,
-        text: text,
-        parse_mode: 'Markdown',
-      });
-      console.log('[TelegramService] Telegram message sent successfully');
-      return true;
-    } catch (error: any) {
-      console.error('[TelegramService] Failed to dispatch telegram notification:', error.response?.data || error.message);
-      return false;
+    const MAX_LEN = 4000;
+    const chunks: string[] = [];
+    if (text.length <= MAX_LEN) {
+      chunks.push(text);
+    } else {
+      let current = '';
+      const flush = () => { if (current) { chunks.push(current); current = ''; } };
+      for (const line of text.split('\n')) {
+        // A single line longer than MAX_LEN can't be appended whole -- slicing off just the
+        // first MAX_LEN chars and discarding the remainder would silently drop content, the
+        // exact failure this chunking exists to prevent. Split it into its own MAX_LEN pieces.
+        if (line.length > MAX_LEN) {
+          flush();
+          for (let i = 0; i < line.length; i += MAX_LEN) {
+            chunks.push(line.slice(i, i + MAX_LEN));
+          }
+          continue;
+        }
+        if ((current + '\n' + line).length > MAX_LEN) {
+          flush();
+          current = line;
+        } else {
+          current = current ? current + '\n' + line : line;
+        }
+      }
+      flush();
     }
+
+    let allSuccess = true;
+    for (const chunk of chunks) {
+      try {
+        await axios.post(url, {
+          chat_id: chatId,
+          text: chunk,
+          parse_mode: 'Markdown',
+        });
+        console.log('[TelegramService] Telegram message chunk sent successfully');
+      } catch (error: any) {
+        console.error('[TelegramService] Failed to dispatch telegram notification:', error.response?.data || error.message);
+        allSuccess = false;
+      }
+    }
+    return allSuccess;
   }
 
   /**

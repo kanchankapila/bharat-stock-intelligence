@@ -496,7 +496,7 @@ const TABLE_FRESHNESS_CHECKS: TableFreshnessConfig[] = [
   // registries agree on what "stale" means for the same underlying table.
   { id: 'confluence-signals-freshness', label: 'confluence_signals (canonical confluence engine)',
     category: 'scoring', critical: true, table: 'confluence_signals', dateColumn: 'computed_at',
-    tradingDayAware: false, warnDays: 0.5, failDays: 0.75 },
+    tradingDayAware: false, warnDays: 0.375, failDays: 0.5 },
   { id: 'unified-signals-freshness', label: 'unified_signals',
     category: 'signals', critical: false, table: 'unified_signals', dateColumn: 'signal_date', warnDays: 3, failDays: 5 },
   { id: 'screener-appearances-freshness', label: 'screener_appearances (feeds screener_momentum_score)',
@@ -1525,7 +1525,7 @@ export const DATA_QUALITY_CHECKS: DataQualityCheck[] = [
       if (stale != null && stale > 3) {
         return { status: 'warn', detail: `regime_edge_status hasn't refreshed in ${fmtDays(stale)} trading day(s) — ml_calibration.py's nightly snapshot may not be running.` };
       }
-      if (breachedCount > 2) {
+      if (breachedCount > 0) {
         return { status: 'warn', detail: `${breachedCount} of ${readyCount} regime(s) with sufficient history sit below the 0.55 live-edge trust floor.` };
       }
       return { status: 'pass', detail: `${readyCount - breachedCount}/${readyCount} regime(s) clear live-edge trust floor (${breachedCount} self-correcting via probability decay).` };
@@ -1705,16 +1705,24 @@ export const DATA_QUALITY_CHECKS: DataQualityCheck[] = [
       }
       const bad = Number(row?.stuck_bad ?? 0);
       const good = Number(row?.stuck_good ?? 0);
-      if (bad > 2) {
+      if (bad > 0 || good > 0) {
+        const parts: string[] = [];
+        if (bad > 0) {
+          parts.push(
+            `${bad} check(s) have returned the SAME non-pass verdict on every one of their last 10+ runs: ${row?.stuck_bad_ids}. Either the defect is real and unactioned, or the check cannot pass — both mean it is currently providing no signal.`
+          );
+        }
+        if (good > 0) {
+          parts.push(
+            `${good} check(s) have passed on EVERY one of their last 200+ runs: ${row?.stuck_good_ids}.`
+          );
+        }
         return {
           status: 'warn',
-          detail: `${bad} check(s) have returned the SAME non-pass verdict on every one of their last 10+ runs: ` +
-                  `${row?.stuck_bad_ids}. Either the defect is real and unactioned, or the check cannot pass — ` +
-                  `both mean it is currently providing no signal.` +
-                  (good > 0 ? ` Also, ${good} check(s) have passed on every one of their last 200+ runs: ${row?.stuck_good_ids}.` : ''),
+          detail: parts.join(' '),
         };
       }
-      return { status: 'pass', detail: `${judged} checks judged over 10+ runs; ${bad} stuck non-pass checks within tolerance.` };
+      return { status: 'pass', detail: `${judged} checks judged over 10+ runs; none stuck on a single verdict either direction.` };
     },
   },
 

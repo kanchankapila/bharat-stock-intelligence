@@ -20,7 +20,12 @@ export const QUEUE_RECOMMENDATIONS_DIGEST = 'recommendations-digest';
 
 async function processJobDigest(): Promise<void> {
   const digest = await buildDailyDigest();
-  await telegramService.sendMarkdownMessage(digest);
+  const ok = await telegramService.sendMarkdownMessage(digest);
+  if (!ok) {
+    // Same reasoning as processRecommendationsDigest below: a swallowed Telegram failure here
+    // would let job_heartbeat mark this critical daily digest 'success' on a send nobody received.
+    throw new Error('job digest failed to send to Telegram');
+  }
 }
 
 async function processRecommendationsDigest(): Promise<void> {

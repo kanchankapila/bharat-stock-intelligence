@@ -185,7 +185,7 @@ describe('individual evaluate() functions', () => {
     const r = byId('regime-edge-trust-floor').evaluate(
       { breached_count: 0, ready_count: 2, latest_computed_at: now.toISOString() }, now);
     expect(r.status).toBe('pass');
-    expect(r.detail).toMatch(/clear the live-edge trust floor/);
+    expect(r.detail).toMatch(/clear live-edge trust floor/);
   });
 
   it('regime-edge-trust-floor warns if its own snapshot has gone stale, even with no breach', () => {
