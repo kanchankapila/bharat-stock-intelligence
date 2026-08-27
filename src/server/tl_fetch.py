@@ -86,7 +86,14 @@ class TLResponse:
     def raise_for_status(self) -> None:
         if self.status_code >= 400:
             extra = f" (x-amzn-waf-action={self.waf_action})" if self.waf_action else ""
-            raise Exception(f"HTTP {self.status_code}{extra} for {getattr(self._resp, 'url', '?')}")
+            exc = Exception(f"HTTP {self.status_code}{extra} for {getattr(self._resp, 'url', '?')}")
+            # requests.Response.raise_for_status() attaches itself as exc.response so callers
+            # (fetch_utils.retry_get's WAF-challenge check, in particular) can inspect the real
+            # status/headers without parsing the message string. A bare Exception() here would
+            # make that check silently never fire for exactly the fetchers routed through this
+            # shim -- found 2026-08-27 fixing retry_get's WAF short-circuit, before it shipped.
+            exc.response = self  # type: ignore[attr-defined]
+            raise exc
 
 
 class TLSession:

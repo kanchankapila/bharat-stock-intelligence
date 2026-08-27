@@ -27,11 +27,36 @@ import time
 import random
 
 
+def _is_waf_challenge(exc: Exception) -> bool:
+    """True if `exc` is an HTTPError whose response carries AWS WAF's own
+    `x-amzn-waf-action` header (e.g. 'captcha', 'challenge') -- an unambiguous signal from
+    the WAF itself, not a heuristic on status code alone (a bare 403/405 can mean other
+    things on other providers). Retrying THIS specific response is never useful: it will not
+    self-clear within a backoff window, and for providers whose allowance is a per-session
+    REQUEST COUNT rather than a rate (see cap_to_run_budget's docstring), every retry directly
+    consumes budget that a genuinely-fetchable row further down the list could have used.
+    """
+    resp = getattr(exc, "response", None)
+    if resp is None:
+        return False
+    return bool(resp.headers.get("x-amzn-waf-action"))
+
+
 def retry_get(session_or_requests, url: str, retries: int = 3, backoff_base: float = 1.0, **kwargs):
     """GET with exponential backoff + jitter. Raises the last exception after `retries` attempts.
 
     Mirrors requests' call signature (session.get(url, **kwargs) or requests.get(url, **kwargs))
     so it's a drop-in replacement at existing call sites.
+
+    Does NOT retry a response the WAF itself marks as a challenge/captcha (see
+    _is_waf_challenge) -- found 2026-08-27: trendlyne_adv_tech_fetcher.py/
+    trendlyne_price_analysis_fetcher.py's cap_to_run_budget(limit=110) caps the number of
+    SYMBOLS per run, but blindly retrying every WAF-blocked one 3x before FetchTracker's
+    abort_after_consecutive_fails=20 circuit breaker trips meant up to 20*3=60 of that
+    110-request allowance was spent on responses that were never going to succeed --
+    silently multiplying the effective per-run request cost against the exact ceiling this
+    budget exists to respect, and explaining trendlyne-midweek's 83% failure rate despite the
+    budget "working as designed" by its own row count.
     """
     last_exc: Exception | None = None
     for attempt in range(1, retries + 1):
@@ -41,6 +66,10 @@ def retry_get(session_or_requests, url: str, retries: int = 3, backoff_base: flo
             return resp
         except Exception as e:
             last_exc = e
+            if _is_waf_challenge(e):
+                print(f"[RETRY] {url} blocked by WAF challenge (not retrying -- would not "
+                      f"self-clear, and would waste this run's request allowance)")
+                break
             if attempt == retries:
                 break
             sleep_s = backoff_base * (2 ** (attempt - 1)) + random.uniform(0, 0.5)
