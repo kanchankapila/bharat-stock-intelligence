@@ -34,6 +34,180 @@ current verdicts you need before acting; that one is the derivation, read on dem
 > behaviour of noise, not of a real factor. Re-run any load-bearing number here before trusting it;
 > this harness's own numbers go stale as the panel grows.
 
+## FULL LIVE RE-MEASUREMENT, 2026-08-27 — every harness re-run against production; verdicts hold, two claims retracted
+
+Every number below was produced today by the shipped harnesses (`factor_edge.py`,
+`factor_backtest.py`, `assembly_ablation.py`, `blend_walkforward.py`,
+`screener_combo_finder.py`) against live `bharat_intel`, run with `backend-python/venv`
+(Python 3.11). Nothing here is re-derived by hand or carried over from an earlier entry.
+`stock_ohlcv` and `technical_signals` were both fresh to 2026-08-26 at run time.
+
+**Headline: no verdict anywhere in this file flips to USABLE, and `unified_score` is still
+no-edge. Two claims recorded below are retracted (§3, §4). The rest reproduce.**
+
+### 1. The five `technical_signals` engines — all still `no edge`, both entry conventions
+
+`factor_edge.py --table technical_signals --horizons 1,5,21 --persist`, run twice
+(`--entry close` and `--entry open`). 91,128 rows / 2,271 symbols / 76 dates
+(2026-05-16..08-26); 86,537 matched to forward prices.
+
+| score | h | IC close | AUC close | IC **open** | AUC open | dates | verdict |
+|---|---|---|---|---|---|---|---|
+| `win_probability` | 1d | +0.039 | 0.492 | **+0.020** | 0.500 | 58 | no edge |
+| `win_probability` | 5d | +0.070 | 0.511 | +0.065 | 0.510 | 54 | no edge |
+| `win_probability` | 21d | +0.091 | 0.522 | +0.084 | 0.523 | 38 | no edge |
+| `cs_score` | 1d | +0.042 | 0.504 | +0.030 | 0.504 | 58 | no edge |
+| `cs_score` | 5d | +0.055 | 0.510 | +0.054 | 0.510 | 54 | no edge |
+| `cs_score` | 21d | +0.011 | 0.503 | +0.002 | 0.502 | 38 | no edge |
+| `signal_score` | 1d | −0.001 | 0.500 | −0.001 | 0.500 | 58 | no edge |
+| `signal_score` | 5d | +0.013 | 0.502 | +0.011 | 0.502 | 54 | no edge |
+| `signal_score` | 21d | +0.029 | 0.507 | +0.029 | 0.506 | 38 | no edge |
+| `breakout_probability` | 1d | +0.003 | 0.486 | −0.001 | 0.493 | 33 | no edge |
+| `movement_probability` | 1d | −0.035 | 0.484 | −0.036 | 0.485 | 27 | no edge |
+
+**`--entry open` now exists** — this file previously recorded it as deliberately-not-built,
+and someone has since built it. Its results confirm the predicted shape exactly: h=1 loses
+roughly half its IC (`win_probability` +0.039 → +0.020), h=5 barely moves, h=21 loses a
+little. **Every close-entry IC in this file should still be read as an upper bound**, h=1
+most of all. Open-entry runs persist under `<table>__open_entry` so the conventions never mix.
+
+`win_probability` continues to decay toward null as its panel grows (21d IC 0.103 → 0.091,
+AUC 0.537 → 0.522 since 2026-08-20) — the expected behaviour of a weak signal, not a real one.
+⚠ `movement_probability`'s panel still **straddles** its 2026-08-20 train/serve-skew fix, so
+these 27 dates are a pre/post mixture and remain untrustworthy in both directions; that engine
+is still genuinely ungraded.
+
+### 2. `engine_composite_scores` — reproduces, still the best 5d IC here, still not USABLE
+
+82,470 rows / 66 dates. Close: 1d +0.043/0.510, 5d **+0.076**/0.523, 21d +0.072/0.537.
+Open: 1d +0.020/0.506, 5d +0.074/0.522, 21d +0.063/0.535. Against the 2026-08-22 reading
+(5d +0.083/0.526, 21d +0.077/0.540) this is a clean reproduction with mild decay, and the
+standing claim survives: **the composite's 5d IC is the highest measured on this platform**
+(+0.076 vs `win_probability`'s +0.070), and it still fails on AUC. Unchanged verdict,
+unchanged advice — it stays un-wired into `unified_ranker.py`.
+
+⚠ **Operational finding — CORRECTED after tracing; the first version of this note was wrong.**
+`engine_composite_scores` read max date 2026-08-21 against a panel running to 08-26, and this
+section originally said "its producer has not written for five sessions." **That was a wrong
+diagnosis from a symptom.** `engine_composite.py` runs directly and exits 0, writing the missing
+sessions in ~15s (the table now runs to **2026-08-26, 69 dates**). Two real facts replace it:
+(a) the step lives inside `processMlWeeklyRetrain` (`queues.ts:1444`), a **WEEKLY** job, so this
+table is up to ~7 sessions behind by design — read its date count as a floor, not as evidence of
+a broken producer; and (b) **`ml-weekly-retrain` last SUCCEEDED 2026-08-17 and its 2026-08-24 run
+FAILED** (`job_heartbeat.last_error`: `2 steps failed: exit-policy-train,backtest-optimizer`;
+6 failures in 30 runs), so every step after the failure point silently did not run. The composite
+step is itself wrapped in `.catch(e => console.warn(...))`, so its own failure would never redden
+the job either — the swallowed-degradation family `recurring-bugs.md` already tracks. **The weekly
+job failure is the real open item here, not the composite.**
+
+### 3. ⚠ RETRACTED — "`REGIME_WEIGHTS` is the single biggest POSITIVE step" no longer holds
+
+`assembly_ablation.py --horizons 1,5,21 --entry close`, 68,643 rows / 2,417 symbols / 47
+dates, ≥₹1cr ADT20 floor keeping 41,790 rows (60.9%):
+
+| arm | 5d IC | 5d AUC | 21d IC | 21d AUC | verdict @21d |
+|---|---|---|---|---|---|
+| `equal_weight` | **+0.0502** | 0.5275 | **+0.0530** | 0.5440 | no edge |
+| `regime_weighted` | +0.0484 | 0.5291 | +0.0452 | 0.5444 | no edge |
+| `rw+quality` | +0.0476 | 0.5291 | +0.0467 | 0.5458 | no edge |
+| `rw+quality+redflag` | +0.0440 | 0.5285 | +0.0355 | 0.5434 | no edge |
+| `rw+quality+redflag+highvol` | +0.0445 | 0.5288 | +0.0379 | 0.5456 | no edge |
+| `rw7+screener` | +0.0309 | 0.5275 | +0.0216 | 0.5382 | no edge |
+| `rw7+smartmoney` | +0.0446 | 0.5287 | +0.0379 | 0.5456 | no edge |
+| `rw8+gates` | +0.0311 | 0.5275 | +0.0216 | 0.5382 | no edge |
+| `stored_unified_score` | +0.0245 | 0.5101 | +0.0310 | 0.5171 | no edge |
+
+**Two changes from the 2026-08-23 run, both stated plainly:**
+
+1. **Equal weighting now BEATS regime weighting** (5d +0.0502 vs +0.0484; 21d +0.0530 vs
+   +0.0452). The earlier run had regime weighting adding +0.011 @5d and +0.017 @21d and called
+   it the biggest positive step in the stack. **That claim is retracted.** It is NOT proof the
+   weights are wrong, and the comparison is genuinely confounded: `REGIME_WEIGHTS` has been
+   re-shrunk **twice** since that ablation (screener again 2026-08-21, `ml` halved 2026-08-24),
+   so `regime_weighted` is not the same arm it was. What can be said honestly is that **on
+   today's panel and today's weights, the tuned vector buys nothing over equal weighting** —
+   which puts this file's older standing prior ("combining/reweighting reduced performance in
+   every case tested") back in force rather than overturning it.
+2. **All three `USABLE` verdicts in the old ablation table are gone** — the best 21d AUC is now
+   0.5458 (`rw+quality`), under the 0.55 bar. The old entry warned these sat "barely over
+   `MIN_DATES_RELIABLE`" and should be read as promising, not established. They decayed, as
+   warned. Nothing in the stack clears USABLE today.
+
+**What reproduces exactly, and matters most:** the **screener bisection**. Adding `screener` to
+the 6-engine blend costs **−0.0136 @5d and −0.0163 @21d** (`rw+quality+redflag+highvol`
++0.0445/+0.0379 → `rw7+screener` +0.0309/+0.0216), while `rw7+smartmoney` is **identical to the
+baseline to 4 decimal places** — `smart_money` is still completely inert, exactly as recorded.
+`rw8+gates` ≈ `rw7+screener`, confirming screener drives the whole loss.
+
+### 4. The canonical ranker and its 8 engines — screener confirmed harmful a FOURTH time
+
+`factor_edge.py --table unified_recommendations --date-col computed_at`, 78,277 rows / 2,418
+symbols / 48 dates (2026-06-01..08-27), 75,928 matched.
+
+| score | 1d IC | 5d IC | 21d IC | dates | verdict |
+|---|---|---|---|---|---|
+| `unified_score` | +0.006 | **+0.017** | +0.012 | 46/42/26 | no edge |
+| `screener_stock_score` | +0.002 | **−0.034** | **−0.048** | 46/42/26 | no edge (negative) |
+| `ml_score` | −0.006 | −0.012 | −0.002 | 46/42/26 | no edge |
+| `confluence_score` | −0.010 | −0.039 | −0.024 | 46/42/26 | no edge |
+| `technical_score` | +0.017 | +0.032 | +0.036 | 46/42/26 | no edge |
+| `dl_score` | +0.001 | +0.036 | **+0.098** | 46/42/26 | no edge |
+| `cs_score` | −0.022 | −0.013 | — | 12/8 | LOW-DATA |
+| `breakout_score` | −0.011 | +0.005 | — | 12/8 | LOW-DATA |
+| `smart_money_score` | +0.003 | −0.014 | — | 12/8 | LOW-DATA |
+
+- **`screener_stock_score` at 5d IC −0.034 is a fourth independent confirmation that the
+  screener engine is actively harmful**, landing almost exactly on the −0.0326 recorded in
+  `unified_ranker.py`'s own weight-shrink comment. Four unrelated constructions now agree (the
+  direct factor test, the `confluence_score` natural experiment, the ablation bisection, and
+  this). Both shrinks taken so far were directionally right.
+- **`ml_score` grades mildly NEGATIVE at every horizon.** That independently corroborates the
+  2026-08-24 decision to halve it — taken then on a walk-forward arm test, and now supported by
+  a realized-return grade the shrink did not have available at the time.
+- **`dl_score` is the strongest engine at 21d (+0.098)**, consistent with the in-code note that
+  `dl` holds the best engine IC and with arm B (halving `dl`) having been tested and rejected.
+- ⚠ **`unified_score`'s 5d IC is +0.017, not the ~0.0001 this file quotes as its headline.**
+  Still `no edge`, still nowhere near tradeable — but "indistinguishable from zero" is now the
+  weaker of the two readings. Do not upgrade the verdict on this; do stop quoting 0.0001 as
+  though it had been re-confirmed.
+- ⚠ **Two caveats bound this whole table.** The panel starts 2026-06-01 and therefore straddles
+  both the **2026-08-18** zero-vs-NULL guard boundary and the **2026-08-23** trading-day-cutoff
+  boundary, which this file already designates as population boundaries for exactly these
+  columns. And `cs_score`/`breakout_score`/`smart_money_score` are populated on only 12 of 48
+  dates — a coverage defect worth its own look, not a verdict.
+
+### 5. Unchanged, verified by direct re-run
+
+- **`momentum_12_1`** — `factor_backtest.py --rebalance 21 --top-k 50 --cost-bps 25`: net excess
+  **+0.6864%/period, t=1.45, NOT significant**, 4/5 years positive, 34.8% one-way turnover.
+  **Bit-identical to the 2026-08-23 run** — the harness is deterministic and this factor's panel
+  has not moved.
+- **The capitulation triple** — `screener_combo_finder.py --tier1`: `gap_down AND open_eq_low AND
+  top_loser`, 430 days / 658 signal-rows, spread **+0.5064%/day net of 0.15%, t=+3.48,
+  p=0.0005**. Still the single validated edge here, still clearing the 41-combination Bonferroni
+  bar; the negative-direction `gap_down,open_eq_high` is still the most significant row in the
+  table (t=−4.08). ⚠ **This run is byte-identical to the 2026-08-20 one — same 430 days, same 658 rows, a week
+  later — and the first version of this note read that as "the panel is not advancing." Traced,
+  and that was WRONG:** `_load_ohlcv()` returns **2021-03-08 → 2026-08-26** (1,361 days), i.e.
+  current to the latest bar, and `build_flyer_labels()` is a same-day label with no forward
+  horizon, so nothing structurally caps the recent end. The window is a rolling
+  `today - 2000 days`, so it drops days at the START as it gains them at the end — identical
+  totals are a coincidence of that, not a frozen panel. Recorded because the coincidence is
+  genuinely surprising and worth re-checking if a third run also lands on 430/658, but it is
+  NOT a known defect.
+- **`blend_walkforward.py`** — BASE mean 5d open-entry rank IC **0.0394**, 21/27 days positive,
+  8 top-30 gainer hits, edge +0.108pp; the TILT alternative gives **dIC −0.0006**. The
+  pre-declared bar (dIC>0 AND |t|≥~2) is again not met, so **the shipped weights stay**. This
+  does NOT contradict §3: `blend_walkforward` asks "does this TILT beat the shipped vector"
+  (no), the ablation asks "does the shipped vector beat equal weighting" (no, today). Both
+  point the same way — **do not reweight again.**
+
+**Nothing in any scoring path was changed on the strength of this pass.** It is measurement
+only; no weight, threshold, veto or classification was touched, and the two retractions in §3
+and §4 remove claims rather than add new ones. All `factor_edge` and ablation results were
+`--persist`ed to `factor_edge_history` (run_at 2026-08-27T07:4x) so they accumulate rather than
+rotting as one-off numbers in this file.
+
 ## Accuracy comes from realized returns, never a proxy
 
 - **Accuracy and win-rate must always be computed from actual realized returns vs. the actual system-generated signal — never from a proxy metric (a job's "success" status, a promotion gate's CV/AUC number, a model's self-reported test score).** This project's own incident history is full of proxies that looked fine while the real outcome was wrong — a leak-inflated CV score blocking honest retrains forever, a "success" heartbeat on a step that silently wrote nothing, `unified_recommendations` classifying `Sell` on a stock that then rallied 15%+. The only check that catches this class of bug is joining the signal table (`unified_recommendations`/`unified_signals`/`intraday_recommendations`) against what the underlying instrument actually did afterward (`stock_ohlcv`/`intraday_ohlcv`, or the already-graded `signal_outcomes`/`intraday_recommendation_outcomes` tables) and computing win rate as `WIN / (WIN + LOSS)` — decisive outcomes only, NEUTRAL/PENDING excluded — plus average realized return, not a single blended percentage. **Before trusting or comparing any win-rate number, check its `label_definition`** — this table has at least two structurally different label conventions in production right now (`signal_outcomes.label_definition`: `terminal_pct2`, a strict fixed ±2% terminal-return barrier, vs `path_barrier`, a path-based max-favorable-excursion rule) and they are NOT comparable: live-measured 2026-08-06, `technical`-sourced h5/h15 outcomes (path_barrier) showed an 88–91% win rate while `confluence`-sourced h7/h14 outcomes (terminal_pct2, the exact same calendar window) showed 41–44% — the gap is almost entirely the label definition, not real skill. See [[topgainers_reverse_engineering_practice]] for the full methodology this rule is extracted from.
@@ -110,7 +284,7 @@ sub-populations grade the same way. Flagged, not measured.
 
 ## Known state of the edge (as measured, not assumed)
 
-`unified_score` 5d rank IC ≈ 0.0001 (t=0.02). Short-horizon momentum is negative at three horizons. Bullish screener consensus is significantly negative (t=−2.36), and screener sentiment labels are themselves inverted (bullish minus bearish = −0.11pp, t=−4.61) because they're keyword-classified off the screener name, never validated against an outcome. `insider_net` re-runs mildly positive but not significant (t=1.73, see banner); `delivery_spike`, `ticket_size` are null-to-negative. No individual screener (0 of 552 tested) survives FDR or Bonferroni. The common bullish setups (Gap Up ≥2%, breakout>20d-high, volume shocker) are inverted at 1-day. **The "Gap Down is the one significantly positive setup" line here was retracted 2026-08-13** — it was a same-day descriptive screener-membership reading, not a tradeable one (see the "Screeners are DESCRIPTIVE, not predictive" finding in `measurement-history.md`); reconstructed from price and run through the real turnover/cost-aware harness (`factor_backtest.py --factor gap_down`), it is significantly NEGATIVE net of costs at every rebalance tested (21d t=−3.54, 5d t=−9.0), same magnitude and sign as `gap_up` (21d t=−3.55) — both directions are a turnover trap (~90-93% one-way turnover every period; almost no persistence in which names gapped) rather than an edge in either direction. See the "already tested" table. Sector-neutralising a factor destroys its edge here (opposite of the published US result) — see the "already tested" table. FnO/positioning factors (long/short buildup) cannot be reconstructed at all — no fetcher on this platform captures per-stock futures OI.
+`unified_score` 5d rank IC was long quoted here as ≈ 0.0001 (t=0.02); **re-measured live 2026-08-27 it is +0.017 over 42 dates** (see the full re-measurement section above). Still `no edge` and nowhere near tradeable — but stop quoting 0.0001 as a re-confirmed figure; "indistinguishable from zero" is now the weaker of the two readings. Short-horizon momentum is negative at three horizons. Bullish screener consensus is significantly negative (t=−2.36), and screener sentiment labels are themselves inverted (bullish minus bearish = −0.11pp, t=−4.61) because they're keyword-classified off the screener name, never validated against an outcome. `insider_net` re-runs mildly positive but not significant (t=1.73, see banner); `delivery_spike`, `ticket_size` are null-to-negative. No individual screener (0 of 552 tested) survives FDR or Bonferroni. The common bullish setups (Gap Up ≥2%, breakout>20d-high, volume shocker) are inverted at 1-day. **The "Gap Down is the one significantly positive setup" line here was retracted 2026-08-13** — it was a same-day descriptive screener-membership reading, not a tradeable one (see the "Screeners are DESCRIPTIVE, not predictive" finding in `measurement-history.md`); reconstructed from price and run through the real turnover/cost-aware harness (`factor_backtest.py --factor gap_down`), it is significantly NEGATIVE net of costs at every rebalance tested (21d t=−3.54, 5d t=−9.0), same magnitude and sign as `gap_up` (21d t=−3.55) — both directions are a turnover trap (~90-93% one-way turnover every period; almost no persistence in which names gapped) rather than an edge in either direction. See the "already tested" table. Sector-neutralising a factor destroys its edge here (opposite of the published US result) — see the "already tested" table. FnO/positioning factors (long/short buildup) cannot be reconstructed at all — no fetcher on this platform captures per-stock futures OI.
 
 **Consequence: reweighting the existing engines is not a fix.** There is no incumbent factor to beat — see the banner above. Combining reduced performance in every case tested (12-1 alone +0.86% vs +2 exclusions −1.25%; long-only +0.86% vs long/short +0.49%; the 8-engine blend at IC 0.0001).
 

@@ -41,6 +41,15 @@ HEADERS = {
 }
 
 
+def _already_has_oi(index_name: str, date: str, expiry: str) -> bool:
+    from db_compat import query_scalar
+    cnt = query_scalar(
+        "SELECT COUNT(*) FROM index_option_oi WHERE index_name = ? AND date = ? AND expiry = ?",
+        (index_name, date, expiry)
+    )
+    return bool(cnt and cnt > 0)
+
+
 def _get(url: str) -> dict:
     req = urllib.request.Request(url, headers=HEADERS)
     with urllib.request.urlopen(req, timeout=15) as resp:
@@ -249,11 +258,12 @@ def _fetch_and_store(sc_id: str, expiry: str, date: str, fetched_at: str) -> int
         # overwrites, while sibling index_max_pain stayed fresh. A stale block must write
         # nothing rather than clobber another provider's session.
         if oi_date < date:
-            log.warning(
-                "%s expiry=%s: MC's freshest OI block is %s (< requested %s); skipping "
-                "rather than backdating over an already-written session",
-                index_name, expiry, oi_date, date)
-            return 0
+            if _already_has_oi(index_name, oi_date, expiry):
+                log.warning(
+                    "%s expiry=%s: MC's freshest OI block is %s (< requested %s); skipping "
+                    "rather than backdating over an already-written session",
+                    index_name, expiry, oi_date, date)
+                return 0
     if not raw_rows:
         # Fallback: flat list under data
         flat = data.get("oiData") or data.get("oi_data") or []
