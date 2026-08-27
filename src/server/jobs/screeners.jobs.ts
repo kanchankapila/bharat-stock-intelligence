@@ -107,6 +107,19 @@ async function processTrendlyneScreenerSync(job: Job): Promise<{ success: boolea
   return { success: true };
 }
 
+export async function processScreenerSyncsMaster(job: Job): Promise<{ success: boolean }> {
+  if (await shouldSkipOnTradingHoliday(job)) {
+    console.log('[QUEUE] screener-syncs-master skipped — trading holiday, nothing new to sync');
+    return { success: true };
+  }
+  console.log('[QUEUE] Starting consolidated master screener syncs pipeline...');
+  await processEtMarketstatsSync(job).catch(e => console.warn('[QUEUE] et-marketstats step warning:', e.message));
+  await processTrendlyneScreenerSync(job).catch(e => console.warn('[QUEUE] trendlyne-screener step warning:', e.message));
+  await processMcScreenerSync(job).catch(e => console.warn('[QUEUE] mc-screener step warning:', e.message));
+  await processEtnowScreenerSync(job).catch(e => console.warn('[QUEUE] etnow-screener step warning:', e.message));
+  console.log('[QUEUE] Consolidated master screener syncs pipeline complete.');
+  return { success: true };
+}
 async function processFundamentalsSync(job: Job): Promise<{ success: boolean }> {
   const phase2Only = job.data?.phase2Only === true;
   console.log(`[QUEUE] Starting fundamentals sync (phase2Only=${phase2Only})...`);
