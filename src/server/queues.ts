@@ -448,8 +448,13 @@ async function processIntradayFetcher(_job: Job): Promise<{ skipped: boolean }> 
 
 async function processMoverCapture(_job: Job): Promise<{ skipped: boolean }> {
   // Movers lists only exist on trading days; skip weekends/holidays like intraday-fetcher.
-  if (!(await isMarketOpen())) {
-    console.log('[QUEUE] mover-screener-capture skipped — outside NSE market hours');
+  // NOT isMarketOpen(): this job is deliberately scheduled AFTER close (16:05 IST, see the
+  // registration comment below), so "is the market open right now" is guaranteed false on
+  // every trading day too -- it skipped unconditionally on both 2026-08-25 and 2026-08-26,
+  // never once actually running. shouldSkipOnTradingHoliday() answers the real question
+  // ("was today a trading day"), same as the sibling mover-intraday-slot worker.
+  if (await shouldSkipOnTradingHoliday({ name: 'mover-screener-capture' })) {
+    console.log('[QUEUE] mover-screener-capture skipped — weekend/holiday');
     return { skipped: true };
   }
   // ~2 min: five lightweight JSON list endpoints + one OHLCV pass.
