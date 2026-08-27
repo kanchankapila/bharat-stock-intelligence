@@ -1,6 +1,6 @@
 # Bharat Stock Intelligence — Claude Instructions
 
-Real-time Indian stock market intelligence platform (NSE/BSE). Express + tRPC backend, React 19 + Vite frontend, PostgreSQL/TimescaleDB, BullMQ jobs, ~30 Python ML engines.
+Real-time Indian stock market intelligence platform (NSE/BSE). Express + tRPC backend, React 19 + Vite frontend, PostgreSQL/TimescaleDB, BullMQ jobs, ~200 Python modules in `src/server/` (79 fetchers + ML engines/jobs/helpers).
 
 ## Read first
 
@@ -17,7 +17,7 @@ Real-time Indian stock market intelligence platform (NSE/BSE). Express + tRPC ba
 | any accuracy / win-rate / IC / backtest number | `.claude/rules/measurement.md` |
 | **anything** — skim before writing Python or SQL | `.claude/rules/recurring-bugs.md` |
 
-`docs/session-log.md` is the historical changelog (743 lines). Not loaded automatically; read a specific entry when you need the history behind a decision.
+`docs/session-log.md` is the historical changelog (~6,100 lines — never load it whole). Not loaded automatically; grep or read a specific dated entry when you need the history behind a decision.
 
 ## Definition of done
 
@@ -36,6 +36,10 @@ Plus, for anything touching signal/scoring/model logic:
 - **Run it against live production data and query the result back.** `tsc --noEmit` and a green suite do not tell you a fetcher wrote the right rows. See `.claude/rules/measurement.md`.
 - **Committed ≠ deployed.** `.ts` needs `pm2 restart bharat-server`; a migration needs `npm run migrate:up` against the real `POSTGRES_URL`; a package needs `npm install` / the right venv.
 
+**These are enforced, not advisory.** `.claude/hooks/verify-gate.mjs` is a `Stop` hook: it blocks the session from finishing if the diff touches `.ts`/`.py` and the matching command never ran, and demands backtest evidence for signal-surface files. It reads your actual Bash invocations — writing "I ran pytest" does not satisfy it. `.claude/hooks/{rules-pointer,env-guard}.mjs` run on every Edit/Write.
+
+Run pytest with `backend-python/venv` (the production interpreter, Python 3.11) unless reproducing a CI-only failure — CI runs 3.12, and that gap has caused a green-locally/red-on-CI tokenizer bug before.
+
 ## Knowledge graph
 
 Query before reading source files:
@@ -46,7 +50,7 @@ $PY = Get-Content "graphify-out/.graphify_python"
 & $PY -m graphify update .               # after significant changes
 ```
 
-~16.3k nodes / 25.9k edges over ~1374 files (rebuilt 2026-08-19 at `5aa2270f`). Check `graphify-out/GRAPH_REPORT.md`'s freshness hash against `git rev-parse HEAD` before trusting it — it drifted 330 files behind in five days once already, and these counts themselves go stale the moment the graph is next rebuilt.
+Check `graphify-out/GRAPH_REPORT.md`'s "Built from commit" hash against `git rev-parse HEAD` before trusting it — it drifted 330 files behind in five days once already, and it is usually behind (it was again at the time of writing). Node/edge/file counts live in that report, deliberately not here.
 
 Updating is **free** (local AST extraction, 0 tokens) — run it, don't ration it. `graph.html` is no longer emitted: 16k+ nodes is over the 5,000-node viz cap, which is expected and exits 0. `query`/`path`/`explain` are the interface.
 
@@ -62,16 +66,20 @@ in the others — and `.ts` is not hot-reloaded, so the Node server needs `pm2 r
 | `chatbot` | `src/server/chatbot/app.py` | 8001 (`CHATBOT_PORT`) | LangGraph RAG agent, ChromaDB |
 | `alphaquant-api` | `backend-python/main.py` | 8002 (`PYTHON_PORT`) | Backtesting, scoring, TV bridge, optimisation |
 
+`ecosystem.config.cjs` registers **18** pm2 apps, not 4: these four long-running services plus a `cron_restart` tier (`gf-*` greenfield jobs, `pg-backup-nightly`, `deploy-drift-check`, `port-drift-check`). A `cron_restart` app sitting at `stopped`/`pid 0` looks identical whether it is healthily idle or dormant after a failed first launch — see `recurring-bugs.md`.
+
+**`greenfield/` (~105 `.ts` files) is a parallel rebuild that nothing in the live app imports.** Changing it changes nothing a user sees, and vice versa. Check which tree you are in before editing.
+
 ## Layout
 
 ```
 src/
   App.tsx            main app, layout + tab routing
-  v2/ … v6/          six dashboard experiences, all lazy-loaded, all reading the same tRPC surface
-  components/        36+ shared React components
+  v1/ … v6/          six dashboard experiences, all lazy-loaded, all reading the same tRPC surface
+  components/        shared React components
   services/          marketService (live prices), aiService (routes to gemini/bedrockService — no local LLM since 2026-08-20)
   lib/trpc.ts        tRPC client
-  data/              stocklist.ts (180 stocks, all provider mappings) · nseStocks.ts (2000+ NSE master)
+  data/              stocklist.ts (2,000 stocks, provider mappings 89-100% populated) · nseStocks.ts (2000+ NSE master)
 
 src/server/
   router.ts          ALL tRPC procedures — check here before searching elsewhere
@@ -82,23 +90,23 @@ src/server/
   queues.ts          BullMQ definitions + all cron schedules
   jobs/*.jobs.ts     decomposed job registrations
   cacheService.ts    Redis → in-memory fallback
-  dataQualityChecks.ts   ~150 freshness/coverage checks, daily cron + Telegram
-  *.py               ML engines — canonical ranker is unified_ranker.py
+  dataQualityChecks.ts   freshness/coverage checks (factory-generated + hand-rolled), daily cron + Telegram
+  *.py               79 `*_fetcher.py` + ML engines/backfills — canonical ranker is unified_ranker.py
 ```
 
 Component/procedure/table inventories are deliberately **not** listed here — they rot. Grep the source.
 
 ## Frontend versions
 
-Six dashboards coexist in one app, no separate build. `App.tsx`'s `dashboardVersion` (localStorage) picks among **v1/v2/v3/v6 only** — fallback is `v6` (that's what a fresh visitor lands on). v4 and v5 aren't `dashboardVersion` values; see their rows below for how each is actually reached.
+Six dashboards coexist in one app, no separate build. `App.tsx`'s `dashboardVersion` (localStorage) picks among **v1/v2/v3/v6 only** — fallback is `v1` (that's what a fresh visitor lands on; promoted back from v6 on 2026-08-20, `App.tsx:218`). v4 and v5 aren't `dashboardVersion` values; see their rows below for how each is actually reached.
 
 | | Shell | Notes |
 |---|---|---|
-| v1 | `AppShell` | classic tab list |
+| v1 | `AppShell` | **default** — classic tab list, now nav-linking every page the other shells had (v6 screener/portfolio + the v5 desk retrofits) |
 | v2 / v3 | `V2AppShell` | v3 = Bloomberg-terminal restyle |
 | v4 | inside `V2AppShell` | `MarketCommandCenter`, `StockIntelligencePage` |
 | v5 | own route tree at `/v5` | institutional workbench + desk pages |
-| v6 | `V6Shell` | **default** — composed home + portfolio tracker + screener browser |
+| v6 | `V6Shell` | composed home + portfolio tracker + screener browser |
 
 Nothing is deprecated. Before trusting any "fix applied to the nav/shell" claim, check *which shell* it landed in — a comment saying it was mirrored has been wrong before.
 

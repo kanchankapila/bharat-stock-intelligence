@@ -54,32 +54,27 @@ HEADERS = {
     "Referer":         "https://www.amfiindia.com/",
 }
 
-# Top sectors we emit as macro features (must match nse_stocks.sector values)
-TOP_SECTORS = [
-    "Financial Services",
-    "Information Technology",
-    "Automobile",
-    "Pharmaceuticals",
-    "FMCG",
-    "Energy",
-    "Metals & Mining",
-    "Capital Goods",
-    "Healthcare",
-    "Consumer Durables",
-]
-
-# Map sector name → macro_asset_prices label suffix
+# Map nse_stocks.sector -> macro_asset_prices symbol suffix.
+# These keys MUST be live `nse_stocks.sector` values or the propagation below is
+# a silent no-op: _update_macro_asset_prices skips any sector missing from this
+# dict, and _update_technical_signals maps on nse_stocks.sector directly.
+# Verified live 2026-08-27 -- the column is GICS-style. The previous vocabulary
+# here ("Financial Services"/"Automobile"/"Pharmaceuticals"/"FMCG"/
+# "Metals & Mining"/"Capital Goods"/"Consumer Durables") matched NOTHING in that
+# column, so every key missed and zero rows were ever written. Never noticed
+# because the AMFI source died upstream before this code path completed a run.
 SECTOR_LABEL = {
-    "Financial Services":  "BANKS",
+    "Financials":             "BANKS",
     "Information Technology": "IT",
-    "Automobile":          "AUTO",
-    "Pharmaceuticals":     "PHARMA",
-    "FMCG":                "FMCG",
-    "Energy":              "ENERGY",
-    "Metals & Mining":     "METALS",
-    "Capital Goods":       "CAPGOODS",
-    "Healthcare":          "HEALTH",
-    "Consumer Durables":   "CONSDUR",
+    "Consumer Discretionary": "AUTO",
+    "Healthcare":             "HEALTH",
+    "Consumer Staples":       "FMCG",
+    "Energy":                 "ENERGY",
+    "Materials":              "METALS",
+    "Industrials":            "CAPGOODS",
+    "Telecommunications":     "TELECOM",
+    "Utilities":              "UTILITIES",
+    "Real Estate":            "REALTY",
 }
 
 # ---------------------------------------------------------------------------
@@ -305,7 +300,11 @@ def _compute_flow(curr_df: pd.DataFrame, prior_df: pd.DataFrame) -> pd.DataFrame
 
 
 def _update_macro_asset_prices(flow: pd.DataFrame, month_str: str) -> None:
-    """Write per-sector flow into macro_asset_prices as MF_FLOW_<SECTOR> labels."""
+    """Write per-sector flow into macro_asset_prices as MF_FLOW_<SECTOR> rows.
+
+    NB: the column is `symbol` (PK is (date, symbol)); there is no `label`
+    column and never was -- writing one raised UndefinedColumn on every run.
+    """
     year, mon = int(month_str[:4]), int(month_str[5:7])
     last_day = calendar.monthrange(year, mon)[1]
     price_date = f"{month_str}-{last_day:02d}"
@@ -317,15 +316,14 @@ def _update_macro_asset_prices(flow: pd.DataFrame, month_str: str) -> None:
         val = flow_map.get(sector)
         if val is None:
             continue
-        label = f"MF_FLOW_{label_suffix}"
-        rows.append((price_date, label, float(val)))
+        rows.append((price_date, f"MF_FLOW_{label_suffix}", float(val)))
 
     if not rows:
         return
 
     executemany(
-        "INSERT INTO macro_asset_prices (date, label, close) VALUES (?, ?, ?) "
-        "ON CONFLICT(date, label) DO UPDATE SET close=excluded.close",
+        "INSERT INTO macro_asset_prices (date, symbol, close) VALUES (?, ?, ?) "
+        "ON CONFLICT(date, symbol) DO UPDATE SET close=excluded.close",
         rows,
     )
     print(f"[MFSectorFlow] Wrote {len(rows)} MF_FLOW macro features for {price_date}.")

@@ -1549,6 +1549,8 @@ HEAVIEST-weighted engine of all 8, always. Two decisive tests, live production, 
    real, and motivated tracing screener's weight specifically rather than concluding the blend
    can't work at all.
 
+⚠ **The weight table below is the 2026-08-20 state and is NO LONGER LIVE — two further targeted shrinks landed after it, and `unified_ranker.py`'s `REGIME_WEIGHTS` is the authority.** Verified 2026-08-27: a SECOND screener shrink (2026-08-21, same policy, screener BULL 0.15 → 0.075) and a THIRD shrink halving **`ml`** (2026-08-24, freed weight redistributed proportionally, `breakout` pinned). Live BULL today reads screener 0.08445 / ml 0.107098 / confluence 0.214195 / technical 0.171356 / dl 0.114237, not the row below. Each later shrink carries its own pre-declared evidence gate in `unified_ranker.py`'s own comment block (the 2026-08-24 one shipped arm A, ml×0.5, dIC +0.0019, paired t=+2.05, and explicitly rejected arms B and C) — **that block, not this table, is the derivation record for the current numbers.** The table is kept unedited as the dated record of the first shrink; no number in it has been re-derived here.
+
 **Fixed**: applied this platform's own existing `ENGINE_EDGE_SHRINK = 0.5` policy (already used
 by `edge_adjusted_weights`/`load_engine_edge_verdicts` for exactly this situation, just gated on
 a `factor_edge_history` verdict against `unified_recommendations` that's stuck at 1 date and

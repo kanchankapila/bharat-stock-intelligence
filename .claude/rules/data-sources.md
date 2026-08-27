@@ -23,15 +23,15 @@ The **NSE symbol** (e.g., `HDFCBANK`, `INFY`, `BAJAJ-AUTO`) is the single source
 
 ### Resolution Files
 
-- **`src/data/stocklist.ts`** — authoritative mapping table for 180 liquid stocks; holds all provider fields. Always preferred.
+- **`src/data/stocklist.ts`** — authoritative mapping table, **2,000 stocks** (~85% of `nseStocks.ts`'s 2,366-name NSE master); holds all provider fields, populated 89-100% depending on the field (`tlid`/`tlname` 100%, `isin` 99%, `mcsymbol`/`companyid` 98%, `stockid` 91%, `tickertape_sid` 90%, `scripcode` 89%). Always preferred.
 - **`src/data/nseStocks.ts`** — master list of 2000+ NSE stocks; NSE symbol + basic info only, no provider mappings.
 - **`src/server/stockMapping.ts`** — lookup functions; `stocklist.ts` takes precedence over `nseStocks.ts`.
 
 ### Resolution Order (for any new provider)
 
 1. **`stocklist.ts` first** — call `getStockMapping(nseTicker)` to get the full `StockMapping` object and read the provider's field directly.
-2. **Provider autocomplete API second** — if the stock is not in the 180-stock list, call the provider's search/autocomplete endpoint with the NSE symbol and cache the result in the `scIdCache` pattern already used for MoneyControl.
-3. **ISIN as fallback** — if the provider accepts ISIN, it is universally available from `StockMapping.isin` for all 180 stocks.
+2. **Provider autocomplete API second** — if the stock is not in `stocklist.ts`, or its row has an empty value for the field you need, call the provider's search/autocomplete endpoint with the NSE symbol and cache the result in the `scIdCache` pattern already used for MoneyControl (`stockMapping.ts:35`). This is now the exception (~366 NSE names are absent, plus the per-field gaps above), not the common path it was at 180.
+3. **ISIN as fallback** — if the provider accepts ISIN, `StockMapping.isin` carries one for **1,980 of the 2,000** rows (99%). Near-universal, but check the value is non-empty rather than assuming it.
 4. **Never guess** — do not construct provider IDs by convention. Each provider's ID scheme is opaque and must be resolved explicitly.
 
 ### Adding a New Provider
@@ -40,7 +40,7 @@ When integrating a new data source (new URL, new API endpoint):
 
 1. **Identify the provider's ID type** — look at its API docs/response to find what it uses to identify a stock (symbol, ISIN, internal ID, slug).
 2. **Add a field to `StockMapping`** in `src/data/stocklist.ts` if the provider has its own opaque ID not derivable from existing fields.
-3. **Populate mappings for the 180 stocks** in `stocklist.ts` before writing any fetch logic.
+3. **Populate mappings in `stocklist.ts`** before writing any fetch logic. It is 2,000 rows, so backfilling a new provider field across all of them is a scripted job, not a hand edit — and partial coverage is normal (see the per-field percentages above), so the fetcher must handle an empty value rather than assume every row resolves.
 4. **Add a resolver function** in `src/server/stockMapping.ts` following the `resolveMoneycontrolSymbol` pattern: hardcoded map first → in-memory cache → provider autocomplete API fallback.
 5. **For Yahoo Finance-style providers** — if the provider accepts `symbol.NS` or `symbol.BO` suffix conventions, derive it inline without adding a new field.
 6. **Cache the resolved ID** — use `Map<string, string>` keyed on the uppercase NSE symbol, populated on first resolution.
@@ -55,7 +55,7 @@ wrong on day one; the data-quality check catches one that's silently wrong (or d
 200 — neither substitutes for the other.
 
 Every fetcher that reads from an external URL/API — new or existing — needs one test marked
-`@pytest.mark.live_datasource` (see `src/server/tests/conftest.py`, `live_datasource_helpers.py`,
+`@pytest.mark.live_datasource` (see `src/server/conftest.py` — moved up from `tests/` on 2026-08-17, `src/server/tests/live_datasource_helpers.py`,
 and the two worked examples `test_live_datasource_trendlyne_screener.py` /
 `test_live_datasource_et_stats.py`) that:
 
