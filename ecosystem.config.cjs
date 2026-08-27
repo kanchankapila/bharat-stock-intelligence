@@ -77,6 +77,7 @@ module.exports = {
       args: 'server.ts',
       interpreter: 'node',
       node_args: '--max-old-space-size=4096',
+      max_memory_restart: '3500M',
     },
     {
       ...common,
