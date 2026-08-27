@@ -15,6 +15,7 @@ Real-time Indian stock market intelligence platform (NSE/BSE). Express + tRPC ba
 | scoring, ranking, any `*_signals` / `*_outcomes` table | `.claude/rules/scoring-authority.md` |
 | a fetcher, a new provider, a provider-issued id | `.claude/rules/data-sources.md` |
 | any accuracy / win-rate / IC / backtest number | `.claude/rules/measurement.md` |
+| a model, a promotion gate, a measurement harness | `.claude/rules/ml-model-bugs.md` |
 | **anything** — skim before writing Python or SQL | `.claude/rules/recurring-bugs.md` |
 
 `docs/session-log.md` is the historical changelog (~6,100 lines — never load it whole). Not loaded automatically; grep or read a specific dated entry when you need the history behind a decision.
@@ -30,11 +31,13 @@ python -m pytest src/server/__tests__/ src/server/tests/ tests/chatbot/  # any .
 npm run schema:drift                                # any migration
 ```
 
+`/verify-gate-runner` runs the first three in sequence.
+
 Plus, for anything touching signal/scoring/model logic:
 
 - **Negative-control your tests.** Revert the fix, confirm the new test fails, restore. A green suite that never failed against the bug protects nothing.
 - **Run it against live production data and query the result back.** `tsc --noEmit` and a green suite do not tell you a fetcher wrote the right rows. See `.claude/rules/measurement.md`.
-- **Committed ≠ deployed.** `.ts` needs `pm2 restart bharat-server`; a migration needs `npm run migrate:up` against the real `POSTGRES_URL`; a package needs `npm install` / the right venv.
+- **Committed ≠ deployed.** `.ts` needs `pm2 restart bharat-server`; a migration needs `npm run migrate:up` against the real `POSTGRES_URL`; a package needs `npm install` / the right venv. (`/deploy-and-verify` does this end to end.)
 
 **These are enforced, not advisory.** `.claude/hooks/verify-gate.mjs` is a `Stop` hook: it blocks the session from finishing if the diff touches `.ts`/`.py` and the matching command never ran, and demands backtest evidence for signal-surface files. It reads your actual Bash invocations — writing "I ran pytest" does not satisfy it. `.claude/hooks/{rules-pointer,env-guard}.mjs` run on every Edit/Write.
 
@@ -117,7 +120,7 @@ Nothing is deprecated. Before trusting any "fix applied to the nav/shell" claim,
 - **NSE symbol is the only canonical identifier.** Every provider id derives from it, never the reverse, and is never constructed by convention.
 - **Postgres/TimescaleDB (:5433) is the ONLY database. There is no second dialect to reason about.** `usePostgres()` / `use_postgres()` take no environment variable for any real process — a missing `.env` can no longer reroute anything, it can only fail to connect, loudly. Several tables are compressed hypertables where a predicate-wide `UPDATE`/`ADD CONSTRAINT` will fail or destroy compression.
   - **TypeScript is fully migrated.** `npx vitest run`'s `unit` project runs against a private throwaway Postgres schema built from `db/schema.postgres.sql` (`vitest.globalSetup.ts`); its `live` project talks to real production on purpose. There is no SQLite path left in any `.ts`.
-  - **Python runs on Postgres too, and the shim is GONE (2026-08-17).** There is no `SQLITE_SHIM_POSTGRES` flag and no monkeypatch of `sqlite3.connect` any more: 93 fixture files were converted to an explicit **`pg_memory_conn()`** (`src/server/pg_test_support.py`), which is the 1:1 replacement for a raw `sqlite3.connect(':memory:')`. `conftest.py` now lives at **`src/server/conftest.py`**, not `src/server/tests/` — it was moved up because `src/server/__tests__/` had no conftest at all, so its Python files were invisible to the old shim's own counter. Use `pg_memory_conn()`, `pg_conn` (empty schema, bring your own DDL) or `pg_db_conn` (full production schema); never add a `sqlite3.connect`. **6 named files still block Phase 3** (`sql_translate.py`'s pytest branch) — they are enumerated in `docs/SQLITE_DECOMMISSION_PLAN.md`. ⚠ Do not verify this with a bare `grep -r "sqlite3.connect(':memory:')"`: it matches 8 *comments/docstrings* naming the retired pattern, and from the repo root it also descends into `.claude/worktrees/` (gitignored, 12 stale copies) and returns dozens. The verified check is the assignment form — `grep -rnE "=\s*sqlite3\.connect\(':memory:'\)" --include=*.py src/ tests/` → 0, and 21 against a stale worktree, so it is not vacuous.
+  - **Python runs on Postgres too, and the shim is GONE (2026-08-17).** There is no `SQLITE_SHIM_POSTGRES` flag and no monkeypatch of `sqlite3.connect` any more: 93 fixture files were converted to an explicit **`pg_memory_conn()`** (`src/server/pg_test_support.py`), which is the 1:1 replacement for a raw `sqlite3.connect(':memory:')`. `conftest.py` now lives at **`src/server/conftest.py`**, not `src/server/tests/` — it was moved up because `src/server/__tests__/` had no conftest at all, so its Python files were invisible to the old shim's own counter. Use `pg_memory_conn()`, `pg_conn` (empty schema, bring your own DDL) or `pg_db_conn` (full production schema); never add a `sqlite3.connect`. **Phase 3 Python is DONE too (2026-08-19)** — the 6 files that blocked it were converted/deleted and `sql_translate.py`'s pytest carve-out (`_in_pytest()`) was removed as dead code, so `use_postgres()` now returns True unconditionally *including inside pytest* (`docs/SQLITE_DECOMMISSION_PLAN.md`). ⚠ Do not verify this with a bare `grep -r "sqlite3.connect(':memory:')"`: it matches 8 *comments/docstrings* naming the retired pattern, and from the repo root it also descends into `.claude/worktrees/` (gitignored, 12 stale copies) and returns dozens. The verified check is the assignment form — `grep -rnE "=\s*sqlite3\.connect\(':memory:'\)" --include=*.py src/ tests/` → 0, and 21 against a stale worktree, so it is not vacuous.
   - **Test against an EMPTY database before believing a test passes.** A developer's Postgres IS production, and `pg_conn` puts `public` on the search_path, so a table the fixture forgot silently resolves to the real one. Three separate suites were green that way and red in CI. `PGTEST_DB=<empty db> pytest ...` is the check.
 - **Measured state of the edge**: the ranker has no demonstrated forward-return edge, and most factors tested are null-to-negative. Read `.claude/rules/measurement.md` before proposing a reweighting — it is very likely the wrong fix.
 
@@ -131,7 +134,7 @@ Nothing is deprecated. Before trusting any "fix applied to the nav/shell" claim,
 
 ## Closing a session
 
-Before finishing, make all three consistent with what actually happened:
+Before finishing, make all three consistent with what actually happened (`/session-close` walks this against what the session actually changed):
 
 1. **`docs/session-log.md`** — append what changed and what was learned.
 2. **Memory** — add/extend a file for anything durable and non-obvious; update `MEMORY.md`'s index.

@@ -1,10 +1,11 @@
 ---
-description: Review a model-training/promotion-gate script (champion/challenger comparison, CV setup, staleness override) against the "Models & measurement" bug classes in recurring-bugs.md — one script from a diff, or the full sweep across every promotion-gated engine
+description: Review a model-training/promotion-gate script (champion/challenger comparison, CV setup, staleness override) against the bug classes in `.claude/rules/ml-model-bugs.md` — one script from a diff, or the full sweep across every promotion-gated engine
 ---
 
 # ML Promotion-Gate Review
 
-Read `.claude/rules/recurring-bugs.md`'s "Models & measurement" section and `measurement.md`'s
+Read `.claude/rules/ml-model-bugs.md` (the model/gate/harness classes, split out of
+recurring-bugs.md on 2026-08-27) and `measurement.md`'s
 "already tested" table first. `trpc-surface-review` and `fetcher-accuracy-review` cover the
 backend/data-source half of this codebase's recurring-bug surface; this is the equivalent for the
 ~30 Python ML engines that train, gate, or promote a model — a surface with at least six

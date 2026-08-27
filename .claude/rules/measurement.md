@@ -663,83 +663,16 @@ would need to survive a >12%/yr cost headwind it isn't currently clearing. Re-te
 understand *why* the write-timing/provenance question needed resolving before this could be
 trusted at all.
 
-### ⚠ SUPERSEDED same day, see the correction section immediately below — wrong grading horizon for 3 of 4
+### The 4 previously-ungraded `unified_ranker.py` engines — first pass used the WRONG horizon (2026-08-20)
 
-### The 4 previously-ungraded `unified_ranker.py` engines — graded 2026-08-20, none clear USABLE
+The original ~78-line section here graded `breakout_probability` / `movement_probability` /
+`ml_breakout_probability` against `factor_edge.py`'s generic 1/5/21d terminal-return grid, which is
+not what any of the three was trained to predict. **It was superseded the same day by the
+correction immediately below, which is the reading that counts.** `cs_score` was the one engine
+correctly configured on that first pass, and its `no edge` verdict stands.
 
-Prompted by a "which of the ~30 models actually earn their runtime cost" review:
-`breakout_classifier.py`, `movement_predictor.py`, `confluence_ml_engine.py`, and `cs_ranker.py`
-had never been run through `factor_edge.py` or `factor_backtest.py` — no net-of-cost verdict, no
-IC/AUC read, anywhere in this repo. Graded the same way `win_probability` just was, live
-production 2026-08-20T12:03-12:05 IST.
+Full superseded tables and the wrong-target numbers: `docs/measurement-history.md`.
 
-`factor_edge.py --table technical_signals --scores breakout_probability,movement_probability,cs_score --horizons 1,5,21 --persist`
-(80,517 rows / 2,269 symbols / 72 dates, 75,558 matched to forward prices):
-
-| score | horizon | rank_IC | hit_AUC | n | dates | verdict |
-|---|---|---|---|---|---|---|
-| `breakout_probability` | 1d | +0.008 | 0.486 | 59,020 | 28 | no edge |
-| `breakout_probability` | 5d | −0.007 | 0.496 | 50,249 | 24 | no edge |
-| `breakout_probability` | 21d | −0.013 | 0.492 | 15,261 | 8 | LOW-DATA |
-| `movement_probability` | 1d | −0.030 | 0.486 | 48,108 | 22 | no edge |
-| `movement_probability` | 5d | −0.031 | 0.489 | 39,339 | 18 | LOW-DATA |
-| `movement_probability` | 21d | −0.048 | 0.474 | 4,355 | 2 | LOW-DATA |
-| `cs_score` | 1d | +0.047 | 0.505 | 73,368 | 53 | no edge |
-| `cs_score` | 5d | +0.062 | 0.512 | 64,597 | 49 | no edge |
-| `cs_score` | 21d | +0.015 | 0.508 | 29,483 | 33 | no edge |
-
-`confluence_ml_engine.py`'s `ml_breakout_probability` lives in `confluence_signals`, a 30-min-cadence
-intraday table (4.49M rows / 52 dates, not one-row-per-symbol-per-day like `technical_signals`), so
-`factor_edge.py`'s `--table` CLI can't be pointed at it directly without either double-counting
-same-day snapshots or picking a look-ahead-biased entry point. Reduced to the EARLIEST
-`computed_at` per `(symbol, date)` — the most conservative, earliest-tradeable read — via a one-off
-script that imported `factor_edge.py`'s own `_forward_returns`/`_metrics`/`_verdict` rather than
-reimplementing the IC/AUC math, then persisted to `factor_edge_history` under
-`table_name='confluence_signals_daily_first'` so it's flagged as a different measurement shape than
-the other rows, deleted after the run (not a shipped tool):
-
-| score | horizon | rank_IC | hit_AUC | n | dates | verdict |
-|---|---|---|---|---|---|---|
-| `ml_breakout_probability` | 1d | +0.016 | 0.511 | 83,527 | 37 | no edge |
-| `ml_breakout_probability` | 5d | +0.040 | 0.526 | 74,140 | 33 | no edge |
-| `ml_breakout_probability` | 21d | +0.022 | 0.521 | 36,584 | 17 | LOW-DATA |
-
-**None of the four clear `USABLE` (needs `abs(rank_IC) >= 0.03` AND `hit_AUC >= 0.55`).** Two
-data points worth reading precisely rather than as a flat zero: `cs_score` (5d IC +0.062) and
-`ml_breakout_probability` (5d IC +0.040) both clear the IC bar alone — same "IC says something real,
-AUC says it's not classifiable" shape `win_probability` showed above, just weaker (AUC 0.512/0.526
-vs win_probability's 0.513/0.537). Three independent engines now show this identical ceiling
-(win_probability, cs_score, ml_breakout_probability), which strengthens rather than weakens the
-existing hypothesis that the AUC ceiling is a **label/target construction** problem shared across
-this codebase's ML pipeline, not a property of any one model. `movement_probability` and
-`breakout_probability` are flat negative/near-zero on both metrics — no directional signal at all,
-not even the weak kind.
-
-**Consumption check — this is the part that makes the finding actionable, not just descriptive.**
-Grepped `unified_ranker.py` for all four:
-- **`cs_score` and `breakout_probability` ARE live-blended** into `unified_score` today (`engine_scores['cs']`/`engine_scores['breakout']`, unified_ranker.py:2065-2092,2221) — i.e. two inputs to the canonical Buy/Sell call that every dashboard shell ultimately reads now have an external, well-powered (24-53 dates) "no edge" verdict.
-- **`movement_probability` is advisory-only by its own inline comment** (queues.ts:1102, "Advisory-only for now") — never read by `unified_ranker.py` at all. It trains, scores, and writes on a 30-min job for a value nothing downstream ever consumes beyond a freshness-coverage check (`dataQualityChecks.ts`) and a NEVER_FILL list (`densify_feature_matrix.py`). Pure runtime cost, zero output.
-- **`ml_breakout_probability` has no reader anywhere outside `confluence_ml_engine.py` itself** — not `unified_ranker.py`, not any other file. Same shape, fully inert.
-
-**Does not contradict `load_engine_edge_verdicts()`'s existing gate.** `unified_ranker.py`'s live
-`ENGINE_EDGE_SHRINK` mechanism (line 681 area) reads `factor_edge_history` filtered to
-`table_name='unified_recommendations'` — i.e. the ranker's OWN blended reporting columns
-(`cs_score`/`breakout_score` on `unified_recommendations`), not the raw `technical_signals` values
-graded above. Checked live: that table's own grading run (`run_at=2026-08-17T19:05:22`) is stuck at
-**1 date** for both (`LOW-DATA`) — same calendar-constraint shape as `smart_money_score`'s existing
-entry below, because `unified_recommendations_history` still only has a handful of provably
-pre-market dates. So the live auto-shrink gate has nothing to act on yet regardless. **The grading
-above is a different, much better-powered read of the same underlying question** (24-53 dates vs 1)
-— it measures whether the raw engine output has any signal at all, upstream of the ranker's own
-regime multipliers and crowding discount, and at this sample size it's a more decisive answer than
-the gate's own input currently can give.
-
-**Not escalated to a `factor_backtest.py` cost/turnover-aware run.** Unlike `win_probability`
-(real, *growing* IC that justified the extra cost-aware pass), none of these four clear even the
-fast IC+AUC screen — the two closest (`cs_score`, `ml_breakout_probability`) are weaker than
-`win_probability`'s already-tested-and-rejected 5d read. Per this file's own "already tested, do
-not re-run without a reason" discipline, spending a full cost-aware backtest on a result already
-below a rejected bar isn't warranted.
 
 ### ⚠ CORRECTED 2026-08-20 — the section above graded 3 of 4 engines against the wrong target entirely
 
@@ -991,7 +924,9 @@ was never affected — `engine_scores`/`unified` are computed from `present` BEF
 columns are built. The correct handling is what this section provides: a dated boundary
 (**2026-08-18**) that every future measurement filters on, which is also what
 `assembly_ablation.py` does by sourcing its panel from the raw tables instead.
-### The post-blend stack ABLATED, layer by layer — 2026-08-22. It is not destroying the edge; the ranker's own weighting is the biggest positive step, and the loss is elsewhere
+### The post-blend stack ABLATED, layer by layer — 2026-08-22. It is not destroying the edge, and the loss sits in one identifiable step
+
+⚠ **This section's original heading claimed "the ranker's own weighting is the biggest positive step". That claim was RETRACTED 2026-08-27** — on today's panel and today's (twice-re-shrunk) weights, equal weighting BEATS regime weighting. See §3 of the FULL LIVE RE-MEASUREMENT at the top of this file before citing finding 1 below. The screener bisection (finding 3 / the 2026-08-23 addendum) reproduced exactly and is unaffected.
 
 This closes the open question the 2026-08-22 blend A/B left behind (its caveat #1: reconstruction
 fidelity 0.5665, "this graded the blend in isolation, not the final ranking"). Tool:
@@ -1348,7 +1283,9 @@ is null on IC and sub-threshold on AUC. Re-grade against live `unified_recommend
 `factor_edge.py` once ~20 post-fix dates accumulate (roughly late September 2026), which is the
 only way to see whether the AUC drift survives the multiplier stack.
 
-### An equal-weight composite of RAW engines is the first thing here to clear USABLE — 2026-08-21
+### An equal-weight composite of RAW engines — 2026-08-21 (its "first to clear USABLE" claim is RETRACTED)
+
+⚠ **Read the "CORRECTION, same day" section ABOVE this one first** (it sits ~135 lines earlier, which is why this heading went uncorrected). Re-graded through `factor_edge.py` itself on a longer window, the composite is `no edge`, not USABLE: the IC reproduces (+0.077 at 21d) and the AUC does not (0.540 on 30 dates vs 0.558 on 25). Every "USABLE" below is retracted; the IC numbers and the ensemble reasoning stand.
 
 The best result measured on this platform to date, and the reason it is worth reading carefully
 rather than acting on immediately. Built from the **raw** engine outputs (not
@@ -1524,6 +1461,38 @@ features** in the live training matrix, **116 carry no usable stock-ranking info
   Trendlyne block (`adx_tl`, `mfi_tl`, `ret_1m/3m/6m/1y_tl`, … 95.8%), and
   `roe_annual`/`roce_annual`/`ebitda_margin`/`np_margin`/`rev_growth_yoy_q`/`np_growth_yoy_q`/
   `analyst_upside_pct`/`analyst_count_log`/`analyst_buy_pct_tl` at **nunique=2, flat on 98.6%**.
+
+⚠ **STALE — spot-checked live 2026-08-27 and the "36 globally constant" list is already wrong in
+part. This sweep was NOT re-run by the 2026-08-27 full re-measurement** (that pass re-ran
+`factor_edge`/`factor_backtest`/`assembly_ablation`/`blend_walkforward`/`screener_combo_finder`
+only). Of the 10 named-constant features that exist as raw `technical_signals` columns, checked on
+the last COMPLETED day (2026-08-26, 2,197 rows — a partial same-day read gives the wrong answer
+here, and did):
+
+| feature | nonnull | distinct | status vs 08-21 |
+|---|---|---|---|
+| `call_wall_dist_pct` | 159 | **152** | **now VARIES** |
+| `put_wall_dist_pct` | 159 | **154** | **now VARIES** |
+| `mc_del_acceleration` | 1,855 | **1,625** | **now VARIES** |
+| `mc_fno_eligible` | 2,062 | **2** | **now VARIES** |
+| `iv_skew` | 210 | 1 | still constant |
+| `near_expiry_gamma` | 2,197 | 1 | still constant |
+| `is_nifty50` / `is_nifty100` | 2,197 | 1 | still constant |
+| `pledge_chg_90d` | 0 | 0 | still all-NULL |
+| `positive_turnaround` | 1,978 | 1 | still constant |
+
+**`mc_del_acceleration` and `mc_fno_eligible` are the exact two this entry called "cheap follow-ups
+identified but deliberately not built" — they have since been populated.** The two options columns
+now vary but are still NULL on 93% of the universe, so the "vanishes in a 2,200-symbol join" point
+stands even though "globally constant" no longer does.
+
+**The analyst-revision block is still calendar-blocked, as predicted:** `analyst_estimates_history`
+spans 2026-06-21 -> 2026-08-23 = **63 days** against the ~76 `eps_rev_3m` needs, i.e. ~13 more days
+(the ~2026-09-05 estimate was about right).
+
+**Do not quote "116 of 421" as current.** At least 4 of the 36 have flipped; the other 17 named
+features are derived inside `build_features()` and were not checkable without re-running the full
+sweep, which this spot-check did not do. Re-run the sweep before citing any number here.
 
 **Consequence, and the useful conclusion of this pass: the ceiling is not a missing data source.**
 Adding features to a matrix where 116 of 421 already cannot rank anything is not the lever — which
@@ -1834,125 +1803,24 @@ question the label second) applied to its own flagship model exactly as it did t
 today. Same lesson, same day, fourth instance: check the native label before trusting a "no
 edge"/"weak AUC" verdict on any model with its own training target, not just factors with none.
 
-### ⚠ RETRACTION WITHDRAWN 2026-08-15 — the retraction itself was wrong. Result stands, preliminary.
+### `win_probability`'s 2026-08-15 preliminary grade — flipped twice in one session, now superseded outright
 
-**Read this whole block before citing anything here; this finding flipped twice in one session.**
+Graded positive (h=1d raw rank IC +0.0364, t=+2.58, 41 dates) -> retracted on a provenance trace ->
+**the retraction was itself wrong and was withdrawn.** All three layers are now superseded by the
+properly-powered 2026-08-20 re-measurement (72 dates, see this file's dedicated `win_probability`
+section) and by the native-label correction that followed it. **Do not cite the +0.0364 / t=+2.58
+figures** — the operative readings are the 2026-08-20 ones.
 
-The retraction below claimed two defects. **Both are false**, and the error was mine:
+The lesson survives and is the part that matters: **a writer is not found by grepping its CLI
+flag** — a job can be invoked over HTTP, and the grep confidently shows nothing. Two cheap checks
+would each have caught it in seconds: ask the data (`COUNT(*) - COUNT(col)` per date), and read the
+comments already in the repo (`dataQualityChecks.ts` stated the real cadence in prose). A wrong
+provenance conclusion is as damaging as a wrong measurement — here it retracted a *correct*
+finding. Crystallized as a rule in `.claude/rules/recurring-bugs.md`'s "CORRECTED 2026-08-15" entry.
 
-1. *"--score runs only weekly."* **Wrong.** `ml_ensemble.py --score` is not the only scoring path.
-   `queues.ts:1037` runs `T.run('ml-ensemble-score', () => pythonApi.scorePending())` **daily**
-   inside ml-daily-ops — an HTTP call to the ml-api service, which is why a grep for `--score`
-   missed it. `python_api.py`'s handler is `ml_ensemble.run(do_train=False, do_score=True)`.
-   Confirmed in data: `unscored = 0` on every recent date (08-10 … 08-14); a weekly cadence would
-   leave a visible backlog. `dataQualityChecks.ts:653` already documented this in a comment —
-   *"win_probability is written by ml-ensemble-score … which runs once in the evening, AFTER
-   technical-scan has written that day's rows (8:30am-4pm IST)"* — i.e. the answer was written
-   down in this repo and I concluded the opposite without reading it.
-2. *"Train-on-test leakage."* **Wrong for the live path.** The daily scorer passes
-   `do_train=False`; it scores with the pickled model from the *previous* weekly retrain, which
-   predates the rows being scored. The weekly `--train --tune --score` does train-then-score, but
-   by the time it runs, daily scoring has already filled those rows, so its `WHERE
-   win_probability IS NULL` matches ~nothing. Not a live leakage path.
+Full three-layer narrative — the preliminary grade, the retraction, and its withdrawal:
+`docs/measurement-history.md`.
 
-**So the numbers stand** — raw h=1d rank IC **+0.0364, t=+2.58** (41 dates), h=5d +0.0763,
-t=+3.58; top-decile excess +0.183%/day; the day's 10 biggest gainers at mean percentile 0.550.
-Rows are written the evening of date *d*, so they are knowable before *d+1*'s open, and the
-next-open entry used in the grading is legitimate.
-
-**The caveats that remain genuinely valid, unchanged:**
-- **IC is not a tradeable edge.** No cost or turnover analysis was run. `delivery_pct` in the
-  table above had spread t=+7.82 and was still **dead** long-only net of costs.
-- **h=5 windows overlap** across consecutive dates, so those observations are autocorrelated and
-  t=+3.58 is optimistic. **h=1 (t=+2.58) is the honest read.**
-- **41 dates is thin**, and `win_probability` history only starts 2026-05-16.
-
-**Provenance is now measured rather than inferred.** Migration `1787050000000` added
-`win_probability_scored_at`, stamped by the scorer itself, and check `win-probability-scored-in-time`
-watches the lag. From the next daily run the real cadence is a number in the data instead of
-something reconstructed from the scheduler — which is what should have settled this the first time.
-**Note:** the 1.41d lag observed on 2026-08-15 is an artifact of a manual test write, NOT the real
-cadence; expect ~0.2-0.5d once the daily scorer stamps a full batch.
-
-### (superseded — the retraction that was itself wrong, kept for the record)
-
-**The provenance trace that the entry below listed as its own #2 caveat was carried out
-2026-08-15 and it invalidates the result.** Two independent, structural defects, either one
-sufficient on its own:
-
-1. **The value does not exist at the entry time it was graded against.** `ml_ensemble.py --score`
-   appears in exactly ONE scheduled place (`queues.ts:1290`), inside the **weekly** retrain job
-   (`--train --tune --score`, "weekly retrain continues"). It scores `WHERE ts.win_probability IS
-   NULL`, i.e. the whole backlog since the last weekly run. So a Monday row's `win_probability` is
-   typically written the FOLLOWING weekend — days after the Tuesday open the grading used as its
-   entry. Nobody could have traded on it. `technical_signals.created_at`/`updated_at` are 100%
-   NULL (dead columns), which is why this had to be traced through the scheduler rather than read
-   off the row; `computed_at` (100% populated) records only when the row was CREATED, a lower
-   bound, and it correctly shows same-day creation — which is what made the setup *look* clean.
-2. **Train-on-test leakage.** In the same invocation `run()` executes `if do_train:` first —
-   `load_training_data()` pulls every resolved `signal_outcomes` row with no cutoff excluding the
-   week about to be scored — and only then scores that week's rows. **The model is fitted on the
-   outcomes of the very rows it subsequently scores.** A positive IC is the expected artifact.
-
-**Retracted numbers** (raw h=1d IC +0.0364 t=+2.58; h=5d +0.0763 t=+3.58; calibrated +0.0472 /
-+0.1007; top-decile excess +0.183%/day; gainers at percentile 0.550). Grading the raw column
-separately did rule out *calibration* leakage specifically — but not this, which sits upstream of
-both columns and contaminates raw and calibrated alike. **`unified_score`'s IC ≈ 0.0001 remains
-this platform's honest headline; nothing has displaced it.**
-
-**Separate, real finding worth keeping — `win_probability` is not fit to be a live signal as
-currently produced.** It feeds `scoring_engine`'s Factor 3 (`ml_alignment_points`, 0-20 pts, ~18/20
-mean) and the 0.55/0.40/0.30 bands, yet it is (i) written only weekly, so it is stale by up to
-~5 trading days for most rows, and (ii) produced by a train-then-score-in-one-invocation job, so
-it can never be graded as a forward signal without first separating those steps. Fixing it means
-scoring on a daily cadence with a model trained strictly on data preceding each scored date —
-until then, no measurement of this column can be trusted, in either direction.
-
-### (superseded, kept for the record) PRELIMINARY — `win_probability` grades POSITIVE
-
-Graded 2026-08-15 against realized returns, full panel spec (per-date then averaged, winsorised
-1/99 on observed values, `is_suspect` excluded, ≥₹1cr ADT20, **next-day OPEN entry**):
-
-| column | h=1d rank IC | h=5d rank IC |
-|---|---|---|
-| **raw `win_probability`** (model output, never fitted on outcomes) | **+0.0364, t=+2.58** (41 dates) | **+0.0763, t=+3.58** (38 dates) |
-| `calibrated_win_probability` (isotonic fit ON realized outcomes) | +0.0472, t=+3.41 (36) | +0.1007, t=+4.15 (33) |
-
-Top-decile-by-`win_probability` excess vs the day's own universe: **+0.183%/day (t=+2.56)** at
-h=1, **+0.886%/period (t=+3.24)** at h=5. The day's 10 biggest real gainers sat at a mean
-`win_probability` percentile of **0.550** vs 0.500 for chance.
-
-**Leakage was tested for, not assumed.** `calibrated_win_probability` is produced by
-`ml_calibration.py` fitting isotonic on realized `signal_outcomes` — i.e. potentially on the very
-outcomes being graded. Grading the **raw** column separately isolates that: raw is independently
-positive, so this is **not purely a leakage artifact**. That calibrated is consistently stronger
-than raw is nonetheless consistent with *some* leakage in the calibrated column, and it should not
-be quoted as the headline number.
-
-**Why this does NOT contradict this file's "no edge" headline:** that verdict is about
-`unified_score` (5d rank IC ≈ 0.0001, t=0.02) and the 26 `FACTORS`. `win_probability` is a
-different, previously-ungraded column — the LGBM ensemble's own output. This is new information,
-not a reversal.
-
-**Four reasons this is NOT yet a tradeable edge, and must not be treated as one:**
-1. **IC is not edge, and this platform has been burned by exactly that.** See `delivery_pct` in
-   the table above: quintile spread t=+7.82, yet **dead** as a long-only factor net of costs
-   (−1.04%/period at 21d/25bps). Nothing here is cost- or turnover-aware. A real
-   `factor_backtest.py`-style net-of-cost run is required before any claim of tradeability.
-2. **Provenance is unverified.** It is assumed, not proven, that a date-`d` `win_probability` is
-   written before `d+1`'s open. `ml_ensemble --score` only fills `WHERE win_probability IS NULL`
-   (so it does not rewrite history), but the write *timing* was not traced. This repo has already
-   had one confident, wrong result from exactly this class (`signal_generated_at`, t=−3.44 → −1.28
-   once re-anchored) — treat the provenance filter as unchecked until someone traces it.
-3. **h=5 windows overlap** on consecutive dates, so those 38 observations are autocorrelated and
-   the t-stat is optimistic. h=1 (t=+2.58 raw) is the cleaner read.
-4. **Only 41 dates** (`win_probability` history starts 2026-05-16). Thin, and the same span that
-   this file elsewhere calls insufficient for a verdict.
-
-**Next step, in order:** trace write-timing provenance → re-run h=1 only, non-overlapping →
-cost/turnover-aware portfolio run. If it survives all three, it is the first genuinely positive
-signal measured on this platform and belongs in the "already tested" table with a real entry.
-Until then it stays here, flagged preliminary.
 
 ## The 7 permanently-NULL `technical_signals` columns are NOT broken writers (checked 2026-08-16)
 
@@ -1993,91 +1861,22 @@ follow-ups, neither of which is a code change: a deeper `analyst_estimates_histo
 second fiscal year in `working_capital_history` unblocks `ccc_trend`. `fcf_yield` and
 `created_at` are droppable whenever someone wants the schema tidy.
 
-### `build_features()`'s pandas fragmentation fix (2026-08-22) is NOT a scoring change — no `factor_backtest.py` run applies
+### `build_features()`'s fragmentation fix, then its single-pass rewrite (2026-08-22) — NOT scoring changes
 
-`ml_ensemble.py`'s `build_features()` assigns 400+ columns one at a time (`X['col'] = expr`),
-which trips pandas' `PerformanceWarning: DataFrame is highly fragmented` past its internal
-~100-block threshold — 612 distinct source lines, ~16,500 total warning instances across a full
-pytest run, purely from this one function (called from training, two scoring/backtest paths, and
-`incremental_update`). Found while investigating why a routine pytest run's output looked
-alarming (16k+ warning lines read, at a glance, like mass failure — it wasn't; 0 tests failed).
+400+ sequential `X['col'] = expr` assignments tripped pandas' `PerformanceWarning` (~16,500
+instances per test run). Fixed first with 5 periodic `.copy()` checkpoints, then properly by
+accumulating into a plain dict and constructing the DataFrame **once** (the `.copy()` checkpoints
+then became unnecessary and were removed). Verified byte-identical two ways: a direct old-vs-new
+comparison on identical input gave 421 columns and **0 differing values** (`atol=0, rtol=0`,
+empty-input branch included), and all 80 caller tests passed. Warning volume 16,526 -> 154.
 
-Fixed by inserting `X = X.copy()` at 5 points spread across the function's ~50 section
-boundaries. `.copy()` is a pure identity operation — it duplicates the DataFrame's data
-byte-for-byte into freshly consolidated memory blocks, changing zero values — and its only
-effect is resetting pandas' block-fragmentation counter before the next stretch of assignments
-re-triggers the warning. **No feature's computed value changes, no column is added or removed,
-no weight/threshold/formula is touched.**
+No feature value, weight, threshold, classification or formula changed, so **no `factor_backtest.py`
+run applies** — same reasoning as this file's `_log_recommendations` / `seed_screener_catalog`
+entries. **Performance was never benchmarked; do not quote a speedup.**
 
-**`factor_backtest.py` was deliberately NOT run, same reasoning as this file's
-`_log_recommendations`/`seed_screener_catalog`/`_next_generated_at` entries**: it measures
-price-panel factor edge and has no code path sensitive to `build_features()`'s internal memory
-layout. The applicable verification is a direct one, done: `test_ml_ensemble.py`,
-`test_exit_policy.py`, `test_ml_ensemble_pricefeed_fallback.py`,
-`test_ml_ensemble_promotion_label_and_edge.py`, `test_cs_ranker.py`,
-`test_analyst_estimates_snapshot.py`, `test_fundamentals_pit.py` (all callers of
-`build_features()` reachable from the test suite) — 80/80 passed, and the `PerformanceWarning`
-no longer appears in any of their output. **Warning volume measured, not asserted**: a full
-CI-identical run dropped from 16,526 warnings (pre-fix baseline) to 154 (post-fix) — the ~16.4k
-difference is entirely `PerformanceWarning` instances this fix removes.
+Full before/after detail, the substitution counts, and the unrelated `test_mc_earnings_fetcher`
+flake investigation: `docs/measurement-history.md`.
 
-Full CI-identical suite re-run twice to confirm no regression, and each run told a different,
-useful part of the story: the first came back `1 failed, 2125 passed` —
-`test_mc_earnings_fetcher.py::TestFetchActualEstimateBeatsUsesLogicalTradingDate::test_write_targets_logical_trading_date`,
-a file this change never touches. Investigated rather than dismissed: passed standalone, passed
-with its whole file run alone, and passed within `src/server/tests/` run alone (1,658 tests) — a
-`src/server/__tests__/`/`tests/chatbot/`-interaction-dependent flake, not reproducible in
-isolation. A second full run came back **`2129 passed / 232 skipped / 0 failed`** — clean,
-including that exact test. Recorded honestly rather than claimed as fixed: this is a
-**pre-existing, non-deterministic flake, root cause not identified**, orthogonal to this change
-(3 of 4 attempts against the post-fix code were clean; the file's own logic and this diff share
-no code path). Worth a dedicated look if it recurs; not this session's finding to claim.
-
-### `build_features()` rewritten to single-pass construction (2026-08-22) — supersedes the periodic-`.copy()` interim fix above, still not a scoring change
-
-The periodic-`.copy()` fix above was explicitly the mitigation, not the fix: it silenced the
-warning by resetting pandas' block-fragmentation counter, but the 400+ sequential
-`X['col'] = expr` assignments were still there. Rewritten for real: `build_features()` now
-accumulates every feature into a plain `dict` (`feat['col'] = expr`, O(1), no pandas block
-machinery involved at all) and constructs the DataFrame **once** at the very end
-(`X = pd.DataFrame(feat, index=df.index)`), which also made the 5 `.copy()` checkpoints
-unnecessary — removed.
-
-Done as a scoped, mechanical text transform (Python script under `Bash`, not hand-edited line by
-line across ~880 lines) with safety assertions on every substitution count before writing:
-`X['` → `feat['` (408 occurrences), `X.get(` → `feat.get(` (3, the second-order-interaction
-fallback reads), `index=X.index` → `index=df.index` (3, same 3 lines) — checked first for any
-other whole-DataFrame usage of `X` (`.columns`, `.shape`, `.loc`, `in X`, etc.) that a blind
-substitution could silently break; none existed beyond the 3 `.get()` sites and one unrelated
-comment mentioning `predict_proba_ensemble()`'s own `X` parameter (a different function, left
-untouched).
-
-**Verified as zero-value-change two ways, not one:**
-1. A direct old-vs-new comparison — both versions loaded side by side via `importlib`, called on
-   the identical synthetic 50-row input (broad column coverage, including columns deliberately
-   left absent to exercise `num()`'s default path and the `.get()`/`feat.get()` fallback path,
-   plus the `len(df)==0` empty branch) — **421 columns, 0 differing values, exact match
-   (`atol=0, rtol=0`), including the empty-input branch's column set.** Not a unit test; a one-off
-   script, deleted after use per this file's own convention for such checks.
-2. The existing 80-test suite across every `build_features()` caller — 80/80 passed, unchanged
-   from the periodic-`.copy()` fix's own verification.
-
-**No `factor_backtest.py` run applies, same reasoning as the periodic-`.copy()` fix and this
-file's `_log_recommendations`/`seed_screener_catalog` entries** — a construction-method change
-with byte-identical output has nothing for a price-panel factor-edge measurement to detect.
-
-Full CI-identical suite re-run a third time on top of this change: **2140 passed / 232 skipped /
-0 failed / 154 warnings (980.79s)** — same warning count as the periodic-`.copy()` fix (confirms
-the single-pass rewrite doesn't reintroduce fragmentation elsewhere), and the
-`test_mc_earnings_fetcher.py` flake noted above did **not** recur this run either (4 of 5 total
-attempts across both fixes now clean — consistent with "non-deterministic, unrelated," not
-"caused by either change").
-
-**Performance was not benchmarked.** Every claim above is about correctness (identical values) and
-warning suppression (confirmed), not wall-clock speed — dict accumulation plus one final
-construction is expected to be faster than 400+ incremental DataFrame inserts (the textbook
-reason pandas recommends this pattern), but that expectation was not measured with a timer, and
-should not be quoted as a measured number.
 
 ### First real DL walk-forward AUC in 17 attempts (roc_auc=0.6493), and the saturation guard rejected promotion anyway — 2026-08-25
 
@@ -2108,6 +1907,8 @@ lever is label/loss-side calibration, **not gate tampering** — the bar that fi
 
 - **Fundamentals, analyst, ownership and earnings factors**: every one of those tables has ~30 distinct dates, all starting 2026-06-30 (1–2 independent quarterly observations). Calendar constraint, not engineering — elapsed time or a backfill fixes it, nothing else does.
 - **FnO / positioning (long/short buildup, short covering)**: no fetcher captures per-stock futures OI; `so_stock_oi_summary.fut_oi` is 100% NULL (re-confirmed live 2026-08-21: 5,649 rows, `fut_oi` populated on **0**, table otherwise fresh to 2026-08-20 — the table is being written, that column never is). ⚠ **CORRECTED 2026-08-21 — "Needs a new data source" was WRONG, and it blocked this for months. The source is already onboarded; nobody ever built the fetcher.** `src/server/urls_sample.json` (857 URLs) carries `api.moneycontrol.com/mcapi/v1/fno/futures/getFuturesData?fut=FUTSTK&id=<scId>&expirydate=<d>`, live-probed against RELIANCE (`id=RI`, near expiry resolved from the sibling `getExpDts`, which returns `{"data":{"0":{"fno_exp":"2026-08-25",...}}}` — a dict-of-dicts, not a list; parsing it as a list yields `None` and a 422). Real response, verbatim: `open_int` 79,580,500 · `oi_change` −11,349,500 · `oi_percchg` −12.48 · **`oiBuildup` "Long Unwinding"** · `rollover` 52.57 · `oi_pcr` 0.61 · `spot_price` 1316.00 vs `lastprice` 1310.00 (so basis is derivable too). That is the entire long/short-buildup family this line called impossible, plus rollover, per stock, from an endpoint already in the registry. Trendlyne carries the same family independently (`smartoptions.trendlyne.com/phoenix/api/fno/market/filter/?...screenType=long-buildup|short-buildup|oi-gainers|oi-losers`, and `trendlyne.com/futures-options/api/heatmap/.../long/price/`), so there is a cross-check available rather than a single-vendor dependency. **Still genuinely unbuilt** — this is an engineering gap now, not a data gap, and the factor remains UNMEASURED: nothing here claims edge, and `oiBuildup` is a *vendor's own* directional label, which this file's `mojo_indigraph` row already shows is worth no more than our own. Build it per `data-sources.md` (fetcher + `live_datasource` test + `TABLE_FRESHNESS_CHECKS` entry; MC's `scId` is already in `StockMapping.mcsymbol`, and note two providers issue this family independently, so any table keyed on a vendor id needs the provider in the PK), then grade it through `factor_edge.py`/`factor_backtest.py` like everything else before it is allowed near `unified_ranker.py`.
+
+  ⚠ **CORRECTED again, 2026-08-27 — "Still genuinely unbuilt" is now stale too.** `mc_stock_futures_oi_fetcher.py` exists, writes `stock_futures_oi_history` keyed `(source, symbol, date, expiry)` (the composite-key rule was followed), has its `live_datasource` test and `dataQualityChecks.ts` freshness entry, and runs daily inside `ml-daily-ops`'s F&O microstructure batch — live-checked: 233 symbols, 3 of the last 4 trading days populated (~230/day). What was still missing was the "must be graded through `factor_edge.py`" step the fetcher's own docstring promises — no scheduled call existed, so the table was accumulating with no path to a verdict, same gap `engine_composite_scores` had before it got one. Added (`queues.ts`, `ml-weekly-retrain`, alongside the other `factor_edge.py --persist` calls) and run once live to seed it: `oi_change`/`oi_pct_change`/`oi_pcr`/`basis`/`rollover_pct` at 1d, 3 dates, all `LOW-DATA` (table is under a week old) — `basis` is the only one worth watching once more dates accrue (rank_IC +0.156, n=846, but 3 dates is far too thin to read anything into that yet). `oiBuildup` deliberately excluded from grading, per the fetcher's own docstring — it's a vendor text label, not a numeric score, and this file's `mojo_indigraph` row already shows a vendor's own directional call is worth no more than ours. Re-check once ~20 dates have accumulated (~late September on daily cadence), same bar as every other LOW-DATA row in this file.
 - Of 60 symbol+date tables audited 2026-08-11, only 9 have enough history to test anything at all; the other 35 start ~2026-06-30.
 
 - **REGIME_WEIGHTS re-check executed early on the expanded sample — shipped weights CONFIRMED, no edit (2026-08-25).** The 2026-08-13 ml×0.5 derivation's own comment pins a trigger ("re-run blend_walkforward.py once ~20+ further sessions accumulate"); only ~8 had accrued when this session reached the item, but the harness was run anyway across ALL data (46 sessions, 74,246 rows, 2,407 symbols): BASE mean 5d open-entry rank IC **0.0406**, 26/33 days positive, 9 top-30→next-day-top-15 gainer hits, mean edge +0.134pp — vs TILT dIC **−0.0003**, same hits, edge +0.139pp. Pre-declared bar (dIC>0 AND |t|≥~2) not met by the alternative ⇒ weights stay verbatim. This is a validation, NOT a reweight; do not cite it as an improvement.
