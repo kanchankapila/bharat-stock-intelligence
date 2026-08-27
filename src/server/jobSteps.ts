@@ -24,7 +24,9 @@ export class StepTracker {
     } catch (e) {
       const error = (e as Error)?.message ?? String(e);
       this.recs.push({ name: monitorName, ok: false, error, ms: Date.now() - t0 });
-      console.warn(`[QUEUE] ${this.jobName}:${monitorName} failed:`, error);
+      if (process.env.VITEST !== 'true' && process.env.NODE_ENV !== 'test') {
+        console.warn(`[QUEUE] ${this.jobName}:${monitorName} failed:`, error);
+      }
       return undefined;
     }
   }
@@ -46,7 +48,9 @@ export class StepTracker {
     const names = failed.map(r => r.name);
     const line = `${this.recs.length - failed.length} ok, ${failed.length} failed`
       + (failed.length ? `: ${names.join(', ')}` : '');
-    console.log(`[QUEUE] ${this.jobName}: ${line}`);
+    if (process.env.VITEST !== 'true' && process.env.NODE_ENV !== 'test') {
+      console.log(`[QUEUE] ${this.jobName}: ${line}`);
+    }
     updateMonitorState(
       this.jobName,
       failed.length ? 'failed' : 'success',

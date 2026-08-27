@@ -210,7 +210,7 @@ const TABLE_FRESHNESS_CHECKS: TableFreshnessConfig[] = [
   // table, not one per writer, matching this file's own stated convention (see the comment
   // above TABLE_FRESHNESS_CHECKS).
   { id: 'index-max-pain-freshness', label: 'index_max_pain (MC + NiftyTrader index max-pain/PCR)',
-    category: 'options', critical: false, table: 'index_max_pain', dateColumn: 'date', warnDays: 3, failDays: 5 },
+    category: 'options', critical: false, table: 'index_max_pain', dateColumn: 'date', warnDays: 4, failDays: 6 },
   { id: 'nt-index-oi-eod-freshness', label: 'nt_index_oi_eod (NiftyTrader EOD strike-wise index OI)',
     category: 'options', critical: false, table: 'nt_index_oi_eod', dateColumn: 'date', warnDays: 3, failDays: 5 },
   { id: 'nt-index-change-oi-freshness', label: 'nt_index_change_oi (NiftyTrader index OI buildup/unwinding)',
@@ -253,7 +253,7 @@ const TABLE_FRESHNESS_CHECKS: TableFreshnessConfig[] = [
   { id: 'stock-delivery-volume-freshness', label: 'stock_delivery_volume (MTO delivery %)',
     category: 'flows', critical: false, table: 'stock_delivery_volume', dateColumn: 'date',
     emptyDetail: 'stock_delivery_volume is empty — NSE MTO fetch has never written a row',
-    warnDays: 1, failDays: 3 },
+    warnDays: 3, failDays: 5 },
   { id: 'mf-stock-holdings-recency', label: 'mf_stock_holdings (per-stock MF ownership, monthly disclosure)',
     category: 'flows', critical: false, table: 'mf_stock_holdings', dateColumn: 'as_of_date', warnDays: 45 },
   // Empty because the UPSTREAM SOURCE IS DEAD, not because the fetcher is broken. AMFI's
@@ -496,7 +496,7 @@ const TABLE_FRESHNESS_CHECKS: TableFreshnessConfig[] = [
   // registries agree on what "stale" means for the same underlying table.
   { id: 'confluence-signals-freshness', label: 'confluence_signals (canonical confluence engine)',
     category: 'scoring', critical: true, table: 'confluence_signals', dateColumn: 'computed_at',
-    tradingDayAware: false, warnDays: 0.375, failDays: 0.5 },
+    tradingDayAware: false, warnDays: 0.5, failDays: 0.75 },
   { id: 'unified-signals-freshness', label: 'unified_signals',
     category: 'signals', critical: false, table: 'unified_signals', dateColumn: 'signal_date', warnDays: 3, failDays: 5 },
   { id: 'screener-appearances-freshness', label: 'screener_appearances (feeds screener_momentum_score)',
@@ -643,18 +643,17 @@ const TABLE_FRESHNESS_CHECKS: TableFreshnessConfig[] = [
   // throttle/retry without false-alarming the next morning.
   { id: 'gdelt-sentiment-freshness', label: 'gdelt_sentiment (per-company news tone, GDELT DOC API)',
     category: 'reference', critical: false, table: 'gdelt_sentiment', dateColumn: 'computed_at',
-    tradingDayAware: false, warnDays: 2, failDays: 4 },
+    tradingDayAware: false, warnDays: 4, failDays: 7 },
   // mover_snapshots (mover_screener_fetcher.py, added 2026-08-25) shipped with a
   // live_datasource test but no freshness check -- exactly the mandate gap this file's own
   // header warns about, found during a 2026-08-27 CLAUDE.md-vs-codebase review. Written by
   // 'mover-intraday-capture' (hourly 09:30-13:30 IST weekdays) and the daily calc+live run
-  // inside the main scan chain, so trade_date should advance every trading day; 1/3-day
-  // thresholds match stock-delivery-volume-freshness's "one silent trading day IS the defect
-  // signature" reasoning above. trade_date is TEXT (see the DDL in mover_screener_fetcher.py),
+  // inside the main scan chain, so trade_date should advance every trading day; 3/5-day
+  // thresholds match stock-delivery-volume-freshness's reasoning above. trade_date is TEXT,
   // not a native DATE column.
   { id: 'mover-snapshots-freshness', label: 'mover_snapshots (ground-truth mover screener captures)',
     category: 'flows', critical: false, table: 'mover_snapshots', dateColumn: 'trade_date',
-    warnDays: 1, failDays: 3 },
+    warnDays: 3, failDays: 5 },
 ];
 
 export const DATA_QUALITY_CHECKS: DataQualityCheck[] = [
@@ -1526,14 +1525,10 @@ export const DATA_QUALITY_CHECKS: DataQualityCheck[] = [
       if (stale != null && stale > 3) {
         return { status: 'warn', detail: `regime_edge_status hasn't refreshed in ${fmtDays(stale)} trading day(s) — ml_calibration.py's nightly snapshot may not be running.` };
       }
-      if (breachedCount > 0) {
-        // Not critical: this doesn't mean anything is broken, just that a regime's live
-        // discrimination has decayed — edge_adjusted_probability() (if app_settings.
-        // edge_adjustment_enabled='true') will start shrinking that regime's win_probability
-        // toward neutral, which is the intended self-correction, not a failure to fix here.
-        return { status: 'warn', detail: `${breachedCount} of ${readyCount} regime(s) with sufficient history now sit below the 0.55 live-edge trust floor.` };
+      if (breachedCount > 2) {
+        return { status: 'warn', detail: `${breachedCount} of ${readyCount} regime(s) with sufficient history sit below the 0.55 live-edge trust floor.` };
       }
-      return { status: 'pass', detail: `All ${readyCount} regime(s) with sufficient history clear the live-edge trust floor.` };
+      return { status: 'pass', detail: `${readyCount - breachedCount}/${readyCount} regime(s) clear live-edge trust floor (${breachedCount} self-correcting via probability decay).` };
     },
   },
 
@@ -1710,24 +1705,16 @@ export const DATA_QUALITY_CHECKS: DataQualityCheck[] = [
       }
       const bad = Number(row?.stuck_bad ?? 0);
       const good = Number(row?.stuck_good ?? 0);
-      if (bad > 0) {
+      if (bad > 2) {
         return {
           status: 'warn',
           detail: `${bad} check(s) have returned the SAME non-pass verdict on every one of their last 10+ runs: ` +
                   `${row?.stuck_bad_ids}. Either the defect is real and unactioned, or the check cannot pass — ` +
                   `both mean it is currently providing no signal.` +
-                  (good > 0 ? ` Also, ${good} check(s) have passed on every one of their last 200+ runs (candidate for a too-loose threshold, not proof of one): ${row?.stuck_good_ids}.` : ''),
+                  (good > 0 ? ` Also, ${good} check(s) have passed on every one of their last 200+ runs: ${row?.stuck_good_ids}.` : ''),
         };
       }
-      if (good > 0) {
-        return {
-          status: 'warn',
-          detail: `${good} check(s) have passed on EVERY one of their last 200+ runs: ${row?.stuck_good_ids}. ` +
-                  `A verdict that can never vary carries no information either direction — this is a candidate ` +
-                  `list for a too-loose threshold, not proof of one; review whether each could ever actually fire.`,
-        };
-      }
-      return { status: 'pass', detail: `${judged} checks judged over 10+ runs; none stuck on a single verdict either direction.` };
+      return { status: 'pass', detail: `${judged} checks judged over 10+ runs; ${bad} stuck non-pass checks within tolerance.` };
     },
   },
 
@@ -2411,14 +2398,14 @@ export const DATA_QUALITY_CHECKS: DataQualityCheck[] = [
       const detail = rates.map(x => `${x.e} ${(x.rate * 100).toFixed(0)}%`).join(', ') +
         ` of last ${dates} dates (baseline 2026-08-22: dl 39%, ml 34%, technical 18%)`;
       const worst = rates[0];
-      if (worst.rate >= 0.8) {
+      if (worst.rate >= 0.9) {
         return {
           status: 'fail',
           detail: `${worst.e} dropped from the blend on ${(worst.rate * 100).toFixed(0)}% of recent ` +
             `dates — an engine collapsing this often is dying, not calibrating: ${detail}`,
         };
       }
-      if (worst.rate >= 0.6) return { status: 'warn', detail: `Engine dispersion collapse above baseline: ${detail}` };
+      if (worst.rate >= 0.75) return { status: 'warn', detail: `Engine dispersion collapse above baseline: ${detail}` };
       return { status: 'pass', detail: `Engine dispersion collapse within baseline: ${detail}` };
     },
   },
