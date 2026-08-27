@@ -138,7 +138,7 @@ def _et_company_map() -> dict | None:
         return {str(r["companyid"]): r["symbol"].upper() for r in rows
                 if r.get("companyid") and r.get("symbol")}
     except Exception as e:
-        print(f"[et_screen] companyid map unavailable ({e})")
+        print(f"[et_screen] companyid map unavailable ({e})", file=sys.stderr)
         return None
 
 
@@ -195,7 +195,7 @@ def fetch_et_screens(session, wanted: set | None = None, trade_date: str = "") -
                             json.dumps(payload, default=str)))
             print(f"[{source}] captured {rank} rows")
         except Exception as e:
-            print(f"[{source}] fetch failed: {e}")
+            print(f"[{source}] fetch failed: {e}", file=sys.stderr)
     return out
 
 MC_HEADERS = {
@@ -295,7 +295,7 @@ def _rows_from_response(resp, label: str):
     try:
         body = resp.json()
     except ValueError:
-        print(f"[{label}] non-JSON response ({resp.status_code}), skipping")
+        print(f"[{label}] non-JSON response ({resp.status_code}), skipping", file=sys.stderr)
         return []
     groups = _find_rows(body)
     rows = [r for g in groups for r in g]
@@ -340,7 +340,7 @@ def fetch_et(session, dur_label: str, dur_param: str, order: str = "desc") -> li
         resp.raise_for_status()
         rows = _rows_from_response(resp, label)
     except Exception as e:
-        print(f"[{label}] fetch failed: {e}")
+        print(f"[{label}] fetch failed: {e}", file=sys.stderr)
     out = []
     for i, row in enumerate(rows, 1):
         norm = normalize_row(row, i)
@@ -365,7 +365,7 @@ def _mojo_sid_map() -> dict | None:
         return {str(r["stockid"]): r["symbol"].upper() for r in rows
                 if r.get("stockid") and r.get("symbol")}
     except Exception as e:
-        print(f"[mojo] stocklist.json sid map unavailable ({e})")
+        print(f"[mojo] stocklist.json sid map unavailable ({e})", file=sys.stderr)
         return None
 
 
@@ -406,7 +406,7 @@ def fetch_mojo(session) -> list:
             else:
                 raw_rows = [r for g in _rows_from_response(resp, label) for r in g]
         except Exception as e:
-            print(f"[{label}] fetch failed: {e}")
+            print(f"[{label}] fetch failed: {e}", file=sys.stderr)
         seen, rank = set(), 0
         for row in raw_rows:
             sym = _ci_get(row, *SYMBOL_KEYS)
@@ -440,7 +440,7 @@ def fetch_niftytrader(session) -> list:
         resp.raise_for_status()
         rows = _rows_from_response(resp, "nt_top_gainers")
     except Exception as e:
-        print(f"[nt_top_gainers] fetch failed: {e}")
+        print(f"[nt_top_gainers] fetch failed: {e}", file=sys.stderr)
     out = []
     for i, row in enumerate(rows, 1):
         norm = normalize_row(row, i)
@@ -464,7 +464,7 @@ def _mc_symbol_map() -> dict | None:
                          "WHERE mcsymbol IS NOT NULL AND mcsymbol <> ''")
         return {r["mcsymbol"].strip().upper(): r["symbol"] for r in rows}
     except Exception as e:
-        print(f"[mc_price_shockers] symbol-map lookup failed ({e})")
+        print(f"[mc_price_shockers] symbol-map lookup failed ({e})", file=sys.stderr)
         return None
 
 
@@ -500,7 +500,7 @@ def fetch_mc_shockers(session, symbol_map: dict | None = None) -> list:
         else:
             rows = _rows_from_response(resp, "mc_price_shockers")
     except Exception as e:
-        print(f"[mc_price_shockers] fetch failed: {e}")
+        print(f"[mc_price_shockers] fetch failed: {e}", file=sys.stderr)
         rows = []
     out = []
     rank = 0
@@ -536,7 +536,7 @@ def _nt_bearer_token():
         return query_scalar(
             "SELECT value FROM app_settings WHERE key = 'niftytrader_auth_token'")
     except Exception as e:
-        print(f"[ntlive] token lookup failed ({e}); live screener will be skipped")
+        print(f"[ntlive] token lookup failed ({e}); live screener will be skipped", file=sys.stderr)
         return None
 
 
@@ -654,7 +654,7 @@ def fetch_nt_screens(session, wanted: set | None = None) -> list:
             out += rows
             print(f"[{source}] captured {len(rows)} rows")
         except Exception as e:
-            print(f"[{source}] fetch failed: {e}")
+            print(f"[{source}] fetch failed: {e}", file=sys.stderr)
     return out
 
 
@@ -681,7 +681,7 @@ def fetch_nt_live_screener(session, bearer: str | None = None, hhmm: str = "eod"
         print(f"[ntlive_{hhmm}_*] captured {len(rows)} rows (market + {len(NT_LIVE_SCREENS)} screens)")
         return rows
     except Exception as e:
-        print(f"[ntlive_{hhmm}] fetch failed: {e}")
+        print(f"[ntlive_{hhmm}] fetch failed: {e}", file=sys.stderr)
         return []
 
 
@@ -700,7 +700,7 @@ def fetch_live(trade_date: str, wanted: set | None = None, hhmm: str = "eod") ->
             out += fetch_et(session, "gainers_1w", "1%20week")
             out += fetch_et(session, "losers_1w", "1%20week", order="asc")
         except Exception as e:
-            print(f"[et] block failed hard: {e}")
+            print(f"[et] block failed hard: {e}", file=sys.stderr)
     for fn, tag in ((fetch_mojo, "mojo"), (fetch_niftytrader, "nt"),
                     (lambda s: fetch_mc_shockers(s, symbol_map=_mc_symbol_map()),
                      "mc_price_shockers"),
@@ -715,7 +715,7 @@ def fetch_live(trade_date: str, wanted: set | None = None, hhmm: str = "eod") ->
         try:
             out += fn(session)
         except Exception as e:
-            print(f"[{tag}] failed hard: {e}")
+            print(f"[{tag}] failed hard: {e}", file=sys.stderr)
     return [r + (trade_date,) for r in out]
 
 
@@ -857,7 +857,7 @@ def resolve_trade_date(con) -> str:
         if row and row["d"]:
             return str(row["d"])[:10]
     except Exception as e:
-        print(f"[mover] session-date lookup failed ({e}); falling back to today")
+        print(f"[mover] session-date lookup failed ({e}); falling back to today", file=sys.stderr)
     return datetime.date.today().strftime("%Y-%m-%d")
 
 
@@ -902,7 +902,7 @@ def main():
                 total[f"live@{hhmm}"] = persist(
                     con, [r + (trade_date,) for r in rows], now_iso)
             except Exception as e:
-                print(f"[live] intraday slot capture failed: {e}")
+                print(f"[live] intraday slot capture failed: {e}", file=sys.stderr)
             con.close()
             print(f"[mover] done: {dict(total)} rows persisted to mover_snapshots")
             return
@@ -919,12 +919,12 @@ def main():
                         if not wanted or r[0] in wanted]
                 total["calc(today)"] = persist(con, rows, now_iso)
             except Exception as e:
-                print(f"[calc] today's classes failed: {e}")
+                print(f"[calc] today's classes failed: {e}", file=sys.stderr)
         if live_wanted:
             try:
                 total["live"] = persist(con, fetch_live(trade_date, wanted), now_iso)
             except Exception as e:
-                print(f"[live] capture failed: {e}")
+                print(f"[live] capture failed: {e}", file=sys.stderr)
 
     con.close()
     print(f"[mover] done: {dict(total)} rows persisted to mover_snapshots")

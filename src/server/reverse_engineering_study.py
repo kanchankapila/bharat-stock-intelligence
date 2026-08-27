@@ -160,7 +160,7 @@ def load_factors_for_date(engine, t1_date: str) -> pd.DataFrame:
             wide = df if wide is None else wide.merge(df, on="symbol", how="outer")
         except Exception as e:
             # tail, not head -- the SQL prefix is useless; the driver's message is at the end
-            print(f"[study] factor family '{fam}' unavailable (...{str(e)[-220:]}) -> skipped")
+            print(f"[study] factor family '{fam}' unavailable (...{str(e)[-220:]}) -> skipped", file=sys.stderr)
     if wide is None:
         return pd.DataFrame(columns=["symbol"])
     for c in wide.columns:

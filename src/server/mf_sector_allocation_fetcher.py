@@ -270,7 +270,7 @@ def refresh_universe(max_per_amc=None) -> int:
         try:
             schemes = discover_schemes(slug, amcid)
         except UpstreamError as e:
-            print(f"[MFSectorAlloc] WARN: {slug} ({amcid}) failed: {e}")
+            print(f"[MFSectorAlloc] WARN: {slug} ({amcid}) failed: {e}", file=sys.stderr)
             continue
         if max_per_amc:
             schemes = set(sorted(schemes)[:max_per_amc])
