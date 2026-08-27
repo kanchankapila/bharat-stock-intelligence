@@ -47,7 +47,20 @@ const common = {
 
 // Shared config for greenfield one-shot cron jobs (shadow-ranker pipeline).
 // cron_restart schedules the run; autorestart:false lets the script exit normally
-// without pm2 restarting it immediately.  All cron times are UTC -- IST = UTC+5:30.
+// without pm2 restarting it immediately.
+//
+// cron_restart strings below are LOCAL SERVER TIME (IST, UTC+5:30), not UTC, despite
+// every job's inline comment historically documenting a "UTC = IST" pair as if the UTC
+// half were literal. Found 2026-08-27: PM2's cron_restart (Worker.js) calls
+// `Cron(pm2_env.cron_restart, callback)` from the `croner` package with no options object
+// at all -- no timezone field exists anywhere in PM2's own cron_restart code path for an
+// ecosystem.config.cjs app to set, so croner always falls back to the process's system
+// timezone (IST on this host, confirmed via job_heartbeat: pg-backup fired at 17:45
+// LOCAL, matching its raw '45 17 * * *' string, not the intended 17:45 UTC = 23:15 IST).
+// Every cron string below was therefore firing 5.5h earlier than its own comment's stated
+// intent for as long as it has run. Fixed by rewriting each string to its true IST
+// value (arithmetic verified against the pre-existing "X UTC = Y IST" comments, which were
+// internally correct -- only the code never matched them) and updating comments to match.
 // Prerequisite: run `pnpm install` once inside the greenfield/ directory so that
 // @greenfield/* workspace packages are resolvable from their pnpm virtual store.
 const gfCron = {
@@ -102,7 +115,7 @@ module.exports = {
     },
 
     // ------------------------------------------------------------------
-    // Greenfield shadow-ranker pipeline (one-shot cron jobs, UTC times)
+    // Greenfield shadow-ranker pipeline (one-shot cron jobs, local IST times — see gfCron's own comment)
     // Chain: bhavcopy → fii-dii → features → ranker (daily, weekdays)
     //        kayal screeners (weekly, Sunday) | fundamentals (weekly, Saturday)
     // ------------------------------------------------------------------
@@ -110,56 +123,56 @@ module.exports = {
     {
       ...gfCron,
       name: 'gf-bhavcopy-daily',
-      // 10:30 UTC = 16:00 IST — NSE bhavcopy published by ~15:30 IST
-      cron_restart: '30 10 * * 1-5',
+      // 16:00 IST (10:30 UTC) — NSE bhavcopy published by ~15:30 IST
+      cron_restart: '0 16 * * 1-5',
       args: 'greenfield/packages/ingestion/src/nse/run-daily-bhavcopy.ts',
     },
     {
       ...gfCron,
       name: 'gf-fii-dii-daily',
-      // 12:00 UTC = 17:30 IST — NSE publishes FII/DII after market close
-      cron_restart: '0 12 * * 1-5',
+      // 17:30 IST (12:00 UTC) — NSE publishes FII/DII after market close
+      cron_restart: '30 17 * * 1-5',
       args: 'greenfield/packages/ingestion/src/stage3/run-daily-fii-dii.ts',
     },
     {
       ...gfCron,
       name: 'gf-features-daily',
-      // 12:30 UTC = 18:00 IST — after bhavcopy + FII/DII land
-      cron_restart: '30 12 * * 1-5',
+      // 18:00 IST (12:30 UTC) — after bhavcopy + FII/DII land
+      cron_restart: '0 18 * * 1-5',
       args: 'greenfield/packages/ingestion/src/stage4/run-compute-features.ts',
     },
     {
       ...gfCron,
       name: 'gf-stage3-dq-daily',
-      // 12:40 UTC — Task 3.7's 5 checks (corporate-actions/fundamentals/fii-dii/
+      // 18:10 IST (12:40 UTC) — Task 3.7's 5 checks (corporate-actions/fundamentals/fii-dii/
       // screener-membership freshness+coverage) had evaluateAllStage3Checks/
       // persistStage3DqResult exported but no runner anywhere — dead code from
       // an operational standpoint. run-dq-checks.ts mirrors stage4's own runner.
-      cron_restart: '40 12 * * 1-5',
+      cron_restart: '10 18 * * 1-5',
       args: 'greenfield/packages/ingestion/src/stage3/run-dq-checks.ts',
     },
     {
       ...gfCron,
       name: 'gf-stage4-dq-daily',
-      // 12:50 UTC — same gap, one stage over: run-dq-checks.ts existed and
+      // 18:20 IST (12:50 UTC) — same gap, one stage over: run-dq-checks.ts existed and
       // called evaluateAllStage4Checks correctly, just never scheduled.
-      cron_restart: '50 12 * * 1-5',
+      cron_restart: '20 18 * * 1-5',
       args: 'greenfield/packages/ingestion/src/stage4/run-dq-checks.ts',
     },
     {
       ...gfCron,
       name: 'gf-ranker-daily',
-      // 13:00 UTC = 18:30 IST — after features; shadow period clock ticks here
-      cron_restart: '0 13 * * 1-5',
+      // 18:30 IST (13:00 UTC) — after features; shadow period clock ticks here
+      cron_restart: '30 18 * * 1-5',
       args: 'greenfield/packages/ingestion/src/stage5/run-ranker.ts',
     },
     {
       ...gfCron,
       name: 'gf-divergence-daily',
-      // 13:15 UTC = 18:45 IST — after ranker; compares shadow recs against legacy
+      // 18:45 IST (13:15 UTC) — after ranker; compares shadow recs against legacy
       // unified_recommendations for the same session (descriptive only, per spec).
       // Needs OLD_DATABASE_URL like the weekly transfer jobs below -- reads legacy.
-      cron_restart: '15 13 * * 1-5',
+      cron_restart: '45 18 * * 1-5',
       args: 'greenfield/packages/ingestion/src/stage5/run-divergence-analysis.ts',
       env: {
         ...dotenvVars,
@@ -170,8 +183,8 @@ module.exports = {
     {
       ...gfCron,
       name: 'gf-kayal-weekly',
-      // 02:00 UTC Saturday = 07:30 IST Saturday — 1,052 screenpks × ~6s each
-      cron_restart: '0 2 * * 6',
+      // 07:30 IST Saturday (02:00 UTC) — 1,052 screenpks × ~6s each
+      cron_restart: '30 7 * * 6',
       kill_timeout: 7_200_000,  // 2h
       args: 'greenfield/packages/ingestion/src/stage3/transfer-screener-membership.ts',
       env: {
@@ -185,19 +198,19 @@ module.exports = {
     {
       ...gfCron,
       name: 'gf-fundamentals-weekly',
-      // 04:00 UTC Saturday = 09:30 IST Saturday — ET Stats + MarketsMojo (~180 symbols)
-      cron_restart: '0 4 * * 6',
+      // 09:30 IST Saturday (04:00 UTC) — ET Stats + MarketsMojo (~180 symbols)
+      cron_restart: '30 9 * * 6',
       kill_timeout: 3_600_000,  // 1h
       args: 'greenfield/packages/ingestion/src/stage3/transfer-fundamentals.ts',
     },
     // Phase 2 — analyst estimates + insider trades (one-shot Saturday morning).
-    // Both read legacy bharat_intel DB; ran after fundamentals (04:00 UTC)
+    // Both read legacy bharat_intel DB; ran after fundamentals (09:30 IST)
     // so the connection pool is free.
     {
       ...gfCron,
       name: 'gf-analyst-estimates-weekly',
-      // 06:00 UTC Saturday = 11:30 IST Saturday
-      cron_restart: '0 6 * * 6',
+      // 11:30 IST Saturday (06:00 UTC)
+      cron_restart: '30 11 * * 6',
       kill_timeout: 1_800_000,  // 30 min — bulk DB-to-DB copy, no live API calls
       args: 'greenfield/packages/ingestion/src/stage3/transfer-analyst-estimates.ts',
       env: {
@@ -209,8 +222,8 @@ module.exports = {
     {
       ...gfCron,
       name: 'gf-insider-activity-weekly',
-      // 06:30 UTC Saturday = 12:00 IST Saturday
-      cron_restart: '30 6 * * 6',
+      // 12:00 IST Saturday (06:30 UTC)
+      cron_restart: '0 12 * * 6',
       kill_timeout: 1_800_000,  // 30 min
       args: 'greenfield/packages/ingestion/src/stage3/transfer-insider-activity.ts',
       env: {
@@ -232,8 +245,8 @@ module.exports = {
     {
       ...gfCron,
       name: 'pg-backup-nightly',
-      // 17:45 UTC = 23:15 IST — daily after all rankers, digests, and DQ checks complete.
-      cron_restart: '45 17 * * *',
+      // 23:15 IST (17:45 UTC) — daily after all rankers, digests, and DQ checks complete.
+      cron_restart: '15 23 * * *',
       kill_timeout: 3_600_000,  // 1h — a full -Fc dump of a multi-GB TimescaleDB instance
       interpreter: VENV_PY,
       script: path.resolve(__dirname, 'scripts', 'backup_pg.py'),

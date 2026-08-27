@@ -116,7 +116,14 @@ def backup() -> None:
         proc = subprocess.run(cmd, stdout=fh, stderr=subprocess.PIPE)
     if proc.returncode != 0:
         out.unlink(missing_ok=True)
-        msg = f"pg_dump failed: {proc.stderr.decode(errors='replace')[:1000]}"
+        # Keep the TAIL, not the head: TimescaleDB's circular-FK warnings on its own catalog
+        # tables (hypertable/chunk/continuous_agg) are benign boilerplate that pg_dump repeats
+        # for every affected table, and they front-load enough text that a head-truncated
+        # message cuts off exactly where the real fatal "pg_dump: error: ..." line starts --
+        # found 2026-08-27 diagnosing a live 5/31 pg-backup failure rate: job_heartbeat's
+        # stored error read "...pg_dump: er" with the actual cause never recorded anywhere.
+        stderr_text = proc.stderr.decode(errors='replace')
+        msg = f"pg_dump failed: {stderr_text[-2000:]}"
         _record_heartbeat(False, msg)
         sys.exit(f"[BACKUP] {msg}")
 
