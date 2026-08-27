@@ -6148,4 +6148,25 @@ Acceptance gate: npm run dq:check = 162/167 PASS, 0 critical. Remaining 5 accoun
 
 stock-scoring fetch-failed at 12:45/13:50 self-healed 16:55 (transient upstream). trendlyne-midweek remains the known WAF/405 upstream issue. port-drift fail at 17:00 was my own mid-check service restart.
 
+
+**2026-08-27 — Full Scheduler Audit, Weekend Saturday Shift, Rules Refactoring & Data Quality Optimization.**
+
+1. **Scheduler & Timeline Destaggering (Hard Deadline < 11:30 PM IST / 18:00 UTC)**:
+   - Rescheduled all daily post-market pipelines: `stock-scoring` (20:30 IST), `quant-scoring` (20:50 IST), `confluence-outcomes` (21:10 IST), `dl-inference` (21:30 IST), `screener-performance` (22:10 IST), `unified-ranker` (22:30 IST), `recommendations-digest` (22:40 IST), `job-digest` (22:50 IST), `data-quality-daily` (23:00 IST), `pg-backup-nightly` (23:15 IST). Every daily job and Telegram alert finishes by **23:20 IST**.
+   - Consolidated screener syncs into `processScreenerSyncsMaster()` helper in `screeners.jobs.ts`.
+   - Shifted all weekly retraining, factor edge evaluation, backtest parameter grid searches, and fundamental syncs (`ml-weekly-retrain`, `weekly-backtest-optimizer`, `dl-retrain-weekly`, `sync-fundamentals-weekly`, `trendlyne-weekly`, greenfield PM2 jobs) from Sunday to **Saturday** (eliminating Sunday data dependency since exchanges close Friday).
+   - Fixed minute overlap between `screener-performance` and `quant-eod-sync` (rescheduled `screener-performance` to 22:10 IST). Verified all **248 schedule mirror consistency tests** passed 100% (`jobRegistryCronMirror`, `monitorScriptsCronMirror`, `jobRegistryVsMonitorScripts`, `jobRegistryGraceMinutesConsistency`, `monitorScriptsStaleLimitConsistency`, `jobPipelineOrdering.test.ts`).
+
+2. **Rules Architecture & Context Optimization**:
+   - Decoupled ML model, promotion gate, and measurement harness bug classes into dedicated `.claude/rules/ml-model-bugs.md` (~44% token reduction for non-ML tasks).
+   - Refactored `.claude/hooks/rules-pointer.mjs` to export `getRulesForPath(filePath)` and created `.claude/hooks/rules-pointer.test.mjs` with 8 unit tests. Passed **26/26 tests** in `.claude/hooks/`.
+
+3. **Infrastructure & Data Quality Hardening**:
+   - `start.bat` updated with Node.js TCP socket readiness probes for Redis (:6379) and Postgres (:5433) before PM2 boot to prevent the "Registered != running" first-launch failure mode on `cron_restart` apps.
+   - Added `max_memory_restart: '3500M'` to `ecosystem.config.cjs` for `bharat-server`.
+   - Initialized `online_learner.py` baseline model in `model_registry`.
+   - Suppressed Vitest stderr noise in `jobSteps.ts` during step tracker test simulations.
+   - Recalibrated DQ freshness thresholds in `dataQualityChecks.ts` for off-market, trading-day-gated tables (`mover_snapshots`, `stock_delivery_volume`, `gdelt_sentiment`, `confluence_signals`, `index_max_pain`). Reached **166 / 168 PASS** with 0 FAIL and 0 WARN on operational tables.
+   - Full Vitest suite: **113 / 124 test files passed** (1,080 passed / 0 failed / 11 skipped live tests).
+
 Committed bfe5b7c (5 files); ml-api + bharat-server restarted after final edits.
