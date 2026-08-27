@@ -146,14 +146,20 @@ class TestParseEarningsForecast:
 def _restore_db_env():
     """Repoint POSTGRES_URL at a throwaway Postgres schema per test; restore + invalidate engine cache after."""
     import psycopg2
-    from pg_test_support import _pg_dsn, _sa_url, pg_available, drop_throwaway_schema
+    from pg_test_support import (
+        PG_TEST_SCHEMA_LOCK_NS, _pg_dsn, _sa_url, pg_available, drop_throwaway_schema,
+    )
     if not pg_available():
         pytest.skip("live Postgres not reachable — set PGTEST_* or start the container")
     saved = {k: os.environ.get(k) for k in ("POSTGRES_URL", "USE_POSTGRES", "DATABASE_URL")}
     schema = f"t_{uuid.uuid4().hex[:12]}"
     admin = psycopg2.connect(**_pg_dsn())
     admin.autocommit = True
-    admin.cursor().execute(f'CREATE SCHEMA "{schema}"')
+    admin_cur = admin.cursor()
+    admin_cur.execute(f'CREATE SCHEMA "{schema}"')
+    # See pg_test_support.purge_orphan_schemas: claim ownership before this schema has any
+    # table of its own, or a concurrent sweep can read the pre-DDL gap as orphaned.
+    admin_cur.execute("SELECT pg_advisory_lock(%s, hashtext(%s))", (PG_TEST_SCHEMA_LOCK_NS, schema))
     os.environ["USE_POSTGRES"] = "true"
     os.environ["POSTGRES_URL"] = _sa_url(schema)
     os.environ.pop("DATABASE_URL", None)

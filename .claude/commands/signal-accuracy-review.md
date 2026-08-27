@@ -45,10 +45,14 @@ For anything in the first bucket, trace *where* the symbol dropped out by walkin
 
 Report per-date, then average. **Never pooled** — pooling has flipped or inflated a conclusion three separate times in this repo.
 
-State plainly:
-- hit rate and wrong-direction count, with the date count behind them
+State plainly, as an explicit percentage breakdown across all three buckets from step 3 (not just a
+single "hit rate"), per date and then averaged:
+- **% matched** — correctly flagged, direction agreed with what the market did
+- **% opposite** — wrong-direction (rated Sell and rallied, or Buy and fell)
+- **% not flagged** — absent from every list
+- the raw counts and date count behind each percentage — a percentage with n<20 is decoration, say so
 - whether the sample is large enough to mean anything (over ~39 ranker dates, mostly it isn't)
-- named examples with their traced cause
+- named examples with their traced cause, especially every "opposite" one — that bucket is the one plain recall hides
 
 ## 5. The thing to expect
 

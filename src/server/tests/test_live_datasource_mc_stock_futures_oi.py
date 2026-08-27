@@ -31,7 +31,9 @@ from live_datasource_helpers import (  # noqa: E402
     assert_non_empty_response,
     assert_numeric_and_finite,
 )
-from pg_test_support import _pg_dsn, _sa_url, drop_throwaway_schema, pg_available  # noqa: E402
+from pg_test_support import (  # noqa: E402
+    PG_TEST_SCHEMA_LOCK_NS, _pg_dsn, _sa_url, drop_throwaway_schema, pg_available,
+)
 
 # A large, unambiguously F&O-listed name. Its MC scId is resolved through the fetcher's own
 # map rather than hardcoded, so a stale mapping fails loudly instead of silently 404ing.
@@ -48,7 +50,11 @@ def throwaway_db():
     schema = f"t_{uuid.uuid4().hex[:12]}"
     admin = psycopg2.connect(**_pg_dsn())
     admin.autocommit = True
-    admin.cursor().execute(f'CREATE SCHEMA "{schema}"')
+    admin_cur = admin.cursor()
+    admin_cur.execute(f'CREATE SCHEMA "{schema}"')
+    # See pg_test_support.purge_orphan_schemas: claim ownership before this schema has any
+    # table of its own, or a concurrent sweep can read the pre-DDL gap as orphaned.
+    admin_cur.execute("SELECT pg_advisory_lock(%s, hashtext(%s))", (PG_TEST_SCHEMA_LOCK_NS, schema))
     os.environ["USE_POSTGRES"] = "true"
     os.environ["POSTGRES_URL"] = _sa_url(schema)
     os.environ.pop("DATABASE_URL", None)

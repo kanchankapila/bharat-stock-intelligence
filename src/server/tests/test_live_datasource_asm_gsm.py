@@ -72,7 +72,9 @@ class TestAsmGsmLiveDataSource:
         # known up front rather than parsed back out of the connection.
         import uuid
         import psycopg2
-        from pg_test_support import _pg_dsn, _sa_url, pg_available, drop_throwaway_schema
+        from pg_test_support import (
+            PG_TEST_SCHEMA_LOCK_NS, _pg_dsn, _sa_url, pg_available, drop_throwaway_schema,
+        )
         from sqlalchemy import create_engine
         from db_compat import ConnWrapper
 
@@ -82,7 +84,11 @@ class TestAsmGsmLiveDataSource:
         schema = f"t_{uuid.uuid4().hex[:12]}"
         admin = psycopg2.connect(**_pg_dsn())
         admin.autocommit = True
-        admin.cursor().execute(f'CREATE SCHEMA "{schema}"')
+        admin_cur = admin.cursor()
+        admin_cur.execute(f'CREATE SCHEMA "{schema}"')
+        # See pg_test_support.purge_orphan_schemas: claim ownership before this schema has any
+        # table of its own, or a concurrent sweep can read the pre-DDL gap as orphaned.
+        admin_cur.execute("SELECT pg_advisory_lock(%s, hashtext(%s))", (PG_TEST_SCHEMA_LOCK_NS, schema))
         try:
             seed_engine = create_engine(_sa_url(schema), future=True)
             seed_sa_conn = seed_engine.connect()

@@ -89,6 +89,12 @@ def pg_schema():
     conn.autocommit = True
     cur = conn.cursor()
     cur.execute(f'CREATE SCHEMA "{schema}"')
+    # See purge_orphan_schemas: claim ownership for this connection's whole lifetime before
+    # this schema has any table (and hence any relation lock) of its own -- the window between
+    # CREATE SCHEMA and the test's first CREATE TABLE is exactly the gap a lock-only orphan
+    # check misreads as abandoned, and this fixture's schema sits in that gap the whole time
+    # a test body hasn't run its own DDL yet.
+    cur.execute("SELECT pg_advisory_lock(%s, hashtext(%s))", (PG_TEST_SCHEMA_LOCK_NS, schema))
     # public stays on the path so extensions/types resolve, but the throwaway schema is FIRST,
     # so an unqualified name can only ever shadow a production table, never write to one.
     cur.execute(f'SET search_path TO "{schema}", public')
