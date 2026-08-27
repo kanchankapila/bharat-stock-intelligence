@@ -1469,6 +1469,20 @@ async function processMlWeeklyRetrain(_job: Job): Promise<{ success: boolean; fa
      '--scores', 'prob_up_1d,prob_up_5d,prob_up_15d',
      '--horizons', '1,5,15', '--persist'], 15 * 60_000)
     .catch(e => console.warn('[QUEUE] factor_edge (dl heads) failed:', (e as Error).message));
+  // mc_stock_futures_oi_fetcher.py's own docstring/queues.ts comment says this table "must be
+  // graded through factor_edge.py like everything else before anything consumes it" -- that
+  // grading call never existed until now, so the table was accumulating rows with no scheduled
+  // path to a verdict (same gap engine_composite_scores had before it got one). oi_buildup is
+  // excluded: it's a vendor text label (Long Buildup/Short Covering/...), not a numeric score,
+  // and this platform's one prior test of a vendor's own directional label (mojo_indigraph)
+  // measured no edge -- turning it into a signed feature is a measurement decision, not a
+  // parsing one, per the fetcher's own docstring. First run will read LOW-DATA (table is <1
+  // week old); that's correct, not a bug -- it's what starts the accumulation.
+  await runPython('factor_edge.py',
+    ['--table', 'stock_futures_oi_history', '--date-col', 'date',
+     '--scores', 'oi_change,oi_pct_change,oi_pcr,basis,rollover_pct',
+     '--horizons', '1,5,21', '--persist'], 15 * 60_000)
+    .catch(e => console.warn('[QUEUE] factor_edge (stock_futures_oi) failed:', (e as Error).message));
   // Same as ml-daily-ops above: report the tracker's real verdict rather than a blanket true.
   const verdict = T.finish();
   await alertFailedSteps('ml-weekly-retrain', verdict);

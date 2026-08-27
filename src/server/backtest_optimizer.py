@@ -320,6 +320,24 @@ def run_grid_search(
               f"DD={stats.get('max_drawdown_pct',0):.1f}%")
         results.append({'config': cfg, 'stats': stats})
 
+    # `conn` (this function's write handle -- the DELETE cleanup calls below and
+    # _get_current_sharpe/_get_current_config further down) has sat completely idle since
+    # _effective_window_days() at the top of this function, while the loop above did ~13-16
+    # min of real work through `bt`'s OWN separate connection (300 grid combos). Same failure
+    # shape already fixed in strategy_optimizer.py (2026-08-25, 2026-08-26, same docstring
+    # there): a connection idle that long can be closed server-side (Postgres/an intermediary)
+    # without pool_pre_ping ever catching it, since pre_ping only validates a connection at
+    # POOL CHECKOUT and this one was checked out once at the top of run() and never returned.
+    # Reproduced live 2026-08-27: exactly this crash, on the FIRST conn.execute() after this
+    # loop (the 'opt_%' cleanup DELETE, three lines down) -- "psycopg2.OperationalError:
+    # server closed the connection unexpectedly" -- which is why 301 orphaned 'opt_*'/
+    # 'opt_holdout' scratch rows were sitting in backtesting_runs from the prior failed run
+    # (the crash happens AFTER the holdout run's own row is saved via `bt`, but before this
+    # function's own DELETE can clean it up). Reconnecting once here, before the gap's first
+    # post-loop use, covers all three DELETE call sites below plus the two reads after them.
+    conn.close()
+    conn = connect()
+
     if not results:
         print("[BtOptimizer] No results on the train window -- cannot optimise.")
         bt.close()
