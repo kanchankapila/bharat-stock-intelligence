@@ -644,6 +644,17 @@ const TABLE_FRESHNESS_CHECKS: TableFreshnessConfig[] = [
   { id: 'gdelt-sentiment-freshness', label: 'gdelt_sentiment (per-company news tone, GDELT DOC API)',
     category: 'reference', critical: false, table: 'gdelt_sentiment', dateColumn: 'computed_at',
     tradingDayAware: false, warnDays: 2, failDays: 4 },
+  // mover_snapshots (mover_screener_fetcher.py, added 2026-08-25) shipped with a
+  // live_datasource test but no freshness check -- exactly the mandate gap this file's own
+  // header warns about, found during a 2026-08-27 CLAUDE.md-vs-codebase review. Written by
+  // 'mover-intraday-capture' (hourly 09:30-13:30 IST weekdays) and the daily calc+live run
+  // inside the main scan chain, so trade_date should advance every trading day; 1/3-day
+  // thresholds match stock-delivery-volume-freshness's "one silent trading day IS the defect
+  // signature" reasoning above. trade_date is TEXT (see the DDL in mover_screener_fetcher.py),
+  // not a native DATE column.
+  { id: 'mover-snapshots-freshness', label: 'mover_snapshots (ground-truth mover screener captures)',
+    category: 'flows', critical: false, table: 'mover_snapshots', dateColumn: 'trade_date',
+    warnDays: 1, failDays: 3 },
 ];
 
 export const DATA_QUALITY_CHECKS: DataQualityCheck[] = [
