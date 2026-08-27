@@ -26,6 +26,11 @@ import { EODMarketScreener } from './EODMarketScreener';
 import { ActivityFeed } from './ActivityFeed';
 import { MarketBreadthIntraday } from './MarketBreadthIntraday';
 import { MarketMoodGauge } from './MarketMoodGauge';
+import { V1MacroRegimeHeader } from './V1MacroRegimeHeader';
+import { V1ConfluenceMatrixWidget } from './V1ConfluenceMatrixWidget';
+import { V1SmartMoneyFlowWidget } from './V1SmartMoneyFlowWidget';
+import { V1FnOMicrostructureWidget } from './V1FnOMicrostructureWidget';
+import { V1TradeRiskCalculatorWidget } from './V1TradeRiskCalculatorWidget';
 
 // ─── Fonts injected once ──────────────────────────────────────────────────────
 const FONT_FAMILY_DISPLAY = "'Rajdhani', sans-serif";
@@ -501,6 +506,11 @@ const DashboardPage: React.FC<DashboardPageProps> = ({
   return (
     <div style={{ padding: '12px 16px', background: 'transparent', minHeight: '100vh' }}>
 
+      {/* ── Macro Regime & Institutional Ticker Bar ───────────────────── */}
+      <div style={{ marginBottom: 12 }}>
+        <V1MacroRegimeHeader onSelectStock={onSelectStock} />
+      </div>
+
       {/* ── V4 entry point ───────────────────────────────────────────────
           This dashboard (v1) is still the default landing experience, but v4's
           MarketCommandCenter/StockIntelligencePage are already reachable via the sidebar
@@ -911,8 +921,16 @@ const DashboardPage: React.FC<DashboardPageProps> = ({
         </div>
       </div>
 
-      {/* ── Row 2.5: Market Mood Index — single-glance sentiment gauge (2026-08-06 urls.txt
-          data analysis; data already fed macro features, previously had no frontend surface). */}
+      {/* ── Institutional Confluence & Derivatives Grid ───────────────────── */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mb-3">
+        <V1ConfluenceMatrixWidget onSelectStock={onSelectStock} />
+        <V1SmartMoneyFlowWidget onSelectStock={onSelectStock} />
+      </div>
+
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mb-3">
+        <V1FnOMicrostructureWidget onSelectStock={onSelectStock} />
+        <V1TradeRiskCalculatorWidget />
+      </div>
       <div className="glass border border-slate-800/50 shadow-[0_4px_20px_rgba(0,0,0,0.02)]" style={{ borderRadius: 10, padding: '10px 16px', marginBottom: 12 }}>
         <MarketMoodGauge />
       </div>

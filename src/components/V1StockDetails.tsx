@@ -24,6 +24,8 @@ import { FinologyPanel } from './FinologyPanel';
 // Ported from v2's V2StockDetails (2026-08-20 v1 consolidation) -- self-contained, so reusable
 // as-is; genuinely absent from both this page and the separate Stock Intelligence Hub page.
 import { AiInsightsTab } from '../v2/views/stock-analysis/AiInsightsTab';
+import { V1PeadConcallWidget } from './V1PeadConcallWidget';
+import { V1TradeRiskCalculatorWidget } from './V1TradeRiskCalculatorWidget';
 
 // Same O(1) lookup maps App.tsx builds at module scope for the same purpose (avoids O(n)
 // .find() on every stock detail open) -- duplicated here rather than imported from App.tsx,
@@ -576,6 +578,11 @@ export const V1StockDetails: React.FC<{
                     </ResponsiveContainer>
                 </div>
               </Card>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <V1PeadConcallWidget symbol={symbol} />
+                <V1TradeRiskCalculatorWidget initialEntry={initialStock?.price ?? 1000} symbol={symbol} />
+              </div>
 
               <React.Suspense fallback={<PageFallback />}><V1TechnicalAnalysis symbol={symbol} /></React.Suspense>
               <MCErrorBoundary>
