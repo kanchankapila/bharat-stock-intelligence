@@ -26,6 +26,7 @@ export const QUEUE_COMPANY_PROFILES_SYNC = 'company-profiles-sync';
 export const QUEUE_TICKERTAPE_SCORECARD = 'tickertape-scorecard';
 export const QUEUE_NSE_SYNC = 'nse-sync';
 export const QUEUE_CORPORATE_ACTIONS_INGEST = 'corporate-actions-ingest';
+export const QUEUE_INDEX_MEMBERSHIP = 'index-membership';
 
 async function processCorporateActionsIngest(_job: Job): Promise<{ success: boolean }> {
   // corporate_actions.ratio fix (2026-08-07, dead-column sweep): ohlcv_quality.py's
@@ -133,6 +134,26 @@ async function processCompanyProfilesSync(_job: Job): Promise<void> {
 async function processTickertapeScorecard(_job: Job): Promise<{ success: boolean }> {
   await runPython('tickertape_scorecard_fetcher.py', [], 60 * 60_000)
     .catch(e => console.warn('[QUEUE] tickertape_scorecard_fetcher failed:', (e as Error).message));
+  return { success: true };
+}
+
+async function processIndexMembership(_job: Job): Promise<{ success: boolean }> {
+  // AF-20260828-21: index_membership_fetcher.py was only invoked from nse-sync-weekly
+  // (Saturday), so its own date-guarded write (`date >= logical_write_floor()`, added
+  // 2026-07-19 specifically to stop overwriting HISTORICAL rows with today's membership --
+  // see that fetcher's own comment) only ever blessed the single trading day the job
+  // happened to run on. Every technical_signals row created on the other 4-5 trading days
+  // of the week defaulted is_nifty50/is_nifty100/is_nifty200/is_midcap150/is_smallcap250/
+  // nifty_tier to the column's raw schema DEFAULT (0) -- indistinguishable from "confirmed
+  // not a member" -- until the following Saturday. Root-caused this, not just re-scheduled
+  // around it: NSE's own index-constituent CSVs (nsearchives.nseindia.com) are cheap (5
+  // small static-file requests, no per-symbol iteration, no documented WAF/rate-limit
+  // history unlike Trendlyne) and already 0/15 failures in job_heartbeat, so there was no
+  // reliability reason to look for an alternate provider -- the fix is cadence, not source.
+  // Kept as its own job (not folded into nse-sync-weekly, which stays weekly for its other,
+  // genuinely-weekly-cadence steps) so this doesn't risk that job's existing budget/timeout.
+  await runPython('index_membership_fetcher.py', [], 60_000)
+    .catch(e => console.warn('[QUEUE] index_membership_fetcher failed:', (e as Error).message));
   return { success: true };
 }
 
@@ -330,5 +351,32 @@ export async function registerSyncJobs(connection: any) {
     monitorFn: updateMonitorState,
   });
 
-  return { screenerPerf, companyProfilesSync, tickertapeScorecard, nseSync, corporateActionsIngest };
+  const indexMembership = await registerRepeatableJob({
+    connection,
+    queueName: QUEUE_INDEX_MEMBERSHIP,
+    jobName: 'index-membership-daily',
+    // AF-20260828-21: daily, weekdays only -- nse-sync-weekly's own Saturday run stays as a
+    // redundant safety net (the fetcher is idempotent), this is what actually closes the
+    // Mon-Thu coverage gap. 15:35 UTC = 21:05 IST -- same off-hours slot family as
+    // company-profiles-sync-daily (15:30 UTC), just after that day's 15:30 IST close and
+    // clear of the 22:00-23:35 IST EOD job cluster; offset by 5 min to avoid an exact
+    // simultaneous start with company-profiles-sync-daily. Needs logical_write_floor() to
+    // resolve to TODAY's date (i.e. today's stock_ohlcv/technical_signals rows must already
+    // exist), which they do well before this slot -- EOD OHLCV ingestion runs earlier in the
+    // evening cluster.
+    repeat: { pattern: '35 15 * * 1-5' },
+    jobId: 'index-membership-daily',
+    removeOnComplete: 3,
+    removeOnFail: 3,
+    processor: processIndexMembership,
+    monitorName: 'index-membership',
+    concurrency: 1,
+    lockDuration: 10 * 60_000,
+    lockRenewTime: 2 * 60_000,
+  });
+
+  return {
+    screenerPerf, companyProfilesSync, tickertapeScorecard, nseSync, corporateActionsIngest,
+    indexMembership,
+  };
 }

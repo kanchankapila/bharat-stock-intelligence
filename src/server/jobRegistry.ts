@@ -76,6 +76,11 @@ export const JOB_REGISTRY: JobScheduleEntry[] = [
   // screener_features_fetcher.py's screener_momentum_score same as MC/ETnow.
   { jobName: 'trendlyne-screener-sync', label: 'Trendlyne Screener Sync', cronPattern: '40 12 * * 1-5', graceMinutes: 105, critical: true },
   { jobName: 'nse-sync', label: 'NSE Master List Sync', cronPattern: '0 2 * * 6', graceMinutes: 120, critical: false },
+  // AF-20260828-21: closes the Mon-Thu is_nifty50/.../nifty_tier coverage gap left by
+  // nse-sync's own weekly (Saturday-only) run of the same fetcher -- see sync.jobs.ts's
+  // processIndexMembership() comment for the full root-cause. critical:false, same as
+  // nse-sync: a supplementary ML feature, not a live-blended score input.
+  { jobName: 'index-membership', label: 'Index Membership Daily', cronPattern: '35 15 * * 1-5', graceMinutes: 45, critical: false },
   { jobName: 'fundamentals-sync', label: 'Fundamentals Sync', cronPattern: '0 3 * * 6', graceMinutes: 120, critical: false },
   { jobName: 'quant-scoring', label: 'Quant Score Engine', cronPattern: '20 15 * * 1-5', graceMinutes: 45, critical: true },
   { jobName: 'signal-outcomes', label: 'Signal Outcome Tracker', cronPattern: '30 3 * * 1-5', graceMinutes: 45, critical: true },

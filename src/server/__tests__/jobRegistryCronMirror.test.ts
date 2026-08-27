@@ -193,6 +193,7 @@ describe('JOB_REGISTRY cronPattern/everyMs mirror consistency', () => {
     { jobName: 'fundamentals-sync', marker: "jobName: 'sync-fundamentals-weekly'", label: 'screeners.jobs.ts' },
     { jobName: 'quant-scoring', marker: "jobName: 'quant-score-daily'", label: 'screeners.jobs.ts' },
     { jobName: 'nse-sync', marker: "jobName: 'nse-sync-weekly'", label: 'sync.jobs.ts' },
+    { jobName: 'index-membership', marker: "jobName: 'index-membership-daily'", label: 'sync.jobs.ts' },
     { jobName: 'confluence-compute', marker: "jobName: 'confluence-compute'", label: 'confluence.jobs.ts' },
     { jobName: 'confluence-outcomes', marker: "jobName: 'confluence-outcomes-daily'", label: 'confluence.jobs.ts' },
     { jobName: 'trendlyne-catchup', marker: "jobName: 'trendlyne-catchup-slice'", label: 'trendlyneWeekly.jobs.ts' },

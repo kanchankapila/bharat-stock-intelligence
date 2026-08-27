@@ -4,7 +4,14 @@
 Passive ETF flows (₹2L+ Cr AUM in Nifty 50 ETFs) are predictable at index
 rebalancing — index membership is a structural demand signal.
 
-Run weekly: python index_membership_fetcher.py
+Run daily (queues.ts: index-membership-daily, weekdays 15:35 UTC / 21:05 IST) so every
+trading day's technical_signals row gets blessed same-day -- see backfill_technical_signals()'s
+own comment (AF-20260828-21) for why a weekly-only cadence left is_nifty50/etc. at the column's
+raw schema default (0, indistinguishable from "confirmed not a member") on 4-5 of every 5
+trading days. Also still invoked from nse-sync-weekly (Saturday) as a redundant safety net --
+harmless, the fetcher is idempotent.
+
+Manual run: python index_membership_fetcher.py
 """
 from datetime import datetime
 import io
@@ -151,12 +158,19 @@ def backfill_technical_signals(con) -> int:
     # historical index-membership snapshot exists to backfill from, so older rows are
     # explicitly nulled rather than left holding today's status.
     #
-    # Anchor to the last completed trading session, NOT datetime.now() -- this job runs weekly
-    # via nse-sync (Sunday 07:30 IST, queues.ts), a non-trading day with no technical_signals row
-    # yet for today's wall-clock date. A bare datetime.now() floor matches zero existing rows, so
-    # every historical is_nifty50/.../nifty_tier column gets NULLed out on every single run -- same
-    # bug class already fixed in asm_gsm_fetcher.py, financial_ratios_fetcher.py, and 7 other
-    # fetchers (see CLAUDE.md "date('now') anchor" recurring-bug notes).
+    # Anchor to the last completed trading session, NOT datetime.now() -- nse-sync-weekly
+    # (queues.ts) runs this fetcher Saturday 2:00 AM UTC / 7:30 AM IST, a non-trading day with
+    # no technical_signals row yet for today's wall-clock date. A bare datetime.now() floor
+    # would match zero existing rows there, NULLing every historical is_nifty50/.../nifty_tier
+    # column on every single run -- same bug class already fixed in asm_gsm_fetcher.py,
+    # financial_ratios_fetcher.py, and 7 other fetchers (see CLAUDE.md "date('now') anchor"
+    # recurring-bug notes). logical_write_floor() correctly resolves to the prior Friday there.
+    #
+    # AF-20260828-21: this same date-guard, correct in isolation, meant the job only ever
+    # blessed the ONE trading-day row it happened to run on -- weekly cadence left every OTHER
+    # trading day's row at the column's raw schema default (0) until the following week. Fixed
+    # by also running this fetcher daily (queues.ts: index-membership-daily, weekdays), not by
+    # touching this guard -- the guard itself was never wrong.
     today = logical_write_floor(cur, fallback=datetime.now().strftime("%Y-%m-%d"))
     if use_postgres():
         cur.execute(
@@ -237,7 +251,7 @@ def main():
 
     print(
         f"[IndexMembership] Nifty50={n50}, Nifty100={n100}, Nifty200={n200}, "
-        f"Midcap150={mid}, Smallcap250={sml} → technical_signals updated ({ts_updated} rows)"
+        f"Midcap150={mid}, Smallcap250={sml} -> technical_signals updated ({ts_updated} rows)"
     )
 
 
