@@ -6079,3 +6079,42 @@ server.ts tree → start once → verify ancestry chain Daemon→wrapper→worke
 Restarting into a squatted port just burns another generation.
 
 
+
+**2026-08-26 (afternoon) -- post-fix log review caught a SECOND date-cast wave across Python engines + one TS diagnostic; all fixed and live-verified.**
+
+Pending action was "review all logs after the 08-25 fixes". Verdict: NOT clean. Timeline of what the logs showed:
+- 01:07-01:08 IST: every Python engine died at import (`db_compat.py` SyntaxError, unterminated string literal at line 561). Self-healed/committed before this session; transient corruption window only (~40 engines x 1 cron pass). No data lost beyond that window.
+- 07:23-09:30 IST: second wave -- psycopg2 `operator does not exist` in performance_tracker / online_learner / ml_ensemble / ml_calibration / cs_ranker / rl_agent / outcome_resolver / backfill_technical_features: same native-DATE vs TEXT class as the TS bugs fixed 08-25, but on the PYTHON side, which nobody swept.
+- All day, every 15 min: `technical-signals-feature-coverage` DQ check failing with `text < date` -- its own SQL cast the WRONG side (`date::text < CURRENT_DATE`) while the comment claimed correctness. Fixed to bare `date < CURRENT_DATE`; verified live (2200 rows x 303 cols, dead=8 vs baseline 53).
+
+Root cause of the wave: the 2026-08-25 migration flipped technical_signals.date to native DATE. The concurrent session fixed the TS layer + a handful of .py sites; the rest of the Python fleet kept comparing TEXT columns against ts.date raw. Measured type map (public schema): DATE = technical_signals.date, feature_store.date, stock_ohlcv.date, sector_fo_sentiment.date, macro_asset_prices.date; TEXT = signal_outcomes.signal_date, market_breadth.date, mc_pricefeed_daily.date, gdelt_sentiment.date, historical_fno_sentiment.date, proprietary_scores_history.date, fundamentals_history.as_of_date, analyst_estimates_history.as_of_date, credit_rating_events.announcement_date, recommendation_log.signal_date, signal_excursions.signal_date.
+
+Fixed this session: shared helper as_of.py as_of_join_sql() gained base_date_is_text flag (default True = all existing callers unchanged); ml_ensemble.py live/score path (~L1765-2124) mb/hfs/psh/aeh joins, train-path L1529 ts2 LATERAL, L1576 fs join, L1582 snap_date ::text, L1370 gdelt lower bound; cs_ranker.py score_batch psh subqueries; exit_policy.py live block; dataQualityChecks.ts dead-column predicate.
+
+Live-caught lesson about my OWN first attempt: casting inside MAX() (`SELECT MAX(col::date)`) flips the OUTER equality to text = date -- the fragment must cast ONLY the inner <= predicate so outer stays TEXT=TEXT (same shape as every hand-rolled psh block). Caught by executing the generated fragment against production before claiming done; negative control was the failure itself.
+
+Verified: py_compile all 4 files; tsc --noEmit clean; vitest dataQualityChecks 111/111; pytest test_as_of* + test_sql_translate 53/53; live SQL: dead-column check executes, 382-row live-path join executes, outcome_resolver pending query returns 4833 (backlog from today's failures, drains next scheduled run), backfill gaps=0. Full pytest src/server suite left running in terminal.
+
+NOT fixed (deliberate): GenAI 403s (unregistered callers -- key/quota issue), Telegram 'message too long' (cosmetic), AMFI mf_sector_flow 0-rows (upstream format change, needs parser rework), intraday_fetcher 600s timeouts (market-hours load; separate investigation), Redis AOF fsync warnings + RAM 98% (host capacity). ml-ensemble-score win_probability coverage 15.7% for 08-25 should self-heal tonight now that scoring imports work; re-check DQ job tomorrow morning.
+
+**Addendum (same day, later): full suite 2253 passed / 1 failed -- the failure was test_ml_ensemble_pricefeed_fallback's look-ahead regex requiring literal `mp2.date <= <col>`; my first live-path cast (`mp2.date::date <= ts.date`) broke the textual match. Re-cast the DATE side instead (`mp2.date <= ts.date::text`, TEXT=TEXT, same ordering for ISO dates, matches the sibling lower-bound style): parity test 5/5, compile OK, LATERAL re-executed live (382 rows). ml-api restarted (it imports ml_ensemble at module level, so tonight's scorePending picks up the fixes); bharat-server restarted for dataQualityChecks.ts. Both online.**
+
+**Addendum 2: recurring-bugs.md's fourth-recurrence direction refinement (landed mid-session by the concurrent session) supersedes my first-cast choice -- inverted every TEXT-side ::date cast to the repo-canonical DATE-side ::text form (ml_ensemble live+score paths, cs_ranker psh subqueries, exit_policy block, as_of.py helper now emits `as_of_date <= base.date::text`). Rationale: identical ordering on live Postgres AND green under SQLite-heritage pytest fixtures whose schemas declare these columns TEXT. Final state: compile OK x4, targeted suites 58/58, canonical-form join executed live against production (382 rows), no TEXT-vs-native-DATE residuals left in src/server.**
+
+**E2E job exercise (2026-08-26 evening) -- every failed heartbeat job re-run by hand with production args, writes verified per job.**
+
+Baseline: 8 jobs failed at last scheduled run. After the fixes + manual runs:
+- nse-bhavcopy-fetcher: OK (NSE had since published; wrote nse_universe_history=3352 rows for today). Morning 404s were pre-publication timing, not a code bug.
+- outcome_resolver h1/h5/h15: OK (912/920 rec-log resolved h1; technical pending 4833 -> 2839 via the LIMIT 2000 cap; rest drains next run).
+- delivery_volume_fetcher --date today: OK (3383 rows stock_delivery_volume max=today; filled delivery_pct on 382 ts rows).
+- ml_ensemble --score: initially STILL failing -- third variant found: pre-existing `fs.date::text = ts.date` where BOTH are native DATE (live path L1775 + exit_policy L388). Fixed to bare equality; scorer then wrote win_probability for ALL 2237 pending signals; coverage 08-25 AND 08-26 both now 100% (was 15.7%/0%).
+- online_learner --window 180: OK (251701 outcomes, samples_seen=714397).
+- signal_type_priors.py: OK (priors recomputed; this is what the signal-type-stats heartbeat wraps).
+- ml_ensemble --incremental --incr-days 3: initially failing -- FOURTH variant: incremental_update() executed its SQLite-fallback query UNCONDITIONALLY (`ts2.date <= so.signal_date` raw). Branched on use_postgres() like load_training_data(); then OK: 367 triple-barrier outcomes ingested, warm-start correctly gated OFF (no promotion without backtest evidence).
+- performance_tracker / cs_ranker --score smoke tests: OK (cs_score written for 2237 signals).
+
+Acceptance gate: npm run dq:check = 162/167 PASS, 0 critical. Remaining 5 accounted: index_option_oi 3.5d stale = MC upstream has not published today block yet (fetcher correctly refuses to backdate; same shape as morning bhavcopy 404s); engine_composite_scores = research table with NO scheduled writer by design; mf_sector_allocation empty = AMFI upstream format change (known); 2 meta-warns informational.
+
+stock-scoring fetch-failed at 12:45/13:50 self-healed 16:55 (transient upstream). trendlyne-midweek remains the known WAF/405 upstream issue. port-drift fail at 17:00 was my own mid-check service restart.
+
+Committed bfe5b7c (5 files); ml-api + bharat-server restarted after final edits.

@@ -1002,9 +1002,10 @@ async function processMlDailyOps(job: Job): Promise<{ success: boolean; failedSt
   await runPython('credit_rating_fetcher.py', [], 3 * 60_000)
     .catch(e => console.warn('[QUEUE] credit_rating_fetcher failed:', (e as Error).message));
 
-  // MF sector AUM flow from AMFI monthly disclosures → mf_sector_allocation + technical_signals.
-  await runPython('mf_sector_flow_fetcher.py', [], 5 * 60_000)
-    .catch(e => console.warn('[QUEUE] mf_sector_flow_fetcher failed:', (e as Error).message));
+  // MF sector AUM flow (ET / mcxlivefeeds JSONP feed, replaces dead AMFI disclosure endpoint)
+  // → mf_scheme_sector_allocation + mf_sector_allocation + technical_signals.
+  await runPython('mf_sector_allocation_fetcher.py', [], 5 * 60_000)
+    .catch(e => console.warn('[QUEUE] mf_sector_allocation_fetcher failed:', (e as Error).message));
 
   // Index/macro batch — same rationale as the NT/MMI/option-chain batch above: five distinct
   // external APIs, five distinct index-level destination tables (macro_asset_prices, index_valuation,
