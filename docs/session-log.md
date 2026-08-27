@@ -6170,3 +6170,19 @@ stock-scoring fetch-failed at 12:45/13:50 self-healed 16:55 (transient upstream)
    - Full Vitest suite: **113 / 124 test files passed** (1,080 passed / 0 failed / 11 skipped live tests).
 
 Committed bfe5b7c (5 files); ml-api + bharat-server restarted after final edits.
+
+
+**Addendum — 2026-08-27 morning commits, undocumented until now.** Six commits landed 07:14-07:39 IST (before `5e3fff2`'s PR #86 merge at 08:05, so from a separate concurrent session) with no session-log entry:
+- `75ffd8f` — closed the `mover_snapshots` mandate gap: `live_datasource` test + freshness check added.
+- `7a9ecc0`/`c788cb5` — `mover-screener-capture`'s guard was checking `isMarketOpen()` where it needed `shouldSkipOnTradingHoliday()` (duplicate commit, same fix twice).
+- `f2c9be3` — **replaced `mf_sector_flow_fetcher.py`'s dead AMFI `DownloadSchemeData_Po.aspx` endpoint** with a new `mf_sector_allocation_fetcher.py` sourcing from ET/mcxlivefeeds JSONP (`topsectorforportfolio.htm`). This closes the "AMFI mf_sector_flow 0-rows (upstream format change, needs parser rework)" item left open in the 2026-08-26 entry above — **that line is now stale; the fix landed the next morning.** `mf_sector_flow_fetcher.py` itself is no longer scheduled (`queues.ts` now calls `mf_sector_allocation_fetcher.py` only) but is not dead code — the new fetcher imports its `ensure_schema`/`_update_macro_asset_prices`/`_update_technical_signals` helpers, which is why `b453b17` (below) still edits the old file.
+- `b453b17` — updated `SECTOR_LABEL` vocabulary to GICS in `mf_sector_flow_fetcher.py` (the shared helper file above) and added the `mf_sector_allocation_fetcher.py` live-datasource test.
+- `f80defd` — fixed a stale idle DB connection in `strategy_optimizer.py`'s write phase (same class as `b9f6c40`'s later fix in `backtest_optimizer.py` the same day — the pattern from `strategy_optimizer` was not yet mirrored into `backtest_optimizer` until that later commit).
+- `9964e3d` — `mc_index_option_oi` fetcher now checks DB presence before skipping a stale MoneyControl block, rather than skipping blind.
+
+**Status check on the rest of 2026-08-26's "NOT fixed (deliberate)" list, verified live 2026-08-27 evening:**
+- GenAI 403s — not observed in the last 2000 pm2 log lines; likely resolved or dormant, not re-verified further.
+- Telegram "message too long" (called cosmetic then) — **turned out not to be cosmetic.** A later same-day audit found it was silently truncating and discarding the tail of any digest message over 4096 chars with no chunking at all. Fixed (chunking added, then a truncation bug in that same fix caught and corrected) — see the weekend-audit findings ledger, AF-20260827-03.
+- AMFI mf_sector_flow 0-rows — **resolved**, see the addendum above (`f2c9be3`).
+- `intraday_fetcher` 600s timeouts — still occurring, but now observed on a **different** script under the same shape: `trendlyne_fundamentals_fetcher.py` via `trendlyne-catchup` timed out at 600000ms as recently as 2026-08-27 20:00 IST. Consistent with the already-documented WAF request-allowance ceiling (memory: `trendlyne_waf_request_allowance_2026_08_17` — the 2,234-symbol universe is ~15x the allowance, so no pacing completes a full pass), not a new regression.
+- Redis AOF fsync warnings + RAM 98% (host capacity) — **still unresolved, still at capacity**: checked live 2026-08-27 20:0x IST, host RAM at 95.9% used (0.9GB free of 23GB). Two full days at >95% and no capacity work has landed; this is the one item on this list that has had zero progress since first flagged.

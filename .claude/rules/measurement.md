@@ -1494,6 +1494,27 @@ spans 2026-06-21 -> 2026-08-23 = **63 days** against the ~76 `eps_rev_3m` needs,
 features are derived inside `build_features()` and were not checkable without re-running the full
 sweep, which this spot-check did not do. Re-run the sweep before citing any number here.
 
+⚠ **Sweep re-run for real, 2026-08-27 evening (`load_training_data()` + `build_features()`
+executed directly against production, not spot-checked columns) — 46 globally-constant / 421,
+and one real bug found and fixed as a direct result.** 207,896 rows / 76 dates / 318 raw columns
+in, 421-feature matrix out. Every one of the 46 constant features was checked against the SQL:
+43 are genuinely NULL/near-constant upstream (calendar-blocked analyst-revision columns, sparse
+Trendlyne `_tl` block, calendar-blocked pledge/working-capital columns — all already documented
+above) — but **`call_wall_dist_pct`, `put_wall_dist_pct`, and `near_expiry_gamma` were never in
+the SELECT at all**, in any of the 5 parallel query sites (`load_training_data` x2,
+`load_pending_signals`, `incremental_update` x2). `num(col, default)`'s own fallback —
+`pd.Series(default, index=df.index)` when the column is absent from the dataframe, not just
+NULL per-row — silently manufactured a constant for every row, indistinguishable from genuine
+NULL, even though `call_wall_dist_pct` has real data back to 2026-05-21 (42 distinct dates).
+**Fixed** (all 5 SELECT sites, both `use_postgres()` branches): re-ran the identical sweep
+before/after, raw columns 318→321, dead-feature count 46→41 (the 3 fixed columns plus their 2
+derived flags `near_call_wall`/`near_put_wall`, which now inherit real variation). 55 existing
+`test_ml_ensemble*.py` tests still green. **Not claimed as an AUC fix** — a feature going from
+constant to real is a precondition for it to help, not proof it does; needs a retrain and an
+honest `factor_edge.py`-style re-grade before that claim can be made, and options-wall coverage
+is inherently bounded to F&O-eligible symbols (~210 of 2,200+). Full derivation and the debunked
+claims from the same-day audit that led here: `docs/audit-findings.md` AF-20260827-16/17.
+
 **Consequence, and the useful conclusion of this pass: the ceiling is not a missing data source.**
 Adding features to a matrix where 116 of 421 already cannot rank anything is not the lever — which
 is consistent with this file's standing "combining/reweighting reduced performance in every case
@@ -1848,12 +1869,31 @@ out to be the wrong measurement date. Corrected breakdown, each traced individua
 | `target_revision_3m_pct` | **calendar** | same source, same constraint |
 | `analyst_count_chg` | **calendar** | same; ran live — `0 symbols updated, 2337 skipped (2337 insufficient history)` |
 | `pledge_chg_90d` | **calendar** | ran live — wrote 2,230 snapshots then `pledge_chg_90d for 0 symbols`; needs 90d of its own snapshot history |
-| `ccc_trend` | **arithmetically impossible today** | it is a year-over-year CCC delta, and `working_capital_history` holds **one fiscal year per symbol — 0 of 1,675 symbols have 2+** |
+| `ccc_trend` | ~~arithmetically impossible today~~ **WRONG, fixed 2026-08-27** | see correction below |
+
+⚠ **CORRECTED 2026-08-27 — `ccc_trend`'s "arithmetically impossible" verdict was a code bug
+mischaracterized as a data gap, and the real cause survived unfound for weeks because nobody
+checked the actual API request depth.** `working_capital_fetcher.py`'s `process_stock()` called
+`fetch_et_stats(company_id, "Balance", session)` (default `last=5` = 5 FISCAL YEARS, correct)
+and `fetch_et_stats(company_id, "Quarterly", session)` with the SAME default `last=5` — but for
+quarterly-cadence data that's 5 QUARTERS (~1.25 years), nowhere near enough to complete a second
+fiscal year's 4-quarter match. `compute_ccc()`'s own per-year loop was always correctly written
+to handle multiple years and compute a YoY trend when 2+ exist — it just never got a second year
+to work with. Live-verified against the real ET_Stats endpoint before touching anything:
+`last=20` on the SAME endpoint the fetcher already calls returns quarters back to 2021-09-30,
+covering Balance's full 5-year span with real data, not a data source that needs a backfill.
+**Fixed**: `last=20` on the Quarterly call. Verified end-to-end: ACC went from 1 fiscal-year row
+to 4 (2023–2026) with a real `ccc_trend=19.18` computing correctly. 9 tests in
+`test_working_capital_fetcher.py` (1 new, negative-controlled: fails against the pre-fix code,
+asserting `last>=20`). This also retroactively explains AF-20260818-43's `wc_deteriorating`/
+`wc_improving` frozen-at-0 finding — same root cause, not a separate issue. Full derivation:
+`docs/audit-findings.md` AF-20260827-18.
 
 **All three producers are scheduled and all three run clean** (`analyst_revision.py`
 queues.ts:841, `fundamentals_snapshot.py` queues.ts:576, `working_capital_fetcher.py` /
-`financial_ratios_fetcher.py` in the weekly batch). Nothing is silently failing; five of the
-seven are waiting on elapsed time or an upstream backfill, and two are dead by design.
+`financial_ratios_fetcher.py` in the weekly batch). Nothing is silently failing; four of the
+remaining six are waiting on elapsed time or an upstream backfill, two are dead by design, and
+`ccc_trend` was a code bug now fixed (see correction above).
 
 **Do not "fix" these, and do not re-audit them as dead columns.** The two genuinely actionable
 follow-ups, neither of which is a code change: a deeper `analyst_estimates_history` backfill (or
