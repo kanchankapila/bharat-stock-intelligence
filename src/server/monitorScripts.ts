@@ -352,11 +352,11 @@ export const MONITOR_SCRIPTS = [
     description: 'Fills screener_appearances returns, computes Bayesian tiers (A/B/C/D), classifies new screeners via Ollama',
     // Was labelled "Daily 6 PM" but the queue used `every: 24h`, which drifts on every
     // restart — it actually last succeeded at 5:42 AM IST. Pinned to a real cron 2026-07-31.
-    schedule: 'Daily 10:00 PM IST',
+    schedule: 'Daily 10:10 PM IST',
     pyScript: 'screener_performance.py',
     queueName: 'screener-performance',
     staleLimitHours: 26,
-    cronPatterns: ['30 16 * * 1-5'],
+    cronPatterns: ['40 16 * * 1-5'],
     graceMinutes: 180,
   },
   {

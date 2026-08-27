@@ -217,7 +217,7 @@ export async function registerSyncJobs(connection: any) {
     //
     // 21:00 UTC (not 20:30) so it clears ohlcv-gap-fill-weekly, which fires Fri 20:30 UTC
     // = Sat 2:00 AM IST -- the one day-of-week where these two would otherwise collide.
-    repeat: { pattern: '30 16 * * 1-5' }, // 10:00 PM IST (16:30 UTC)
+    repeat: { pattern: '40 16 * * 1-5' }, // 10:10 PM IST (16:40 UTC)
     jobId: 'screener-performance-daily',
     removeOnComplete: 3,
     removeOnFail: 3,
