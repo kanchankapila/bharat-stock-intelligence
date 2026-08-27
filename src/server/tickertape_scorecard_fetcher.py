@@ -22,6 +22,7 @@ Run:
 """
 
 import argparse
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import date
 
 import requests
@@ -31,6 +32,15 @@ from tickertape_client import HEADERS, fetch_scorecard, load_tickertape_sid_map
 import sys
 
 ORDINAL_MAP = {"low": 0, "avg": 1, "high": 2}
+
+# Live-measured 2026-08-28 (fetch_scorecard alone, no DB writes): 4 symbols serial =
+# 1.68s (0.42s/symbol) vs 4 concurrent = 0.47s (0.12s/symbol), 3.57x, 4/4 ok both ways,
+# zero errors introduced by concurrency. api.tickertape.in carries no documented WAF/
+# request-budget ceiling (unlike Trendlyne) -- only a per-call politeness RATE_LIMIT_SEC
+# in tickertape_client.py, which is unaffected by running several calls in parallel
+# threads. BATCH_SIZE kept conservative (untested at full-universe scale) and matches
+# marketsmojo_technical_fetcher.py's MAX_WORKERS=8, the closest in-repo precedent.
+BATCH_SIZE = 8
 
 
 # ── Pure computation (fully unit-testable, no network/DB) ───────────────────────
@@ -78,14 +88,6 @@ def upsert_scores(symbol: str, today: str, scores: dict[str, dict], con) -> int:
     return count
 
 
-# ── Per-stock processing ──────────────────────────────────────────────────────────
-
-def process_stock(symbol: str, sid: str, today: str, session: requests.Session, con) -> int:
-    data = fetch_scorecard(sid, session)
-    scores = compute_ordinal_scores(data)
-    return upsert_scores(symbol, today, scores, con)
-
-
 # ── Stock list ────────────────────────────────────────────────────────────────────
 
 def load_stocks(symbol_filter: str | None, limit: int | None) -> list[tuple[str, str]]:
@@ -114,24 +116,40 @@ def main() -> None:
         con.close()
         return
 
-    print(f"[TickertapeScorecard] Processing {len(stocks)} stocks…")
+    print(f"[TickertapeScorecard] Fetching {len(stocks)} stocks in batches of {BATCH_SIZE}…")
     session = requests.Session()
     session.headers.update(HEADERS)
     today = date.today().isoformat()
 
+    def _fetch_one(item):
+        symbol, sid = item
+        return symbol, sid, fetch_scorecard(sid, session)
+
     ok = 0
-    for i, (symbol, sid) in enumerate(stocks, 1):
-        try:
-            n = process_stock(symbol, sid, today, session, con)
-            if n:
-                ok += 1
-            print(f"  [{i}/{len(stocks)}] {symbol}: {n} categories written")
-        except Exception as e:
-            try:
-                con.rollback()
-            except Exception:
-                pass
-            print(f"  [{i}/{len(stocks)}] {symbol}: ERROR — {e}", file=sys.stderr)
+    done = 0
+    for batch_start in range(0, len(stocks), BATCH_SIZE):
+        batch = stocks[batch_start:batch_start + BATCH_SIZE]
+        with ThreadPoolExecutor(max_workers=len(batch)) as pool:
+            futures = [pool.submit(_fetch_one, item) for item in batch]
+            # DB writes happen here, on the main thread, after each fetch future
+            # resolves -- never inside a worker thread. Matches mc_pricefeed_fetcher.py's
+            # batch pattern: parallelize the network I/O only, keep the single `con`
+            # connection single-threaded.
+            for fut in as_completed(futures):
+                symbol, sid, data = fut.result()
+                done += 1
+                try:
+                    scores = compute_ordinal_scores(data)
+                    n = upsert_scores(symbol, today, scores, con)
+                    if n:
+                        ok += 1
+                    print(f"  [{done}/{len(stocks)}] {symbol}: {n} categories written")
+                except Exception as e:
+                    try:
+                        con.rollback()
+                    except Exception:
+                        pass
+                    print(f"  [{done}/{len(stocks)}] {symbol}: ERROR — {e}", file=sys.stderr)
 
     print(f"[TickertapeScorecard] Done. {ok}/{len(stocks)} stocks with scores written.")
     con.close()
