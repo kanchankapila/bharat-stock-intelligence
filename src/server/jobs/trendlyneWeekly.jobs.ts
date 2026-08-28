@@ -15,6 +15,7 @@ import { Job } from 'bullmq';
 import { runPython } from '../pythonRunner';
 import { updateMonitorState } from '../monitoringService';
 import { registerRepeatableJob } from './registerJob';
+import { isMarketOpen } from '../marketStatusService';
 
 export const QUEUE_TRENDLYNE_MIDWEEK = 'trendlyne-midweek';
 export const QUEUE_TRENDLYNE_RATIOS_MONTHLY = 'trendlyne-ratios-monthly';
@@ -54,7 +55,22 @@ async function processTrendlyneCatchup(_job: Job): Promise<{ success: boolean; s
   return { success: true, script };
 }
 
-async function processTrendlyneMidweek(_job: Job): Promise<{ success: boolean }> {
+async function processTrendlyneMidweek(_job: Job): Promise<{ success: boolean; skipped?: boolean }> {
+  // AF-20260828-25: the deliberate Tuesday 8 PM IST slot is already off-hours, but
+  // registerJob's catch-up mechanism re-fires this job whenever a server restart notices it
+  // "missed" that slot -- at whatever wall-clock time the restart happened to land, market
+  // hours included. Live-measured 2026-08-28: off-hours got 106/110 requests through cleanly;
+  // a mid-day run got blocked after exactly 1 request, and a second mid-day run got 51/75
+  // before a sustained block. Same shared-IP WAF budget as every other Trendlyne fetcher
+  // (data-sources.md's request-count-not-rate finding) -- spending it during market hours,
+  // when it degrades fastest, is strictly worse than waiting for the next off-hours window.
+  // { skipped: true } (not a thrown error) -- registerJob's shared 'completed' handler already
+  // treats this as a no-op, same convention as technical-signals' own market-hours skip guard.
+  if (await isMarketOpen()) {
+    console.log('[QUEUE] trendlyne-midweek skipped — market is open, deferring to the next off-hours run to protect the shared Trendlyne WAF budget');
+    return { success: true, skipped: true };
+  }
+
   // Both scripts must still run even if one fails (a broken adv-tech fetch shouldn't skip
   // price-analysis, and vice versa) -- but swallowing both failures via .catch() unconditionally
   // resolving {success:true} meant a real failure never reached the worker's 'completed'/'failed'
