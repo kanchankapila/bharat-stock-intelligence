@@ -2907,16 +2907,19 @@ export async function initQueues(): Promise<boolean> {
 
     await registerDigestJobs(connection);
 
-    // ── Daily data-integrity report — 8:40 AM IST (03:10 UTC), every day ──────────
+    // ── Daily data-integrity report — 11:00 PM IST (17:30 UTC), every day ──────────
     // Formal cron wrapper around dataQualityChecks.ts's ~25-check suite (2026-08-01 audit).
     // The 15-min setInterval poll in jobWatchdog.ts already runs these checks continuously
     // and pages on critical failures -- this does NOT replace that, it exists because the
     // poll itself was never a monitored JOB_REGISTRY job (an unregistered setInterval has no
     // lateness detection: a dead process silently takes monitoring down with it, same class
     // of gap job-digest had before it was registered). Sends a pass/warn/fail summary
-    // regardless of outcome, so a quiet day is confirmed rather than assumed. Scheduled
-    // after both unified-ranker (07:30 IST) and recommendations-digest (08:15 IST weekdays)
-    // so the report reflects that morning's freshly-built state when both ran.
+    // regardless of outcome, so a quiet day is confirmed rather than assumed. Moved from
+    // 8:40 AM IST to 11 PM IST by 37c0fec (2026-08-27, "optimize Indian market timelines") to
+    // run after that day's post-market chain -- unified-ranker (22:30 IST), job-digest
+    // (22:50 IST) and recommendations-digest (22:40 IST weekdays) -- so the report reflects
+    // that day's freshly-built state instead of the previous evening's. This paragraph was
+    // left describing the old morning slot for a day; the pattern below was already correct.
     const QUEUE_DATA_QUALITY_DAILY = 'data-quality-daily';
     const dataQualityDailyQueue = new Queue(QUEUE_DATA_QUALITY_DAILY, { connection });
     const dataQualityDailyWorker = new Worker(
