@@ -324,6 +324,88 @@ separate skill from noise.
 
 Re-measured weekly by the `signal-accuracy-review-weekly` scheduled task.
 
+### Weekly re-measurement, 2026-08-22 — h=21 significance did not reproduce; `technical` needs a next-session entry, not same-day
+
+Same method, `created_at` anchor, window widened to 2026-07-01→2026-08-20 to get more dates
+(20/19/12 vs the original 17/14/9):
+
+| Horizon | Signals | Dates | Per-date signed return | t | Win rate |
+|---|---|---|---|---|---|
+| 1d | 6,430 | 20 | −0.49% | −1.16 | 43.7% |
+| 5d | 6,246 | 19 | −0.40% | −1.03 | 45.1% |
+| 21d | 931 | 12 | −0.44% | **−0.43** | 42.6% |
+
+**The 21d row was the one significant reading in the 08-12 baseline (t=−2.40) and it did not
+reproduce — same shape as this file's own `insider_net` non-reproduction**, diluting toward null
+as more dates accumulated (9→12) rather than confirming. Nothing here is significant at any
+horizon; direction is still mildly negative across the board, consistent with "no edge either
+way," not a reversal.
+
+**A real methodology gap, not a code bug, found while tracing why `signal_source='technical'`
+(the largest, steadiest source, ~2,400 rows/day) contributes almost nothing to the table above.**
+`technical_analysis_engine.py` stamps `signal_date` via `logical_write_floor()` — the date of the
+session it just analyzed, correctly, by design (see the docstring at `as_of.py:152`). Since the
+job runs POST-CLOSE the same day (`ml-daily-ops`'s batch, `created_at` consistently ~12:30-14:00
+UTC / 18:00-19:30 IST), a `technical` row's `signal_date` is the day it DESCRIBES, not a forecast
+for that day — it only becomes tradeable at the NEXT session's open. Grading it with this
+section's own convention (entry at `signal_date`'s own open, filtered to `created_at` before that
+open) is therefore not a bug in the filter — it's correctly excluding rows that were never
+knowable before that open. It just means `technical` currently reads as ~0 pre-market-gradeable
+rows on 5 of the last 6 trading days (08-14, 17, 18, 19, 21 all had **zero** `technical` rows with
+`created_at` before 03:45 UTC; only 08-20 had any, and that was `technical_scan`, a different
+writer). The 08-11 to 08-13 window that dominates the 08-12 baseline was written unusually early
+(some rows `created_at` the prior evening) — that window is the anomaly, not the norm; steady
+state is same-day-afternoon, post-close.
+
+**Re-graded `technical`'s own Bullish/Bearish call with the correct entry (next session's open,
+not `signal_date`'s own open) — 12 dates, 2026-08-03→08-19, ~1,500-1,600 signals/day:**
+
+| Horizon | Signals | Dates | Per-date signed return | t | Win rate |
+|---|---|---|---|---|---|
+| 1d (next-open→close) | 18,855 | 12 | +0.11% | **+2.13** | 48-53%, ~coin flip |
+| 5d | 12,521 | 8 (overlapping) | +0.38% | +5.21 | not computed |
+
+**Do not read this as a discovered edge yet.** Win rate sits right at 48-53% on every one of the
+12 dates — a real directional edge should show up in win rate, not just mean magnitude, so this
+reads as a few large winners pulling the mean rather than skill (the same "measures volatility,
+not direction" caution this file applies elsewhere). 12 dates is under this file's own
+`MIN_DATES_RELIABLE=20` bar, and t=2.13 on a single un-corrected test is not strong given how many
+factors in this file have failed to reproduce at similar or better t-stats (`insider_net` t=2.05
+did not reproduce). The 5d reading (t=5.21, 8 dates) is heavily overlapping-window and should be
+distrusted more, not less, per this file's own standing caution on overlapping observations. A
+crude recall check on the same corrected convention: of 130 top-10-daily-gainer slots
+(08-04→08-20, liquid, non-suspect), 87 (67%) had been flagged Bullish by `technical` the prior
+close, against a chance expectation of ~70 (54%) — a modest lift, consistent with the weak but
+real t=+2.13, not a strong signal. **Action: re-run this exact next-session-entry grading for
+`technical` once ~20+ dates accumulate under the corrected convention (~2026-09 given the current
+daily cadence) before deciding whether it's worth anything.** Any future review of
+`signal_source='technical'` should use next-session entry, not `signal_date`'s own open — the
+existing convention above (entry at the signal's own `signal_date` open) remains correct for
+`AI`/`screener`/`technical_scan`, which write pre-market or intraday and are actionable same-day.
+
+**Separate, unrelated finding: `unified_recommendations`'s pre-market-gradeable date count is
+still stuck at 2 (2026-08-12, 08-13), unchanged since that date was first recorded — and the
+job's own completion time has been drifting later each day since, which is why.**
+`unified-ranker-daily` is scheduled `0 2 * * 1-5` (02:00 UTC / 07:30 IST, comfortably pre-market),
+but the actual `generated_at` on `unified_recommendations_history` has crept later every day this
+week: 08-13 02:00 UTC (in), 08-18 03:56, 08-19 07:47, 08-20 04:31, 08-21 04:26, and the most recent
+run available (rolled forward to the next Monday over the weekend) 04:12 — every one of 08-14
+through 08-21 lands AFTER the 03:45 UTC pre-market cutoff, some by several hours. At the current
+rate, `unified_recommendations` will not accumulate the ~30 pre-market dates this file's own
+remediation plan called for (see "The canonical ranker is not gradeable yet" below) — it is stuck
+at 2 by construction, not by bad luck. Not root-caused in this pass (would need live
+`job_heartbeat`/BullMQ queue-depth tracing, out of scope for a signal-accuracy review) — flagged
+for `job-runtime-audit` or `deploy-reliability-review` to trace whether this is queue contention
+behind `ml-daily-ops`, a growing catch-up backlog, or the job itself taking longer each day.
+
+**Also found, incidental to this review, not investigated further:** `information_schema.columns`
+queried without a `table_schema` filter for `job_heartbeat` returns rows from **11 schemas** —
+`public` plus 10 leaked throwaway test schemas (9 `pytest_*`, 1 `vitest_*`). `recurring-bugs.md`'s
+"leaked throwaway test schema" entry documented 2 such leftovers on 2026-08-18 and fixed the one
+known unfiltered consumer (`densify_feature_matrix.py`); the leaks themselves were never cleaned
+up and have grown to 10. Worth a `DROP SCHEMA ... CASCADE` sweep and re-checking the 3 other files
+recurring-bugs.md already flagged as sharing the same unfiltered-query shape.
+
 ### The canonical ranker is not gradeable yet — and the clock started 2026-08-12
 
 `unified_recommendations` holds 37 distinct `computed_at` dates and **exactly one** is provably

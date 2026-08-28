@@ -6186,3 +6186,65 @@ Committed bfe5b7c (5 files); ml-api + bharat-server restarted after final edits.
 - AMFI mf_sector_flow 0-rows — **resolved**, see the addendum above (`f2c9be3`).
 - `intraday_fetcher` 600s timeouts — still occurring, but now observed on a **different** script under the same shape: `trendlyne_fundamentals_fetcher.py` via `trendlyne-catchup` timed out at 600000ms as recently as 2026-08-27 20:00 IST. Consistent with the already-documented WAF request-allowance ceiling (memory: `trendlyne_waf_request_allowance_2026_08_17` — the 2,234-symbol universe is ~15x the allowance, so no pacing completes a full pass), not a new regression.
 - Redis AOF fsync warnings + RAM 98% (host capacity) — **still unresolved, still at capacity**: checked live 2026-08-27 20:0x IST, host RAM at 95.9% used (0.9GB free of 23GB). Two full days at >95% and no capacity work has landed; this is the one item on this list that has had zero progress since first flagged.
+
+## 2026-08-22 (scheduled) — `signal-accuracy-review-weekly`: h=21's significance did not reproduce, `technical`'s entry convention was wrong
+
+Scheduled run of `/signal-accuracy-review`, per `.claude/rules/measurement.md`'s own "Re-measured
+weekly by the `signal-accuracy-review-weekly` scheduled task" line. All queries ran live against
+production (`stock_ohlcv` max date 2026-08-21 at query time) via the `mcp__postgres` connector,
+`created_at` anchor, per-date-then-averaged. Full numbers, tables and derivation:
+`.claude/rules/measurement.md`'s new "Weekly re-measurement, 2026-08-22" section (inserted right
+after the 2026-08-12 baseline it updates). No signal/scoring logic touched, per the task's own
+instruction — measurement only.
+
+**Headline: the 08-12 baseline's one significant row did not reproduce.** h=21 was t=−2.40 (9
+dates) on 08-12; re-measured on 12 dates it's t=**−0.43** — diluted toward null as the sample
+grew, the same shape this file's `insider_net` entry already documents. h=1/h=5 stayed
+directionally negative and not significant, consistent with the standing "no edge either way"
+verdict.
+
+**A genuine methodology finding, not a code bug: `signal_source='technical'` cannot be graded
+under this review's own literal convention, and was contributing almost nothing.**
+`technical_analysis_engine.py` correctly stamps `signal_date` via `logical_write_floor()` (the
+date of the session it just analyzed — a by-design, correctly-implemented choice, not a bug), but
+the job runs POST-CLOSE the same day. So a `technical` row's `signal_date` is the day it
+*describes*, not a forecast — it's only tradeable at the NEXT session's open. Grading it at its
+own `signal_date`'s open (this review's stated convention) correctly excludes it every time — on
+5 of the last 6 trading days checked (08-14, 17, 18, 19, 21), `technical` contributed **zero**
+pre-market-provable rows. The 08-11→08-13 window that carries the whole 08-12 baseline was an
+early-writing anomaly (some rows `created_at` the evening before), not the steady state.
+Re-graded with the corrected entry (next session's open): 12 dates, ~1,500-1,600 signals/day,
+h=1 mean +0.11%/day, **t=+2.13**, win rate a flat 48-53% on every date — read as "not yet an edge"
+(win rate that flat is inconsistent with real directional skill; 12 dates is under this file's own
+`MIN_DATES_RELIABLE=20`; a similar-magnitude t-stat, `insider_net`'s 2.05, already failed to
+reproduce once in this file). Flagged to re-check at ~20+ dates under the corrected convention,
+not acted on.
+
+**Two findings outside the review's own scope, surfaced while tracing the above, neither
+root-caused this pass:**
+1. `unified_recommendations`'s pre-market-gradeable date count is still stuck at 2 (08-12, 08-13)
+   — unchanged since first recorded. `unified-ranker-daily` is scheduled 02:00 UTC (comfortably
+   pre-market) but its actual `generated_at` has crept later every day since 08-14 (03:56 → 07:47
+   → 04:31 → 04:26 → 04:12 UTC across 08-18→08-21), missing the 03:45 UTC cutoff every time. At
+   the current rate the ~30-date remediation this file calls for cannot accumulate. Not
+   root-caused — needs `job_heartbeat`/BullMQ queue-depth tracing, flagged for
+   `job-runtime-audit`/`deploy-reliability-review`. Given the extensive scheduler/date-cutoff work
+   this repo did on 08-23 and 08-27 (destaggering, trading-day-aware windowing, four date-casting
+   fixes), this may already be resolved or partially addressed — re-check against current
+   `generated_at` timestamps before re-investigating from scratch.
+2. An unqualified `information_schema.columns` query for `job_heartbeat` returned rows from **11
+   schemas** — `public` plus 10 leaked throwaway test schemas (9 `pytest_*`, 1 `vitest_*`).
+   `recurring-bugs.md`'s "leaked throwaway test schema" entry (2026-08-18) found 2 and fixed the
+   one known unfiltered consumer; the leaks were never cleaned up and have grown to 10. Worth a
+   `DROP SCHEMA ... CASCADE` sweep plus re-checking the other files that entry flags as sharing the
+   same unfiltered-query shape.
+
+**Process note, for whoever picks up the next scheduled run:** this task ran across a large real-
+world time gap — a tool-permission error paused it mid-query, and by the time it resumed the
+`mcp__postgres` connector had disconnected and could not be reloaded, so no further live queries
+were possible after the `technical`-entry-convention finding above. All numbers in this entry and
+in `measurement.md`'s new section are accurate as of `stock_ohlcv` max date 2026-08-21 (queried
+2026-08-22); they were not re-verified against the several days of subsequent work (08-23 through
+08-28) that landed in this repo while this task was paused. Next week's run should treat this
+entry's open items (the generated_at drift, the leaked schemas) as needing a fresh check, not an
+established current state.
