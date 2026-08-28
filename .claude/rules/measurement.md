@@ -406,13 +406,22 @@ Query `job_run_history` (not `unified_recommendations_history`'s `MIN`) for any 
 this job's timing — it didn't exist before 2026-08-22, which is why the original read had to use
 the misleading proxy.
 
-**Also found, incidental to this review, not investigated further:** `information_schema.columns`
-queried without a `table_schema` filter for `job_heartbeat` returns rows from **11 schemas** —
-`public` plus 10 leaked throwaway test schemas (9 `pytest_*`, 1 `vitest_*`). `recurring-bugs.md`'s
-"leaked throwaway test schema" entry documented 2 such leftovers on 2026-08-18 and fixed the one
-known unfiltered consumer (`densify_feature_matrix.py`); the leaks themselves were never cleaned
-up and have grown to 10. Worth a `DROP SCHEMA ... CASCADE` sweep and re-checking the 3 other files
-recurring-bugs.md already flagged as sharing the same unfiltered-query shape.
+**Also found, incidental to this review — and its "10 leaked schemas, worth a DROP SCHEMA sweep"
+conclusion was WRONG, corrected here after the fact.** An `information_schema.columns` query
+without a `table_schema` filter for `job_heartbeat` returned rows from 11 schemas at the time
+(`public` plus 10 `pytest_*`/`vitest_*`), read against `recurring-bugs.md`'s 2026-08-18
+"leaked throwaway test schema" entry (2 leftovers then) as evidence of unbounded growth. **What
+this section missed: `docs/audit-findings.md` AF-20260827-07 already found and dropped 17 of
+these (down to 0), and AF-20260827-13 the same day found that dropping schemas by name pattern
+alone — without cross-checking `pg_stat_activity` — corrupted a live pytest run mid-execution.**
+`purge_orphan_schemas()` (`pg_test_support.py`) was hardened through two further iterations after
+that (a relation-lock check, then a session advisory-lock check once the relation-lock check
+itself proved insufficient). Re-checked live before proposing any action: none of the original 10
+schema names still exist; the current count is 2, and both were queried within the prior ~20
+minutes by this session's own running pytest suite — legitimately in use, not orphaned. **Do not
+re-propose a DROP SCHEMA sweep from an `information_schema` name-pattern count alone** — cross-
+check `pg_stat_activity` first (AF-13's own lesson), and use `purge_orphan_schemas()` rather than
+a hand-rolled drop.
 
 ### The canonical ranker is not gradeable yet — and the clock started 2026-08-12
 
