@@ -383,20 +383,28 @@ daily cadence) before deciding whether it's worth anything.** Any future review 
 existing convention above (entry at the signal's own `signal_date` open) remains correct for
 `AI`/`screener`/`technical_scan`, which write pre-market or intraday and are actionable same-day.
 
-**Separate, unrelated finding: `unified_recommendations`'s pre-market-gradeable date count is
-still stuck at 2 (2026-08-12, 08-13), unchanged since that date was first recorded — and the
-job's own completion time has been drifting later each day since, which is why.**
-`unified-ranker-daily` is scheduled `0 2 * * 1-5` (02:00 UTC / 07:30 IST, comfortably pre-market),
-but the actual `generated_at` on `unified_recommendations_history` has crept later every day this
-week: 08-13 02:00 UTC (in), 08-18 03:56, 08-19 07:47, 08-20 04:31, 08-21 04:26, and the most recent
-run available (rolled forward to the next Monday over the weekend) 04:12 — every one of 08-14
-through 08-21 lands AFTER the 03:45 UTC pre-market cutoff, some by several hours. At the current
-rate, `unified_recommendations` will not accumulate the ~30 pre-market dates this file's own
-remediation plan called for (see "The canonical ranker is not gradeable yet" below) — it is stuck
-at 2 by construction, not by bad luck. Not root-caused in this pass (would need live
-`job_heartbeat`/BullMQ queue-depth tracing, out of scope for a signal-accuracy review) — flagged
-for `job-runtime-audit` or `deploy-reliability-review` to trace whether this is queue contention
-behind `ml-daily-ops`, a growing catch-up backlog, or the job itself taking longer each day.
+**Separate finding on `unified-ranker-daily`'s timing — flagged as "still stuck" when this section
+was first written, then traced further and found to be RESOLVED, not open.** The first version of
+this paragraph read `unified_recommendations_history`'s `MIN(generated_at)` per `computed_at` and
+saw every date 08-14 through 08-21 landing after the 03:45 UTC cutoff (08-18 03:56, 08-19 07:47,
+08-20 04:31, 08-21 04:26 UTC), and concluded the scheduled 02:00 UTC run was chronically late.
+**That conclusion doesn't survive checking the actual job runs.** `job_run_history` (added
+2026-08-22, so it only covers the tail of this window) shows the scheduled run landing well inside
+the pre-market cutoff on 3 of the 4 days checked: 08-24 first run 02:02:07 UTC (success), 08-26
+02:01:28 UTC (success), 08-27 02:02:06 UTC (success) — comfortably before 03:45 UTC every time.
+08-25 is a real, different incident: 10 failed runs starting at the scheduled 02:01:35 UTC, then
+one success at 21:07 UTC (post-close) — a same-day retry-then-recover, not a drift. **The `MIN()`
+read was misleading, not wrong on its face**: because `computed_at` values can be written by more
+than one run over time (a stale early attempt and a later corrected one can both land on the same
+`computed_at`), `MIN(generated_at)` can surface an OLD run's timestamp for a date that was, in
+fact, also served on time by a later, unrelated run — it answers "the earliest anything was ever
+written for this date," not "did today's scheduled run land on time." **Net: no evidence the
+02:00 UTC schedule itself is broken or drifting** — the 2-pre-market-date stall this file's
+remediation plan flagged is a real, separate constraint (see "The canonical ranker is not
+gradeable yet" below), but it is not caused by the run consistently missing its own schedule.
+Query `job_run_history` (not `unified_recommendations_history`'s `MIN`) for any future check of
+this job's timing — it didn't exist before 2026-08-22, which is why the original read had to use
+the misleading proxy.
 
 **Also found, incidental to this review, not investigated further:** `information_schema.columns`
 queried without a `table_schema` filter for `job_heartbeat` returns rows from **11 schemas** —

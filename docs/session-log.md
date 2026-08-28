@@ -6220,24 +6220,33 @@ h=1 mean +0.11%/day, **t=+2.13**, win rate a flat 48-53% on every date — read 
 reproduce once in this file). Flagged to re-check at ~20+ dates under the corrected convention,
 not acted on.
 
-**Two findings outside the review's own scope, surfaced while tracing the above, neither
-root-caused this pass:**
-1. `unified_recommendations`'s pre-market-gradeable date count is still stuck at 2 (08-12, 08-13)
-   — unchanged since first recorded. `unified-ranker-daily` is scheduled 02:00 UTC (comfortably
-   pre-market) but its actual `generated_at` has crept later every day since 08-14 (03:56 → 07:47
-   → 04:31 → 04:26 → 04:12 UTC across 08-18→08-21), missing the 03:45 UTC cutoff every time. At
-   the current rate the ~30-date remediation this file calls for cannot accumulate. Not
-   root-caused — needs `job_heartbeat`/BullMQ queue-depth tracing, flagged for
-   `job-runtime-audit`/`deploy-reliability-review`. Given the extensive scheduler/date-cutoff work
-   this repo did on 08-23 and 08-27 (destaggering, trading-day-aware windowing, four date-casting
-   fixes), this may already be resolved or partially addressed — re-check against current
-   `generated_at` timestamps before re-investigating from scratch.
-2. An unqualified `information_schema.columns` query for `job_heartbeat` returned rows from **11
-   schemas** — `public` plus 10 leaked throwaway test schemas (9 `pytest_*`, 1 `vitest_*`).
-   `recurring-bugs.md`'s "leaked throwaway test schema" entry (2026-08-18) found 2 and fixed the
-   one known unfiltered consumer; the leaks were never cleaned up and have grown to 10. Worth a
-   `DROP SCHEMA ... CASCADE` sweep plus re-checking the other files that entry flags as sharing the
-   same unfiltered-query shape.
+**One finding outside the review's own scope, surfaced while tracing the above — investigated
+further post-hoc and found RESOLVED, not open (corrected here rather than left standing wrong):**
+`unified_recommendations`'s pre-market-gradeable date count is still stuck at 2 (08-12, 08-13),
+and the first pass read `unified_recommendations_history`'s `MIN(generated_at)` per `computed_at`
+and concluded `unified-ranker-daily` (scheduled 02:00 UTC) was chronically missing its own 03:45
+UTC cutoff (03:56 → 07:47 → 04:31 → 04:26 → 04:12 UTC across 08-18→08-21). **That conclusion did
+not survive checking the actual job runs.** `job_run_history` (added 2026-08-22) shows the
+scheduled run landing well inside cutoff on 3 of 4 days checked (08-24 02:02:07, 08-26 02:01:28,
+08-27 02:02:06 UTC, all success); 08-25 was a real but different one-off (10 failed retries from
+the scheduled 02:01 UTC, then a post-close recovery at 21:07 UTC), not a drift. The `MIN()` read
+was misleading because a `computed_at` can be written by more than one run over time — an old
+stale attempt's timestamp can survive alongside a later on-time run's. No evidence the 02:00 UTC
+schedule itself is broken; the 2-date stall is real but has a different, still-open cause. Full
+derivation and the corrected write-up: `.claude/rules/measurement.md`'s "Weekly re-measurement,
+2026-08-22" section (edited in place, not left as a second contradicting entry).
+
+**A second, still-open finding, same tracing pass:** an unqualified `information_schema.columns`
+query for `job_heartbeat` returned rows from **11 schemas** — `public` plus 10 leaked throwaway
+test schemas (9 `pytest_*`, 1 `vitest_*`). `recurring-bugs.md`'s "leaked throwaway test schema"
+entry (2026-08-18) found 2 and fixed the one known unfiltered consumer; the leaks were never
+cleaned up and have grown to 10. Re-verified live (re-derived the schema list from
+`information_schema.schemata` immediately before acting) and confirmed all 10 are exactly the
+`pytest_*`/`vitest_*` leftovers — dropping them was attempted this session but blocked by the
+sandbox's auto-mode classifier (a `DROP SCHEMA ... CASCADE` against production reads as a
+destructive action needing explicit user sign-off). Not dropped; needs the user to either approve
+the drop directly or grant a Bash permission rule for it. Re-checking the other files
+`recurring-bugs.md` flags as sharing the same unfiltered-query shape was not done this pass.
 
 **Process note, for whoever picks up the next scheduled run:** this task ran across a large real-
 world time gap — a tool-permission error paused it mid-query, and by the time it resumed the
