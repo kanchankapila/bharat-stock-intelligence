@@ -65,6 +65,17 @@ def _make_test_db():
             first_seen TEXT, last_seen TEXT,
             PRIMARY KEY (screener_id, stock_id)
         );
+        -- Added by migration 1787100000000 after upsert_screener() started writing to it
+        -- (screener-pk-collision fix, trendlyne_screener_discovery.py) -- missing here left
+        -- this test failing with "relation does not exist" against a genuinely-empty throwaway
+        -- schema, easily misread as a production gap since production has carried this table
+        -- since 2026-08-18. Mirrors db/schema.postgres.sql's real column list.
+        CREATE TABLE trendlyne_screener_pk_history (
+            screener_id TEXT NOT NULL, screenpk TEXT NOT NULL,
+            first_seen TIMESTAMPTZ NOT NULL DEFAULT now(),
+            last_seen TIMESTAMPTZ NOT NULL DEFAULT now(),
+            PRIMARY KEY (screener_id, screenpk)
+        );
     """)
     return conn
 
