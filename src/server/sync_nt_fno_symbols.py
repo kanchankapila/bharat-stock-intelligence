@@ -34,8 +34,29 @@ NT_HEADERS = {
     "Referer": "https://www.niftytrader.in/",
 }
 
-INDEX_DATA_URL  = "https://webapi.niftytrader.in/webapi/symbol/stock-index-data"
+# `webapi.niftytrader.in/webapi/symbol/stock-index-data` 401s unconditionally now, even with a
+# freshly-issued, otherwise-valid Bearer token (confirmed live 2026-08-28, same finding as
+# mover_screener_fetcher.py's NT_GAINERS_URL -- see that file's comment for the full trace). The
+# site's own Next.js API proxy (`www.niftytrader.in/api/niftytrader/symbol/...`) serves the
+# identical data successfully with the same Bearer token, no cookie jar needed. PSYMBOL_URL is
+# unaffected -- confirmed still working unauthenticated on the old `webapi.` host -- so only this
+# one URL moves, not every NT endpoint in this file.
+INDEX_DATA_URL  = "https://www.niftytrader.in/api/niftytrader/symbol/stock-index-data"
 PSYMBOL_URL     = "https://webapi.niftytrader.in/webapi/symbol/psymbol-list?exchange=false"
+
+
+def _nt_bearer_token():
+    """Best-effort read of the JWT niftytraderAuthService.ts maintains in
+    app_settings.niftytrader_auth_token. Returns None (never raises) when the token was
+    never captured or the lookup fails. Mirrors mover_screener_fetcher.py's helper of the
+    same name -- not shared via import to keep each fetcher's db_compat usage self-contained."""
+    try:
+        from db_compat import query_scalar
+        return query_scalar(
+            "SELECT value FROM app_settings WHERE key = 'niftytrader_auth_token'")
+    except Exception as e:
+        print(f"[sync_nt_fno] token lookup failed ({e})", file=sys.stderr)
+        return None
 
 # NT display name → (canonical index_name, api_symbol, provider)
 # provider 'nt_index'     = NSE exchange  (reqType=nse_pcr_data, exchange=nse)
@@ -57,9 +78,10 @@ _BSE_EXTRA: list[tuple[str, str, str]] = [
 ]
 
 
-def _fetch(url: str) -> list | None:
+def _fetch(url: str, extra_headers: dict | None = None) -> list | None:
     try:
-        r = requests.get(url, headers=NT_HEADERS, timeout=15)
+        headers = {**NT_HEADERS, **extra_headers} if extra_headers else NT_HEADERS
+        r = requests.get(url, headers=headers, timeout=15)
         d = r.json()
         if d.get("result") != 1:
             print(f"[sync_nt_fno] API error: {d.get('resultMessage')}")
@@ -72,7 +94,11 @@ def _fetch(url: str) -> list | None:
 
 def sync_index_map(dry_run: bool = False) -> int:
     """Upsert 6 NT index entries into index_provider_map."""
-    data = _fetch(INDEX_DATA_URL)
+    bearer = _nt_bearer_token()
+    if not bearer:
+        print("[sync_nt_fno] no stored NT token; skipping index map (this endpoint requires one)")
+        return 0
+    data = _fetch(INDEX_DATA_URL, extra_headers={"Authorization": f"Bearer {bearer}", "platform_type": "1"})
     if data is None:
         return 0
 

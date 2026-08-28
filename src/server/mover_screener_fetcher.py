@@ -67,7 +67,15 @@ ET_GAINERS_URL = ("https://etmarketsapis.indiatimes.com/ET_Stats/gainers"
                   "?pagesize=50&marketcap=largecap%2Cmidcap%2Csmallcap&duration={dur}"
                   "&sort=intraday&sortby=percentchange&sortorder={order}&pageno=1")
 MOJO_MOVERS_URL = "https://frapi.marketsmojo.com/market_Gainersloser/getData?exchange=0&type={t}&"
-NT_GAINERS_URL = "https://webapi.niftytrader.in/webapi/symbol/top-gainers-data?fno_stock=false"
+# `webapi.niftytrader.in/webapi/symbol/top-gainers-data` 401s unconditionally now, even with a
+# freshly-issued, otherwise-valid Bearer token that DOES work against the sibling
+# `webapi.niftytrader.in/webapi/Screener/live-market-filter-data` endpoint below -- confirmed
+# live 2026-08-28 with two independently-obtained tokens, so this isn't a stale-token problem.
+# The site's own Next.js API proxy route (`www.niftytrader.in/api/niftytrader/symbol/...`, one
+# host over from `webapi.`) serves the identical data successfully with the same Bearer token
+# and no cookie jar needed -- same reverse-engineering-from-the-live-site pattern already used
+# for NT_EOD_SCREENER_URL/NT_LIVE_SCREENER_URL below. `?fno_stock=false` param unchanged.
+NT_GAINERS_URL = "https://www.niftytrader.in/api/niftytrader/symbol/top-gainers-data?fno_stock=false"
 # Post-close EOD screener (reverse-engineered 2026-08-25 from www.niftytrader.in's own
 # Next.js chunks -- routes moved under /webapi/Screener/ with a capital S; the old flat
 # paths in ai_endpoint_memory.json all 404). Unauthenticated POST, empty body = full
@@ -433,10 +441,31 @@ def fetch_mojo(session) -> list:
 
 def fetch_niftytrader(session) -> list:
     rows = []
+    bearer = _nt_bearer_token()
+    if not bearer:
+        print("[nt_top_gainers] no stored NT token; skipping (this endpoint requires one)")
+        return []
     try:
         resp = session.get(NT_GAINERS_URL,
                            headers={"User-Agent": MC_HEADERS["User-Agent"],
-                                    "Accept": "application/json"}, timeout=15)
+                                    "Accept": "application/json",
+                                    "Authorization": f"Bearer {bearer}",
+                                    "platform_type": "1",
+                                    "Origin": "https://www.niftytrader.in",
+                                    "Referer": "https://www.niftytrader.in/",
+                                    # This Next.js API route 403s ("Unauthorized...") without
+                                    # these three even with a valid token+Origin+Referer -- real
+                                    # browsers set them automatically on every fetch/XHR, so
+                                    # something in front of the route (the app itself or its CDN)
+                                    # is using their absence as a bot signal. Isolated live
+                                    # 2026-08-28: Origin+Referer alone still 403s; adding just
+                                    # these three (same Origin/Referer/token) -> 200.
+                                    "sec-fetch-site": "same-origin",
+                                    "sec-fetch-mode": "cors",
+                                    "sec-fetch-dest": "empty"}, timeout=15)
+        if resp.status_code in (401, 403):
+            print(f"[nt_top_gainers] unauthorized (HTTP {resp.status_code}, token absent/expired); skipping")
+            return []
         resp.raise_for_status()
         rows = _rows_from_response(resp, "nt_top_gainers")
     except Exception as e:
