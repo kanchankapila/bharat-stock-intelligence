@@ -162,7 +162,13 @@ export default defineConfig(({mode}) => {
             name: 'live',
             include: ['**/*.live.test.ts', '**/mcapiProxy.test.ts'],
             exclude: SHARED_EXCLUDE,
-            setupFiles: ['./vitest.setup.ts'],
+            // vitest.setup.live.ts MUST run first: it strips VITEST_PG_SCHEMA/VITEST_PG_URL,
+            // which a co-running `unit` project's globalSetup leaks into this project's forked
+            // process via env inheritance (see that file's header for the full mechanism and the
+            // two failures it was silently causing). Order matters -- setupFiles run in array
+            // order, and the delete must land before vitest.setup.ts or any test file's own
+            // `await import('../pgClient')` can read the leaked value.
+            setupFiles: ['./vitest.setup.live.ts', './vitest.setup.ts'],
             pool: 'forks',
             poolOptions: { forks: { singleFork: true } },
           },
