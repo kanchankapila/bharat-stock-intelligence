@@ -6564,3 +6564,70 @@ sector-return fix means the model's most-skilled subpopulation stops being fed a
 going forward. Neither fix's downstream benefit (a higher AUC, a cleaner job list forever) can be
 claimed yet — both need a few days of fresh data / normal operation to honestly confirm, which is
 exactly the discipline `measurement.md` asks for rather than declaring victory on day one.
+
+## 2026-08-29 (cont.) — audit-loop remediation pass: commit the day's uncommitted fixes, close ledger rows, trim stale docs, new live bugs found and fixed
+
+User asked to fix everything in findings/ledgers requiring fixtures and review error logs. This
+session's own transcript up to this point (S420-S427, all recorded above) had accumulated a large
+verified-but-uncommitted working tree (~235 modified/new files) plus ~20 `docs/audit-findings.md`
+rows explicitly marked "fixed, uncommitted" — the ledger's own convention treats those as not
+actually closed until they land. Full check stack (`tsc --noEmit`, `npx vitest run`, full `pytest`,
+`npm run schema:drift`, `check_recurring_bugs.py`) re-run fresh against the actual working tree
+before touching anything — all clean (vitest 1086/1086, pytest 2326 passed/244 skipped/0 failed,
+schema 224/224) — before committing.
+
+**Two new live bugs found and fixed this pass, both negative-controlled:**
+1. `resolveMoneycontrolSymbol`'s autocomplete-API fallback (`stockMapping.ts`) has silently
+   returned `null` for every symbol it was ever asked to resolve — MoneyControl's
+   `autosuggestion_solr.php` always concatenates a second literal JSON array onto its response
+   with no separator (confirmed live via curl against 2 independent symbols), so `res.json()`
+   always threw `Unexpected non-whitespace character after JSON`, silently caught and logged.
+   6 occurrences in one ~30s window in today's error log is what surfaced it. Fixed with a
+   balanced-bracket JSON extractor; the underlying match-heuristic's own correctness (whether it
+   ever resolves the right symbol given MC's real field shapes) is a separate, already-flagged
+   question in memory, not addressed here. AF-20260829-40.
+2. `check_recurring_bugs.py` found one live instance of its own degraded-print-to-stdout class:
+   `strategy_optimizer.py`'s 2026-08-29 stale-connection close() failure message (AF-33) printed
+   to stdout, invisible to `runPython()`'s stderr-only inspection. Fixed (`file=sys.stderr`).
+   AF-20260829-41.
+
+**Closed AF-20260827-08** (TodaysPicks.tsx had no as-of/freshness indicator) — header now derives
+an as-of stamp from the rows' own `computed_at`, reusing the existing `relativeFromNow`/
+`formatISTWithLocal` helpers already used by `ActivityFeed.tsx`.
+
+**Docs trimmed of already-fixed issues, per explicit user request** (ledger itself left intact —
+its own "never delete, close with a date" convention was confirmed with the user before touching
+anything): `docs/SQLITE_DECOMMISSION_PLAN.md` condensed from a 400-line phase-by-phase plan to a
+~35-line "complete" record (the migration finished 2026-08-19, the doc still read as an open plan
+describing already-fixed issues in detail); `docs/FETCHER_HEALTH_TRACKER.md`'s TODO list dropped
+its `working_capital_fetcher.py` item (fixed 2026-08-27 in `e9daeae` — a request-depth bug, not
+the dead-source problem the TODO described).
+
+**Committed the day's accumulated work in 5 logical commits, by explicit path** (never
+`git add -A`): stale-docs deletions (45 files, already staged from an earlier session) · rules/
+docs/ledger updates (14 files) · TypeScript fixes (22 files, including today's 2 new bugs) · misc
+config/schema/MCP (7 files) · the ~223-file Python bucket (fetcher/engine fixes + the polars/
+BaseFetcher scaffolding pass, confirmed dormant via the clean full pytest run). Left uncommitted,
+deliberately: `scratch_verify/` (throwaway investigation scripts/probe output) and
+`screener_proposal.txt`/`screener_reclassification_report.txt` (raw output tied to the
+still-open EVIDENCE-lane screener-sentiment reclassification, AF-20260829-12/20 — nothing in
+`unified_ranker.py`'s scoring math was touched by this pass, verified line-by-line before
+committing the Python bucket).
+
+**Deployed, not just committed**: `pm2 restart bharat-server --update-env` (today's TS changes
+touch `dataQualityChecks.ts`, `queues.ts`, `confluenceEngine.ts`, `pgClient.ts`, all of which need
+the restart). Verified live: HTTP 200 on `/`, clean boot log, all 4 core pm2 processes
+(`bharat-server`, `alphaquant-api`, `ml-api`, `chatbot`) online post-restart.
+
+**Error-log review**: swept `logs/error-2026-08-29.log` (Winston JSON) and pm2's `gf-err.log`/
+`pm2-*-err.log`. Findings: `GEMINI_API_KEY` 403s (10x) — already AF-20260828-24, blocked on a user
+-supplied credential, no code fix possible. A cluster of Postgres connection-timeout/"too many
+clients" errors (13:01-18:00 IST) — traced to the same concurrent heavy-load window this session's
+own earlier halves already documented (ml-weekly-retrain + audit harness running simultaneously);
+not a new code bug, no new fix warranted. `gf-*`/`pg-backup-nightly` cron_restart jobs' shared
+`gf-err.log` last entry is from 2026-08-27 (pre-existing `pg_dump` circular-FK warning, already
+covered by AF-20260827-06's fix) — no fresh errors since.
+
+Final state: `tsc --noEmit` clean, `npx vitest run` 1087/1087 passed, full `pytest` 2326 passed /
+244 skipped / 0 failed, `npm run schema:drift` clean (224/224), `check_recurring_bugs.py` 0
+findings — all re-verified after the commits, not just before.
