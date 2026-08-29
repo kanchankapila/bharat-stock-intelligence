@@ -4,8 +4,14 @@ pydantic==2.13.4
 python-dotenv==1.2.2
 requests==2.34.2
 httpx==0.28.1
+# tenacity: retry/backoff decorators used by ingress_governor.py
+tenacity==9.1.4
 beautifulsoup4==4.14.3
 pandas==2.3.3
+# polars: imported at module top by ~200 src/server/*.py files (to_polars_df helper).
+# CI installs THIS file, not the repo-root requirements.txt -- an import-time dep that
+# only reaches the root file is an import error on every clean checkout.
+polars==1.44.1
 numpy==2.4.6
 scipy==1.17.1
 scikit-learn==1.8.0

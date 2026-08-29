@@ -113,6 +113,13 @@ module.exports = {
       script: path.resolve(__dirname, 'src', 'server', 'chatbot', 'app.py'),
       interpreter: VENV_PY,
     },
+    {
+      ...common,
+      name: 'engine-worker',           // FastAPI on :8005 — Ingestion Governor, MCP server & Engine Worker
+      script: path.resolve(__dirname, 'src', 'server', 'worker_service.py'),
+      interpreter: VENV_PY,
+    },
+
 
     // ------------------------------------------------------------------
     // Greenfield shadow-ranker pipeline (one-shot cron jobs, local IST times — see gfCron's own comment)

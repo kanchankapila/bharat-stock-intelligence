@@ -34,7 +34,7 @@ if errorlevel 1 (
 
 echo.
 echo [5/5] Starting/Reloading all services via PM2 ^(idempotent startOrReload^)...
-REM ecosystem.config.cjs injects .env into every service, so all four share the Postgres engine.
+REM ecosystem.config.cjs injects .env into every service, so all five share the Postgres engine.
 REM pm2 startOrReload ensures clean startup without creating duplicate process IDs.
 call npx pm2 startOrReload ecosystem.config.cjs
 call npx pm2 save >nul 2>&1
@@ -49,6 +49,7 @@ echo     bharat-server    http://localhost:3000
 echo     alphaquant-api   http://localhost:8002   (FastAPI)
 echo     ml-api           http://localhost:8000   (FastAPI)
 echo     chatbot          http://localhost:8001   (FastAPI)
+echo     engine-worker    http://localhost:8005   (FastAPI / MCP)
 echo ===================================================
 echo.
 call npx pm2 status
