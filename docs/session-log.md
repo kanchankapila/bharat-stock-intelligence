@@ -6631,3 +6631,61 @@ covered by AF-20260827-06's fix) — no fresh errors since.
 Final state: `tsc --noEmit` clean, `npx vitest run` 1087/1087 passed, full `pytest` 2326 passed /
 244 skipped / 0 failed, `npm run schema:drift` clean (224/224), `check_recurring_bugs.py` 0
 findings — all re-verified after the commits, not just before.
+
+## 2026-08-29 (cont.) — acting on the EVIDENCE/INVESTIGATE/ACCEPT rows, not just reporting them
+
+User pushed back twice: first to fix the previously-reported-but-not-actioned lanes, then
+explicitly "instead of just reporting, fix issues as well." Went through each and did what that
+lane actually allows. Full detail: `docs/audit-findings.md` AF-20260829-40 through -45.
+
+**Real fixes, both live-verified:**
+- `queues.ts`: `strategy-optimizer`'s 30min timeout was genuinely too tight for
+  `max_iterations=300`'s grid search, independent of the earlier "concurrent load" theory —
+  timed a standalone run under confirmed low contention (checked `pg_stat_activity` + the OS
+  process table for real CPU burn, ruling out a stuck connection): 33m59s, exit 0. Bumped to
+  60min, matching `backtest_optimizer.py`'s sibling budget one line below. The run's own
+  stale-connection scenario doubled as a real-world validation of AF-33's earlier reconnect fix.
+- `dataQualityChecks.ts`: new `screener-sentiment-catalog-master-divergence` check.
+  `screener_catalog.signal_bias`/`screener_master.inferred_sentiment` had no consistency check
+  despite AF-12/20 already flagging drift — live-measured 222/972 (22.8%) directional
+  disagreement, confirmed live in production via `npm run dq:check` post-deploy (FAIL, exact
+  reading). Monitoring only, deliberately does not sync/revert either column (that's still
+  EVIDENCE-gated). 5 new negative-controlled tests.
+
+**Investigated and resolved without a code change (the honest answer for that lane):**
+- AF-70/72/74/75/76 (calendar-cutoff engine getters): turned out to be a STALE LEDGER, not a
+  stale codebase — already fixed and measured on 2026-08-23 (`9df8aff`), with a full before/after
+  table already sitting later in the same ledger file. The original "open" rows had simply never
+  been reconciled against that closure block for 6 days. Fixed the ledger, not the code (nothing
+  to fix there).
+- AF-31 (2+ hour TimescaleDB compression run): live `job_stats` now shows the same 5 hypertables
+  completing in 135µs–20min with 0/119-120 failures — explained by AF-38's same-day orphaned-job
+  cleanup (16 duplicate jobs on the identical 5 hypertables), not a separate defect.
+- FACTOR_CROWDING_THRESHOLD / `smart_money_score`: re-checked live date counts (13/30, 14/~18) —
+  still genuinely calendar-blocked. Forcing a threshold pick now would repeat the exact
+  "fabricated backtest" mistake `measurement.md` exists to prevent.
+- AF-12 (screener reclassification): ran the requested before/after measurement
+  (`factor_edge.py` on `screener_momentum_score`, the column that actually consumes
+  `inferred_sentiment`) — positive, USABLE at 21d, but the panel is dominated by
+  pre-reclassification history, so it doesn't isolate the relabeling's effect. Recorded honestly
+  as still-open rather than claimed as resolved.
+
+**Verified live, corrected stale docs (no code bug, just wrong documentation):**
+- `mf_holdings_fetcher.py`'s `FETCHER_HEALTH_TRACKER.md` TODO was 16 days stale — the fetcher was
+  already rewritten and working since 2026-08-13. Ran it live for RELIANCE to confirm, checked
+  `stock_mf_holdings` (5,616 rows / 1,403 symbols, fresh through today).
+- `mf_sector_flow_fetcher.py` re-confirmed genuinely dead (AMFI restructured to ~54 per-AMC Excel
+  workbooks). Checked one candidate replacement (`mfdata.in`) — down (HTTP 522). A real fix needs
+  a new scraper project; not attempted, recorded honestly rather than half-built.
+
+**Deployed and verified**: `pm2 restart bharat-server --update-env` (queues.ts/dataQualityChecks.ts
+changes need it) — HTTP 200, clean boot log, all 4 core services online. `npm run dq:check` run
+live post-deploy: the new check fires with the exact measured reading (222/972, 22.8%).
+
+**Left untouched**: a concurrent session's in-progress work surfaced mid-pass
+(`dl_trainer.py`, `test_dl_trainer_registry_gate.py`, `backfill_sector_ret_pattern_fired.py`,
+`scripts/_trigger_ml_weekly_retrain_manual.ts`) — not committed, not read into this session's
+own changes, per this repo's "commit by explicit path" convention.
+
+Final state: `tsc --noEmit` clean, `npx vitest run` 1092/1092 passed, `npm run schema:drift`
+clean (224/224).
