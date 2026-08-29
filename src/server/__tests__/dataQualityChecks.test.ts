@@ -196,6 +196,41 @@ describe('individual evaluate() functions', () => {
     expect(r.detail).toMatch(/refresh/);
   });
 
+  it('screener-sentiment-catalog-master-divergence passes when nothing to compare yet', () => {
+    const r = byId('screener-sentiment-catalog-master-divergence').evaluate({ total: 0, mismatched: 0 }, now);
+    expect(r.status).toBe('pass');
+  });
+
+  it('screener-sentiment-catalog-master-divergence passes when every pair agrees', () => {
+    const r = byId('screener-sentiment-catalog-master-divergence').evaluate({ total: 900, mismatched: 0 }, now);
+    expect(r.status).toBe('pass');
+    expect(r.detail).toMatch(/agree/);
+  });
+
+  it('screener-sentiment-catalog-master-divergence warns below the 5% floor', () => {
+    const r = byId('screener-sentiment-catalog-master-divergence').evaluate({ total: 1000, mismatched: 10 }, now);
+    expect(r.status).toBe('warn');
+    expect(r.detail).toMatch(/10\/1000/);
+  });
+
+  it('screener-sentiment-catalog-master-divergence fails above the 5% floor (matches the live AF-20260829-12/20 reading)', () => {
+    const r = byId('screener-sentiment-catalog-master-divergence').evaluate({ total: 972, mismatched: 222 }, now);
+    expect(r.status).toBe('fail');
+    expect(r.detail).toMatch(/222\/972/);
+  });
+
+  it('NEGATIVE CONTROL: screener-sentiment-catalog-master-divergence SQL actually checks direction, not just inequality', () => {
+    // A bare `<>` would also flag two rows that mean the same thing with different casing/wording
+    // -- the check must specifically compare bullish/bearish/neutral, matching the class this
+    // repo's cross-writer-collision-audit exists to catch.
+    const sql = byId('screener-sentiment-catalog-master-divergence').sql!;
+    expect(sql).toMatch(/bullish/);
+    expect(sql).toMatch(/bearish/);
+    expect(sql).toMatch(/neutral/);
+    expect(sql).toMatch(/screener_catalog/);
+    expect(sql).toMatch(/screener_master/);
+  });
+
   it('NEGATIVE CONTROL: regime-edge-trust-floor does not false-positive on a Friday snapshot checked Monday evening', () => {
     // ml_calibration.py only runs weekdays (ml-daily-ops, '20 13 * * 1-5'). Friday 18:00 UTC to
     // Monday 20:00 UTC is 3.083 RAW calendar days -- pre-fix (plain daysStale) that alone clears

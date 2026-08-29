@@ -1532,6 +1532,56 @@ export const DATA_QUALITY_CHECKS: DataQualityCheck[] = [
     },
   },
 
+  // 2026-08-29: AF-20260829-12/20 found screener_master.inferred_sentiment and
+  // screener_catalog.signal_bias had drifted apart after an unreviewed reclassification pass
+  // updated one table's sentiment column and not the other's -- confirmed live: 222 of 972
+  // matching (screener_id, source) pairs (22.8%) now disagree in DIRECTION (bullish vs bearish,
+  // or neutral vs either), not just wording. This matters beyond bookkeeping: `event_triggers.py`
+  // reads `COALESCE(sc.signal_bias, sm.inferred_sentiment)` -- signal_bias is NOT NULL, so it
+  // always wins there, silently pinning that reader to the OLD label while `unified_ranker.py`/
+  // `confluence_outcome_tracker.py`/`screener_features_fetcher.py` (which read
+  // screener_master.inferred_sentiment directly) already see the NEW one. Two different readers
+  // of "the same screener's sentiment" can now disagree. Deliberately NOT auto-synced here --
+  // per measurement.md, syncing means propagating an unmeasured relabeling into a scoring input,
+  // the exact EVIDENCE-gated action AF-12 says needs a factor_edge.py read first. This check only
+  // makes the divergence visible so it can't silently reappear/grow unnoticed.
+  {
+    id: 'screener-sentiment-catalog-master-divergence',
+    label: 'screener_catalog.signal_bias vs screener_master.inferred_sentiment (same screener)',
+    category: 'signals',
+    critical: false,
+    sql: `SELECT
+            COUNT(*) AS total,
+            COUNT(*) FILTER (
+              WHERE (sc.signal_bias = 'bullish' AND sm.inferred_sentiment = 'bearish')
+                 OR (sc.signal_bias = 'bearish' AND sm.inferred_sentiment = 'bullish')
+                 OR (sc.signal_bias = 'neutral' AND sm.inferred_sentiment IN ('bullish', 'bearish'))
+                 OR (sc.signal_bias IN ('bullish', 'bearish') AND sm.inferred_sentiment = 'neutral')
+            ) AS mismatched
+          FROM screener_catalog sc
+          JOIN screener_master sm ON sm.scan_id = sc.screener_id AND sm.source = sc.source`,
+    evaluate: (row) => {
+      const total = Number(row?.total ?? 0);
+      const mismatched = Number(row?.mismatched ?? 0);
+      if (total === 0) {
+        return { status: 'pass', detail: 'No matching (screener_id, source) pairs to compare yet.' };
+      }
+      const pct = (mismatched / total) * 100;
+      // A screener_id/source pair describes ONE screener -- its sentiment direction should never
+      // disagree across the two tables, so this is a should-be-zero invariant, not a naturally
+      // noisy metric (recurring-bugs.md's "bare count > 0 fails on correct data" caution doesn't
+      // apply the same way here; a small nonzero floor still guards against a single concurrent-
+      // write timing race being reported as a full-blown divergence).
+      if (pct > 5) {
+        return { status: 'fail', detail: `${mismatched}/${total} (${pct.toFixed(1)}%) screener sentiment pairs disagree in direction between screener_catalog and screener_master — see AF-20260829-12/20.` };
+      }
+      if (mismatched > 0) {
+        return { status: 'warn', detail: `${mismatched}/${total} (${pct.toFixed(1)}%) screener sentiment pairs disagree in direction — below the 5% fail floor but worth reconciling.` };
+      }
+      return { status: 'pass', detail: `All ${total} matching screener_catalog/screener_master pairs agree on sentiment direction.` };
+    },
+  },
+
   // mc_general_metrics is a shared multi-source table (also written by ET Marketstats' daily
   // sync) -- the TABLE_FRESHNESS_CHECKS factory only supports a bare MAX(dateColumn), which
   // would report "fresh" off et_marketstats' own writes even if this source_api stopped

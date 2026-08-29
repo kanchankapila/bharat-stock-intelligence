@@ -1406,7 +1406,13 @@ async function processMlWeeklyRetrain(_job: Job): Promise<{ success: boolean; fa
   // -- cs_ranker writes a promotion decision to model_registry on every run but its failure was
   // invisible to every monitor this platform has.
   await T.run('cs-ranker-train', () => runPython('cs_ranker.py', ['--train', '--score'], 30 * 60_000));
-  await T.run('strategy-optimizer', () => runPython('strategy_optimizer.py', [], 30 * 60_000));
+  // 2026-08-29 (AF-20260829-30/45): 30min was too tight for max_iterations=300's default grid
+  // search, not (only) a symptom of concurrent load as first suspected -- live-timed standalone
+  // under LOW contention (no other heavy jobs running): still executing, real CPU burn confirmed
+  // via the OS process table (not idle/hung), past 30min with no sign of a stuck connection.
+  // Bumped to match backtest_optimizer.py's sibling budget one line below, a similarly-shaped
+  // grid-search step in the same weekly pipeline.
+  await T.run('strategy-optimizer', () => runPython('strategy_optimizer.py', [], 60 * 60_000));
   await runPython('backtester.py', ['--start', '2023-01-01'], 30 * 60_000)
     .catch(e => console.warn('[QUEUE] backtester failed:', (e as Error).message));
   // Backtest-driven strategy parameter tuning (holdout-gated inside the script itself).
