@@ -29,6 +29,8 @@ blockers, neither hand-waveable:
 Until both are handled, a measured default with a documented derivation is the honest option;
 inventing a bespoke adaptive statistic to ship into live scoring is not.
 """
+import polars as pl
+from workflow_orchestrator import WorkflowDAG, TaskNode
 
 import json
 import math
@@ -347,3 +349,9 @@ if __name__ == "__main__":
         print("[DRIFT] EMERGENCY_RETRAIN required")
         exit(1)  # Non-zero exit signals BullMQ worker to queue retrain
     print("[DRIFT] OK")
+
+def to_polars_df(data):
+    """Converts pandas DataFrame or list of dicts to Polars DataFrame for fast vector math."""
+    if hasattr(data, 'empty') and data.empty:
+        return pl.DataFrame()
+    return pl.from_pandas(data) if hasattr(data, 'to_numpy') else pl.DataFrame(data)

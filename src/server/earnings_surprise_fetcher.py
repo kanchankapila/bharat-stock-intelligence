@@ -26,6 +26,7 @@ Run: python earnings_surprise_fetcher.py
      python earnings_surprise_fetcher.py --symbol INFY
 """
 
+import polars as pl
 import os
 import sys
 import time
@@ -37,6 +38,24 @@ from curl_cffi import requests
 
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 from db_compat import get_engine, use_postgres
+from pydantic import BaseModel, Field
+from base_fetcher import BaseFetcher
+
+class EarningsBeatRowSchema(BaseModel):
+    quarter_date: str
+    period_type: str
+    beat_type: str
+    beat_score: int
+    eps_actual: float | None = None
+    eps_avg: float | None = None
+    surprise_pct: float | None = None
+
+class EarningsSurpriseFetcher(BaseFetcher[EarningsBeatRowSchema]):
+    fetcher_name = "EarningsSurpriseFetcher"
+    domain = "moneycontrol.com"
+    schema = EarningsBeatRowSchema
+    min_interval_sec = 0.5
+
 
 HEADERS = {
     "Accept": "application/json, text/plain, */*",
@@ -199,7 +218,7 @@ def upsert_rows(conn, symbol: str, rows: list[dict]) -> int:
                 INSERT INTO stock_earnings_beats
                     (symbol, quarter_date, period_type, beat_type, beat_score,
                      eps_actual, eps_avg, eps_high, eps_low, surprise_pct, fetched_at)
-                VALUES (:sym, :pd, :pt, :bt, :bs, :ea, :ag, :hi, :lo, :sp, now())
+                VALUES (:sym, :pd, :pt, :bt, :bs, :ea, :ag, :hi, :lo, :sp, CURRENT_TIMESTAMP)
                 ON CONFLICT (symbol, quarter_date)
                 DO UPDATE SET period_type  = EXCLUDED.period_type,
                               beat_type    = EXCLUDED.beat_type,
@@ -209,7 +228,7 @@ def upsert_rows(conn, symbol: str, rows: list[dict]) -> int:
                               eps_high     = COALESCE(EXCLUDED.eps_high,   stock_earnings_beats.eps_high),
                               eps_low      = COALESCE(EXCLUDED.eps_low,    stock_earnings_beats.eps_low),
                               surprise_pct = COALESCE(EXCLUDED.surprise_pct, stock_earnings_beats.surprise_pct),
-                              fetched_at   = now()
+                              fetched_at   = CURRENT_TIMESTAMP
             """), {"sym": symbol, "pd": r["period_date"], "pt": r["period_type"],
                    "bt": r["beat_type"], "bs": r["beat_score"],
                    "ea": r["eps_actual"], "ag": r["eps_avg"],
@@ -290,3 +309,9 @@ if __name__ == "__main__":
     parser.add_argument("--symbol", default=None, help="Fetch a single NSE symbol")
     args = parser.parse_args()
     run(limit=args.limit, symbol_filter=args.symbol)
+
+def to_polars_df(data):
+    """Converts pandas DataFrame or list of dicts to Polars DataFrame for fast vector operations."""
+    if hasattr(data, 'empty') and data.empty:
+        return pl.DataFrame()
+    return pl.from_pandas(data) if hasattr(data, 'to_numpy') else pl.DataFrame(data)

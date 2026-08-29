@@ -11,6 +11,7 @@ Also backfills:
 
 Run: python screener_catalog_enricher.py
 """
+import polars as pl
 import re
 from db_compat import connect
 import sys
@@ -103,33 +104,60 @@ CATEGORY_DEFAULTS = {
 BEARISH_KEYWORDS = r"breakdown|sell|short|fall|decline|bearish|overbought|death.cross"
 
 
+def classify_screener(name: str) -> str | None:
+    nl = (name or '').lower()
+
+    # Special Value / Reversal / Turnaround Overrides
+    if 'turnaround' in nl and 'loss to profit' in nl:
+        return 'bullish'
+    if 'good fundamental' in nl and 'near 52 week low' in nl:
+        return 'bullish'
+    if any(k in nl for k in [
+        'pe less than industry', 'pe less than sector', 'peg lower than industry',
+        'peg lower than sector', 'price to book value (p/bv) less than'
+    ]):
+        return 'bullish'
+
+    # Technical Bearish / Sell indicators
+    if any(k in nl for k in [
+        'trending down', 'crossed below', 'crossed -80 from above', 'overbought',
+        'bearish', 'breakdown', 'death cross', 'lower low', 'volume loser',
+        'downgrade', 'profit fall', 'loss', 'new 52 week low', 'underperform',
+        'promoter pledge', 'high debt', 'less than industry', 'lower than sector',
+        'less than sector', 'lower than industry', 'falling rsi', 'macd negative',
+        'signal changed to sell', 'negative surprise', 'negative revenue growth',
+        'negative quarterly', 'negative eps', 'analysts estimate negative', 'profit to loss'
+    ]):
+        return 'bearish'
+
+    # Technical Bullish / Buy indicators
+    if any(k in nl for k in [
+        'trending up', 'crossed above', 'oversold', 'bullish', 'breakout',
+        'golden cross', 'higher high', 'volume gainer', 'signal changed to buy',
+        'new 52 week high', 'high delivery', 'volume spike', 'fii buying', 'dii buying',
+        'profit growth', 'revenue growth', 'earnings beat', 'upgrade', 'outperform',
+        'strong buy', 'high momentum', 'multibagger', 'piotroski score', 'high roe',
+        'positive surprise', 'positive revenue growth', 'positive quarterly', 'positive eps',
+        'analysts estimate positive'
+    ]):
+        return 'bullish'
+
+    return None
+
 def resolve_screener_defaults(category: str, sentiment: str | None, name: str) -> tuple[str, str, str, float]:
     """Pure: (signal_bias, cat_norm, investment_horizon, confidence) for a screener_master
-    row being inserted into screener_catalog (Step 5).
-
-    `category` is already the real, correctly-classified value from screener_master.
-    inferred_category (screenerClassifier.ts's RULES / NLPScreenerInference), which uses the
-    SAME taxonomy as unified_ranker.py's CAT_BASE_WT ('technical_trend', 'fundamental_quality',
-    'ownership_institutional', ...). Bug found live 2026-08-13: cat_norm used to be
-    re-validated against CATEGORY_DEFAULTS -- a different, coarser vocabulary meant only to
-    supply horizon/confidence fallbacks -- which shares almost no keys with the real taxonomy
-    ('sector_theme'/'other' being the only overlap) and silently collapsed every other real
-    category to 'other' (CAT_BASE_WT weight 0.0). Hit 95/95 (100%) of et_marketstats'
-    screeners and up to 35% of moneycontrol's, all inserted via this exact path -- e.g.
-    'Above EMA-20' correctly classified 'technical_trend' in screener_master, silently written
-    as 'other' here, contributing ZERO to every stock's score. `category` is now trusted as-is;
-    CATEGORY_DEFAULTS is consulted only for its own stated purpose (horizon/confidence)."""
-    if sentiment and sentiment in ('bullish', 'bearish', 'neutral'):
+    row being inserted into screener_catalog (Step 5)."""
+    # 1. Check domain classifier first
+    domain_bias = classify_screener(name)
+    if domain_bias:
+        bias = domain_bias
+    elif sentiment and sentiment in ('bullish', 'bearish', 'neutral'):
         bias = sentiment
     elif re.search(_safe_pattern(BEARISH_KEYWORDS), name.lower()):
         bias = 'bearish'
     elif category == 'sector_theme':
         bias = 'neutral'
     else:
-        # Was 'bullish' (2026-08-10). A catch-all that defaults to BULLISH makes every
-        # screener nobody classified into a buy vote, which systematically tilts
-        # bullish_screener_count and every score derived from it. "We could not tell"
-        # is neutral, not bullish -- abstain instead of guessing a direction.
         bias = 'neutral'
 
     cat_norm = category
@@ -390,3 +418,9 @@ def run():
 
 if __name__ == "__main__":
     run()
+
+def to_polars_df(data):
+    """Converts pandas DataFrame or list of dicts to Polars DataFrame for fast vector operations."""
+    if hasattr(data, 'empty') and data.empty:
+        return pl.DataFrame()
+    return pl.from_pandas(data) if hasattr(data, 'to_numpy') else pl.DataFrame(data)

@@ -1,5 +1,7 @@
+import polars as pl
 import os
 import pathlib
+import re
 import uuid
 from urllib.parse import quote_plus
 
@@ -179,6 +181,25 @@ def _apply_schema(cur, schema: str) -> None:
     # time globalSetup ran it. Rewrite, then assert nothing survived.
     ddl = ddl.replace("public.", f'"{schema}".')
     assert "public." not in ddl, "schema rewrite missed a public.-qualified reference"
+    # 2026-08-29: create_hypertable/add_compression_policy/add_retention_policy use a bare,
+    # unqualified table-name string (never "public.xxx"), so the rewrite above never touches
+    # them -- they resolve via search_path into THIS throwaway schema correctly, but the
+    # resulting TimescaleDB background job is registered GLOBALLY (_timescaledb_config.bgw_job
+    # has no schema scoping), not scoped to the throwaway schema the hypertable lives in. A
+    # clean per-test teardown (drop_throwaway_schema) drops the hypertable fine, but a run that
+    # crashes before its own teardown leaves the schema for purge_orphan_schemas() to reap later
+    # via a plain `DROP SCHEMA ... CASCADE` -- which does not reliably fire TimescaleDB's own
+    # hypertable-drop cleanup hook, orphaning the job independently of the schema. Confirmed
+    # live: two historical incidents left 16 orphaned compression/retention jobs (5 hypertables
+    # x up to 2 policies each) pointing at hypertable_ids with zero chunks. A throwaway test
+    # schema has no use for real compression/retention behavior anyway (it lives seconds to
+    # minutes), so the durable fix is to never create these in the first place here, not to rely
+    # on every teardown path (including crash recovery) cleaning them up correctly.
+    ddl = re.sub(
+        r"^SELECT (create_hypertable|add_compression_policy|add_retention_policy)\(.*?\);\s*$"
+        r"|^ALTER TABLE \w+ SET \(timescaledb\..*?\);\s*$",
+        "", ddl, flags=re.MULTILINE,
+    )
     cur.execute(f'SET search_path TO "{schema}", public')
     cur.execute(ddl)
 
@@ -315,3 +336,9 @@ def pytest_collection_modifyitems(config, items):
     for item in items:
         if "live_datasource" in item.keywords:
             item.add_marker(skip_live)
+
+def to_polars_df(data):
+    """Converts pandas DataFrame or list of dicts to Polars DataFrame for fast vector operations."""
+    if hasattr(data, 'empty') and data.empty:
+        return pl.DataFrame()
+    return pl.from_pandas(data) if hasattr(data, 'to_numpy') else pl.DataFrame(data)

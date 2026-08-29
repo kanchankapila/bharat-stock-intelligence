@@ -12,6 +12,21 @@ Run:  python mc_index_ohlc_fetcher.py            # 2yr range (default)
       python mc_index_ohlc_fetcher.py --range 6m  # specific range
 """
 
+import polars as pl
+from pydantic import BaseModel
+from base_fetcher import BaseFetcher, governed_fetcher
+
+class McIndexOhlcFetcherSchema(BaseModel):
+    symbol: str | None = None
+    date: str | None = None
+
+class McIndexOhlcFetcherBaseFetcher(BaseFetcher[McIndexOhlcFetcherSchema]):
+    fetcher_name = 'McIndexOhlcFetcher'
+    domain = 'moneycontrol.com'
+    schema = McIndexOhlcFetcherSchema
+    min_interval_sec = 0.5
+
+
 import argparse
 import datetime
 import time
@@ -248,3 +263,9 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+
+def to_polars_df(data):
+    """Converts pandas DataFrame or list of dicts to Polars DataFrame for fast vector operations."""
+    if hasattr(data, 'empty') and data.empty:
+        return pl.DataFrame()
+    return pl.from_pandas(data) if hasattr(data, 'to_numpy') else pl.DataFrame(data)

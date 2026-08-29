@@ -18,6 +18,21 @@ Features written (all into technical_signals):
 Run daily after screener sync.
 """
 
+import polars as pl
+from pydantic import BaseModel
+from base_fetcher import BaseFetcher, governed_fetcher
+
+class ScreenerFeaturesFetcherSchema(BaseModel):
+    symbol: str | None = None
+    date: str | None = None
+
+class ScreenerFeaturesFetcherBaseFetcher(BaseFetcher[ScreenerFeaturesFetcherSchema]):
+    fetcher_name = 'ScreenerFeaturesFetcher'
+    domain = 'general'
+    schema = ScreenerFeaturesFetcherSchema
+    min_interval_sec = 0.5
+
+
 import re
 import time
 import datetime
@@ -403,3 +418,9 @@ def run():
 
 if __name__ == "__main__":
     run()
+
+def to_polars_df(data):
+    """Converts pandas DataFrame or list of dicts to Polars DataFrame for fast vector operations."""
+    if hasattr(data, 'empty') and data.empty:
+        return pl.DataFrame()
+    return pl.from_pandas(data) if hasattr(data, 'to_numpy') else pl.DataFrame(data)

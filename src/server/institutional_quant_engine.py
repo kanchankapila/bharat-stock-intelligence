@@ -12,6 +12,8 @@ No yfinance calls per symbol — uses bulk-synced fundamentals only.
 Run:  python institutional_quant_engine.py
       python institutional_quant_engine.py --limit 500
 """
+import polars as pl
+from workflow_orchestrator import WorkflowDAG, TaskNode
 
 import os
 import math
@@ -284,3 +286,9 @@ if __name__ == "__main__":
 
     engine = InstitutionalQuantEngine()
     engine.run(limit=args.limit)
+
+def to_polars_df(data):
+    """Converts pandas DataFrame or list of dicts to Polars DataFrame for fast vector math."""
+    if hasattr(data, 'empty') and data.empty:
+        return pl.DataFrame()
+    return pl.from_pandas(data) if hasattr(data, 'to_numpy') else pl.DataFrame(data)

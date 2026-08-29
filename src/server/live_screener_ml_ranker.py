@@ -17,6 +17,8 @@ Run:
     python live_screener_ml_ranker.py --train   # fit + honest held-out AUC, promote or reject
     python live_screener_ml_ranker.py --score   # write win_probability for the latest collection cycle
 """
+import polars as pl
+from workflow_orchestrator import WorkflowDAG, TaskNode
 import argparse
 import datetime
 import json
@@ -592,3 +594,9 @@ if __name__ == "__main__":
         score()
     if not (args.train or args.score):
         parser.print_help()
+
+def to_polars_df(data):
+    """Converts pandas DataFrame or list of dicts to Polars DataFrame for fast vector math."""
+    if hasattr(data, 'empty') and data.empty:
+        return pl.DataFrame()
+    return pl.from_pandas(data) if hasattr(data, 'to_numpy') else pl.DataFrame(data)

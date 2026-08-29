@@ -18,6 +18,21 @@ symbol resolution and headers are shared with marketsmojo_technical_fetcher.py (
 stocklist.json-backed stockid map, same 403-without-headers endpoint family).
 """
 
+import polars as pl
+from pydantic import BaseModel
+from base_fetcher import BaseFetcher, governed_fetcher
+
+class MarketsmojoFinancialsFetcherSchema(BaseModel):
+    symbol: str | None = None
+    date: str | None = None
+
+class MarketsmojoFinancialsFetcherBaseFetcher(BaseFetcher[MarketsmojoFinancialsFetcherSchema]):
+    fetcher_name = 'MarketsmojoFinancialsFetcher'
+    domain = 'marketsmojo.com'
+    schema = MarketsmojoFinancialsFetcherSchema
+    min_interval_sec = 0.5
+
+
 import argparse
 import json
 import sys
@@ -255,3 +270,9 @@ if __name__ == "__main__":
     parser.add_argument("--full", action="store_true", help="force a complete re-upsert (backfill/vendor restatement)")
     args = parser.parse_args()
     run(args.symbols, full=args.full)
+
+def to_polars_df(data):
+    """Converts pandas DataFrame or list of dicts to Polars DataFrame for fast vector operations."""
+    if hasattr(data, 'empty') and data.empty:
+        return pl.DataFrame()
+    return pl.from_pandas(data) if hasattr(data, 'to_numpy') else pl.DataFrame(data)

@@ -24,6 +24,8 @@ Run:  python backtester.py
       python backtester.py --horizon 15 --min-score 5 --initial-capital 1000000
       python backtester.py --strategies momentum,value,quality
 """
+import polars as pl
+from workflow_orchestrator import WorkflowDAG, TaskNode
 
 import os, json, math, datetime, argparse
 import numpy as np
@@ -1325,3 +1327,9 @@ if __name__ == "__main__":
             )
     finally:
         bt.close()
+
+def to_polars_df(data):
+    """Converts pandas DataFrame or list of dicts to Polars DataFrame for fast vector math."""
+    if hasattr(data, 'empty') and data.empty:
+        return pl.DataFrame()
+    return pl.from_pandas(data) if hasattr(data, 'to_numpy') else pl.DataFrame(data)

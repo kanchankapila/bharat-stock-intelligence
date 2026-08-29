@@ -36,6 +36,21 @@ Usage:
     python mf_holdings_fetcher.py --symbol RELIANCE
     python mf_holdings_fetcher.py --limit 50
 """
+
+import polars as pl
+from pydantic import BaseModel
+from base_fetcher import BaseFetcher, governed_fetcher
+
+class MfHoldingsFetcherSchema(BaseModel):
+    symbol: str | None = None
+    date: str | None = None
+
+class MfHoldingsFetcherBaseFetcher(BaseFetcher[MfHoldingsFetcherSchema]):
+    fetcher_name = 'MfHoldingsFetcher'
+    domain = 'amfiindia.com'
+    schema = MfHoldingsFetcherSchema
+    min_interval_sec = 0.5
+
 import argparse
 import time
 from datetime import date, timedelta
@@ -195,3 +210,9 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+def to_polars_df(data):
+    """Converts pandas DataFrame or list of dicts to Polars DataFrame for fast vector operations."""
+    if hasattr(data, 'empty') and data.empty:
+        return pl.DataFrame()
+    return pl.from_pandas(data) if hasattr(data, 'to_numpy') else pl.DataFrame(data)

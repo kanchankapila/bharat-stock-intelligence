@@ -15,6 +15,7 @@ gap. This harness makes ordering quality continuously measurable instead of ad-h
      pricing, matching factor_edge --entry open), and (b) AF-81's own criterion:
      top-30 by blended score -> hits in the NEXT session's top-15 gainers + mean edge.
 """
+import polars as pl
 import argparse
 import math
 
@@ -252,3 +253,9 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+def to_polars_df(data):
+    """Converts pandas DataFrame or list of dicts to Polars DataFrame for fast vector operations."""
+    if hasattr(data, 'empty') and data.empty:
+        return pl.DataFrame()
+    return pl.from_pandas(data) if hasattr(data, 'to_numpy') else pl.DataFrame(data)

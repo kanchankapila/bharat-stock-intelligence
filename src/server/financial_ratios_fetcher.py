@@ -50,6 +50,8 @@ Run:
   python financial_ratios_fetcher.py --limit 50
 """
 
+import polars as pl
+
 import argparse
 from datetime import date
 
@@ -511,3 +513,22 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+
+from pydantic import BaseModel
+from base_fetcher import BaseFetcher, governed_fetcher
+
+class FinancialRatiosFetcherSchema(BaseModel):
+    symbol: str | None = None
+    date: str | None = None
+
+class FinancialRatiosFetcherBaseFetcher(BaseFetcher[FinancialRatiosFetcherSchema]):
+    fetcher_name = 'FinancialRatiosFetcher'
+    domain = 'general'
+    schema = FinancialRatiosFetcherSchema
+    min_interval_sec = 0.5
+
+def to_polars_df(data):
+    """Converts pandas DataFrame or list of dicts to Polars DataFrame for fast vector operations."""
+    if hasattr(data, 'empty') and data.empty:
+        return pl.DataFrame()
+    return pl.from_pandas(data) if hasattr(data, 'to_numpy') else pl.DataFrame(data)

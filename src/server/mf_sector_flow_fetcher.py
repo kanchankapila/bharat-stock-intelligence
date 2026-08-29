@@ -14,6 +14,21 @@ Run:
     python mf_sector_flow_fetcher.py --month 2026-05
 """
 
+import polars as pl
+from pydantic import BaseModel
+from base_fetcher import BaseFetcher, governed_fetcher
+
+class MfSectorFlowFetcherSchema(BaseModel):
+    symbol: str | None = None
+    date: str | None = None
+
+class MfSectorFlowFetcherBaseFetcher(BaseFetcher[MfSectorFlowFetcherSchema]):
+    fetcher_name = 'MfSectorFlowFetcher'
+    domain = 'amfiindia.com'
+    schema = MfSectorFlowFetcherSchema
+    min_interval_sec = 0.5
+
+
 import argparse
 import calendar
 import datetime
@@ -487,3 +502,9 @@ if __name__ == "__main__":
     )
     args = parser.parse_args()
     run(month_str=args.month)
+
+def to_polars_df(data):
+    """Converts pandas DataFrame or list of dicts to Polars DataFrame for fast vector operations."""
+    if hasattr(data, 'empty') and data.empty:
+        return pl.DataFrame()
+    return pl.from_pandas(data) if hasattr(data, 'to_numpy') else pl.DataFrame(data)

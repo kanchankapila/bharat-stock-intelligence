@@ -3,6 +3,8 @@
 BiLSTM + TFT deep learning models for multi-horizon stock prediction.
 Reads from feature_store, writes to deep_learning_predictions.
 """
+import polars as pl
+from workflow_orchestrator import WorkflowDAG, TaskNode
 
 import os
 import sys
@@ -930,3 +932,9 @@ if __name__ == "__main__":
     elif args.mode == "validate":
         metrics = train_lstm(version=args.version)
         print(f"[DL] Validation metrics: {metrics}")
+
+def to_polars_df(data):
+    """Converts pandas DataFrame or list of dicts to Polars DataFrame for fast vector math."""
+    if hasattr(data, 'empty') and data.empty:
+        return pl.DataFrame()
+    return pl.from_pandas(data) if hasattr(data, 'to_numpy') else pl.DataFrame(data)

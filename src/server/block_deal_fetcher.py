@@ -28,6 +28,7 @@ Run:
   python block_deal_fetcher.py --date 2026-06-24
 """
 
+import polars as pl
 import argparse
 import time
 from datetime import date, datetime, timedelta
@@ -38,6 +39,22 @@ from as_of import logical_trading_date, trading_days_back
 from db_compat import connect
 from fetch_utils import retry_get
 import sys
+from pydantic import BaseModel
+from base_fetcher import BaseFetcher
+
+class BlockDealRowSchema(BaseModel):
+    symbol: str
+    date: str
+    price: float | None = None
+    qty: int | None = None
+    value_cr: float | None = None
+
+class BlockDealFetcher(BaseFetcher[BlockDealRowSchema]):
+    fetcher_name = "BlockDealFetcher"
+    domain = "nseindia.com"
+    schema = BlockDealRowSchema
+    min_interval_sec = 0.5
+
 
 LIVE_URL  = "https://www.nseindia.com/api/block-deal"
 HIST_URL  = "https://www.nseindia.com/api/historical/block-deals"
@@ -351,3 +368,9 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+
+def to_polars_df(data):
+    """Converts pandas DataFrame or list of dicts to Polars DataFrame for fast vector operations."""
+    if hasattr(data, 'empty') and data.empty:
+        return pl.DataFrame()
+    return pl.from_pandas(data) if hasattr(data, 'to_numpy') else pl.DataFrame(data)

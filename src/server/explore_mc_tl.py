@@ -8,6 +8,7 @@ Usage:
   python explore_mc_tl.py --limit 10  # quick test (first 10 URLs)
   python explore_mc_tl.py --db /path/to/output.db
 """
+import polars as pl
 import argparse
 import calendar
 import datetime
@@ -1402,3 +1403,9 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+
+def to_polars_df(data):
+    """Converts pandas DataFrame or list of dicts to Polars DataFrame for fast vector operations."""
+    if hasattr(data, 'empty') and data.empty:
+        return pl.DataFrame()
+    return pl.from_pandas(data) if hasattr(data, 'to_numpy') else pl.DataFrame(data)

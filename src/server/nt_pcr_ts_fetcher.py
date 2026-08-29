@@ -19,6 +19,21 @@ Run:
   python nt_pcr_ts_fetcher.py --date 2026-06-27  # historical date (if API supports)
 """
 
+import polars as pl
+from pydantic import BaseModel
+from base_fetcher import BaseFetcher, governed_fetcher
+
+class NtPcrTsFetcherSchema(BaseModel):
+    symbol: str | None = None
+    date: str | None = None
+
+class NtPcrTsFetcherBaseFetcher(BaseFetcher[NtPcrTsFetcherSchema]):
+    fetcher_name = 'NtPcrTsFetcher'
+    domain = 'niftytrader.in'
+    schema = NtPcrTsFetcherSchema
+    min_interval_sec = 0.5
+
+
 import argparse
 from datetime import date as _date
 from urllib.parse import urlencode
@@ -225,3 +240,9 @@ if __name__ == "__main__":
     parser.add_argument("--date",  default="",   help="reqDate param (leave empty for today)")
     args = parser.parse_args()
     run(target_index=args.index, req_date=args.date)
+
+def to_polars_df(data):
+    """Converts pandas DataFrame or list of dicts to Polars DataFrame for fast vector operations."""
+    if hasattr(data, 'empty') and data.empty:
+        return pl.DataFrame()
+    return pl.from_pandas(data) if hasattr(data, 'to_numpy') else pl.DataFrame(data)

@@ -8,6 +8,8 @@ Run:  python outcome_resolver.py
       python outcome_resolver.py --horizon 5
       python outcome_resolver.py --dry-run
 """
+import polars as pl
+from workflow_orchestrator import WorkflowDAG, TaskNode
 
 import datetime, argparse, math, re
 
@@ -1441,3 +1443,9 @@ if __name__ == '__main__':
     parser.add_argument('--dry-run',  action='store_true')
     args = parser.parse_args()
     run(horizon_days=args.horizon, dry_run=args.dry_run)
+
+def to_polars_df(data):
+    """Converts pandas DataFrame or list of dicts to Polars DataFrame for fast vector math."""
+    if hasattr(data, 'empty') and data.empty:
+        return pl.DataFrame()
+    return pl.from_pandas(data) if hasattr(data, 'to_numpy') else pl.DataFrame(data)

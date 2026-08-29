@@ -8,6 +8,7 @@ Run:  python fii_dii_fetcher.py
       python fii_dii_fetcher.py --days 30
 """
 
+import polars as pl
 import os
 import datetime
 import argparse
@@ -19,6 +20,22 @@ from sqlalchemy import text
 from db_compat import get_engine
 from fetch_utils import retry_get
 import sys
+from pydantic import BaseModel
+from base_fetcher import BaseFetcher
+
+class FiiDiiRowSchema(BaseModel):
+    category: str
+    date: str
+    buy_value: float | None = None
+    sell_value: float | None = None
+    net_value: float | None = None
+
+class FiiDiiBaseFetcher(BaseFetcher[FiiDiiRowSchema]):
+    fetcher_name = "FiiDiiFetcher"
+    domain = "nseindia.com"
+    schema = FiiDiiRowSchema
+    min_interval_sec = 0.5
+
 
 NSE_FII_DII_URL = "https://www.nseindia.com/api/fiidiiTradeReact"
 
@@ -302,3 +319,9 @@ if __name__ == "__main__":
 
     fetcher = FiiDiiFetcher()
     fetcher.run(days=args.days)
+
+def to_polars_df(data):
+    """Converts pandas DataFrame or list of dicts to Polars DataFrame for fast vector operations."""
+    if hasattr(data, 'empty') and data.empty:
+        return pl.DataFrame()
+    return pl.from_pandas(data) if hasattr(data, 'to_numpy') else pl.DataFrame(data)

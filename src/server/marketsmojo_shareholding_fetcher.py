@@ -20,6 +20,21 @@ both shapes rather than assuming one.
 symbol resolution and headers are shared with marketsmojo_technical_fetcher.py.
 """
 
+import polars as pl
+from pydantic import BaseModel
+from base_fetcher import BaseFetcher, governed_fetcher
+
+class MarketsmojoShareholdingFetcherSchema(BaseModel):
+    symbol: str | None = None
+    date: str | None = None
+
+class MarketsmojoShareholdingFetcherBaseFetcher(BaseFetcher[MarketsmojoShareholdingFetcherSchema]):
+    fetcher_name = 'MarketsmojoShareholdingFetcher'
+    domain = 'marketsmojo.com'
+    schema = MarketsmojoShareholdingFetcherSchema
+    min_interval_sec = 0.5
+
+
 import argparse
 import re
 import sys
@@ -209,3 +224,9 @@ if __name__ == "__main__":
     parser.add_argument("--full", action="store_true", help="force a complete re-upsert (backfill/vendor restatement)")
     args = parser.parse_args()
     run(args.symbols, full=args.full)
+
+def to_polars_df(data):
+    """Converts pandas DataFrame or list of dicts to Polars DataFrame for fast vector operations."""
+    if hasattr(data, 'empty') and data.empty:
+        return pl.DataFrame()
+    return pl.from_pandas(data) if hasattr(data, 'to_numpy') else pl.DataFrame(data)

@@ -26,6 +26,7 @@ Run:
     python commodity_sensitivity.py --days 90
 """
 
+import polars as pl
 import argparse
 import datetime
 
@@ -275,3 +276,9 @@ if __name__ == "__main__":
     )
     args = parser.parse_args()
     run(symbol=args.symbol, window=args.days)
+
+def to_polars_df(data):
+    """Converts pandas DataFrame or list of dicts to Polars DataFrame for fast vector operations."""
+    if hasattr(data, 'empty') and data.empty:
+        return pl.DataFrame()
+    return pl.from_pandas(data) if hasattr(data, 'to_numpy') else pl.DataFrame(data)

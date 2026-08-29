@@ -25,6 +25,21 @@ Run:  python mc_stock_futures_oi_fetcher.py
       python mc_stock_futures_oi_fetcher.py --dry-run
 """
 
+import polars as pl
+from pydantic import BaseModel
+from base_fetcher import BaseFetcher, governed_fetcher
+
+class McStockFuturesOiFetcherSchema(BaseModel):
+    symbol: str | None = None
+    date: str | None = None
+
+class McStockFuturesOiFetcherBaseFetcher(BaseFetcher[McStockFuturesOiFetcherSchema]):
+    fetcher_name = 'McStockFuturesOiFetcher'
+    domain = 'moneycontrol.com'
+    schema = McStockFuturesOiFetcherSchema
+    min_interval_sec = 0.5
+
+
 import argparse
 import datetime
 import json
@@ -266,3 +281,9 @@ if __name__ == "__main__":
     ap.add_argument("--dry-run", action="store_true")
     a = ap.parse_args()
     run(symbols=a.symbols.split(",") if a.symbols else None, dry_run=a.dry_run)
+
+def to_polars_df(data):
+    """Converts pandas DataFrame or list of dicts to Polars DataFrame for fast vector operations."""
+    if hasattr(data, 'empty') and data.empty:
+        return pl.DataFrame()
+    return pl.from_pandas(data) if hasattr(data, 'to_numpy') else pl.DataFrame(data)

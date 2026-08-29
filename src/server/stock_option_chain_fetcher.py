@@ -17,6 +17,21 @@ Run:
     python stock_option_chain_fetcher.py --limit 10      # first N stocks
 """
 
+import polars as pl
+from pydantic import BaseModel
+from base_fetcher import BaseFetcher, governed_fetcher
+
+class StockOptionChainFetcherSchema(BaseModel):
+    symbol: str | None = None
+    date: str | None = None
+
+class StockOptionChainFetcherBaseFetcher(BaseFetcher[StockOptionChainFetcherSchema]):
+    fetcher_name = 'StockOptionChainFetcher'
+    domain = 'general'
+    schema = StockOptionChainFetcherSchema
+    min_interval_sec = 0.5
+
+
 import os
 import sys
 import time
@@ -558,3 +573,9 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+def to_polars_df(data):
+    """Converts pandas DataFrame or list of dicts to Polars DataFrame for fast vector operations."""
+    if hasattr(data, 'empty') and data.empty:
+        return pl.DataFrame()
+    return pl.from_pandas(data) if hasattr(data, 'to_numpy') else pl.DataFrame(data)

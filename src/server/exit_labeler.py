@@ -22,6 +22,7 @@ Run:  python exit_labeler.py
       python exit_labeler.py --limit 500
 """
 
+import polars as pl
 import argparse
 import datetime
 
@@ -317,3 +318,9 @@ if __name__ == "__main__":
     parser.add_argument("--limit", type=int, help="Cap number of entries (newest first)")
     args = parser.parse_args()
     run(horizon=args.horizon, limit=args.limit)
+
+def to_polars_df(data):
+    """Converts pandas DataFrame or list of dicts to Polars DataFrame for fast vector operations."""
+    if hasattr(data, 'empty') and data.empty:
+        return pl.DataFrame()
+    return pl.from_pandas(data) if hasattr(data, 'to_numpy') else pl.DataFrame(data)

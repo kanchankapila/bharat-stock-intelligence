@@ -10,6 +10,21 @@ Run: python src/server/moneycontrol_fetcher.py --symbols INFY RELIANCE
      python src/server/moneycontrol_fetcher.py --batch-size 150
 """
 
+import polars as pl
+from pydantic import BaseModel
+from base_fetcher import BaseFetcher, governed_fetcher
+
+class MoneycontrolFetcherSchema(BaseModel):
+    symbol: str | None = None
+    date: str | None = None
+
+class MoneycontrolFetcherBaseFetcher(BaseFetcher[MoneycontrolFetcherSchema]):
+    fetcher_name = 'MoneycontrolFetcher'
+    domain = 'moneycontrol.com'
+    schema = MoneycontrolFetcherSchema
+    min_interval_sec = 0.5
+
+
 import os
 import re
 import sys
@@ -973,3 +988,9 @@ if __name__ == "__main__":
         fetcher.run_seasonality()
     else:
         fetcher.run()
+
+def to_polars_df(data):
+    """Converts pandas DataFrame or list of dicts to Polars DataFrame for fast vector operations."""
+    if hasattr(data, 'empty') and data.empty:
+        return pl.DataFrame()
+    return pl.from_pandas(data) if hasattr(data, 'to_numpy') else pl.DataFrame(data)

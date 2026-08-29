@@ -1,3 +1,4 @@
+import polars as pl
 import asyncio
 
 from db_compat import connect
@@ -558,3 +559,9 @@ if __name__ == "__main__":
         elif args.mode == "gap-fill":
             gap_fill(conn, lookback_days=args.lookback)
             print("Done.")
+
+def to_polars_df(data):
+    """Converts pandas DataFrame or list of dicts to Polars DataFrame for fast vector operations."""
+    if hasattr(data, 'empty') and data.empty:
+        return pl.DataFrame()
+    return pl.from_pandas(data) if hasattr(data, 'to_numpy') else pl.DataFrame(data)

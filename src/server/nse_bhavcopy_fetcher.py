@@ -26,6 +26,21 @@ Run:
   python nse_bhavcopy_fetcher.py --backfill --monthly      # month-end snapshots only (fast)
   python nse_bhavcopy_fetcher.py --survivorship-report
 """
+
+import polars as pl
+from pydantic import BaseModel
+from base_fetcher import BaseFetcher, governed_fetcher
+
+class NseBhavcopyFetcherSchema(BaseModel):
+    symbol: str | None = None
+    date: str | None = None
+
+class NseBhavcopyFetcherBaseFetcher(BaseFetcher[NseBhavcopyFetcherSchema]):
+    fetcher_name = 'NseBhavcopyFetcher'
+    domain = 'nseindia.com'
+    schema = NseBhavcopyFetcherSchema
+    min_interval_sec = 0.5
+
 import argparse
 import csv
 import datetime
@@ -371,3 +386,9 @@ def main():
 
 if __name__ == '__main__':
     main()
+
+def to_polars_df(data):
+    """Converts pandas DataFrame or list of dicts to Polars DataFrame for fast vector operations."""
+    if hasattr(data, 'empty') and data.empty:
+        return pl.DataFrame()
+    return pl.from_pandas(data) if hasattr(data, 'to_numpy') else pl.DataFrame(data)

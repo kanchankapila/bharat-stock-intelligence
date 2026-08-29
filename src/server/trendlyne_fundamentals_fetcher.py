@@ -30,6 +30,21 @@ Run:
   python trendlyne_fundamentals_fetcher.py --symbol BEL
 """
 
+import polars as pl
+from pydantic import BaseModel
+from base_fetcher import BaseFetcher, governed_fetcher
+
+class TrendlyneFundamentalsFetcherSchema(BaseModel):
+    symbol: str | None = None
+    date: str | None = None
+
+class TrendlyneFundamentalsFetcherBaseFetcher(BaseFetcher[TrendlyneFundamentalsFetcherSchema]):
+    fetcher_name = 'TrendlyneFundamentalsFetcher'
+    domain = 'trendlyne.com'
+    schema = TrendlyneFundamentalsFetcherSchema
+    min_interval_sec = 0.5
+
+
 import argparse
 import json
 import os
@@ -116,25 +131,43 @@ def ensure_schema(con) -> None:
     """)
     con.commit()
 
-    for ddl in [
-        "ALTER TABLE technical_signals ADD COLUMN eps_ttm REAL",
-        "ALTER TABLE technical_signals ADD COLUMN eps_growth_yoy REAL",
-        "ALTER TABLE technical_signals ADD COLUMN eps_growth_qoq REAL",
-        "ALTER TABLE technical_signals ADD COLUMN eps_acceleration REAL",
-        "ALTER TABLE technical_signals ADD COLUMN pe_ttm REAL",
-        "ALTER TABLE technical_signals ADD COLUMN pe_pct_rank_252d REAL",
-        "ALTER TABLE technical_signals ADD COLUMN pe_vs_median_1yr REAL",
-        "ALTER TABLE technical_signals ADD COLUMN pb_pct_rank_252d REAL",
-        "ALTER TABLE technical_signals ADD COLUMN div_yield_ttm REAL",
-        "ALTER TABLE technical_signals ADD COLUMN dvm_durability INTEGER",
-        "ALTER TABLE technical_signals ADD COLUMN dvm_valuation INTEGER",
-        "ALTER TABLE technical_signals ADD COLUMN dvm_momentum INTEGER",
-    ]:
-        try:
-            cur.execute(ddl)
-            con.commit()
-        except Exception:
-            con.rollback()
+    # AF-20260827-14 / AF-20260829-18: these 12 columns have existed on technical_signals for
+    # months (db/schema.postgres.sql is schema-of-record and already carries them). A bare
+    # "ADD COLUMN" without IF NOT EXISTS still requests an ACCESS EXCLUSIVE lock before it can
+    # even discover the column exists and throw DuplicateColumn -- and once that lock request is
+    # queued, every concurrent reader of technical_signals (a hot table read by dozens of jobs)
+    # queues behind it too, by Postgres's FIFO lock-queue-per-relation rule. That queued-for-
+    # minutes ALTER TABLE, re-run on every single fetcher invocation, is what repeatedly stalled
+    # this session's `integrity_sweep.py`/pytest runs on 2026-08-29 while ml-weekly-retrain was
+    # active. Fix: IF NOT EXISTS (no-op when already present, no exception) + a short
+    # `lock_timeout` scoped to just this block so a genuinely busy table makes this skip fast
+    # instead of holding a place in the lock queue for however long the blocker takes.
+    # NOTE: SET LOCAL would reset after the first per-statement commit() below, leaving
+    # statements 2-12 unprotected -- use a session-scoped SET, restored in the finally.
+    cur.execute("SET lock_timeout = '2s'")
+    try:
+        for ddl in [
+            "ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS eps_ttm REAL",
+            "ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS eps_growth_yoy REAL",
+            "ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS eps_growth_qoq REAL",
+            "ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS eps_acceleration REAL",
+            "ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS pe_ttm REAL",
+            "ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS pe_pct_rank_252d REAL",
+            "ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS pe_vs_median_1yr REAL",
+            "ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS pb_pct_rank_252d REAL",
+            "ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS div_yield_ttm REAL",
+            "ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS dvm_durability INTEGER",
+            "ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS dvm_valuation INTEGER",
+            "ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS dvm_momentum INTEGER",
+        ]:
+            try:
+                cur.execute(ddl)
+                con.commit()
+            except Exception:
+                con.rollback()
+    finally:
+        cur.execute("SET lock_timeout = DEFAULT")
+        con.commit()
 
 
 # â”€â”€ Fetch helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
@@ -447,3 +480,9 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+
+def to_polars_df(data):
+    """Converts pandas DataFrame or list of dicts to Polars DataFrame for fast vector operations."""
+    if hasattr(data, 'empty') and data.empty:
+        return pl.DataFrame()
+    return pl.from_pandas(data) if hasattr(data, 'to_numpy') else pl.DataFrame(data)

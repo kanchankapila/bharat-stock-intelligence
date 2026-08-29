@@ -10,6 +10,8 @@ Underreaction is strongest in: small-caps, high-retail-ownership, low-analyst-co
 
 Writes: technical_signals.pead_score (float, range -1 to +1)
 """
+import polars as pl
+from workflow_orchestrator import WorkflowDAG, TaskNode
 import sys, math
 from pathlib import Path
 from datetime import datetime
@@ -128,3 +130,9 @@ def run():
 
 if __name__ == '__main__':
     run()
+
+def to_polars_df(data):
+    """Converts pandas DataFrame or list of dicts to Polars DataFrame for fast vector math."""
+    if hasattr(data, 'empty') and data.empty:
+        return pl.DataFrame()
+    return pl.from_pandas(data) if hasattr(data, 'to_numpy') else pl.DataFrame(data)

@@ -24,6 +24,21 @@ Run:
   python nt_oi_snapshot_fetcher.py --time 14:00:00    # intraday snapshot
 """
 
+import polars as pl
+from pydantic import BaseModel
+from base_fetcher import BaseFetcher, governed_fetcher
+
+class NtOiSnapshotFetcherSchema(BaseModel):
+    symbol: str | None = None
+    date: str | None = None
+
+class NtOiSnapshotFetcherBaseFetcher(BaseFetcher[NtOiSnapshotFetcherSchema]):
+    fetcher_name = 'NtOiSnapshotFetcher'
+    domain = 'niftytrader.in'
+    schema = NtOiSnapshotFetcherSchema
+    min_interval_sec = 0.5
+
+
 import argparse
 import requests
 
@@ -218,3 +233,9 @@ if __name__ == "__main__":
     parser.add_argument("--time",  default="15:20:00", help="Snapshot time HH:MM:SS")
     args = parser.parse_args()
     run(target_index=args.index, snap_time=args.time)
+
+def to_polars_df(data):
+    """Converts pandas DataFrame or list of dicts to Polars DataFrame for fast vector operations."""
+    if hasattr(data, 'empty') and data.empty:
+        return pl.DataFrame()
+    return pl.from_pandas(data) if hasattr(data, 'to_numpy') else pl.DataFrame(data)

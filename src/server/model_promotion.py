@@ -17,6 +17,8 @@ auto-promote just because there happens to be no prior baseline to fail against)
 other five sites' existing behavior does NOT special-case a NaN candidate -- changing that
 would be a functional change, not a refactor, so it is deliberately not applied everywhere.
 """
+import polars as pl
+from workflow_orchestrator import WorkflowDAG, TaskNode
 import datetime
 import math
 from typing import Optional, Tuple
@@ -236,3 +238,9 @@ def live_edge_is_unproven(verdict: Optional[dict],
                         f"hit_auc={verdict['hit_auc']:.4f}, {verdict['dates']} dates)")
     return True, (f"live rank_ic={verdict['rank_ic']:.4f} / hit_auc={verdict['hit_auc']:.4f} over "
                    f"{verdict['dates']} dates fails IC>={min_ic} AND AUC>={min_auc}")
+
+def to_polars_df(data):
+    """Converts pandas DataFrame or list of dicts to Polars DataFrame for fast vector math."""
+    if hasattr(data, 'empty') and data.empty:
+        return pl.DataFrame()
+    return pl.from_pandas(data) if hasattr(data, 'to_numpy') else pl.DataFrame(data)

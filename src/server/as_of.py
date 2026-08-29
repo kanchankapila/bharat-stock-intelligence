@@ -9,6 +9,7 @@ feature_engineering.py. This is the ONE place that pattern lives now. A test
 (tests/test_as_of_no_hand_rolled_joins.py) fails CI if a new hand-rolled "as of date" join is
 added anywhere else under src/server, so this doesn't quietly re-drift.
 """
+import polars as pl
 from typing import Sequence
 
 import pandas as pd
@@ -277,3 +278,9 @@ def trading_days_back(n: int, conn=None) -> list:
                 conn.close()
             except Exception:
                 pass
+
+def to_polars_df(data):
+    """Converts pandas DataFrame or list of dicts to Polars DataFrame for fast vector operations."""
+    if hasattr(data, 'empty') and data.empty:
+        return pl.DataFrame()
+    return pl.from_pandas(data) if hasattr(data, 'to_numpy') else pl.DataFrame(data)

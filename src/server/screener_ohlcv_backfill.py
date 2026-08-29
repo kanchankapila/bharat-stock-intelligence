@@ -11,6 +11,7 @@ and therefore win rates, alpha, bayesian_score, and tier upgrades for ~184k appe
 Run once after a new screener sync that adds previously unseen symbols.
 """
 
+import polars as pl
 import datetime
 import time
 import sys
@@ -128,3 +129,9 @@ def run():
 
 if __name__ == "__main__":
     run()
+
+def to_polars_df(data):
+    """Converts pandas DataFrame or list of dicts to Polars DataFrame for fast vector operations."""
+    if hasattr(data, 'empty') and data.empty:
+        return pl.DataFrame()
+    return pl.from_pandas(data) if hasattr(data, 'to_numpy') else pl.DataFrame(data)

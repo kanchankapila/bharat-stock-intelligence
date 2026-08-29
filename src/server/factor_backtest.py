@@ -121,6 +121,7 @@ import math
 
 import numpy as np
 import pandas as pd
+import polars as pl
 
 from db_compat import read_df, transaction
 import sys
@@ -1566,6 +1567,13 @@ def main() -> None:
               .to_string(index=False))
         print("\nNothing with |t| < 2 is evidence of anything. Sweep --cost-bps before "
               "acting on a result that sits near break-even.")
+
+
+def to_polars_df(data):
+    """Converts pandas DataFrame or list of dicts to Polars DataFrame for fast vector math."""
+    if hasattr(data, 'empty') and data.empty:
+        return pl.DataFrame()
+    return pl.from_pandas(data) if hasattr(data, 'to_numpy') else pl.DataFrame(data)
 
 
 if __name__ == '__main__':

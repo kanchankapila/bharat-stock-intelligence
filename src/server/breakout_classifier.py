@@ -18,6 +18,8 @@ Run:
     python breakout_classifier.py --train           # fit + report purged-OOF AUC
     python breakout_classifier.py --score            # write breakout_probability for latest date
 """
+import polars as pl
+from workflow_orchestrator import WorkflowDAG, TaskNode
 
 import argparse
 import datetime
@@ -548,3 +550,9 @@ if __name__ == "__main__":
         score()
     if not (args.train or args.report or args.score):
         train(report_only=True)
+
+def to_polars_df(data):
+    """Converts pandas DataFrame or list of dicts to Polars DataFrame for fast vector math."""
+    if hasattr(data, 'empty') and data.empty:
+        return pl.DataFrame()
+    return pl.from_pandas(data) if hasattr(data, 'to_numpy') else pl.DataFrame(data)

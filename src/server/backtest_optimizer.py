@@ -20,6 +20,8 @@ Uses the most recent `--window` days of data (default 365).
 Run:  python backtest_optimizer.py
       python backtest_optimizer.py --window 365 --dry-run
 """
+import polars as pl
+from workflow_orchestrator import WorkflowDAG, TaskNode
 
 import os, sys, datetime, argparse, itertools
 from typing import Optional
@@ -464,3 +466,9 @@ if __name__ == '__main__':
     parser.add_argument('--dry-run', action='store_true')
     args = parser.parse_args()
     run(window_days=args.window, dry_run=args.dry_run)
+
+def to_polars_df(data):
+    """Converts pandas DataFrame or list of dicts to Polars DataFrame for fast vector math."""
+    if hasattr(data, 'empty') and data.empty:
+        return pl.DataFrame()
+    return pl.from_pandas(data) if hasattr(data, 'to_numpy') else pl.DataFrame(data)

@@ -10,6 +10,7 @@ Run:  python analyst_estimates_snapshot.py
       python analyst_estimates_snapshot.py --as-of 2026-06-22
       python analyst_estimates_snapshot.py --symbols RELIANCE,TCS
 """
+import polars as pl
 
 import argparse
 import datetime
@@ -247,3 +248,9 @@ if __name__ == "__main__":
     args = parser.parse_args()
     syms = [s.strip() for s in args.symbols.split(",")] if args.symbols else None
     run(as_of=args.as_of, symbols=syms)
+
+def to_polars_df(data):
+    """Converts pandas DataFrame or list of dicts to Polars DataFrame for fast vector operations."""
+    if hasattr(data, 'empty') and data.empty:
+        return pl.DataFrame()
+    return pl.from_pandas(data) if hasattr(data, 'to_numpy') else pl.DataFrame(data)

@@ -5,6 +5,8 @@ Analyzes historical live screener outcomes and trains a Decision Tree
 to identify the best combinations of filters for finding high-growth stocks.
 Saves the results back to app_settings.
 """
+import polars as pl
+from workflow_orchestrator import WorkflowDAG, TaskNode
 
 import os
 import sys
@@ -226,3 +228,9 @@ def optimize_combinations():
 
 if __name__ == '__main__':
     optimize_combinations()
+
+def to_polars_df(data):
+    """Converts pandas DataFrame or list of dicts to Polars DataFrame for fast vector math."""
+    if hasattr(data, 'empty') and data.empty:
+        return pl.DataFrame()
+    return pl.from_pandas(data) if hasattr(data, 'to_numpy') else pl.DataFrame(data)

@@ -13,6 +13,21 @@ Usage:
   python src/server/extra_endpoints_fetcher.py --registry-only # Validate/sync endpoint registry only
 """
 
+import polars as pl
+from pydantic import BaseModel
+from base_fetcher import BaseFetcher, governed_fetcher
+
+class ExtraEndpointsFetcherSchema(BaseModel):
+    symbol: str | None = None
+    date: str | None = None
+
+class ExtraEndpointsFetcherBaseFetcher(BaseFetcher[ExtraEndpointsFetcherSchema]):
+    fetcher_name = 'ExtraEndpointsFetcher'
+    domain = 'niftytrader.in'
+    schema = ExtraEndpointsFetcherSchema
+    min_interval_sec = 0.5
+
+
 import argparse
 import json
 import os
@@ -202,3 +217,9 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+def to_polars_df(data):
+    """Converts pandas DataFrame or list of dicts to Polars DataFrame for fast vector operations."""
+    if hasattr(data, 'empty') and data.empty:
+        return pl.DataFrame()
+    return pl.from_pandas(data) if hasattr(data, 'to_numpy') else pl.DataFrame(data)

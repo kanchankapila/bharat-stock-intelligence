@@ -35,6 +35,7 @@ Usage:
 
 from __future__ import annotations
 
+import polars as pl
 import pandas as pd
 
 
@@ -75,3 +76,9 @@ def leak_canary(
             f"{'SUSPECT LEAK, investigate the feature-lag joins' if suspect else 'within tolerance for a genuinely point-in-time feature set'}")
     return {"baseline_auc": baseline_auc, "shifted_auc": shifted_auc, "auc_drop": drop,
             "suspect_leak": suspect, "note": note}
+
+def to_polars_df(data):
+    """Converts pandas DataFrame or list of dicts to Polars DataFrame for fast vector operations."""
+    if hasattr(data, 'empty') and data.empty:
+        return pl.DataFrame()
+    return pl.from_pandas(data) if hasattr(data, 'to_numpy') else pl.DataFrame(data)

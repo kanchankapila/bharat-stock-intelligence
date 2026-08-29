@@ -4,6 +4,8 @@
 States: BULL | SIDEWAYS | HIGH_VOL | BEAR | CRASH
 Writes daily regime to market_regimes table.
 """
+import polars as pl
+from workflow_orchestrator import WorkflowDAG, TaskNode
 
 import sys
 import json
@@ -400,3 +402,9 @@ if __name__ == "__main__":
     else:
         regime = update_regime(args.date)
         print(f"[HMM] Done: {regime}")
+
+def to_polars_df(data):
+    """Converts pandas DataFrame or list of dicts to Polars DataFrame for fast vector math."""
+    if hasattr(data, 'empty') and data.empty:
+        return pl.DataFrame()
+    return pl.from_pandas(data) if hasattr(data, 'to_numpy') else pl.DataFrame(data)

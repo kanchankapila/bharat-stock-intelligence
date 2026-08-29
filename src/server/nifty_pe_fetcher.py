@@ -22,6 +22,21 @@ Run:  python nifty_pe_fetcher.py              # last 30 days from MC
       python nifty_pe_fetcher.py --days 365   # last 365 days from MC
 """
 
+import polars as pl
+from pydantic import BaseModel
+from base_fetcher import BaseFetcher, governed_fetcher
+
+class NiftyPeFetcherSchema(BaseModel):
+    symbol: str | None = None
+    date: str | None = None
+
+class NiftyPeFetcherBaseFetcher(BaseFetcher[NiftyPeFetcherSchema]):
+    fetcher_name = 'NiftyPeFetcher'
+    domain = 'general'
+    schema = NiftyPeFetcherSchema
+    min_interval_sec = 0.5
+
+
 import argparse
 import datetime
 import time
@@ -275,3 +290,9 @@ if __name__ == "__main__":
     parser.add_argument("--full", action="store_true", help="Full history from Trendlyne")
     args = parser.parse_args()
     run(days=args.days, full=args.full)
+
+def to_polars_df(data):
+    """Converts pandas DataFrame or list of dicts to Polars DataFrame for fast vector operations."""
+    if hasattr(data, 'empty') and data.empty:
+        return pl.DataFrame()
+    return pl.from_pandas(data) if hasattr(data, 'to_numpy') else pl.DataFrame(data)

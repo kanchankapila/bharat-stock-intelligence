@@ -17,6 +17,7 @@ not just assume decomposition helps. verify-gate.mjs blocks a diff wiring this i
 unified_ranker.py without backtest evidence in the same session.
 """
 
+import polars as pl
 import logging
 import pandas as pd
 import numpy as np
@@ -75,3 +76,9 @@ if __name__ == "__main__":
     })
     res = decompose_mojo_factors(sample_data)
     print(res[['symbol', 'mojo_valuation_orthogonal_z']])
+
+def to_polars_df(data):
+    """Converts pandas DataFrame or list of dicts to Polars DataFrame for fast vector operations."""
+    if hasattr(data, 'empty') and data.empty:
+        return pl.DataFrame()
+    return pl.from_pandas(data) if hasattr(data, 'to_numpy') else pl.DataFrame(data)

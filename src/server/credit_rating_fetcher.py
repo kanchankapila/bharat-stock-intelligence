@@ -11,6 +11,21 @@ Run:  python credit_rating_fetcher.py
       python credit_rating_fetcher.py --days 90
 """
 
+import polars as pl
+from pydantic import BaseModel
+from base_fetcher import BaseFetcher, governed_fetcher
+
+class CreditRatingFetcherSchema(BaseModel):
+    symbol: str | None = None
+    date: str | None = None
+
+class CreditRatingFetcherBaseFetcher(BaseFetcher[CreditRatingFetcherSchema]):
+    fetcher_name = 'CreditRatingFetcher'
+    domain = 'general'
+    schema = CreditRatingFetcherSchema
+    min_interval_sec = 0.5
+
+
 import argparse
 import datetime
 
@@ -347,3 +362,9 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+def to_polars_df(data):
+    """Converts pandas DataFrame or list of dicts to Polars DataFrame for fast vector operations."""
+    if hasattr(data, 'empty') and data.empty:
+        return pl.DataFrame()
+    return pl.from_pandas(data) if hasattr(data, 'to_numpy') else pl.DataFrame(data)

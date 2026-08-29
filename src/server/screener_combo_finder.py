@@ -40,6 +40,8 @@ Run:
     python screener_combo_finder.py --tier2
     python screener_combo_finder.py --tier1 --tier2 --persist
 """
+
+import polars as pl
 import argparse
 import datetime
 import itertools
@@ -348,3 +350,9 @@ if __name__ == "__main__":
         run_tier1(persist=args.persist)
     if args.tier2:
         run_tier2(persist=args.persist)
+
+def to_polars_df(data):
+    """Converts pandas DataFrame or list of dicts to Polars DataFrame for fast vector operations."""
+    if hasattr(data, 'empty') and data.empty:
+        return pl.DataFrame()
+    return pl.from_pandas(data) if hasattr(data, 'to_numpy') else pl.DataFrame(data)

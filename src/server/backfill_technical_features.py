@@ -31,6 +31,7 @@ Usage:
   python backfill_technical_features.py
   python backfill_technical_features.py --limit 500   # process first 500 pairs
 """
+import polars as pl
 import sys, argparse
 from pathlib import Path
 from datetime import datetime, timedelta
@@ -447,10 +448,21 @@ def run_full_universe_today(min_price: float = 15.0) -> int:
                 "WHERE date=? AND signal_type='GRID' AND fii_3d_net IS NULL",
                 (f3_day, f10_day, d3_day, latest))
             print(f"[Grid] repaired flow nets on {missing} pre-existing GRID rows")
+    # 2026-08-29: was `signal_type='GRID'` only, which meant `technical_analysis_engine.py`'s
+    # own pattern-fired rows (signal_type != 'GRID') NEVER got sector_ret_5d/21d from ANY code
+    # path -- that writer has never referenced these columns at all. ml_ensemble.py's
+    # build_features() defaults a NULL here to 0.0 ("sector flat") via num(col, 0), so every
+    # pattern-fired row was silently fed a fabricated sector reading, on every single day since
+    # inception -- live-verified via a fresh reverse-engineering pass: pattern-fired rows are the
+    # ~18% of the scored universe where win_probability actually carries measurable signal
+    # (per-date IC +0.022 vs the GRID population's +/-0.000, 30x), so this defaulted-to-zero
+    # feature was reaching exactly the rows most likely to benefit from a real value. Dropping
+    # the GRID restriction (still gated on sector_ret_5d IS NULL, so it only ever fills a gap,
+    # never overwrites a real value) lets this same repair pass cover every row, not just GRID.
     sec_fixes = []
     for r in con.execute(
         "SELECT symbol FROM technical_signals "
-        "WHERE date=? AND signal_type='GRID' AND sector_ret_5d IS NULL",
+        "WHERE date=? AND sector_ret_5d IS NULL",
         (latest,)).fetchall():
         s = symbol_sector.get(r['symbol'])
         vals = sector_mom.get(latest, {}).get(s) if s else None
@@ -459,9 +471,9 @@ def run_full_universe_today(min_price: float = 15.0) -> int:
     if sec_fixes:
         con.executemany(
             "UPDATE technical_signals SET sector_ret_5d=?, sector_ret_21d=? "
-            "WHERE symbol=? AND date=? AND signal_type='GRID' AND sector_ret_5d IS NULL",
+            "WHERE symbol=? AND date=? AND sector_ret_5d IS NULL",
             sec_fixes)
-        print(f"[Grid] repaired sector returns on {len(sec_fixes)} rows")
+        print(f"[Grid] repaired sector returns on {len(sec_fixes)} rows (GRID + pattern-fired)")
     con.commit()
     total = con.execute("SELECT COUNT(*) AS c FROM technical_signals WHERE date=?", (latest,)).fetchone()['c']
     print(f"[Grid] {latest}: ensured {written} rows; technical_signals now has {total} rows for the day.")
@@ -480,3 +492,9 @@ if __name__ == '__main__':
         run_full_universe_today()
     else:
         run(limit=args.limit)
+
+def to_polars_df(data):
+    """Converts pandas DataFrame or list of dicts to Polars DataFrame for fast vector operations."""
+    if hasattr(data, 'empty') and data.empty:
+        return pl.DataFrame()
+    return pl.from_pandas(data) if hasattr(data, 'to_numpy') else pl.DataFrame(data)

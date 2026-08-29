@@ -33,6 +33,7 @@ PYTHON_API_URL-style toggles are handled elsewhere in this repo.
 
 from __future__ import annotations
 
+import polars as pl
 import json as _json
 import os
 
@@ -147,3 +148,9 @@ def create_session():
         s = requests.Session()
         s.headers.update(LEGACY_HEADERS)
         return s
+
+def to_polars_df(data):
+    """Converts pandas DataFrame or list of dicts to Polars DataFrame for fast vector operations."""
+    if hasattr(data, 'empty') and data.empty:
+        return pl.DataFrame()
+    return pl.from_pandas(data) if hasattr(data, 'to_numpy') else pl.DataFrame(data)

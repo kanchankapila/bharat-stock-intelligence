@@ -18,6 +18,7 @@ Run:  python market_breadth.py            # full backfill from all history
       python market_breadth.py --days 420 # bound the read for a fast daily top-up
 """
 
+import polars as pl
 import argparse
 import datetime
 
@@ -142,3 +143,9 @@ if __name__ == "__main__":
     parser.add_argument("--days", type=int, help="Bound the OHLCV read to the last N days (default: full backfill)")
     args = parser.parse_args()
     run(days=args.days)
+
+def to_polars_df(data):
+    """Converts pandas DataFrame or list of dicts to Polars DataFrame for fast vector operations."""
+    if hasattr(data, 'empty') and data.empty:
+        return pl.DataFrame()
+    return pl.from_pandas(data) if hasattr(data, 'to_numpy') else pl.DataFrame(data)

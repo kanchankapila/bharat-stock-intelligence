@@ -18,6 +18,8 @@ Run:  python online_learner.py
       python online_learner.py --min-new 10  # only update if ≥10 new outcomes
       python online_learner.py --dry-run
 """
+import polars as pl
+from workflow_orchestrator import WorkflowDAG, TaskNode
 
 import copy, os, sys, json, datetime, argparse, pickle, warnings
 warnings.filterwarnings('ignore')
@@ -437,3 +439,9 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     run(window_days=args.window, min_new=args.min_new, dry_run=args.dry_run)
+
+def to_polars_df(data):
+    """Converts pandas DataFrame or list of dicts to Polars DataFrame for fast vector math."""
+    if hasattr(data, 'empty') and data.empty:
+        return pl.DataFrame()
+    return pl.from_pandas(data) if hasattr(data, 'to_numpy') else pl.DataFrame(data)

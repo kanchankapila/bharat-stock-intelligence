@@ -70,12 +70,31 @@ Run:
   python investsights_fundamentals_fetcher.py --limit 300
   python investsights_fundamentals_fetcher.py --symbol RELIANCE
 """
+import polars as pl
 import argparse
 import sys
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import requests
+from pydantic import BaseModel
+
+from base_fetcher import BaseFetcher
+
+
+class InvestSightsFundamentalsSchema(BaseModel):
+    symbol: str
+    dcf_valuation: float | None = None
+    piotroski_score: float | None = None
+    altman_z_score: float | None = None
+    pe_ratio: float | None = None
+
+
+class InvestSightsFundamentalsFetcher(BaseFetcher[InvestSightsFundamentalsSchema]):
+    fetcher_name = "InvestSightsFundamentalsFetcher"
+    domain = "investsights.in"
+    schema = InvestSightsFundamentalsSchema
+    min_interval_sec = 0.5
 
 from db_compat import connect, ConnWrapper
 from fetch_utils import retry_get
@@ -347,3 +366,9 @@ def main() -> int:
 
 if __name__ == "__main__":
     sys.exit(main())
+
+def to_polars_df(data):
+    """Converts pandas DataFrame or list of dicts to Polars DataFrame for fast vector operations."""
+    if hasattr(data, 'empty') and data.empty:
+        return pl.DataFrame()
+    return pl.from_pandas(data) if hasattr(data, 'to_numpy') else pl.DataFrame(data)

@@ -22,6 +22,7 @@ Usage:
 
 from __future__ import annotations
 
+import polars as pl
 import sys
 import time
 import random
@@ -246,3 +247,9 @@ def cap_to_run_budget(rows, label: str, requests_per_row: int = 1,
           f"per-session COUNT (~131-150 observed), not a rate). The next scheduled run resumes "
           f"from the DB; a partial run here is normal, not a failure.")
     return rows[:max_rows]
+
+def to_polars_df(data):
+    """Converts pandas DataFrame or list of dicts to Polars DataFrame for fast vector operations."""
+    if hasattr(data, 'empty') and data.empty:
+        return pl.DataFrame()
+    return pl.from_pandas(data) if hasattr(data, 'to_numpy') else pl.DataFrame(data)

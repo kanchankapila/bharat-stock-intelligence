@@ -16,6 +16,7 @@ Used by scoring_engine.py: call get_policy(conn, state_key) to get action,
 then get_multipliers(action) to get per-signal-type score multipliers.
 """
 
+import polars as pl
 import datetime, argparse, random
 from typing import Optional
 
@@ -510,3 +511,9 @@ if __name__ == '__main__':
     parser.add_argument('--dry-run',  action='store_true')
     args = parser.parse_args()
     run(mode=args.mode, dry_run=args.dry_run, lookback=getattr(args, 'lookback', 180))
+
+def to_polars_df(data):
+    """Converts pandas DataFrame or list of dicts to Polars DataFrame for fast vector operations."""
+    if hasattr(data, 'empty') and data.empty:
+        return pl.DataFrame()
+    return pl.from_pandas(data) if hasattr(data, 'to_numpy') else pl.DataFrame(data)

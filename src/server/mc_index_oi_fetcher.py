@@ -1,3 +1,4 @@
+import polars as pl
 import argparse
 import datetime
 import json
@@ -363,3 +364,22 @@ if __name__ == "__main__":
 
     sc_ids = [args.index] if args.index else None
     run(sc_ids=sc_ids, expiry_override=args.expiry)
+
+from pydantic import BaseModel
+from base_fetcher import BaseFetcher, governed_fetcher
+
+class McIndexOiFetcherSchema(BaseModel):
+    symbol: str | None = None
+    date: str | None = None
+
+class McIndexOiFetcherBaseFetcher(BaseFetcher[McIndexOiFetcherSchema]):
+    fetcher_name = 'McIndexOiFetcher'
+    domain = 'moneycontrol.com'
+    schema = McIndexOiFetcherSchema
+    min_interval_sec = 0.5
+
+def to_polars_df(data):
+    """Converts pandas DataFrame or list of dicts to Polars DataFrame for fast vector operations."""
+    if hasattr(data, 'empty') and data.empty:
+        return pl.DataFrame()
+    return pl.from_pandas(data) if hasattr(data, 'to_numpy') else pl.DataFrame(data)

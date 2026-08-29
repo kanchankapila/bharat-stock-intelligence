@@ -42,6 +42,8 @@ ENDPOINT QUIRKS -- verified, do not "fix" these
 Run:
   python trading80_call_alerts_fetcher.py
 """
+
+import polars as pl
 import json
 import sys
 from pathlib import Path
@@ -201,3 +203,22 @@ def main() -> int:
 
 if __name__ == "__main__":
     sys.exit(main())
+
+from pydantic import BaseModel
+from base_fetcher import BaseFetcher, governed_fetcher
+
+class Trading80CallAlertsFetcherSchema(BaseModel):
+    symbol: str | None = None
+    date: str | None = None
+
+class Trading80CallAlertsFetcherBaseFetcher(BaseFetcher[Trading80CallAlertsFetcherSchema]):
+    fetcher_name = 'Trading80CallAlertsFetcher'
+    domain = 'general'
+    schema = Trading80CallAlertsFetcherSchema
+    min_interval_sec = 0.5
+
+def to_polars_df(data):
+    """Converts pandas DataFrame or list of dicts to Polars DataFrame for fast vector operations."""
+    if hasattr(data, 'empty') and data.empty:
+        return pl.DataFrame()
+    return pl.from_pandas(data) if hasattr(data, 'to_numpy') else pl.DataFrame(data)

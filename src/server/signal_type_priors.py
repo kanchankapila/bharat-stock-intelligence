@@ -3,6 +3,7 @@ Beta-Bernoulli per-signal-type win probability priors.
 Stored as JSON in app_settings key 'signal_type_priors'.
 Schema: {"EMA_BULL_STACK": {"alpha": 12.0, "beta": 8.0}, ...}
 """
+import polars as pl
 import json
 from db_compat import query_one, execute
 
@@ -81,3 +82,9 @@ if __name__ == '__main__':
         mean = p['alpha'] / (p['alpha'] + p['beta'])
         n    = p['alpha'] + p['beta'] - PRIOR_ALPHA - PRIOR_BETA
         print(f"  {st:<30} mean={mean:.3f}  obs~{n:.0f}")
+
+def to_polars_df(data):
+    """Converts pandas DataFrame or list of dicts to Polars DataFrame for fast vector operations."""
+    if hasattr(data, 'empty') and data.empty:
+        return pl.DataFrame()
+    return pl.from_pandas(data) if hasattr(data, 'to_numpy') else pl.DataFrame(data)

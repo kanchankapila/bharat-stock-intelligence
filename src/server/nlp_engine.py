@@ -541,6 +541,20 @@ class NLPScreenerInference:
             return 'bearish'
         if cls._RISK_DOWN.search(t):
             return 'bullish'
+
+        # Turnaround / relative-valuation setups (added 2026-08-28). Reasoned, not measured,
+        # so they sit AFTER the vendor's own explicit label and the risk checks, and BEFORE
+        # only the generic valuation lists -- never ahead of a MEASURED family.
+        if 'turnaround' in t and 'loss to profit' in t:
+            return 'bullish'
+        if 'good fundamental' in t and 'near 52 week low' in t:
+            return 'bullish'
+        if any(k in t for k in [
+            'pe less than industry', 'pe less than sector', 'peg lower than industry',
+            'peg lower than sector', 'price to book value (p/bv) less than'
+        ]):
+            return 'bullish'
+
         # Measured: stretched-down is bearish, stretched-up carries no signal. Checked before
         # VAL_RICH/VAL_CHEAP -- see the ordering note above.
         if cls._OVERSOLD.search(t):
@@ -721,3 +735,16 @@ if __name__ == "__main__":
     for name, desc in tests:
         r = nlp.infer(name, desc)
         print(f"[{r['sentiment']:8s}] [{r['category']:12s}] [{r['timeframe']:10s}] conf={r['confidence']:.2f}  | {name}")
+try:
+    import polars as pl
+except ImportError:
+    pl = None
+from workflow_orchestrator import WorkflowDAG, TaskNode
+
+def to_polars_df(data):
+    """Converts pandas DataFrame or list of dicts to Polars DataFrame for fast vector math."""
+    if pl is None:
+        return data
+    if hasattr(data, 'empty') and data.empty:
+        return pl.DataFrame()
+    return pl.from_pandas(data) if hasattr(data, 'to_numpy') else pl.DataFrame(data)

@@ -30,6 +30,7 @@ Run:  python high_flyer_retrospective.py            # latest completed session
       python high_flyer_retrospective.py --date 2026-07-08
 """
 
+import polars as pl
 import argparse
 import json
 import math
@@ -460,3 +461,9 @@ if __name__ == "__main__":
                         help="Also process the N sessions before the target day (bootstraps lift stats)")
     args = parser.parse_args()
     run(target_date=args.date, backfill=args.backfill)
+
+def to_polars_df(data):
+    """Converts pandas DataFrame or list of dicts to Polars DataFrame for fast vector operations."""
+    if hasattr(data, 'empty') and data.empty:
+        return pl.DataFrame()
+    return pl.from_pandas(data) if hasattr(data, 'to_numpy') else pl.DataFrame(data)

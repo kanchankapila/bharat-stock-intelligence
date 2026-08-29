@@ -20,6 +20,7 @@ Run standalone:
     python backfill_sector_industry.py --all           # re-fetch every stock
 """
 
+import polars as pl
 import argparse
 import random
 import sys
@@ -156,3 +157,9 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+def to_polars_df(data):
+    """Converts pandas DataFrame or list of dicts to Polars DataFrame for fast vector operations."""
+    if hasattr(data, 'empty') and data.empty:
+        return pl.DataFrame()
+    return pl.from_pandas(data) if hasattr(data, 'to_numpy') else pl.DataFrame(data)

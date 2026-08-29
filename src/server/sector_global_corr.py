@@ -11,6 +11,7 @@ and joins into technical_signals (sector_global_corr_21d).
 
 Run daily after global_macro_fetcher.py.
 """
+import polars as pl
 import sys
 from datetime import date, timedelta
 
@@ -218,3 +219,9 @@ if __name__ == "__main__":
     p.add_argument("--days", type=int, default=7)
     args = p.parse_args()
     main(args.days)
+
+def to_polars_df(data):
+    """Converts pandas DataFrame or list of dicts to Polars DataFrame for fast vector operations."""
+    if hasattr(data, 'empty') and data.empty:
+        return pl.DataFrame()
+    return pl.from_pandas(data) if hasattr(data, 'to_numpy') else pl.DataFrame(data)

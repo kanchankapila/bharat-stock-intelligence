@@ -5,6 +5,21 @@ Fetch upcoming economic calendar events from MoneyControl and persist to:
   - macro_asset_prices    — 3 summary count features for ML consumption
 """
 
+import polars as pl
+from pydantic import BaseModel
+from base_fetcher import BaseFetcher, governed_fetcher
+
+class McEcoCalendarFetcherSchema(BaseModel):
+    symbol: str | None = None
+    date: str | None = None
+
+class McEcoCalendarFetcherBaseFetcher(BaseFetcher[McEcoCalendarFetcherSchema]):
+    fetcher_name = 'McEcoCalendarFetcher'
+    domain = 'moneycontrol.com'
+    schema = McEcoCalendarFetcherSchema
+    min_interval_sec = 0.5
+
+
 import sys
 from datetime import datetime, timedelta
 
@@ -219,3 +234,9 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+
+def to_polars_df(data):
+    """Converts pandas DataFrame or list of dicts to Polars DataFrame for fast vector operations."""
+    if hasattr(data, 'empty') and data.empty:
+        return pl.DataFrame()
+    return pl.from_pandas(data) if hasattr(data, 'to_numpy') else pl.DataFrame(data)

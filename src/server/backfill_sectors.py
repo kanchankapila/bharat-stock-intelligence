@@ -13,6 +13,7 @@ Run:  python backfill_sectors.py
       python backfill_sectors.py --dry-run
 """
 
+import polars as pl
 import argparse
 
 from db_compat import connect, use_postgres, ConnWrapper
@@ -113,3 +114,9 @@ if __name__ == "__main__":
     p.add_argument("--dry-run", action="store_true")
     args = p.parse_args()
     run(dry_run=args.dry_run)
+
+def to_polars_df(data):
+    """Converts pandas DataFrame or list of dicts to Polars DataFrame for fast vector operations."""
+    if hasattr(data, 'empty') and data.empty:
+        return pl.DataFrame()
+    return pl.from_pandas(data) if hasattr(data, 'to_numpy') else pl.DataFrame(data)

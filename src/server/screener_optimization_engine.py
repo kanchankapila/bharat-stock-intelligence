@@ -15,6 +15,8 @@ a different construction and a real reason for skepticism, not a verdict. verify
 will block a diff wiring this into unified_ranker.py without backtest evidence in the same
 session (see .claude/rules/recurring-bugs.md, "unmeasured signal/scoring change" class).
 """
+import polars as pl
+from workflow_orchestrator import WorkflowDAG, TaskNode
 
 import logging
 import pandas as pd
@@ -69,3 +71,9 @@ if __name__ == "__main__":
     test_weights = {'momentum': 1.0, 'breakout': 1.0, 'quality': 1.0, 'valuation': 1.0}
     print("Risk-On Weights:", compute_regime_weights(test_weights, 15.0, 2000.0))
     print("Risk-Off Weights:", compute_regime_weights(test_weights, 28.0, -4500.0))
+
+def to_polars_df(data):
+    """Converts pandas DataFrame or list of dicts to Polars DataFrame for fast vector math."""
+    if hasattr(data, 'empty') and data.empty:
+        return pl.DataFrame()
+    return pl.from_pandas(data) if hasattr(data, 'to_numpy') else pl.DataFrame(data)

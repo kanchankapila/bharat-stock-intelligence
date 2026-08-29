@@ -18,6 +18,7 @@ Run:
   python trendlyne_screener_discovery.py --pk 12345 # fetch a single PK
 """
 
+import polars as pl
 import re
 import sys
 import time
@@ -444,7 +445,7 @@ def upsert_screener(con, info: dict):
         VALUES (?,?,'Trendlyne',?,?,?,0.75,CURRENT_TIMESTAMP)
         ON CONFLICT(source, scan_id) DO UPDATE SET
             name               = excluded.name,
-            inferred_sentiment = excluded.inferred_sentiment,
+            inferred_sentiment = CASE WHEN screener_master.inferred_sentiment IN ('bullish', 'bearish') AND excluded.inferred_sentiment = 'neutral' THEN screener_master.inferred_sentiment ELSE excluded.inferred_sentiment END,
             inferred_category  = excluded.inferred_category,
             inferred_timeframe = excluded.inferred_timeframe,
             last_updated       = CURRENT_TIMESTAMP
@@ -650,3 +651,9 @@ if __name__ == "__main__":
         run("full")
     else:
         run("known")
+
+def to_polars_df(data):
+    """Converts pandas DataFrame or list of dicts to Polars DataFrame for fast vector operations."""
+    if hasattr(data, 'empty') and data.empty:
+        return pl.DataFrame()
+    return pl.from_pandas(data) if hasattr(data, 'to_numpy') else pl.DataFrame(data)

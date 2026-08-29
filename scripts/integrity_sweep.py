@@ -115,12 +115,34 @@ def _classify(nn: int, nd: int, n: int, dt: str) -> str | None:
     return None
 
 
+def _date_eq_filter(datecol: str, datecol_type: str, latest: str) -> str:
+    """`datecol = latest` without casting the COLUMN, when avoidable.
+
+    2026-08-29: `"{datecol}"::text = '{latest}'` was found live to make this sweep's
+    confluence_signals query run 100+ minutes (still climbing when killed) -- a text cast on an
+    indexed DATE/TIMESTAMPTZ column defeats the index for a single-day filter, forcing a full
+    sequential scan on a table with 30-min-cadence history. `latest` itself already came from a
+    `MAX(datecol)::text` read (see latest_date_expr), so it round-trips exactly through a cast
+    on the LITERAL instead -- the column stays untouched and any index on it still applies.
+    Falls back to the original (safe, just slow) column-cast form for any type this doesn't
+    recognize, rather than guessing at a cast that could raise on a real production table."""
+    if datecol_type in ("date",):
+        return f"\"{datecol}\" = '{latest}'::date"
+    if datecol_type in ("timestamp with time zone", "timestamp without time zone"):
+        return f"\"{datecol}\" = '{latest}'::timestamptz"
+    if datecol_type in ("text", "character varying"):
+        return f"\"{datecol}\" = '{latest}'"
+    return f"\"{datecol}\"::text = '{latest}'"
+
+
 def sweep_table(table: str, min_rows: int):
     info = latest_date_expr(table)
     if not info:
         return None
     datecol, latest, cols = info
-    n = read_df(f'SELECT COUNT(*) c FROM "{table}" WHERE "{datecol}"::text = \'{latest}\'')["c"][0]
+    datecol_type = cols.loc[cols["column_name"] == datecol, "data_type"].iloc[0]
+    date_filter = _date_eq_filter(datecol, datecol_type, latest)
+    n = read_df(f'SELECT COUNT(*) c FROM "{table}" WHERE {date_filter}')["c"][0]
     if n < min_rows:
         return None
 
@@ -138,7 +160,7 @@ def sweep_table(table: str, min_rows: int):
             for col, _ in check_cols
         )
         try:
-            row = read_df(f'SELECT {select_parts} FROM "{table}" WHERE "{datecol}"::text = \'{latest}\'').iloc[0]
+            row = read_df(f'SELECT {select_parts} FROM "{table}" WHERE {date_filter}').iloc[0]
             for col, dt in check_cols:
                 kind = _classify(int(row[f"{col}__nn"]), int(row[f"{col}__nd"]), n, dt)
                 if kind == "dead":
@@ -151,7 +173,7 @@ def sweep_table(table: str, min_rows: int):
             for col, dt in check_cols:
                 try:
                     r = read_df(f'SELECT COUNT("{col}") AS nn, COUNT(DISTINCT "{col}") AS nd '
-                                f'FROM "{table}" WHERE "{datecol}"::text = \'{latest}\'')
+                                f'FROM "{table}" WHERE {date_filter}')
                     kind = _classify(int(r["nn"][0]), int(r["nd"][0]), n, dt)
                 except Exception:
                     continue

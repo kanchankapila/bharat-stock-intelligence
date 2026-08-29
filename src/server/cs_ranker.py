@@ -9,6 +9,8 @@ Run:
     python cs_ranker.py --train
     python cs_ranker.py --score
 """
+import polars as pl
+from workflow_orchestrator import WorkflowDAG, TaskNode
 
 import os
 import sys
@@ -553,3 +555,9 @@ if __name__ == '__main__':
 
     if not args.train and not args.score:
         parser.print_help()
+
+def to_polars_df(data):
+    """Converts pandas DataFrame or list of dicts to Polars DataFrame for fast vector math."""
+    if hasattr(data, 'empty') and data.empty:
+        return pl.DataFrame()
+    return pl.from_pandas(data) if hasattr(data, 'to_numpy') else pl.DataFrame(data)

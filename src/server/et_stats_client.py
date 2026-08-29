@@ -28,6 +28,7 @@ same 2,005-stock provider-ID export already used elsewhere in this project —
 NOT via Trendlyne's tlid.
 """
 
+import polars as pl
 import json
 import time
 from datetime import date, timedelta
@@ -134,3 +135,9 @@ def fetch_et_stats(
         return None
     finally:
         time.sleep(RATE_LIMIT_SEC)
+
+def to_polars_df(data):
+    """Converts pandas DataFrame or list of dicts to Polars DataFrame for fast vector operations."""
+    if hasattr(data, 'empty') and data.empty:
+        return pl.DataFrame()
+    return pl.from_pandas(data) if hasattr(data, 'to_numpy') else pl.DataFrame(data)

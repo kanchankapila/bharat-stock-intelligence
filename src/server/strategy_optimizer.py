@@ -21,6 +21,8 @@ Run:  python strategy_optimizer.py
       python strategy_optimizer.py --dry-run      # show weights without saving
       python strategy_optimizer.py --apply         # also writes to screener_master
 """
+import polars as pl
+from workflow_orchestrator import WorkflowDAG, TaskNode
 
 import os, sys, json, datetime, argparse, warnings
 warnings.filterwarnings('ignore')
@@ -485,7 +487,19 @@ class StrategyOptimizer:
         # the three write methods below to no-ops, so there is nothing real to reconnect there.
         # In production __init__ always sets self.conn, so the guard is a no-op and this always runs.
         if hasattr(self, 'conn'):
-            self.conn.close()
+            # 2026-08-29: close() itself can throw here -- it's the SAME stale connection this
+            # comment already identified as potentially dead, and SQLAlchemy's close() tries a
+            # rollback first, which fails with the identical "server closed the connection
+            # unexpectedly" error the reconnect exists to work around. Live-observed: this
+            # crashed the run AFTER a full grid search + 888 computed overrides, discarding all
+            # of it, because the crash sits BEFORE save_to_history/apply_to_scoring_engine below.
+            # We are discarding this connection regardless of whether close() succeeds, so a
+            # failure here is not a reason to abort -- only a failure to open the NEW one is.
+            try:
+                self.conn.close()
+            except Exception as e:
+                print(f"[Optimizer] Stale connection close() failed (expected if the server "
+                      f"already dropped it): {e}", file=sys.stderr)
             self.conn = connect()
 
         self.save_to_history(result, overrides)
@@ -538,3 +552,9 @@ if __name__ == "__main__":
         )
     finally:
         opt.close()
+
+def to_polars_df(data):
+    """Converts pandas DataFrame or list of dicts to Polars DataFrame for fast vector math."""
+    if hasattr(data, 'empty') and data.empty:
+        return pl.DataFrame()
+    return pl.from_pandas(data) if hasattr(data, 'to_numpy') else pl.DataFrame(data)

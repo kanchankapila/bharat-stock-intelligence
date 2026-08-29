@@ -20,6 +20,7 @@ Run:
     python mc_ohlcv_backfill.py --symbols BEL,INFY    # specific names
 """
 
+import polars as pl
 import argparse
 import datetime
 import sys
@@ -211,3 +212,9 @@ if __name__ == "__main__":
     args = p.parse_args()
     only = [s.strip().upper() for s in args.symbols.split(",")] if args.symbols else None
     run(args.from_year, args.workers, args.limit, only, args.overwrite)
+
+def to_polars_df(data):
+    """Converts pandas DataFrame or list of dicts to Polars DataFrame for fast vector operations."""
+    if hasattr(data, 'empty') and data.empty:
+        return pl.DataFrame()
+    return pl.from_pandas(data) if hasattr(data, 'to_numpy') else pl.DataFrame(data)

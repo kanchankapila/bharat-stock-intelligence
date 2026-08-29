@@ -55,6 +55,8 @@ ENDPOINT QUIRKS -- verified, do not "fix" these
 Run:
   python trendlyne_market_insight_fetcher.py
 """
+
+import polars as pl
 import sys
 from datetime import datetime
 
@@ -183,3 +185,22 @@ def main() -> int:
 
 if __name__ == "__main__":
     sys.exit(main())
+
+from pydantic import BaseModel
+from base_fetcher import BaseFetcher, governed_fetcher
+
+class TrendlyneMarketInsightFetcherSchema(BaseModel):
+    symbol: str | None = None
+    date: str | None = None
+
+class TrendlyneMarketInsightFetcherBaseFetcher(BaseFetcher[TrendlyneMarketInsightFetcherSchema]):
+    fetcher_name = 'TrendlyneMarketInsightFetcher'
+    domain = 'trendlyne.com'
+    schema = TrendlyneMarketInsightFetcherSchema
+    min_interval_sec = 0.5
+
+def to_polars_df(data):
+    """Converts pandas DataFrame or list of dicts to Polars DataFrame for fast vector operations."""
+    if hasattr(data, 'empty') and data.empty:
+        return pl.DataFrame()
+    return pl.from_pandas(data) if hasattr(data, 'to_numpy') else pl.DataFrame(data)

@@ -19,6 +19,7 @@ Run:  python ownership_relative.py
       python ownership_relative.py --date today
 """
 
+import polars as pl
 import argparse
 import datetime
 
@@ -131,3 +132,9 @@ if __name__ == "__main__":
     parser.add_argument("--date", help="If 'today', only update today's rows")
     args = parser.parse_args()
     run(only_date=args.date)
+
+def to_polars_df(data):
+    """Converts pandas DataFrame or list of dicts to Polars DataFrame for fast vector operations."""
+    if hasattr(data, 'empty') and data.empty:
+        return pl.DataFrame()
+    return pl.from_pandas(data) if hasattr(data, 'to_numpy') else pl.DataFrame(data)

@@ -48,12 +48,13 @@ SERIES = {
 @pytest.fixture
 def db(pg_conn):
     pg_conn.execute("""
-        CREATE TABLE marketsmojo_technical_history (
+        CREATE TABLE IF NOT EXISTS marketsmojo_technical_history (
             symbol TEXT, indicator TEXT, period TEXT, date TEXT,
             price REAL, grade TEXT, flag INTEGER, details TEXT, fetched_at TEXT,
             PRIMARY KEY (symbol, indicator, period, date)
         )
     """)
+    pg_conn.execute("DELETE FROM marketsmojo_technical_history")
     pg_conn.commit()
     return pg_conn
 

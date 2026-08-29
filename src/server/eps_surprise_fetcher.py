@@ -29,6 +29,21 @@ Run:
   python eps_surprise_fetcher.py --limit 50     # first 50 resolved stocks
 """
 
+import polars as pl
+from pydantic import BaseModel
+from base_fetcher import BaseFetcher, governed_fetcher
+
+class EpsSurpriseFetcherSchema(BaseModel):
+    symbol: str | None = None
+    date: str | None = None
+
+class EpsSurpriseFetcherBaseFetcher(BaseFetcher[EpsSurpriseFetcherSchema]):
+    fetcher_name = 'EpsSurpriseFetcher'
+    domain = 'general'
+    schema = EpsSurpriseFetcherSchema
+    min_interval_sec = 0.5
+
+
 import argparse
 import sys
 
@@ -433,3 +448,9 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+
+def to_polars_df(data):
+    """Converts pandas DataFrame or list of dicts to Polars DataFrame for fast vector operations."""
+    if hasattr(data, 'empty') and data.empty:
+        return pl.DataFrame()
+    return pl.from_pandas(data) if hasattr(data, 'to_numpy') else pl.DataFrame(data)

@@ -47,6 +47,8 @@ Run:
   python tickertape_deals_fetcher.py --pages 5        # recent deals
   python tickertape_deals_fetcher.py --pages 200      # deeper history
 """
+
+import polars as pl
 import argparse
 import datetime
 import sys
@@ -332,3 +334,22 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+from pydantic import BaseModel
+from base_fetcher import BaseFetcher, governed_fetcher
+
+class TickertapeDealsFetcherSchema(BaseModel):
+    symbol: str | None = None
+    date: str | None = None
+
+class TickertapeDealsFetcherBaseFetcher(BaseFetcher[TickertapeDealsFetcherSchema]):
+    fetcher_name = 'TickertapeDealsFetcher'
+    domain = 'tickertape.in'
+    schema = TickertapeDealsFetcherSchema
+    min_interval_sec = 0.5
+
+def to_polars_df(data):
+    """Converts pandas DataFrame or list of dicts to Polars DataFrame for fast vector operations."""
+    if hasattr(data, 'empty') and data.empty:
+        return pl.DataFrame()
+    return pl.from_pandas(data) if hasattr(data, 'to_numpy') else pl.DataFrame(data)

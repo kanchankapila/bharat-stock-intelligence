@@ -25,6 +25,21 @@ Usage:
   python india_macro_fetcher.py --days 90
 """
 
+import polars as pl
+from pydantic import BaseModel
+from base_fetcher import BaseFetcher, governed_fetcher
+
+class IndiaMacroFetcherSchema(BaseModel):
+    symbol: str | None = None
+    date: str | None = None
+
+class IndiaMacroFetcherBaseFetcher(BaseFetcher[IndiaMacroFetcherSchema]):
+    fetcher_name = 'IndiaMacroFetcher'
+    domain = 'general'
+    schema = IndiaMacroFetcherSchema
+    min_interval_sec = 0.5
+
+
 import argparse
 import re
 import sys
@@ -314,3 +329,9 @@ if __name__ == "__main__":
                         help="Number of past days of eco-calendar actuals to scan (default: 60)")
     args = parser.parse_args()
     main(args.days)
+
+def to_polars_df(data):
+    """Converts pandas DataFrame or list of dicts to Polars DataFrame for fast vector operations."""
+    if hasattr(data, 'empty') and data.empty:
+        return pl.DataFrame()
+    return pl.from_pandas(data) if hasattr(data, 'to_numpy') else pl.DataFrame(data)

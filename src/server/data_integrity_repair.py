@@ -20,6 +20,7 @@ Each repair is idempotent and can be run independently:
 
 Run:  python data_integrity_repair.py --all [--dry-run]
 """
+import polars as pl
 import argparse
 import datetime
 import json
@@ -645,3 +646,9 @@ def main():
 
 if __name__ == '__main__':
     main()
+
+def to_polars_df(data):
+    """Converts pandas DataFrame or list of dicts to Polars DataFrame for fast vector operations."""
+    if hasattr(data, 'empty') and data.empty:
+        return pl.DataFrame()
+    return pl.from_pandas(data) if hasattr(data, 'to_numpy') else pl.DataFrame(data)

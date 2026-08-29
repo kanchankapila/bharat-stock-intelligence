@@ -25,6 +25,7 @@ Run:
 """
 from __future__ import annotations
 
+import polars as pl
 import argparse
 import csv
 import re
@@ -279,3 +280,9 @@ if __name__ == "__main__":
         print(f"same-day relevant:{c.same_day_relevant}")
     else:
         _coverage_report(args.csv, args.show_uncovered)
+
+def to_polars_df(data):
+    """Converts pandas DataFrame or list of dicts to Polars DataFrame for fast vector operations."""
+    if hasattr(data, 'empty') and data.empty:
+        return pl.DataFrame()
+    return pl.from_pandas(data) if hasattr(data, 'to_numpy') else pl.DataFrame(data)

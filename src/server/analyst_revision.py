@@ -28,6 +28,7 @@ Run:
     python analyst_revision.py                # all symbols
     python analyst_revision.py --symbol INFY  # single symbol (debug / backfill)
 """
+import polars as pl
 
 import argparse
 import datetime
@@ -254,3 +255,9 @@ if __name__ == "__main__":
     )
     args = parser.parse_args()
     run(only_symbol=args.symbol)
+
+def to_polars_df(data):
+    """Converts pandas DataFrame or list of dicts to Polars DataFrame for fast vector operations."""
+    if hasattr(data, 'empty') and data.empty:
+        return pl.DataFrame()
+    return pl.from_pandas(data) if hasattr(data, 'to_numpy') else pl.DataFrame(data)

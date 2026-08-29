@@ -39,6 +39,8 @@ VERIFIED LIVE BEHAVIOUR (2026-08-13)
 Run:
   python investsights_factor_scores_fetcher.py
 """
+
+import polars as pl
 import sys
 import time
 
@@ -201,3 +203,22 @@ def main() -> int:
 
 if __name__ == "__main__":
     sys.exit(main())
+
+from pydantic import BaseModel
+from base_fetcher import BaseFetcher, governed_fetcher
+
+class InvestsightsFactorScoresFetcherSchema(BaseModel):
+    symbol: str | None = None
+    date: str | None = None
+
+class InvestsightsFactorScoresFetcherBaseFetcher(BaseFetcher[InvestsightsFactorScoresFetcherSchema]):
+    fetcher_name = 'InvestsightsFactorScoresFetcher'
+    domain = 'investsights.in'
+    schema = InvestsightsFactorScoresFetcherSchema
+    min_interval_sec = 0.5
+
+def to_polars_df(data):
+    """Converts pandas DataFrame or list of dicts to Polars DataFrame for fast vector operations."""
+    if hasattr(data, 'empty') and data.empty:
+        return pl.DataFrame()
+    return pl.from_pandas(data) if hasattr(data, 'to_numpy') else pl.DataFrame(data)

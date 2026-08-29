@@ -23,6 +23,7 @@ Verdict thresholds (per horizon, needs dates>=20 to count): usable factor if |ra
 AND hit_AUC>=0.55; otherwise "no edge". Momentum-style scores are expected to invert sign in
 mean-reverting regimes, so read IC sign alongside AUC.
 """
+import polars as pl
 import argparse
 import sys
 import warnings
@@ -240,3 +241,9 @@ if __name__ == "__main__":
     run(a.table, [s.strip() for s in a.scores.split(",")], a.symbol_col, a.date_col,
         [int(h) for h in a.horizons.split(",")], a.by_regime, a.min_per_date, a.min_n, a.quantiles,
         a.persist, a.entry)
+
+def to_polars_df(data):
+    """Converts pandas DataFrame or list of dicts to Polars DataFrame for fast vector operations."""
+    if hasattr(data, 'empty') and data.empty:
+        return pl.DataFrame()
+    return pl.from_pandas(data) if hasattr(data, 'to_numpy') else pl.DataFrame(data)

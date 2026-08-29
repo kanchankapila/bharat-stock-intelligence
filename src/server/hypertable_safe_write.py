@@ -11,6 +11,7 @@ tribal-knowledge comment repeated by hand at each of its two call sites (ohlcv_q
 data_integrity_repair.py) rather than an enforced code path -- exactly the gap a new writer
 against either table has no way to discover except by hitting the limit in production first.
 """
+import polars as pl
 from typing import Sequence, Tuple, Optional
 
 
@@ -46,3 +47,9 @@ def safe_keyed_update(conn, sql: str, params_list: Sequence[Tuple], *,
         conn.commit()
         done += len(batch)
     return done
+
+def to_polars_df(data):
+    """Converts pandas DataFrame or list of dicts to Polars DataFrame for fast vector operations."""
+    if hasattr(data, 'empty') and data.empty:
+        return pl.DataFrame()
+    return pl.from_pandas(data) if hasattr(data, 'to_numpy') else pl.DataFrame(data)

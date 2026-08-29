@@ -198,6 +198,32 @@ class TestPromotionGate:
         opt.run(dry_run=False, apply=True)
         assert calls['saved'] is True
 
+    def test_stale_connection_close_raising_does_not_lose_the_computed_result(self, monkeypatch):
+        """2026-08-29: live-observed -- a full grid search (888 computed overrides) was
+        discarded because self.conn.close() itself raised 'server closed the connection
+        unexpectedly' on the SAME stale connection the reconnect exists to replace, and that
+        raise happened BEFORE save_to_history/apply_to_scoring_engine. A failing close() must
+        not prevent the fresh connection from being opened or the writes from happening."""
+        result = {
+            'category_weights': {}, 'source_weights': {},
+            'optimised_test_objective': 0.60, 'baseline_test_objective': 0.55,
+            'baseline_win_rate': 0.5, 'optimised_win_rate': 0.6, 'improvement_pct': 9.1,
+        }
+        opt, calls = self._make_optimizer(monkeypatch, result)
+
+        class _DeadConn:
+            def close(self):
+                raise Exception("server closed the connection unexpectedly")
+
+        opt.conn = _DeadConn()
+        fresh_conn = object()
+        monkeypatch.setattr('src.server.strategy_optimizer.connect', lambda: fresh_conn)
+
+        opt.run(dry_run=False, apply=True)  # must not raise
+
+        assert opt.conn is fresh_conn
+        assert calls == {'saved': True, 'applied_scoring': True, 'applied_screeners': True}
+
 
 class TestScreenerOverrideHoldoutGate:
     """Regression test for the second half of Finding #42: compute_screener_overrides()

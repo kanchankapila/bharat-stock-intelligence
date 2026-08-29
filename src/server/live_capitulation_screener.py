@@ -31,6 +31,7 @@ USAGE
 """
 from __future__ import annotations
 
+import polars as pl
 import argparse
 import datetime
 
@@ -143,3 +144,9 @@ if __name__ == "__main__":
     ap.add_argument("--dry-run", action="store_true")
     a = ap.parse_args()
     run(dry_run=a.dry_run)
+
+def to_polars_df(data):
+    """Converts pandas DataFrame or list of dicts to Polars DataFrame for fast vector operations."""
+    if hasattr(data, 'empty') and data.empty:
+        return pl.DataFrame()
+    return pl.from_pandas(data) if hasattr(data, 'to_numpy') else pl.DataFrame(data)

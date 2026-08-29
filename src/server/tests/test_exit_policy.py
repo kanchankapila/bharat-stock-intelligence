@@ -65,6 +65,56 @@ class TestTrainAndPredict:
         assert target > 100.0 > stop          # predicted MFE>0, MAE<0 → bracket straddles entry
 
 
+class TestLoadExitTrainingDataRowCap:
+    """2026-08-29: signal_excursions has no retention window and grew to 393K qualifying rows
+    in ~103 days, which is why exit-policy-train's GradientBoosting fit (scales with row count,
+    run 4x) kept timing out even after one timeout bump. load_exit_training_data() now caps to
+    the most recent MAX_TRAINING_ROWS by signal_date. Negative-controlled: reverting the LIMIT
+    (setting MAX_TRAINING_ROWS above the seeded row count) makes this test fail, confirming it
+    actually exercises the cap rather than passing vacuously."""
+
+    def _seed(self, conn, n_dates: int):
+        # `?` placeholders, not `%s` -- db_compat's translate() expects the SQLite-style
+        # marker and rewrites it for Postgres; a literal `%s` bypasses translate() and
+        # psycopg2 chokes on it (recurring-bugs.md's "raw %s placeholders" entry).
+        cur = conn.cursor()
+        for i in range(n_dates):
+            d = f"2026-{(i // 28) + 1:02d}-{(i % 28) + 1:02d}"
+            cur.execute(
+                "INSERT INTO technical_signals (symbol, date, rsi, adx) VALUES (?, ?, ?, ?)",
+                (f"SYM{i}", d, 50.0, 20.0),
+            )
+            cur.execute(
+                "INSERT INTO signal_excursions "
+                "(symbol, signal_date, horizon_days, entry_price, mfe_pct, mae_pct) "
+                "VALUES (?, ?, ?, ?, ?, ?)",
+                (f"SYM{i}", d, 5, 100.0, float(i), -float(i)),
+            )
+        conn.commit()
+
+    def test_caps_to_most_recent_n_rows(self, pg_db_conn, monkeypatch):
+        self._seed(pg_db_conn, n_dates=10)
+        monkeypatch.setattr(ep, "MAX_TRAINING_ROWS", 3)
+
+        df = ep.load_exit_training_data()
+
+        assert len(df) == 3
+        # The 3 MOST RECENT symbols by signal_date are SYM7/SYM8/SYM9 (0-indexed, latest dates),
+        # and the result must still be ascending by signal_date for train_from_df's time-ordered
+        # split -- both properties broken by a naive "just add LIMIT N" without the ORDER BY DESC
+        # subquery + re-sort.
+        assert list(df["symbol"]) == ["SYM7", "SYM8", "SYM9"]
+        assert list(df["signal_date"]) == sorted(df["signal_date"])
+
+    def test_negative_control_cap_above_seed_count_returns_everything(self, pg_db_conn, monkeypatch):
+        self._seed(pg_db_conn, n_dates=10)
+        monkeypatch.setattr(ep, "MAX_TRAINING_ROWS", 1_000)
+
+        df = ep.load_exit_training_data()
+
+        assert len(df) == 10
+
+
 class TestMixedHorizonEmbargo:
     """Live bug, 2026-08-09: horizon_days = max(df['horizon_days']) let a small minority of
     long-horizon rows (e.g. 0.8% at horizon=30 in production) force an embargo so large it

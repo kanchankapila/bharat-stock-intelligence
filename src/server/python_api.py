@@ -1,3 +1,4 @@
+import polars as pl
 import os
 import sys
 import logging
@@ -69,3 +70,9 @@ if __name__ == "__main__":
     port = int(os.environ.get("PYTHON_API_PORT", 8000))
     logger.info(f"Starting Python API on port {port}...")
     uvicorn.run("python_api:app", host="127.0.0.1", port=port, reload=False)
+
+def to_polars_df(data):
+    """Converts pandas DataFrame or list of dicts to Polars DataFrame for fast vector operations."""
+    if hasattr(data, 'empty') and data.empty:
+        return pl.DataFrame()
+    return pl.from_pandas(data) if hasattr(data, 'to_numpy') else pl.DataFrame(data)

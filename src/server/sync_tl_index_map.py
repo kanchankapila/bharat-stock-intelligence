@@ -18,6 +18,7 @@ Run:
   python sync_tl_index_map.py --dry-run  # print only, no writes
 """
 
+import polars as pl
 import argparse
 import re
 
@@ -248,3 +249,9 @@ if __name__ == "__main__":
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args()
     sync(dry_run=args.dry_run)
+
+def to_polars_df(data):
+    """Converts pandas DataFrame or list of dicts to Polars DataFrame for fast vector operations."""
+    if hasattr(data, 'empty') and data.empty:
+        return pl.DataFrame()
+    return pl.from_pandas(data) if hasattr(data, 'to_numpy') else pl.DataFrame(data)

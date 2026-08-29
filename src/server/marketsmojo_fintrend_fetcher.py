@@ -16,6 +16,21 @@ this project's provider-ID scheme.
 symbol resolution and headers are shared with marketsmojo_technical_fetcher.py.
 """
 
+import polars as pl
+from pydantic import BaseModel
+from base_fetcher import BaseFetcher, governed_fetcher
+
+class MarketsmojoFintrendFetcherSchema(BaseModel):
+    symbol: str | None = None
+    date: str | None = None
+
+class MarketsmojoFintrendFetcherBaseFetcher(BaseFetcher[MarketsmojoFintrendFetcherSchema]):
+    fetcher_name = 'MarketsmojoFintrendFetcher'
+    domain = 'marketsmojo.com'
+    schema = MarketsmojoFintrendFetcherSchema
+    min_interval_sec = 0.5
+
+
 import argparse
 import sys
 import time
@@ -153,3 +168,9 @@ if __name__ == "__main__":
     parser.add_argument("--full", action="store_true", help="force a complete re-upsert (backfill/vendor restatement)")
     args = parser.parse_args()
     run(args.symbols, full=args.full)
+
+def to_polars_df(data):
+    """Converts pandas DataFrame or list of dicts to Polars DataFrame for fast vector operations."""
+    if hasattr(data, 'empty') and data.empty:
+        return pl.DataFrame()
+    return pl.from_pandas(data) if hasattr(data, 'to_numpy') else pl.DataFrame(data)

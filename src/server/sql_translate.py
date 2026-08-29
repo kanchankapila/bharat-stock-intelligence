@@ -1,3 +1,4 @@
+import polars as pl
 """
 SQLite -> PostgreSQL SQL translation for the Python engines (Phase 3 / P3f).
 
@@ -411,3 +412,9 @@ def build_params(params) -> dict:
         return {k: _clean_value(v) for k, v in params.items()}
     return {f"p{i}": _clean_value(v) for i, v in enumerate(params)}
 
+
+def to_polars_df(data):
+    """Converts pandas DataFrame or list of dicts to Polars DataFrame for fast vector operations."""
+    if hasattr(data, 'empty') and data.empty:
+        return pl.DataFrame()
+    return pl.from_pandas(data) if hasattr(data, 'to_numpy') else pl.DataFrame(data)

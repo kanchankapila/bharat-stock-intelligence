@@ -33,6 +33,21 @@ scoring without a fresh factor_backtest.py-style measurement against realized re
 Run:
   python marketsmojo_stock_picks_fetcher.py
 """
+
+import polars as pl
+from pydantic import BaseModel
+from base_fetcher import BaseFetcher, governed_fetcher
+
+class MarketsmojoStockPicksFetcherSchema(BaseModel):
+    symbol: str | None = None
+    date: str | None = None
+
+class MarketsmojoStockPicksFetcherBaseFetcher(BaseFetcher[MarketsmojoStockPicksFetcherSchema]):
+    fetcher_name = 'MarketsmojoStockPicksFetcher'
+    domain = 'marketsmojo.com'
+    schema = MarketsmojoStockPicksFetcherSchema
+    min_interval_sec = 0.5
+
 import sys
 from pathlib import Path
 
@@ -167,3 +182,9 @@ def main() -> int:
 
 if __name__ == "__main__":
     sys.exit(main())
+
+def to_polars_df(data):
+    """Converts pandas DataFrame or list of dicts to Polars DataFrame for fast vector operations."""
+    if hasattr(data, 'empty') and data.empty:
+        return pl.DataFrame()
+    return pl.from_pandas(data) if hasattr(data, 'to_numpy') else pl.DataFrame(data)

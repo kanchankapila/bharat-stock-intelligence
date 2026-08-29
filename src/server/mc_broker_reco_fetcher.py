@@ -17,6 +17,21 @@ Run:  python mc_broker_reco_fetcher.py             # fetch + backfill (7-day win
       python mc_broker_reco_fetcher.py --days 14   # wider backfill window
 """
 
+import polars as pl
+from pydantic import BaseModel
+from base_fetcher import BaseFetcher, governed_fetcher
+
+class McBrokerRecoFetcherSchema(BaseModel):
+    symbol: str | None = None
+    date: str | None = None
+
+class McBrokerRecoFetcherBaseFetcher(BaseFetcher[McBrokerRecoFetcherSchema]):
+    fetcher_name = 'McBrokerRecoFetcher'
+    domain = 'moneycontrol.com'
+    schema = McBrokerRecoFetcherSchema
+    min_interval_sec = 0.5
+
+
 import argparse
 import datetime
 import sys
@@ -352,3 +367,9 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+
+def to_polars_df(data):
+    """Converts pandas DataFrame or list of dicts to Polars DataFrame for fast vector operations."""
+    if hasattr(data, 'empty') and data.empty:
+        return pl.DataFrame()
+    return pl.from_pandas(data) if hasattr(data, 'to_numpy') else pl.DataFrame(data)

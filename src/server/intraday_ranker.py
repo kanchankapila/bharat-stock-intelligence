@@ -13,6 +13,8 @@ no table or query with the positional pipeline, so unified_ranker output is neve
 
 Run (market hours, every 15 min):  python intraday_ranker.py
 """
+import polars as pl
+from workflow_orchestrator import WorkflowDAG, TaskNode
 import json
 import math
 from datetime import date, datetime, timedelta
@@ -833,3 +835,9 @@ class IntradayRanker:
 
 if __name__ == "__main__":
     IntradayRanker().run()
+
+def to_polars_df(data):
+    """Converts pandas DataFrame or list of dicts to Polars DataFrame for fast vector math."""
+    if hasattr(data, 'empty') and data.empty:
+        return pl.DataFrame()
+    return pl.from_pandas(data) if hasattr(data, 'to_numpy') else pl.DataFrame(data)

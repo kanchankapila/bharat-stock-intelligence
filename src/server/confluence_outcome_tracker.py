@@ -12,6 +12,7 @@ Run daily after market close:
   python confluence_outcome_tracker.py
 """
 
+import polars as pl
 from datetime import datetime, timedelta
 
 from db_compat import connect
@@ -284,3 +285,9 @@ if __name__ == '__main__':
         recompute_screener_reliability(conn)
     finally:
         conn.close()
+
+def to_polars_df(data):
+    """Converts pandas DataFrame or list of dicts to Polars DataFrame for fast vector operations."""
+    if hasattr(data, 'empty') and data.empty:
+        return pl.DataFrame()
+    return pl.from_pandas(data) if hasattr(data, 'to_numpy') else pl.DataFrame(data)

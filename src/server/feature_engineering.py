@@ -3,6 +3,8 @@
 Feature engineering pipeline: computes 84 ML-ready features per (symbol, date)
 and writes to feature_store. Enforces strict leakage prevention rules.
 """
+import polars as pl
+from workflow_orchestrator import WorkflowDAG, TaskNode
 
 import sys
 import json
@@ -1042,3 +1044,9 @@ if __name__ == "__main__":
     fe = FeatureEngineer()
     syms = args.symbols
     fe.run_full_pipeline(symbols=syms, lookback_days=args.lookback, date_filter=args.date)
+
+def to_polars_df(data):
+    """Converts pandas DataFrame or list of dicts to Polars DataFrame for fast vector math."""
+    if hasattr(data, 'empty') and data.empty:
+        return pl.DataFrame()
+    return pl.from_pandas(data) if hasattr(data, 'to_numpy') else pl.DataFrame(data)

@@ -19,6 +19,7 @@ Run:  python exit_policy.py --train
       python exit_policy.py --train --min-samples 200
 """
 
+import polars as pl
 import argparse
 import datetime
 import os
@@ -59,26 +60,48 @@ def suggest_levels(entry: float, pred_mfe_pct: float, pred_mae_pct: float,
     return round(target, 2), round(stop, 2)
 
 
+# 2026-08-29: signal_excursions has no retention/window at all -- it grew to 393K qualifying
+# rows in its first ~103 days of existence (2026-05-16..08-27) and GradientBoostingRegressor's
+# per-tree cost scales with row count, fit 4x (2 targets x split-fit + refit-all, see
+# train_from_df). This is the direct cause of exit-policy-train's weekly timeout, which had
+# already been bumped once (20min->45min, 2026-08-24) "for dataset growth" and hit the new
+# ceiling again just 5 days later -- bumping it a second time would only defer the same failure
+# again as the table keeps growing, unbounded, forever. A recency cap keeps runtime roughly flat
+# going forward instead of growing every week; MAX_TRAINING_ROWS is deliberately a ROW count, not
+# a calendar window, because the table is currently younger than any reasonable calendar window
+# would be (a "last 2 years" cap would not drop a single row today). The champion/challenger gate
+# in _register_exit_model already refuses to promote a worse model, so a training-set change here
+# cannot silently degrade the live model -- it can only fail to improve it, which is caught.
+MAX_TRAINING_ROWS = 150_000
+
+
 def load_exit_training_data() -> pd.DataFrame:
     """Excursion labels joined to the entry-time technical features + point-in-time
-    fundamentals (same as-of discipline as ml_ensemble.load_training_data)."""
+    fundamentals (same as-of discipline as ml_ensemble.load_training_data).
+
+    Capped to the most recent MAX_TRAINING_ROWS by signal_date (see the comment above) --
+    re-sorted ascending afterward since train_from_df's time-ordered split assumes that order."""
     q = f"""
-        SELECT se.symbol, se.signal_date, se.horizon_days,
-               se.mfe_pct, se.mae_pct,
-               ts.signal_score, ts.signals_json,
-               ts.rsi, ts.adx, ts.nifty_regime, ts.cmp, ts.sma200, ts.volume_ratio,
-               ts.fii_3d_net, ts.above_sma200, ts.pcr_oi, ts.pcr_vol,
-               ts.fii_10d_net, ts.dii_3d_net, ts.delivery_pct,
-               ts.sector_ret_5d, ts.sector_ret_21d,
-               ts.iv_rank, ts.iv_skew, ts.rs_rank_21d, ts.rs_rank_63d,
-               fh.fifty_two_week_high, fh.piotroski_f_score, fh.debt_to_equity,
-               fh.operating_margins, fh.return_on_equity, fh.revenue_growth,
-               fh.earnings_growth, fh.earnings_yield, fh.price_to_book, fh.market_cap
-        FROM signal_excursions se
-        JOIN technical_signals ts ON ts.symbol = se.symbol AND ts.date = se.signal_date::date
-        {as_of_join_sql('fundamentals_history', 'fh', 'se', 'symbol', 'signal_date')}
-        WHERE se.mfe_pct IS NOT NULL AND se.mae_pct IS NOT NULL
-        ORDER BY se.signal_date
+        WITH recent AS (
+            SELECT se.symbol, se.signal_date, se.horizon_days,
+                   se.mfe_pct, se.mae_pct,
+                   ts.signal_score, ts.signals_json,
+                   ts.rsi, ts.adx, ts.nifty_regime, ts.cmp, ts.sma200, ts.volume_ratio,
+                   ts.fii_3d_net, ts.above_sma200, ts.pcr_oi, ts.pcr_vol,
+                   ts.fii_10d_net, ts.dii_3d_net, ts.delivery_pct,
+                   ts.sector_ret_5d, ts.sector_ret_21d,
+                   ts.iv_rank, ts.iv_skew, ts.rs_rank_21d, ts.rs_rank_63d,
+                   fh.fifty_two_week_high, fh.piotroski_f_score, fh.debt_to_equity,
+                   fh.operating_margins, fh.return_on_equity, fh.revenue_growth,
+                   fh.earnings_growth, fh.earnings_yield, fh.price_to_book, fh.market_cap
+            FROM signal_excursions se
+            JOIN technical_signals ts ON ts.symbol = se.symbol AND ts.date = se.signal_date::date
+            {as_of_join_sql('fundamentals_history', 'fh', 'se', 'symbol', 'signal_date')}
+            WHERE se.mfe_pct IS NOT NULL AND se.mae_pct IS NOT NULL
+            ORDER BY se.signal_date DESC
+            LIMIT {MAX_TRAINING_ROWS}
+        )
+        SELECT * FROM recent ORDER BY signal_date
     """
     return read_df(q)
 
@@ -462,3 +485,9 @@ if __name__ == "__main__":
     args = parser.parse_args()
     if args.train:
         train(min_samples=args.min_samples)
+
+def to_polars_df(data):
+    """Converts pandas DataFrame or list of dicts to Polars DataFrame for fast vector operations."""
+    if hasattr(data, 'empty') and data.empty:
+        return pl.DataFrame()
+    return pl.from_pandas(data) if hasattr(data, 'to_numpy') else pl.DataFrame(data)

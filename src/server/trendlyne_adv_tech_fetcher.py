@@ -34,6 +34,21 @@ Run:
   python trendlyne_adv_tech_fetcher.py --symbol BEL # single stock
 """
 
+import polars as pl
+from pydantic import BaseModel
+from base_fetcher import BaseFetcher, governed_fetcher
+
+class TrendlyneAdvTechFetcherSchema(BaseModel):
+    symbol: str | None = None
+    date: str | None = None
+
+class TrendlyneAdvTechFetcherBaseFetcher(BaseFetcher[TrendlyneAdvTechFetcherSchema]):
+    fetcher_name = 'TrendlyneAdvTechFetcher'
+    domain = 'trendlyne.com'
+    schema = TrendlyneAdvTechFetcherSchema
+    min_interval_sec = 0.5
+
+
 import argparse
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -608,3 +623,9 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+
+def to_polars_df(data):
+    """Converts pandas DataFrame or list of dicts to Polars DataFrame for fast vector operations."""
+    if hasattr(data, 'empty') and data.empty:
+        return pl.DataFrame()
+    return pl.from_pandas(data) if hasattr(data, 'to_numpy') else pl.DataFrame(data)

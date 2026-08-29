@@ -16,6 +16,7 @@ symbol resolution: stockid is read from scripts/stocklist.json (same file/patter
 et_stats_client.py uses for companyid) -- never hardcoded, per .claude/rules/data-sources.md.
 """
 
+import polars as pl
 import argparse
 import json
 import sys
@@ -28,6 +29,21 @@ import requests
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from db_compat import connect  # noqa: E402
+from pydantic import BaseModel, Field
+from base_fetcher import BaseFetcher, DomainGovernor
+
+class MarketsMojoPointSchema(BaseModel):
+    date: str
+    price: float | None = None
+    grade: str | None = None
+    flag: int | None = None
+
+class MarketsMojoTechnicalFetcher(BaseFetcher[MarketsMojoPointSchema]):
+    fetcher_name = "MarketsMojoTechnicalFetcher"
+    domain = "marketsmojo.com"
+    schema = MarketsMojoPointSchema
+    min_interval_sec = 0.5
+
 
 BASE_URL = "https://www.marketsmojo.com/technical_card/getCardInfo"
 HEADERS = {
@@ -236,3 +252,9 @@ if __name__ == "__main__":
                         help="re-upsert every date instead of only dates newer than what is stored")
     args = parser.parse_args()
     run(args.symbols, full=args.full)
+
+def to_polars_df(data):
+    """Converts pandas DataFrame or list of dicts to Polars DataFrame for fast vector operations."""
+    if hasattr(data, 'empty') and data.empty:
+        return pl.DataFrame()
+    return pl.from_pandas(data) if hasattr(data, 'to_numpy') else pl.DataFrame(data)

@@ -2,6 +2,7 @@ from pathlib import Path
 import json
 import datetime
 import pandas as pd
+import polars as pl
 import difflib
 from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError
@@ -1293,3 +1294,10 @@ if __name__ == "__main__":
 
     engine = AlphaQuantScoringEngine()
     engine.process_scoring(force_rebuild=args.rebuild)
+
+
+def to_polars_df(data):
+    """Converts pandas DataFrame or list of dicts to Polars DataFrame for fast vector math."""
+    if hasattr(data, 'empty') and data.empty:
+        return pl.DataFrame()
+    return pl.from_pandas(data) if hasattr(data, 'to_numpy') else pl.DataFrame(data)

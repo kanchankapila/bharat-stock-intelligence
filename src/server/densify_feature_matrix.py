@@ -30,6 +30,7 @@ import argparse
 import datetime
 
 import pandas as pd
+import polars as pl
 from db_compat import connect
 
 # Below this coverage on a normal trading day, a column is treated as sporadically-written
@@ -115,6 +116,47 @@ def sparse_columns(conn, probe_date: str) -> list:
     return out
 
 
+def ffill_and_ages(df, cols):
+    """Per-symbol forward-fill capped at MAX_FILL_AGE_DAYS, plus the staleness age.
+
+    Returns (filled_dataframe, ages_list) -- `filled` carries df's own index so it can be
+    assigned straight back onto a row-aligned frame.
+
+    Polars rather than pandas, and the reason is measured, not assumed: on the real
+    production panel (91,041 rows x 160 sparse columns, 2,272 symbols, 276 trading days,
+    2026-08-29) this is 2.14x faster end to end -- 1.542s -> 0.722s including the frame
+    build. Almost all of the win is the age computation at 10.2x, because the pandas
+    version ran a pure-Python loop over every single row; the ffill itself is only 1.57x.
+    Equivalence with the previous pandas implementation is pinned by
+    src/server/tests/test_densify_ffill_ages.py, which reimplements nothing -- it calls
+    this function and compares against pandas groupby/ffill on the same input.
+
+    LOAD-BEARING: NaN is NOT null in polars, and forward_fill() propagates over nulls
+    ONLY. Without the fill_nan(None) below this fills nothing at all and still returns a
+    perfectly plausible-looking frame -- the first version of this conversion did exactly
+    that and was caught only because the benchmark asserted equality before reporting a
+    speedup.
+    """
+    pldf = pl.DataFrame(
+        {"symbol": df["symbol"].to_numpy().astype(str)}
+        | {c: df[c].to_numpy(dtype="float64", na_value=float("nan")) for c in cols}
+    ).with_columns([pl.col(c).fill_nan(None) for c in cols])
+
+    filled_pl = pldf.with_columns(
+        [pl.col(c).forward_fill(limit=MAX_FILL_AGE_DAYS).over("symbol") for c in cols])
+    filled = pd.DataFrame({c: filled_pl[c].to_numpy() for c in cols}, index=df.index)
+
+    ages = (
+        pldf.with_columns(
+                pl.any_horizontal([pl.col(c).is_not_null() for c in cols]).alias("_has"))
+            .with_columns(pl.int_range(pl.len()).over("symbol").alias("_i"))
+            .with_columns(pl.when(pl.col("_has")).then(pl.col("_i")).otherwise(None)
+                            .forward_fill().over("symbol").alias("_last"))
+            .with_columns((pl.col("_i") - pl.col("_last")).alias("_age"))["_age"].to_list()
+    )
+    return filled, ages
+
+
 def run(since: str, dry: bool) -> None:
     conn = connect()
     try:
@@ -151,22 +193,13 @@ def run(since: str, dry: bool) -> None:
         before = df[cols].notna().sum().sum()
         df = df.sort_values(['symbol', 'date'])
 
-        # strictly forward, per symbol, capped by age
-        filled = df.groupby('symbol', group_keys=False)[cols].ffill(limit=MAX_FILL_AGE_DAYS)
-        # how stale is the carried value? measured on the densest column set as a whole
-        had_any = df[cols].notna().any(axis=1)
-        ages = []
-        for _, g in df.assign(_has=had_any).groupby('symbol', sort=False):
-            age, cur = [], None
-            for has_val in g['_has'].values:
-                if has_val:
-                    cur = 0
-                elif cur is not None:
-                    cur += 1
-                age.append(cur)
-            ages.extend(age)
-        df_out = df[['symbol', 'date']].copy()
-        df_out[cols] = filled
+        # strictly forward, per symbol, capped by age; plus how stale each carried
+        # value is, measured on the densest column set as a whole. See ffill_and_ages().
+        filled, ages = ffill_and_ages(df, cols)
+        # One concat rather than 160 individual column inserts -- assigning df_out[cols]
+        # column-by-column triggers pandas' "DataFrame is highly fragmented" warning and
+        # the copying that goes with it. filled carries df's index, so this aligns.
+        df_out = pd.concat([df[['symbol', 'date']], filled], axis=1)
         df_out['enrichment_ffill_age_days'] = ages
 
         after = df_out[cols].notna().sum().sum()

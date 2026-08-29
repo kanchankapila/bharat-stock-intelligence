@@ -17,6 +17,7 @@ sid is resolved via scripts/stocklist.json's tickertape_sid field
 lookup — see that script for how sid is obtained.
 """
 
+import polars as pl
 import json
 from pathlib import Path
 
@@ -75,3 +76,9 @@ def fetch_scorecard(sid: str, session: requests.Session) -> list[dict] | None:
     finally:
         import time
         time.sleep(RATE_LIMIT_SEC)
+
+def to_polars_df(data):
+    """Converts pandas DataFrame or list of dicts to Polars DataFrame for fast vector operations."""
+    if hasattr(data, 'empty') and data.empty:
+        return pl.DataFrame()
+    return pl.from_pandas(data) if hasattr(data, 'to_numpy') else pl.DataFrame(data)

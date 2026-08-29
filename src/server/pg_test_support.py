@@ -10,6 +10,7 @@ repo uses, so a test file's import resolves here regardless of sys.path order.
 conftest.py imports from this module and owns the pytest-facing surface (fixtures, hooks).
 """
 
+import polars as pl
 import os
 import pathlib
 import uuid
@@ -92,8 +93,10 @@ def purge_orphan_schemas() -> int:
     -- skips them, and every t_*/pytest_* schema minted so far stays in the target
     database forever. They hold nothing, but they POLLUTE: any information_schema/
     pg_tables listing that filters on table name alone reads each row once per orphan.
-    Measured 2026-08-25: twelve orphans made information_schema.columns report
+    Measured 2026-08-25: twelve orphans made information_schema.columns report  # cross-schema-exempt: prose, not a query
     index_option_oi's columns twelve times over, which briefly looked like schema drift.
+    The sweep below also scans every schema on purpose -- a current_schema() filter would
+    defeat the entire function.
 
     Widened 2026-08-27 (weekend-audit, AF-20260827-07): this only ever reaped `t_*`
     (pg_schema's own pattern) -- it never covered `pytest_*` (_pg_session_schema's
@@ -307,3 +310,9 @@ def drain_memory_conns() -> None:
             drop_throwaway_schema(admin, schema)
         finally:
             admin.close()
+
+def to_polars_df(data):
+    """Converts pandas DataFrame or list of dicts to Polars DataFrame for fast vector operations."""
+    if hasattr(data, 'empty') and data.empty:
+        return pl.DataFrame()
+    return pl.from_pandas(data) if hasattr(data, 'to_numpy') else pl.DataFrame(data)
