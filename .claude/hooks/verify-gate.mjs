@@ -6,6 +6,21 @@
 // sentence "I ran pytest" satisfied a hook whose entire purpose is catching exactly
 // that claim. It now pairs each tool_use block against its tool_result and requires
 // is_error !== true, i.e. a real zero exit.
+//
+// 2026-08-28: `git diff --name-only HEAD` was the sole source of "changed" -- correct
+// for a solo working tree, wrong for this one. recurring-bugs.md's own "Concurrent
+// Session Hazards" entry documents multiple sessions editing this repo at once; a
+// read-only session was blocked demanding pytest/tsc/vitest for 199 .py/.ts files it
+// never touched, because another session's uncommitted work was already dirty in the
+// tree before this one's first tool call. Fixed by scoping `changed` to files THIS
+// session's own Edit/Write/MultiEdit/NotebookEdit calls actually wrote (paired against
+// a non-error tool_result, same pattern as verificationsPassed below) -- not everything
+// `git diff` happens to show. A file dirtied only by a concurrent session no longer
+// counts; a file this session genuinely edited still requires the same real, passing
+// verification it always did. Known gap, same shape as the rest of this file's scope:
+// a Bash/PowerShell command that writes a file via redirection/sed instead of the
+// Edit/Write tools is not tracked -- consistent with rules-pointer.mjs/env-guard.mjs,
+// which also only fire on the Edit|Write matcher, not arbitrary shell writes.
 import { execSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 
@@ -74,6 +89,57 @@ export function verificationsPassed(transcript) {
   return passed;
 }
 
+const EDIT_TOOLS = new Set(['Edit', 'Write', 'MultiEdit', 'NotebookEdit']);
+
+/**
+ * File paths THIS session actually wrote: Edit/Write/MultiEdit/NotebookEdit tool_use
+ * calls whose paired tool_result is not an error. Same two-pass tool_use/tool_result
+ * pairing as verificationsPassed, for the same reason -- a tool_use alone doesn't mean
+ * the write happened (an Edit can fail on an old_string mismatch).
+ */
+export function sessionEditedFiles(transcript) {
+  const pending = new Map(); // tool_use id -> file_path
+  const written = new Set();
+
+  const records = transcript
+    .split('\n')
+    .filter(Boolean)
+    .map(l => { try { return JSON.parse(l); } catch { return null; } })
+    .filter(Boolean);
+
+  const blocks = r => (Array.isArray(r?.message?.content) ? r.message.content : []);
+
+  for (const r of records) {
+    for (const b of blocks(r)) {
+      if (b?.type !== 'tool_use' || !EDIT_TOOLS.has(b.name)) continue;
+      const fp = b.input?.file_path ?? b.input?.notebook_path;
+      if (typeof fp === 'string' && fp) pending.set(b.id, fp);
+    }
+  }
+  for (const r of records) {
+    for (const b of blocks(r)) {
+      if (b?.type !== 'tool_result') continue;
+      const fp = pending.get(b.tool_use_id);
+      if (fp && b.is_error !== true) written.add(fp);
+    }
+  }
+  return written;
+}
+
+/** editedPath (absolute, possibly Windows-style, from a tool_use) vs. gitRelPath
+ * (repo-relative POSIX, from `git diff --name-only`) -- same file? */
+function samePath(editedPath, gitRelPath) {
+  const e = String(editedPath).replace(/\\/g, '/').toLowerCase();
+  const g = String(gitRelPath).replace(/\\/g, '/').toLowerCase().replace(/^\/+/, '');
+  return e === g || e.endsWith('/' + g);
+}
+
+/** Of the files `git diff` shows as changed, only the ones this session's own edits touched. */
+export function filterToSessionEdits(gitFiles, editedPaths) {
+  const edited = [...editedPaths];
+  return gitFiles.filter(f => edited.some(ep => samePath(ep, f)));
+}
+
 /**
  * null = allow completion; string = the reason to block on.
  * `allChanged` defaults to `changed` for callers that don't distinguish (existing
@@ -121,18 +187,17 @@ function main() {
     try { inp = JSON.parse(raw); } catch { process.exit(0); }
     if (inp.stop_hook_active) process.exit(0); // already blocked once; don't loop
 
-    let changed = [];
-    let allChanged = [];
+    let allChangedRaw = [];
     try {
-      allChanged = execSync('git diff --name-only HEAD', { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] })
+      allChangedRaw = execSync('git diff --name-only HEAD', { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] })
         .split('\n')
         .filter(Boolean);
-      changed = allChanged.filter(f => /\.(py|ts|tsx)$/.test(f) && !/(test|spec|__tests__)/i.test(f));
     } catch { process.exit(0); } // not a repo / git unavailable — don't block
-    if (!changed.length) process.exit(0);
+    if (!allChangedRaw.length) process.exit(0);
 
     // Fail loud, not open: an unreadable transcript means we cannot tell whether
-    // anything was verified. Silently passing here would disable the gate invisibly.
+    // anything was verified, or even which of the working tree's changes are this
+    // session's own. Silently passing here would disable the gate invisibly.
     let transcript;
     try {
       transcript = readFileSync(inp.transcript_path, 'utf8');
@@ -140,14 +205,23 @@ function main() {
       process.stdout.write(JSON.stringify({
         decision: 'block',
         reason:
-          `${changed.length} code file(s) changed and the verify-gate hook could not read the ` +
-          `transcript (${e.code ?? e.message}), so it cannot confirm anything was run. ` +
-          `State which verification commands you ran and their real output.`,
+          `The working tree has ${allChangedRaw.length} changed file(s) and the verify-gate hook ` +
+          `could not read the transcript (${e.code ?? e.message}), so it cannot tell which of them ` +
+          `this session touched or whether anything was verified. State which files you changed and ` +
+          `which verification commands you ran, with their real output.`,
       }));
       process.exit(0);
     }
 
-    const reason = decide(changed, transcript, allChanged);
+    // Scope to files THIS session actually wrote -- see the 2026-08-28 comment at the
+    // top of this file. `git diff` alone can't distinguish this session's edits from a
+    // concurrent session's uncommitted work already sitting dirty in the shared tree.
+    const edited = sessionEditedFiles(transcript);
+    const sessionTouched = filterToSessionEdits(allChangedRaw, edited);
+    const changed = sessionTouched.filter(f => /\.(py|ts|tsx)$/.test(f) && !/(test|spec|__tests__)/i.test(f));
+    if (!changed.length) process.exit(0);
+
+    const reason = decide(changed, transcript, sessionTouched);
     if (!reason) process.exit(0);
     process.stdout.write(JSON.stringify({ decision: 'block', reason }));
   });

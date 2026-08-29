@@ -52,8 +52,9 @@ always clobbered same-night. Retired as an automatic writer (still reachable on-
 depend on `quantScoringService` having already run but ran *before* it — moved to run inside the
 `quant-scoring` job, after `runQuantScoring()`.
 
-**Signal model.** `signals` was dropped 2026-06-20 ("Cluster A" —
-`docs/superpowers/plans/2026-06-19-signal-model-rationalization-cluster-a.md`); `technical_analysis_signals`
+**Signal model.** `signals` was dropped 2026-06-20 ("Cluster A", fully executed — the original
+planning doc was removed in the 2026-08-28 stale-docs sweep, this section is the authoritative
+record now); `technical_analysis_signals`
 was folded into `unified_signals` (`signal_source='technical'`) 2026-08 ("Cluster B-lite", continuing
 Cluster A's own deferred scope) — its writer (`technical_analysis_engine.py`, now also scheduled nightly
 inside `ml-daily-ops` for the first time — it had never run on any automatic schedule before) and all 3

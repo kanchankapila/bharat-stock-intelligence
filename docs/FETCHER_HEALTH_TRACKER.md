@@ -132,5 +132,6 @@ non-issue in production), `delivery_trend_fetcher` (same encoding caveat), `nift
 
 - [ ] **`mf_sector_flow_fetcher.py`** — need an alternative URL/source (AMFI's bulk endpoint is dead, see above).
 - [ ] **`mf_holdings_fetcher.py`** — need an alternative URL/source (ET Markets endpoint is dead, see above).
-- [ ] **`working_capital_fetcher.py`** / **`financial_ratios_fetcher.py`**'s cash-flow params — need an alternative URL/source (Trendlyne's quarterly line-item params are dead, see above), or consider deriving CCC/FCF-yield/interest-coverage from `stock_fundamentals`/`fundamentals_history` we already ingest instead.
-- [ ] No scheduler changes made for the 3 still-broken scripts above — they still run on their existing cron per `queues.ts` / `JOB_REGISTRY`; they fail gracefully (no crashes) but produce no new data until an alternative source is found.
+- [ ] **`financial_ratios_fetcher.py`**'s cash-flow params — need an alternative URL/source (Trendlyne's quarterly line-item params are dead, see above), or consider deriving FCF-yield/interest-coverage from `stock_fundamentals`/`fundamentals_history` we already ingest instead.
+- [x] ~~`working_capital_fetcher.py` needs an alternative source~~ — **fixed 2026-08-27** (`e9daeae`): not a dead source, a one-line request-depth bug (`fetch_et_stats(..., "Quarterly", ...)` was requesting only 5 quarters instead of 20). No new data source was needed; live-verified against the full ~1,969-symbol universe (601 deteriorating / 561 improving, previously frozen at 0/0).
+- [ ] No scheduler changes made for the still-broken scripts above — they still run on their existing cron per `queues.ts` / `JOB_REGISTRY`; they fail gracefully (no crashes) but produce no new data until an alternative source is found.

@@ -592,6 +592,19 @@ def check_information_schema_missing_table_schema(path: Path, text: str) -> list
         window = "\n".join(lines[max(0, i - 4):i + 8])
         if _TABLE_SCHEMA_RE.search(window):
             continue
+        # Line-level exemption, mirroring check_short_calendar_lookback's
+        # `trading-day-exempt:` marker -- deliberately NOT a file-level allowlist, which
+        # would blind this check to a future genuine instance in the same file. The only
+        # legitimate case is a query that MUST look across schemas (e.g. reaping orphan
+        # throwaway schemas from crashed pytest runs), where current_schema() would defeat
+        # the query's entire purpose.
+        exempt = "cross-schema-exempt:" in lines[i]
+        j = i - 1
+        while not exempt and j >= 0 and lines[j].strip().startswith("#"):
+            exempt = "cross-schema-exempt:" in lines[j]
+            j -= 1
+        if exempt:
+            continue
         findings.append(
             f"{_display_path(path)}:{i + 1}: information_schema query with no `table_schema` "
             f"filter -- a test fixture's throwaway schema (pg_conn/pg_schema, or a leaked "
@@ -650,6 +663,58 @@ def check_degraded_print_to_stdout(path: Path, text: str, runpython_scripts: set
                         f"existing self._degraded()-style helper if this class already has one."
                     )
             j += 1
+    return findings
+
+
+def check_python_file_parses(path: Path, text: str) -> list[str]:
+    """A .py file that does not PARSE, and a line-1 import shoved above a shebang.
+
+    Both are the signature of an automated bulk-edit pass inserting a line at absolute
+    line 1 without looking at what was already there (recurring-bugs.md, "Automated
+    bulk-edit passes"). On 2026-08-28 such a pass put `import polars as pl` above
+    `event_triggers.py`'s docstring, displacing `from __future__ import annotations`
+    out of first-statement position; the resulting SyntaxError failed pytest at
+    COLLECTION, so the whole suite ran zero tests while reporting nothing obviously
+    wrong. 17 other files had their `#!` shebang demoted to line 2, where the kernel
+    stops honouring it.
+
+    This is the one check in this file that is not a heuristic: a parse failure is a
+    fact, and it cannot produce a false positive.
+    """
+    findings: list[str] = []
+
+    # Strip a leading BOM exactly as Python's own source loader does. Four trendlyne
+    # fetchers are UTF-8-with-BOM (and have been since long before this check existed);
+    # they import perfectly, but main() reads with plain utf-8, so the U+FEFF survives
+    # into the string and compile() rejects it. Not stripping it here reports four
+    # healthy files as unparseable -- a false positive that would redden CI forever.
+    text = text.lstrip("﻿")
+
+    try:
+        # compile(), NOT ast.parse(): ast.parse uses PyCF_ONLY_AST, which SKIPS
+        # __future__-placement validation, so it happily parses the exact file that
+        # broke pytest collection on 2026-08-28. compile() runs the full front-end
+        # (it produces bytecode and executes nothing) and does enforce it.
+        compile(text, str(path), "exec")
+    except SyntaxError as exc:
+        findings.append(
+            f"{path}:{exc.lineno}: file does not parse -- {exc.msg}. Python cannot import "
+            f"this module at all; if anything under src/server/__tests__ imports it, pytest "
+            f"aborts during COLLECTION and the entire suite runs zero tests."
+        )
+        return findings  # a non-parsing file makes every other check here meaningless
+
+    lines = text.splitlines()
+    for i, line in enumerate(lines[:5]):
+        if line.startswith("#!"):
+            if i > 0:
+                findings.append(
+                    f"{path}:{i + 1}: shebang is on line {i + 1}, not line 1 -- the kernel only "
+                    f"honours `#!` as the very first bytes of a file, so this script is no longer "
+                    f"directly executable. Move whatever precedes it below the docstring."
+                )
+            break
+
     return findings
 
 
@@ -720,6 +785,7 @@ def main() -> int:
     all_findings: list[str] = []
     for path in py_files:
         text = path.read_text(encoding="utf-8", errors="ignore")
+        all_findings.extend(check_python_file_parses(path, text))
         all_findings.extend(check_date_anchor(path, text))
         all_findings.extend(check_short_calendar_lookback(path, text))
         all_findings.extend(check_raw_percent_s(path, text))

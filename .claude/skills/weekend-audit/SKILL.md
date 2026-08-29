@@ -6,7 +6,7 @@ description: Weekly whole-system health sweep across repo/build, the four servic
 # Weekend audit
 
 Nothing here is a new monitoring engine. The 15-minute `jobWatchdog`, the 62 checks in
-`dataQualityChecks.ts`, and the 12 `.claude/commands/*-audit|*-review` files already cover most
+`dataQualityChecks.ts`, and the 19 `.claude/commands/*.md` review files already cover most
 of this. This skill exists for the gaps those cannot see:
 
 - **They answer "is it fresh", never "is it correct".** `recurring-bugs.md`'s dominant class is
