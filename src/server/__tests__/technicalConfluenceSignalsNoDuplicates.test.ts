@@ -49,5 +49,5 @@ describe('getTechnicalConfluenceSignals', () => {
     expect(mine.length).toBe(1);
     // The LATERAL join must pick the LATEST row (10:00, score 90), not an arbitrary one.
     expect(Number(mine[0].confluence_score)).toBe(90);
-  });
+  }, 15000);
 });

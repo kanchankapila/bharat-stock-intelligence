@@ -463,11 +463,22 @@ export async function computeConfluenceSignals(): Promise<{ computed: number; el
   const nseMap = new Map<string, any>(
     (await dbAll('SELECT symbol, sector, market_cap FROM nse_stocks') as any[]).map((r: any) => [r.symbol, r])
   );
+  // current_volume: 2026-08-29 finding -- technical_signals (techMap's source) has no raw
+  // volume column, only volume_ratio, so this schema column had zero producers anywhere in
+  // the repo since it was added. stock_ohlcv carries the real figure. A single MAX(date)
+  // filter, not a per-symbol ROW_NUMBER() window (this job runs every 30 min; a window-function
+  // scan over stock_ohlcv's full multi-year history would be needlessly heavy here, unlike
+  // techMap's technical_signals scan which is a much smaller table).
+  const volumeMap = new Map<string, number>(
+    (await dbAll(
+      `SELECT symbol, volume FROM stock_ohlcv WHERE date = (SELECT MAX(date) FROM stock_ohlcv)`
+    ) as any[]).map((r: any) => [r.symbol, r.volume])
+  );
 
   const now = new Date().toISOString();
   const expiresAt = new Date(Date.now() + 30 * 60 * 1000).toISOString();
 
-  const COLS = 29;
+  const COLS = 30;
   const buildUpsertSql = (n: number) => `
     INSERT INTO confluence_signals (
       symbol, computed_at, confluence_score, conviction_level,
@@ -476,7 +487,7 @@ export async function computeConfluenceSignals(): Promise<{ computed: number; el
       trend_alignment_score, volume_score, sector_strength_score, fundamental_score,
       suggested_timeframe, trade_reasoning,
       entry_zone_low, entry_zone_high, stop_loss, target_1, target_2, target_3, risk_reward,
-      sector, market_cap, current_price, rsi, atr, expires_at
+      sector, market_cap, current_price, current_volume, rsi, atr, expires_at
     ) VALUES ${rowGroups(n, COLS)}
     ON CONFLICT(symbol, computed_at) DO UPDATE SET
       confluence_score = excluded.confluence_score,
@@ -491,6 +502,7 @@ export async function computeConfluenceSignals(): Promise<{ computed: number; el
     const quant = quantMap.get(symbol) ?? null;
     const fund = fundMap.get(symbol) ?? null;
     const nse = nseMap.get(symbol) ?? null;
+    const volume = volumeMap.get(symbol) ?? null;
 
     const scored = scoreStock({ symbol, screenerIds: ids, screenerNames: names, screenerClasses: classes }, tech, quant, fund, nse);
 
@@ -520,7 +532,7 @@ export async function computeConfluenceSignals(): Promise<{ computed: number; el
       setup?.target2 ?? null, setup?.target3 ?? null,
       setup?.riskReward ?? null,
       nse?.sector ?? null, nse?.market_cap ?? null,
-      price ?? null, tech?.rsi ?? null, atr ?? null, expiresAt,
+      price ?? null, volume, tech?.rsi ?? null, atr ?? null, expiresAt,
     ]);
 
     if (scored.convictionLevel === 'ELITE') elite++;

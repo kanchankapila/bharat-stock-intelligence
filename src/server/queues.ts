@@ -1385,7 +1385,12 @@ async function processMlWeeklyRetrain(_job: Job): Promise<{ success: boolean; fa
   // promotion decision to model_registry on every run, and this step's --train call has already
   // timed out silently in production (2026-08-17) with nothing surfacing it beyond this log line
   // -- same fix already applied to ml-ensemble-train/strategy-optimizer/backtest-optimizer below.
-  await T.run('exit-policy-train', () => runPython('exit_policy.py', ['--train'], 45 * 60_000));
+  // 2026-08-29: hit the 45min ceiling again (bumped from 20min just 5 days earlier, 2026-08-24)
+  // -- the real fix is exit_policy.py's own MAX_TRAINING_ROWS cap (added this session, keeps its
+  // query's row count roughly flat instead of growing every week); this bump to 60min is a
+  // margin against transient contention on top of that, not a second "wait for it to keep
+  // growing" deferral.
+  await T.run('exit-policy-train', () => runPython('exit_policy.py', ['--train'], 60 * 60_000));
   // --tune runs Optuna hyperparameter search (this is what took the model from AUC 0.70 to
   // 0.757 in the first place) — without it, every scheduled retrain silently falls back to
   // untuned defaults, which measured ~0.20 AUC worse on held-out test in one observed run.

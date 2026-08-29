@@ -43,6 +43,8 @@ const InvestmentStrategy = React.lazy(() => import('../components/InvestmentStra
 const IndicesPage        = React.lazy(() => import('../components/IndicesPage').then(m => ({ default: m.IndicesPage })));
 const StrategyIntelligence = React.lazy(() => import('../components/StrategyIntelligence').then(m => ({ default: m.StrategyIntelligence })));
 const HighConvictionPage = React.lazy(() => import('../components/HighConvictionPage').then(m => ({ default: m.HighConvictionPage })));
+const EtCallsPage = React.lazy(() => import('../components/EtCallsPage').then(m => ({ default: m.EtCallsPage })));
+const UltimateDecisionMatrix = React.lazy(() => import('../components/UltimateDecisionMatrix').then(m => ({ default: m.UltimateDecisionMatrix })));
 const DailySignals       = React.lazy(() => import('../components/DailySignals').then(m => ({ default: m.DailySignals })));
 const SentimentIntelligence = React.lazy(() => import('../components/SentimentIntelligence').then(m => ({ default: m.SentimentIntelligence })));
 const SignalTracking     = React.lazy(() => import('../components/SignalTracking').then(m => ({ default: m.SignalTracking })));
@@ -151,6 +153,7 @@ const V1Routes = ({
                                     onToggleWatchlist={onToggleWatchlist}
                                 />
                             } />
+                            <Route path="/decision-matrix" element={<UltimateDecisionMatrix onSelectStock={onSelectStock} onToggleWatchlist={onToggleWatchlist} watchlist={watchlist} />} />
                             <Route path="/alpha" element={<CommandCenterDashboard onSelectStock={(s) => { onSelectStock(s); navigate('/trade-cockpit'); }} />} />
                             <Route path="/buy-recs" element={<Navigate to="/alpha" replace />} />
                             <Route path="/money-flow" element={<MoneyFlowPage />} />
@@ -184,6 +187,7 @@ const V1Routes = ({
                             <Route path="/options-desk" element={<OptionsDeskPage onSelectSymbol={onSelectStock} />} />
                             <Route path="/risk" element={<RiskDeskPage onSelectSymbol={onSelectStock} />} />
                             <Route path="/todays-picks" element={<TodaysPicks onSelectStock={onSelectStock} />} />
+                            <Route path="/et-calls" element={<EtCallsPage onSelectStock={onSelectStock} />} />
                             <Route path="/early-spotter" element={<EarlyHoursSpotter onSelectStock={onSelectStock} />} />
                             <Route path="/screener-intelligence" element={<ScreenerIntelligencePage />} />
                             <Route path="/agent-data-scientist" element={<AgentDataScientistPage />} />

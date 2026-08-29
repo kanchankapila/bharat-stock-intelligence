@@ -582,57 +582,9 @@ describe('pg-backup-recency', () => {
   });
 });
 
-// ── deploy-drift ─────────────────────────────────────────────────────────────────────
-// scripts/check_deploy_drift.mjs does the git/pm2 comparison and stamps job_heartbeat;
-// this check only reads that row. "server N commits behind HEAD" (AF-14) was always caught
-// by a human noticing, never by a check — these pin that a stale/missing heartbeat is
-// itself a failure, not a silent pass, since that's the exact shape the gap had.
-describe('deploy-drift', () => {
-  const byId = (id: string) => DATA_QUALITY_CHECKS.find(c => c.id === id)!;
-  const now = new Date('2026-08-20T12:00:00Z');
-  const minsAgo = (n: number) => new Date(now.getTime() - n * 60_000).toISOString();
-
-  it('is critical — a merged fix that was never deployed reads as resolved everywhere but production', () => {
-    expect(byId('deploy-drift').critical).toBe(true);
-  });
-
-  it('FAILS when the checker has never run (no heartbeat row)', () => {
-    const r = byId('deploy-drift').evaluate(undefined, now);
-    expect(r.status).toBe('fail');
-    expect(r.detail).toMatch(/never run/i);
-  });
-
-  it('FAILS when the checker itself has stopped running, not just found drift', () => {
-    // Scheduled every 15 min; a run from 2 days ago means the checker is dead, which is
-    // worse than a drift finding and must not be masked by a stale 'success' status.
-    const r = byId('deploy-drift').evaluate(
-      { last_status: 'success', last_run_at: minsAgo(2 * 24 * 60), last_success_at: minsAgo(2 * 24 * 60), last_error: null },
-      now,
-    );
-    expect(r.status).toBe('fail');
-    expect(r.detail).toMatch(/stopped/i);
-  });
-
-  it('FAILS with the recorded reason when the last run found real drift', () => {
-    const r = byId('deploy-drift').evaluate(
-      { last_status: 'failed', last_run_at: minsAgo(5), last_success_at: minsAgo(45),
-        last_error: 'HEAD (abc123def456, committed 2026-08-20T10:00:00.000Z) is newer than ' +
-                    'bharat-server\'s last restart (2026-08-19T18:00:00.000Z) by 16.0h. ' +
-                    'Run: pm2 restart bharat-server.' },
-      now,
-    );
-    expect(r.status).toBe('fail');
-    expect(r.detail).toMatch(/pm2 restart bharat-server/);
-  });
-
-  it('passes when the last run succeeded recently', () => {
-    const r = byId('deploy-drift').evaluate(
-      { last_status: 'success', last_run_at: minsAgo(5), last_success_at: minsAgo(5), last_error: null },
-      now,
-    );
-    expect(r.status).toBe('pass');
-  });
-});
+// NOTE: the 'deploy-drift' describe block (and the 'port-drift' check, which had no
+// dedicated tests) were removed 2026-08-29 (AF-20260829-17) along with their DATA_QUALITY_CHECKS
+// entries — see dataQualityChecks.ts's note at the removal site for why.
 
 // ── Regression guards for the four defects the 2026-08-11 audit found live ────────────
 // Each was invisible for weeks because the table was fresh and full the whole time -- just

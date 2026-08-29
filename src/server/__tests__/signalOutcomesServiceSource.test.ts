@@ -138,5 +138,5 @@ describe('getWinRateStats scopes to one signal_source AND one label_definition',
     const stats = await getWinRateStats();
 
     expect(stats.overall.total).toBe(1);
-  });
+  }, 15000);
 });

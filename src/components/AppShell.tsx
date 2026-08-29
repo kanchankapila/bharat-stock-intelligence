@@ -67,8 +67,10 @@ const NAV_GROUPS: NavGroup[] = [
   {
     label: 'Top Picks',
     items: [
-      { icon: Zap,        label: 'Alpha ⚡',      id: 'alpha'         },
-      { icon: Sparkles,   label: 'Trade Cockpit', id: 'trade-cockpit' },
+      { icon: Crosshair,    label: 'Decision Matrix Pro', id: 'decision-matrix' },
+      { icon: Zap,          label: 'Alpha ⚡',            id: 'alpha'         },
+      { icon: Sparkles,     label: 'Trade Cockpit',       id: 'trade-cockpit' },
+      { icon: Radio,        label: 'ET Calls',            id: 'et-calls'      },
     ],
   },
   {

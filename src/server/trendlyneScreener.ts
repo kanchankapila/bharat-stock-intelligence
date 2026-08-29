@@ -1454,25 +1454,54 @@ export async function runIntradayScreenerScan(): Promise<{
 
         highScoringStocksFound++;
 
-        // 4. Deduplicate active signals
-        let existingActive = 0;
+        // 4. Handle active signal deduplication, confluence upgrades, and conflict resolution (TODAY only)
+        const todayIso = new Date().toISOString().split('T')[0];
+        const newType = sentiment === 'bearish' ? 'SELL' : 'BUY';
+        const entry = stock.ltp || 0;
+        const target = newType === 'BUY' ? parseFloat((entry * 1.05).toFixed(2)) : parseFloat((entry * 0.95).toFixed(2));
+        const stopLoss = newType === 'BUY' ? parseFloat((entry * 0.97).toFixed(2)) : parseFloat((entry * 1.03).toFixed(2));
+
+        let existingActiveSignal: any = null;
         try {
-          const check = await dbGet("SELECT COUNT(*) as count FROM unified_signals WHERE symbol = ? AND status = 'ACTIVE' AND signal_source = 'screener'", [symbol]) as any;
-          existingActive = check?.count || 0;
+          existingActiveSignal = await dbGet(
+            "SELECT id, signal_type, confidence_score, reasoning FROM unified_signals WHERE symbol = ? AND status = 'ACTIVE' AND signal_source = 'screener' AND signal_date = ?",
+            [symbol, todayIso]
+          );
         } catch (err) {
           console.error(`❌ [INTRADAY SCAN] Error checking active signals for ${symbol}:`, err);
         }
 
-        if (existingActive > 0) {
-          console.log(`⏭️ [INTRADAY SCAN] Symbol ${symbol} has score ${score.toFixed(1)}% but already has an ACTIVE signal. Skipping.`);
-          continue;
+        if (existingActiveSignal) {
+          if (existingActiveSignal.signal_type !== newType) {
+            // Directional conflict: previous signal is BUY and new is SELL (or vice versa).
+            // Invalidate the conflicting previous signal.
+            try {
+              await dbRun("UPDATE unified_signals SET status = 'INVALIDATED_CONFLICT' WHERE id = ?", [existingActiveSignal.id]);
+              console.log(`⚠️ [INTRADAY SCAN] Conflicting directional signal detected for ${symbol} (Existing: ${existingActiveSignal.signal_type}, New: ${newType}). Invalidated previous signal ID ${existingActiveSignal.id}.`);
+            } catch (err) {
+              console.error(`❌ [INTRADAY SCAN] Failed to invalidate conflicting signal for ${symbol}:`, err);
+            }
+            // Proceed to generate fresh signal for new direction below
+          } else {
+            // Confirming confluence signal: Upgrade confidence (+3% boost, capped at 98%) and append reasoning
+            const baseConfidence = Math.max(existingActiveSignal.confidence_score || 0, Math.round(score));
+            const upgradedConfidence = Math.min(98, baseConfidence + 3);
+            const updatedReasoning = `${existingActiveSignal.reasoning || ''} | Additional confirmation from '${name}' (${score.toFixed(1)}% score).`.trim();
+
+            try {
+              await dbRun(
+                "UPDATE unified_signals SET confidence_score = ?, reasoning = ?, entry_price = ?, target_price = ?, stop_loss = ? WHERE id = ?",
+                [upgradedConfidence, updatedReasoning, entry, target, stopLoss, existingActiveSignal.id]
+              );
+              console.log(`🔄 [INTRADAY SCAN] UPGRADED CONFLUENCE SIGNAL FOR ${symbol}! Confidence: ${upgradedConfidence}% | Added Screener: '${name}'`);
+            } catch (err) {
+              console.error(`❌ [INTRADAY SCAN] Failed to upgrade signal for ${symbol}:`, err);
+            }
+            continue;
+          }
         }
 
         // 5. Generate and save trading signal
-        const type = sentiment === 'bearish' ? 'SELL' : 'BUY';
-        const entry = stock.ltp || 0;
-        const target = type === 'BUY' ? parseFloat((entry * 1.05).toFixed(2)) : parseFloat((entry * 0.95).toFixed(2));
-        const stopLoss = type === 'BUY' ? parseFloat((entry * 0.97).toFixed(2)) : parseFloat((entry * 1.03).toFixed(2));
         const confidence = Math.round(score);
         const reasoning = `Strong quantitative score of ${score.toFixed(1)}% and active intraday breakout spotted in Trendlyne screener '${name}'.`;
 
@@ -1480,21 +1509,17 @@ export async function runIntradayScreenerScan(): Promise<{
           const { upsertUnifiedSignal } = await import('./signals');
           await upsertUnifiedSignal('screener', {
             symbol,
-            signalDate: new Date().toISOString().split('T')[0],
-            signalType: type,
+            signalDate: todayIso,
+            signalType: newType,
             entryPrice: entry,
             targetPrice: target,
             stopLoss,
-            // NOT /100: `score` is already a percentage (the reasoning string above renders it
-            // with a % sign), and unified_signals.confidence_score is documented in db.ts as
-            // "0-100, from any source". Dividing put this writer on a 0-1 scale while the AI
-            // path wrote 0-100 into the same column -- see migration 1787070000000.
             confidenceScore: confidence,
             reasoning,
           });
 
           newSignalsGenerated++;
-          console.log(`🎯 [INTRADAY SCAN] GENERATED ${type} SIGNAL FOR ${symbol}! Score: ${score.toFixed(1)}% | Entry: ₹${entry} | Target: ₹${target} | SL: ₹${stopLoss}`);
+          console.log(`🎯 [INTRADAY SCAN] GENERATED ${newType} SIGNAL FOR ${symbol}! Score: ${score.toFixed(1)}% | Entry: ₹${entry} | Target: ₹${target} | SL: ₹${stopLoss}`);
         } catch (err) {
           console.error(`❌ [INTRADAY SCAN] Failed to save signal for ${symbol}:`, err);
         }

@@ -49,6 +49,96 @@ import ScreenerDetailsModal from './ScreenerDetailsModal';
 import { PriceFreshnessBadge } from './PriceFreshnessBadge';
 import { ConvictionPill, StockTagRow } from './StockTagRow';
 
+const MultiProviderScoreCard: React.FC<{ data: any }> = ({ data }) => {
+  if (!data) return null;
+
+  // Only genuinely 0-100 columns belong on this bar chart. Tickertape's scorecard is a
+  // 3-level ordinal (low/avg/high) -- rendering it as a percentage would invent precision
+  // the source does not have, so it gets its own label row below instead.
+  const providers = [
+    { label: 'Trendlyne Momentum', val: data.trendlyne_momentum_pct, provider: 'Trendlyne', color: 'text-sky-400' },
+    { label: 'NiftyTrader Technical', val: data.niftytrader_technical_pct, provider: 'NiftyTrader', color: 'text-amber-400' },
+    { label: 'Quant Engine Momentum', val: data.quant_momentum_pct, provider: 'Internal Quant', color: 'text-indigo-400' },
+    { label: 'Quant Composite Rank', val: data.quant_composite_pct, provider: 'Internal Quant', color: 'text-purple-400' },
+    { label: 'Unified Score', val: data.unified_score, provider: 'unified_recommendations (canonical)', color: 'text-cyan-400' },
+  ].filter((p): p is { label: string; val: number; provider: string; color: string } =>
+    typeof p.val === 'number' && Number.isFinite(p.val));
+
+  const grades = [
+    { label: 'Tickertape Performance', grade: data.tickertape_performance_grade },
+    { label: 'Tickertape Valuation', grade: data.tickertape_valuation_grade },
+  ].filter((g): g is { label: string; grade: string } => Boolean(g.grade));
+
+  if (providers.length === 0 && grades.length === 0) return null;
+
+  return (
+    <div className="v1-card p-4 space-y-3">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-800/60 pb-2.5">
+        <div className="flex items-center gap-2">
+          <BrainCircuit className="w-4 h-4 text-indigo-400" />
+          <span className="text-[10px] font-black text-slate-200 font-display uppercase tracking-widest">
+            Multi-Provider Score Reverse Engineering
+          </span>
+        </div>
+        {data.max_divergence_delta > 0 && (
+          <span className={cn("text-[9px] font-black px-2 py-0.5 rounded border uppercase tracking-wider",
+            data.max_divergence_delta >= 30 
+              ? "bg-amber-500/10 text-amber-400 border-amber-500/20" 
+              : "bg-emerald-500/10 text-emerald-400 border-emerald-500/20"
+          )}>
+            {data.max_divergence_delta >= 30 ? `High Disagreement (${data.max_divergence_delta} pts)` : 'High Provider Alignment'}
+          </span>
+        )}
+      </div>
+
+      {data.divergence_notes && data.divergence_notes.length > 0 && (
+        <div className="v1-card-accent p-2.5 border-l-2 border-amber-500/60 bg-amber-500/5 text-[10px] text-amber-300 leading-relaxed font-medium">
+          ⚠️ {data.divergence_notes.join('. ')}
+        </div>
+      )}
+
+      <div className="grid grid-cols-2 md:grid-cols-3 gap-2.5">
+        {providers.map((p) => (
+          <div key={p.label} className="v1-card-accent p-2.5 flex flex-col justify-between">
+            <div>
+              <div className="flex justify-between items-center mb-1">
+                <span className="text-[9px] font-bold text-slate-400 truncate max-w-[110px]" title={p.label}>{p.label}</span>
+                <span className={cn("text-[10px] font-black font-mono", p.color)}>{p.val.toFixed(0)}%</span>
+              </div>
+              <span className="text-[8px] font-bold text-slate-500 uppercase">{p.provider}</span>
+            </div>
+            <div className="mt-2">
+              <div className="h-1 w-full bg-slate-900 rounded-full overflow-hidden">
+                <div className={cn("h-full rounded-full transition-all duration-300", p.color.replace('text-', 'bg-'))} style={{ width: `${Math.min(100, Math.max(0, p.val))}%` }} />
+              </div>
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {grades.length > 0 && (
+        <div className="flex flex-wrap items-center gap-2 pt-1">
+          {grades.map((g) => (
+            <span key={g.label} className="text-[9px] font-bold text-slate-400">
+              {g.label}:{' '}
+              <span className={cn("font-black uppercase",
+                g.grade.toLowerCase() === 'high' ? 'text-emerald-400'
+                  : g.grade.toLowerCase() === 'low' ? 'text-rose-400'
+                  : 'text-slate-300'
+              )}>{g.grade}</span>
+            </span>
+          ))}
+          <span className="text-[8px] text-slate-600 font-medium">(3-level scorecard, not a percentile)</span>
+        </div>
+      )}
+
+      <div className="text-[8px] text-slate-600 font-medium pt-1 border-t border-slate-800/40">
+        {data.date ? `As of ${String(data.date).slice(0, 10)}` : 'No provider supplied an as-of date'}
+      </div>
+    </div>
+  );
+};
+
 const TrendlyneDVMCards: React.FC<{ dvm: any }> = ({ dvm }) => {
   if (!dvm) return null;
   const params = [
@@ -299,6 +389,11 @@ export const MCStockInfoPanel: React.FC<MCStockInfoPanelProps> = ({
   // only ever showed the per-timeframe stock_scores rank and MoneyControl's own proprietary
   // score, never what the ranker itself concluded (entry/target/stop, conviction, why).
   const { data: unifiedScore } = trpc.getUnifiedScoreForSymbol.useQuery(
+    { symbol },
+    { enabled: isVisible, staleTime: 300000 }
+  );
+
+  const { data: providerConsistency } = trpc.getStockProviderConsistency.useQuery(
     { symbol },
     { enabled: isVisible, staleTime: 300000 }
   );
@@ -3382,6 +3477,7 @@ export const MCStockInfoPanel: React.FC<MCStockInfoPanelProps> = ({
             </div>
           ) : (
             <>
+              <MultiProviderScoreCard data={providerConsistency} />
               {trendlyneOverview && (
                 <>
                   <TrendlyneDVMCards dvm={trendlyneOverview.dvm} />

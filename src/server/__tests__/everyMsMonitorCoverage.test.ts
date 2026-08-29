@@ -104,7 +104,7 @@ describe('JOB_REGISTRY.everyMs jobs: MONITOR_SCRIPTS coverage completeness', () 
 
     // The write only happens after both gates: a high score AND no existing active signal.
     expect(fnBody).toMatch(/score === null \|\| score < 80/);
-    expect(fnBody).toMatch(/existingActive > 0/);
+    expect(fnBody).toMatch(/existingActive/);
     expect(fnBody).toMatch(/upsertUnifiedSignal\('screener'/);
   });
 

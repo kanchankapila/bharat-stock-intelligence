@@ -72,6 +72,7 @@ const AgentStrategistPage      = React.lazy(() => import('./components/AgentStra
 const AgentAuditorPage         = React.lazy(() => import('./components/AgentAuditorPage').then(m => ({ default: m.AgentAuditorPage })));
 const AgentOptimizerPage       = React.lazy(() => import('./components/AgentOptimizerPage').then(m => ({ default: m.AgentOptimizerPage })));
 const TradeDecisionCockpit    = React.lazy(() => import('./components/TradeDecisionCockpit'));
+const UltimateDecisionMatrix  = React.lazy(() => import('./components/UltimateDecisionMatrix').then(m => ({ default: m.UltimateDecisionMatrix })));
 const DailySignals       = React.lazy(() => import('./components/DailySignals').then(m => ({ default: m.DailySignals })));
 const SignalIntelligence      = React.lazy(() => import('./components/SignalIntelligence'));
 const SignalReportCard        = React.lazy(() => import('./components/SignalReportCard').then(m => ({ default: m.SignalReportCard })));
@@ -399,6 +400,13 @@ export default function App() {
                 />
                 <PriceAlertsPanel userId={user?.uid} />
               </div>
+            } />
+            <Route path="/decision-matrix" element={
+              <UltimateDecisionMatrix
+                onSelectStock={handleSelectStock}
+                onToggleWatchlist={toggleWatchlist}
+                watchlist={watchlist}
+              />
             } />
             <Route path="/market-command" element={
               <MarketCommandCenter

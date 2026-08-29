@@ -3,6 +3,7 @@ import { TrendingUp, TrendingDown, AlertCircle, Target, ShieldAlert, Zap } from 
 import { trpc } from '../lib/trpc';
 import { cn } from '../lib/utils';
 import { LegacyScoreBanner } from './CanonicalSourceNote';
+import { relativeFromNow, formatISTWithLocal } from '../lib/timeFormat';
 
 interface TodaysPicksProps {
   onSelectStock?: (symbol: string) => void;
@@ -56,6 +57,14 @@ export function TodaysPicks({ onSelectStock }: TodaysPicksProps) {
 
   const picks = (data ?? []) as any[];
 
+  // AF-20260827-08: the header previously showed only a client-side `new Date()` — identical
+  // whether the underlying job ran seconds ago or has silently stopped for days. Derive an
+  // as-of stamp from the rows' own `computed_at` instead.
+  const latestComputedAt = picks.reduce<number | null>((max, p) => {
+    const t = p?.computed_at ? new Date(p.computed_at).getTime() : NaN;
+    return Number.isFinite(t) && (max === null || t > max) ? t : max;
+  }, null);
+
   return (
     <div className="p-6 space-y-4">
       <LegacyScoreBanner note="Computes its own ad-hoc blend (0.4x signal score + 0.4x win probability + 0.2x confluence), unrelated to unified_recommendations -- despite this page's name, it does not read the canonical unified_score. Check Alpha / Buy Recs for the canonical, regime-aware view." />
@@ -69,8 +78,11 @@ export function TodaysPicks({ onSelectStock }: TodaysPicksProps) {
             Multi-engine conviction — signal score + ML win probability + confluence
           </p>
         </div>
-        <span className="text-xs text-slate-500 bg-slate-800 px-3 py-1 rounded-full">
-          {picks.length} picks · {today}
+        <span
+          className="text-xs text-slate-500 bg-slate-800 px-3 py-1 rounded-full"
+          title={latestComputedAt ? formatISTWithLocal(latestComputedAt) : undefined}
+        >
+          {picks.length} picks · {latestComputedAt ? `as of ${relativeFromNow(latestComputedAt)}` : today}
         </span>
       </div>
 

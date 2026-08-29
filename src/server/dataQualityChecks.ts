@@ -2035,100 +2035,13 @@ export const DATA_QUALITY_CHECKS: DataQualityCheck[] = [
     },
   },
 
-  {
-    id: 'deploy-drift',
-    label: 'bharat-server was restarted at or after the current git HEAD commit',
-    category: 'infra',
-    // critical: a merged fix that was never deployed is worse than no fix -- it reads as
-    // resolved everywhere except in the one place that matters.
-    critical: true,
-    // scripts/check_deploy_drift.mjs does the actual git/pm2 comparison (it needs `git log`
-    // and `pm2 jlist`, neither of which belongs behind a SQL query) and stamps this row.
-    // NOTE: that script applies a 2h grace window (scripts/lib/deployDriftVerdict.mjs) before a
-    // commit newer than the running process counts as a finding -- it stamps SUCCESS while a
-    // just-landed commit is still inside it. Without that, this entry went red the instant
-    // anyone committed and stayed red until the next restart (measured 61/198 runs failed), and
-    // a `critical` check that is red by construction on every dev day stops being read.
-    // "server N commits behind HEAD" is a recurring audit finding (AF-14) -- always caught
-    // late by a human noticing, never by a check, because nothing compared the two before.
-    sql: `SELECT last_status, last_error,
-                 to_timestamp(last_run_at/1000)     AS last_run_at,
-                 to_timestamp(last_success_at/1000) AS last_success_at
-            FROM job_heartbeat
-           WHERE job_name = 'deploy-drift'`,
-    evaluate: (row, now) => {
-      if (!row) {
-        return {
-          status: 'fail',
-          detail: 'No deploy-drift heartbeat row has ever been written — the check has never run. ' +
-                  'Confirm pm2 has `deploy-drift-check` registered (`pm2 describe deploy-drift-check`).',
-        };
-      }
-      const sinceRun = daysStale(row.last_run_at, now);
-      if (sinceRun == null || sinceRun > 0.5) {
-        // Scheduled every 15 min; >12h since ANY run (success or fail) means the checker
-        // itself has stopped, which is worse than a drift finding — nothing is watching.
-        return {
-          status: 'fail',
-          detail: `deploy-drift-check has not run in ${sinceRun == null ? 'an unknown amount of time' : `${sinceRun.toFixed(1)} days`} ` +
-                  '— the checker itself appears to have stopped, not just found drift.',
-        };
-      }
-      if (row.last_status !== 'success') {
-        return {
-          status: 'fail',
-          detail: String(row.last_error ?? 'bharat-server is behind the current commit, or is not running.'),
-        };
-      }
-      return { status: 'pass', detail: 'bharat-server was last restarted at or after the current HEAD commit.' };
-    },
-  },
-
-  {
-    id: 'port-drift',
-    label: 'Every online pm2 app service actually owns the port it is supposed to be listening on',
-    category: 'infra',
-    // critical: this is the exact failure mode that took ml-api and alphaquant-api fully
-    // offline for over an hour on 2026-08-20 while pm2 reported both "online" -- an
-    // ancestry-unrelated process (leftover from a Docker Desktop crash) won the port race
-    // first, so the pm2-tracked process started clean but never actually served traffic.
-    critical: true,
-    // scripts/check_port_drift.mjs does the actual pm2/netstat/process-tree comparison
-    // (needs `pm2 jlist` and Windows process introspection, neither of which belongs
-    // behind a SQL query) and stamps this row. See that script's header for the full
-    // incident and why ancestry, not interpreter path, is the only reliable signal.
-    sql: `SELECT last_status, last_error,
-                 to_timestamp(last_run_at/1000)     AS last_run_at,
-                 to_timestamp(last_success_at/1000) AS last_success_at
-            FROM job_heartbeat
-           WHERE job_name = 'port-drift'`,
-    evaluate: (row, now) => {
-      if (!row) {
-        return {
-          status: 'fail',
-          detail: 'No port-drift heartbeat row has ever been written — the check has never run. ' +
-                  'Confirm pm2 has `port-drift-check` registered (`pm2 describe port-drift-check`).',
-        };
-      }
-      const sinceRun = daysStale(row.last_run_at, now);
-      if (sinceRun == null || sinceRun > 0.5) {
-        // Scheduled every 15 min; >12h since ANY run (success or fail) means the checker
-        // itself has stopped, which is worse than a drift finding — nothing is watching.
-        return {
-          status: 'fail',
-          detail: `port-drift-check has not run in ${sinceRun == null ? 'an unknown amount of time' : `${sinceRun.toFixed(1)} days`} ` +
-                  '— the checker itself appears to have stopped, not just found drift.',
-        };
-      }
-      if (row.last_status !== 'success') {
-        return {
-          status: 'fail',
-          detail: String(row.last_error ?? 'a service port is squatted by a process outside pm2\'s tracked tree.'),
-        };
-      }
-      return { status: 'pass', detail: 'every online pm2 app service owns its expected port.' };
-    },
-  },
+  // NOTE: 'deploy-drift' and 'port-drift' checks were removed 2026-08-29 (AF-20260829-17) —
+  // their underlying pm2 cron_restart apps (deploy-drift-check, port-drift-check) were
+  // deliberately removed from ecosystem.config.cjs on 2026-08-27 (`b27e588`, user-requested),
+  // which left both checks structurally guaranteed to fail forever ("checker itself appears to
+  // have stopped") rather than reporting a real drift finding. scripts/check_deploy_drift.mjs
+  // and scripts/check_port_drift.mjs are untouched and can still be run manually or
+  // re-registered in ecosystem.config.cjs if this monitoring is wanted again.
 
   {
     id: 'trendlyne-per-symbol-fetcher-coverage',

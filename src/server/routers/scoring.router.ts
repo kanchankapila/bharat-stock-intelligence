@@ -105,6 +105,26 @@ export const scoringRouter = router({
       return (await getQuantScore(input.symbol)) ?? null;
     }),
 
+  getProviderConsistencyMatrix: publicProcedure
+    .query(async () => {
+      const { getProviderConsistencyMatrix } = await import('../providerScoreConsistencyService');
+      return await getProviderConsistencyMatrix();
+    }),
+
+  getProviderMarketGrowthPerformance: publicProcedure
+    .input(z.object({ horizonDays: z.number().optional().default(21) }))
+    .query(async ({ input }) => {
+      const { getProviderMarketGrowthPerformance } = await import('../providerScoreConsistencyService');
+      return await getProviderMarketGrowthPerformance(input.horizonDays);
+    }),
+
+  getStockProviderConsistency: publicProcedure
+    .input(z.object({ symbol: z.string() }))
+    .query(async ({ input }) => {
+      const { getStockProviderConsistency } = await import('../providerScoreConsistencyService');
+      return await getStockProviderConsistency(input.symbol);
+    }),
+
   getConvergenceSignals: publicProcedure
     .input(z.object({ minScore: z.number().optional().default(65) }))
     .query(({ input }) => crossSourceFilter(input.minScore)),

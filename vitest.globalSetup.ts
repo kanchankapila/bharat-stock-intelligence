@@ -70,6 +70,22 @@ export async function setup() {
   let ddl = readFileSync(path.resolve(__dirname, 'db/schema.postgres.sql'), 'utf8');
   ddl = ddl.replace(/\bpublic\./g, `"${schema}".`);
   if (/\bpublic\./.test(ddl)) throw new Error('schema rewrite missed a public.-qualified reference');
+  // 2026-08-29: create_hypertable/add_compression_policy/add_retention_policy take a bare,
+  // unqualified table-name string (never "public.xxx"), so the rewrite above never touches
+  // them -- they correctly resolve via search_path into THIS throwaway schema, but the
+  // resulting TimescaleDB background job is registered GLOBALLY (no schema scoping in
+  // _timescaledb_config.bgw_job). A clean teardown (dropThrowawaySchema) drops the hypertable
+  // fine, but a run that crashes before its own teardown leaves a `DROP SCHEMA ... CASCADE`
+  // (from crash-recovery cleanup, if any exists on this side, or none at all) that does not
+  // reliably fire TimescaleDB's own hypertable-drop hook -- orphaning the job independently of
+  // the schema. Confirmed live: this + the pytest-side equivalent (src/server/conftest.py's
+  // _apply_schema) together left 16 orphaned compression/retention jobs pointing at
+  // hypertable_ids with zero chunks. A throwaway schema that lives seconds to minutes has no
+  // use for real compression/retention behavior, so skip creating these here entirely.
+  ddl = ddl.replace(
+    /^SELECT (create_hypertable|add_compression_policy|add_retention_policy)\(.*?\);\s*$|^ALTER TABLE \w+ SET \(timescaledb\..*?\);\s*$/gm,
+    '',
+  );
 
   await client.query(`CREATE SCHEMA "${schema}"`);
   // public stays on the path so extensions (pg_trgm, timescaledb) and their types resolve; the
