@@ -12,7 +12,7 @@ import { dbAll, dbRun, dbExec } from './dbAsync';
 import { CronExpressionParser } from 'cron-parser';
 import { JOB_REGISTRY } from './jobRegistry';
 import { MONITOR_SCRIPTS } from './monitorScripts';
-import { DATA_QUALITY_CHECKS } from './dataQualityChecks';
+import { DATA_QUALITY_CHECKS, tradingDaysStale } from './dataQualityChecks';
 
 // This module is the sole creator of job_heartbeat on both engines (it is not in db.ts
 // nor the generated PG schema). The CREATE runs once, memoized, and every public fn
@@ -50,6 +50,17 @@ function ensureTable(): Promise<void> {
 // for job names NOT present in JOB_REGISTRY (e.g. MONITOR_SCRIPTS-tracked jobs that
 // still call recordHeartbeat via the updateMonitorState bridge). Cron-aware lateness
 // for JOB_REGISTRY entries is computed by getLateJobs() below instead.
+//
+// 2026-08-30: this flat calendar threshold false-positived every weekend for every step of
+// ml-daily-ops (event-triggers, online-learner, breakout-classifier-train,
+// movement-predictor-train, ...) plus mover-screener-capture/mover-intraday-capture --
+// all Mon-Fri-only jobs whose T.run() sub-steps write their OWN job_heartbeat row (unlike
+// their parent 'ml-daily-ops', which IS in JOB_REGISTRY and correctly skipped here). A Friday
+// success read on Sunday morning is only ~1 day of REAL staleness once the weekend is
+// subtracted, but 26h flat already trips on Saturday morning. Same class as recurring-bugs.md's
+// "Raw daysStale() reads Monday as 3 days stale -- use tradingDaysStale()", just in this
+// fallback bucket instead of a dataQualityChecks.ts freshness check. Compared via
+// tradingDaysStale() below instead of the raw ms delta.
 const DEFAULT_STALE_MS = 26 * 60 * 60 * 1000;
 
 const UPSERT_SQL = `
@@ -100,6 +111,18 @@ export async function getStaleJobs(): Promise<Array<{ job: string; hoursStale: n
     const registryNames = new Set(JOB_REGISTRY.map(j => j.jobName));
     const monitorScriptIds = new Set(MONITOR_SCRIPTS.map(s => s.id as string));
     const dataQualityIds = new Set(DATA_QUALITY_CHECKS.map(c => c.id));
+    // 'deploy-drift' and 'port-drift': their pm2 cron_restart apps were deliberately removed
+    // from ecosystem.config.cjs 2026-08-27 (`b27e588`, user-requested) and their DATA_QUALITY_CHECKS
+    // entries were then removed 2026-08-29 (AF-20260829-17, see dataQualityChecks.ts) because a
+    // checker for a deliberately-unscheduled job is structurally guaranteed to fail forever. That
+    // fix removed them from `dataQualityIds` above too, as a side effect -- so their existing
+    // job_heartbeat rows (never deleted; scripts/check_{deploy,port}_drift.mjs are left runnable
+    // manually) fell through into this generic 26h-staleness check and started logging a fresh
+    // "STALE" warning every hour, forever, for monitoring this session intentionally turned off.
+    // Same bug class as recurring-bugs.md's "deleting a thing does not delete the checks pointing
+    // at it" -- exclude explicitly here too, matching the exclusion already applied in
+    // dataQualityChecks.ts's own read path.
+    const decommissionedJobs = new Set(['deploy-drift', 'port-drift']);
     const rows = await dbAll('SELECT job_name, last_success_at FROM job_heartbeat') as
       Array<{ job_name: string; last_success_at: number | null }>;
     const stale: Array<{ job: string; hoursStale: number | null }> = [];
@@ -113,6 +136,7 @@ export async function getStaleJobs(): Promise<Array<{ job: string; hoursStale: n
       // "has never succeeded" here forever, even after it starts passing again, duplicating
       // the check's own real freshness signal in data_quality_results/getLatestDataQualityResults().
       if (dataQualityIds.has(r.job_name)) continue;
+      if (decommissionedJobs.has(r.job_name)) continue;
       if (r.last_success_at == null) {
         // Never succeeded — no epoch to measure staleness against; "?? 0" here would
         // report "hours since 1970" (~495,000h) instead of the real signal, which is
@@ -121,7 +145,10 @@ export async function getStaleJobs(): Promise<Array<{ job: string; hoursStale: n
         continue;
       }
       if (now - r.last_success_at > DEFAULT_STALE_MS) {
-        stale.push({ job: r.job_name, hoursStale: Math.floor((now - r.last_success_at) / 3_600_000) });
+        const tradingDays = tradingDaysStale(new Date(r.last_success_at), new Date(now)) ?? 0;
+        if (tradingDays * 86_400_000 > DEFAULT_STALE_MS) {
+          stale.push({ job: r.job_name, hoursStale: Math.floor((now - r.last_success_at) / 3_600_000) });
+        }
       }
     }
     return stale;

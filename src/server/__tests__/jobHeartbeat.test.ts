@@ -20,9 +20,17 @@ vi.mock('../jobRegistry', () => ({
   ],
 }));
 vi.mock('../monitorScripts', () => ({ MONITOR_SCRIPTS: [] }));
-vi.mock('../dataQualityChecks', () => ({
-  DATA_QUALITY_CHECKS: [{ id: 'ohlcv-freshness-coverage' }],
-}));
+vi.mock('../dataQualityChecks', async () => {
+  // Real tradingDaysStale() is a pure function with no DB import-time side effects (see its
+  // module's header) -- use the actual implementation so the weekend-aware tests below exercise
+  // real behavior instead of a hand-copied reimplementation that can't disagree with the code
+  // it's meant to be checking.
+  const actual = await vi.importActual<typeof import('../dataQualityChecks')>('../dataQualityChecks');
+  return {
+    DATA_QUALITY_CHECKS: [{ id: 'ohlcv-freshness-coverage' }],
+    tradingDaysStale: actual.tradingDaysStale,
+  };
+});
 
 import { getLateJobs, getStaleJobs } from '../jobHeartbeat';
 
@@ -97,5 +105,47 @@ describe('getStaleJobs', () => {
     mockRows.push({ job_name: 'some-untracked-job', last_success_at: null, last_error: null, last_alert_sent_at: null });
     const stale = await getStaleJobs();
     expect(stale.map(s => s.job)).toContain('some-untracked-job');
+  });
+
+  // 2026-08-30: 'deploy-drift'/'port-drift' pm2 apps were deliberately removed (`b27e588`,
+  // 2026-08-27) and their DATA_QUALITY_CHECKS entries removed after them (AF-20260829-17,
+  // 2026-08-29) since a checker for a job that will never run again is structurally guaranteed
+  // to fail. That second fix silently dropped these two out of `dataQualityIds` too, so their
+  // pre-existing job_heartbeat rows (never deleted) fell through into the generic 26h-staleness
+  // branch and started logging a fresh "STALE" warning every hour for monitoring this session
+  // intentionally turned off. Negative control: this test fails against jobHeartbeat.ts as it
+  // stood right after AF-20260829-17, before the explicit `decommissionedJobs` exclusion.
+  it('does not flag deploy-drift/port-drift as stale even though nothing will ever heartbeat them again', async () => {
+    mockRows.push({ job_name: 'deploy-drift', last_success_at: Date.now() - 48 * 3_600_000, last_error: null, last_alert_sent_at: null });
+    mockRows.push({ job_name: 'port-drift', last_success_at: null, last_error: null, last_alert_sent_at: null });
+    const stale = await getStaleJobs();
+    expect(stale.map(s => s.job)).not.toContain('deploy-drift');
+    expect(stale.map(s => s.job)).not.toContain('port-drift');
+  });
+
+  // 2026-08-30: ml-daily-ops's T.run() sub-steps (event-triggers, online-learner,
+  // breakout-classifier-train, ...) write their own job_heartbeat row, are Mon-Fri-only, and
+  // are NOT in JOB_REGISTRY (only their parent 'ml-daily-ops' is) -- so they fell through into
+  // this flat 26h calendar check and logged "STALE" every single weekend, live-confirmed
+  // 2026-08-30 (a Sunday) against a Friday success. Negative control: fails against the plain
+  // `now - last_success_at > DEFAULT_STALE_MS` comparison before the tradingDaysStale() fix.
+  it('does not flag a Mon-Fri-only step as stale on a weekend read of its Friday success', async () => {
+    const now = new Date('2026-08-30T07:00:00Z'); // Sunday
+    const fridaySuccess = new Date('2026-08-28T15:09:25Z').getTime(); // Friday
+    vi.setSystemTime(now);
+    mockRows.push({ job_name: 'event-triggers', last_success_at: fridaySuccess, last_error: null, last_alert_sent_at: null });
+    const stale = await getStaleJobs();
+    vi.useRealTimers();
+    expect(stale.map(s => s.job)).not.toContain('event-triggers');
+  });
+
+  it('still flags a step whose last success predates the weekend by a genuine multi-day gap', async () => {
+    const now = new Date('2026-08-30T07:00:00Z'); // Sunday
+    const staleSuccess = new Date('2026-08-24T15:09:25Z').getTime(); // the Monday before -- a real week-long gap
+    vi.setSystemTime(now);
+    mockRows.push({ job_name: 'event-triggers', last_success_at: staleSuccess, last_error: null, last_alert_sent_at: null });
+    const stale = await getStaleJobs();
+    vi.useRealTimers();
+    expect(stale.map(s => s.job)).toContain('event-triggers');
   });
 });

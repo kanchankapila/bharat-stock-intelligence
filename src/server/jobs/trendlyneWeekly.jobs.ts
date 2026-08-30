@@ -46,12 +46,23 @@ export function catchupFetcherFor(now = new Date()): string {
   return CATCHUP_FETCHERS[slot % CATCHUP_FETCHERS.length];
 }
 
-async function processTrendlyneCatchup(_job: Job): Promise<{ success: boolean; script: string }> {
+export async function processTrendlyneCatchup(_job: Job): Promise<{ success: boolean; script: string }> {
   const script = catchupFetcherFor();
   // 10 min: a 110-request slice is ~2-4 min serially. Deliberately far below the 20-min cadence
   // so two catch-up runs can never overlap and double-spend the shared WAF allowance.
-  await runPython(script, [], 10 * 60_000)
-    .catch(e => console.warn(`[QUEUE] trendlyne-catchup ${script} failed:`, (e as Error).message));
+  //
+  // Was `.catch(warn)` with no rethrow, same shape processTrendlyneMidweek below was already
+  // fixed for (2026-08-28) but this sibling was missed: a timeout/failure here logged a warning
+  // and then unconditionally returned {success:true}, so job_heartbeat.trendlyne-catchup showed
+  // 0 failures across 861 runs even on a night this exact timeout fired twice inside one hour
+  // (found live 2026-08-30 reviewing logs/error-2026-08-30.log). Rethrow so a real failure
+  // reaches worker.on('failed') and actually marks the heartbeat.
+  try {
+    await runPython(script, [], 10 * 60_000);
+  } catch (e) {
+    console.warn(`[QUEUE] trendlyne-catchup ${script} failed:`, (e as Error).message);
+    throw e;
+  }
   return { success: true, script };
 }
 
@@ -98,8 +109,20 @@ async function processTrendlyneMidweek(_job: Job): Promise<{ success: boolean; s
   return { success: true };
 }
 
-async function processTrendlyneRatiosMonthly(_job: Job): Promise<{ success: boolean; monthlySkipped?: boolean }> {
+export async function processTrendlyneRatiosMonthly(_job: Job): Promise<{ success: boolean; monthlySkipped?: boolean }> {
   const isFirstSundayOfMonth = new Date().getUTCDate() <= 7;
+  // Every step below used to be `.catch(warn)` with no rethrow -- same shape processTrendlyneMidweek
+  // was fixed for on 2026-08-28, missed here (found live 2026-08-30): job_heartbeat.trendlyne-ratios-monthly
+  // shows 0 failures across its whole run history despite six independently-failable steps, which is
+  // exactly the "success heartbeat on a step that wrote nothing" class in recurring-bugs.md. Steps still
+  // run best-effort (one broken fetcher must not skip the rest), but errors are now collected and
+  // re-thrown once every step has had its chance, so a real failure reaches job_heartbeat.
+  const errors: string[] = [];
+  const step = (label: string, p: Promise<unknown>) =>
+    p.catch(e => {
+      console.warn(`[QUEUE] ${label} failed:`, (e as Error).message);
+      errors.push(`${label}: ${(e as Error).message}`);
+    });
 
   // WEEKLY (every Sunday) — moved out of the first-Sunday gate 2026-07-31.
   // The ratios themselves only change quarterly, but the gate meant a newly-added
@@ -112,8 +135,7 @@ async function processTrendlyneRatiosMonthly(_job: Job): Promise<{ success: bool
   // 60 min, not 30: measured 29m02s for 1,969 stocks on 2026-07-31, i.e. 97% of the
   // old 30-min budget. That is the same under-budgeted-timeout pattern that has bitten
   // this file repeatedly — treat anything under ~2x the measured runtime as too tight.
-  await runPython('financial_ratios_fetcher.py', [], 60 * 60_000)
-    .catch(e => console.warn('[QUEUE] financial_ratios_fetcher failed:', (e as Error).message));
+  await step('financial_ratios_fetcher', runPython('financial_ratios_fetcher.py', [], 60 * 60_000));
 
   // Deep per-stock corporate-action history (dividends/bonus/splits/rights), 2026-08-07
   // urls.txt open-source sourcing pass -> stock_corporate_action_history. Weekly, not daily:
@@ -124,8 +146,7 @@ async function processTrendlyneRatiosMonthly(_job: Job): Promise<{ success: bool
   // concurrency) measures ~25 min full-universe; this fetcher's section=all payload is smaller
   // per-stock than pricefeed's, so 30 min is headroom, not a guess -- re-measure and bump if a
   // real run needs more.
-  await runPython('mc_corporate_actions_fetcher.py', [], 30 * 60_000)
-    .catch(e => console.warn('[QUEUE] mc_corporate_actions_fetcher failed:', (e as Error).message));
+  await step('mc_corporate_actions_fetcher', runPython('mc_corporate_actions_fetcher.py', [], 30 * 60_000));
 
   // ohlcv_adjust.py had NO scheduled run at all before this (its own docstring only documents
   // manual `--report`/`--persist` invocation) -- so ohlcv_adjustment_factors, which
@@ -133,15 +154,13 @@ async function processTrendlyneRatiosMonthly(_job: Job): Promise<{ success: bool
   // frozen at whatever a one-off manual run last left it. Scheduled here, weekly, right after
   // the bhavcopy universe (nse_bhavcopy_fetcher.py, daily inside ml-daily-ops) and the fresh
   // MC corporate-action history right above it -- both this step's real inputs.
-  await runPython('ohlcv_adjust.py', ['--persist'], 20 * 60_000)
-    .catch(e => console.warn('[QUEUE] ohlcv_adjust --persist failed:', (e as Error).message));
+  await step('ohlcv_adjust --persist', runPython('ohlcv_adjust.py', ['--persist'], 20 * 60_000));
   // Cross-validates the heuristic factors above against stock_corporate_action_history and
   // fills genuine gaps (e.g. pre-2021 bonus/split events bhavcopy has no rows for at all) --
   // see cross_validate_with_mc_actions()'s own docstring for the confirmed/filled/disagreement
   // three-way split. Deliberately run as a SEPARATE step after --persist commits, not merged
   // into one invocation, so a failure in the cross-check never blocks the heuristic scan.
-  await runPython('ohlcv_adjust.py', ['--cross-validate', '--persist'], 10 * 60_000)
-    .catch(e => console.warn('[QUEUE] ohlcv_adjust --cross-validate failed:', (e as Error).message));
+  await step('ohlcv_adjust --cross-validate', runPython('ohlcv_adjust.py', ['--cross-validate', '--persist'], 10 * 60_000));
 
   // mc_seasonality_best_stocks refresh (added 2026-08-07 — the table's schema existed since
   // moneycontrol_fetcher.py's original table batch, but no writer was ever built; the
@@ -149,12 +168,12 @@ async function processTrendlyneRatiosMonthly(_job: Job): Promise<{ success: bool
   // silently reading an always-empty table). 24 requests (12 months x bullish/bearish),
   // measured ~48s uncontended; 10-min budget is generous headroom for MC rate-limit backoff.
   // Weekly, not monthly: cheap enough that there's no reason to wait a month for movement.
-  await runPython('moneycontrol_fetcher.py', ['--seasonality'], 10 * 60_000)
-    .catch(e => console.warn('[QUEUE] moneycontrol_fetcher --seasonality failed:', (e as Error).message));
+  await step('moneycontrol_fetcher --seasonality', runPython('moneycontrol_fetcher.py', ['--seasonality'], 10 * 60_000));
 
   if (!isFirstSundayOfMonth) {
     console.log('[QUEUE] trendlyne-ratios: weekly ratios done; monthly steps skipped '
       + '(not the first Sunday of the month)');
+    if (errors.length > 0) throw new Error(errors.join(' | '));
     return { success: true, monthlySkipped: true };
   }
 
@@ -163,11 +182,9 @@ async function processTrendlyneRatiosMonthly(_job: Job): Promise<{ success: bool
   // 60 min: 1969-stock sequential cash-conversion-cycle fetch runs ~33 min at ~1 stock/s,
   // so the old 30-min budget SIGTERM'd near the end (leaving partial data + a 'failed' mark
   // in the monthly report even though most rows were written).
-  await runPython('working_capital_fetcher.py', [], 60 * 60_000)
-    .catch(e => console.warn('[QUEUE] working_capital_fetcher failed:', (e as Error).message));
+  await step('working_capital_fetcher', runPython('working_capital_fetcher.py', [], 60 * 60_000));
   // Per-stock MF ownership flow (AMFI publishes portfolio disclosures monthly).
-  await runPython('mf_stock_holdings_fetcher.py', [], 30 * 60_000)
-    .catch(e => console.warn('[QUEUE] mf_stock_holdings_fetcher failed:', (e as Error).message));
+  await step('mf_stock_holdings_fetcher', runPython('mf_stock_holdings_fetcher.py', [], 30 * 60_000));
   // Deepens proprietary_scores_history's Altman/Ohlson/Graham/DuPont history from
   // moneycontrol_fetcher.py's daily single-snapshot scrape to ~9 years of annual bars.
   // Runs AFTER working_capital_fetcher.py above (not before) because it resolves each
@@ -175,8 +192,8 @@ async function processTrendlyneRatiosMonthly(_job: Job): Promise<{ success: bool
   // first, then the history backfill that depends on it. Monthly cadence: these are
   // annual figures that change at most once a year, so a weekly re-run (like the ratios
   // above) would be pure load for no new data.
-  await runPython('mc_stockvitals_history_fetcher.py', [], 60 * 60_000)
-    .catch(e => console.warn('[QUEUE] mc_stockvitals_history_fetcher failed:', (e as Error).message));
+  await step('mc_stockvitals_history_fetcher', runPython('mc_stockvitals_history_fetcher.py', [], 60 * 60_000));
+  if (errors.length > 0) throw new Error(errors.join(' | '));
   return { success: true };
 }
 

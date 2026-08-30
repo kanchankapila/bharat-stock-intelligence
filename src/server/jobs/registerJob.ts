@@ -62,9 +62,25 @@ export async function addJobWithCatchup(
   }
 
   try {
-    const jobs = await queue.getJobs(['completed', 'failed'], 0, 1, false);
-    const lastJob = jobs.length > 0 ? jobs[0] : null;
-    const lastRunTime = lastJob?.timestamp || null;
+    // Regression 2026-08-29: a single combined getJobs(['completed','failed'], 0, 1) call was
+    // used to find "the last run", but BullMQ interleaves statuses in that combined form in
+    // whatever order it stores them, not by recency -- live for ml-weekly-retrain, it returned a
+    // month-old FAILED job as "the last run" on a day the job had actually completed successfully
+    // ~11 hours earlier, so every bharat-server restart concluded the weekly schedule was missed
+    // and queued a redundant catch-up (three restarts in one afternoon, three catch-ups, which is
+    // what starved exit_policy.py --train of its Python-subprocess slot budget). Query each status
+    // separately (BullMQ returns newest-first within a single status) and take whichever of the
+    // two is actually more recent -- neither a stale failure nor an absent history should shadow
+    // a genuinely recent run of the other kind.
+    const [completedJobs, failedJobs] = await Promise.all([
+      queue.getJobs(['completed'], 0, 1, false),
+      queue.getJobs(['failed'], 0, 1, false),
+    ]);
+    const candidateTimes = [completedJobs[0], failedJobs[0]]
+      .filter((j): j is Job => Boolean(j))
+      .map(j => j.finishedOn ?? j.timestamp)
+      .filter((t): t is number => typeof t === 'number');
+    const lastRunTime = candidateTimes.length > 0 ? Math.max(...candidateTimes) : null;
 
     let missed = staleNextMissed;
 
