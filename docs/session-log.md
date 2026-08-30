@@ -6866,3 +6866,45 @@ corrections and both `.ts` fixes from the earlier turn need `pm2 restart bharat-
 `pm2 restart gf-*` to go live — the permission classifier blocked a direct `pm2 restart` attempt
 this session, so this needs the user (or an explicitly-approved run) to execute. `GEMINI_API_KEY`
 still unset (a secret, not independently fixable).
+
+## 2026-08-30 (cont.) — "fix all" open-items sweep: deployment blocked, 14-job fail-ratio audit clean, Polars warning root-caused as benign
+
+User: "fix all" (referring to the open-items list from the prior turn). Scoped deliberately:
+skipped `GEMINI_API_KEY` (needs a secret), skipped the concurrent session's uncommitted
+`.py`/`.claude/rules/` work (not mine to touch), skipped calendar-blocked measurement items
+(no code fix exists for "wait for more trading dates").
+
+**Deployment attempted, blocked twice by the permission classifier**: `git merge
+fix/job-heartbeat-and-log-audit-20260830` into `main`, then (after restoring the fix branch)
+`pm2 restart bharat-server` — both denied. Not worked around; left for the user/an approved run.
+Branch `fix/job-heartbeat-and-log-audit-20260830` (commit `8defc70`) remains pushed, unmerged.
+Noted along the way: `main` already has `4420cd2` (the gf-bhavcopy-daily cron-time fix) merged by
+another concurrent session — that item from the prior turn's list is resolved on the code side,
+still pending the same pm2-restart deployment step.
+
+**Audited the 14 unaudited high-fail-ratio jobs flagged in the prior turn** (`nse-bhavcopy-fetcher`,
+`stock-scoring`, `unified-ranker`, `screener-performance`, `ml-weekly-retrain`, `drift-detector`,
+`dl-feature-refresh`, `dl-trainer`, `confluence-outcomes`, `data-quality-daily`,
+`agent-strategist`, `chatbot-reingest`, `ml-ensemble-train`, `pg-backup`) — pulled each one's
+lifetime ratio AND its last 5-8 `job_run_history` rows, not just the ratio. **None are currently
+broken.** Every lifetime ratio is scar tissue from an already-diagnosed-and-fixed cause:
+`nse-bhavcopy-fetcher`'s 3 failures are the 2026-08-24..08-28 too-early-cron 404s (fixed by
+`4420cd2`); `ml-weekly-retrain`'s 2 failures are the pre-registerJob.ts-fix concurrent-retrain
+contention (2026-08-23, 2026-08-29 — the second one predates today's `registerJob.ts` fix by
+hours); `data-quality-daily`'s failure was the orphaned `deploy-drift` check (removed
+AF-20260829-17). The rest (`stock-scoring`, `dl-feature-refresh`) show one isolated transient
+`fetch failed`/BullMQ-lock-stall several runs back that self-recovered on retry — not a pattern.
+`pg-backup-nightly` isn't a `job_heartbeat` name at all; the real name is `pg-backup`
+(`dataQualityChecks.ts:2051`), healthy (31/36 lifetime, current status success). **Lesson for
+next time: a lifetime fail-ratio without checking the RECENT trend is misleading by construction
+— it never decays, so a bug fixed months ago still shows the same percentage forever.**
+
+**Polars-binary-missing warning — root-caused as benign, not fixed.** Traced to
+`polars/_utils/polars_version.py`'s own `except ImportError: warnings.warn(...); _POLARS_VERSION
+= ""` fallback — it degrades gracefully, doesn't crash. All 9 occurrences ever logged are from
+one script (`trendlyne_overview_fetcher.py`), and every one co-occurs with that script's
+already-documented 600s-timeout/Trendlyne-WAF-throttling failure — never standalone. Direct
+`import polars._plr` succeeds cleanly from both `backend-python/` and repo root. Reads as
+incidental resource contention (concurrent Python subprocess starts under
+`MAX_PYTHON_CONCURRENT=5`) during that script's already-slow runs, not an independent bug worth
+chasing further.
