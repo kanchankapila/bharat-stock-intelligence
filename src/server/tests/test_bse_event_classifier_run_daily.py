@@ -10,11 +10,23 @@ Same fix as insider_features.py: anchor to as_of.logical_trading_date() instead.
 import os
 import sqlite3
 import sys
+from datetime import datetime, timedelta
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 from pg_test_support import pg_memory_conn  # noqa: E402
 
 import bse_event_classifier as bec
+
+# run_daily()'s news lookback is `datetime.now() - 30 days` (real wall clock, not the
+# monkeypatched logical_trading_date -- see its own docstring: only the WRITE-target date
+# guard uses logical_trading_date, the READ window intentionally doesn't). A fixture with a
+# hardcoded absolute news date rots the moment 30 real days pass -- exactly this file's own
+# CI comment's documented class ("hardcoded dates vs a rolling now()-window filter"). Anchor
+# every date here to datetime.now() instead so this test can't go stale again.
+_TODAY = datetime.now()
+_GRID_DATE = (_TODAY - timedelta(days=1)).strftime('%Y-%m-%d')      # "yesterday" grid row
+_WRONG_DATE = _TODAY.strftime('%Y-%m-%d')                            # "today" -- no grid row
+_NEWS_TS = (_TODAY - timedelta(days=2)).strftime('%Y-%m-%dT10:00:00')  # inside the 30d window
 
 
 def _make_conn():
@@ -35,7 +47,7 @@ def _make_conn():
     conn.execute("INSERT INTO nse_stocks VALUES ('RELIANCE')")
     conn.execute(
         "INSERT INTO news_articles (title, summary, symbols, timestamp) VALUES (?,?,?,?)",
-        ("RELIANCE order win announced today", "", "RELIANCE", "2026-07-30T10:00:00"),
+        ("RELIANCE order win announced today", "", "RELIANCE", _NEWS_TS),
     )
     conn.commit()
     return conn
@@ -44,21 +56,21 @@ def _make_conn():
 class TestRunDailyUsesLogicalTradingDate:
     def test_writes_into_the_row_matching_logical_trading_date(self, monkeypatch):
         conn = _make_conn()
-        # The grid row that already exists is for 2026-07-31 (yesterday relative to a
-        # post-midnight run), NOT 2026-08-01 -- the exact scenario that broke silently.
+        # The grid row that already exists is for _GRID_DATE (yesterday relative to a
+        # post-midnight run), NOT _WRONG_DATE -- the exact scenario that broke silently.
         conn.execute(
             "INSERT INTO technical_signals (symbol, date, event_signal_score) VALUES (?,?,NULL)",
-            ("RELIANCE", "2026-07-31"),
+            ("RELIANCE", _GRID_DATE),
         )
         conn.commit()
 
-        monkeypatch.setattr(bec, 'logical_trading_date', lambda: '2026-07-31')
+        monkeypatch.setattr(bec, 'logical_trading_date', lambda: _GRID_DATE)
 
         bec.run_daily(conn)
 
         row = conn.execute(
             "SELECT event_signal_score, event_type_flags FROM technical_signals "
-            "WHERE symbol='RELIANCE' AND date='2026-07-31'"
+            "WHERE symbol='RELIANCE' AND date=?", (_GRID_DATE,)
         ).fetchone()
         assert row['event_signal_score'] is not None
         assert row['event_signal_score'] > 0  # ORDER_WIN is a positive event
@@ -71,18 +83,18 @@ class TestRunDailyUsesLogicalTradingDate:
         conn = _make_conn()
         conn.execute(
             "INSERT INTO technical_signals (symbol, date, event_signal_score) VALUES (?,?,NULL)",
-            ("RELIANCE", "2026-07-31"),
+            ("RELIANCE", _GRID_DATE),
         )
         conn.commit()
 
         # Simulates the pre-fix bug: "today" resolves to a day with no grid row.
-        monkeypatch.setattr(bec, 'logical_trading_date', lambda: '2026-08-01')
+        monkeypatch.setattr(bec, 'logical_trading_date', lambda: _WRONG_DATE)
 
         bec.run_daily(conn)
 
         row = conn.execute(
             "SELECT event_signal_score FROM technical_signals "
-            "WHERE symbol='RELIANCE' AND date='2026-07-31'"
+            "WHERE symbol='RELIANCE' AND date=?", (_GRID_DATE,)
         ).fetchone()
         assert row['event_signal_score'] is None, (
             "documents the silent-miss failure mode: the enrichment is dropped, not errored"

@@ -9,9 +9,26 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 import pytest
 from fastapi.testclient import TestClient
 from worker_service import app
-from conftest import pg_available
 
-pytestmark = pytest.mark.skipif(not pg_available(), reason="Postgres required")
+# NOT conftest.pg_available(): that checks reachability via PGTEST_* (pg_test_support._pg_dsn),
+# but every endpoint here goes through db_compat.connect(), which reads POSTGRES_*/POSTGRES_URL
+# instead -- a different env-var convention pointing at a different port. CI's python-tests job
+# deliberately sets only PGTEST_* (db_compat.py: "so a stray production URL can never redirect a
+# schema-creating run"), so POSTGRES_PORT is unset there and db_compat falls back to its hardcoded
+# default of 5433 -- which isn't the job's Postgres service (mapped to 5432). pg_available() said
+# "reachable" (true, on 5432) while every test here then failed with connection refused on 5433.
+# Gate on the same connector the code under test actually uses, so this skips exactly when
+# db_compat has nothing to connect to, regardless of which env-var convention supplied it.
+def _db_compat_available() -> bool:
+    try:
+        from db_compat import connect
+        connect().close()
+        return True
+    except Exception:
+        return False
+
+
+pytestmark = pytest.mark.skipif(not _db_compat_available(), reason="Postgres (via db_compat) required")
 
 client = TestClient(app)
 
