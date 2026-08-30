@@ -322,9 +322,17 @@ class TestLiveSources:
         assert payload["closePrice"] == pytest.approx(105.0)
 
 
-    def test_nt_top_gainers_parses_webapi_shape(self):
+    def test_nt_top_gainers_parses_webapi_shape(self, monkeypatch):
         # live shape (verified 2026-08-24): webapi.niftytrader.in returns
         # resultData.topGainers rows keyed symbol_name/change_percent
+        #
+        # _nt_bearer_token() hits app_settings via db_compat -- unmocked, this test's
+        # outcome silently depended on ambient DB state instead of the _FakeSession below.
+        # In CI's python-tests job (POSTGRES_* deliberately unset -- see db_compat.py) that
+        # lookup fails, fetch_niftytrader() early-returns [] before ever touching the mock,
+        # and the assertion fails with no indication the mock was never reached. Same
+        # monkeypatch pattern as _mojo_sid_map/_et_company_map above.
+        monkeypatch.setattr(msf, "_nt_bearer_token", lambda: "fake-token")
         sess = _FakeSession({"top-gainers-data": {"result": 1, "resultData": {
             "topGainers": [
                 {"symbol_name": "MARATHON", "change_percent": 19.99, "today_close": 422.8},
