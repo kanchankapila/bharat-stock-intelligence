@@ -130,56 +130,64 @@ module.exports = {
     {
       ...gfCron,
       name: 'gf-bhavcopy-daily',
-      // 16:00 IST (10:30 UTC) — NSE bhavcopy published by ~15:30 IST
-      cron_restart: '0 16 * * 1-5',
+      // 19:30 IST (14:00 UTC) — matches queues.ts's own proven margin ("bhavcopy and MTO
+      // files land ~18:00 IST, so 19:30 left most of the post-close window"). Was 16:00 IST,
+      // ~2h before NSE actually publishes; every weekday run 2026-08-24..08-28 hit a
+      // too-early 404 and got permanently misrecorded as "non-trading day" (isRunAlreadyCompleted
+      // treats status='skipped' as done forever, so nothing ever retried) — found + fixed 2026-08-30.
+      cron_restart: '30 19 * * 1-5',
       args: 'greenfield/packages/ingestion/src/nse/run-daily-bhavcopy.ts',
     },
     {
       ...gfCron,
       name: 'gf-fii-dii-daily',
-      // 17:30 IST (12:00 UTC) — NSE publishes FII/DII after market close
-      cron_restart: '30 17 * * 1-5',
+      // 21:00 IST (15:30 UTC) — shifted with the bhavcopy fix above; was 17:30 IST
+      cron_restart: '0 21 * * 1-5',
       args: 'greenfield/packages/ingestion/src/stage3/run-daily-fii-dii.ts',
     },
     {
       ...gfCron,
       name: 'gf-features-daily',
-      // 18:00 IST (12:30 UTC) — after bhavcopy + FII/DII land
-      cron_restart: '0 18 * * 1-5',
+      // 21:30 IST (16:00 UTC) — after bhavcopy + FII/DII land; was 18:00 IST
+      cron_restart: '30 21 * * 1-5',
       args: 'greenfield/packages/ingestion/src/stage4/run-compute-features.ts',
     },
     {
       ...gfCron,
       name: 'gf-stage3-dq-daily',
-      // 18:10 IST (12:40 UTC) — Task 3.7's 5 checks (corporate-actions/fundamentals/fii-dii/
+      // 21:40 IST (16:10 UTC) — Task 3.7's 5 checks (corporate-actions/fundamentals/fii-dii/
       // screener-membership freshness+coverage) had evaluateAllStage3Checks/
       // persistStage3DqResult exported but no runner anywhere — dead code from
       // an operational standpoint. run-dq-checks.ts mirrors stage4's own runner.
-      cron_restart: '10 18 * * 1-5',
+      // Was 18:10 IST — shifted with the bhavcopy fix above.
+      cron_restart: '40 21 * * 1-5',
       args: 'greenfield/packages/ingestion/src/stage3/run-dq-checks.ts',
     },
     {
       ...gfCron,
       name: 'gf-stage4-dq-daily',
-      // 18:20 IST (12:50 UTC) — same gap, one stage over: run-dq-checks.ts existed and
+      // 21:50 IST (16:20 UTC) — same gap, one stage over: run-dq-checks.ts existed and
       // called evaluateAllStage4Checks correctly, just never scheduled.
-      cron_restart: '20 18 * * 1-5',
+      // Was 18:20 IST — shifted with the bhavcopy fix above.
+      cron_restart: '50 21 * * 1-5',
       args: 'greenfield/packages/ingestion/src/stage4/run-dq-checks.ts',
     },
     {
       ...gfCron,
       name: 'gf-ranker-daily',
-      // 18:30 IST (13:00 UTC) — after features; shadow period clock ticks here
-      cron_restart: '30 18 * * 1-5',
+      // 22:00 IST (16:30 UTC) — after features; shadow period clock ticks here
+      // Was 18:30 IST — shifted with the bhavcopy fix above.
+      cron_restart: '0 22 * * 1-5',
       args: 'greenfield/packages/ingestion/src/stage5/run-ranker.ts',
     },
     {
       ...gfCron,
       name: 'gf-divergence-daily',
-      // 18:45 IST (13:15 UTC) — after ranker; compares shadow recs against legacy
+      // 22:15 IST (16:45 UTC) — after ranker; compares shadow recs against legacy
       // unified_recommendations for the same session (descriptive only, per spec).
       // Needs OLD_DATABASE_URL like the weekly transfer jobs below -- reads legacy.
-      cron_restart: '45 18 * * 1-5',
+      // Was 18:45 IST — shifted with the bhavcopy fix above.
+      cron_restart: '15 22 * * 1-5',
       args: 'greenfield/packages/ingestion/src/stage5/run-divergence-analysis.ts',
       env: {
         ...dotenvVars,
