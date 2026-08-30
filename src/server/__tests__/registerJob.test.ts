@@ -16,8 +16,13 @@ function makeQueue(opts: {
   // perpetual next-occurrence placeholder's real BullMQ state) so callers only need to set it
   // when a test specifically cares about the 'active' vs 'waiting'/'delayed' distinction.
   inFlight?: Array<{ name: string; data?: any; state?: 'active' | 'waiting' | 'delayed' }>;
+  // 2026-08-29 regression: completed/failed job history, queried as two SEPARATE per-status
+  // lists (matching the real getJobs(['completed'],...) / getJobs(['failed'],...) call shape),
+  // each { finishedOn, timestamp }.
+  completedHistory?: Array<{ finishedOn?: number; timestamp: number }>;
+  failedHistory?: Array<{ finishedOn?: number; timestamp: number }>;
 } = {}) {
-  const { staleRepeatable = true, inFlight = [] } = opts;
+  const { staleRepeatable = true, inFlight = [], completedHistory = [], failedHistory = [] } = opts;
   const add = vi.fn().mockResolvedValue({});
   const removeRepeatableByKey = vi.fn().mockResolvedValue(undefined);
   const getRepeatableJobs = vi.fn().mockResolvedValue(
@@ -25,9 +30,12 @@ function makeQueue(opts: {
   );
   // Filters by each job's real state, the way BullMQ's getJobs actually does -- a job sitting in
   // 'delayed' must NOT show up in a getJobs(['active']) call, or the active-vs-catchup distinction
-  // the 2026-08-19 fix relies on can't be exercised.
+  // the 2026-08-19 fix relies on can't be exercised. completed/failed are queried as their own
+  // single-status calls (the 2026-08-29 fix), each returning its own history array unmodified --
+  // real BullMQ already returns newest-first for a single status with asc=false.
   const getJobs = vi.fn(async (states: string[]) => {
-    if (states.includes('completed')) return []; // no finished history -> lastRunTime null
+    if (states.length === 1 && states[0] === 'completed') return completedHistory;
+    if (states.length === 1 && states[0] === 'failed') return failedHistory;
     return inFlight.filter(j => states.includes(j.state ?? 'delayed'));
   });
   return { name: 'test-queue', add, removeRepeatableByKey, getRepeatableJobs, getJobs } as any;
@@ -96,5 +104,68 @@ describe('addJobWithCatchup', () => {
     // Only the normal repeatable registration -- no duplicate catchup queued behind the live run.
     expect(queue.add).toHaveBeenCalledTimes(1);
     expect(queue.add.mock.calls[0][1]).not.toMatchObject({ isCatchup: true });
+  });
+
+  it('regression (2026-08-29): a recent completed run is not shadowed by an old failed one -- ' +
+     'live for ml-weekly-retrain, a combined getJobs([\'completed\',\'failed\'], 0, 1) call ' +
+     'returned a month-old failed job as "the last run" on a day the job had actually completed ' +
+     'successfully ~11 hours earlier, so every bharat-server restart concluded the weekly ' +
+     'schedule was missed and queued a fresh catch-up -- three restarts in one afternoon each ' +
+     'queued another one, reproducing the exact concurrent-retrain contention already documented ' +
+     'as the cause of exit_policy.py\'s historical timeouts', async () => {
+    const now = Date.now();
+    const queue = makeQueue({
+      staleRepeatable: false,
+      inFlight: [],
+      // Completed 30 minutes ago -- well within the 24h interval below.
+      completedHistory: [{ finishedOn: now - 30 * 60_000, timestamp: now - 60 * 60_000 }],
+      // Failed over a month ago -- must NOT win just because 'failed' was queried too.
+      failedHistory: [{ finishedOn: now - 40 * 24 * 60 * 60_000, timestamp: now - 40 * 24 * 60 * 60_000 }],
+    });
+    await addJobWithCatchup(queue, 'test-job', {}, {
+      repeat: { every: 24 * 60 * 60_000 }, // interval-based, not cron -- deterministic vs. wall clock
+      jobId: 'test-job-id',
+    });
+    // Only the normal repeatable registration -- the recent completion correctly satisfies
+    // the schedule, so no catchup should be queued.
+    expect(queue.add).toHaveBeenCalledTimes(1);
+    expect(queue.add.mock.calls[0][1]).not.toMatchObject({ isCatchup: true });
+  });
+
+  it('regression (2026-08-29), inverse: a recent FAILURE (with no completed history at all) ' +
+     'still correctly counts as "ran recently" -- the missed-check cares about recency of any ' +
+     'run, not success/failure, so it must not ignore failedHistory just because completedHistory ' +
+     'is empty', async () => {
+    const now = Date.now();
+    const queue = makeQueue({
+      staleRepeatable: false,
+      inFlight: [],
+      completedHistory: [], // never completed
+      failedHistory: [{ finishedOn: now - 30 * 60_000, timestamp: now - 60 * 60_000 }], // failed 30min ago
+    });
+    await addJobWithCatchup(queue, 'test-job', {}, {
+      repeat: { every: 24 * 60 * 60_000 },
+      jobId: 'test-job-id',
+    });
+    expect(queue.add).toHaveBeenCalledTimes(1);
+    expect(queue.add.mock.calls[0][1]).not.toMatchObject({ isCatchup: true });
+  });
+
+  it('regression (2026-08-29), both stale: when BOTH completed and failed history are older ' +
+     'than the schedule interval, a catchup is still correctly queued -- confirms the fix does ' +
+     'not accidentally suppress a genuinely-missed run', async () => {
+    const now = Date.now();
+    const queue = makeQueue({
+      staleRepeatable: false,
+      inFlight: [],
+      completedHistory: [{ finishedOn: now - 40 * 24 * 60 * 60_000, timestamp: now - 40 * 24 * 60 * 60_000 }],
+      failedHistory: [{ finishedOn: now - 35 * 24 * 60 * 60_000, timestamp: now - 35 * 24 * 60 * 60_000 }],
+    });
+    await addJobWithCatchup(queue, 'test-job', {}, {
+      repeat: { every: 24 * 60 * 60_000 },
+      jobId: 'test-job-id',
+    });
+    expect(queue.add).toHaveBeenCalledTimes(2);
+    expect(queue.add.mock.calls[1][1]).toMatchObject({ isCatchup: true });
   });
 });

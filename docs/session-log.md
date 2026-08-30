@@ -6689,3 +6689,180 @@ own changes, per this repo's "commit by explicit path" convention.
 
 Final state: `tsc --noEmit` clean, `npx vitest run` 1092/1092 passed, `npm run schema:drift`
 clean (224/224).
+
+## 2026-08-30 — cs_ranker/exit_policy feature-completeness fix, measured live; scoring-stack remediation Phases 1.1/1.2/4/5
+
+Root-caused why `cs_ranker.py`/`exit_policy.py` kept losing to their promotion-gate baselines:
+both `import build_features` from `ml_ensemble.py` but hand-rolled their own narrower training
+SQL — `cs_ranker` used 29/304 of `build_features()`'s raw inputs, `exit_policy` 23/304, the rest
+silently defaulted to constants via `num(col, default)`. Fixed by extracting `ml_ensemble.py`'s
+own ~275-column query into shared `full_feature_train_sql()`/`full_feature_score_sql()`
+(parameterized on anchor table/date column), rewiring both scripts to use them;
+`load_training_data()`/`load_pending_signals()` themselves untouched. Also added a missing
+`signal_excursions` freshness check (`exit_policy`'s entire label source had none).
+
+**Retrained both live to measure the real effect — the result was NOT uniformly positive:**
+- `cs_ranker`: rho 0.0875 → **0.1403**, a real improvement, still short of baseline 0.1758+0.01
+  margin. REJECTED (6th rejection / ~20 days stale).
+- `exit_policy`: MFE holdout MAE 4.998% → **5.66%**, WORSE, moving further from baseline 4.7642%.
+  REJECTED (3rd rejection / 2.7 days stale).
+Recorded as a new bug-class entry in `ml-model-bugs.md` ("Models, labels & promotion gates") —
+the fix helping one model and hurting the other in the same session is the point: "give the
+model more features" is not a one-way lever, verify per model.
+
+**Then ran the four independent Phase-1/4/5 items from the remediation plan in parallel:**
+
+- **Phase 1.1 (add `dl_score` to `unified_recommendations_history`)**: already done. Migration
+  `1787110000000` applied 2026-08-21, column 100% populated every day since 2026-08-22 (live-
+  checked). `measurement.md`'s "Open/pending" line calling this still-blocked was stale —
+  corrected in place rather than left to mislead the next session.
+- **Phase 1.2 (usage-check `timeframe_scores`)**: settled more conclusively than the plan
+  expected. `SELECT count(*) FROM timeframe_scores` → **0 rows, ever** — `computeTimeframeScores`
+  has never successfully run in production. No request-level logging exists to watch traffic
+  over a week; the 0-row check was more conclusive than that would have been anyway. Recommend
+  retiring the feature outright in Phase 2, no backtest-first needed — nothing to preserve.
+- **Phase 4 (`mean_reversion_14` as a veto, not a standalone factor)**: added a reusable
+  `veto_fn` param to `factor_backtest.py`'s `run_backtest()` (default `None`, 91/91 existing
+  factor_backtest tests still pass unchanged) and tested excluding the top-decile-overbought
+  names from `momentum_12_1`'s pool. First pass compared mismatched windows (baseline 54 periods/
+  4.5yr vs. vetoed 17/1.42yr — `mean_reversion_14`'s `feature_store` inputs only cover a recent
+  subset of history) and was corrected to a same-dates paired comparison before trusting it.
+  Honest result: 21d/25bps paired delta +0.77pp/period (t=1.75, n=17 — promising but under the
+  20-date reliability floor and regime-confounded); 5d/15bps +0.05pp/period (t=0.79, n=75 — no
+  effect). **Verdict: NOT proven, do not adopt** — re-test once `feature_store` coverage extends
+  further back.
+- **Phase 5 (vendor-onboarding-freeze rule)**: added to `data-sources.md` — before onboarding a
+  new vendor, check the existing 116/421-dead-feature backlog and state a specific hypothesis the
+  new vendor closes, rather than adding more untested, likely-correlated surface area.
+
+Three new memory files written (`cs_ranker_exit_policy_feature_completeness_2026_08_30`,
+`unified_recommendations_history_dl_score_and_timeframe_scores_audit_2026_08_30`,
+`mean_reversion_14_veto_test_2026_08_30`), `MEMORY.md` index updated, `measurement.md`'s
+`mean_reversion_14` and `dl_score` entries corrected in place.
+
+**Verification**: `py_compile` clean on all changed `.py`; `pytest` on the 5 `factor_backtest`-
+related suites (91/91 passed) and `test_exit_policy.py` (16/16 passed, pre-widening) confirming
+no regression from the `veto_fn`/query-extraction changes; `npx tsc --noEmit` clean for the
+`dataQualityChecks.ts` freshness-check addition. Not yet run this session: full `npx vitest run`/
+full pytest suite (no `.ts` behavior changed beyond the one freshness-check config entry; the
+`.py` changes are additive functions plus two rewired SELECTs already exercised by the live
+retrains above).
+
+**Still open, deliberately not chased further this session**: `exit_policy`'s ~80min retrain
+runtime (vs. `cs_ranker`'s ~3min) is undiagnosed — plausibly just `MAX_TRAINING_ROWS=150,000` vs.
+~19,298 rows, possibly a `signal_excursions`-anchored join inefficiency; Phase 2 (retire
+`timeframe_scores`) and Phase 3 (screener weight to zero in `unified_ranker.py`, needs its own
+full `factor_backtest.py`/`factor_edge.py` evidence chain per `verify-gate.mjs`) not started.
+
+## 2026-08-30 (cont.) — "is data/wiring the reason for these numbers": a real 3rd instance found and fixed, one gap ruled out
+
+User asked directly whether the weak numbers seen all session (cs_ranker/exit_policy still
+missing baseline, the underpowered veto test, generally-null factor grades) might be a data-
+sourcing/wiring problem rather than genuine no-edge. Checked rather than answered from priors:
+
+- **Grepped every `build_features` importer** (`ml_ensemble.py` itself, `python_api.py`,
+  `online_learner.py`, plus the 2 already fixed). Found a **3rd real instance**:
+  `online_learner.py`'s `load_recent_outcomes()` — feeds the DAILY SGD/PassiveAggressive
+  online-learning update (`ml-daily-ops`'s `online-learner` step, `--window 180`, not weekly) —
+  had the same ~30-column hand-rolled SELECT despite its own docstring wrongly claiming parity
+  with `ml_ensemble.load_training_data`. Worse than the first two: its sibling
+  `load_pending_signals()` already delegated correctly to the wide canonical query, so this was
+  a genuine train/serve feature-distribution skew (narrow constant-padded training vector, wide
+  real scoring vector), not just a narrower fit. Fixed with the same shared
+  `full_feature_train_sql('so','signal_date')`, deferred-import pattern preserved (this file
+  deliberately avoids pulling in lightgbm/xgboost at module load). Live-verified: 100,820 rows ×
+  318 columns, `screener_momentum_score` populated on 94,096 (was always 0 before). 12/12
+  relevant pytest cases pass (`test_online_learner_embargo.py`,
+  `test_online_learner_promotion_gate.py`, `test_online_learner_win_probability_stamp.py`). Not
+  manually re-run against production — `online_sgd.pkl` is a live incremental model that
+  `partial_fit`s in place; the fix takes effect on its regular next daily scheduled run.
+  Recorded as a 3rd confirmed instance in `ml-model-bugs.md`'s existing entry for this bug class.
+- **Checked and ruled out as the same class**: `feature_store`'s 412/~1,128-date coverage (which
+  limited the Phase 4 veto test to a recent ~1.4yr window) is NOT a stalled/broken job — its
+  monthly write cadence 2025-01 through 2026-08 is steady (~19-24 dates every month, zero gaps)
+  and internal coverage is ~100% within its dates. It's a **historical backfill gap**: the table
+  simply starts 2025-01-08, predating the 4.5yr price panel other factors are tested against.
+  Technical indicators are pure OHLCV derivations with no vendor dependency, so a backfill to
+  2021 is possible but has never been done — a real, separate, actionable gap, different fix
+  (a backfill job) from the wiring bug above.
+
+Full detail in the `cs_ranker_exit_policy_feature_completeness_2026_08_30` memory file (updated
+in place rather than a new file, since this is the same investigation continuing).
+
+## 2026-08-30 (cont.) — log/error/stale-job audit: silent-success swallow (3rd/4th instance), combined-getJobs bug, orphaned-decommission staleness class, missing `tabulate` dep
+
+User request: "review all logs for errors and warnings and also stale jobs which should have run
+but havent run since long. fix all of them" — then, in a follow-up turn, "there are some fresh
+errors and warnings since last check, fix them and rerun as well."
+
+**Fixed and negative-controlled (revert → confirm the right test failure → restore), full
+`npx tsc --noEmit` + `npx vitest run` clean at 1102 passed / 0 failed throughout:**
+
+1. **`trendlyneWeekly.jobs.ts`** — `processTrendlyneCatchup` and `processTrendlyneRatiosMonthly`
+   both swallowed every `runPython()` failure via `.catch(console.warn)` with no rethrow, so
+   `job_heartbeat.trendlyne-catchup` showed 861→895 runs / 0 failures despite two real 600000ms
+   timeouts logged the same night. `processTrendlyneMidweek` (same file) was already fixed for
+   this 2026-08-28 — these two siblings were missed. New test:
+   `trendlyneWeeklyErrorPropagation.test.ts`.
+
+2. **`registerJob.ts`'s `addJobWithCatchup`** — a combined `getJobs(['completed','failed'], 0, 1)`
+   call doesn't reliably return the more-recent job across both statuses; live for
+   `ml-weekly-retrain` this let a month-old failure shadow a completed run 11h earlier, queuing
+   3 redundant catch-ups in one afternoon (the cause of `exit_policy.py --train`'s historical
+   subprocess-slot starvation). Fixed to query each status separately and take the max
+   `finishedOn`/`timestamp`. (Completed a fix a prior session left half-done: the regression test
+   existed, the implementation didn't.)
+
+3. **`jobHeartbeat.ts`'s `getStaleJobs()`** — new finding this pass, found by re-reading
+   `pm2-out.log`'s hourly `[HEARTBEAT] STALE` lines rather than assuming the earlier pass's fixes
+   covered everything. Two related but distinct bugs in the same function:
+   - `deploy-drift`/`port-drift`: their pm2 cron_restart apps were deliberately removed
+     (`b27e588`, 2026-08-27) and their `DATA_QUALITY_CHECKS` entries removed after them
+     (AF-20260829-17, 2026-08-29, correctly reasoned there as "a checker for a job that will
+     never run again is structurally guaranteed to fail"). That second fix silently dropped
+     these two job names out of `getStaleJobs()`'s `dataQualityIds` exclusion set too (it reads
+     `DATA_QUALITY_CHECKS.map(c => c.id)`), so their pre-existing `job_heartbeat` rows fell
+     through into the generic 26h-staleness branch and started logging a fresh "STALE" warning
+     every hour for monitoring this session intentionally turned off. Textbook instance of
+     recurring-bugs.md's "deleting a thing does not delete the checks pointing at it" class,
+     one level removed (the orphan here is a monitoring EXCLUSION being deleted alongside its
+     check, not the check itself). Fixed with an explicit `decommissionedJobs` exclusion set.
+   - Separately: `event-triggers`, `online-learner`, `breakout-classifier-train`,
+     `movement-predictor-train` (all `T.run()` sub-steps of `ml-daily-ops`, Mon-Fri only,
+     `20 13 * * 1-5`) plus `mover-screener-capture`/`mover-intraday-capture`/
+     `live-screener-ml-train` are NOT in `JOB_REGISTRY` (only their parent `ml-daily-ops` is —
+     confirmed via `job_run_history`: no attempt at all since Friday 2026-08-28T15:09:25Z, correct
+     given the weekday-only cron and that 2026-08-29/30 are Sat/Sun), so they get the flat
+     `DEFAULT_STALE_MS = 26h` fallback instead of `JOB_REGISTRY`'s cron-aware `getLateJobs()`. A
+     Friday-evening success read on Sunday morning is genuinely ~1 day stale once the weekend is
+     subtracted, but 26h flat already trips Saturday morning — same class as recurring-bugs.md's
+     "Raw daysStale() reads Monday as 3 days stale — use tradingDaysStale()", just in this
+     fallback bucket rather than a `dataQualityChecks.ts` freshness check. Fixed by comparing via
+     `tradingDaysStale()` (imported from `dataQualityChecks.ts`) instead of the raw ms delta.
+     Caught a second bug while testing this: the existing test file's `vi.mock('../dataQualityChecks', …)`
+     replaced the whole module including `tradingDaysStale`, so the first version of the new test
+     "passed" only because the resulting `undefined(...)` call threw and `getStaleJobs()`'s
+     outer try/catch silently returned `[]` — not because the trading-day logic actually ran.
+     Fixed the mock to `vi.importActual` the real `tradingDaysStale` instead of hand-reimplementing
+     it, per recurring-bugs.md's "a test that reimplements the logic under test" warning applied
+     one level down (mocking a dependency, not the function under test, but the same trap).
+     New tests in `jobHeartbeat.test.ts`.
+
+4. **Missing `tabulate` dependency** — `mover-study-weekly` (`reverse_engineering_study.py --days
+   250`) failed on its very first-ever production invocation (`job_heartbeat` run_count=1,
+   fail_count=1) with `ModuleNotFoundError: No module named 'tabulate'` inside
+   `pandas.DataFrame.to_markdown()`, called twice in `write_report()`. `docs/mover_study_report.md`
+   at the repo root (the production write path — `bharat-server`'s cwd) had never been written at
+   all, consistent with this being attempt #1. Installed `tabulate==0.10.0` into
+   `backend-python/venv` and declared it in `backend-python/requirements.txt` (the file CI
+   installs from, per recurring-bugs.md's "declared where CI installs from" note — NOT the
+   repo-root `requirements.txt`). Live-verified: manually re-ran the full script
+   (`--days 250`, ~18.4 min, matching production's 30-min budget) — exit 0, `docs/mover_study_report.md`
+   written with real markdown tables, 251,675 events across 82 classes, 5971 result rows
+   persisted.
+
+**Still open, not fixed this pass (deployment, not code):** the `ecosystem.config.cjs` gf-* cron
+corrections and both `.ts` fixes from the earlier turn need `pm2 restart bharat-server` /
+`pm2 restart gf-*` to go live — the permission classifier blocked a direct `pm2 restart` attempt
+this session, so this needs the user (or an explicitly-approved run) to execute. `GEMINI_API_KEY`
+still unset (a secret, not independently fixable).
