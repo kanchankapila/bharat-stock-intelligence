@@ -7313,3 +7313,103 @@ undeployed — the server had been up since before the merge). Checked `getJobCo
 BullMQ queues first and confirmed zero `active` jobs, so the restart could not create the
 zombie-`active` state documented 2026-08-30; the in-flight `dl_trainer.py` run was confirmed to
 descend from a terminal `bash.exe`, not pm2, so the restart could not kill it either.
+
+## 2026-08-31 — DalalOS/finstack-mcp integration: scoped down to what actually clears the bar
+
+User asked to "integrate dalalos and finstack-mcp into the code to fetch data." Both are
+connected MCP servers, not URLs — a fundamentally different onboarding shape than
+`onboard-data-source`'s usual "hit a REST endpoint" phases, and the scope was narrowed twice via
+explicit user choices before any code was written, per data-sources.md's vendor-onboarding
+freeze ("state the hypothesis before writing the fetcher").
+
+**What the two servers actually are.** finstack-mcp (github.com/finstacklabs/finstack-mcp, 94
+tools) is confirmed open-source and just wraps `yfinance`/SEC EDGAR/CoinGecko — free, keyless,
+directly callable without MCP. DalalOS (~70 tools) is a scraper-backed service with its own
+DB/job/staleness-tracking layer behind the MCP wrapper.
+
+**Architecture decision (user-confirmed):** conventional fetchers hitting the underlying REST
+API directly, not an embedded MCP client in the backend — no precedent in this codebase for the
+latter, and it would need these MCP servers running as standing processes outside Claude Code.
+
+**Gap analysis against measurement.md** before onboarding anything: most of both servers'
+surface duplicates already-tested-and-killed factor families (screener/scanner signals — 0/1,563
+survive FDR; vendor BUY/SELL/target verdicts — same shape as `mojo_indigraph`'s measured no-edge;
+technical indicators; fundamentals/ownership snapshots — calendar-blocked regardless of vendor).
+Four candidates cleared the "genuinely new" bar: SEBI enforcement alerts, a credit-ratings fix,
+AMFI/market-breadth as a regime input, and a "look for backfill opportunities" ask — of which:
+
+- **`get_sebi_alerts` (finstack) — live endpoint call failed** ("SEBI website may be down") on
+  the one test call. Not pursued further this session; a real SEBI-enforcement fetcher needs its
+  own direct-scrape investigation, not a re-export of an already-flaky third-party wrapper.
+- **AMFI fund flows (finstack `amfi_fund_flows`) — a static, rounded approximation**
+  (`total_aum_inr_cr_approx: 6700000`), inferior to the existing `mf_sector_flow_fetcher.py`
+  (real AMFI portfolio-disclosure CSV parsing, per-sector MoM flow, already feeding
+  `macro_asset_prices`). Skipped as a strict downgrade.
+- **DalalOS market breadth (`get_market_breadth`) — duplicate.** `mc_advance_decline_fetcher.py`
+  / `market_breadth.py` already cover this domain; the DalalOS tool's own docstring also
+  disclaims "no bulk historical archive," so it carries no backfill value either.
+- **DalalOS shareholding (`get_shareholding`, up to 12 quarters) — duplicate, live-checked.**
+  `marketsmojo_shareholding_history` already holds 2018-08-31 quarterly ownership for 1,825
+  symbols (44 distinct dates) — deeper than DalalOS's own 3-year cap. Not a backfill opportunity.
+- **DalalOS `get_valuation_history` (P/E history, requested 1825 days) — effectively empty.**
+  Only 2 cached points returned for RELIANCE. Skipped.
+- **credit_rating_events fix — already merged (commit `1fdb927`), just not yet re-run.** The
+  issuer-prefix ISIN fallback documented in `ml-model-bugs.md` was live on `HEAD` but the table
+  still showed 279/323 (86.4%) blank symbols because the daily job hadn't fired since the fix
+  landed (07:04 IST today). Ran `credit_rating_fetcher.py` live: blank rate dropped to 207/324
+  (63.9%) — the fix works, verified against real production data. No new code needed here; this
+  stream is closed.
+- **DalalOS `get_financial_trends` (up to 12 real quarters, revenue/EPS/margin/QoQ/YoY growth)
+  — the one genuine finding.** Checked `historical_fundamentals`/`fundamentals_history` live
+  against RELIANCE: despite ~35-46 "distinct dates" since 2026-06-30, `revenue_growth`/`eps_ttm`
+  are the same 3-4 quarterly snapshots re-stamped daily — **zero real multi-quarter fundamental
+  history exists anywhere in this repo today.** `get_financial_trends` returns real quarters
+  back to 2023-09-30.
+
+**DalalOS's REST surface (a live API key was supplied mid-session) returned `HTTP 403
+{"error": "The rest API is not included in your plan"}`** when tested against
+`https://mcp.dalalos.in/v1/stocks/RELIANCE/profile` — so no conventional fetcher is buildable
+for DalalOS today regardless of architecture preference; it stays MCP-tool-only until/unless the
+plan changes. Key saved to this worktree's `.env` (gitignored) for if that changes.
+
+**Built, per user's explicit "stop at 6, build the pipeline" choice** (not the full NIFTY-50/200
+universe — a deliberate, disclosed partial scope, not a silent cap):
+- Migration `20260831143000_dalalos-financial-trends-history.sql` — new table
+  `dalalos_financial_trends_history` (PK `symbol, period_end, period_type`; single-provider
+  table, so no composite `(source, id)` key needed). Applied live against production Postgres.
+- `dalalos_financial_trends_backfill.py` — own parse function (`parse_financial_trends`) + own
+  DB-write function (`write_financial_trends_rows`), reading a seed JSON
+  (`dalalos_financial_trends_seed.json`) of trimmed MCP tool output rather than calling MCP
+  itself (Python can't call MCP tools — a Claude session has to be the bridge; the module
+  docstring explains exactly how to extend coverage: call `get_financial_trends` via MCP, append
+  a trimmed entry, re-run).
+- **Caught its own bug via the test, not by inspection:** `write_financial_trends_rows(conn,
+  rows)` accepted a `conn` parameter and then called `db_compat`'s module-level `executemany()`,
+  which opens its own production engine connection and ignores whatever `conn` was passed — the
+  exact "a function that takes a conn argument and then ignores it" class in recurring-bugs.md.
+  `test_write_roundtrip_and_upsert_idempotent` (writing into an isolated `pg_conn` test schema)
+  failed with 0 rows found where 2 were expected; fixed by routing through `conn.executemany()`
+  + `conn.commit()` instead. Production data was never corrupted by this (both paths pointed at
+  the same DB), but the function was silently untestable and would have broken for any future
+  caller passing a scoped connection.
+- Live-verified after the fix: 72 rows / 6 symbols / 2023-09-30→2026-06-30, re-run is idempotent
+  (still 72 rows, no duplication).
+- 6 unit tests (`test_dalalos_financial_trends_backfill.py`), all passing, real Postgres via
+  `pg_conn`. Not a `live_datasource` test — there is no HTTP endpoint this module calls itself
+  (documented in its own docstring); the mandatory-live-test rule doesn't apply the usual way
+  here, and the module docstring says so explicitly rather than silently omitting it.
+- **No freshness check added, deliberately** — nothing re-populates this table on a schedule
+  (MCP-only, no callable API), so a freshness check would fail forever by construction, which is
+  the exact "orphaned check reads as a permanent outage" class fixed earlier today in the
+  drift-check entry above. Documented in the migration's own `COMMENT ON TABLE`.
+- **Phase 8 ML assessment: not wired into any scoring surface.** Named candidate wiring points
+  (a `feature_store`/`ml_ensemble.py` column family for fundamental-momentum/earnings-growth-
+  persistence) but explicitly NOT touched — `verify-gate.mjs` blocks exactly this without a
+  `factor_backtest.py` run, and 6 symbols × 12 quarters is far short of a gradeable panel besides.
+
+Gates: new/changed files are `.py`/`.sql`/`.json`/`.md` only, no `.ts` touched, so `tsc`/`vitest`
+don't apply here. `python -m pytest src/server/__tests__/ src/server/tests/ -q` run in full
+against the production venv (backend-python/venv), from the worktree root as CLAUDE.md
+specifies: **2313 passed, 244 skipped, 0 failed**, exit 0 (433.8s). Nothing left uncommitted;
+awaiting the user's decision on whether/when to commit these 5 files (1 modified, 4 new) — per
+CLAUDE.md, commits happen only when asked.
