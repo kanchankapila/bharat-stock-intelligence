@@ -116,6 +116,27 @@ Currently automated (9 checks): `date.today()` write-anchor, short calendar-day 
   defect is choosing a budget with no headroom, then never revisiting it when the work grows.
 ## Monitoring blind spots
 
+- **Removing a monitor does not remove its last verdict — a snapshot table keyed on the monitor's
+  own id keeps that verdict readable forever, and every consumer reads it as current.**
+  `data_quality_results` holds one upserted row per `check_id` and never deletes;
+  `getLatestDataQualityResults()` (what the daily digest reads, deliberately, so it need not re-run
+  168 queries) returned every row with no filter against `DATA_QUALITY_CHECKS`. So `deploy-drift`
+  and `port-drift`, switched off on purpose (pm2 apps dropped 2026-08-27 `b27e588`, checks removed
+  2026-08-29 AF-20260829-17), still reported `status='fail'` stamped 2026-08-29 in the 2026-08-30
+  digest — red for monitoring nobody wanted. **The tell is arithmetic, and it was sitting in the
+  digest itself:** the snapshot table held 170 rows while the same message's data-integrity section
+  reported 168 checks. Whenever a "latest status per X" table disagrees on COUNT with the registry
+  that defines X, the difference is dead rows being reported as live.
+  **What makes this a class and not an incident:** it was the THIRD patch for one removal —
+  `dataQualityChecks.ts` and `jobHeartbeat.ts`'s `getStaleJobs()` had each already grown a bespoke
+  `['deploy-drift','port-drift']` exclusion list, each with a comment citing the "deleting a thing
+  does not delete the checks pointing at it" entry below. **Two hand-maintained exclusion lists for
+  one removal is the signal that the generic fix is missing** — a third consumer you have not
+  thought of is reading the same stale rows. Fix it at the shape, not per consumer: purge rows the
+  run did not produce (the full-recomputation rule under "Writes & keys"), AND filter the read to
+  the live registry so it is self-cleaning before the next sweep. Leave the append-only *history*
+  table alone — it records what was true then, which is a different question.
+
 - **A table-freshness check cannot see whether the FEATURE that table exists to produce ever landed.** A fresh table is not a delivered feature — count 100%-NULL columns on the last COMPLETED day, generically (via `jsonb_each` over the row), not via a hand-enumerated column list that only guards what someone remembered to add.
 - **A data-quality check's own assumption goes stale, silently, when the source logic it guards grows a new legitimate case.** When editing any date/provenance-rollforward function, grep every data-quality check reading the column it stamps — a check's SQL doesn't know when its premise changed underneath it.
 - 🤖 **A degraded-read message printed to stdout (not stderr) defeats the one hook that would surface it** — subprocess wrappers that only inspect stderr for "finished with warnings" never see a `print()`'d degradation message. Use `print(..., file=sys.stderr)` inside anything invoked via a subprocess wrapper that only checks stderr.
