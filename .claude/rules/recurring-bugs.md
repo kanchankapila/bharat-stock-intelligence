@@ -208,6 +208,32 @@ Currently automated (9 checks): `date.today()` write-anchor, short calendar-day 
   difference between scaffolding and a feature. Same family as ml-model-bugs.md's
   "evidence-shaped output" class, in bulk-refactor form.
 
+- **A test that locates a value in SOURCE TEXT by character distance from a marker breaks when
+  you add a COMMENT — and the failure names the source, not your comment.**
+  `jobRegistryGraceMinutesConsistency.test.ts` finds each job's `lockDuration` by scanning
+  forward from the first occurrence of its jobName marker, capped at `MAX_LOOKAHEAD = 4000`
+  chars. Adding a 3-line explanatory comment INSIDE `addJobWithCatchup(regimeQueue, ...)`'s opts
+  object pushed `'regime-intraday'` -> `lockDuration` from 3933 to 4189 and failed two cases with
+  "no lockDuration found near marker ... source shape may have changed" (CI 2026-08-31). Nothing
+  about the behaviour changed; only the whitespace between two tokens did.
+  **Second instance in this file** — `queues.ts` already carries an inline warning about the
+  same hazard for the `'ml-daily-ops'` marker, which is what makes this a class and not an
+  accident. It was documented, read, and walked into anyway.
+  **Two traps when fixing it, both hit here on the first attempt (which made it WORSE, 4646):**
+  (1) moving the comment ABOVE the call is the right fix — text before the marker costs zero
+  distance — but (2) if your new comment QUOTES the marker string, the comment becomes the
+  FIRST occurrence and moves the search origin earlier, which is worse than where you started.
+  The test's own docstring warns about a stray reference to the same string; that warning applies
+  to comments you add while fixing it. Refer to the marker descriptively, and assert the literal
+  still appears exactly the expected number of times.
+  **Margins here are thin by nature** (~100 chars after the fix; only 67 on main beforehand), so
+  measure rather than eyeball: compute `src.indexOf(marker)` and the nearest `lockDuration` match
+  offset directly, and compare against the pre-change baseline from `git show <ref>:<file>` — not
+  merely against the cap, or you will land back at the edge without noticing.
+  **How it reached CI:** the comment edits were followed by `tsc --noEmit` only. CLAUDE.md
+  requires vitest for ANY `.ts` change, and the green vitest run being relied on predated the
+  edits. A typecheck cannot see a source-text-parsing test. **Re-run the suite after the LAST
+  edit, not after the last edit you considered risky** — this one looked like a pure comment.
 ## Environment & deploy
 
 - **Declared ≠ installed.** A dependency in `package.json`/`requirements.txt` but not actually installed silently breaks a live job for days.
