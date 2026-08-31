@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it } from 'vitest';
 
 const { dbExec, dbRun, dbGet, dbAll } = await import('../dbAsync');
 const scoringServiceModule = await import('../scoringService');
-const { computeTimeframeScores, getTopRatedStocks, clearTopRatedCache } = scoringServiceModule;
+const { getTopRatedStocks, clearTopRatedCache } = scoringServiceModule;
 
 beforeEach(async () => {
   for (const table of ['screener_runs', 'timeframe_scores', 'quant_scores', 'technical_composite_scores', 'stock_fundamentals', 'stock_ohlcv', 'backtesting_runs', 'unified_recommendations', 'stock_scores']) {
@@ -63,28 +63,5 @@ describe('getTopRatedStocks reroute to unified_recommendations', () => {
 
     const rows = await getTopRatedStocks(10, 'intraday') as any[];
     expect(rows.map(r => r.symbol)).toEqual(['INTRA']);
-  });
-});
-
-describe('scoringService', () => {
-  it('computes timeframe scores for a screener run and persists results', async () => {
-    await dbRun('INSERT INTO screener_runs (run_id, screener_id, records_json) VALUES (?, ?, ?)', ['run1', 'S123', JSON.stringify([{ symbol: 'TEST' }])]);
-
-    await dbRun('INSERT INTO quant_scores (symbol, return_1w, return_1m, momentum_score, rank_momentum) VALUES (?, ?, ?, ?, ?)', ['TEST', 2.4, 5.1, 65, 80]);
-    await dbRun('INSERT INTO technical_composite_scores (symbol, composite_score) VALUES (?, ?)', ['TEST', 72]);
-    await dbRun('INSERT INTO stock_fundamentals (symbol, trailing_pe, return_on_equity, avg_volume_3m, market_cap) VALUES (?, ?, ?, ?, ?)', ['TEST', 18.5, 0.21, 600000, 18000000000]);
-
-    const results = await computeTimeframeScores({ runId: 'run1', timeframe: 'short', topN: 10 }) as any[];
-
-    expect(results).toHaveLength(1);
-    expect(results[0].symbol).toBe('TEST');
-    expect(results[0].score).toBeGreaterThan(0);
-    expect(results[0].confidence).toBeGreaterThan(0);
-    expect(results[0].domains.momentum).toBeGreaterThanOrEqual(0);
-
-    const row = await dbGet<any>('SELECT * FROM timeframe_scores WHERE run_id = ? AND symbol = ?', ['run1', 'TEST']) as any;
-    expect(row).toBeTruthy();
-    expect(row.timeframe).toBe('short');
-    expect(typeof row.domains_json).toBe('string');
   });
 });

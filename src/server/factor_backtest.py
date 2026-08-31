@@ -1135,7 +1135,8 @@ def run_backtest(panel: pd.DataFrame,
                  by_date: dict | None = None,
                  missing_exit_pct: float = MISSING_EXIT_PCT,
                  exit_by_date: dict | None = None,
-                 last_alive: dict | None = None) -> dict:
+                 last_alive: dict | None = None,
+                 veto_fn=None) -> dict:
     """Equal-weight top-K portfolio, rebalanced every `rebalance_days` SESSIONS.
 
     Rebalance cadence is counted in trading sessions, not calendar days, so holidays cannot
@@ -1143,6 +1144,14 @@ def run_backtest(panel: pd.DataFrame,
 
     Pass `by_date` (from index_by_date) when sweeping many factors over one panel -- the
     per-date grouping is the expensive step and is identical across factors.
+
+    `veto_fn`, if given, is called as `veto_fn(cur)` on each rebalance date's eligible slice
+    (same shape `FACTORS[factor]` receives) and must return a boolean Series aligned to `cur`'s
+    index -- True where the name should be EXCLUDED from the selection pool before ranking.
+    Added 2026-08-30 to test a veto-shaped construction (same mechanism as the validated
+    HIGH_VOL_VETO in unified_ranker.py) for the mean-reversion-14 finding, as an alternative to
+    the standalone-factor construction already tested and rejected (see measurement.md). Default
+    None preserves every existing call site's behavior exactly.
     """
     if factor not in FACTORS:
         raise KeyError(f"unknown factor {factor!r}; known: {sorted(FACTORS)}")
@@ -1171,6 +1180,9 @@ def run_backtest(panel: pd.DataFrame,
             continue
 
         scored = cur.assign(_s=score_fn(cur)).dropna(subset=['_s', 'next_open'])
+        if veto_fn is not None:
+            vetoed = veto_fn(cur).reindex(scored.index).fillna(False)
+            scored = scored.loc[~vetoed]
         if len(scored) < top_k * 2:
             continue
         scored = scored.sort_values('_s', ascending=False)

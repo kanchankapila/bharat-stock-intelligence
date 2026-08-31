@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
-// Isolates this test from the host environment's USE_POSTGRES -- see backtestRunner.test.ts
-// for the full explanation of why this must be set before any dbAsync.ts import.
+// Isolates this test from the host environment's USE_POSTGRES -- a deferred `await import`
+// (rather than a static top-level import) is required so this runs before any dbAsync.ts import.
 const { dbExec, dbRun, dbGet, dbAll } = await import('../dbAsync');
 const { syncNSEStocksToDatabase } = await import('../nseService');
 const { nseStocksData } = await import('../../data/nseStocks');
