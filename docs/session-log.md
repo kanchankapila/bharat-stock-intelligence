@@ -7254,3 +7254,62 @@ Gates: `tsc --noEmit` clean; pytest **2,341 passed / 244 skipped** (was 2,336 --
 regression tests added for defects 3 and 4), checked for a collection abort. All new tests
 negative-controlled: reverting the sort fails exactly the 2 ordering tests, disabling the warning
 fails exactly the 1 warning test, restore returns 9/9 with the file byte-identical.
+
+## 2026-08-31 — Daily digest triage: a removed check that kept failing forever
+
+Triage of the 2026-08-30 daily job-health digest's 3 "Needs attention" items. Two of the three
+turned out to be the same defect, and it was not the one the digest described.
+
+**What the digest said.** `deploy-drift-check` and `port-drift-check` "have not run in 1.0 days —
+the checker itself appears to have stopped, not just found drift."
+
+**What was actually true.** Both checkers were deliberately switched off. Their pm2 `cron_restart`
+apps were removed from `ecosystem.config.cjs` on 2026-08-27 (`b27e588`, user-requested), and their
+`DATA_QUALITY_CHECKS` entries were removed 2026-08-29 (AF-20260829-17) precisely because a checker
+for a deliberately-unscheduled job fails forever by construction. Neither app is in `pm2 jlist`
+today (17 apps, no drift entries) and the phrase "appears to have stopped" no longer exists
+anywhere in `src/` — it was deleted with the check.
+
+**The real bug, one layer down.** `persistResult()` upserts one row per `check_id` into
+`data_quality_results` and never deletes. `getLatestDataQualityResults()` — which is what the
+digest reads, deliberately, so the digest doesn't re-run 168 queries — returned every row in that
+table with no filter against `DATA_QUALITY_CHECKS`. So removing a check from the registry leaves
+its final verdict frozen and readable, and every snapshot consumer keeps reporting it as current.
+Live, before the fix: both rows still held `status='fail'` stamped `2026-08-29T12:42:27Z`, two days
+stale, and the table held **170 rows while the same digest's data-integrity section reported 168
+checks** — the gap is exactly the two dead rows.
+
+This is the **third** patch for the same removal. `dataQualityChecks.ts` (AF-17) and
+`jobHeartbeat.ts`'s `getStaleJobs()` had each already grown a bespoke `deploy-drift`/`port-drift`
+exclusion list, each with its own explanatory comment citing recurring-bugs.md's "deleting a thing
+does not delete the checks pointing at it." Nobody checked the persisted snapshot the digest
+actually reads. Two hand-maintained exclusion lists are the tell that the generic fix was missing.
+
+**Fixed both halves**, because either alone leaves one path exposed:
+- `runDataQualityChecks()` now calls `purgeOrphanResults()`, deleting snapshot rows the sweep did
+  not produce — recurring-bugs.md's "any table written as today's full recomputation needs a purge
+  of rows the run did not produce." Guarded against purging on an empty sweep.
+- `getLatestDataQualityResults()` filters to ids still in `DATA_QUALITY_CHECKS`, so a removal is
+  self-cleaning on the very next read, before any sweep runs.
+
+`data_quality_history` is deliberately left alone — it is the append-only record of what was true
+at the time, not a snapshot. The two bespoke exclusion lists are now redundant rather than wrong;
+left in place rather than removed as a drive-by.
+
+**Third digest item, deliberately not actioned.** `screener-sentiment-catalog-master-divergence`
+(222/972, 22.8%) is AF-20260829-12/20's known split-brain, and the `dq-uninformative-checks`
+warning naming it is correct but unactionable today: reconciling the two tables writes sentiment
+into a scoring input (`unified_ranker.py` reads `inferred_sentiment`), an EVIDENCE-lane change that
+needs a `factor_edge.py` reading first — and that reading is calendar-blocked until ~20 trading
+dates accumulate past 2026-08-29 (~late September). Logged as AF-20260831-02, open by design.
+
+Gates: `tsc --noEmit` clean; `npx vitest run` **1102 passed / 41 skipped**, exit 0. Both new tests
+negative-controlled **independently** — reverting the read filter fails only the read test,
+reverting the purge call fails only the sweep test, each restored → both pass. Live-verified by
+running the real `npm run dq:check` against production and re-querying `data_quality_results`.
+
+Also deployed en route: `pm2 restart bharat-server` (PR #89's merged scheduler/CV work was still
+undeployed — the server had been up since before the merge). Checked `getJobCounts` across all 58
+BullMQ queues first and confirmed zero `active` jobs, so the restart could not create the
+zombie-`active` state documented 2026-08-30; the in-flight `dl_trainer.py` run was confirmed to
+descend from a terminal `bash.exe`, not pm2, so the restart could not kill it either.
