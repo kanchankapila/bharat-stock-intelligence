@@ -39,7 +39,25 @@ avoid a second copy that can drift from the source of truth.
 to 4 decimals). This is the **fourth** independent confirmation that the screener engine is
 actively harmful (direct factor test, the `confluence_score` natural experiment, the ablation
 bisection, and this run) — both weight shrinks taken so far (2026-08-20, 2026-08-21) were
-directionally right. `dl_score` is the strongest engine at 21d (+0.098 IC), consistent with
+directionally right. **THIRD shrink, 2026-08-30: `screener`'s `REGIME_WEIGHTS` set to 0.0 in
+every regime** (was ~0.054–0.115), freed weight redistributed proportionally across the other 6
+non-pinned engines (`breakout` stays fixed at its own independent audit-derived ceiling —
+`[0.15, 0.05, 0.10, 0.05, 0.13]` across BULL/BEAR/HIGH_VOL/CRASH/SIDEWAYS — a naive proportional
+split across all 7 remaining engines would have scaled it up, which `test_regime_weights_sum_to_one`
+caught before it shipped). This is not a fresh discovery — it's acting on the bisection result
+already reproduced 4 times above, since `assembly_ablation.py`'s `rw7`/`rw7+screener` arms read
+`REGIME_WEIGHTS['screener']` directly through the same `_blend()`-style renormalization this
+change uses, making that comparison mechanically identical to this code change. All 221
+`unified_ranker`-related pytest cases pass; `unified_ranker.py` runs as a fresh subprocess per
+scheduled invocation (`runPython`, not a resident service), so no `pm2 restart` was needed — it
+took effect on the next run. **Re-verify on FRESH dates once ~15-20 accumulate under the new
+weights** (`factor_edge.py --table unified_recommendations` against the live `unified_score`
+column) — today's `assembly_ablation.py` re-run confirmed the code runs cleanly with sane,
+non-degenerate output, but its `stored_unified_score` arm still reflected pre-change history (the
+ranker hadn't run yet at re-run time), and its per-arm row populations aren't cleanly comparable
+population-for-population without modifying the script, so it does not by itself constitute the
+fresh confirmation — that has to come from live dates generated under the new weights. `dl_score`
+is the strongest engine at 21d (+0.098 IC), consistent with
 `ml_score` grading mildly negative at every horizon (corroborating the 2026-08-24 halving).
 
 `momentum_12_1` and the capitulation triple (`gap_down AND open_eq_low AND top_loser`, next-session
@@ -49,6 +67,68 @@ neither panel moved. The capitulation triple remains **the one validated edge on
 "Already tested" below. `blend_walkforward.py`'s TILT alternative still fails its pre-declared bar
 (dIC −0.0006) — **do not reweight the shipped vector again** on the strength of any single ablation.
 
+**Verified again 2026-08-30 (scheduler audit, read-back not re-run).** `factor_edge_history`'s
+latest persisted run (`run_at` 2026-08-30T00:22, written by that night's `ml-weekly-retrain`) was
+read back column-by-column against this file. **Every number in the 2026-08-29 block above
+reproduces exactly** — `win_probability` close 1/5/21d 0.0371/0.0677/0.0855 (60/56/40 dates),
+`engine_composite_scores` close 5d IC 0.0726 (51 dates), `dl_score` 21d IC 0.0981 (28 dates),
+`smart_money_score` h1 -0.000/AUC 0.502 (14 dates) and h5 -0.020/0.484 (10 dates),
+`screener_momentum_score` open-entry 0.047/0.104/0.2175 with 21d AUC 0.5516 still the only
+`USABLE`. Nothing was re-derived and nothing moved; this is a read-back confirmation, not a
+fifth independent measurement, and must not be cited as one.
+
+**What DID change on 2026-08-30, and is new here:**
+
+- **The active ensemble's CV is now 0.5305, not 0.5203.** `model_registry` id trained
+  2026-08-29 23:25 (`label=triple_barrier`, `is_active=1`) reports `cv_roc_auc` **0.5304899**,
+  superseding the 0.5203 this file has quoted since the label switch. This is the same honest
+  triple-barrier label, so the two ARE comparable — it is a small genuine improvement, not a
+  label artifact. It changes nothing about the verdict: 0.53 still sits inside the live realized
+  AUC band (0.49–0.53) that the label switch was made to match, and `unified_score` is still
+  no-edge. Quote 0.5305 as the incumbent's CV from now on; keep quoting 0.7664 only as the
+  retired `horizon`-label number it always was.
+- **⚠ The NEXT ensemble CV will NOT be comparable to 0.5305, and a LOWER number is the
+  expected, correct outcome — do not read it as a regression.** Uncommitted-at-time-of-writing
+  changes to `ml_ensemble.py` (reviewed 2026-08-30) change the CV *construction*, not the label:
+  (a) `tune_hyperparameters()`/`_fit_stack()` now use a date-grouped **purged** walk-forward
+  splitter (`purged_cv.make_purged_group_time_series_split`) instead of row-based
+  `TimeSeriesSplit(gap=embargo)`, so a single trading day can no longer be split across
+  train/validation; (b) `_base_models()` is now `(*, cv)` keyword-only with NO default and the
+  real splitter is threaded into all six `CalibratedClassifierCV` instances, closing the
+  `cv=int` -> `StratifiedKFold` leak recorded in `ml-model-bugs.md`; (c)
+  `drop_untrainable_features()` removes constant/degenerate columns before training, so
+  `feature_count` will fall below the 421 every ensemble row has carried to date.
+  All three REMOVE leakage or noise, so the honest CV should come out below 0.5305.
+  **This is the same hazard as the 0.7664 -> 0.5203 label switch, one layer over**: the metric
+  moved because the measurement changed, not because the model got worse.
+  The promotion gate does NOT deadlock on it — verified live 2026-08-30: `live_edge_verdict()`
+  reads the incumbent's `technical_signals.win_probability` best horizon as
+  rank_ic=0.0855 / hit_auc=0.5179 over 60 dates, which passes IC>=0.03 but FAILS AUC>=0.55, so
+  `live_edge_is_unproven()` returns True, `baseline_untrustworthy` is set, and the CV-margin bar
+  is skipped. Record the CV construction alongside the label on the registry row if this changes
+  again; `baseline['label'] != new_label` keys on the LABEL only and would not have caught this.
+- **`online_sgd` (the daily incremental learner) reports val_AUC 0.5017** — live-measured
+  2026-08-30 over 266,396 outcomes in a 180-day window. Chance, as expected for this engine.
+- **Two promotion gates rejected again, both reproducing `ml-model-bugs.md`'s 2026-08-30
+  feature-completeness finding rather than contradicting it**: `cs_ranker` spearman_rho 0.1403
+  vs baseline 0.1758 (REJECTED — up from 0.0875 pre-fix, still short), `exit_policy` held-out
+  MFE MAE 5.664 vs baseline 4.7642 (REJECTED — and WORSE than its own 4.998 pre-fix run). The
+  "more features is not a one-way lever" corollary in that file is now two runs deep, not one.
+- **11 `technical_signals.ext_*` vendor columns are newly graded and ALL `LOW-DATA` at 4 dates**
+  (`ext_fii_holding_pct`, `ext_dii_holding_pct`, `ext_fii_qoq_chg`, `ext_dii_qoq_chg`,
+  `ext_mojo_financial_pts`, `ext_mojo_quality_rank`, `ext_mojo_valuation_rank`,
+  `ext_t80_financial_pts`, `ext_t80_quality_rank`, `ext_t80_valuation_rank`,
+  `ext_t80_tech_score`). Their h=5 ICs swing from -0.24 to +0.39 on FOUR dates, which is noise,
+  not signal — do not read the positive ones as promising. These are exactly the untested
+  correlated vendor surface `data-sources.md`'s vendor-onboarding freeze was written about;
+  re-check once ~20 dates exist (~late September 2026) and treat a continued no-edge as a
+  removal candidate.
+- **No BiLSTM has trained since 2026-08-25** (`model_registry` last BiLSTM row: v4, 2026-08-25
+  00:27, cv 0.6493, rejected by the saturation guard; champion still v3). This is NOT a new
+  modelling result — it is a scheduler defect found the same day: `dl-retrain-weekly`'s Saturday
+  2026-08-29 11:30 IST run was left marked `active` in BullMQ with no surviving worker process
+  (killed by a pm2 restart), so the slot neither ran nor reported failure. Re-run 2026-08-30 as
+  a make-up. Do not interpret the flat DL champion as evidence about the model.
 ## Accuracy comes from realized returns, never a proxy
 
 - **Accuracy and win-rate must always be computed from actual realized returns vs. the actual system-generated signal — never from a proxy metric** (a job's "success" status, a promotion gate's CV/AUC number, a model's self-reported test score). Join the signal table (`unified_recommendations`/`unified_signals`/`intraday_recommendations`) against what the instrument actually did afterward (`stock_ohlcv`/`intraday_ohlcv`, or the already-graded `signal_outcomes`/`intraday_recommendation_outcomes` tables) and compute win rate as `WIN / (WIN + LOSS)` — decisive outcomes only, NEUTRAL/PENDING excluded — plus average realized return, never a single blended percentage. **Before trusting or comparing any win-rate number, check its `label_definition`** — `signal_outcomes.label_definition` has two structurally different conventions (`terminal_pct2`: strict fixed ±2% terminal barrier; `path_barrier`: path-based max-favorable-excursion) that are NOT comparable — the same calendar window read 88–91% win rate under one and 41–44% under the other, almost entirely the label, not skill. See [[topgainers_reverse_engineering_practice]].
@@ -74,7 +154,7 @@ Any cross-sectional forward-return measurement on this data:
 
 ## Standing architecture facts (still true, verify before contradicting)
 
-- **The ML training label is `triple_barrier`** (`signal_excursions.tb_label`, a cost-aware López de Prado barrier), not the old `path_barrier`-derived `horizon` label that inflated CV to 0.7664 by measuring the label's easiness rather than skill — the honest label gives CV 0.5203, matching live realized AUC (0.49–0.53). **Promotion now gates on `factor_edge_history`, not just CV**: `model_promotion.py`'s `live_edge_verdict()`/`live_edge_is_unproven()` skip the CV-margin bar entirely when the label changed, and treat the incumbent's own realized `factor_edge_history` reading as the bar when it fails `|rank_IC|>=0.03 AND hit_AUC>=0.55`. A "never graded" column is NOT read as "no edge" (that would auto-override on zero evidence), and a reading under `MIN_DATES_RELIABLE=20` cannot override either.
+- **The ML training label is `triple_barrier`** (`signal_excursions.tb_label`, a cost-aware López de Prado barrier), not the old `path_barrier`-derived `horizon` label that inflated CV to 0.7664 by measuring the label's easiness rather than skill — the honest label gives CV 0.5203 at the switch, and the incumbent trained 2026-08-29 now reports 0.5305 — both matching live realized AUC (0.49–0.53). **Promotion now gates on `factor_edge_history`, not just CV**: `model_promotion.py`'s `live_edge_verdict()`/`live_edge_is_unproven()` skip the CV-margin bar entirely when the label changed, and treat the incumbent's own realized `factor_edge_history` reading as the bar when it fails `|rank_IC|>=0.03 AND hit_AUC>=0.55`. A "never graded" column is NOT read as "no edge" (that would auto-override on zero evidence), and a reading under `MIN_DATES_RELIABLE=20` cannot override either.
 - **`win_probability` has a real, small IC on a terminal-return grading, but it keeps decaying toward null as its panel grows, and AUC never clears 0.55.** Live-verified 2026-08-29 against `factor_edge_history`'s latest (2026-08-27) run: IC/AUC now read **+0.020/0.500 (1d, 57 dates), +0.065/0.510 (5d, 53 dates), +0.084/0.523 (21d, 37 dates)** — down from the 0.044→0.077→0.103 figures this row previously quoted (themselves already a decay from an earlier 21d IC of 0.103→0.091 recorded in `measurement-history.md`). Graded against its own real training label instead (`signal_outcomes`, `path_barrier`, decisive WIN/LOSS) it DOES clear `USABLE` at 1d/5d (AUC 0.617/0.600), but that is a same-shape base-rate artifact of the barrier construction, not proof of tradeable skill, and the cost/turnover-aware `factor_backtest.py` run still fails (5d/top-50/15bps: 7 periods, net +1.52%/period, **t=1.54, not significant**, 83.4% one-way turnover, 12.61%/yr cost drag). Two independent disqualifiers (weak, decaying AUC on the honest target, real cost drag) — do not trade this as scored today. Re-test once ~12 months of history exist.
 - **`ml_breakout_probability`** (a sub-engine feeding `confluence_ml_engine.py`, native label = `signal_outcomes` WIN/LOSS h=7) clears `USABLE` outright — IC +0.082, AUC 0.553, n=44 dates. The strongest previously-ungraded result measured on this platform; has zero downstream readers today (advisory only), and has not yet had the cost-aware `factor_backtest.py` follow-up `win_probability` got.
 - **`breakout_probability`** (native label = fwd-10d max return ≥ +6%) reads IC +0.153/AUC 0.583 at 19 dates — one date short of `MIN_DATES_RELIABLE`, promising, do not downweight in the blend on an older superseded wrong-horizon reading.
@@ -89,12 +169,12 @@ Any cross-sectional forward-return measurement on this data:
 
 ## Open / pending — re-check or act on these, don't re-derive them from scratch
 
-- **`unified_recommendations_history` doesn't store `dl_score`**, which blocks any clean reconstruction of the live 8-engine blend from that table (the only available reconstruction omits `dl`, and its implied multiplier vs. `unified_score` goes above 1.0 — arithmetically impossible for the real veto/gate stack, proof the reconstruction is incomplete). Add the column before attempting another blend-decomposition pass.
+- **CORRECTED 2026-08-30 — this row was stale.** `unified_recommendations_history` DOES store `dl_score`: migration `1787110000000` added it and was applied to production 2026-08-21, and `unified_ranker.py`'s insert already writes it (verified live 2026-08-30: 100% non-null coverage on every day 2026-08-22 through 2026-08-27, the most recent populated range). Rows before 2026-08-21 are still NULL by design (never captured, deliberately not backfilled — see the migration's own comment). The blend-decomposition pass this row used to block is now unblocked for any window starting 2026-08-22 or later — attempt it against that window rather than re-deriving that the column is missing.
 - **`smart_money_score`** — at 14 dates as of 2026-08-29 (up from 1), still under the ~15-20 date floor (see "Already tested" table below for the live reading — trending toward zero/negative). `ENGINE_EDGE_SHRINK` will apply automatically once it clears LOW-DATA with a negative verdict (gated behind `engine_edge_adjustment_enabled`, off by default).
 - **`technical`'s next-session-entry directional call** (t=+2.13 at 1d on 12 dates, under this file's own 20-date bar) — re-run once ~20+ dates accumulate under the corrected next-session-entry convention (~2026-09).
 - **`earnings_beat_yoy`/`earnings_beat_qoq`, `screener_breadth`, the 3 named results screeners** — all underpowered (3–27 periods), re-test only once ~12+ months of history exists in their source tables.
 - **`cs_ranker`'s active model has a declining self-reported CV-AUC across 3 consecutive retrains** (0.176 active vs 0.161/0.161/0.133 rejected) — flagged, not confirmed as a bug (self-reported CV-AUC on a thin date-split holdout is exactly the kind of number this file warns not to trust blindly). Worth a dedicated look.
-- **`mean_reversion_14`** (sign-flipped composite of the 14 Bonferroni-significant `feature_store` factors) failed its own first honest test (t=+0.64, 2/6 years positive) — the more promising untried next step: test EXCLUDING top-decile-overbought names from the existing long-only pool (a veto, same shape as the validated `HIGH_VOL_VETO`) rather than trying to buy the opposite tail outright. Not attempted.
+- **`mean_reversion_14` veto construction — CLOSED 2026-08-30, definitively not significant. Moved from "Open" to the "Already tested" table below; do not re-open without a genuinely new angle.** The `feature_store` coverage gap that made the first pass ambiguous (412/~1,128 dates, a recent-only subset) was itself backfilled the same day (2,428 symbols, 2,658,313 rows, full 2021-2026 trading-calendar coverage) specifically to settle this question — see the "Already tested" row for the final, full-history, well-powered result.
 - **`win_probability` sub-population split** (grid-scored vs. pattern-fired via `signals_json IS NOT NULL`) has never been explicitly re-graded to confirm the two sub-populations behave the same way — flagged, not measured.
 - **`mc_fno_eligible`/`mc_del_acceleration`** are now cheaply derivable (`mc_pricefeed_daily.fno_lot_size > 0`; `del_pct_3d`/`del_pct_20d`) but deliberately not built — the risk was a formula that might silently disagree with the fetcher's own definition. Revisit if these features are ever prioritized.
 - **`engine_composite_scores`'s producer runs weekly** (inside `processMlWeeklyRetrain`) and that job **failed on 2026-08-24** (`job_heartbeat.last_error`: `2 steps failed: exit-policy-train,backtest-optimizer`, wrapped in a swallowed `.catch()` so its own failure never reddens the job) — the weekly job's reliability is the open item, not the composite score itself.
@@ -132,7 +212,8 @@ Each of these was measured on the 5-year price panel with the spec above. Re-tes
 | **`win_probability`** (factor-backtest construction) | 21d fails outright (calendar); 5d/top-50/15bps: 7 periods, net excess +1.52%/period, **t=+1.54, NOT significant**, 83.4% turnover, 12.61%/yr cost drag | **NOT significant** — see "Standing architecture facts" above for the full picture (real IC, AUC ceiling, cost drag: three independent disqualifiers) |
 | **`breakout_classifier.py` / `movement_predictor.py` / `cs_ranker.py` / `confluence_ml_engine.py`** | Graded against each model's own NATIVE label (not the generic 1/5/21d grid, which was the first-pass mistake): `breakout_probability` IC +0.153/AUC 0.583 (19 dates, LOW-DATA); `ml_breakout_probability` IC +0.082/AUC 0.553 (44 dates) — **clears USABLE**; `movement_probability` had a real leak bug, now fixed, genuinely ungraded again; `cs_score` no edge (correctly configured on the first pass) | See "Standing architecture facts" above. `ml_breakout_probability` is next in line for a cost-aware `factor_backtest.py` pass. |
 | **`screener_combo_finder.py --tier1`'s "capitulation" triple** (`gap_down AND open_eq_low AND top_loser`, next-session open→close, single day) | 430→658 signal-rows through 2026-08-20, spread +0.5064%/day net of 0.15%, **t=+3.48, p=0.0005**, clears the 41-combination Bonferroni bar, robust to winsorization and to dropping the top 3 most extreme days. 5/6 years positive (2026 YTD is the exception, thin partial year, t=−0.49 not significant). Reproduced bit-identical 2026-08-27. | **The one validated edge on this platform — but capacity-constrained, not scale-tradeable.** Median deployable capital ≈₹0.46cr/signal-day at a conservative 2%-of-ADTV convention (p90 ₹3.54cr); signals cluster at ~1/day (median), max 28 on one day. Real at small/personal/prop scale; do not build production infrastructure assuming it scales to meaningful AUM. |
-| **`mean_reversion_14`** (sign-flipped composite of the 14 negative feature_store factors) | 278 periods/5.52yr: net excess +0.044%/period, **t=+0.64, NOT significant**, 2/6 years positive | Confirms this file's "combining/reweighting reduces performance" prior applies to this hypothesis too — see "Open / pending" above for the untried alternative (a veto, not a long factor) |
+| **`mean_reversion_14`** (sign-flipped composite of the 14 negative feature_store factors, standalone long factor) | 278 periods/5.52yr: net excess +0.044%/period, **t=+0.64, NOT significant**, 2/6 years positive | Confirms this file's "combining/reweighting reduces performance" prior applies to this hypothesis too |
+| **`mean_reversion_14`** (as a VETO on `momentum_12_1`'s pool instead — 2026-08-30, re-run same day against the full backfilled 2021-2026 `feature_store` history) | Same-dates paired, full history: 21d +0.27pp/period, paired t=1.50, n=54 (well-powered, down from a truncated-window t=1.75/n=17); 5d -0.01pp/period, t=-0.24, n=230 (no effect) | **NOT significant, CLOSED** — the earlier truncated-window "promising" reading was a regime-confounded artifact, not a real effect; do not re-test again |
 
 ## Not testable — do not spend time here without a genuinely new angle
 

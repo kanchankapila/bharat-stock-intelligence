@@ -6908,3 +6908,349 @@ already-documented 600s-timeout/Trendlyne-WAF-throttling failure — never stand
 incidental resource contention (concurrent Python subprocess starts under
 `MAX_PYTHON_CONCURRENT=5`) during that script's already-slow runs, not an independent bug worth
 chasing further.
+
+## 2026-08-30 (cont.) — feature_store historical backfill (2021-2026) run live; closes the mean_reversion_14 veto question definitively
+
+Direct continuation of the "3rd instance found and fixed" entry above. User asked to actually run
+the `feature_store` backfill that entry flagged as a follow-up.
+
+**Backfill executed successfully.** Used the existing `feature_engineering.py --lookback N` CLI
+(`run_full_pipeline` already supports arbitrary lookback + full historical write — no new code
+needed). Validated on 3 then 60 symbols first (writes are `ON CONFLICT DO UPDATE`, safe to
+interrupt/re-run) before launching the full 2,428-symbol run with `--lookback 2100`. **Final
+result: 2,428/2,428 symbols, 2,658,313 total rows written, ~2 hours wall time.** `feature_store`
+now covers 2021-2026 with ~248-249 dates/year (matching the trading calendar) and 100% `stoch_d`
+coverage within every year — up from 412 dates starting only 2025-01-08.
+
+**A real operational mistake happened mid-run, documented as a new entry in `recurring-bugs.md`.**
+While diagnosing an apparent stall, a `pg_stat_activity` row was pattern-matched to a known
+"orphaned idle-in-transaction" bug class by query text alone, without checking whether its
+`query_start` actually indicated a stale orphan vs. a live job's normal between-commit state. The
+connection killed (`pg_terminate_backend`) turned out to be the backfill's OWN connection, crashing
+it (`sqlalchemy.exc.PendingRollbackError`). No data lost (upserts), but the run restarted from
+scratch. Correctly avoided repeating the mistake ~15 minutes later: when the backfill was found to
+be (harmlessly) blocking TimescaleDB's own background compression policy job, `pg_blocking_pids()`
+was checked first, confirmed it was normal write-vs-maintenance-job contention, and nothing was
+touched.
+
+**This directly and definitively closed the Phase 4 `mean_reversion_14` veto question** (see the
+"is data/wiring the reason for these numbers" entry above). Re-ran the identical veto test against
+the now-complete history: both legs trade the IDENTICAL dates as `momentum_12_1`'s own baseline for
+the first time (no window mismatch at all). Result: **21d/25bps paired delta +0.27pp/period,
+paired t=1.50, n=54** (well-powered now, still NOT significant — down from the truncated-window's
+misleading t=1.75/n=17); **5d/15bps paired delta -0.01pp/period, t=-0.24, n=230** (no effect,
+unchanged). **The earlier "promising" 21d reading was itself a regime-confounded artifact of the
+truncated recent-only window, not a real effect that more data would strengthen.** Closed
+definitively in `measurement.md` (moved from "Open/pending" to "Already tested") — do not re-test
+this hypothesis again without a genuinely new angle.
+
+`measurement.md`'s stale `unified_recommendations_history.dl_score` "still blocked" note was also
+corrected in place this session (verified live: the column has existed and been 100% populated
+since 2026-08-21 — an earlier session's fix that was never reflected back into the rule file).
+
+**Memory**: `cs_ranker_exit_policy_feature_completeness_2026_08_30.md` and
+`mean_reversion_14_veto_test_2026_08_30.md` updated in place with final results.
+`recurring-bugs.md` gained a new entry on verifying `query_start` before terminating any backend
+PID. `MEMORY.md` compacted 20.6KB→17.5KB per the size-hook prompt (trimmed verbose entries, no
+content dropped — only moved detail stayed exactly where it already was, in the topic files).
+
+## 2026-08-30 (cont.) — Phase 2: retired the confirmed-dead `timeframe_scores` cluster
+
+User asked to proceed with the remediation plan's Phase 2 (retire `timeframe_scores`) and Phase 3
+(screener weight to zero). Called `advisor()` before starting — it flagged that Phase 2's scope
+had grown mid-orientation (found `backtestRunner.ts`'s `triggerBacktest` also depends on
+`computeTimeframeScores`, not just the two procedures found earlier) and that Phase 3 needed a
+fresh backtest of the SPECIFIC zero-weight change before shipping, not just the existing citations
+of prior shrinks being "directionally right." Followed both points.
+
+**Confirmed the removal scope was safe before touching anything**: `backtesting_runs` (what
+`triggerBacktest`/`runBacktest` would write to) has 1,180 real rows, but **zero** with the `bt:`
+prefix `runBacktest()` uses — every real row comes from two unrelated writers
+(`backtest_live_screener.py`, `backtester.py`). This confirms the whole
+`computeTimeframeScores`/`getTimeframeRanking`/`triggerBacktest`/`backtestRunner.ts` cluster has
+never fired in production, not just `timeframe_scores` itself. Also checked `ScreenerIntelligencePage.tsx`
+(436 lines) before deleting anything — it does much more than this dead feature (screener detail,
+category stats, a leaderboard), so only the specific dead sub-block (a "Compute rankings" button +
+`ScreenerRankingPanel`) was removed, not the whole page/route.
+
+**Removed**: `computeTimeframeScores`/`getTimeframeRanking`/`triggerBacktest` procedures from
+`screeners.router.ts`; `computeTimeframeScores()` from `scoringService.ts` (its removed comment
+documented a real historical schema bug — a `computed_at`/`updated_at` mismatch inherited from the
+deleted `db.ts` — that was already fixed in the code but never actually exercised, since nothing
+ever called it); `backtestRunner.ts` and its test outright; the dead sub-block + `ScreenerRankingPanel`
+import from `ScreenerIntelligencePage.tsx`; `ScreenerRankingPanel.tsx` outright. Fixed two other
+test files' comments that pointed at the now-deleted `backtestRunner.test.ts` as documentation of
+an isolation pattern (`recurring-bugs.md`'s "deleting a thing doesn't delete what points to it"
+class, caught before it could go stale). Left the `timeframe_scores` DB table itself in place —
+dropping a table is a separate, more invasive decision than removing dead application code.
+
+**Verified live**: `npx tsc --noEmit` clean; targeted suites (scoringService, commandCenter, the
+two nseSectorUpsertGuard/nseStockSearchCaseInsensitive files whose comments were touched) 21/21
+passed; full `npx vitest run` **1,100 passed / 41 skipped, zero failures** (126 files).
+
+**Phase 3 (screener weight to zero) NOT done this session** — per advisor's flag, going from
+"further shrinking is directionally justified" (2 prior shrinks, 4 independent harm confirmations)
+to "zero, unverified, this turn" is a bigger step than today's evidence licenses, and this
+session's own standard all day was measure-then-ship, not ship-then-hope. Left for a dedicated
+pass that budgets time for an actual `factor_backtest.py`/`factor_edge.py` run against the exact
+proposed change before it's committed.
+
+---
+
+## 2026-08-30 (Sunday) - Full scheduler audit: IST correctness, weekend-on-Saturday, weekday 23:30 budget
+
+Asked for a complete scheduler review: correct jobs at correct IST times for the Indian market,
+weekday parallelism so the chain finishes before 23:30 IST, all weekend work completing on
+Saturday, any incomplete weekend job re-run today as an exception (judged from DATA, not the
+queue), and the latest AUC/score numbers written into the critical `.md` files.
+
+### What the audit actually found (and what it corrected in my own framing)
+
+**The headline finding is that the weekday chain already meets the 23:30 IST target, and the
+overruns were NOT a parallelism problem.** Commit `37c0fec` (2026-08-27) had already re-timed the
+post-market chain and moved the weekly tier Sunday->Saturday. Reconstructing the last four
+weekday evenings from `job_run_history` (aggregated per job per IST day, not raw rows - the
+per-symbol fetchers emit hundreds of heartbeats and drown the signal):
+
+| Weekday | Chain tail (IST) | Verdict |
+|---|---|---|
+| Wed 2026-08-26 | ml-daily-ops 04:46, dl-engine-infer 05:01 | massive overrun |
+| Thu 2026-08-27 | unified-ranker 03:22, data-quality 03:36 | overrun |
+| Fri 2026-08-28 | ml-daily-ops 20:39, unified-ranker 22:31, digests 22:40/22:50, DQ 23:00 | **clean, inside 23:30** |
+
+Friday is the first full weekday after `37c0fec` landed. The Wed/Thu overruns trace to
+**duplicate catch-up runs from server restart storms**, not to insufficient concurrency:
+`stock-scoring` ran 9x on 2026-08-26, `unified-ranker` 10x on 2026-08-25, `screener-performance`
+and `dl-engine-infer` 4-6x on most days. 2026-08-25 is the PM2 `EADDRINUSE` crash-loop day
+(233 restarts, already fixed), and each restart re-enters `initQueues()` and can queue a
+catch-up per queue. So the correct lever was duplicate suppression (already largely fixed) plus
+headroom - not parallelising the nightly chain further.
+
+**Deliberately NOT done, with reasons.** I did not parallelise `ml-daily-ops`'s remaining serial
+steps. Two of its blocks are already `Promise.allSettled` groups, and most of what is left
+serial writes `technical_signals` - the code says so explicitly ("Kept serial: it writes
+technical_signals, which several later steps also update -- avoids row-lock churn"). Running
+those concurrently trades a measured-adequate 109-minute runtime with ~2h of slack before
+`unified-ranker` for a real deadlock risk in the nightly chain. Reuse `quantPhase()`/`quantStep()`
+(the existing helper, correct `allSettled`-then-rethrow semantics) if this is ever revisited, and
+group strictly by disjoint target table.
+
+### Timezone: verified correct, not assumed
+
+`addJobWithCatchup()` injects `tz: 'Etc/UTC'` whenever a repeat pattern omits one, and all 12
+tz-less patterns in `queues.ts` route through it - so every BullMQ cron is UTC, uniformly. The
+pm2 `cron_restart` strings are local IST (croner has no tz option in PM2's code path). Both
+conventions are internally consistent; enumerated all 69 registered repeatables from Redis and
+converted each `next` fire to IST to confirm.
+
+### Fixed
+
+1. **`mover-study-weekly` was the last job still on Sunday** (`30 6 * * 0`, Sunday 12:00 IST) ->
+   `30 8 * * 6` (Saturday 14:00 IST), between the retrains and tickertape-scorecard.
+2. **`ohlcv-gap-fill-weekly` `30 20 * * 5`** - nominally "Saturday 02:00 IST" but expressed as
+   FRIDAY 20:30 UTC, which put a 30-day full-universe backfill inside the Friday weekday tail
+   (it ran 02:01 on Sat 08-29 alongside trendlyne-daily-fetch finishing 00:14). Moved to
+   `0 0 * * 6` = Saturday 05:30 IST, the earliest Saturday-ANCHORED slot (any IST Saturday time
+   before 05:30 is still Friday in UTC).
+3. **`online-learner` timeout 120_000 -> 15 * 60_000.** It had already timed out at 120s on
+   2026-08-28 (failing the whole `ml-daily-ops` parent - it is a `T.run()` step), and the
+   2026-08-30 feature-completeness fix widened its query from ~30 hand-rolled columns to
+   `full_feature_train_sql()`'s ~275. **Live-measured after that fix: 3m34.8s** (266,396
+   outcomes, val_AUC 0.5017) - 1.8x the old budget uncontended. The fix had converted an
+   intermittent failure into a guaranteed one.
+4. **Five stale `schedule: 'Weekly Sunday'` labels** in `monitorScripts.ts` (ml-ensemble-train,
+   strategy-optimizer, dl-trainer, trendlyne-fundamentals, trendlyne-ratios) left behind by
+   `37c0fec`'s Saturday move, plus `'First Sunday of month'` -> `'First run of month (Saturday)'`.
+5. **Renamed `isFirstSundayOfMonth` -> `isFirstRunOfMonth`** in `trendlyneWeekly.jobs.ts`. The
+   gate is `getUTCDate() <= 7` - day-of-MONTH, weekday-agnostic - so it still fires correctly on
+   the first Saturday. **Checked before changing: this was a naming/label defect, not the
+   dead-gate bug it looked like.**
+
+### Weekend completion, judged from data
+
+Verified each Saturday job against its OUTPUT TABLE, not `job_heartbeat`. All greenfield weeklies
+succeeded on Saturday (`stage3.screener_membership` 58,069 rows 07:30; `stage3.fundamentals`
+4,898,693 rows 09:30; `phase2.analyst_estimates` 188 rows 11:30; `phase2.insider_activity` 1,825
+rows 12:00). `nse_stocks`, `stock_fundamentals`, `corporate_actions` all carry Saturday writes.
+Two genuinely did not complete:
+
+- **`mover-study-weekly` FAILED** - `ModuleNotFoundError: No module named 'tabulate'` at the
+  `.to_markdown()` report step. `tabulate==0.10.0` IS declared in `backend-python/requirements.txt`;
+  it was simply not installed in the venv. Its site-packages dir is stamped **12:18:46**, i.e.
+  installed AFTER the 12:13 failure - which is why `mover_study_results` has rows at 12:19 from a
+  manual re-run while the heartbeat still reads `failed`. A "Declared != installed" instance.
+- **`dl-retrain-weekly` never produced a model.** Its Saturday 11:30 IST run was still marked
+  `active` in BullMQ ~29h later with NO surviving `python.exe` - a pm2 restart had killed the
+  worker mid-run. BullMQ holds it `active` until the stalled reclaim fires, masked further by the
+  24h `lockDuration` this job legitimately needs. Consequence surfaced elsewhere: last BiLSTM
+  `model_registry` row is 2026-08-25, which reads as "the DL model isn't improving" rather than
+  "the trainer never ran".
+
+Both re-run today as make-up jobs through their real queues (so the processors and heartbeats
+exercise the real path, not a bare script invocation).
+
+### Numbers written to the rule files
+
+Read `factor_edge_history`'s latest persisted run (`run_at` 2026-08-30T00:22) back against
+`measurement.md` column by column. **Every 2026-08-29 number reproduced exactly** - win_probability
+0.0371/0.0677/0.0855 (60/56/40 dates), engine_composite 5d 0.0726, dl_score 21d 0.0981,
+smart_money h1 -0.000/0.502, screener_momentum_score open-entry 21d 0.2175/0.5516 (still the only
+`USABLE`). Recorded as a read-back confirmation, explicitly NOT as a fifth measurement.
+
+Genuinely new and now in `measurement.md`: the active ensemble's CV is **0.5305** (trained
+2026-08-29 23:25, `label=triple_barrier`), superseding the long-quoted 0.5203 - same label, so
+the two ARE comparable, and 0.53 still sits inside the live realized 0.49-0.53 band, changing no
+verdict. Also `online_sgd` val_AUC 0.5017; `cs_ranker` rho 0.1403 and `exit_policy` MFE MAE 5.664
+both rejected again (reproducing, not contradicting, the feature-completeness finding - that fix
+helped cs_ranker and hurt exit_policy); and **11 newly-graded `technical_signals.ext_*` vendor
+columns, ALL LOW-DATA at 4 dates** with h=5 ICs swinging -0.24 to +0.39, i.e. noise - flagged
+against `data-sources.md`'s vendor-onboarding freeze rather than read as promising.
+
+### Bug classes added to `recurring-bugs.md`
+
+- A BullMQ job left `active` by a killed worker is a **zombie** indistinguishable from a healthy
+  long-running job, and on a weekly queue it eats the whole week's slot silently. Cross-check
+  long-`active` jobs against the OS process table; `pm2 list`/`getJobCounts()` cannot tell you.
+- **A timeout budget is calibrated against the query the step ran when the budget was set**, so
+  widening a SHARED query helper invalidates every caller's budget at once. When you change a
+  shared feature/query helper, the blast radius is its callers' timeout constants, not just the
+  file you edited.
+
+Gates: `npx tsc --noEmit` clean; `npx vitest run` 1,100 passed / 41 skipped across 115 files
+(checked for a collection abort, not just the footer).
+
+## 2026-08-30 (cont.) — Phase 3: screener weight → 0 in unified_ranker.py, shipped and verified live
+
+Direct continuation of the Phase 2 entry above. Set `REGIME_WEIGHTS['screener']` to `0.0` in
+every regime (was ~0.054–0.115) — the third shrink in this policy's history (first two:
+2026-08-20, 2026-08-21), this time all the way to zero, backed by the screener-bisection result
+already reproduced 4 independent times in `measurement.md` (adding screener at its prior nonzero
+weight cost −0.0136 IC @5d / −0.0163 @21d every time).
+
+**Caught two real mistakes in my own first attempt, both via the existing test suite, before
+either shipped:** (1) zeroing screener without redistributing its freed weight left every
+regime's weights summing to ~0.916 instead of 1.0, failing `test_regime_weights_sum_to_one`;
+(2) the naive fix — redistribute proportionally across all 7 remaining engines — scaled up
+`breakout`, which the same test pins at an independent audit-derived ceiling
+(`[0.15, 0.05, 0.10, 0.05, 0.13]` across BULL/BEAR/HIGH_VOL/CRASH/SIDEWAYS) that a proportional
+split must never touch. Recomputed correctly: freed mass redistributed across the other 6
+non-pinned engines only, `breakout` held exactly fixed, residual rounding dumped onto
+`confluence` (largest weight in every regime) to keep the literal sum within the test's `1e-9`
+tolerance.
+
+**Verified before calling it done** (per the advisor's explicit condition from the "yes" that
+authorized this): all 221 `unified_ranker`-related pytest cases pass; `assembly_ablation.py`
+re-run live against production completed cleanly with sane, non-degenerate output; `unified_ranker.py`
+itself run live as a smoke test — exit 0, `{"success": true, "stocks_scored": 2041,
+"conviction_breakdown": {"D_MARGINAL": 1387, "A_HIGH": 435, "S_ELITE": 219}, "regime": "SIDEWAYS",
+"degraded_count": 0}`. Queried the resulting `unified_recommendations` rows directly: `unified_score`
+100% populated (2041/2041), sane range (1.38–93.09, avg 43.35), zero NaN/bad values;
+`screener_stock_score` still populated on 97.9% of rows (the reporting column survives, as
+designed — only its blend weight changed) and visibly no longer drives rank (e.g. QPOWER:
+screener=52.73 but ranked #4 by unified_score=90.4).
+
+`unified_ranker.py` runs as a fresh subprocess per scheduled `runPython()` invocation, not a
+resident service, so no `pm2 restart` was needed — the change took effect on this run already.
+
+**Honestly flagged, not glossed over**: today's `assembly_ablation.py` re-run is a sanity check
+that the code runs and produces sane output, not a fresh confirmation that zero is the right
+value — its per-arm row populations differ for reasons unrelated to this change (a
+`MIN_ENGINES`-filtering quirk when a stored-only engine is added to the presence count), making a
+clean same-population before/after read hard to extract from that script as-is. The real
+confirmation requires `factor_edge.py --table unified_recommendations` against the live
+`unified_score` column once ~15-20 fresh dates accumulate under the new weights — logged as an
+explicit open follow-up in `measurement.md`, not claimed as already done.
+
+Gates: `py_compile` clean; targeted `unified_ranker`-suite pytest 221/221 passed; full
+`python -m pytest src/server/__tests__/ src/server/tests/ tests/chatbot/`: **2,336 passed, 244
+skipped, 0 failed** (606.53s). First launch attempt (via `nohup ... &`/`disown`) died silently at
+5% progress after ~15 minutes — a shell-detachment issue with this session's background-process
+handling across turns, not a real failure; relaunched via PowerShell `Start-Process` with proper
+`-RedirectStandardOutput`/`-RedirectStandardError`, which survived to completion. Mid-run, one
+query (`cs.symbol`/`ns.name` lookup, `tests/chatbot/`) ran actively for 3+ minutes straight —
+checked `pg_stat_activity` before assuming anything was wrong (applying the same-day lesson from
+the `feature_store` backfill mistake): confirmed genuine `DataFileRead` I/O, not a lock or a
+stuck/orphaned connection, and it completed on its own. All 156 warnings are benign (a deliberate
+negative-control overflow test, a known pandas/SQLAlchemy connectable notice, scipy
+precision-loss notices on near-identical synthetic data).
+
+**Phase 3 fully closed for this session**: code shipped, all three verification layers passed
+(targeted unit tests, live ablation sanity check, live ranker smoke test + DB query), full gate
+suite green. What remains open is explicitly NOT claimed as done: the live forward-IC re-check on
+fresh post-change dates, logged in `measurement.md` as the next actionable step once ~15-20 dates
+accumulate.
+
+### Follow-on same session: review of the uncommitted ml_ensemble.py / purged_cv.py changes
+
+Asked to review the working-tree ml_ensemble changes and complete them if correct. **Verdict:
+logically correct**, and four defects were found and fixed while verifying them — three of which
+were PRE-EXISTING, not introduced by the change under review.
+
+**What the change does (all sound):** extracts `full_feature_train_sql()`/`full_feature_score_sql()`
+(the starved-query fix); replaces row-based `TimeSeriesSplit(gap=)` with a date-grouped purged
+splitter in both `tune_hyperparameters()` and `_fit_stack()`; makes `_base_models(*, cv)`
+keyword-only with NO default so the real splitter reaches all six `CalibratedClassifierCV`
+instances (closing the `cv=int` -> `StratifiedKFold` leak); adds `drop_untrainable_features()`.
+Score-time alignment was checked and is correct -- both score paths subset to
+`ensemble['feature_names']`, which is captured AFTER the drop, so the feature filtering
+introduces no skew.
+
+**Defect 1 (pre-existing) -- train/score column asymmetry.** Parsing both new SQL helpers and
+differencing the aliases: 311 columns common, but `cr_upgrades`/`cr_downgrades` were TRAIN-ONLY.
+`build_features()` reads them via `num('cr_upgrades', 0.0)`, so three features -- `credit_trend`,
+`credit_upgraded`, `credit_x_score` -- had real values while training and constant 0.0 while
+scoring. Confirmed pre-existing via `git show HEAD` (the committed score path had none either).
+`drop_untrainable_features()` structurally cannot catch this: the columns are well-behaved in the
+training matrix and only degenerate on the serving side. Fixed; live-verified non-vacuously
+(AFCONS down=1, GABRIEL up=1, NAVINFLUOR up=1 where all read 0 before).
+
+**Defect 2 -- `credit_rating_events` is 86% blank-symbol, and the root cause is instructive.**
+279 of 323 rows had no symbol, and ALL 279 carried an ISIN, so the exact-ISIN fallback was not
+sparse but structurally unable to hit. An Indian ISIN is INE + 4-char issuer + 2-digit INSTRUMENT
+code: '01'/'10' is equity, the '07'/'08' families are debentures/bonds. Credit ratings are
+overwhelmingly issued against DEBT (blank rows' instrument codes: 80 x47, 70 x35, 71 x20, 82 x17,
+81 x11, 73 x11; resolved rows: code 10 on 38 of 44), and `nse_stocks` holds only equity ISINs --
+so a rated bond of a large listed issuer never matches. **Most of the 86% is therefore correct.**
+But the first 8 ISIN chars are the ISSUER, shared across instruments, and matching on that
+recovers 104 of 279 to real listed symbols (IIFL x20, HDBFS x15, NLCINDIA x6, LTF, SBIN,
+BANKINDIA, BANKBARODA, UCOBANK...). Implemented in `credit_rating_fetcher.py`, ambiguous prefixes
+(18 of them) DROPPED rather than guessed. Every spot-check matches its own headline company.
+**Worth recording:** my first estimate of 117 came from a SQL probe using `LIMIT 1` on the prefix
+join -- which was itself the blind-fallback bug, and mis-attributed L&T Finance to LT. The shipped
+code skips ambiguous prefixes: 13 fewer rows, LTF correct instead of LT.
+
+**Defect 3 (in the new `purged_cv.py`) -- order derived from `drop_duplicates()`, not sorting.**
+`split()` treated first-appearance order as chronological order. Measured on a rotated 20-date
+panel: **2 of 3 folds trained on dates post-dating their own validation fold**, silently. Not live
+(production callers sort), but an unguarded contract in the module whose entire purpose is
+temporal ordering. Fixed by sorting (a no-op on chronological input) + raising on non-comparable
+date types. Note the first probe checked only fold 0 and wrongly reported 'order preserved' --
+check EVERY fold.
+
+**Defect 4 (same file) -- purge width silently clamped.** When the panel is too short,
+`make_purged_group_time_series_split()` quietly returned a gap narrower than the label horizon
+(validation labels overlapping training) with no signal. At the production panel size (78 distinct
+dates) every horizon 1-21 gets its FULL gap, so this is not firing today; at 40 dates a 21-day
+horizon clamps to 13. Now warns to stderr, and the warning was checked for DISCRIMINATION: silent
+on all 13 adequate configs, loud on exactly the 2 clamped ones.
+
+**Defect 5 -- `pythonRunner.ts` discarded the real failure reason.** The non-zero-exit branch used
+`const reason = err || out.slice(-500)`. Any torch-importing script writes UserWarnings to stderr
+on EVERY run, so `err` is never empty, the `||` short-circuits, and the stdout tail carrying the
+actual error is thrown away. Live case: `dl-retrain-weekly`'s make-up run was recorded in
+job_run_history, the BullMQ failedReason AND the heartbeat with a 448-char 'error' consisting of
+nothing but two torch warnings -- no error text anywhere in the system. `dl_trainer.py` prints
+`[TRAINER] Done: {...}` to stdout then `sys.exit(1)` deliberately, so the reason was always on the
+discarded stream. Fixed to concatenate both, labelled; verified end-to-end with a probe script
+that writes a warning to stderr and an error to stdout (reason now carries both).
+
+`purged_cv.py` and `test_purged_cv.py` were UNTRACKED while `ml_ensemble.py` imports `purged_cv`
+at module level -- a commit without them would have broken the whole ML stack on a fresh checkout.
+`git add`-ed by explicit path. The module's try/except import fallback was checked and is correct
+and necessary: tests really do import the package path (`from src.server.backtester import ...`),
+under which the bare import fails; both paths verified to resolve.
+
+Gates: `tsc --noEmit` clean; pytest **2,341 passed / 244 skipped** (was 2,336 -- exactly the +5
+regression tests added for defects 3 and 4), checked for a collection abort. All new tests
+negative-controlled: reverting the sort fails exactly the 2 ordering tests, disabling the warning
+fails exactly the 1 warning test, restore returns 9/9 with the file byte-identical.

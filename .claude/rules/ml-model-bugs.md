@@ -43,8 +43,74 @@ cover classes that stayed in `recurring-bugs.md`.
 
 ## Models, labels & promotion gates
 
-- **A metric-based promotion gate cannot catch weight divergence or output saturation.** All-NaN weights make validation *raise*, which a handler swallows; a 70%-saturated model still scores AUC 0.66. Gate on the artifact, not only its score.
+- **A second script that hand-rolls its own training-data SQL instead of importing the canonical feature-engineering function's OWN query silently drifts to a fraction of the real feature set, and the decline shows up as "the model is getting worse," not as an obvious bug.** `cs_ranker.py` and `exit_policy.py` both `import build_features` from `ml_ensemble.py` (correctly sharing the feature-*transform* code) but each wrote its own SELECT for the training *query* feeding it — `build_features()`'s `num(col, default)` silently defaults any column the caller's SQL didn't fetch to a constant, so neither script errored, both just trained on hollowed-out data. Measured 2026-08-30: `cs_ranker.py` used 29 of `build_features()`'s 304 raw inputs, `exit_policy.py` used 23 — and both had multiple consecutive promotion-gate REJECTIONs with declining metrics (`cs_ranker` rho trending 0.161→0.161→0.133→0.158→0.081→0.088 over 6 rejections; `exit_policy` MFE holdout MAE 4.76→4.91→5.00 across 2), which read as "the model doesn't work" rather than "the query is starving it." Fixed by extracting `ml_ensemble.py`'s own maintained ~275-column query into shared `full_feature_train_sql()`/`full_feature_score_sql()` functions (parameterized on anchor table/date column) and rewiring both scripts to use them, `load_training_data()` itself left untouched. **The fix did not uniformly help — this is the finding, not a footnote**: re-trained live 2026-08-30, `cs_ranker` improved (rho 0.0875→0.1403, still short of baseline 0.1758) but `exit_policy` got WORSE (MFE MAE 4.998→5.66, moving further from baseline 4.7642) — the extra features added noise for that specific regression target rather than signal. **Tell:** any second/third script importing a shared feature-*engineering* function should also import (or call) that module's own training-data *query*, not reimplement a narrower one by hand; a `num()`/`.get(col, default)`-style silent-default pattern anywhere in the shared function means a caller's incomplete SELECT fails silently, so diff the caller's SELECT columns against every `num('col', ...)`/`row.get('col')` call in the shared function before trusting either script's metrics. **Corollary: "give the model more features" is not a one-way lever** — verify the effect per model, not per fix, exactly as `measurement.md`'s discipline already demands for any other scoring change. **Third instance, found same day by directly checking every other `build_features` importer after this entry was written**: `online_learner.py`'s `load_recent_outcomes()` — feeding the DAILY SGD/PassiveAggressive online-learning update (`ml-daily-ops`'s `online-learner` step, not weekly), not the score-time path — had the same ~30-column hand-rolled SELECT, and its own docstring wrongly claimed it matched `ml_ensemble.load_training_data`'s columns. **A worse shape than the first two**: this file's sibling `load_pending_signals()` already correctly delegated to the canonical wide query, so the online model trained on a narrow constant-padded vector but scored on the real wide one — a genuine train/serve feature-distribution skew, not just a narrower fit. Fixed the same way. Grepping every `build_features` importer found no further instances after this fix, but nothing prevents a newly-written script from reintroducing the pattern — the tell above is the durable check, not "count now equals zero."
 
+- **Extracting a shared train query and a shared score query as SEPARATE functions does not make
+  them agree — diff their column sets, because any column in one and not the other is train/serve
+  skew by construction.** Found 2026-08-30 reviewing `ml_ensemble.py`'s new
+  `full_feature_train_sql()` / `full_feature_score_sql()` pair (the fix for the starved-query bug
+  in the entry above). Parsing both and differencing the aliases: **311 columns common, but
+  `cr_upgrades` and `cr_downgrades` were train-only.** `build_features()` reads them via
+  `num('cr_upgrades', 0.0)`, so at score time they silently defaulted to zero and THREE features
+  -- `credit_trend`, `credit_upgraded`, `credit_x_score` -- carried real values while training and
+  a constant 0.0 while serving. **This was PRE-EXISTING, not introduced by the extraction**
+  (`git show HEAD` -- the committed `load_pending_signals()` had no `cr_upgrades` either); the
+  extraction just made it mechanically visible for the first time. Fixed by adding the same two
+  `credit_rating_events` subqueries to the score helper, anchored on `ts.date::date`.
+  **Two things make this class nastier than the starved-query one it sits next to:**
+  (1) `drop_untrainable_features()` structurally CANNOT catch it -- the columns are perfectly
+  well-behaved in the training matrix and only degenerate on the serving side, which is exactly
+  where nothing is measuring them; (2) it produces no error, no NaN and no warning, just a model
+  splitting on a feature that is always zero in production.
+  **Tell / cheap check:** whenever a module exposes a train query and a score query as separate
+  strings, parse the aliases out of both and assert the sets are equal -- one throwaway script,
+  and it is the only thing that finds this. Do NOT rely on the score path's
+  `for col in feature_names: if col not in X: X[col] = 0.0` alignment loop to tell you: that loop
+  is what SILENTLY manufactures the skew, and it looks like defensive hygiene.
+  Live-verified after the fix against production (negative control, not a vacuous all-zero pass):
+  AFCONS `cr_downgrades=1`, GABRIEL `cr_upgrades=1`, NAVINFLUOR `cr_upgrades=1` at the score-time
+  anchor, where all three read 0 before.
+  **Separate defect found the same way, still OPEN:** `credit_rating_events` has **279 of 323 rows
+  (86%) with a blank/NULL `symbol`**, leaving only 26 distinct real symbols -- so these three
+  features are near-dead in production regardless of the skew fix. Same shape as
+  `data-sources.md`'s `trendlyne_screener_discovery.py` incident (an identifier column silently
+  holding the wrong thing). Fix the fetcher's symbol resolution before reading anything into
+  `credit_trend`'s measured edge.
+- **A splitter that derives its time order from `drop_duplicates()` inherits FIRST-APPEARANCE
+  order, not chronological order — so it silently trains on the future the moment a caller hands
+  it an unsorted panel.** Found 2026-08-30 reviewing the new `purged_cv.py`. `split()` built
+  `unique_groups = list(pd.Series(groups).dropna().drop_duplicates())` and then treated
+  `unique_groups[:train_end]` as "before" and `unique_groups[test_start:test_end]` as "after".
+  Measured against a rotated 20-date panel: **2 of 3 folds trained on dates that post-date their
+  own validation fold** — the exact leak the class exists to prevent — with no exception, no
+  warning, and a perfectly normal-looking AUC. Production callers happen to sort
+  (`load_training_data` orders by `signal_date ASC`, and `_fit_stack`'s docstring states the
+  assumption), so this was never live; but it was an unguarded contract in the one module whose
+  entire purpose is temporal ordering, and any future caller passing a regime subset, a resampled
+  panel or a `groupby` result would have reintroduced it invisibly. Fixed by sorting the unique
+  groups (a no-op for already-chronological input, so production folds are unchanged) and raising
+  loudly on mutually non-comparable date types rather than falling back to insertion order.
+  **Tell:** any temporal splitter, embargo or as-of helper that establishes order from the
+  *arrival order of rows* rather than by sorting the key. Grep for `drop_duplicates()`,
+  `dict.fromkeys()`, `pd.unique()` and `set()` feeding anything that is subsequently sliced as if
+  it were a timeline. **Verify with a rotation, not a shuffle, and check EVERY fold** — a first
+  fold can look clean while later folds leak (the first probe here inspected only fold 0 and
+  reported "chronological order preserved", which was wrong).
+
+- **A purge/embargo width that is silently CLAMPED to fit a short panel is a leak that reports
+  itself as a successful CV.** Same review: `make_purged_group_time_series_split()` reduces the
+  split count to fit the requested gap, but if even the minimum split count does not fit it
+  quietly returns `gap = min(desired_gap, first_test_start - min_train_groups)` — a purge
+  narrower than the label horizon, i.e. validation rows whose labels overlap training. Measured:
+  at the **production panel size (78 distinct dates) every horizon 1–21 gets its full gap**, so
+  this is not firing today; at 40 dates a 21-day horizon clamps to 13 (an 8-day overlap) and at
+  40 dates a 15-day horizon clamps to 13. Now warns to **stderr** (not stdout — the subprocess
+  wrapper only inspects stderr, see `recurring-bugs.md`). The warning was checked for
+  DISCRIMINATION, not just for firing: silent on all 13 adequately-purged configurations, loud on
+  exactly the 2 clamped ones — per this file's own "a monitor that fires on EVERY run carries no
+  information" rule. **Tell:** any `min(desired, available)` on a safety margin. Clamping a
+  correctness parameter to whatever fits is not degradation, it is a silent correctness change,
+  and it must say so.
 - **AUC can be excellent and useless.** `flyer_classifier` holds AUC 0.81 with IC −0.041 (t=−9.02) — it measures *who* flies, not *when*.
 
 - **Grouping training rows by day when scoring reads one snapshot** is train/serve skew. Found in 3 files; `test_auc` 0.641 → 0.486 once honest.
