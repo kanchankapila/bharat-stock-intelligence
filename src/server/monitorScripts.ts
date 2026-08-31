@@ -182,7 +182,7 @@ export const MONITOR_SCRIPTS = [
     category: 'ML',
     critical: false,
     description: 'Retrains GB+RF+ET+LR stacking ensemble on accumulated outcomes',
-    schedule: 'Weekly Sunday',
+    schedule: 'Weekly Saturday',
     pyScript: 'ml_ensemble.py --train --score',
     queueName: 'ml-weekly-retrain',
     staleLimitHours: 200,
@@ -193,7 +193,7 @@ export const MONITOR_SCRIPTS = [
     category: 'ML',
     critical: false,
     description: 'Optimizes category/source weights via differential evolution',
-    schedule: 'Weekly Sunday',
+    schedule: 'Weekly Saturday',
     pyScript: 'strategy_optimizer.py',
     queueName: 'ml-weekly-retrain',
     staleLimitHours: 200,
@@ -316,7 +316,7 @@ export const MONITOR_SCRIPTS = [
     category: 'ML',
     critical: false,
     description: 'Trains / retrains deep learning model on feature_store. Writes metrics to dl_model_performance.',
-    schedule: 'Weekly Sunday',
+    schedule: 'Weekly Saturday',
     pyScript: 'dl_trainer.py --trigger scheduled',
     queueName: null,
     staleLimitHours: 200,
@@ -381,7 +381,7 @@ export const MONITOR_SCRIPTS = [
     category: 'Data',
     critical: false,
     description: 'EPS_TTM + DivYield series and DVM scores (PE/PB now fed by mc_pricefeed_fetcher.py)',
-    schedule: 'Weekly Sunday',
+    schedule: 'Weekly Saturday',
     pyScript: 'trendlyne_fundamentals_fetcher.py',
     queueName: 'ml-weekly-retrain',
     // 200h assumed a flat 168h (Sunday-to-Sunday) worst case, but the written `date` value is
@@ -426,7 +426,7 @@ export const MONITOR_SCRIPTS = [
     // Was "First Sunday of month" / staleLimitHours: 900 -- both stale. financial_ratios_fetcher.py
     // was moved OUT of the first-Sunday gate on 2026-07-31 (see trendlyneWeekly.jobs.ts's
     // processTrendlyneRatiosMonthly: it now runs unconditionally on every Sunday, before the
-    // `isFirstSundayOfMonth` check that still gates working_capital_fetcher.py/
+    // `isFirstRunOfMonth` check (day-of-month <= 7) that still gates working_capital_fetcher.py/
     // mf_stock_holdings_fetcher.py below it) -- this entry's own label/threshold were never
     // updated to match, so it was carrying a 5x-looser threshold than its real weekly cadence
     // needs (not a false-alarm risk, since 900h > the true 168h worst case, but a real
@@ -435,7 +435,7 @@ export const MONITOR_SCRIPTS = [
     // test -- corrected to match its ml-weekly-retrain/trendlyne-fundamentals siblings' convention
     // (168h worst case + margin). working-capital below is genuinely still monthly-gated and
     // keeps its own correct 900h.
-    schedule: 'Weekly Sunday',
+    schedule: 'Weekly Saturday',
     // 200h was still wrong, found 2026-08-09: `as_of_date` is logical_write_floor()-anchored to
     // the last completed trading session (Friday), 2 days behind the Sunday run that writes it --
     // same lag as trendlyne-fundamentals above. True worst case checked right before that week's
@@ -455,7 +455,7 @@ export const MONITOR_SCRIPTS = [
     category: 'ML',
     critical: false,
     description: 'Cash conversion cycle per fiscal year, rewritten against ET_Stats after Trendlyne retired the params',
-    schedule: 'First Sunday of month',
+    schedule: 'First run of month (Saturday)',
     pyScript: 'working_capital_fetcher.py',
     queueName: 'trendlyne-ratios-monthly',
     // Same "first Sunday of month" worst-case-gap fix as financial-ratios above (840h > 800h).

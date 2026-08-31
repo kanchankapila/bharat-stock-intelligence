@@ -110,7 +110,12 @@ async function processTrendlyneMidweek(_job: Job): Promise<{ success: boolean; s
 }
 
 export async function processTrendlyneRatiosMonthly(_job: Job): Promise<{ success: boolean; monthlySkipped?: boolean }> {
-  const isFirstSundayOfMonth = new Date().getUTCDate() <= 7;
+  // Day-of-MONTH gate, not day-of-week: true on whichever weekly run lands in the first 7 days.
+  // Renamed 2026-08-30 (old name: the first-Sunday spelling) -- this queue moved Sunday->Saturday
+  // on 2026-08-27 (37c0fec) and the old name then described a day the job never runs on. The gate
+  // itself was always correct (getUTCDate() <= 7 is weekday-agnostic), so this is a naming fix,
+  // not a behaviour change: the monthly steps still fire once per month, now on the first Saturday.
+  const isFirstRunOfMonth = new Date().getUTCDate() <= 7;
   // Every step below used to be `.catch(warn)` with no rethrow -- same shape processTrendlyneMidweek
   // was fixed for on 2026-08-28, missed here (found live 2026-08-30): job_heartbeat.trendlyne-ratios-monthly
   // shows 0 failures across its whole run history despite six independently-failable steps, which is
@@ -170,9 +175,9 @@ export async function processTrendlyneRatiosMonthly(_job: Job): Promise<{ succes
   // Weekly, not monthly: cheap enough that there's no reason to wait a month for movement.
   await step('moneycontrol_fetcher --seasonality', runPython('moneycontrol_fetcher.py', ['--seasonality'], 10 * 60_000));
 
-  if (!isFirstSundayOfMonth) {
+  if (!isFirstRunOfMonth) {
     console.log('[QUEUE] trendlyne-ratios: weekly ratios done; monthly steps skipped '
-      + '(not the first Sunday of the month)');
+      + '(not the first run of the month)');
     if (errors.length > 0) throw new Error(errors.join(' | '));
     return { success: true, monthlySkipped: true };
   }
