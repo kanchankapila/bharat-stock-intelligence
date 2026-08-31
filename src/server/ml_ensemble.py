@@ -47,6 +47,10 @@ from model_promotion import (clears_promotion_bar, rejections_since,
                               staleness_override_applies,
                               live_edge_verdict, live_edge_is_unproven,
                               DEFAULT_STALENESS_MAX_DAYS, DEFAULT_STALENESS_MAX_REJECTIONS)
+try:
+    from purged_cv import make_purged_group_time_series_split
+except ImportError:  # package import path used by some pytest modules
+    from src.server.purged_cv import make_purged_group_time_series_split
 
 # Script-relative, not os.getcwd()-relative (2026-08-09): the old cwd-relative join silently
 # wrote/read the model at a doubled src/server/src/server/ml_models path when this script was
@@ -1042,6 +1046,521 @@ def _table_columns(conn: ConnWrapper, table: str) -> list:
         return [r[0] for r in rows]
     rows = conn.execute(f"PRAGMA table_info({table})").fetchall()
     return [r[1] for r in rows]
+
+
+def full_feature_train_sql(anchor: str = 'so', date_col: str = 'signal_date') -> tuple:
+    """Returns (select_columns_sql, joins_sql) for the full technical/fundamental/analyst/
+    proprietary-scores/macro/sector feature set this platform has accumulated on
+    technical_signals -- the same ~275-column block load_training_data()'s Postgres branch
+    below selects inline. `anchor`/`date_col` let any table shaped like signal_outcomes/
+    signal_excursions (a `symbol` column plus a date column with the same as-of semantics)
+    join into this block; both tables have exactly that shape.
+
+    Extracted 2026-08-30 for cs_ranker.py and exit_policy.py, which were found training on
+    only 29/304 and 23/304 of build_features()'s raw inputs respectively (this query supplies
+    275/304, same as load_training_data() itself) -- see measurement.md's cs_ranker/exit_policy
+    feature-completeness finding. load_training_data() below is deliberately left untouched --
+    it already works and backs the live active ensemble model; this is a NEW, separately-used
+    copy for the two under-fed scripts, not a refactor of the original, to keep this fix's
+    blast radius to the two things that were actually broken. Postgres only (SQLite is
+    decommissioned platform-wide -- see CLAUDE.md).
+    """
+    A, D = anchor, date_col
+    select_cols = f"""
+                   ts.rsi, ts.adx, ts.nifty_regime, ts.cmp, ts.sma200, ts.volume_ratio,
+                   ts.fii_3d_net,
+                   ts.above_sma200,
+                   COALESCE(ts.news_sentiment_score, gdelt.tone_scaled) AS news_sentiment_score,
+                   ts.pcr_oi, ts.pcr_vol,
+                   ts.fii_10d_net, ts.dii_3d_net,
+                   ts.delivery_pct,
+                   ts.sector_ret_5d, ts.sector_ret_21d,
+                   ts.sector_global_corr_21d,
+                   ts.iv_rank, ts.iv_skew, ts.call_wall_dist_pct, ts.put_wall_dist_pct, ts.near_expiry_gamma,
+                   ts.rs_rank_21d, ts.rs_rank_63d,
+                   ts.insider_buy_pct_90d,
+                   ts.opening_range_break,
+                   ts.vwap_deviation_pct,
+                   ts.first_hour_vol_share,
+                   ts.avwap_deviation_pct,
+                   ts.oi_net_change_pct,
+                   ts.eps_beat_last_q,
+                   ts.eps_beat_streak_4q,
+                   ts.eps_miss_streak_4q,
+                   ts.eps_surprise_last_yr,
+                   ts.eps_estimate_dispersion,
+                   fs.ret_12m_ex1m,
+                   mb.pct_above_200dma, mb.adv_decline_ratio, mb.net_highs_lows,
+                   hfs.max_pain,
+                   ts.mf_holding_pct, ts.mf_fund_count, ts.mf_chg_vs_prev,
+                   ts.rollover_pct, ts.cost_of_carry_ann,
+                   ts.block_deal_net_qty, ts.block_deal_value_cr,
+                   ts.eps_ttm, ts.eps_growth_yoy, ts.eps_growth_qoq, ts.eps_acceleration,
+                   ts.pe_ttm, ts.dvm_durability, ts.dvm_valuation, ts.dvm_momentum,
+                   ts.pe_pct_rank_252d, ts.pe_vs_median_1yr, ts.pb_pct_rank_252d, ts.div_yield_ttm,
+                   ts.ma_bull_frac, ts.osc_bull_frac, ts.adx_tl, ts.atr_pct_tl, ts.mfi_tl,
+                   ts.pivot_dist_pct_tl, ts.delivery_avg_1m_tl, ts.beta_1y_tl,
+                   ts.ret_1m_tl, ts.ret_3m_tl, ts.ret_6m_tl, ts.ret_1y_tl,
+                   ts.analyst_upside_pct, ts.analyst_count, ts.analyst_buy_pct,
+                   ts.roe_annual, ts.roce_annual, ts.ebitda_margin, ts.np_margin,
+                   ts.promoter_pct, ts.fii_pct, ts.mf_pct, ts.pledge_pct,
+                   ts.promoter_chg_qoq, ts.fii_chg_qoq, ts.mf_chg_qoq, ts.pledge_chg_qoq,
+                   ts.rev_growth_yoy_q, ts.np_growth_yoy_q,
+                   ts.days_since_dividend, ts.last_dividend_amt,
+                   ts.days_to_ex_div, ts.days_to_board_meeting, ts.upcoming_div_pct,
+                   COALESCE(ts.mc_52w_high_dist_pct, mp.dist_52w_high) AS mc_52w_high_dist_pct, COALESCE(ts.mc_52w_low_dist_pct, mp.dist_52w_low) AS mc_52w_low_dist_pct, COALESCE(ts.mc_days_from_52wh, mp.days_from_52wh) AS mc_days_from_52wh,
+                   COALESCE(ts.mc_cagr_3y, mp.cagr_3y) AS mc_cagr_3y, COALESCE(ts.mc_cagr_5y, mp.cagr_5y) AS mc_cagr_5y, COALESCE(ts.mc_cagr_10y, mp.cagr_10y) AS mc_cagr_10y, COALESCE(ts.mc_ind_pe, mp.ind_pe) AS mc_ind_pe, COALESCE(ts.mc_pe_vs_ind, mp.pe_vs_ind) AS mc_pe_vs_ind,
+                   COALESCE(ts.mc_consensus_pe, mp.consensus_pe) AS mc_consensus_pe, COALESCE(ts.mc_consensus_pb, mp.consensus_pb) AS mc_consensus_pb,
+                   COALESCE(ts.mc_ma30_dist_pct, mp.ma30_dist_pct) AS mc_ma30_dist_pct, COALESCE(ts.mc_ma50_dist_pct, mp.ma50_dist_pct) AS mc_ma50_dist_pct, COALESCE(ts.mc_ma150_dist_pct, mp.ma150_dist_pct) AS mc_ma150_dist_pct, COALESCE(ts.mc_ma200_dist_pct, mp.ma200_dist_pct) AS mc_ma200_dist_pct,
+                   COALESCE(ts.mc_del_pct_3d, mp.del_pct_3d) AS mc_del_pct_3d, COALESCE(ts.mc_del_pct_5d, mp.del_pct_5d) AS mc_del_pct_5d, COALESCE(ts.mc_del_pct_20d, mp.del_pct_20d) AS mc_del_pct_20d, ts.mc_del_acceleration,
+                   COALESCE(ts.mc_vol_ratio, mp.vol_ratio) AS mc_vol_ratio, COALESCE(ts.mc_circuit_dist_pct, mp.circuit_dist_pct) AS mc_circuit_dist_pct, ts.mc_fno_eligible,
+                   COALESCE(ts.mc_3d_return, mp.ret_3d) AS mc_3d_return, COALESCE(ts.mc_ytd_return, mp.ret_ytd) AS mc_ytd_return,
+                   COALESCE(ts.mc_price_cash, mp.price_cash) AS mc_price_cash, COALESCE(ts.mc_consensus_eps, mp.consensus_eps) AS mc_consensus_eps, COALESCE(ts.mc_eps_vs_cons, mp.eps_vs_cons) AS mc_eps_vs_cons, COALESCE(ts.mc_pe_fwd_discount, mp.pe_fwd_discount) AS mc_pe_fwd_discount,
+                   ts.mc_cp_bull_count, ts.mc_cp_bear_count, ts.mc_cp_net_score, ts.mc_cp_avg_target_pct,
+                   ts.tl_vs_nifty_1m, ts.tl_vs_nifty_3m, ts.tl_vs_nifty_6m,
+                   ts.tl_vs_ind_1m, ts.tl_vs_ind_3m,
+                   ts.tl_seasonal_month_5y, ts.tl_dist_3m_high_pct, ts.tl_dist_3m_low_pct,
+                   ts.nt_max_pain_dist_pct, ts.nt_oi_direction, ts.nt_pcr, ts.nt_option_volume_log,
+                   ts.hv_10d, ts.hv_20d, ts.hv_30d, ts.hv_60d, ts.iv_hv_ratio,
+                   ts.pead_score, ts.event_signal_score,
+                   ts.eps_revision_3m_pct, ts.target_revision_3m_pct, ts.analyst_count_chg,
+                   ts.rs_vs_sector_21d, ts.rs_vs_sector_63d,
+                   ts.asm_flag, ts.gsm_stage,
+                   ts.crude_corr_90d, ts.gold_corr_90d, ts.dxy_corr_90d, ts.sp500_corr_90d,
+                   ts.mc_broker_buy_7d, ts.mc_broker_sell_7d, ts.mc_broker_upside,
+                   ts.days_to_next_results, ts.earnings_category_yoy, ts.earnings_category_qoq,
+                   ts.earnings_np_growth_yoy, ts.earnings_np_growth_qoq,
+                   ts.positive_turnaround, ts.negative_turnaround,
+                   ts.earnings_shocker_flag, ts.earnings_shocker_gain,
+                   ts.is_nifty50, ts.is_nifty100, ts.nifty_tier,
+                   ts.pledge_chg_90d,
+                   ts.iep_gap_pct, ts.preopen_imbalance,
+                   ts.expected_move_pct, ts.stock_gex_proxy, ts.iv_term_slope,
+                   ts.eps_surprise_q1, ts.eps_surprise_q2, ts.eps_beat_streak,
+                   ts.eps_miss_after_streak, ts.rev_surprise_q1,
+                   ts.fcf_yield_approx AS fcf_yield, ts.interest_coverage, ts.fcf_positive, ts.debt_coverage_risk,
+                   ts.roce, ts.roce_trend, ts.quick_ratio, ts.ev_ebitda, ts.asset_turnover, ts.cfo_growth,
+                   ts.interest_coverage_post_tax, ts.lt_de_ratio,
+                   ts.nim, ts.cost_to_income, ts.int_income_earning_assets, ts.non_int_income_earning_assets,
+                   ts.op_profit_earning_assets, ts.op_expense_earning_assets, ts.int_exp_earning_assets,
+                   ts.capital_adequacy, ts.tier1_capital, ts.tier2_capital,
+                   ts.gross_npa_pct, ts.net_npa_pct, ts.net_npa_to_advances, ts.num_branches,
+                   ts.int_income_per_employee, ts.np_per_employee, ts.business_per_employee,
+                   ts.int_income_per_branch, ts.np_per_branch,
+                   ts.cfi_growth, ts.cff_growth,
+                   ts.cfo_cagr_3y, ts.cfi_cagr_3y, ts.cff_cagr_3y, ts.cfo_cagr_5y, ts.cfi_cagr_5y, ts.cff_cagr_5y,
+                   ts.mf_net_share_chg_pct, ts.mf_fund_count,
+                   ts.mf_funds_adding, ts.mf_funds_trimming, ts.mf_add_trim_ratio,
+                   ts.mf_avg_pct_assets, ts.mf_big_fund_flow, ts.mf_flow_vs_sector, ts.mf_flow_rank,
+                   ts.delivery_trend_30d, ts.block_deal_flag, ts.block_deal_direction,
+                   ts.short_interest_proxy,
+                   ts.promoter_buy_90d_cr, ts.promoter_sell_90d_cr, ts.promoter_net_90d,
+                   ts.ext_fii_holding_pct, ts.ext_dii_holding_pct, ts.ext_fii_qoq_chg, ts.ext_dii_qoq_chg,
+                   ts.ext_t80_tech_score, ts.ext_t80_quality_rank, ts.ext_t80_valuation_rank, ts.ext_t80_financial_pts,
+                   ts.ext_mojo_quality_rank, ts.ext_mojo_valuation_rank, ts.ext_mojo_financial_pts,
+                   ts.ext_is_overall_score, ts.ext_is_percentile_rank, ts.ext_tt_score,
+                   ts.insider_buy_flag, ts.insider_sell_flag,
+                   ts.rating_upgrade_180d, ts.rating_downgrade_180d, ts.days_since_upgrade,
+                   ts.mf_sector_flow_pct,
+                   ts.receivables_days_ttm, ts.ccc_ttm, ts.ccc_trend,
+                   ts.wc_deteriorating, ts.wc_improving,
+                   ts.screener_bull_count, ts.screener_bear_count, ts.screener_cat_breadth,
+                   ts.screener_tier1_count, ts.screener_momentum_score, ts.screener_streak_days,
+                   ts.screener_name_signal, ts.screener_alpha_score,
+                   macro_snap.gift_nifty_pct, macro_snap.nifty_gex,
+                   macro_snap.india_10y, macro_snap.india_us_spread,
+                   macro_snap.high_impact_3d, macro_snap.asia_sentiment, macro_snap.global_risk,
+                   macro_snap.market_np_yoy, macro_snap.earnings_breadth_mkt,
+                   macro_snap.fii_net_today,
+                   macro_snap.usdinr_chg_pct, macro_snap.nifty_basis_pct, macro_snap.nifty_contango,
+                   macro_snap.india_vix, macro_snap.india_mmi,
+                   macro_snap.adrs_bullish_pct, macro_snap.usdinr_ret_1d,
+                   macro_snap.nikkei_ret_1d, macro_snap.hangseng_ret_1d,
+                   mse.np_growth_yoy AS sector_np_growth_yoy, mse.np_growth_qoq AS sector_np_growth_qoq,
+                   mse.rev_growth_yoy AS sector_rev_growth_yoy,
+                   fh.fifty_two_week_high, fh.piotroski_f_score, fh.debt_to_equity,
+                   fh.operating_margins, fh.return_on_equity, fh.revenue_growth,
+                   fh.earnings_growth, fh.earnings_yield, fh.price_to_book, fh.market_cap,
+                   aeh.n_analysts, aeh.buy_count, aeh.target_mean,
+                   psh_az.score_value AS altman_z,
+                   psh_oo.score_value AS ohlson_o,
+                   psh_gn.score_value AS graham_number,
+                   psh_ds.score_value AS dupont_score,
+                   (SELECT COUNT(*) FROM credit_rating_events cre
+                     WHERE cre.symbol = {A}.symbol
+                       AND UPPER(cre.action) LIKE '%UPGRADE%'
+                       AND cre.announcement_date::date >= ({A}.{D}::date - interval '365 days')
+                       AND cre.announcement_date::date <= {A}.{D}::date) AS cr_upgrades,
+                   (SELECT COUNT(*) FROM credit_rating_events cre
+                     WHERE cre.symbol = {A}.symbol
+                       AND UPPER(cre.action) LIKE '%DOWNGRADE%'
+                       AND cre.announcement_date::date >= ({A}.{D}::date - interval '365 days')
+                       AND cre.announcement_date::date <= {A}.{D}::date) AS cr_downgrades,
+                   sfs.sector_pcr, sfs.total_call_oi AS sector_call_oi, sfs.total_put_oi AS sector_put_oi
+    """
+    joins = f"""
+            LEFT JOIN LATERAL (
+                SELECT * FROM technical_signals ts2
+                WHERE ts2.symbol = {A}.symbol
+                  AND ts2.date <= {A}.{D}::date
+                  AND ts2.date >= ({A}.{D}::date - interval '7 days')
+                ORDER BY ts2.date DESC
+                LIMIT 1
+            ) ts ON TRUE
+            LEFT JOIN LATERAL (
+                SELECT * FROM mc_pricefeed_daily mp2
+                WHERE mp2.symbol = {A}.symbol
+                  AND mp2.date <= {A}.{D}
+                  AND mp2.date >= ({A}.{D}::date - interval '7 days')::text
+                ORDER BY mp2.date DESC
+                LIMIT 1
+            ) mp ON TRUE
+            {as_of_join_sql('fundamentals_history', 'fh', A, 'symbol', D)}
+            {as_of_join_sql('analyst_estimates_history', 'aeh', A, 'symbol', D)}
+            LEFT JOIN LATERAL (
+                SELECT AVG(g.avg_tone) / 10.0 AS tone_scaled
+                FROM gdelt_sentiment g
+                WHERE g.symbol = {A}.symbol
+                  AND g.date <= {A}.{D}
+                  AND g.date >= ({A}.{D}::date - interval '30 days')::text
+            ) gdelt ON TRUE
+            LEFT JOIN proprietary_scores_history psh_az
+                   ON psh_az.symbol = {A}.symbol
+                  AND psh_az.source = 'moneycontrol'
+                  AND psh_az.score_type = 'altman_z_score'
+                  AND psh_az.date = (
+                      SELECT MAX(p2.date) FROM proprietary_scores_history p2
+                      WHERE p2.symbol = {A}.symbol AND p2.source = 'moneycontrol'
+                        AND p2.score_type = 'altman_z_score'
+                        AND p2.date <= {A}.{D}
+                  )
+            LEFT JOIN proprietary_scores_history psh_oo
+                   ON psh_oo.symbol = {A}.symbol
+                  AND psh_oo.source = 'moneycontrol'
+                  AND psh_oo.score_type = 'ohlson_o_score'
+                  AND psh_oo.date = (
+                      SELECT MAX(p2.date) FROM proprietary_scores_history p2
+                      WHERE p2.symbol = {A}.symbol AND p2.source = 'moneycontrol'
+                        AND p2.score_type = 'ohlson_o_score'
+                        AND p2.date <= {A}.{D}
+                  )
+            LEFT JOIN proprietary_scores_history psh_gn
+                   ON psh_gn.symbol = {A}.symbol
+                  AND psh_gn.source = 'moneycontrol'
+                  AND psh_gn.score_type = 'graham_number'
+                  AND psh_gn.date = (
+                      SELECT MAX(p2.date) FROM proprietary_scores_history p2
+                      WHERE p2.symbol = {A}.symbol AND p2.source = 'moneycontrol'
+                        AND p2.score_type = 'graham_number'
+                        AND p2.date <= {A}.{D}
+                  )
+            LEFT JOIN proprietary_scores_history psh_ds
+                   ON psh_ds.symbol = {A}.symbol
+                  AND psh_ds.source = 'moneycontrol'
+                  AND psh_ds.score_type = 'dupont_score'
+                  AND psh_ds.date = (
+                      SELECT MAX(p2.date) FROM proprietary_scores_history p2
+                      WHERE p2.symbol = {A}.symbol AND p2.source = 'moneycontrol'
+                        AND p2.score_type = 'dupont_score'
+                        AND p2.date <= {A}.{D}
+                  )
+            LEFT JOIN feature_store fs
+                   ON fs.symbol = {A}.symbol AND fs.date::text = {A}.{D} AND fs.timeframe = 'D'
+            LEFT JOIN market_breadth mb ON mb.date = {A}.{D}
+            LEFT JOIN historical_fno_sentiment hfs
+                   ON hfs.symbol = {A}.symbol AND hfs.date = {A}.{D}
+            LEFT JOIN (
+                SELECT
+                    date::text AS snap_date,
+                    MAX(CASE WHEN symbol='GIFT_NIFTY_CHG_PCT'   THEN close END) AS gift_nifty_pct,
+                    MAX(CASE WHEN symbol='NIFTY_GEX'             THEN close END) AS nifty_gex,
+                    MAX(CASE WHEN symbol='INDIA_10Y'             THEN close END) AS india_10y,
+                    MAX(CASE WHEN symbol='INDIA_US_SPREAD'       THEN close END) AS india_us_spread,
+                    MAX(CASE WHEN symbol='HIGH_IMPACT_EVENTS_3D' THEN close END) AS high_impact_3d,
+                    MAX(CASE WHEN symbol='ASIA_SENTIMENT'        THEN close END) AS asia_sentiment,
+                    MAX(CASE WHEN symbol='GLOBAL_RISK_SCORE'     THEN close END) AS global_risk,
+                    MAX(CASE WHEN symbol='ADRS_BULLISH_PCT'      THEN close END) AS adrs_bullish_pct,
+                    MAX(CASE WHEN symbol='USDINR'                THEN ret_1d  END) AS usdinr_ret_1d,
+                    MAX(CASE WHEN symbol='NIKKEI'                THEN ret_1d  END) AS nikkei_ret_1d,
+                    MAX(CASE WHEN symbol='HANGSENG'              THEN ret_1d  END) AS hangseng_ret_1d,
+                    MAX(CASE WHEN symbol='MARKET_NP_GROWTH_YOY'  THEN close END) AS market_np_yoy,
+                    MAX(CASE WHEN symbol='EARNINGS_BREADTH'       THEN close END) AS earnings_breadth_mkt,
+                    MAX(CASE WHEN symbol='FII_NET_TODAY'           THEN close END) AS fii_net_today,
+                    MAX(CASE WHEN symbol='INDIA_VIX'              THEN close END) AS india_vix,
+                    MAX(CASE WHEN symbol='INDIA_MMI'              THEN close END) AS india_mmi,
+                    MAX(CASE WHEN symbol='USDINR_CHG_PCT'          THEN close END) AS usdinr_chg_pct,
+                    MAX(CASE WHEN symbol='NIFTY_BASIS_PCT'          THEN close END) AS nifty_basis_pct,
+                    MAX(CASE WHEN symbol='NIFTY_CONTANGO'           THEN close END) AS nifty_contango
+                FROM macro_asset_prices
+                GROUP BY date
+            ) macro_snap ON macro_snap.snap_date = {A}.{D}
+            LEFT JOIN mc_sector_earnings mse ON mse.sector_name = (
+                SELECT ns.sector FROM nse_stocks ns WHERE ns.symbol = {A}.symbol LIMIT 1
+            )
+            LEFT JOIN LATERAL (
+                SELECT sfs2.sector_pcr, sfs2.total_call_oi, sfs2.total_put_oi
+                FROM sector_fo_sentiment sfs2
+                JOIN nse_stocks ns2 ON ns2.sector = sfs2.sector AND ns2.symbol = {A}.symbol
+                WHERE sfs2.date <= {A}.{D}::date
+                ORDER BY sfs2.date DESC
+                LIMIT 1
+            ) sfs ON true
+    """
+    return select_cols, joins
+
+
+def full_feature_score_sql() -> tuple:
+    """Returns (select_columns_sql, joins_sql) for the same feature set as
+    full_feature_train_sql(), anchored directly on `ts` (technical_signals) for score-time
+    use -- mirrors load_pending_signals()'s Postgres query below. Uses the LIVE
+    stock_fundamentals snapshot (`sf`) rather than the as-of fundamentals_history join,
+    same convention load_pending_signals() uses, since at score time "latest known" is
+    correct (no point-in-time leakage risk -- the row being scored is today's).
+    Extracted 2026-08-30 for cs_ranker.py's score_batch(), which was scoring off the same
+    narrow ~29-column set its training query used -- see full_feature_train_sql()'s docstring.
+
+    cr_upgrades/cr_downgrades are selected here DELIBERATELY, and their absence was a real
+    (pre-existing, not introduced by the extraction) train/serve skew: the training query has
+    always emitted both credit-rating counts, but no score-time query ever did, so
+    build_features()'s num('cr_upgrades', 0.0) defaulted them to zero at inference. That made
+    THREE features -- credit_trend, credit_upgraded, credit_x_score -- carry real values while
+    training and constant 0.0 while scoring. drop_untrainable_features() cannot catch this:
+    the columns are perfectly well-behaved in the training matrix, and only degenerate on the
+    serving side. Verified against the committed file before fixing (git show HEAD -- the
+    score path had no cr_upgrades either), so this closes an old defect rather than a
+    regression. Keep the two subqueries in sync with full_feature_train_sql()'s copies; any
+    column present in one and not the other is skew by construction.
+    """
+    select_cols = """
+                   ts.rsi, ts.adx, ts.nifty_regime, ts.cmp, ts.sma200, ts.volume_ratio,
+                   ts.fii_3d_net,
+                   ts.above_sma200,
+                   ts.news_sentiment_score,
+                   ts.pcr_oi, ts.pcr_vol,
+                   ts.fii_10d_net, ts.dii_3d_net,
+                   ts.delivery_pct,
+                   ts.sector_ret_5d, ts.sector_ret_21d,
+                   ts.sector_global_corr_21d,
+                   ts.iv_rank, ts.iv_skew, ts.call_wall_dist_pct, ts.put_wall_dist_pct, ts.near_expiry_gamma,
+                   ts.rs_rank_21d, ts.rs_rank_63d,
+                   ts.insider_buy_pct_90d,
+                   ts.opening_range_break,
+                   ts.vwap_deviation_pct,
+                   ts.first_hour_vol_share,
+                   ts.avwap_deviation_pct,
+                   ts.oi_net_change_pct,
+                   ts.eps_beat_last_q,
+                   ts.eps_beat_streak_4q,
+                   ts.eps_miss_streak_4q,
+                   ts.eps_surprise_last_yr,
+                   ts.eps_estimate_dispersion,
+                   fs.ret_12m_ex1m,
+                   mb.pct_above_200dma, mb.adv_decline_ratio, mb.net_highs_lows,
+                   hfs.max_pain,
+                   ts.mf_holding_pct, ts.mf_fund_count, ts.mf_chg_vs_prev,
+                   ts.rollover_pct, ts.cost_of_carry_ann,
+                   ts.block_deal_net_qty, ts.block_deal_value_cr,
+                   ts.eps_ttm, ts.eps_growth_yoy, ts.eps_growth_qoq, ts.eps_acceleration,
+                   ts.pe_ttm, ts.dvm_durability, ts.dvm_valuation, ts.dvm_momentum,
+                   ts.pe_pct_rank_252d, ts.pe_vs_median_1yr, ts.pb_pct_rank_252d, ts.div_yield_ttm,
+                   ts.ma_bull_frac, ts.osc_bull_frac, ts.adx_tl, ts.atr_pct_tl, ts.mfi_tl,
+                   ts.pivot_dist_pct_tl, ts.delivery_avg_1m_tl, ts.beta_1y_tl,
+                   ts.ret_1m_tl, ts.ret_3m_tl, ts.ret_6m_tl, ts.ret_1y_tl,
+                   ts.analyst_upside_pct, ts.analyst_count, ts.analyst_buy_pct,
+                   ts.roe_annual, ts.roce_annual, ts.ebitda_margin, ts.np_margin,
+                   ts.promoter_pct, ts.fii_pct, ts.mf_pct, ts.pledge_pct,
+                   ts.promoter_chg_qoq, ts.fii_chg_qoq, ts.mf_chg_qoq, ts.pledge_chg_qoq,
+                   ts.rev_growth_yoy_q, ts.np_growth_yoy_q,
+                   ts.days_since_dividend, ts.last_dividend_amt,
+                   ts.days_to_ex_div, ts.days_to_board_meeting, ts.upcoming_div_pct,
+                   COALESCE(ts.mc_52w_high_dist_pct, mp.dist_52w_high) AS mc_52w_high_dist_pct, COALESCE(ts.mc_52w_low_dist_pct, mp.dist_52w_low) AS mc_52w_low_dist_pct, COALESCE(ts.mc_days_from_52wh, mp.days_from_52wh) AS mc_days_from_52wh,
+                   COALESCE(ts.mc_cagr_3y, mp.cagr_3y) AS mc_cagr_3y, COALESCE(ts.mc_cagr_5y, mp.cagr_5y) AS mc_cagr_5y, COALESCE(ts.mc_cagr_10y, mp.cagr_10y) AS mc_cagr_10y, COALESCE(ts.mc_ind_pe, mp.ind_pe) AS mc_ind_pe, COALESCE(ts.mc_pe_vs_ind, mp.pe_vs_ind) AS mc_pe_vs_ind,
+                   COALESCE(ts.mc_consensus_pe, mp.consensus_pe) AS mc_consensus_pe, COALESCE(ts.mc_consensus_pb, mp.consensus_pb) AS mc_consensus_pb,
+                   COALESCE(ts.mc_ma30_dist_pct, mp.ma30_dist_pct) AS mc_ma30_dist_pct, COALESCE(ts.mc_ma50_dist_pct, mp.ma50_dist_pct) AS mc_ma50_dist_pct, COALESCE(ts.mc_ma150_dist_pct, mp.ma150_dist_pct) AS mc_ma150_dist_pct, COALESCE(ts.mc_ma200_dist_pct, mp.ma200_dist_pct) AS mc_ma200_dist_pct,
+                   COALESCE(ts.mc_del_pct_3d, mp.del_pct_3d) AS mc_del_pct_3d, COALESCE(ts.mc_del_pct_5d, mp.del_pct_5d) AS mc_del_pct_5d, COALESCE(ts.mc_del_pct_20d, mp.del_pct_20d) AS mc_del_pct_20d, ts.mc_del_acceleration,
+                   COALESCE(ts.mc_vol_ratio, mp.vol_ratio) AS mc_vol_ratio, COALESCE(ts.mc_circuit_dist_pct, mp.circuit_dist_pct) AS mc_circuit_dist_pct, ts.mc_fno_eligible,
+                   COALESCE(ts.mc_3d_return, mp.ret_3d) AS mc_3d_return, COALESCE(ts.mc_ytd_return, mp.ret_ytd) AS mc_ytd_return,
+                   COALESCE(ts.mc_price_cash, mp.price_cash) AS mc_price_cash, COALESCE(ts.mc_consensus_eps, mp.consensus_eps) AS mc_consensus_eps, COALESCE(ts.mc_eps_vs_cons, mp.eps_vs_cons) AS mc_eps_vs_cons, COALESCE(ts.mc_pe_fwd_discount, mp.pe_fwd_discount) AS mc_pe_fwd_discount,
+                   ts.mc_cp_bull_count, ts.mc_cp_bear_count, ts.mc_cp_net_score, ts.mc_cp_avg_target_pct,
+                   ts.tl_vs_nifty_1m, ts.tl_vs_nifty_3m, ts.tl_vs_nifty_6m,
+                   ts.tl_vs_ind_1m, ts.tl_vs_ind_3m,
+                   ts.tl_seasonal_month_5y, ts.tl_dist_3m_high_pct, ts.tl_dist_3m_low_pct,
+                   ts.nt_max_pain_dist_pct, ts.nt_oi_direction, ts.nt_pcr, ts.nt_option_volume_log,
+                   ts.hv_10d, ts.hv_20d, ts.hv_30d, ts.hv_60d, ts.iv_hv_ratio,
+                   ts.pead_score, ts.event_signal_score,
+                   ts.eps_revision_3m_pct, ts.target_revision_3m_pct, ts.analyst_count_chg,
+                   ts.rs_vs_sector_21d, ts.rs_vs_sector_63d,
+                   ts.asm_flag, ts.gsm_stage,
+                   ts.crude_corr_90d, ts.gold_corr_90d, ts.dxy_corr_90d, ts.sp500_corr_90d,
+                   ts.mc_broker_buy_7d, ts.mc_broker_sell_7d, ts.mc_broker_upside,
+                   ts.days_to_next_results, ts.earnings_category_yoy, ts.earnings_category_qoq,
+                   ts.earnings_np_growth_yoy, ts.earnings_np_growth_qoq,
+                   ts.positive_turnaround, ts.negative_turnaround,
+                   ts.earnings_shocker_flag, ts.earnings_shocker_gain,
+                   ts.is_nifty50, ts.is_nifty100, ts.nifty_tier,
+                   ts.pledge_chg_90d,
+                   ts.iep_gap_pct, ts.preopen_imbalance,
+                   ts.expected_move_pct, ts.stock_gex_proxy, ts.iv_term_slope,
+                   ts.eps_surprise_q1, ts.eps_surprise_q2, ts.eps_beat_streak,
+                   ts.eps_miss_after_streak, ts.rev_surprise_q1,
+                   ts.fcf_yield_approx AS fcf_yield, ts.interest_coverage, ts.fcf_positive, ts.debt_coverage_risk,
+                   ts.roce, ts.roce_trend, ts.quick_ratio, ts.ev_ebitda, ts.asset_turnover, ts.cfo_growth,
+                   ts.interest_coverage_post_tax, ts.lt_de_ratio,
+                   ts.nim, ts.cost_to_income, ts.int_income_earning_assets, ts.non_int_income_earning_assets,
+                   ts.op_profit_earning_assets, ts.op_expense_earning_assets, ts.int_exp_earning_assets,
+                   ts.capital_adequacy, ts.tier1_capital, ts.tier2_capital,
+                   ts.gross_npa_pct, ts.net_npa_pct, ts.net_npa_to_advances, ts.num_branches,
+                   ts.int_income_per_employee, ts.np_per_employee, ts.business_per_employee,
+                   ts.int_income_per_branch, ts.np_per_branch,
+                   ts.cfi_growth, ts.cff_growth,
+                   ts.cfo_cagr_3y, ts.cfi_cagr_3y, ts.cff_cagr_3y, ts.cfo_cagr_5y, ts.cfi_cagr_5y, ts.cff_cagr_5y,
+                   ts.mf_net_share_chg_pct, ts.mf_fund_count,
+                   ts.mf_funds_adding, ts.mf_funds_trimming, ts.mf_add_trim_ratio,
+                   ts.mf_avg_pct_assets, ts.mf_big_fund_flow, ts.mf_flow_vs_sector, ts.mf_flow_rank,
+                   ts.delivery_trend_30d, ts.block_deal_flag, ts.block_deal_direction,
+                   ts.short_interest_proxy,
+                   ts.promoter_buy_90d_cr, ts.promoter_sell_90d_cr, ts.promoter_net_90d,
+                   ts.ext_fii_holding_pct, ts.ext_dii_holding_pct, ts.ext_fii_qoq_chg, ts.ext_dii_qoq_chg,
+                   ts.ext_t80_tech_score, ts.ext_t80_quality_rank, ts.ext_t80_valuation_rank, ts.ext_t80_financial_pts,
+                   ts.ext_mojo_quality_rank, ts.ext_mojo_valuation_rank, ts.ext_mojo_financial_pts,
+                   ts.ext_is_overall_score, ts.ext_is_percentile_rank, ts.ext_tt_score,
+                   ts.insider_buy_flag, ts.insider_sell_flag,
+                   ts.rating_upgrade_180d, ts.rating_downgrade_180d, ts.days_since_upgrade,
+                   ts.mf_sector_flow_pct,
+                   ts.receivables_days_ttm, ts.ccc_ttm, ts.ccc_trend,
+                   ts.wc_deteriorating, ts.wc_improving,
+                   ts.screener_bull_count, ts.screener_bear_count, ts.screener_cat_breadth,
+                   ts.screener_tier1_count, ts.screener_momentum_score, ts.screener_streak_days,
+                   ts.screener_name_signal, ts.screener_alpha_score,
+                   macro_snap.gift_nifty_pct, macro_snap.nifty_gex,
+                   macro_snap.india_10y, macro_snap.india_us_spread,
+                   macro_snap.high_impact_3d, macro_snap.asia_sentiment, macro_snap.global_risk,
+                   macro_snap.market_np_yoy, macro_snap.earnings_breadth_mkt,
+                   macro_snap.fii_net_today,
+                   macro_snap.usdinr_chg_pct, macro_snap.nifty_basis_pct, macro_snap.nifty_contango,
+                   macro_snap.india_vix, macro_snap.india_mmi,
+                   macro_snap.adrs_bullish_pct, macro_snap.usdinr_ret_1d,
+                   macro_snap.nikkei_ret_1d, macro_snap.hangseng_ret_1d,
+                   mse.np_growth_yoy AS sector_np_growth_yoy, mse.np_growth_qoq AS sector_np_growth_qoq,
+                   mse.rev_growth_yoy AS sector_rev_growth_yoy,
+                   sf.fifty_two_week_high,
+                   sf.piotroski_f_score, sf.debt_to_equity, sf.operating_margins,
+                   sf.return_on_equity, sf.revenue_growth, sf.earnings_growth,
+                   sf.earnings_yield, sf.price_to_book, sf.market_cap,
+                   aeh.n_analysts, aeh.buy_count, aeh.target_mean,
+                   psh_az.score_value AS altman_z,
+                   psh_oo.score_value AS ohlson_o,
+                   psh_gn.score_value AS graham_number,
+                   psh_ds.score_value AS dupont_score,
+                   (SELECT COUNT(*) FROM credit_rating_events cre
+                     WHERE cre.symbol = ts.symbol
+                       AND UPPER(cre.action) LIKE '%UPGRADE%'
+                       AND cre.announcement_date::date >= (ts.date::date - interval '365 days')
+                       AND cre.announcement_date::date <= ts.date::date) AS cr_upgrades,
+                   (SELECT COUNT(*) FROM credit_rating_events cre
+                     WHERE cre.symbol = ts.symbol
+                       AND UPPER(cre.action) LIKE '%DOWNGRADE%'
+                       AND cre.announcement_date::date >= (ts.date::date - interval '365 days')
+                       AND cre.announcement_date::date <= ts.date::date) AS cr_downgrades,
+                   sfs.sector_pcr, sfs.total_call_oi AS sector_call_oi, sfs.total_put_oi AS sector_put_oi
+    """
+    joins = """
+            LEFT JOIN LATERAL (
+                SELECT * FROM mc_pricefeed_daily mp2
+                WHERE mp2.symbol = ts.symbol
+                  AND mp2.date <= ts.date::text
+                  AND mp2.date >= (ts.date::date - interval '7 days')::text
+                ORDER BY mp2.date DESC
+                LIMIT 1
+            ) mp ON TRUE
+            LEFT JOIN stock_fundamentals sf ON sf.symbol = ts.symbol
+            LEFT JOIN feature_store fs
+                   ON fs.symbol = ts.symbol AND fs.date = ts.date AND fs.timeframe = 'D'
+            LEFT JOIN market_breadth mb ON mb.date = ts.date::text
+            LEFT JOIN historical_fno_sentiment hfs
+                   ON hfs.symbol = ts.symbol AND hfs.date = ts.date::text
+            LEFT JOIN LATERAL (
+                SELECT * FROM analyst_estimates_history aeh2
+                WHERE aeh2.symbol = ts.symbol AND aeh2.as_of_date <= ts.date::text
+                ORDER BY aeh2.as_of_date DESC
+                LIMIT 1
+            ) aeh ON TRUE
+            LEFT JOIN proprietary_scores_history psh_az
+                   ON psh_az.symbol = ts.symbol
+                  AND psh_az.source = 'moneycontrol'
+                  AND psh_az.score_type = 'altman_z_score'
+                  AND psh_az.date = (
+                      SELECT MAX(p2.date) FROM proprietary_scores_history p2
+                      WHERE p2.symbol = ts.symbol AND p2.source = 'moneycontrol'
+                        AND p2.score_type = 'altman_z_score'
+                        AND p2.date <= ts.date::text
+                  )
+            LEFT JOIN proprietary_scores_history psh_oo
+                   ON psh_oo.symbol = ts.symbol
+                  AND psh_oo.source = 'moneycontrol'
+                  AND psh_oo.score_type = 'ohlson_o_score'
+                  AND psh_oo.date = (
+                      SELECT MAX(p2.date) FROM proprietary_scores_history p2
+                      WHERE p2.symbol = ts.symbol AND p2.source = 'moneycontrol'
+                        AND p2.score_type = 'ohlson_o_score'
+                        AND p2.date <= ts.date::text
+                  )
+            LEFT JOIN proprietary_scores_history psh_gn
+                   ON psh_gn.symbol = ts.symbol
+                  AND psh_gn.source = 'moneycontrol'
+                  AND psh_gn.score_type = 'graham_number'
+                  AND psh_gn.date = (
+                      SELECT MAX(p2.date) FROM proprietary_scores_history p2
+                      WHERE p2.symbol = ts.symbol AND p2.source = 'moneycontrol'
+                        AND p2.score_type = 'graham_number'
+                        AND p2.date <= ts.date::text
+                  )
+            LEFT JOIN proprietary_scores_history psh_ds
+                   ON psh_ds.symbol = ts.symbol
+                  AND psh_ds.source = 'moneycontrol'
+                  AND psh_ds.score_type = 'dupont_score'
+                  AND psh_ds.date = (
+                      SELECT MAX(p2.date) FROM proprietary_scores_history p2
+                      WHERE p2.symbol = ts.symbol AND p2.source = 'moneycontrol'
+                        AND p2.score_type = 'dupont_score'
+                        AND p2.date <= ts.date::text
+                  )
+            LEFT JOIN (
+                SELECT
+                    MAX(CASE WHEN symbol='GIFT_NIFTY_CHG_PCT'   THEN close END) AS gift_nifty_pct,
+                    MAX(CASE WHEN symbol='NIFTY_GEX'             THEN close END) AS nifty_gex,
+                    MAX(CASE WHEN symbol='INDIA_10Y'             THEN close END) AS india_10y,
+                    MAX(CASE WHEN symbol='INDIA_US_SPREAD'       THEN close END) AS india_us_spread,
+                    MAX(CASE WHEN symbol='HIGH_IMPACT_EVENTS_3D' THEN close END) AS high_impact_3d,
+                    MAX(CASE WHEN symbol='ASIA_SENTIMENT'        THEN close END) AS asia_sentiment,
+                    MAX(CASE WHEN symbol='GLOBAL_RISK_SCORE'     THEN close END) AS global_risk,
+                    MAX(CASE WHEN symbol='ADRS_BULLISH_PCT'      THEN close END) AS adrs_bullish_pct,
+                    MAX(CASE WHEN symbol='USDINR'                THEN ret_1d  END) AS usdinr_ret_1d,
+                    MAX(CASE WHEN symbol='NIKKEI'                THEN ret_1d  END) AS nikkei_ret_1d,
+                    MAX(CASE WHEN symbol='HANGSENG'              THEN ret_1d  END) AS hangseng_ret_1d,
+                    MAX(CASE WHEN symbol='MARKET_NP_GROWTH_YOY'  THEN close END) AS market_np_yoy,
+                    MAX(CASE WHEN symbol='EARNINGS_BREADTH'       THEN close END) AS earnings_breadth_mkt,
+                    MAX(CASE WHEN symbol='FII_NET_TODAY'           THEN close END) AS fii_net_today,
+                    MAX(CASE WHEN symbol='INDIA_VIX'              THEN close END) AS india_vix,
+                    MAX(CASE WHEN symbol='INDIA_MMI'              THEN close END) AS india_mmi,
+                    MAX(CASE WHEN symbol='USDINR_CHG_PCT'          THEN close END) AS usdinr_chg_pct,
+                    MAX(CASE WHEN symbol='NIFTY_BASIS_PCT'          THEN close END) AS nifty_basis_pct,
+                    MAX(CASE WHEN symbol='NIFTY_CONTANGO'           THEN close END) AS nifty_contango
+                FROM macro_asset_prices
+                WHERE date::text = (SELECT MAX(date)::text FROM macro_asset_prices)
+            ) macro_snap ON 1=1
+            LEFT JOIN mc_sector_earnings mse ON mse.sector_name = (
+                SELECT ns.sector FROM nse_stocks ns WHERE ns.symbol = ts.symbol LIMIT 1
+            )
+            LEFT JOIN LATERAL (
+                SELECT sfs2.sector_pcr, sfs2.total_call_oi, sfs2.total_put_oi
+                FROM sector_fo_sentiment sfs2
+                JOIN nse_stocks ns2 ON ns2.sector = sfs2.sector AND ns2.symbol = ts.symbol
+                ORDER BY sfs2.date DESC
+                LIMIT 1
+            ) sfs ON true
+    """
+    return select_cols, joins
 
 
 def load_training_data(label: str = 'triple_barrier') -> pd.DataFrame:
@@ -2313,7 +2832,9 @@ def _base_models(scale_pos_weight: float = 1.0, tuned_params: dict | None = None
 
 
 def tune_hyperparameters(X: pd.DataFrame, y: pd.Series, weights: np.ndarray | None,
-                          spw: float, embargo: int, n_splits: int = 5, n_trials: int = 20) -> dict:
+                          spw: float, embargo: int, n_splits: int = 5, n_trials: int = 20,
+                          dates: pd.Series | None = None,
+                          horizon_days: int | None = None) -> dict:
     """Run Optuna Bayesian hyperparameter search to find best parameters for LightGBM, XGBoost, and CatBoost."""
     import optuna
     from sklearn.model_selection import TimeSeriesSplit
@@ -2323,11 +2844,18 @@ def tune_hyperparameters(X: pd.DataFrame, y: pd.Series, weights: np.ndarray | No
 
     optuna.logging.set_verbosity(optuna.logging.WARNING)
 
-    effective_embargo = min(embargo, len(X) // 10)
-    n_eff = n_splits
-    if effective_embargo > 0:
-        n_eff = max(2, min(n_splits, len(X) // max(1, effective_embargo + 1) - 1))
-    skf = TimeSeriesSplit(n_splits=n_eff, gap=effective_embargo)
+    if dates is not None and len(dates) == len(X) and pd.Series(dates).nunique() > 2:
+        skf = make_purged_group_time_series_split(
+            dates,
+            horizon_days=horizon_days if horizon_days is not None else max(1, embargo),
+            n_splits=n_splits,
+        )
+    else:
+        effective_embargo = min(embargo, len(X) // 10)
+        n_eff = n_splits
+        if effective_embargo > 0:
+            n_eff = max(2, min(n_splits, len(X) // max(1, effective_embargo + 1) - 1))
+        skf = TimeSeriesSplit(n_splits=n_eff, gap=effective_embargo)
     sw = weights if weights is not None else None
 
     def objective(trial):
@@ -2414,8 +2942,67 @@ def average_uniqueness(start_days, horizons) -> list:
     return out
 
 
+def feature_matrix_coverage_report(X: pd.DataFrame) -> dict:
+    """Cheap per-feature training diagnostics after build_features().
+
+    build_features() intentionally emits neutral defaults for scoring continuity.
+    Training needs a second gate so fully-defaulted or numerically-degenerate columns do
+    not become split candidates just because they are present in the schema.
+    """
+    clean = X.replace([np.inf, -np.inf], np.nan)
+    report = {}
+    for col in clean.columns:
+        s = clean[col]
+        report[col] = {
+            'non_null_pct': float(s.notna().mean()) if len(s) else 0.0,
+            'distinct_values': int(s.nunique(dropna=True)),
+            'std': float(s.std(skipna=True)) if s.notna().any() else 0.0,
+        }
+    return report
+
+
+def drop_untrainable_features(
+    X: pd.DataFrame,
+    *,
+    min_non_null_pct: float = 0.98,
+    min_distinct_values: int = 2,
+    min_std: float = 1e-12,
+    min_remaining_features: int = 10,
+) -> tuple[pd.DataFrame, dict]:
+    """Drop hollow engineered features for training while preserving score-time defaults."""
+    report = feature_matrix_coverage_report(X)
+    dropped: dict[str, str] = {}
+    for col, stats in report.items():
+        if stats['non_null_pct'] < min_non_null_pct:
+            dropped[col] = f"non_null_pct={stats['non_null_pct']:.3f}"
+        elif stats['distinct_values'] < min_distinct_values:
+            dropped[col] = f"distinct_values={stats['distinct_values']}"
+        elif abs(stats['std']) <= min_std:
+            dropped[col] = f"std={stats['std']:.3g}"
+
+    keep = [c for c in X.columns if c not in dropped]
+    if len(keep) < min_remaining_features:
+        return X, {
+            'enabled': False,
+            'reason': f"only {len(keep)} features would remain",
+            'dropped': {},
+            'kept_count': len(X.columns),
+            'original_count': len(X.columns),
+            'coverage': report,
+        }
+
+    return X[keep].copy(), {
+        'enabled': True,
+        'dropped': dropped,
+        'kept_count': len(keep),
+        'original_count': len(X.columns),
+        'coverage': report,
+    }
+
+
 def _fit_stack(X: pd.DataFrame, y: pd.Series, spw: float, embargo: int, n_splits: int = 5,
-               sample_weight=None, tuned_params: dict | None = None):
+               sample_weight=None, tuned_params: dict | None = None,
+               dates: pd.Series | None = None, horizon_days: int | None = None):
     """
     Fit OOF-stacked base models + meta-learner on (X, y), purging `embargo` samples
     between each train/validation fold so overlapping forward-return windows cannot
@@ -2430,11 +3017,18 @@ def _fit_stack(X: pd.DataFrame, y: pd.Series, spw: float, embargo: int, n_splits
     from sklearn.metrics import roc_auc_score
 
     sw = np.asarray(sample_weight, dtype=float) if sample_weight is not None else None
-    effective_embargo = min(embargo, len(X) // 10)
-    n_eff = n_splits
-    if effective_embargo > 0:
-        n_eff = max(2, min(n_splits, len(X) // max(1, effective_embargo + 1) - 1))
-    skf = TimeSeriesSplit(n_splits=n_eff, gap=effective_embargo)
+    if dates is not None and len(dates) == len(X) and pd.Series(dates).nunique() > 2:
+        skf = make_purged_group_time_series_split(
+            dates,
+            horizon_days=horizon_days if horizon_days is not None else max(1, embargo),
+            n_splits=n_splits,
+        )
+    else:
+        effective_embargo = min(embargo, len(X) // 10)
+        n_eff = n_splits
+        if effective_embargo > 0:
+            n_eff = max(2, min(n_splits, len(X) // max(1, effective_embargo + 1) - 1))
+        skf = TimeSeriesSplit(n_splits=n_eff, gap=effective_embargo)
     base = _base_models(scale_pos_weight=spw, tuned_params=tuned_params, cv=skf)
 
     oof     = np.zeros((len(X), len(base)))
@@ -2557,6 +3151,12 @@ def train_ensemble(X: pd.DataFrame, y: pd.Series, dates: pd.Series | None = None
             regime_weights = np.clip(regime_weights, 0.2, 5.0)
             weights = (weights if weights is not None else np.ones(len(X))) * regime_weights
 
+    X, feature_filter_report = drop_untrainable_features(X)
+    dropped_count = len(feature_filter_report.get('dropped', {}))
+    if dropped_count:
+        print(f"[Ensemble]   Dropped {dropped_count} untrainable/constant features "
+              f"({feature_filter_report['kept_count']}/{feature_filter_report['original_count']} kept).")
+
     # ── Honest held-out test: last 10% for reporting, prior 10% for threshold selection ──
     # Threshold is found on a dedicated val split (rows [tr_end : tr_end+n_val]), NOT the
     # test set. This keeps F1/Recall metrics unbiased on the held-out test window.
@@ -2574,9 +3174,12 @@ def train_ensemble(X: pd.DataFrame, y: pd.Series, dates: pd.Series | None = None
     test = {'auc': None, 'precision': None, 'recall': None, 'f1': None, 'n': 0}
     tr_end, n_test, n_val = _compute_holdout_split(X, dates, embargo, min_samples)
     if n_test >= 10 and n_val >= 10:
+        train_dates = dates.iloc[:tr_end] if dates is not None and len(dates) == len(X) else None
         fb, mt, _, _, _ = _fit_stack(X.iloc[:tr_end], y.iloc[:tr_end], spw, embargo,
                                      sample_weight=(weights[:tr_end] if weights is not None else None),
-                                     tuned_params=tuned_params)
+                                     tuned_params=tuned_params,
+                                     dates=train_dates,
+                                     horizon_days=horizon_days)
         # Threshold selection on val split (not reused for reporting)
         X_val, y_val = X.iloc[tr_end : tr_end + n_val], y.iloc[tr_end : tr_end + n_val]
         val_proba = mt.predict_proba(
@@ -2617,7 +3220,9 @@ def train_ensemble(X: pd.DataFrame, y: pd.Series, dates: pd.Series | None = None
         print(f"[Ensemble]   Insufficient data for a held-out test (n={len(X)}); reporting CV only.")
 
     # ── Production model: refit on ALL data; CV metric is the purged-OOF AUC ──
-    fitted, meta, auc, acc, imp = _fit_stack(X, y, spw, embargo, sample_weight=weights)
+    fitted, meta, auc, acc, imp = _fit_stack(
+        X, y, spw, embargo, sample_weight=weights, dates=dates, horizon_days=horizon_days
+    )
     print(f"[Ensemble]   Stacking purged-OOF AUC={auc:.4f}  Accuracy={acc:.4f}  (embargo={embargo})")
 
     return {
@@ -2635,6 +3240,7 @@ def train_ensemble(X: pd.DataFrame, y: pd.Series, dates: pd.Series | None = None
         'optimal_threshold':  test.get('optimal_threshold', 0.45),
         'embargo':            embargo,
         'n_samples':          len(X),
+        'feature_filter':     feature_filter_report,
         # was naive datetime.datetime.now().isoformat() -- on this box (local clock IST) that
         # silently stored wall-clock IST into model_registry.trained_at (TIMESTAMPTZ, session
         # TimeZone=UTC), ~5.5h ahead of true UTC. See db_compat.now_utc_iso().
@@ -3290,7 +3896,11 @@ def run(do_train: bool = True, do_score: bool = True,
                     weights_tune = weights[:tune_tr_end] if weights is not None else None
 
                     try:
-                        tuned_params = tune_hyperparameters(X_tune, y_tune, weights_tune, spw, embargo, n_trials=30)
+                        tuned_dates = df['signal_date'].iloc[:tune_tr_end]
+                        tuned_params = tune_hyperparameters(
+                            X_tune, y_tune, weights_tune, spw, embargo, n_trials=30,
+                            dates=tuned_dates, horizon_days=_hz,
+                        )
                     except Exception as e:
                         print(f"[Ensemble] Tuning failed: {e}. Falling back to default parameters.", file=sys.stderr)
 

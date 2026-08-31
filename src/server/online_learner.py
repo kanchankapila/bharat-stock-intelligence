@@ -28,7 +28,6 @@ import numpy as np
 import pandas as pd
 
 from db_compat import connect, read_df, ConnWrapper
-from as_of import as_of_join_sql
 
 # Script-relative, not os.getcwd()-relative -- see ml_ensemble.py's MODELS_DIR comment.
 MODELS_DIR     = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'ml_models')
@@ -54,53 +53,23 @@ def load_recent_outcomes(window_days: int, min_new: int) -> pd.DataFrame:
     ml_ensemble.load_training_data so build_features() receives every column
     it expects (missing ones default safely inside the ensemble's num() helper).
     """
+    # 2026-08-30: was a hand-rolled ~30-column SELECT while build_features() (called on this
+    # DataFrame two calls downstream) reads 304 raw columns -- the other ~90% silently defaulted
+    # to constants via num()'s fallback, same bug class as cs_ranker.py/exit_policy.py (see
+    # ml-model-bugs.md). Worse here than in those two: load_pending_signals() below already
+    # delegates to ml_ensemble's canonical (full-width) query, so the SGD/PassiveAggressive
+    # models were trained on a narrow constant-padded vector but SCORED on the real wide one --
+    # a train/serve feature-distribution skew, not just a narrower model. Fixed by sharing the
+    # same full_feature_train_sql() cs_ranker.py/exit_policy.py now use.
+    from ml_ensemble import full_feature_train_sql  # deferred, see build_features() above
     cutoff = (datetime.datetime.now() - datetime.timedelta(days=window_days)).strftime('%Y-%m-%d')
+    select_cols, joins = full_feature_train_sql('so', 'signal_date')
     q = f"""
         SELECT so.symbol, so.signal_date, so.horizon_days, so.outcome,
                so.signal_score, so.signals_json,
-               ts.rsi, ts.adx, ts.nifty_regime, ts.cmp, ts.sma200, ts.volume_ratio,
-               ts.fii_3d_net, ts.above_sma200, ts.pcr_oi, ts.pcr_vol,
-               ts.fii_10d_net, ts.dii_3d_net, ts.delivery_pct,
-               ts.sector_ret_5d, ts.sector_ret_21d,
-               ts.iv_rank, ts.iv_skew,
-               ts.rs_rank_21d, ts.rs_rank_63d,
-               ts.insider_buy_pct_90d,
-               ts.opening_range_break, ts.vwap_deviation_pct, ts.first_hour_vol_share,
-               COALESCE(fh.fifty_two_week_high, sf.fifty_two_week_high) AS fifty_two_week_high,
-               COALESCE(fh.piotroski_f_score, sf.piotroski_f_score)     AS piotroski_f_score,
-               COALESCE(fh.debt_to_equity, sf.debt_to_equity)           AS debt_to_equity,
-               COALESCE(fh.operating_margins, sf.operating_margins)     AS operating_margins,
-               COALESCE(fh.return_on_equity, sf.return_on_equity)       AS return_on_equity,
-               COALESCE(fh.revenue_growth, sf.revenue_growth)           AS revenue_growth,
-               COALESCE(fh.earnings_growth, sf.earnings_growth)         AS earnings_growth,
-               COALESCE(fh.earnings_yield, sf.earnings_yield)           AS earnings_yield,
-               COALESCE(fh.price_to_book, sf.price_to_book)             AS price_to_book,
-               COALESCE(fh.market_cap, sf.market_cap)                   AS market_cap,
-               aeh.n_analysts, aeh.buy_count, aeh.target_mean,
-               psh_az.score_value AS altman_z,
-               psh_oo.score_value AS ohlson_o
+               {select_cols}
         FROM signal_outcomes so
-        LEFT JOIN technical_signals ts
-               ON ts.symbol = so.symbol AND so.signal_date = ts.date::text
-        {as_of_join_sql('fundamentals_history', 'fh', 'so', 'symbol', 'signal_date')}
-        LEFT JOIN stock_fundamentals sf ON sf.symbol = so.symbol
-        {as_of_join_sql('analyst_estimates_history', 'aeh', 'so', 'symbol', 'signal_date')}
-        LEFT JOIN proprietary_scores_history psh_az
-               ON psh_az.symbol = so.symbol AND psh_az.source = 'moneycontrol'
-              AND psh_az.score_type = 'altman_z_score'
-              AND psh_az.date = (
-                  SELECT MAX(p2.date) FROM proprietary_scores_history p2
-                  WHERE p2.symbol = so.symbol AND p2.source = 'moneycontrol'
-                    AND p2.score_type = 'altman_z_score' AND p2.date <= so.signal_date
-              )
-        LEFT JOIN proprietary_scores_history psh_oo
-               ON psh_oo.symbol = so.symbol AND psh_oo.source = 'moneycontrol'
-              AND psh_oo.score_type = 'ohlson_o_score'
-              AND psh_oo.date = (
-                  SELECT MAX(p2.date) FROM proprietary_scores_history p2
-                  WHERE p2.symbol = so.symbol AND p2.source = 'moneycontrol'
-                    AND p2.score_type = 'ohlson_o_score' AND p2.date <= so.signal_date
-              )
+        {joins}
         WHERE so.outcome IN ('WIN','LOSS','NEUTRAL')
           AND so.signal_date >= ?
           AND so.signal_source = 'technical'

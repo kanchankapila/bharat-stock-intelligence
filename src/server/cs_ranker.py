@@ -28,11 +28,10 @@ from db_compat import connect, read_df, ConnWrapper
 from model_promotion import (clears_promotion_bar, rejections_since,
                               staleness_override_applies,
                               DEFAULT_STALENESS_MAX_DAYS, DEFAULT_STALENESS_MAX_REJECTIONS)
-from as_of import as_of_join_sql
 
 # Import feature engineering from the binary ensemble — same pipeline, different label.
 sys.path.insert(0, os.path.dirname(__file__))
-from ml_ensemble import build_features
+from ml_ensemble import build_features, full_feature_train_sql, full_feature_score_sql
 
 MODELS_DIR    = os.path.join(os.path.dirname(__file__), 'ml_models')
 CS_MODEL_PATH = os.path.join(MODELS_DIR, 'cs_ranker.pkl')
@@ -84,56 +83,19 @@ def load_cs_training_data() -> pd.DataFrame:
         print("[CSRanker] WARNING: No NIFTY50 data in stock_ohlcv — using raw return_pct as target")
         nifty = None
 
+    # Full feature set (2026-08-30): this used to hand-select ~29 of build_features()'s 304
+    # raw inputs -- everything else (screener composites, F&O positioning, TL/MC vendor
+    # ratios, macro snapshot, analyst revisions, ownership/pledge, earnings-shock flags, ...)
+    # silently defaulted to a constant for every training row. See measurement.md's
+    # cs_ranker/exit_policy feature-completeness finding and full_feature_train_sql()'s
+    # docstring in ml_ensemble.py.
+    select_cols, joins = full_feature_train_sql('so', 'signal_date')
     q = f"""
         SELECT so.symbol, so.signal_date, so.return_pct,
                so.signal_score, so.signals_json, so.horizon_days,
-               ts.rsi, ts.adx, ts.nifty_regime, ts.cmp, ts.sma200, ts.volume_ratio,
-               ts.fii_3d_net, ts.above_sma200, ts.pcr_oi, ts.pcr_vol,
-               ts.fii_10d_net, ts.dii_3d_net, ts.delivery_pct,
-               ts.sector_ret_5d, ts.sector_ret_21d,
-               ts.iv_rank, ts.iv_skew,
-               ts.rs_rank_21d, ts.rs_rank_63d,
-               ts.insider_buy_pct_90d,
-               ts.opening_range_break,
-               ts.vwap_deviation_pct,
-               ts.first_hour_vol_share,
-               COALESCE(fh.fifty_two_week_high, sf.fifty_two_week_high) AS fifty_two_week_high,
-               COALESCE(fh.piotroski_f_score, sf.piotroski_f_score)     AS piotroski_f_score,
-               COALESCE(fh.debt_to_equity, sf.debt_to_equity)           AS debt_to_equity,
-               COALESCE(fh.operating_margins, sf.operating_margins)     AS operating_margins,
-               COALESCE(fh.return_on_equity, sf.return_on_equity)       AS return_on_equity,
-               COALESCE(fh.revenue_growth, sf.revenue_growth)           AS revenue_growth,
-               COALESCE(fh.earnings_growth, sf.earnings_growth)         AS earnings_growth,
-               COALESCE(fh.earnings_yield, sf.earnings_yield)           AS earnings_yield,
-               COALESCE(fh.price_to_book, sf.price_to_book)             AS price_to_book,
-               COALESCE(fh.market_cap, sf.market_cap)                   AS market_cap,
-               aeh.n_analysts, aeh.buy_count, aeh.target_mean,
-               psh_az.score_value AS altman_z,
-               psh_oo.score_value AS ohlson_o
+               {select_cols}
         FROM signal_outcomes so
-        LEFT JOIN technical_signals ts
-               ON ts.symbol = so.symbol AND ts.date = so.signal_date::date
-        {as_of_join_sql('fundamentals_history', 'fh', 'so', 'symbol', 'signal_date')}
-        LEFT JOIN stock_fundamentals sf ON sf.symbol = so.symbol
-        {as_of_join_sql('analyst_estimates_history', 'aeh', 'so', 'symbol', 'signal_date')}
-        LEFT JOIN proprietary_scores_history psh_az
-               ON psh_az.symbol = so.symbol
-              AND psh_az.source = 'moneycontrol'
-              AND psh_az.score_type = 'altman_z_score'
-              AND psh_az.date = (
-                  SELECT MAX(p2.date) FROM proprietary_scores_history p2
-                  WHERE p2.symbol = so.symbol AND p2.source = 'moneycontrol'
-                    AND p2.score_type = 'altman_z_score' AND p2.date <= so.signal_date
-              )
-        LEFT JOIN proprietary_scores_history psh_oo
-               ON psh_oo.symbol = so.symbol
-              AND psh_oo.source = 'moneycontrol'
-              AND psh_oo.score_type = 'ohlson_o_score'
-              AND psh_oo.date = (
-                  SELECT MAX(p2.date) FROM proprietary_scores_history p2
-                  WHERE p2.symbol = so.symbol AND p2.source = 'moneycontrol'
-                    AND p2.score_type = 'ohlson_o_score' AND p2.date <= so.signal_date
-              )
+        {joins}
         WHERE so.outcome IN ('WIN', 'LOSS', 'STOP_LOSS')
           AND so.return_pct IS NOT NULL
           AND so.horizon_days = 5
@@ -451,46 +413,15 @@ def score_batch() -> int:
         print("[CSRanker] No model found — run --train first.")
         return 0
 
+    # Full feature set (2026-08-30) -- same widening as load_cs_training_data(), so the
+    # scoring pass uses the same columns the model was actually trained on instead of the
+    # narrower ~13-column set this query used before.
+    select_cols, joins = full_feature_score_sql()
     q = f"""
         SELECT ts.symbol, ts.date AS signal_date, ts.signal_score, ts.signals_json,
-               ts.rsi, ts.adx, ts.nifty_regime, ts.cmp, ts.sma200, ts.volume_ratio,
-               ts.fii_3d_net, ts.above_sma200, ts.pcr_oi, ts.pcr_vol,
-               ts.fii_10d_net, ts.dii_3d_net, ts.delivery_pct,
-               ts.sector_ret_5d, ts.sector_ret_21d,
-               ts.iv_rank, ts.iv_skew,
-               ts.rs_rank_21d, ts.rs_rank_63d,
-               ts.insider_buy_pct_90d,
-               ts.opening_range_break,
-               ts.vwap_deviation_pct,
-               ts.first_hour_vol_share,
-               sf.fifty_two_week_high,
-               sf.piotroski_f_score, sf.debt_to_equity, sf.operating_margins,
-               sf.return_on_equity, sf.revenue_growth, sf.earnings_growth,
-               sf.earnings_yield, sf.price_to_book, sf.market_cap,
-               aeh.n_analysts, aeh.buy_count, aeh.target_mean,
-               psh_az.score_value AS altman_z,
-               psh_oo.score_value AS ohlson_o
+               {select_cols}
         FROM technical_signals ts
-        LEFT JOIN stock_fundamentals sf ON sf.symbol = ts.symbol
-        {as_of_join_sql('analyst_estimates_history', 'aeh', 'ts', 'symbol', 'date', False)}
-        LEFT JOIN proprietary_scores_history psh_az
-               ON psh_az.symbol = ts.symbol
-              AND psh_az.source = 'moneycontrol'
-              AND psh_az.score_type = 'altman_z_score'
-              AND psh_az.date = (
-                  SELECT MAX(p2.date) FROM proprietary_scores_history p2
-                  WHERE p2.symbol = ts.symbol AND p2.source = 'moneycontrol'
-                    AND p2.score_type = 'altman_z_score' AND p2.date <= ts.date::text
-              )
-        LEFT JOIN proprietary_scores_history psh_oo
-               ON psh_oo.symbol = ts.symbol
-              AND psh_oo.source = 'moneycontrol'
-              AND psh_oo.score_type = 'ohlson_o_score'
-              AND psh_oo.date = (
-                  SELECT MAX(p2.date) FROM proprietary_scores_history p2
-                  WHERE p2.symbol = ts.symbol AND p2.source = 'moneycontrol'
-                    AND p2.score_type = 'ohlson_o_score' AND p2.date <= ts.date::text
-              )
+        {joins}
         WHERE ts.cs_score IS NULL
           AND ts.win_probability IS NOT NULL
         ORDER BY ts.date DESC

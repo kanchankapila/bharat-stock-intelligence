@@ -140,6 +140,42 @@ def build_bse_to_nse_map(conn) -> dict[str, dict]:
     """
     Build a map of isin -> {symbol, isin} using nse_stocks table, used as a fallback
     when NSE's own event Symbol field is missing/"NOTLISTED" (debt-only issuers).
+
+    Returns TWO layers, exact first then issuer-prefix:
+
+      mapping[<full 12-char ISIN>]        -> exact equity match
+      mapping['P:' + <first 8 chars>]     -> same ISSUER, different instrument
+
+    Why the second layer (added 2026-08-30, measured): 279 of 323 live
+    credit_rating_events rows had a blank symbol, and ALL 279 carried an ISIN, so the
+    exact-match lookup was not merely sparse -- it was structurally unable to hit. An
+    Indian ISIN is INE + 4-char issuer + 2-digit INSTRUMENT code + serial: '01'/'10' is
+    equity, the '07'/'08' families (70/71/73/80/81/82) are debentures/bonds/NCDs. Credit
+    ratings are overwhelmingly issued against DEBT, so a rated bond's ISIN never equals
+    the issuer's equity ISIN even when the issuer is a large NSE-listed name -- measured
+    on the blank rows: instrument codes 80 (47), 70 (35), 71 (20), 82 (17), 81 (11),
+    73 (11), versus code 10 (equity) on 38 of the 44 rows that DID resolve.
+    The first 8 characters are the issuer, shared across all its instruments, so matching
+    on that recovers 104 of the 279 (37%) to real listed symbols -- IIFL (20 events),
+    HDBFS (15), NLCINDIA (6), LTF (4), SBIN (4), BANKINDIA (3), UCOBANK (3), ...
+    Verified by replaying all 279 blank rows through this function: every spot-checked
+    symbol matches its own headline company (INE084A08169 -> BANKINDIA "Bank Of India",
+    INE484J08097 -> GODREJPROP "Godrej Properties", INE530B07534 -> IIFL "IIFL Finance",
+    INE608A08017 -> PSB "Punjab & Sind Bank"). A blind first-match SQL estimate said 117
+    and attributed L&T Finance to LT; skipping ambiguous prefixes costs 13 rows and gets
+    LTF right instead -- which is the trade this guard exists to make.
+    A bond downgrade of a listed issuer is exactly the credit signal credit_trend /
+    credit_upgraded are meant to carry, and all of it was being dropped.
+
+    The remaining ~147 stay blank and SHOULD: genuinely unlisted issuers, InvITs and
+    trusts (e.g. 'Capital Infra Trust'), plus 15 rows whose ISIN is a sentinel that is
+    not even INE-prefixed (e.g. 'ZZZ555Z55555'). Blank is the correct answer for those.
+
+    Ambiguous prefixes are DROPPED, never guessed: 18 issuer prefixes in nse_stocks map
+    to more than one symbol, and silently taking the first would be the same blind
+    fallback that wrote garbage identifiers in the trendlyne_screener_discovery incident
+    (see data-sources.md, "Never guess"). An ambiguous issuer resolves to blank, which is
+    recoverable later; a wrong symbol attributes another company's downgrade and is not.
     """
     mapping: dict[str, dict] = {}
 
@@ -155,6 +191,22 @@ def build_bse_to_nse_map(conn) -> dict[str, dict]:
                         "symbol": row.get("symbol", ""),
                         "isin":   isin,
                     }
+            # Issuer-prefix layer. Count distinct symbols per prefix first so an
+            # ambiguous issuer can be excluded rather than resolved arbitrarily.
+            prefix_syms: dict[str, set] = {}
+            for _, row in df.iterrows():
+                isin = str(row.get("isin", "")).strip()
+                sym  = str(row.get("symbol", "") or "").strip()
+                if len(isin) >= 8 and sym:
+                    prefix_syms.setdefault(isin[:8], set()).add(sym)
+            ambiguous = 0
+            for pfx, syms in prefix_syms.items():
+                if len(syms) == 1:
+                    mapping["P:" + pfx] = {"symbol": next(iter(syms)), "isin": ""}
+                else:
+                    ambiguous += 1
+            print(f"[CreditRating] Loaded {len(prefix_syms) - ambiguous} unambiguous "
+                  f"ISIN-issuer-prefix mappings ({ambiguous} ambiguous prefixes skipped)")
             print(f"[CreditRating] Loaded {len(mapping)} ISIN->NSE mappings from nse_stocks (fallback)")
     except Exception as e:
         print(f"[CreditRating] nse_stocks isin fallback warning: {e}", file=sys.stderr)
@@ -193,6 +245,10 @@ def parse_announcements(rows: list[dict], bse_nse_map: dict[str, dict]) -> list[
         # a single exact-match check misses most of them.
         if not symbol or symbol.upper().replace(" ", "") in ("NA", "NOTLISTED", "NOTAPPLICABLE"):
             resolved = bse_nse_map.get(isin)
+            if not resolved and len(isin) >= 8 and isin.upper().startswith("INE"):
+                # Same issuer, different instrument (a rated bond/NCD of a listed company).
+                # Guarded on the INE prefix so a sentinel ISIN can't collide into a real one.
+                resolved = bse_nse_map.get("P:" + isin[:8])
             symbol = resolved.get("symbol", "") if resolved else ""
 
         headline = f"{row.get('CompanyName', '')} — {agency} {row.get('CreditRating', '')} ({row.get('RatingAction', '')})".strip()

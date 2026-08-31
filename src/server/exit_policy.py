@@ -29,7 +29,7 @@ import numpy as np
 import pandas as pd
 
 from db_compat import connect, read_df
-from ml_ensemble import build_features
+from ml_ensemble import build_features, full_feature_train_sql
 from as_of import as_of_join_sql
 from model_promotion import (decide_promotion_with_nan_guard, rejections_since,
                               staleness_override_applies,
@@ -81,22 +81,22 @@ def load_exit_training_data() -> pd.DataFrame:
 
     Capped to the most recent MAX_TRAINING_ROWS by signal_date (see the comment above) --
     re-sorted ascending afterward since train_from_df's time-ordered split assumes that order."""
+    # Full feature set (2026-08-30): this used to hand-select ~23 of build_features()'s 304
+    # raw inputs -- everything else silently defaulted to a constant for every training row.
+    # See measurement.md's cs_ranker/exit_policy feature-completeness finding and
+    # full_feature_train_sql()'s docstring in ml_ensemble.py. Anchored on `se` (signal_excursions
+    # has the same symbol/signal_date shape as signal_outcomes), so the LATERAL join inside
+    # full_feature_train_sql already finds its own `ts` row -- the old hand-written
+    # `JOIN technical_signals ts` above is now redundant and removed.
+    select_cols, joins = full_feature_train_sql('se', 'signal_date')
     q = f"""
         WITH recent AS (
             SELECT se.symbol, se.signal_date, se.horizon_days,
                    se.mfe_pct, se.mae_pct,
                    ts.signal_score, ts.signals_json,
-                   ts.rsi, ts.adx, ts.nifty_regime, ts.cmp, ts.sma200, ts.volume_ratio,
-                   ts.fii_3d_net, ts.above_sma200, ts.pcr_oi, ts.pcr_vol,
-                   ts.fii_10d_net, ts.dii_3d_net, ts.delivery_pct,
-                   ts.sector_ret_5d, ts.sector_ret_21d,
-                   ts.iv_rank, ts.iv_skew, ts.rs_rank_21d, ts.rs_rank_63d,
-                   fh.fifty_two_week_high, fh.piotroski_f_score, fh.debt_to_equity,
-                   fh.operating_margins, fh.return_on_equity, fh.revenue_growth,
-                   fh.earnings_growth, fh.earnings_yield, fh.price_to_book, fh.market_cap
+                   {select_cols}
             FROM signal_excursions se
-            JOIN technical_signals ts ON ts.symbol = se.symbol AND ts.date = se.signal_date::date
-            {as_of_join_sql('fundamentals_history', 'fh', 'se', 'symbol', 'signal_date')}
+            {joins}
             WHERE se.mfe_pct IS NOT NULL AND se.mae_pct IS NOT NULL
             ORDER BY se.signal_date DESC
             LIMIT {MAX_TRAINING_ROWS}
