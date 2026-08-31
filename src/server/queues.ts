@@ -2543,15 +2543,22 @@ export async function initQueues(): Promise<boolean> {
       { connection, concurrency: 1, lockDuration: 3 * 60_000 });
     console.log('[QUEUE] Pre-open snapshot scheduled at 9:10 AM IST (weekdays)');
 
-    // ── Intraday regime refresh: VIX + USDINR + Nifty basis every 15 min (9:15–15:30 IST) ──
+    // ── Intraday regime refresh: VIX + USDINR + Nifty basis, every 15 min ──
+    // '*/15 3-10 * * 1-5' = 03:00-10:45 UTC = 08:30-16:15 IST weekdays. Corrected 2026-08-30:
+    // the old comment said '3:45-10:00 UTC = 9:15-15:30 IST', which is the NSE session, not what
+    // this pattern fires. Cycles outside 09:15-15:30 IST no-op on the chain's own guard.
+    //
+    // Keep this note ABOVE the addJobWithCatchup call, not inside its opts: everything between
+    // this queue's own jobName marker and its lockDuration counts against
+    // jobRegistryGraceMinutesConsistency.test.ts's 4000-char MAX_LOOKAHEAD. Placing these four
+    // lines inside the opts object pushed that distance to 4189 and broke the market-regime-
+    // refresh + intraday-ranker cases of that test (CI, 2026-08-31) -- the same proximity-parser
+    // fragility recurring-bugs.md already records for the 'ml-daily-ops' marker in this file.
     const QUEUE_REGIME = 'market-regime-refresh';
     const regimeQueue = new Queue(QUEUE_REGIME, { connection });
     const regimeRep = await regimeQueue.getRepeatableJobs();
     for (const r of regimeRep) await regimeQueue.removeRepeatableByKey(r.key);
     await addJobWithCatchup(regimeQueue, 'regime-intraday', {}, {
-      // '*/15 3-10 * * 1-5' = 03:00-10:45 UTC = 08:30-16:15 IST weekdays. Corrected 2026-08-30:
-      // the old comment said '3:45-10:00 UTC = 9:15-15:30 IST', which is the MARKET session, not
-      // what this pattern fires. Cycles outside 09:15-15:30 IST no-op on the chain's own guard.
       repeat: { pattern: '*/15 3-10 * * 1-5' },
       jobId: 'regime-intraday',
       removeOnComplete: 3, removeOnFail: 3,
