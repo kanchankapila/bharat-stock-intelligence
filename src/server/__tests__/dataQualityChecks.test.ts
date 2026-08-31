@@ -1,13 +1,19 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 const mockRow: { current: Record<string, any> | undefined } = { current: undefined };
+const mockRows: { current: Array<Record<string, any>> } = { current: [] };
+const dbRunCalls: Array<{ sql: string; params: any[] }> = [];
 vi.mock('../dbAsync', () => ({
   dbGet: vi.fn(async () => mockRow.current),
-  dbRun: vi.fn(async () => {}),
+  dbAll: vi.fn(async () => mockRows.current),
+  dbRun: vi.fn(async (sql: string, params: any[] = []) => { dbRunCalls.push({ sql, params }); }),
   dbExec: vi.fn(async () => {}),
 }));
 
-import { DATA_QUALITY_CHECKS, daysStale, tradingDaysStale, safeRatio, runDataQualityChecks } from '../dataQualityChecks';
+import {
+  DATA_QUALITY_CHECKS, daysStale, tradingDaysStale, safeRatio, runDataQualityChecks,
+  getLatestDataQualityResults,
+} from '../dataQualityChecks';
 
 describe('daysStale', () => {
   const now = new Date('2026-07-19T12:00:00Z');
@@ -541,6 +547,39 @@ describe('runDataQualityChecks (orchestration)', () => {
     for (const r of results) {
       expect(['pass', 'warn', 'fail', 'error']).toContain(r.status);
     }
+  });
+
+  // A removed check's last verdict stayed readable forever: persistResult() upserts per
+  // check_id and never deletes, so 'deploy-drift'/'port-drift' (removed 2026-08-29) were still
+  // being reported as failing by the daily digest on 2026-08-31. Both halves are guarded — the
+  // sweep purges, and the read filters — because either alone leaves one path exposed.
+  it('purges snapshot rows for check ids the sweep did not produce', async () => {
+    dbRunCalls.length = 0;
+    await runDataQualityChecks(new Date('2026-07-19T12:00:00Z'));
+
+    const purge = dbRunCalls.find(c => /DELETE FROM data_quality_results/i.test(c.sql));
+    expect(purge, 'sweep must delete rows for checks that no longer exist').toBeDefined();
+    expect(purge!.sql).toMatch(/NOT IN/i);
+    expect(purge!.params.length).toBe(DATA_QUALITY_CHECKS.length);
+    expect(purge!.params).toContain(DATA_QUALITY_CHECKS[0].id);
+    expect(purge!.params).not.toContain('deploy-drift');
+  });
+});
+
+describe('getLatestDataQualityResults (decommissioned-check leakage)', () => {
+  beforeEach(() => { mockRows.current = []; });
+
+  it('drops persisted rows whose check no longer exists in the registry', async () => {
+    const liveId = DATA_QUALITY_CHECKS[0].id;
+    mockRows.current = [
+      { check_id: liveId, label: 'live', category: 'reference', critical: 1, status: 'pass', detail: 'ok' },
+      { check_id: 'deploy-drift', label: 'gone', category: 'reference', critical: 1, status: 'fail', detail: 'checker stopped' },
+    ];
+
+    const results = await getLatestDataQualityResults();
+
+    expect(results.map(r => r.id)).toEqual([liveId]);
+    expect(results.some(r => r.status === 'fail')).toBe(false);
   });
 });
 

@@ -2486,7 +2486,22 @@ export async function runDataQualityChecks(now: Date = new Date()): Promise<Data
     results.push({ id: check.id, label: check.label, category: check.category, critical: check.critical, ...outcome });
     await persistResult(check, outcome);
   }
+  await purgeOrphanResults(results.map(r => r.id));
   return results;
+}
+
+/** Deletes snapshot rows for check ids this sweep did not produce. recurring-bugs.md: "any table
+ *  written as today's full recomputation needs a purge of rows the run did not produce" -- without
+ *  it, deleting a check leaves its last verdict readable forever. data_quality_history is
+ *  deliberately NOT purged: it is the append-only record of what was true at the time. */
+async function purgeOrphanResults(liveIds: string[]): Promise<void> {
+  if (!liveIds.length) return; // never purge on a sweep that produced nothing
+  try {
+    const placeholders = liveIds.map(() => '?').join(', ');
+    await dbRun(`DELETE FROM data_quality_results WHERE check_id NOT IN (${placeholders})`, liveIds);
+  } catch {
+    // Housekeeping must never break the check run itself.
+  }
 }
 
 /** Reads the latest persisted result per check_id (written by the most recent
@@ -2499,7 +2514,17 @@ export async function getLatestDataQualityResults(): Promise<DataQualityResult[]
     const rows = await dbAll<{ check_id: string; label: string; category: string; critical: number; status: DataQualityStatus; detail: string }>(
       'SELECT check_id, label, category, critical, status, detail FROM data_quality_results',
     );
-    return rows.map(r => ({ id: r.check_id, label: r.label, category: r.category, critical: !!r.critical, status: r.status, detail: r.detail }));
+    // Filter to checks that still EXIST. persistResult() upserts one row per check_id and never
+    // deletes, so a check removed from DATA_QUALITY_CHECKS leaves its final row frozen in the
+    // table forever -- and every consumer reading "latest status per check" then reports that
+    // dead verdict as a live one. Measured 2026-08-31: 'deploy-drift'/'port-drift' (removed
+    // 2026-08-29, AF-20260829-17) still held status='fail' from their last sweep on 2026-08-29
+    // and were still being listed under "Needs attention" in the daily digest two days later,
+    // for monitoring that had been deliberately switched off.
+    const live = new Set(DATA_QUALITY_CHECKS.map(c => c.id));
+    return rows
+      .filter(r => live.has(r.check_id))
+      .map(r => ({ id: r.check_id, label: r.label, category: r.category, critical: !!r.critical, status: r.status, detail: r.detail }));
   } catch {
     return [];
   }
