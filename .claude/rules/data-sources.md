@@ -117,3 +117,47 @@ Indices use a separate `indexData` array in `src/server/stockMapping.ts` with `{
 ## Freshness-check mandate
 
 - **Every new live datasource (a fetcher that writes to its own table from an external API) must also get a freshness check in `src/server/dataQualityChecks.ts`.** This is not optional, for the same reason the `live_datasource`-test mandate above isn't: on 2026-08-03, a full sweep of every `runPython()` call site found the file covered only ~25 of the platform's ~140 DB-writing fetchers — most had zero monitoring, and one (`mf_sector_allocation`, `mf_sector_flow_fetcher.py`'s own target table) turned out to be completely empty, indistinguishable from healthy in every existing dashboard. Adding a check is a **one-line config addition**, not a hand-rolled block — push a `{ id, label, category, critical, table, dateColumn, ... }` entry onto the `TABLE_FRESHNESS_CHECKS` array (see the factory + its doc comment in `dataQualityChecks.ts`) and `makeFreshnessCheck()` generates the SQL + evaluate() logic. Use `tradingDayAware: true` (the default) for anything that only updates on NSE trading days — weekends must not false-positive a Monday-morning check (see the same file's `tradingDaysStale()`); set it `false` only for genuinely 24/7-cadence tables (e.g. `confluence_signals`, refreshed every 30 min year-round). Omit `failDays` for a "sparse by nature" datasource (insider filings, IPOs, bulk deals) so it only ever warns, matching `insider-trades-recency`'s existing style — a hand-rolled bespoke check is still fine for anything needing custom logic beyond simple freshness (coverage %, enum/range validation, plausibility bounds), the factory is only for "is this table still getting fresh rows." Only a hand-rolled `evaluate()` (not the factory) is needed for a genuinely internal/derived table (model registries, RL Q-tables, weight-history bookkeeping) — those are ML state, not datasources, and don't belong in this mandate.
+
+## Vendor-onboarding freeze (added 2026-08-30)
+
+**Before onboarding a new vendor/provider, first check whether the existing feature backlog is
+graded.** `ml_ensemble.py`'s own training matrix has **116 of 421 features (28%) with no measured
+cross-sectional signal** (`ml_label_and_promotion_gate_2026_08_21` memory) — each new vendor adds
+more raw columns into `build_features()`/`feature_store` that are, by default, untested and
+correlated with what's already there (most published factors on this platform's data are
+negative or null — see `measurement.md`'s "Already tested" table, 14/23 Bonferroni-significant
+`feature_store` factors are ALL inverted vs. their literature sign). A new vendor is not evidence
+of a new edge; it is more untested surface area layered onto a platform whose main measured
+finding is that most of what's already there doesn't help.
+
+**Before adding a new vendor/provider integration:**
+1. Check `measurement.md`'s "Not testable" and "Already tested" sections — is there a specific,
+   named gap this vendor closes (e.g. a factor family with no data source yet), or is it another
+   instance of something already tested and rejected under a different vendor's label (screener
+   sentiment, technical composites, analyst/ownership snapshots — three separate vendors have
+   each contributed one of these, all measuring roughly the same thing)?
+2. State the hypothesis being tested BEFORE writing the fetcher — what specific factor/signal
+   does this vendor's data let you test that nothing else does. "More data can't hurt" is not a
+   hypothesis; per the shared-ceiling finding in `measurement.md`, more *correlated* engines does
+   not raise the AUC ceiling (max pairwise Spearman rho across today's 8 engines is only 0.29,
+   i.e. they're already fairly independent — a new vendor duplicating an existing factor family
+   adds cost and surface area, not diversification).
+3. **A new fetcher's own live-datasource test and freshness check (mandated above) are necessary
+   but not sufficient.** Once ~20 dates of history exist, the new column(s) must get a
+   `factor_edge.py`/`factor_backtest.py` reading before being wired into any production blend
+   (`unified_ranker.py`, `cs_ranker.py`, `exit_policy.py`, `ml_ensemble.py`'s `build_features()`)
+   at anything above a token starting weight — matching the existing `verify-gate.mjs` backtest-
+   evidence requirement for scoring-surface diffs, applied one step earlier, at onboarding time
+   rather than after the column has already been silently blended in for months.
+4. **A feature/vendor column that stays ungraded (LOW-DATA) or grades no-edge for 6+ months after
+   onboarding is a removal candidate**, not permanent scaffolding — re-check the 116-dead-feature
+   count periodically (`SELECT count(*) FROM factor_edge_history WHERE ...`) rather than letting
+   it only grow. This does not apply to genuinely calendar-blocked data (quarterly fundamentals,
+   anything needing 12+ months of history per `measurement.md`'s "Not testable" section) — those
+   are blocked by elapsed time, not by being untested on purpose.
+
+This is a discipline rule, not a hard gate — there is no automated enforcement for it (unlike the
+freshness-check mandate above). The cost of skipping it is diffuse and slow (a slightly bloated,
+slightly-more-correlated feature matrix that nobody prioritizes cleaning up) rather than a single
+sharp failure, which is exactly why it needs to be a written rule instead of relying on it being
+obviously worth doing in the moment.

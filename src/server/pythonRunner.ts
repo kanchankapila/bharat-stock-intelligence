@@ -252,10 +252,25 @@ export async function runPython(
             resolve({ stdout: out, stderr: err });
           } else {
             // A script can sys.exit(1) after printing its failure reason to stdout
-            // (e.g. mc_broker_reco_fetcher.py's "0 recos fetched" guard) rather than
-            // stderr -- fall back to the stdout tail so the reason isn't lost behind
-            // a bare "Command failed with exit code 1" in job logs.
-            const reason = err || (out ? out.slice(-500) : '') || `Command failed with exit code ${code}`;
+            // (e.g. mc_broker_reco_fetcher.py's "0 recos fetched" guard, dl_trainer.py's
+            // `[TRAINER] Done: {...'error'...}` line) rather than stderr -- include the stdout
+            // tail so the reason isn't lost behind a bare "Command failed with exit code 1".
+            //
+            // `err || out` was WRONG and hid a real failure (found 2026-08-30): any script that
+            // imports torch writes UserWarnings to stderr on every single run, so `err` is
+            // effectively never empty for the ML scripts, the `||` short-circuits, and the stdout
+            // tail carrying the ACTUAL error is discarded. Live case: dl-retrain-weekly's make-up
+            // run failed with a recorded reason consisting of nothing but two torch warnings
+            // ('expandable_segments not supported', 'PYTORCH_CUDA_ALLOC_CONF is deprecated') --
+            // no error text at all, in the job history OR the heartbeat. Concatenate both streams
+            // instead of choosing one: stderr is where a traceback lands, stdout is where a
+            // deliberate sys.exit(1) guard prints its reason, and a failing run can use either.
+            const errTail = err ? err.slice(-500) : '';
+            const outTail = out ? out.slice(-500) : '';
+            const reason = [
+              errTail && `stderr: ${errTail}`,
+              outTail && `stdout: ${outTail}`,
+            ].filter(Boolean).join('\n') || `Command failed with exit code ${code}`;
             reject(Object.assign(new Error(reason), { stdout: out, stderr: err, code }));
           }
         });

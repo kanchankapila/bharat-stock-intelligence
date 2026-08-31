@@ -85,15 +85,64 @@ Currently automated (9 checks): `date.today()` write-anchor, short calendar-day 
 - **A test dismissed as an "order-dependent flake" can be a real defect whose trigger is timing** — before labelling anything flaky, reproduce deterministically and read the actual assertion message; it may name the bug outright. Instrumentation that widens timing (e.g. `-s` adding I/O) can hide a timing bug rather than reveal it.
 - **A value written as a SENTINEL (e.g. `0.0`) instead of NULL for "missing" is invisible to every freshness/coverage check and silently poisons any measurement built on that column** — and the fix can't be retroactive (a `0.0` is indistinguishable after the fact from a genuine zero; rewriting historical rows fabricates evidence). Tell: `count(*) FILTER (WHERE col = 0)` as a large round fraction of the universe. Record the fix date as a population boundary and source measurements from raw tables for anything before it.
 
+- **A BullMQ job left in `active` state by a killed worker is a ZOMBIE that looks exactly like a
+  healthy long-running job, and for a weekly queue it silently eats the entire week's slot.**
+  Found 2026-08-30: `dl-retrain-weekly`'s Saturday 2026-08-29 11:30 IST run still showed
+  `active` ~29h later, with `getJobCounts()` reporting `active: 2`. There was no corresponding
+  `python.exe` in the OS process table — a pm2 restart had killed the worker mid-run, and BullMQ
+  keeps the job in `active` until its `stalledInterval`/`maxStalledCount` reclaim fires (here
+  masked further by a 24h `lockDuration` chosen for a genuinely long training job). The job
+  therefore neither ran nor reported failure, and the *consequence* surfaced somewhere else
+  entirely: `model_registry`'s last BiLSTM row was 5 days stale, which reads as "the DL model
+  isn't improving" rather than "the trainer never executed". **Tell:** cross-check any long-
+  `active` job against the OS process table before believing it is running — an `active` BullMQ
+  job with no matching child process is a zombie, and the older it is the more certain that is.
+  Same family as this file's `cron_restart` "Registered != running" entry (a dormant job that
+  looks idle-healthy) and its "lateness branch that can never fire" entry: silence reads as
+  health in all three. Do NOT diagnose from `pm2 list`/`getJobCounts()` alone.
+
+- **A timeout budget is calibrated against the query the step ran WHEN THE BUDGET WAS SET, and
+  widening a SHARED query helper silently invalidates every caller's budget at once.** The
+  2026-08-30 feature-completeness fix repointed `online_learner.load_recent_outcomes()` (plus
+  `cs_ranker.py`/`exit_policy.py`) at `ml_ensemble.full_feature_train_sql()` — ~30 hand-rolled
+  columns to ~275. `online_learner`'s ml-daily-ops budget stayed at the 120_000 chosen for the
+  narrow query; live-measured after the fix it takes **3m34.8s (215s)**, so the step could never
+  again pass, and because it is a `T.run()` step it fails the whole `ml-daily-ops` parent rather
+  than degrading. It had in fact ALREADY timed out at 120s on 2026-08-28, before the widening —
+  so the fix converted an intermittent failure into a guaranteed one. **When you change a shared
+  query/feature helper, grep every caller for its own timeout constant and re-measure each one
+  — the helper's own callers are the blast radius, not just the file you edited.** Sibling of
+  this file's "measured 119s against a 120_000 budget — a 1-second margin" cases: the recurring
+  defect is choosing a budget with no headroom, then never revisiting it when the work grows.
 ## Monitoring blind spots
 
 - **A table-freshness check cannot see whether the FEATURE that table exists to produce ever landed.** A fresh table is not a delivered feature — count 100%-NULL columns on the last COMPLETED day, generically (via `jsonb_each` over the row), not via a hand-enumerated column list that only guards what someone remembered to add.
 - **A data-quality check's own assumption goes stale, silently, when the source logic it guards grows a new legitimate case.** When editing any date/provenance-rollforward function, grep every data-quality check reading the column it stamps — a check's SQL doesn't know when its premise changed underneath it.
 - 🤖 **A degraded-read message printed to stdout (not stderr) defeats the one hook that would surface it** — subprocess wrappers that only inspect stderr for "finished with warnings" never see a `print()`'d degradation message. Use `print(..., file=sys.stderr)` inside anything invoked via a subprocess wrapper that only checks stderr.
 
+- 🤖-adjacent **`const reason = stderr || stdout` discards the real failure reason for every
+  script that emits a harmless warning.** `pythonRunner.ts`'s non-zero-exit branch chose ONE
+  stream with `||`. Any script importing torch writes UserWarnings to stderr on literally every
+  run ('expandable_segments not supported', 'PYTORCH_CUDA_ALLOC_CONF is deprecated'), so `err` is
+  never empty for the ML scripts, the `||` short-circuits, and the stdout tail holding the actual
+  error is thrown away. Found 2026-08-30: `dl-retrain-weekly`'s make-up run was recorded — in
+  `job_run_history`, in the BullMQ `failedReason` AND in the heartbeat — with a 448-character
+  'error' consisting of nothing but those two torch warnings. No error text existed anywhere in
+  the system. The irony is that the branch's own comment already described the stdout case it was
+  failing to handle (`dl_trainer.py` prints `[TRAINER] Done: {...'error':...}` to stdout and THEN
+  `sys.exit(1)`, deliberately, so a swallowed exception cannot be logged as success). Fixed by
+  concatenating both tails, labelled, instead of choosing one.
+  **Tell:** any `a || b` where both operands are diagnostic output. A warning is enough to make
+  the first operand truthy, and warnings are the norm, not the exception. This is the mirror image
+  of the existing 'degraded-read `print()` to stdout' entry above: there the message went to the
+  stream nothing read; here the message went to the right stream and was discarded anyway because
+  the *other* stream happened to be non-empty. Both produce the same end state — a failure with no
+  recoverable reason — so check both directions when a job reports an error you cannot act on.
 ## Investigating production without breaking it
 
 - **A client-side timeout does NOT cancel the server-side query — it orphans it**, and on a big table that orphan can hold a lock that blocks the whole platform for hours, which then gets misdiagnosed as a storage-engine cost problem. Diagnose lock contention (`pg_stat_activity`, `wait_event_type = 'Lock'`) before theorizing about decompression/storage cost — a query "hanging" on one specific table while others respond normally is lock contention until proven otherwise. Prevent it with a server-side `SET LOCAL statement_timeout`, not a client-side `timeout` wrapper.
+
+- **Matching a `pg_stat_activity` row to a suspected-orphan bug BY QUERY TEXT ALONE, without checking its `query_start` against wall-clock time, can kill the wrong connection — including the very job you're trying to unblock.** 2026-08-30: a genuinely orphaned `idle in transaction` connection from an earlier killed script (matching the exact bug class above) was found and `pg_terminate_backend()`'d — but a SECOND `pg_stat_activity` snapshot, taken right after relaunching the real job, showed another `idle in transaction` row with the same `INSERT INTO feature_store...` query text and a `duration` that read as suspiciously small (single-digit/negative milliseconds from a JS `now() - query_start` computation). That row was pattern-matched to "another instance of the same orphan bug" and killed too — except a near-zero duration is the opposite signal: it meant the transaction had JUST started, i.e. it was the newly-launched legitimate job's own connection caught mid-batch between commits, not a stale orphan. Killing it crashed the job (`sqlalchemy.exc.PendingRollbackError: Can't reconnect until invalid transaction is rolled back`). No data was lost (the writes were `ON CONFLICT DO UPDATE`, so already-committed rows survived), but the job had to be restarted from scratch. **Tell:** `idle in transaction` alone is not evidence of an orphan — a live batch job legitimately sits `idle in transaction` between statements while accumulating a batch before its next `commit()`. Before terminating any backend PID, cross-check `query_start` against `now()` on the SAME query (not two separate snapshots minutes apart) and prefer `pg_blocking_pids(pid)` / a `wait_event_type = 'Lock'` read on some OTHER session to confirm something is actually blocked ON this connection, not just that this connection's query text looks familiar.
 - **A migration's own "files remaining" progress counter cannot count the files it never reaches** — derive coverage counts from the source tree (`grep -rl`), never from the instrument measuring its own coverage.
 - **A test that WRITES through one engine (a raw driver) and READS through another (an app-level facade) asserts nothing**, and stays green as long as both happen to land on the same backend. Pick one; if the code under test uses the facade, the fixture must too.
 - **Moving a test substrate onto the real dialect is not fixture churn — budget for real production bugs it will surface**, because the old substrate structurally could not fail on them (wrong column names, wrong PK assumptions, methods the driver doesn't support all passed silently under a more forgiving engine).
@@ -159,6 +208,32 @@ Currently automated (9 checks): `date.today()` write-anchor, short calendar-day 
   difference between scaffolding and a feature. Same family as ml-model-bugs.md's
   "evidence-shaped output" class, in bulk-refactor form.
 
+- **A test that locates a value in SOURCE TEXT by character distance from a marker breaks when
+  you add a COMMENT — and the failure names the source, not your comment.**
+  `jobRegistryGraceMinutesConsistency.test.ts` finds each job's `lockDuration` by scanning
+  forward from the first occurrence of its jobName marker, capped at `MAX_LOOKAHEAD = 4000`
+  chars. Adding a 3-line explanatory comment INSIDE `addJobWithCatchup(regimeQueue, ...)`'s opts
+  object pushed `'regime-intraday'` -> `lockDuration` from 3933 to 4189 and failed two cases with
+  "no lockDuration found near marker ... source shape may have changed" (CI 2026-08-31). Nothing
+  about the behaviour changed; only the whitespace between two tokens did.
+  **Second instance in this file** — `queues.ts` already carries an inline warning about the
+  same hazard for the `'ml-daily-ops'` marker, which is what makes this a class and not an
+  accident. It was documented, read, and walked into anyway.
+  **Two traps when fixing it, both hit here on the first attempt (which made it WORSE, 4646):**
+  (1) moving the comment ABOVE the call is the right fix — text before the marker costs zero
+  distance — but (2) if your new comment QUOTES the marker string, the comment becomes the
+  FIRST occurrence and moves the search origin earlier, which is worse than where you started.
+  The test's own docstring warns about a stray reference to the same string; that warning applies
+  to comments you add while fixing it. Refer to the marker descriptively, and assert the literal
+  still appears exactly the expected number of times.
+  **Margins here are thin by nature** (~100 chars after the fix; only 67 on main beforehand), so
+  measure rather than eyeball: compute `src.indexOf(marker)` and the nearest `lockDuration` match
+  offset directly, and compare against the pre-change baseline from `git show <ref>:<file>` — not
+  merely against the cap, or you will land back at the edge without noticing.
+  **How it reached CI:** the comment edits were followed by `tsc --noEmit` only. CLAUDE.md
+  requires vitest for ANY `.ts` change, and the green vitest run being relied on predated the
+  edits. A typecheck cannot see a source-text-parsing test. **Re-run the suite after the LAST
+  edit, not after the last edit you considered risky** — this one looked like a pure comment.
 ## Environment & deploy
 
 - **Declared ≠ installed.** A dependency in `package.json`/`requirements.txt` but not actually installed silently breaks a live job for days.

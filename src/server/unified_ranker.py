@@ -179,15 +179,42 @@ HORIZON_MULT = {
 # Re-check via a fresh blend_walkforward.py run once ~20+ further sessions accumulate; if
 # the dIC advantage reverses on the larger sample, revert is a one-commit operation.
 REGIME_WEIGHTS = {
-    'BULL':     {'screener': 0.08445,  'ml': 0.107098, 'cs': 0.079331, 'confluence': 0.214195, 'technical': 0.171356, 'dl': 0.114237, 'breakout': 0.15, 'smart_money': 0.079333},
-    'BEAR':     {'screener': 0.100068, 'ml': 0.136449, 'cs': 0.082198, 'confluence': 0.272899, 'technical': 0.138093, 'dl': 0.138093, 'breakout': 0.05, 'smart_money': 0.0822},
-    'HIGH_VOL': {'screener': 0.054404, 'ml': 0.079274, 'cs': 0.066062, 'confluence': 0.158549, 'technical': 0.317099, 'dl': 0.158549, 'breakout': 0.10, 'smart_money': 0.066063},
-    'CRASH':    {'screener': 0.115177, 'ml': 0.144181, 'cs': 0.089001, 'confluence': 0.224281, 'technical': 0.144181, 'dl': 0.144181, 'breakout': 0.05, 'smart_money': 0.088998},
+    'BULL':     {'screener': 0.0, 'ml': 0.118912, 'cs': 0.088082, 'confluence': 0.237824, 'technical': 0.190259, 'dl': 0.126839, 'breakout': 0.15, 'smart_money': 0.088084},
+    'BEAR':     {'screener': 0.0, 'ml': 0.152514, 'cs': 0.091876, 'confluence': 0.305028, 'technical': 0.154352, 'dl': 0.154352, 'breakout': 0.05, 'smart_money': 0.091878},
+    'HIGH_VOL': {'screener': 0.0, 'ml': 0.084374, 'cs': 0.070312, 'confluence': 0.16875, 'technical': 0.337501, 'dl': 0.16875, 'breakout': 0.10, 'smart_money': 0.070313},
+    'CRASH':    {'screener': 0.0, 'ml': 0.164073, 'cs': 0.10128, 'confluence': 0.255224, 'technical': 0.164073, 'dl': 0.164073, 'breakout': 0.05, 'smart_money': 0.101277},
     # SIDEWAYS was silently falling back to BULL; a balanced blend is more appropriate for
     # a rangebound tape (lean slightly less on momentum/dl than BULL).
-    'SIDEWAYS': {'screener': 0.090793, 'ml': 0.11737, 'cs': 0.081507, 'confluence': 0.23474, 'technical': 0.146713, 'dl': 0.11737, 'breakout': 0.13, 'smart_money': 0.081507},
+    'SIDEWAYS': {'screener': 0.0, 'ml': 0.131046, 'cs': 0.091004, 'confluence': 0.262092, 'technical': 0.163808, 'dl': 0.131046, 'breakout': 0.13, 'smart_money': 0.091004},
 }
-# SECOND screener shrink, 2026-08-21 (the first was 2026-08-20, same policy, same reason).
+# THIRD screener shrink, 2026-08-30, all the way to zero (the first two were 2026-08-20/21).
+#
+# Kept the 'screener' key (weight 0.0) rather than removing it, deliberately: _blend()
+# renormalizes over `{e: weights[e] for e in weights if e in present_engines}` -- a present
+# engine at weight 0.0 contributes exactly 0.0 to both the numerator and wsum, which is
+# mathematically identical to dropping the key, but keeps `unified_recommendations`'s
+# `screener_stock_score` column, drift monitoring, and every downstream reader that expects
+# the key present (dispersion-collapse tracking, the reporting columns) working unchanged --
+# only its weight in unified_score is now zero, not its existence in the pipeline.
+#
+# screener's freed weight was redistributed proportionally across the other 6 engines --
+# EXCLUDING breakout, which stays pinned at its own independent audit-derived ceiling
+# ([0.15, 0.05, 0.10, 0.05, 0.13] across BULL/BEAR/HIGH_VOL/CRASH/SIDEWAYS, asserted by
+# test_unified_ranker.py's test_regime_weights_sum_to_one) -- a proportional split must never
+# scale that value up just because screener's mass became available.
+#
+# Evidence for zero specifically, not just "shrink further": assembly_ablation.py's `rw7`
+# (screener excluded) vs `rw7+screener` (screener added back in at this exact REGIME_WEIGHTS
+# value, same _blend()-style renormalization) arms have measured this precise comparison FOUR
+# independent times (direct factor test, the confluence_score natural experiment, the ablation
+# bisection itself, and the 2026-08-29 full re-run, reproduced bit-identical 2026-08-30) --
+# adding screener at its prior nonzero weight cost -0.0136 IC @5d / -0.0163 IC @21d every time.
+# That comparison IS this code change (screener-in-at-current-weight vs screener-out), not a
+# proxy for it. See measurement.md's screener bisection entry for the numbers and
+# .claude/rules/ml-model-bugs.md for why a monitor/ablation result needs the null checked before
+# trusting it -- already done for this one. Re-verify post-deploy once ~15-20 fresh dates
+# accumulate under the new weights: `factor_edge.py --table unified_recommendations` against the
+# live `unified_score` column, not just this repeated ablation read.
 # ENGINE_EDGE_SHRINK=0.5 applied again to `screener` only, freed weight redistributed
 # proportionally over the 6 non-pinned engines. `breakout` is pinned at its exact prior value
 # in every regime -- it has an independent audit-derived ceiling (BREAKOUT_WEIGHT_CEILING /

@@ -229,6 +229,15 @@ const TABLE_FRESHNESS_CHECKS: TableFreshnessConfig[] = [
   // re-graded, and a silently-dead producer would look identical to one that is simply flat.
   { id: 'engine-composite-freshness', label: 'engine_composite_scores (equal-weight raw-engine composite, research)',
     category: 'ml', critical: false, table: 'engine_composite_scores', dateColumn: 'date', warnDays: 3, failDays: 5 },
+  // exit_labeler.py's path-based MFE/MAE/tb_label excursions -- the entire training input for
+  // exit_policy.py (target/stop regressors) and the triple_barrier label ml_ensemble.py trains
+  // on. Had NO freshness check at all (found 2026-08-30 investigating why exit_policy.py's
+  // retrains kept losing to their baseline -- see measurement.md's cs_ranker/exit_policy
+  // feature-completeness finding): a dead exit_labeler.py would silently freeze both models'
+  // training data on stale history with nothing flagging it, same "looks healthy, quietly
+  // stalled" shape as engine_composite_scores above. Thresholds match that sibling entry.
+  { id: 'signal-excursions-freshness', label: 'signal_excursions (exit_policy training labels: MFE/MAE/tb_label)',
+    category: 'ml', critical: false, table: 'signal_excursions', dateColumn: 'signal_date', warnDays: 3, failDays: 5 },
 
   // flows
   // Watches insider_trades (Tickertape), NOT insider_transactions (NSE corporates-pit).

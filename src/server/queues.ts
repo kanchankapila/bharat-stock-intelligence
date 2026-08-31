@@ -1111,7 +1111,19 @@ async function processMlDailyOps(job: Job): Promise<{ success: boolean; failedSt
   // promotion decision to model_registry (model_name='online_sgd') on every run, but until now
   // its failure was swallowed by console.warn alone -- indistinguishable from a healthy run in
   // every monitor this platform has, same gap already fixed for its siblings in this function.
-  await T.run('online-learner', () => runPython('online_learner.py', ['--window', '180'], 120_000));
+  // Budget raised 120_000 -> 900_000 on 2026-08-30. Two independent reasons, both measured:
+  // (1) it was ALREADY failing at 120s -- job_run_history shows 'online-learner Timed out after
+  //     120000ms' on 2026-08-28, which failed the whole ml-daily-ops parent ('1 steps failed:
+  //     online-learner') since this is a T.run() step, not a tolerated .catch().
+  // (2) the 2026-08-30 feature-completeness fix repointed load_recent_outcomes() at
+  //     ml_ensemble.full_feature_train_sql() (~275 columns, was a hand-rolled ~30-column
+  //     SELECT), so the query it runs is now far wider than when 120s was chosen.
+  // Live-measured after that fix, against production: 3m34.8s wall (266,396 outcomes over the
+  // 180-day window, val_AUC 0.5017) -- i.e. 1.8x the old budget on its own, before any
+  // contention from the ~15 sibling ml-daily-ops steps sharing the 5-slot Python pool.
+  // 15min matches the headroom already given to densify-feature-matrix/performance-tracker
+  // rather than being another 1-second-margin budget of the kind this file keeps re-learning.
+  await T.run('online-learner', () => runPython('online_learner.py', ['--window', '180'], 15 * 60_000));
 
   // Warm-start LGBM ensemble on the last 3 days of newly-resolved outcomes (+20 boost rounds).
   // Runs after online_learner so SGD priors are already updated; keeps ensemble fresh daily
@@ -1787,7 +1799,9 @@ export async function initQueues(): Promise<boolean> {
         // the full universe at 2 AM and on weekends/holidays against completely unchanged EOD
         // data. Narrowed to the same 8:30 AM-4:00 PM IST window as intraday-fetcher (one extra
         // post-close run), plus the same in-handler isMarketOpen() check for holiday-awareness.
-        repeat: { pattern: '*/30 3-10 * * 1-5' }, // 3:00-10:30 UTC = 8:30 AM-4:00 PM IST, weekdays
+        // 03:00-10:30 UTC = 08:30-16:00 IST, weekdays (every 30 min). Spans the full NSE session
+        // (09:15-15:30 IST) plus a pre-open and post-close cycle either side.
+        repeat: { pattern: '*/30 3-10 * * 1-5' },
         jobId: 'technical-signals-daily',
         removeOnComplete: 3,
         removeOnFail: 3,
@@ -2381,15 +2395,21 @@ export async function initQueues(): Promise<boolean> {
       recordHeartbeat('mover-intraday-capture', 'failed', err?.message);
     });
 
-    // ── Mover STUDY (weekly, Sunday 12:00 IST = 06:30 UTC): rebuilds computed classes
+    // ── Mover STUDY (weekly, Saturday 14:00 IST = 08:30 UTC): rebuilds computed classes
     // over 250 sessions then runs reverse_engineering_study.py (rank-IC, cohort lift,
     // engine hit-rate -- now including the ntlive_<HHMM>_* slot cohorts vs EOD outcomes).
-    // addJobWithCatchup: if the box is down Sunday morning, the study still runs once on
+    // addJobWithCatchup: if the box is down Saturday, the study still runs once on
     // next startup instead of silently skipping a week.
+    //
+    // Moved off Sunday 12:00 IST 2026-08-30: every other weekly job on this platform lands on
+    // Saturday, and this one alone kept a Sunday dependency, so a "did the weekend finish?"
+    // check could never be answered on Saturday night. 14:00 IST sits after ml-weekly-retrain
+    // (10:30) and dl-retrain-weekly (11:30) have finished, and well before tickertape-scorecard
+    // (18:30), so the Saturday lane stays serial with no new overlap.
     const QUEUE_MOVER_STUDY = 'mover-reverse-engineering-study';
     const moverStudyQueue = new Queue(QUEUE_MOVER_STUDY, { connection });
     await addJobWithCatchup(moverStudyQueue, 'mover-study-weekly', {}, {
-      repeat: { pattern: '30 6 * * 0', tz: 'Etc/UTC' },   // Sunday 12:00 IST, market closed
+      repeat: { pattern: '30 8 * * 6', tz: 'Etc/UTC' },   // Saturday 14:00 IST, market closed
       jobId: 'mover-study-weekly',
       removeOnComplete: 2,
       removeOnFail: 3,
@@ -2445,7 +2465,12 @@ export async function initQueues(): Promise<boolean> {
       recordHeartbeat('gdelt-sentiment', 'failed', err?.message);
     });
 
-    // ── Live Screener paced collector (every 15 min during market hours: 3:30-10:00 UTC = 9:00-15:30 IST)
+    // ── Live Screener paced collector (every 15 min, '*/15 3-10 * * 1-5' = 03:00-10:45 UTC =
+    //    08:30-16:15 IST weekdays). NOTE the stated window is the CRON window, not the market
+    //    window: NSE trades 09:15-15:30 IST, so ~3 cycles either side sit outside the session and
+    //    are no-ops via the processor's own holiday/market guard (it returns { skipped: true }).
+    //    Comment corrected 2026-08-30 -- it previously claimed '9:00-15:30 IST', which no cron
+    //    field in this repeat has ever produced.
     liveScreenerCollectQueue = new Queue(QUEUE_LIVE_SCREENER_COLLECT, { connection });
     const lsRepeatables = await liveScreenerCollectQueue.getRepeatableJobs();
     for (const r of lsRepeatables) await liveScreenerCollectQueue.removeRepeatableByKey(r.key);
@@ -2518,13 +2543,23 @@ export async function initQueues(): Promise<boolean> {
       { connection, concurrency: 1, lockDuration: 3 * 60_000 });
     console.log('[QUEUE] Pre-open snapshot scheduled at 9:10 AM IST (weekdays)');
 
-    // ── Intraday regime refresh: VIX + USDINR + Nifty basis every 15 min (9:15–15:30 IST) ──
+    // ── Intraday regime refresh: VIX + USDINR + Nifty basis, every 15 min ──
+    // '*/15 3-10 * * 1-5' = 03:00-10:45 UTC = 08:30-16:15 IST weekdays. Corrected 2026-08-30:
+    // the old comment said '3:45-10:00 UTC = 9:15-15:30 IST', which is the NSE session, not what
+    // this pattern fires. Cycles outside 09:15-15:30 IST no-op on the chain's own guard.
+    //
+    // Keep this note ABOVE the addJobWithCatchup call, not inside its opts: everything between
+    // this queue's own jobName marker and its lockDuration counts against
+    // jobRegistryGraceMinutesConsistency.test.ts's 4000-char MAX_LOOKAHEAD. Placing these four
+    // lines inside the opts object pushed that distance to 4189 and broke the market-regime-
+    // refresh + intraday-ranker cases of that test (CI, 2026-08-31) -- the same proximity-parser
+    // fragility recurring-bugs.md already records for the 'ml-daily-ops' marker in this file.
     const QUEUE_REGIME = 'market-regime-refresh';
     const regimeQueue = new Queue(QUEUE_REGIME, { connection });
     const regimeRep = await regimeQueue.getRepeatableJobs();
     for (const r of regimeRep) await regimeQueue.removeRepeatableByKey(r.key);
     await addJobWithCatchup(regimeQueue, 'regime-intraday', {}, {
-      repeat: { pattern: '*/15 3-10 * * 1-5' },  // 3:45–10:00 UTC = 9:15–15:30 IST
+      repeat: { pattern: '*/15 3-10 * * 1-5' },
       jobId: 'regime-intraday',
       removeOnComplete: 3, removeOnFail: 3,
     });
@@ -2691,12 +2726,19 @@ export async function initQueues(): Promise<boolean> {
       updateMonitorState('ohlcv-backfill', 'failed', err.message);
     });
 
-    // Weekly gap-fill: Saturday 2:00 AM IST = Friday 20:30 UTC
+    // Weekly gap-fill: Saturday 5:30 AM IST = Saturday 00:00 UTC.
+    // Moved off Saturday 02:00 IST 2026-08-30. That slot is expressed in UTC as FRIDAY 20:30,
+    // which put a 30-day full-universe backfill inside the tail of the Friday weekday chain
+    // (live-measured: it ran 02:01 on Sat 2026-08-29 while trendlyne-daily-fetch was still
+    // finishing at 00:14 and chatbot-reingest at 01:30). Saturday 00:00 UTC is the earliest
+    // Saturday-ANCHORED slot available -- any IST Saturday time before 05:30 is still Friday in
+    // UTC -- so this both clears the weekday tail and makes the cron string's day-of-week field
+    // agree with the day the job actually runs on.
     // Daily gap-fill: weekdays 4:15 PM IST = 10:45 UTC (after market close, lookback 3 days)
     const ohlcvRep = await ohlcvBackfillQueue.getRepeatableJobs();
     for (const r of ohlcvRep) await ohlcvBackfillQueue.removeRepeatableByKey(r.key);
     await addJobWithCatchup(ohlcvBackfillQueue, 'ohlcv-gap-fill-weekly', { mode: 'gap-fill', lookback: 30 }, {
-      repeat: { pattern: '30 20 * * 5' },
+      repeat: { pattern: '0 0 * * 6' },
       jobId: 'ohlcv-gap-fill-weekly',
       removeOnComplete: 2, removeOnFail: 3,
     });

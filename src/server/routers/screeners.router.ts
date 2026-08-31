@@ -505,34 +505,6 @@ export const screenersRouter = router({
       }
     }),
 
-  computeTimeframeScores: expensiveProcedure
-    .input(z.object({ runId: z.string().optional(), screenerId: z.string().optional(), timeframe: z.enum(['intraday','short','medium','long']).optional(), topN: z.number().optional() }))
-    .mutation(async ({ input }) => {
-      const scoring = await import('../scoringService');
-      const results = await scoring.computeTimeframeScores({ runId: input.runId, screenerId: input.screenerId, timeframe: input.timeframe as any, topN: input.topN });
-      return { success: true, results };
-    }),
-
-  getTimeframeRanking: publicProcedure
-    .input(z.object({ timeframe: z.enum(['intraday','short','medium','long']), runId: z.string().optional(), screenerId: z.string().optional(), limit: z.number().min(1).max(500).optional().default(100) }))
-    .query(async ({ input }) => {
-      const params: any[] = [input.timeframe];
-      let sql = `SELECT symbol, score, confidence, domains_json, reasons_json, suggested_holding_days FROM timeframe_scores WHERE timeframe = ?`;
-      if (input.runId) { sql += ` AND run_id = ?`; params.push(input.runId); }
-      if (input.screenerId) { sql += ` AND reasons_json LIKE ?`; params.push(`%${input.screenerId}%`); }
-      sql += ` ORDER BY score DESC LIMIT ?`;
-      params.push(input.limit);
-      return dbAll(sql, params);
-    }),
-
-  triggerBacktest: adminProcedure
-    .input(z.object({ runId: z.string().optional(), screenerId: z.string().optional(), timeframe: z.enum(['intraday','short','medium','long']).optional(), horizonDays: z.number().optional(), topN: z.number().optional() }))
-    .mutation(async ({ input }) => {
-      const bt = await import('../backtestRunner');
-      const res = await bt.runBacktest({ runId: input.runId, screenerId: input.screenerId, timeframe: input.timeframe as any, horizonDays: input.horizonDays, topN: input.topN });
-      return { success: true, result: res };
-    }),
-
   createScreenerRun: adminProcedure
     .input(z.object({
       screenerId: z.string(),
