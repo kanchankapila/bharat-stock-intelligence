@@ -13,7 +13,8 @@ import sys
 import math
 import json
 import argparse
-from datetime import datetime
+import time
+from datetime import datetime, timezone
 from pathlib import Path
 
 from db_compat import connect, ConnWrapper
@@ -28,7 +29,84 @@ PYDIR     = str(Path(__file__).parent)
 # at once). The old 7200s (2h) threshold predated any measurement of real training time; a
 # 25-symbol sample measured ~15min under typical GPU contention on this machine, so a full
 # ~2100-symbol run plus walk-forward validation can genuinely run for many hours.
+# 2026-08-29: this VALUE (24h+1h buffer) is deliberately reasoned, but no scheduled run's real
+# per-step duration had ever actually been measured to validate the underlying 24h ceiling --
+# STEP_LOG_KEY below exists to close that gap. Once a few weeks of real per-step durations
+# accumulate, revisit whether 24h is generous-but-fine or masking real slowness.
 STALE_LOCK_SECONDS = 25 * 60 * 60  # 25h -- 1h of slack past the 24h job timeout
+
+# 2026-08-29: lightweight step-level progress, added after a live investigation had to resort to
+# checking OS-level CPU deltas on a guessed PID to tell "still working" from "hung" -- every
+# per-step subprocess's own stdout/stderr is DEVNULL'd by _run() (see its docstring), so there was
+# no way to distinguish the two other than that manual process-level check. Reuses app_settings
+# (same pattern as the LOCK_KEY itself) rather than a new table/migration for a diagnostic-only
+# feature. STEP_LOG_KEY holds a JSON array of {step, started_at, finished_at, duration_sec} for
+# the CURRENT/most recent run, so a future session (or a monitoring check) can answer "how long
+# did each step actually take" without re-deriving it from ambiguous log timestamps.
+STEP_LOG_KEY = "dl_retrain_step_log"
+
+
+def _utc_now_iso() -> str:
+    """Explicit UTC, not the naive datetime.now() this file used everywhere before 2026-08-29 --
+    that stores LOCAL time (confirmed live: this machine's local clock is IST, UTC+5:30) with no
+    timezone marker, which silently misled a live investigation into believing a job that started
+    exactly on its 06:00 UTC schedule had actually started 5.5 hours late. Every NEW timestamp
+    this file writes uses this helper; dl_retrain_acquired_at's own naive datetime.now() calls
+    were left as-is deliberately (see the comment at their call sites) since STALE_LOCK_SECONDS'
+    comparison logic uses datetime.now() on both sides of the subtraction and is internally
+    consistent -- correct by not mixing units, not because naive-local was the right choice."""
+    return datetime.now(timezone.utc).isoformat()
+
+
+class _StepLog:
+    """Timestamps each pipeline step to app_settings[STEP_LOG_KEY], explicit UTC. Best-effort --
+    a DB hiccup while logging progress must never fail the actual retrain.
+
+    Deliberately does NOT hold a connection across steps: this file's own `retrain_models()`
+    already documents (see its Step-5 con2/con3 handling) that a connection checked out once
+    and left idle while a step like BiLSTM training runs for hours can be closed server-side --
+    the exact class this session separately found and fixed in strategy_optimizer.py/
+    backtest_optimizer.py. Each write here opens, uses, and closes its own short-lived
+    connection instead of reusing one across the whole run."""
+
+    def __init__(self):
+        self.steps: list[dict] = []
+
+    def step(self, name: str):
+        return _StepTimer(self, name)
+
+    def _record(self, name: str, started_at: str, finished_at: str, duration_sec: float, status: str):
+        self.steps.append({
+            "step": name, "started_at": started_at, "finished_at": finished_at,
+            "duration_sec": round(duration_sec, 1), "status": status,
+        })
+        try:
+            log_con = connect()
+            try:
+                _set_setting(log_con, STEP_LOG_KEY, json.dumps(self.steps))
+            finally:
+                log_con.close()
+        except Exception as e:
+            print(f"[TRAINER] step-log write failed (non-fatal): {e}")
+
+
+class _StepTimer:
+    def __init__(self, log: _StepLog, name: str):
+        self.log, self.name = log, name
+
+    def __enter__(self):
+        self.t0 = time.monotonic()
+        self.started_at = _utc_now_iso()
+        print(f"[TRAINER] step start: {self.name} at {self.started_at} (UTC)")
+        return self
+
+    def __exit__(self, exc_type, exc, tb):
+        duration = time.monotonic() - self.t0
+        finished_at = _utc_now_iso()
+        status = "error" if exc_type else "ok"
+        print(f"[TRAINER] step {status}: {self.name} at {finished_at} (UTC), took {duration:.1f}s")
+        self.log._record(self.name, self.started_at, finished_at, duration, status)
+        return False  # never swallow the exception
 
 
 def _get_setting(con: ConnWrapper, key: str, default=None):
@@ -131,13 +209,16 @@ def retrain_models(trigger: str = "scheduled") -> dict:
 
     _set_setting(con, LOCK_KEY, "1")
     _set_setting(con, "dl_retrain_acquired_at", datetime.now().isoformat())
+    _set_setting(con, STEP_LOG_KEY, "[]")  # clear the previous run's step log at the start of a new one
     con.close()
 
     result = {"trigger": trigger, "timestamp": datetime.now().isoformat()}
+    steps = _StepLog()
 
     try:
         # Step 1: Refresh today's features only (fast mode)
-        rc = _run("python feature_engineering.py --date today")
+        with steps.step("feature_engineering"):
+            rc = _run("python feature_engineering.py --date today")
         if rc != 0:
             raise RuntimeError("feature_engineering.py failed")
 
@@ -147,13 +228,16 @@ def retrain_models(trigger: str = "scheduled") -> dict:
         cfg = json.loads(cfg_path.read_text()) if cfg_path.exists() else {"lstm_version": 1}
         new_version = cfg.get("lstm_version", 1) + 1
 
-        # Step 3: Train BiLSTM in-process
-        import importlib.util
-        spec = importlib.util.spec_from_file_location("dl_engine", Path(__file__).parent / "dl_engine.py")
-        dl = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(dl)
+        # Step 3: Train BiLSTM in-process -- this is the step expected to dominate total runtime
+        # (full-universe LSTM fit + walk-forward validation); the one this session's live
+        # investigation had no visibility into beyond an OS-level CPU-delta check on a guessed PID.
+        with steps.step("train_lstm"):
+            import importlib.util
+            spec = importlib.util.spec_from_file_location("dl_engine", Path(__file__).parent / "dl_engine.py")
+            dl = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(dl)
 
-        metrics = dl.train_lstm(version=new_version)
+            metrics = dl.train_lstm(version=new_version)
         result["metrics"] = metrics
 
         acc = metrics.get("directional_accuracy")
@@ -180,29 +264,38 @@ def retrain_models(trigger: str = "scheduled") -> dict:
                   f"on disk at lstm_v{new_version}.pt for inspection, not deleted.")
 
         # Step 5: Write model_registry entry
-        con2 = connect()
-        try:
-            _record_model_registry(con2, new_version, auc, acc, result["promoted"])
+        with steps.step("record_and_regime_retrain"):
+            con2 = connect()
+            try:
+                _record_model_registry(con2, new_version, auc, acc, result["promoted"])
 
-            # Step 6: Regime retrain — piggybacks on the weekly schedule since nothing
-            # fires trigger="monthly" (dead code path); without this the HMM model
-            # silently never gets (re)trained if ml_models/hmm_regime.pkl goes missing.
-            if trigger in ("scheduled", "monthly"):
-                _run("python regime_detector.py --mode train")
+                # Step 6: Regime retrain — piggybacks on the weekly schedule since nothing
+                # fires trigger="monthly" (dead code path); without this the HMM model
+                # silently never gets (re)trained if ml_models/hmm_regime.pkl goes missing.
+                if trigger in ("scheduled", "monthly"):
+                    _run("python regime_detector.py --mode train")
 
-            _set_setting(con2, "dl_last_retrain", datetime.now().isoformat())
-            _set_setting(con2, LOCK_KEY, "0")
-        finally:
-            con2.close()
+                _set_setting(con2, "dl_last_retrain", datetime.now().isoformat())
+                _set_setting(con2, LOCK_KEY, "0")
+            finally:
+                con2.close()
 
     except Exception as e:
-        con3 = connect()
         try:
-            _set_setting(con3, LOCK_KEY, "0")
-        finally:
-            con3.close()
+            con3 = connect()
+            try:
+                _set_setting(con3, LOCK_KEY, "0")
+            finally:
+                con3.close()
+        except Exception as lock_err:
+            print(f"[TRAINER] Failed to clear lock (non-fatal): {lock_err}")
         result["error"] = str(e)
         print(f"[TRAINER] ERROR: {e}")
+
+    result["step_log"] = steps.steps
+    total_sec = sum(s["duration_sec"] for s in steps.steps)
+    print(f"[TRAINER] step summary: {[(s['step'], s['duration_sec'], s['status']) for s in steps.steps]} "
+          f"(total logged: {total_sec:.1f}s)")
 
     return result
 
