@@ -427,14 +427,20 @@ def update_probabilities(conn):
     # happens inside predict_proba, so X is passed through raw (unscaled).
     probs = model.predict_proba(X)[:, 1]
 
-    conn.executemany("""
-        UPDATE confluence_signals
-        SET ml_breakout_probability = ?
-        WHERE symbol = ? AND computed_at = ?
-    """, [(float(round(prob, 4)), row['symbol'], row['computed_at'])
-          for row, prob in zip(rows, probs)])
+    batch_params = [
+        (float(round(prob, 4)), row['symbol'], row['computed_at'])
+        for row, prob in zip(rows, probs)
+    ]
+    chunk_size = 500
+    for i in range(0, len(batch_params), chunk_size):
+        chunk = batch_params[i:i + chunk_size]
+        conn.executemany("""
+            UPDATE confluence_signals
+            SET ml_breakout_probability = ?
+            WHERE symbol = ? AND computed_at = ?
+        """, chunk)
+        conn.commit()
 
-    conn.commit()
     print(f'[ML] Updated ml_breakout_probability for {len(rows)} signals (batch: {latest_batch})')
 
 

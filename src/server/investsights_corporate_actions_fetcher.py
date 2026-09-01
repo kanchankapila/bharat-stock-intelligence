@@ -128,7 +128,7 @@ def store(conn: ConnWrapper, rows: list[dict]) -> int:
     if not rows:
         return 0
     ph = ",".join(["?"] * len(COLS))
-    updates = ", ".join(f"{c}=excluded.{c}" for c in COLS[1:])
+    updates = ", ".join(f"{c}=excluded.{c}" for c in COLS[1:]) + ", fetched_at=CURRENT_TIMESTAMP"
     sql = (f"INSERT INTO nse_filed_corporate_actions ({', '.join(COLS)}) VALUES ({ph}) "
            f"ON CONFLICT (source_url) DO UPDATE SET {updates}")
     n = 0

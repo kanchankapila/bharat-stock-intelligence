@@ -333,22 +333,44 @@ def persist_results(con, run_at: str, ic: pd.DataFrame, lift: pd.DataFrame,
     return n
 
 
+def _df_to_markdown(df: pd.DataFrame, index: bool = False) -> str:
+    if df is None or not len(df):
+        return "_none_"
+    try:
+        return df.to_markdown(index=index)
+    except (ImportError, ModuleNotFoundError):
+        cols = list(df.columns)
+        if index:
+            cols = [str(df.index.name or "")] + [str(c) for c in cols]
+            rows = [[str(idx)] + [str(v) for v in row] for idx, row in zip(df.index, df.values)]
+        else:
+            cols = [str(c) for c in cols]
+            rows = [[str(v) for v in row] for row in df.values]
+        header_row = "| " + " | ".join(cols) + " |"
+        sep_row = "| " + " | ".join(["---"] * len(cols)) + " |"
+        body_rows = ["| " + " | ".join(r) + " |" for r in rows]
+        return "\n".join([header_row, sep_row] + body_rows)
+
+
 def _md_table(df: pd.DataFrame, max_rows: int = 15) -> str:
     if df is None or not len(df):
         return "_no data_\n"
     d = df.head(max_rows).copy()
-    return d.to_markdown(index=False)
+    return _df_to_markdown(d, index=False)
 
 
 def write_report(run_at: str, ev: pd.DataFrame, ic: pd.DataFrame, lift: pd.DataFrame,
                  hits: pd.DataFrame, out_path: str) -> None:
+    event_counts = (
+        _df_to_markdown(ev.groupby("source").size().rename("events").to_frame(), index=True)
+        if len(ev) else "_none_"
+    )
     lines = [
         "# Mover Reverse-Engineering Study", "",
         f"Run: `{run_at}`  |  events analyzed: **{len(ev):,}** across "
         f"{ev['source'].nunique() if len(ev) else 0} classes", "",
         "## Event counts by class", "",
-        (ev.groupby("source").size().rename("events").to_frame()
-           .to_markdown() if len(ev) else "_none_"), "",
+        event_counts, "",
         "## Factor rank-IC vs realized mover returns", "",
         _md_table(ic), "",
         "## Cohort lift (P(mover | top-quartile factor) / P(mover | bottom-quartile))", "",

@@ -118,7 +118,14 @@ def _psi(expected: np.ndarray, actual: np.ndarray, bins: int = 10) -> float:
 
 def check_feature_drift(model_name: str = "LSTM_TFT_ENSEMBLE") -> dict:
     """Compare recent 30-day feature distribution vs training-window baseline."""
-    df = read_df("SELECT * FROM feature_store WHERE timeframe='D' ORDER BY date")
+    # feature_store has 2.6M+ rows across full 5-year history in TimescaleDB compressed chunks.
+    # Slicing without a date boundary decompresses all 5 years, causing queries to take 300s+
+    # and trigger BullMQ timeout kills. A trailing 180-day window (~300k rows across 125+ trading dates)
+    # provides more than sufficient statistical power for the baseline vs recent 30-day PSI.
+    df = read_df(
+        "SELECT * FROM feature_store WHERE timeframe='D' "
+        "AND date >= CURRENT_DATE - INTERVAL '180 days' ORDER BY date"
+    )
 
     numeric_cols = df.select_dtypes(include=[np.number]).columns.tolist()
     numeric_cols = [c for c in numeric_cols if not c.startswith("target_")]
