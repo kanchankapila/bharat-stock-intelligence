@@ -68,7 +68,16 @@ async function processAgentAuditor(_job: Job): Promise<{ success: boolean }> {
 }
 
 async function processAgentOptimizer(_job: Job): Promise<{ success: boolean }> {
-  await runPython('agents/optimizer_agent.py', [], 20 * 60_000);
+  // 40 min, not 20: optimizer_agent.py's own AlphaQuant call (fires only when the win rate has
+  // stayed below 50% for 5+ consecutive days, so not every run) carries its OWN 30-minute
+  // requests.post(..., timeout=30*60) -- a 20-minute outer runPython budget kills the process
+  // before that inner timeout could ever fire on a legitimately slow (not hung) optimization.
+  // Live-observed 2026-08-25..09-01: every failure timestamped exactly 20 min after the 12:00
+  // UTC cron fire (job_run_history), while every success landed at a later, variable time --
+  // consistent with the outer budget cutting off runs that were still making progress, not a
+  // genuine hang. 40 min covers the 30-min inner call plus the narrative LLM call + DB write
+  // that follow it.
+  await runPython('agents/optimizer_agent.py', [], 40 * 60_000);
 
   const latest = await dbGet<any>(
     'SELECT weights_changed, full_optimizer_triggered, baseline_win_rate, new_win_rate, narrative ' +
@@ -152,7 +161,10 @@ export async function registerAgentJobs(connection: any) {
     processor: processAgentOptimizer,
     monitorName: 'agent-optimizer',
     concurrency: 1,
-    lockDuration: 20 * 60_000,
+    // Matches processAgentOptimizer's own 40-min runPython budget (see that function's
+    // comment) -- a lock shorter than the actual processing time lets BullMQ consider the
+    // job stalled and reassign it while it is still legitimately running.
+    lockDuration: 40 * 60_000,
   });
 
   return { dataScientist, strategist, auditor, optimizer };
