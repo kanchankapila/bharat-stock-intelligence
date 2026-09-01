@@ -16,6 +16,12 @@ Protocol notes (matches the official MCP python SDK's stdio transport):
     notification (no id, no reply expected)
   - responses are correlated by integer `id`; notifications have no id and are ignored
   - tools/call result: {content: [{type: "text", text: ...}], isError?: bool}
+  - timeouts: every request is bounded (INITIALIZE_TIMEOUT_SEC for the handshake,
+    CALL_TIMEOUT_SEC per tool call by default) — a wedged server raises McpError instead
+    of blocking the caller forever (live failure mode 2026-09-01: Yahoo throttling wedged
+    all 6 finstack channels of a full-universe backfill indefinitely)
+  - stderr is drained by a daemon thread (forwarded to our stderr) so a chatty server can
+    never fill the OS pipe buffer and deadlock the child
 
 Usage as a library:
     with McpStdioClient(["python", "-m", "finstack.server"]) as mcp:
@@ -31,8 +37,11 @@ Usage as a CLI (debugging / tool inventory):
 import argparse
 import json
 import os
+import queue
 import subprocess
 import sys
+import threading
+import time
 
 # Default matches the user's own mcpServers entry for finstack (stdio, system python).
 DEFAULT_SERVER_CMD = ["python", "-m", "finstack.server"]
@@ -95,11 +104,15 @@ def extract_result_text(response: dict) -> str:
 class McpStdioClient:
     """Spawn an MCP server as a subprocess and speak JSON-RPC 2.0 over its stdio."""
 
-    def __init__(self, cmd: list[str] | None = None):
+    def __init__(self, cmd: list[str] | None = None,
+                 call_timeout: float = CALL_TIMEOUT_SEC):
         cmd = cmd or os.environ.get("MCP_SERVER_CMD", "").split() or list(DEFAULT_SERVER_CMD)
         self._cmd = cmd.split() if isinstance(cmd, str) else list(cmd)
         self._proc: subprocess.Popen | None = None
         self._next_id = 1
+        self._call_timeout = float(call_timeout)
+        # stdout lines land here via the reader thread; None is the EOF sentinel
+        self._lines: "queue.Queue[str | None]" = queue.Queue()
 
     # -- process lifecycle ---------------------------------------------------
 
@@ -113,7 +126,9 @@ class McpStdioClient:
     def start(self) -> None:
         if self._proc is not None:
             return
-        # stderr pipes to OUR stderr (never the JSON channel); text mode, line buffered.
+        # text mode, line buffered. Both pipes are consumed by daemon threads: stdout
+        # feeds the response queue, stderr is forwarded to our stderr. Without the
+        # stderr drainer a chatty server fills the OS pipe buffer and deadlocks.
         self._proc = subprocess.Popen(
             self._cmd,
             stdin=subprocess.PIPE,
@@ -123,7 +138,33 @@ class McpStdioClient:
             encoding="utf-8",
             bufsize=1,
         )
+        self._lines = queue.Queue()
+        threading.Thread(target=self._pump_stdout, daemon=True,
+                         name=f"mcp-stdout-{id(self):x}").start()
+        threading.Thread(target=self._pump_stderr, daemon=True,
+                         name=f"mcp-stderr-{id(self):x}").start()
         self._initialize()
+
+    def _pump_stdout(self) -> None:
+        proc = self._proc
+        try:
+            if proc is not None and proc.stdout is not None:
+                for line in proc.stdout:
+                    self._lines.put(line)
+        except Exception:
+            pass
+        finally:
+            self._lines.put(None)  # EOF sentinel: wake the waiter, never block it
+
+    def _pump_stderr(self) -> None:
+        proc = self._proc
+        try:
+            if proc is not None and proc.stderr is not None:
+                for line in proc.stderr:
+                    sys.stderr.write(line)
+                    sys.stderr.flush()
+        except Exception:
+            pass
 
     def close(self) -> None:
         if self._proc is None:
@@ -145,21 +186,35 @@ class McpStdioClient:
 
     def _send(self, message: dict) -> None:
         assert self._proc is not None and self._proc.stdin is not None
-        self._proc.stdin.write(json.dumps(message, separators=(",", ":")) + "\n")
-        self._proc.stdin.flush()
+        try:
+            self._proc.stdin.write(json.dumps(message, separators=(",", ":")) + "\n")
+            self._proc.stdin.flush()
+        except (BrokenPipeError, OSError) as exc:
+            # dead/crashed server: normalize to McpError so callers' channel-recycle
+            # logic (see finstack_cashflow_fetcher) sees a transport failure, not a raw OSError
+            raise McpError(f"server stdin closed (rc={self._proc.poll()}): {exc}") from exc
 
-    def _recv_until_id(self, want_id: int) -> dict:
+    def _recv_until_id(self, want_id: int, timeout: float) -> dict:
         """Read stdout lines until the response with `want_id` arrives. Notifications and
-        responses to other requests are skipped. Non-JSON lines (banners) are ignored.
-        A wedged server is bounded by the fetcher's own BullMQ budget, not here."""
-        assert self._proc is not None and self._proc.stdout is not None
+        responses to other requests are skipped; non-JSON banner lines are ignored.
+        Bounded: a wedged or dead server raises McpError after `timeout` seconds instead
+        of blocking forever (see module docstring — this was a live production hang)."""
+        assert self._proc is not None
+        deadline = time.monotonic() + max(float(timeout), 0.1)
         while True:
-            line = self._proc.stdout.readline()
-            if not line:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise McpError(
+                    f"timed out after {timeout:g}s waiting for response id={want_id} "
+                    f"(server possibly wedged; rc={self._proc.poll()})")
+            try:
+                line = self._lines.get(timeout=remaining)
+            except queue.Empty:
+                continue  # loop re-checks the deadline
+            if line is None:  # EOF sentinel from the reader thread
                 raise McpError(
                     f"server stdout closed while waiting for response id={want_id} "
-                    f"(rc={self._proc.poll()})"
-                )
+                    f"(rc={self._proc.poll()})")
             line = line.strip()
             if not line.startswith("{"):
                 continue
@@ -170,15 +225,15 @@ class McpStdioClient:
             if isinstance(msg, dict) and msg.get("id") == want_id:
                 return msg
 
-    def _request(self, builder, **kwargs) -> dict:
+    def _request(self, builder, timeout: float, **kwargs) -> dict:
         self.start()
         req_id = self._next_id
         self._next_id += 1
         self._send(builder(req_id, **kwargs))
-        return self._recv_until_id(req_id)
+        return self._recv_until_id(req_id, timeout)
 
     def _initialize(self) -> dict:
-        resp = self._request(build_initialize_request)
+        resp = self._request(build_initialize_request, INITIALIZE_TIMEOUT_SEC)
         if "error" in resp and resp["error"]:
             raise McpError(f"initialize failed: {resp['error']}")
         self._send(build_initialized_notification())
@@ -187,7 +242,7 @@ class McpStdioClient:
     # -- public API ----------------------------------------------------------
 
     def list_tools(self) -> list[dict]:
-        resp = self._request(build_tools_list_request)
+        resp = self._request(build_tools_list_request, self._call_timeout)
         return (resp.get("result") or {}).get("tools") or []
 
     def call_tool(self, name: str, arguments: dict | None = None) -> str:
@@ -196,11 +251,13 @@ class McpStdioClient:
         envelope (e.g. finstack's {"error": true, "message": ...} business errors) use
         call_tool_raw instead."""
         return extract_result_text(
-            self._request(build_tools_call_request, name=name, arguments=arguments)
+            self._request(build_tools_call_request, self._call_timeout,
+                          name=name, arguments=arguments)
         )
 
     def call_tool_raw(self, name: str, arguments: dict | None = None) -> dict:
-        return self._request(build_tools_call_request, name=name, arguments=arguments)
+        return self._request(build_tools_call_request, self._call_timeout,
+                             name=name, arguments=arguments)
 
 
 def main() -> int:

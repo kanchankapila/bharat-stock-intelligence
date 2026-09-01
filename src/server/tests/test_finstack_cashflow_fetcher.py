@@ -8,6 +8,7 @@ stay hermetic per CLAUDE.md's unit-lane rules.
 """
 
 import importlib
+import json
 import os
 import sys
 import uuid
@@ -100,3 +101,76 @@ class TestUpsertQuarterlyCashflow:
 
     def test_empty_rows_is_a_noop(self, pg_conn):
         fcf.upsert_cashflow("INFY", [], pg_conn)  # must not raise
+
+
+# -- run() channel resilience (2026-09-02 hardening) ------------------------------
+
+class _StubClient:
+    """Stands in for McpStdioClient: BAD symbols raise McpError (wedged channel)."""
+
+    instances: list["_StubClient"] = []
+    closed: list["_StubClient"] = []
+
+    def __init__(self, cmd=None, call_timeout=120.0):
+        self.calls = 0
+        _StubClient.instances.append(self)
+
+    def call_tool(self, name, arguments=None):
+        self.calls += 1
+        if (arguments or {}).get("symbol") == "BAD":
+            raise fcf.McpError("timed out after 120s waiting for response id=2")
+        return json.dumps(_envelope(
+            [{"period": "2026-06-30", "operating_cash_flow": 10.0}]))
+
+    def close(self):
+        if self not in _StubClient.closed:  # real close() is idempotent; mirror that
+            _StubClient.closed.append(self)
+
+
+class _FakeCon:
+    def __init__(self):
+        self.executed: list = []
+
+    def cursor(self):
+        con = self
+
+        class _Cur:
+            def executemany(self, sql, rows):
+                con.executed.extend(rows)
+
+            def execute(self, sql):
+                pass
+
+        return _Cur()
+
+    def commit(self):
+        pass
+
+
+class TestRunResilience:
+    def _patch(self, monkeypatch, universe, client_cls=_StubClient):
+        _StubClient.instances.clear()
+        _StubClient.closed.clear()
+        monkeypatch.setattr(fcf, "McpStdioClient", client_cls)
+        monkeypatch.setattr(fcf, "load_universe", lambda symbols, limit: universe)
+        monkeypatch.setattr(fcf, "connect", lambda: _FakeCon())
+        monkeypatch.setattr(fcf, "ensure_schema", lambda con: None)
+
+    def test_recycles_bad_channel_skips_symbol_and_never_leaks(self, monkeypatch):
+        self._patch(monkeypatch, ["GOOD", "BAD"])
+        written = fcf.run()
+        assert written == 1                                    # GOOD persisted, BAD skipped
+        assert len(_StubClient.instances) == 7                 # 6 workers + 1 recycle
+        assert len(_StubClient.closed) == 7                    # every channel closed once
+        assert set(_StubClient.closed) == set(_StubClient.instances)
+
+    def test_unexpected_pool_error_still_closes_all_channels(self, monkeypatch):
+        class _Boom(_StubClient):
+            def call_tool(self, name, arguments=None):
+                raise RuntimeError("simulated bug")
+
+        self._patch(monkeypatch, ["GOOD", "BAD"], client_cls=_Boom)
+        with pytest.raises(RuntimeError, match="simulated bug"):
+            fcf.run()
+        assert len(_Boom.instances) == 6                       # died before any recycle
+        assert set(_Boom.closed) == set(_Boom.instances)       # zero-leak finally ran

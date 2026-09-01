@@ -27,6 +27,11 @@ Run:
   python finstack_cashflow_fetcher.py                # stocklist.json universe, 6 workers
   python finstack_cashflow_fetcher.py --symbol INFY
   python finstack_cashflow_fetcher.py --limit 50 --workers 3
+
+Resilience (2026-09-02 hardening after a live full-universe hang): every MCP call is bounded
+by McpStdioClient's call timeout; a channel that times out or errors is closed and replaced
+(recycle cap prevents spawn storms) and the symbol is honest-skipped; run() always closes
+every MCP server process in a finally — zero leaks even when the pool dies mid-flight.
 """
 
 import argparse
@@ -142,12 +147,11 @@ def upsert_cashflow(symbol: str, rows: list[dict], con) -> None:
 
 def fetch_symbol(mcp: McpStdioClient, symbol: str) -> list[dict]:
     """Call finstack cash_flow(quarterly=true) for one symbol and parse the envelope.
-    Returns [] on ANY failure (business-error envelope, transport error, empty coverage) —
-    missing coverage is the expected common case, not an exception-worthy event."""
-    try:
-        text = mcp.call_tool("cash_flow", {"symbol": symbol, "quarterly": True})
-    except McpError:
-        return []
+    Returns [] on business-error envelope, malformed payload, or empty vendor coverage —
+    missing data is the expected common case, not an exception-worthy event. Raises
+    McpError on transport/protocol trouble (timeout, wedged or dead channel); run()
+    recycles the channel in that case and honest-skips the symbol."""
+    text = mcp.call_tool("cash_flow", {"symbol": symbol, "quarterly": True})
     try:
         envelope = json.loads(text)
     except json.JSONDecodeError:
@@ -168,38 +172,79 @@ def run(symbols: list[str] | None = None, limit: int | None = None,
 
     # one MCP server process per worker thread (stdio is single-channel per process)
     client_queue: "queue.Queue[McpStdioClient]" = queue.Queue()
+    all_clients: list[McpStdioClient] = []
     for _ in range(max(1, workers)):
-        client_queue.put(McpStdioClient(server_cmd))
+        c = McpStdioClient(server_cmd)
+        all_clients.append(c)
+        client_queue.put(c)
 
     done = 0
     written = 0
     empty = 0
+    recycled = 0
+    recycle_cap = 50  # beyond this, keep the channel: avoid a pathological spawn storm
     lock = threading.Lock()
 
     def _task(sym: str) -> tuple[str, list[dict]]:
+        nonlocal recycled
         client = client_queue.get()
         try:
-            return sym, fetch_symbol(client, sym)
-        finally:
-            client_queue.put(client)
-
-    with ThreadPoolExecutor(max_workers=max(1, workers)) as pool:
-        futures = {pool.submit(_task, s): s for s in universe}
-        for fut in as_completed(futures):
-            sym, rows = fut.result()
+            rows = fetch_symbol(client, sym)
+        except McpError as exc:
+            # Channel state is unknowable after a timeout/transport error: swap it for a
+            # fresh server process and honest-skip this symbol (never fabricate).
             with lock:
-                done += 1
-                if rows:
-                    upsert_cashflow(sym, rows, con)
-                    written += 1
-                else:
-                    empty += 1
-                if done % 100 == 0:
-                    print(f"[FCH] {done}/{len(universe)} symbols ({written} with data, {empty} no coverage)")
+                capped = recycled >= recycle_cap
+                recycled += 1
+                n = recycled
+            if not capped:
+                try:
+                    client.close()
+                except Exception:
+                    pass
+                fresh = McpStdioClient(server_cmd)
+                all_clients.append(fresh)
+                client_queue.put(fresh)
+            else:
+                client_queue.put(client)
+            if n <= 3:
+                # stderr: runPython() inspects stderr to flag the run as degraded
+                print(f"[FCH] {sym}: MCP channel error ({exc}); channel replaced, "
+                      f"symbol skipped", file=sys.stderr)
+            return sym, []
+        # healthy channel: hand it back for the next symbol (a `return` inside the try
+        # suite would skip an else-clause here — do NOT put the handback in an else)
+        client_queue.put(client)
+        return sym, rows
 
-    con.commit()
+    try:
+        with ThreadPoolExecutor(max_workers=max(1, workers)) as pool:
+            futures = {pool.submit(_task, s): s for s in universe}
+            for fut in as_completed(futures):
+                sym, rows = fut.result()
+                with lock:
+                    done += 1
+                    if rows:
+                        upsert_cashflow(sym, rows, con)
+                        written += 1
+                    else:
+                        empty += 1
+                    if done % 100 == 0:
+                        print(f"[FCH] {done}/{len(universe)} symbols ({written} with data, "
+                              f"{empty} no coverage, {recycled} channel recycles)")
+    finally:
+        # zero-leak: whatever happens, no MCP server process outlives this run. Close by
+        # registry, not by queue — clients in-flight when a task died never re-entered it.
+        con.commit()
+        for c in all_clients:
+            try:
+                c.close()
+            except Exception:
+                pass
+
     print(f"[FCH] done: {written}/{len(universe)} symbols wrote quarterly cash-flow, "
-          f"{empty} had no vendor coverage ({time.time() - t0:.1f}s).")
+          f"{empty} had no vendor coverage, {recycled} channel recycles "
+          f"({time.time() - t0:.1f}s).")
     return written
 
 
