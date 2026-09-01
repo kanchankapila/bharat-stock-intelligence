@@ -26,6 +26,32 @@ Historical record, split out of CLAUDE.md on 2026-08-11 (it was 64% of that file
   - Post-fix gates: `tsc --noEmit` clean; jobPipelineOrdering + jobRegistryCronMirror **140/140**; pytest analyst-estimates **24/24**; live 2-symbol smoke run `Wrote 2/2 analyst snapshots as_of 2026-09-01`.
 
 
+## 2026-09-01 -- FinStack MCP Integrated In-Code: First Quarterly Cash-Flow History
+
+- **`src/server/mcp_client.py`** — minimal MCP stdio client (JSON-RPC 2.0, stdlib-only):
+  spawn the server command from the user's own mcpServers config (`python -m finstack.server`),
+  initialize handshake, tools/list, tools/call, id-correlated responses, banner-tolerant
+  newline framing. Live-verified: **95 tools** registered on the real finstack server.
+- **`src/server/finstack_cashflow_fetcher.py`** — quarterly cash-flow ingest speaking MCP to
+  finstack's `cash_flow(symbol, quarterly=true)` (thin wrapper over yfinance
+  quarterly_cashflow, confirmed in the installed package source). 6 parallel MCP client
+  processes over the stocklist universe; `finstack_cashflow_history` table
+  (symbol × period_end; ocf/cfi/cff/capex/fcf/currency), idempotent weekly convergence;
+  scheduled as a weekly step in processMlWeeklyRetrain next to the marketsmojo trio.
+- **Coverage honesty (live-probed):** Yahoo carries quarterly cash-flow for a subset of NSE
+  names — INFY 4 quarters (USD! currency stored per row), TCS/WIPRO 4 quarters (INR),
+  RELIANCE none (finstack error envelope → skipped, never fabricated).
+- **First production rows:** 12 quarterly rows live-verified (INFY/TCS/WIPRO × 4).
+- **Branch reconciliation:** `claude/dalalos-finstack-mcp-integration-95d01f` (26826b5,
+  CI-green but stale — based on f65bf11) was superseded rather than merged: it carried the
+  early 1-symbol DalalOS seed, while this session landed the consolidated 16-symbol
+  iteration on main (`d1d1a5e`) plus the branch's unique session-log scoping section with a
+  dated addendum (the "no embedded MCP client" architecture decision is now revised into
+  mcp_client.py per the user's explicit request). Safe to delete the branch.
+- **DalalOS follow-up:** still MCP-only (REST plan-gated 403) and absent from the pasted
+  mcpServers config — the same mcp_client.py gives it a callable path the moment its
+  launch command (or an HTTP/SSE URL + key) is provided.
+
 ## 2026-08-31 — DalalOS/finstack-mcp integration: scoped down to what actually clears the bar
 
 User asked to "integrate dalalos and finstack-mcp into the code to fetch data." Both are

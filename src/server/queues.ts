@@ -1323,6 +1323,16 @@ async function processMlWeeklyRetrain(_job: Job): Promise<{ success: boolean; fa
     .catch(e => console.warn('[QUEUE] marketsmojo_shareholding_fetcher failed:', (e as Error).message));
   await runPython('marketsmojo_fintrend_fetcher.py', [], 40 * 60_000)
     .catch(e => console.warn('[QUEUE] marketsmojo_fintrend_fetcher failed:', (e as Error).message));
+  // FinStack MCP quarterly cash-flow (onboarded 2026-09-01): the platform's first real
+  // QUARTERLY CFO/CFI/CFF/capex/FCF history, fetched by speaking MCP stdio to
+  // `python -m finstack.server` (whose cash_flow tool wraps yfinance quarterly_cashflow).
+  // Coverage is a SUBSET of NSE names (live-verified: INFY/TCS/WIPRO yes, RELIANCE no) —
+  // missing symbols are skipped via the tool's error envelope, never fabricated. Weekly for
+  // the same restates-on-results-days reason as the trio above; 2,005 symbols × ~1.5s / 6
+  // workers ≈ 8 min, 40 min matches the sibling budgets. Host needs finstack pip-installed
+  // for the PATH python (see finstack_cashflow_fetcher.py's docstring).
+  await runPython('finstack_cashflow_fetcher.py', [], 40 * 60_000)
+    .catch(e => console.warn('[QUEUE] finstack_cashflow_fetcher failed:', (e as Error).message));
   // Trendlyne EPS/DivYield series + DVM scores — 2 calls/stock (PE/PB dropped: MC's daily
   // fetch already covers them, fed into the same history tables — see mc_pricefeed_fetcher.py).
   // Scoped to scripts/stocklist.json (~2005 stocks), not the full tlid universe: 2005 stocks
