@@ -10,6 +10,7 @@
 
 import { dbGet, dbAll, dbRun, dbTransaction } from './dbAsync';
 import { getStockMapping, getStockMappingByTLId, getStockMappingByName } from './stockMapping';
+import { delay } from './lib/async';
 
 const TRENDLYNE_BASE_URL = 'https://kayal.trendlyne.com/broker-webview/kayal/all-in-one-screener-data-get/';
 
@@ -565,7 +566,7 @@ export async function fetchTrendlyneScreenerData(
 
     // Apply jitter delay for polite fetching
     const jitterDelay = getJitter(TRENDLYNE_CONFIG.BASE_DELAY_MS, TRENDLYNE_CONFIG.JITTER_PERCENT);
-    await new Promise(resolve => setTimeout(resolve, jitterDelay));
+    await delay(jitterDelay);
 
     const params = new URLSearchParams({
       perPageCount: '1000',
@@ -803,7 +804,7 @@ export async function fetchAllTrendlyneScreenerNames(forceRefresh = false): Prom
 
       // Apply jitter delay for polite fetching
       const jitterDelay = getJitter(TRENDLYNE_CONFIG.BASE_DELAY_MS, TRENDLYNE_CONFIG.JITTER_PERCENT);
-      await new Promise(resolve => setTimeout(resolve, jitterDelay));
+      await delay(jitterDelay);
 
       try {
         const params = new URLSearchParams({
@@ -1147,7 +1148,7 @@ export async function syncAllScreenerStocksToDB(timeframeFilter?: 'intraday' | '
         }
         
         // Polite delay
-        await new Promise(resolve => setTimeout(resolve, 500));
+        await delay(500);
       } catch (err) {
         console.error(`  ❌ Error syncing screener ${screener.screener_name}:`, err);
       }

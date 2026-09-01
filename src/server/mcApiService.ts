@@ -3,6 +3,7 @@ import { findMcScreenersByStock } from './moneycontrolScreener';
 import { findScreenersByStock } from './trendlyneScreener';
 import { findEtScreenersByStock } from './etnow';
 import { dbRun } from './dbAsync';
+import { backoffDelay, delay } from './lib/async';
 
 const mcSemaphore = new Semaphore(10); // Increased concurrency
 
@@ -327,10 +328,10 @@ export async function mcFetchJson<T = any>(url: string, retries: number = 3, sym
         if (!res.ok) {
           // Retry on 503 Service Unavailable
           if (res.status === 503 && attempt < retries) {
-            const delay = Math.min(1000 * Math.pow(2, attempt - 1), 10000) + Math.random() * 1000;
+            const waitMs = backoffDelay(attempt);
             const logSymbol = symbol ? `${symbol} (${url.split('/').pop()?.split('?')[0]})` : url;
-            console.warn(`MoneyControl API ${logSymbol} returned 503. Retrying in ${Math.round(delay)}ms (attempt ${attempt}/${retries})...`);
-            await new Promise(resolve => setTimeout(resolve, delay));
+            console.warn(`MoneyControl API ${logSymbol} returned 503. Retrying in ${Math.round(waitMs)}ms (attempt ${attempt}/${retries})...`);
+            await delay(waitMs);
             continue;
           }
           return null;
@@ -345,9 +346,9 @@ export async function mcFetchJson<T = any>(url: string, retries: number = 3, sym
       } catch (e) {
         lastError = e instanceof Error ? e : new Error(String(e));
         if (attempt < retries) {
-          const delay = Math.min(1000 * Math.pow(2, attempt - 1), 10000) + Math.random() * 1000;
-          console.warn(`MoneyControl API error for ${symbol || url}: ${lastError.message}. Retrying in ${Math.round(delay)}ms (attempt ${attempt}/${retries})...`);
-          await new Promise(resolve => setTimeout(resolve, delay));
+          const waitMs = backoffDelay(attempt);
+          console.warn(`MoneyControl API error for ${symbol || url}: ${lastError.message}. Retrying in ${Math.round(waitMs)}ms (attempt ${attempt}/${retries})...`);
+          await delay(waitMs);
         }
       }
     }

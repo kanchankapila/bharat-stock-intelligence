@@ -1,5 +1,6 @@
 import { dbAll, dbRun, dbTransaction } from './dbAsync';
-import { rowGroups, bulkUpsert } from './dbBulk';
+import { rowGroups, rowGroupsWith, bulkUpsert } from './dbBulk';
+import { delay } from './lib/async';
 import {
   initEtMarketstatsScreeners, getEtMarketstatsScreenerDefs,
   fetchEtMarketstatsScreener, getFieldValue, cleanNseSymbol, extractMetricRows,
@@ -151,8 +152,11 @@ export async function syncEtMarketstatsScreeners(timeframeFilter?: 'intraday' | 
         const existing = await tx.all<{ symbol: string }>(
           `SELECT symbol FROM et_marketstats_screener_stocks WHERE screener_key = ?`, [def.screenerKey]);
         const toRemove = existing.filter(r => !incomingSymbols.has(r.symbol));
-        for (const r of toRemove) {
-          await tx.run(`DELETE FROM et_marketstats_screener_stocks WHERE screener_key = ? AND symbol = ?`, [def.screenerKey, r.symbol]);
+        if (toRemove.length) {
+          await tx.run(
+            `DELETE FROM et_marketstats_screener_stocks WHERE screener_key = ? AND symbol IN (${toRemove.map(() => '?').join(',')})`,
+            [def.screenerKey, ...toRemove.map(r => r.symbol)]
+          );
         }
 
         await bulkUpsert(tx, [...stockRowsByKey.values()], STOCK_COLS, buildStockUpsertSql);
@@ -163,15 +167,15 @@ export async function syncEtMarketstatsScreeners(timeframeFilter?: 'intraday' | 
       const exited  = Array.from(prevSymbols).filter(s => !incomingSymbols.has(s));
 
       if (entered.length > 0) {
-        await dbTransaction(async (tx) => {
-          for (const s of entered) {
-            await tx.run(
-              // appeared_at records WHEN the sync saw it -- appeared_date is date-only and is
-              // the dedup key, so it cannot carry a time. See the migration.
-              `INSERT OR IGNORE INTO screener_appearances (screener_id, source, symbol, appeared_date, appeared_at) VALUES (?, 'et_marketstats', ?, ?, ?)`,
-              [def.screenerKey, s, today, new Date().toISOString()]);
-          }
-        });
+        // appeared_at records WHEN the sync saw it -- appeared_date is date-only and is
+        // the dedup key, so it cannot carry a time. See the migration.
+        const appearedAt = new Date().toISOString();
+        // 4 bind params per row; the 'et_marketstats' literal stays in the SQL
+        // (screenerAppearedAt.test.ts pins the source literal on the INSERT line).
+        const buildAppSql = (n: number) =>
+          `INSERT OR IGNORE INTO screener_appearances (screener_id, source, symbol, appeared_date, appeared_at) VALUES ${rowGroupsWith(n, "(?, 'et_marketstats', ?, ?, ?)")}`;
+        await dbTransaction((tx) =>
+          bulkUpsert(tx, entered.map(s => [def.screenerKey, s, today, appearedAt]), 4, buildAppSql));
       }
       if (exited.length > 0) {
         await dbRun(
@@ -181,7 +185,7 @@ export async function syncEtMarketstatsScreeners(timeframeFilter?: 'intraday' | 
 
       synced++;
       console.log(`  [ET_MARKETSTATS] "${def.label}": ${records.length} rows, ${incomingSymbols.size} symbols resolved`);
-      await new Promise(resolve => setTimeout(resolve, 500));
+      await delay(500);
     } catch (error) {
       failed++;
       console.error(`  [ET_MARKETSTATS] Error syncing "${def.label}":`, error instanceof Error ? error.message : error);
