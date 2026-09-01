@@ -362,14 +362,16 @@ describe('individual evaluate() functions', () => {
   });
 
   // ml-promotion-gate-review, 2026-08-19: 'ensemble' was the only model_registry model_name with
-  // a freshness check even though cs_ranker/exit_policy/confluence_ml/online_sgd write a row on
-  // every run the same way -- pins that all 4 got the same check, and derives the list from
+  // a freshness check even though the other registry-backed engines write a row on
+  // every run the same way -- pins that all of them got the same check, and derives the list from
   // DATA_QUALITY_CHECKS itself (not a hand-typed count) so a future model_promotion.py consumer
   // silently missing this coverage would fail here, per this repo's own "a hand-enumerated
   // allowlist only guards what someone remembered to list" lesson.
+  // (cs_ranker/online_sgd dropped from this list 2026-08-31 with their deactivation — their
+  // checks no longer exist in DATA_QUALITY_CHECKS by design, see dataQualityChecks.ts.)
   describe('model-registry-active-* covers every model_registry consumer (ml-promotion-gate-review, 2026-08-19)', () => {
     const now = new Date('2026-08-19T00:00:00Z');
-    for (const modelName of ['cs_ranker', 'exit_policy', 'confluence_ml', 'online_sgd', 'BiLSTM']) {
+    for (const modelName of ['exit_policy', 'confluence_ml', 'BiLSTM']) {
       it(`model-registry-active-${modelName} exists and passes on a fresh model + fresh run`, () => {
         const r = byId(`model-registry-active-${modelName}`).evaluate(
           { active_trained_at: '2026-08-15T00:00:00Z', active_auc: 0.6,

@@ -490,7 +490,6 @@ const VALID_ENGINES: { [key: string]: string } = {
   fii_dii_fetcher: "fii_dii_fetcher.py",
   pcr_fetcher: "pcr_fetcher.py",
   finbert_scorer: "finbert_scorer.py",
-  online_learner: "online_learner.py",
   institutional_quant_engine: "institutional_quant_engine.py",
   technical_analysis_engine: "technical_analysis_engine.py",
 };
@@ -508,7 +507,6 @@ server.tool(
       "fii_dii_fetcher",
       "pcr_fetcher",
       "finbert_scorer",
-      "online_learner",
       "institutional_quant_engine",
       "technical_analysis_engine",
     ]).describe("The short name of the quantitative script to run."),

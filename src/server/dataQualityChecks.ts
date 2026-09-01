@@ -994,10 +994,12 @@ export const DATA_QUALITY_CHECKS: DataQualityCheck[] = [
   // instead of 5 near-identical hand-rolled blocks.
   ...([
     { modelName: 'ensemble', label: 'Ensemble' },
-    { modelName: 'cs_ranker', label: 'CS Ranker' },
     { modelName: 'exit_policy', label: 'Exit Policy' },
     { modelName: 'confluence_ml', label: 'Confluence ML' },
-    { modelName: 'online_sgd', label: 'Online SGD' },
+    // cs_ranker / online_sgd removed 2026-08-31: both models deactivated and their training
+    // jobs unscheduled (cs_ranker CV AUC 0.176 — worse than random; online_sgd 0.5017 — coin
+    // flip; see unified_ranker.py's REGIME_WEIGHTS note). A freshness check on a model that
+    // is deliberately never trained again can only ever fail.
     // Added separately (2026-08-19, same sweep continued): dl_trainer.py's _record_model_registry
     // writes a model_registry row on every BiLSTM run too (promoted or not, dl_trainer.py's own
     // comment: "previously ... never deactivated the previous row either way -- every version
@@ -1694,6 +1696,7 @@ export const DATA_QUALITY_CHECKS: DataQualityCheck[] = [
                    ROW_NUMBER() OVER (PARTITION BY check_id ORDER BY checked_at DESC) AS rn
               FROM data_quality_history
              WHERE checked_at > (EXTRACT(epoch FROM now()) - 86400 * 7) * 1000
+               AND check_id IN (SELECT check_id FROM data_quality_results)
           ), pairs AS (
             SELECT c.check_id,
                    MAX(CASE WHEN c.rn = 1 THEN c.status END) AS now_status,

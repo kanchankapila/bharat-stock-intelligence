@@ -173,9 +173,6 @@ async function getLastRunAt(scriptId: ScriptId): Promise<string | null> {
       case 'reward-engine':
         row = await dbGet("SELECT MAX(last_updated) as t FROM signal_type_weights");
         break;
-      case 'rl-agent-update':
-        row = await dbGet("SELECT MAX(last_updated) as t FROM rl_q_table");
-        break;
       case 'dl-engine-infer':
         row = await dbGet("SELECT MAX(created_at) as t FROM deep_learning_predictions");
         break;
@@ -299,11 +296,6 @@ async function getScriptStats(scriptId: ScriptId): Promise<Record<string, number
       }
       case 'reward-engine':
         return { types: ((await dbGet("SELECT COUNT(*) as n FROM signal_type_weights")) as any)?.n ?? 0 };
-      case 'rl-agent-update':
-        return {
-          states: ((await dbGet("SELECT COUNT(DISTINCT state_key) as n FROM rl_q_table")) as any)?.n ?? 0,
-          entries: ((await dbGet("SELECT COUNT(*) as n FROM rl_q_table")) as any)?.n ?? 0,
-        };
       case 'dl-engine-infer':
         return {
           symbols: ((await dbGet("SELECT COUNT(DISTINCT symbol) as n FROM deep_learning_predictions")) as any)?.n ?? 0,
@@ -599,7 +591,7 @@ export const monitorRouter = router({
     }),
 
   triggerAllDaily: adminProcedure.mutation(async () => {
-    const dailyScripts = ['fii-dii-fetcher', 'regime-detector', 'feature-engineering', 'outcome-resolver-5d', 'outcome-resolver-15d', 'performance-tracker', 'reward-engine', 'rl-agent-update', 'ml-ensemble-score', 'dl-engine-infer', 'signal-type-stats'];
+    const dailyScripts = ['fii-dii-fetcher', 'regime-detector', 'feature-engineering', 'outcome-resolver-5d', 'outcome-resolver-15d', 'performance-tracker', 'reward-engine', 'ml-ensemble-score', 'dl-engine-infer', 'signal-type-stats'];
     const upsert = async (key: string, val: string, errorMsg?: string) => {
       try {
         await dbRun("INSERT INTO app_settings(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value", [key, val]);

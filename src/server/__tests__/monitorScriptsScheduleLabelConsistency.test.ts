@@ -38,7 +38,7 @@ describe('MONITOR_SCRIPTS schedule labels agree with their own cronPatterns', ()
     // steps -- caught by checking each entry's actual cronPatterns before trusting the string.
     expect(mlDailyOpsSteps.map(s => s.id).sort()).toEqual([
       'fii-dii-fetcher', 'finbert-scorer', 'ml-ensemble-score',
-      'performance-tracker', 'reward-engine', 'rl-agent-update', 'signal-type-stats',
+      'performance-tracker', 'reward-engine', 'signal-type-stats',
     ].sort());
   });
 

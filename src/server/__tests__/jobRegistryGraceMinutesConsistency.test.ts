@@ -125,6 +125,8 @@ describe('JOB_REGISTRY.graceMinutes consistency', () => {
     'trendlyne-screener-sync': "jobName: 'trendlyne-screener-sync'",
     'nse-sync': "jobName: 'nse-sync-weekly'",
     'index-membership': "jobName: 'index-membership-daily'",
+    'analyst-estimates-sync': "jobName: 'analyst-estimates-sync-daily'",
+
     'fundamentals-sync': "jobName: 'sync-fundamentals-weekly'",
     'quant-scoring': "jobName: 'quant-score-daily'",
     'signal-outcomes': "'signal-outcomes-daily'",
@@ -179,10 +181,10 @@ describe('JOB_REGISTRY.graceMinutes consistency', () => {
     'fii-dii-fetcher', 'fii-dii-history', 'tickertape-deals', 'finbert-scorer',
     'outcome-resolver-5d', 'outcome-resolver-15d', 'performance-tracker',
     'densify-feature-matrix', 'nse-bhavcopy-fetcher', 'ml-ensemble-incremental',
-    'ml-ensemble-score', 'drift-detector', 'reward-engine', 'rl-agent-update',
+    'ml-ensemble-score', 'drift-detector', 'reward-engine',
     'signal-type-stats', 'news-symbol-link',
   ];
-  const mlWeeklyRetrainSubsteps = ['ml-ensemble-train', 'strategy-optimizer', 'exit-policy-train', 'cs-ranker-train', 'backtest-optimizer'];
+  const mlWeeklyRetrainSubsteps = ['ml-ensemble-train', 'strategy-optimizer', 'exit-policy-train', 'backtest-optimizer'];
   const eventDrivenIds = ['ai-signals', 'dl-retrain-emergency'];
 
   it('driving-job list covers every scheduled JOB_REGISTRY entry not already special-cased', () => {

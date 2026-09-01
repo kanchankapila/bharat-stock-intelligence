@@ -248,12 +248,10 @@ def main():
              'covered': sorted(s for s in symbols if s in et_map),
              'missing': sorted(s for s in symbols if s not in et_map)})
 
-    # --- RL: Q-table state, plus the gate's own per-symbol verdict --------------------------
-    # rl_agent runs weekly-ish, so a wider tolerance than the daily tables below.
-    sql_stage('rl:q_table', 'SELECT COUNT(*) AS n, MAX(last_updated) AS last FROM rl_q_table',
-              per_symbol=False, max_age_days=10)
-    sql_stage('rl:episodes', 'SELECT COUNT(*) AS n, MAX(date) AS last FROM rl_episodes',
-              per_symbol=False, max_age_days=10)
+    # --- Track-record gate (post-RL removal, 2026-08-31) --------------------------------------
+    # The rl:q_table / rl:episodes stages were removed with rl_agent.py (no demonstrated
+    # edge; tables dropped). rk._passes_rl_gate below is UNRELATED to that Q-table: it is a
+    # realized-track-record veto over recommendation_log and stays.
     before = rk._degraded_count
     try:
         rl_map = rk._get_rl_gate_map()

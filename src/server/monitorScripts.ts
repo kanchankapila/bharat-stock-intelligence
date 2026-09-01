@@ -271,28 +271,6 @@ export const MONITOR_SCRIPTS = [
     graceMinutes: 280,
   },
   {
-    id: 'rl-agent-update',
-    label: 'RL Agent Update',
-    category: 'ML',
-    critical: false,
-    description: 'Q-learning meta-controller update — writes Q-values to rl_q_table from recent episodes.',
-    schedule: 'Daily 6:50 PM IST (inside ml-daily-ops)',
-    pyScript: 'rl_agent.py --update',
-    queueName: null,
-    staleLimitHours: 26,
-    // graceMinutes 60 -> 280: this entry is a step inside the ml-daily-ops chain (the
-    // '20 13 * * 1-5' pattern above), whose Worker lockDuration is 4h (240min) --
-    // jobRegistryGraceMinutesConsistency.test.ts already found and fixed the equivalent
-    // JOB_REGISTRY entry for this same underlying job, but this is a SEPARATE, independently
-    // tracked registry (DB-freshness via monitor.router.ts, not job_heartbeat), so fixing one
-    // never touched the other. 60min grace flagged 'stale' on every run that took over an
-    // hour into the chain, which per ml-daily-ops's own declared budget is normal. Bumped to
-    // match the corresponding JOB_REGISTRY sub-step fix (270min parent + 10min). Found
-    // 2026-08-03 while building the graceMinutes mirror-consistency test.
-    cronPatterns: ['20 13 * * 1-5'],
-    graceMinutes: 280,
-  },
-  {
     id: 'dl-engine-infer',
     label: 'DL Engine Inference',
     category: 'ML',

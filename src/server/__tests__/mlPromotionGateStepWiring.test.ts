@@ -16,8 +16,6 @@ describe('promotion-gate training steps are tracked by StepTracker, not a bare .
 
   it.each([
     ['exit-policy-train', "runPython('exit_policy.py', ['--train']"],
-    ['cs-ranker-train', "runPython('cs_ranker.py', ['--train', '--score']"],
-    ['online-learner', "runPython('online_learner.py', ['--window', '180']"],
     ['breakout-classifier-train', "runPython('breakout_classifier.py', ['--train', '--score']"],
     ['movement-predictor-train', "runPython('movement_predictor.py', ['--train', '--score']"],
   ])('%s wraps its runPython call in T.run(...)', (stepName, callSnippet) => {

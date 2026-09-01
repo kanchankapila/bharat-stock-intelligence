@@ -81,6 +81,8 @@ export const JOB_REGISTRY: JobScheduleEntry[] = [
   // processIndexMembership() comment for the full root-cause. critical:false, same as
   // nse-sync: a supplementary ML feature, not a live-blended score input.
   { jobName: 'index-membership', label: 'Index Membership Daily', cronPattern: '35 15 * * 1-5', graceMinutes: 45, critical: false },
+  { jobName: 'analyst-estimates-sync', label: 'Analyst Estimates Sync', cronPattern: '15 14 * * 1-5', graceMinutes: 45, critical: false },
+
   { jobName: 'fundamentals-sync', label: 'Fundamentals Sync', cronPattern: '0 3 * * 6', graceMinutes: 120, critical: false },
   { jobName: 'quant-scoring', label: 'Quant Score Engine', cronPattern: '20 15 * * 1-5', graceMinutes: 45, critical: true },
   { jobName: 'signal-outcomes', label: 'Signal Outcome Tracker', cronPattern: '30 3 * * 1-5', graceMinutes: 45, critical: true },
@@ -203,7 +205,7 @@ export const JOB_REGISTRY: JobScheduleEntry[] = [
   { jobName: 'ml-ensemble-score', label: 'ML Daily Ops: Ensemble Score', cronPattern: '20 13 * * 1-5', graceMinutes: 280, critical: false },
   { jobName: 'drift-detector', label: 'ML Daily Ops: Drift Detector', cronPattern: '20 13 * * 1-5', graceMinutes: 280, critical: false },
   { jobName: 'reward-engine', label: 'ML Daily Ops: Reward Engine', cronPattern: '20 13 * * 1-5', graceMinutes: 280, critical: false },
-  { jobName: 'rl-agent-update', label: 'ML Daily Ops: RL Agent Update', cronPattern: '20 13 * * 1-5', graceMinutes: 280, critical: false },
+  // rl-agent-update removed 2026-08-31 with rl_agent.py (no demonstrated edge; tables dropped).
   { jobName: 'signal-type-stats', label: 'ML Daily Ops: Signal Type Stats', cronPattern: '20 13 * * 1-5', graceMinutes: 280, critical: false },
   { jobName: 'news-symbol-link', label: 'ML Daily Ops: News Symbol Link', cronPattern: '20 13 * * 1-5', graceMinutes: 280, critical: false },
 
@@ -216,7 +218,8 @@ export const JOB_REGISTRY: JobScheduleEntry[] = [
   // 2026-08-21: backtest-optimizer logged STALE at ~77-83h while job_heartbeat showed
   // last_status='success' from the prior Saturday, no real failure).
   { jobName: 'exit-policy-train', label: 'ML Weekly Retrain: Exit Policy Train', cronPattern: '0 5 * * 6', graceMinutes: 400, critical: false },
-  { jobName: 'cs-ranker-train', label: 'ML Weekly Retrain: CS Ranker Train', cronPattern: '0 5 * * 6', graceMinutes: 400, critical: false },
+  // cs-ranker-train removed 2026-08-31: model deactivated (live CV AUC 0.176, worse than
+  // random) and its blend weight zeroed — see unified_ranker.py's REGIME_WEIGHTS note.
   { jobName: 'backtest-optimizer', label: 'ML Weekly Retrain: Backtest Optimizer', cronPattern: '0 5 * * 6', graceMinutes: 400, critical: false },
 
   // job-digest (queues.ts '20 17 * * *', runs all 7 days)

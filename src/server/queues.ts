@@ -109,7 +109,7 @@ let moverIntradayQueue: Queue | undefined;
 let moverIntradayWorker: Worker | undefined;
 export { QUEUE_RESEARCH_PREMARKET, QUEUE_RESEARCH_POSTCLOSE, QUEUE_OUTCOME_RESOLVER } from './jobs/operations.jobs';
 export { QUEUE_SCREENER_PERFORMANCE, QUEUE_COMPANY_PROFILES_SYNC, QUEUE_TICKERTAPE_SCORECARD } from './jobs/sync.jobs';
-export { QUEUE_NSE_SYNC } from './jobs/sync.jobs';
+export { QUEUE_NSE_SYNC, QUEUE_ANALYST_ESTIMATES_SYNC } from './jobs/sync.jobs';
 export { QUEUE_DL_MACRO_FETCH, QUEUE_DL_FEATURE_REFRESH, QUEUE_DL_INFERENCE, QUEUE_DL_REGIME_UPDATE, QUEUE_DL_RETRAIN_WEEKLY } from './jobs/dl.jobs';
 export { QUEUE_TRENDLYNE_MIDWEEK, QUEUE_TRENDLYNE_RATIOS_MONTHLY } from './jobs/trendlyneWeekly.jobs';
 export { QUEUE_CONFLUENCE_COMPUTE, QUEUE_CONFLUENCE_OUTCOMES } from './jobs/confluence.jobs';
@@ -1107,27 +1107,13 @@ async function processMlDailyOps(job: Job): Promise<{ success: boolean; failedSt
   // cycle. The audit's extra checks were merged into ohlcv_quality.flag_malformed_bars()
   // instead; data_integrity_repair.py --bad-bars remains available as a manual one-off.
 
-  // T.run (not a bare .catch), ml-promotion-gate-review 2026-08-19: online_learner writes a
-  // promotion decision to model_registry (model_name='online_sgd') on every run, but until now
-  // its failure was swallowed by console.warn alone -- indistinguishable from a healthy run in
-  // every monitor this platform has, same gap already fixed for its siblings in this function.
-  // Budget raised 120_000 -> 900_000 on 2026-08-30. Two independent reasons, both measured:
-  // (1) it was ALREADY failing at 120s -- job_run_history shows 'online-learner Timed out after
-  //     120000ms' on 2026-08-28, which failed the whole ml-daily-ops parent ('1 steps failed:
-  //     online-learner') since this is a T.run() step, not a tolerated .catch().
-  // (2) the 2026-08-30 feature-completeness fix repointed load_recent_outcomes() at
-  //     ml_ensemble.full_feature_train_sql() (~275 columns, was a hand-rolled ~30-column
-  //     SELECT), so the query it runs is now far wider than when 120s was chosen.
-  // Live-measured after that fix, against production: 3m34.8s wall (266,396 outcomes over the
-  // 180-day window, val_AUC 0.5017) -- i.e. 1.8x the old budget on its own, before any
-  // contention from the ~15 sibling ml-daily-ops steps sharing the 5-slot Python pool.
-  // 15min matches the headroom already given to densify-feature-matrix/performance-tracker
-  // rather than being another 1-second-margin budget of the kind this file keeps re-learning.
-  await T.run('online-learner', () => runPython('online_learner.py', ['--window', '180'], 15 * 60_000));
-
-  // Warm-start LGBM ensemble on the last 3 days of newly-resolved outcomes (+20 boost rounds).
-  // Runs after online_learner so SGD priors are already updated; keeps ensemble fresh daily
-  // without the cost of a full weekly retrain.
+  // online_learner REMOVED from scheduling 2026-08-31: its live CV AUC measured 0.5017
+  // (2026-08-30 run, 266,396 outcomes) — a coin flip that kept an active model_registry row
+  // and burned ~3.5min of the nightly Python-slot budget. Nothing reads online_sgd's output
+  // in any scoring path (ml_ensemble's incremental warm-start is independent). The script
+  // stays on disk for manual runs; its registry row is deactivated.
+  // Warm-start LGBM ensemble on the last 3 days of newly-resolved outcomes (+20 boost rounds);
+  // keeps the ensemble fresh daily without the cost of a full weekly retrain.
   await T.run('ml-ensemble-incremental', () => runPython('ml_ensemble.py', ['--incremental', '--incr-days', '3', '--label', 'triple_barrier'], 5 * 60_000));
 
   await T.run('ml-ensemble-score', () => pythonApi.scorePending());
@@ -1162,8 +1148,9 @@ async function processMlDailyOps(job: Job): Promise<{ success: boolean; failedSt
     })
   );
 
-  await runPython('cs_ranker.py', ['--score'], 120_000)
-    .catch(e => console.warn('[QUEUE] cs_ranker score failed:', (e as Error).message));
+  // cs_ranker daily --score REMOVED 2026-08-31: its live registry CV AUC is 0.176 —
+  // materially worse than random — and its weight in the unified blend is now zeroed
+  // (unified_ranker.py REGIME_WEIGHTS). No point scoring a deactivated engine daily.
 
   // Breakout classifier (Lever #4): score today's universe with P(>=6% move in 10d) →
   // technical_signals.breakout_probability. Advisory only for now (strong purged-OOF AUC
@@ -1205,15 +1192,11 @@ async function processMlDailyOps(job: Job): Promise<{ success: boolean; failedSt
     .catch(e => console.warn('[QUEUE] intraday_strategy_learner failed:', (e as Error).message));
 
   await T.run('reward-engine', () => runPython('reward_engine.py'));
-  // --update only recomputes Q-values for existing rl_episodes rows; nothing creates NEW
-  // rows day-to-day (log_episode() is unused dead code) — --backfill is what actually
-  // inserts episodes from newly-resolved signal_outcomes. A short lookback keeps this a
-  // cheap daily top-up instead of re-scanning the full history (default 180d) every run.
-  // Budget: measured 220s uncontended on 2026-07-31 (13,313 outcomes -> Q-updates) against a
-  // 5-minute budget — 27% headroom, which concurrent load in this 19:30-00:00 window eats.
-  await runPython('rl_agent.py', ['--backfill', '--lookback', '5'], 15 * 60_000)
-    .catch(e => console.warn('[QUEUE] rl_agent backfill failed:', (e as Error).message));
-  await T.run('rl-agent-update', () => runPython('rl_agent.py', ['--update']));
+  // rl_agent (Q-learning over signal episodes) REMOVED 2026-08-31: zero demonstrated edge
+  // anywhere in the platform's measurement history (docs/measurement-history.md), and its
+  // --update path only recomputed Q-values for rows nothing else creates. rl_q_table /
+  // rl_episodes dropped with it. The ranker's identically-named _passes_rl_gate is UNRELATED
+  // (a realized-track-record veto over recommendation_log) and stays.
 
   const { computeSignalTypeStats } = await import('./technicalSignalsService');
   await T.run('signal-type-stats', () => computeSignalTypeStats());
@@ -1411,13 +1394,9 @@ async function processMlWeeklyRetrain(_job: Job): Promise<{ success: boolean; fa
   // and always reach T.finish() so the heartbeat is written.
   await T.run('ml-ensemble-train', () => runPython('ml_ensemble.py', ['--train', '--tune', '--score', '--label', 'triple_barrier'], 90 * 60_000))
     .catch(e => console.warn('[QUEUE] ml-ensemble-train failed (weekly retrain continues):', (e as Error).message));
-  // breakout_classifier.py moved to daily ops (2026-07-17) -- its only training source,
-  // stock_ohlcv, updates once a day at EOD, so a weekly cadence left it stale against data
-  // that had already moved on for up to 6 of every 7 days.
-  // T.run (not a bare .catch), ml-promotion-gate-review 2026-08-19: same gap as exit_policy above
-  // -- cs_ranker writes a promotion decision to model_registry on every run but its failure was
-  // invisible to every monitor this platform has.
-  await T.run('cs-ranker-train', () => runPython('cs_ranker.py', ['--train', '--score'], 30 * 60_000));
+  // cs-ranker-train REMOVED 2026-08-31 alongside the daily score and the blend weight:
+  // training a model whose live CV AUC (0.176) is worse than a coin flip only spends
+  // the weekly Python-slot budget to reproduce the same verdict.
   // 2026-08-29 (AF-20260829-30/45): 30min was too tight for max_iterations=300's default grid
   // search, not (only) a symptom of concurrent load as first suspected -- live-timed standalone
   // under LOW contention (no other heavy jobs running): still executing, real CPU burn confirmed

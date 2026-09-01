@@ -156,10 +156,10 @@ describe('JOB_REGISTRY cronPattern/everyMs mirror consistency', () => {
     'fii-dii-fetcher', 'fii-dii-history', 'tickertape-deals', 'finbert-scorer',
     'outcome-resolver-5d', 'outcome-resolver-15d', 'performance-tracker',
     'densify-feature-matrix', 'nse-bhavcopy-fetcher', 'ml-ensemble-incremental',
-    'ml-ensemble-score', 'drift-detector', 'reward-engine', 'rl-agent-update',
+    'ml-ensemble-score', 'drift-detector', 'reward-engine',
     'signal-type-stats', 'news-symbol-link',
   ];
-  const mlWeeklyRetrainSubsteps = ['ml-ensemble-train', 'strategy-optimizer', 'exit-policy-train', 'cs-ranker-train', 'backtest-optimizer'];
+  const mlWeeklyRetrainSubsteps = ['ml-ensemble-train', 'strategy-optimizer', 'exit-policy-train', 'backtest-optimizer'];
 
   const pinned: Array<{ jobName: string; marker: string; label: string }> = [
     // Legacy hand-rolled queues.ts registrations (not yet migrated to registerRepeatableJob).
@@ -194,6 +194,8 @@ describe('JOB_REGISTRY cronPattern/everyMs mirror consistency', () => {
     { jobName: 'quant-scoring', marker: "jobName: 'quant-score-daily'", label: 'screeners.jobs.ts' },
     { jobName: 'nse-sync', marker: "jobName: 'nse-sync-weekly'", label: 'sync.jobs.ts' },
     { jobName: 'index-membership', marker: "jobName: 'index-membership-daily'", label: 'sync.jobs.ts' },
+    { jobName: 'analyst-estimates-sync', marker: "jobName: 'analyst-estimates-sync-daily'", label: 'sync.jobs.ts' },
+
     { jobName: 'confluence-compute', marker: "jobName: 'confluence-compute'", label: 'confluence.jobs.ts' },
     { jobName: 'confluence-outcomes', marker: "jobName: 'confluence-outcomes-daily'", label: 'confluence.jobs.ts' },
     { jobName: 'trendlyne-catchup', marker: "jobName: 'trendlyne-catchup-slice'", label: 'trendlyneWeekly.jobs.ts' },

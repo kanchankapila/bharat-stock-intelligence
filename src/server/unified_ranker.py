@@ -178,15 +178,44 @@ HORIZON_MULT = {
 # DIRECTIONAL_BUY_FLOOR-style absolute thresholds. Left alone for the same reason as then.
 # Re-check via a fresh blend_walkforward.py run once ~20+ further sessions accumulate; if
 # the dIC advantage reverses on the larger sample, revert is a one-commit operation.
+# Timeframe casing normalizer (2026-08-31): confluence_signals.suggested_timeframe and
+# recommendation_log.timeframe arrive in mixed conventions ('swing', 'long_term',
+# 'Intraday'), while the ranker's own literals are uppercase. unified_recommendations is
+# read with exact-match timeframe filters in several routers, so a lowercase variant
+# silently vanishes from those surfaces (live: a handful of 'intraday'/'long_term' rows
+# per day were invisible to every timeframe='SWING'-style filter). Normalize at the write
+# boundary so the table carries one convention only.
+def _normalize_timeframe(raw):
+    if raw is None:
+        return None
+    t = str(raw).strip().upper()
+    return t or None
+
+
 REGIME_WEIGHTS = {
-    'BULL':     {'screener': 0.0, 'ml': 0.118912, 'cs': 0.088082, 'confluence': 0.237824, 'technical': 0.190259, 'dl': 0.126839, 'breakout': 0.15, 'smart_money': 0.088084},
-    'BEAR':     {'screener': 0.0, 'ml': 0.152514, 'cs': 0.091876, 'confluence': 0.305028, 'technical': 0.154352, 'dl': 0.154352, 'breakout': 0.05, 'smart_money': 0.091878},
-    'HIGH_VOL': {'screener': 0.0, 'ml': 0.084374, 'cs': 0.070312, 'confluence': 0.16875, 'technical': 0.337501, 'dl': 0.16875, 'breakout': 0.10, 'smart_money': 0.070313},
-    'CRASH':    {'screener': 0.0, 'ml': 0.164073, 'cs': 0.10128, 'confluence': 0.255224, 'technical': 0.164073, 'dl': 0.164073, 'breakout': 0.05, 'smart_money': 0.101277},
+    'BULL':     {'screener': 0.0, 'ml': 0.15, 'cs': 0.0, 'confluence': 0.30, 'technical': 0.24, 'dl': 0.16, 'breakout': 0.15, 'smart_money': 0.0},
+    'BEAR':     {'screener': 0.0, 'ml': 0.189088, 'cs': 0.0, 'confluence': 0.378178, 'technical': 0.191367, 'dl': 0.191367, 'breakout': 0.05, 'smart_money': 0.0},
+    'HIGH_VOL': {'screener': 0.0, 'ml': 0.099999, 'cs': 0.0, 'confluence': 0.20, 'technical': 0.400001, 'dl': 0.20, 'breakout': 0.10, 'smart_money': 0.0},
+    'CRASH':    {'screener': 0.0, 'ml': 0.208537, 'cs': 0.0, 'confluence': 0.324389, 'technical': 0.208537, 'dl': 0.208537, 'breakout': 0.05, 'smart_money': 0.0},
     # SIDEWAYS was silently falling back to BULL; a balanced blend is more appropriate for
     # a rangebound tape (lean slightly less on momentum/dl than BULL).
-    'SIDEWAYS': {'screener': 0.0, 'ml': 0.131046, 'cs': 0.091004, 'confluence': 0.262092, 'technical': 0.163808, 'dl': 0.131046, 'breakout': 0.13, 'smart_money': 0.091004},
+    'SIDEWAYS': {'screener': 0.0, 'ml': 0.165714, 'cs': 0.0, 'confluence': 0.331429, 'technical': 0.207143, 'dl': 0.165714, 'breakout': 0.13, 'smart_money': 0.0},
 }
+# cs and smart_money zeroed 2026-08-31 (fourth+ fifth engine-weight removals), same procedure
+# and same evidence bar as the screener zeroing below:
+#   - cs (cs_ranker): live model_registry CV AUC 0.176 — materially WORSE than random — and
+#     measurement.md's standing verdict "cs_score no edge (correctly configured on the first
+#     pass)". Its training/scoring jobs were removed from queues.ts the same day.
+#   - smart_money: measured inert in four independent ablations (identical to baseline to
+#     4 decimals in assembly_ablation.py's rw7 arms, re-confirmed 2026-08-29/30) — it never
+#     moved the blend, so zeroing it is a no-op for scoring that stops paying the appearance
+#     of a live engine.
+# Both keys are KEPT at 0.0 rather than removed for the same reasons as 'screener': _blend()
+# renormalizes over present engines, and the persisted cs_score/smart_money_score reporting
+# columns, drift monitoring, and dispersion-collapse tracking all expect the key to exist.
+# Freed weight was redistributed proportionally over ml/confluence/technical/dl only —
+# breakout stays pinned at its audit-derived ceiling [0.15, 0.05, 0.10, 0.05, 0.13]
+# (test_regime_weights_sum_to_one asserts the sums).
 # THIRD screener shrink, 2026-08-30, all the way to zero (the first two were 2026-08-20/21).
 #
 # Kept the 'screener' key (weight 0.0) rather than removing it, deliberately: _blend()
@@ -2233,7 +2262,7 @@ class UnifiedRanker:
                 'target_2':        float(row['target_2'])        if row['target_2']        is not None else None,
                 'target_3':        float(row['target_3'])        if row['target_3']        is not None else None,
                 'risk_reward':     float(row['risk_reward'])     if row['risk_reward']     is not None else None,
-                'timeframe':       row['timeframe'],
+                'timeframe':       _normalize_timeframe(row['timeframe']),
                 'trade_reasoning': row['trade_reasoning'],
                 'sector':          row['sector'],
             }
@@ -2264,7 +2293,7 @@ class UnifiedRanker:
                     'target_2':        float(row['target_2']) if row['target_2'] is not None else None,
                     'target_3':        float(row['target_3']) if row['target_3'] is not None else None,
                     'risk_reward':     rr,
-                    'timeframe':       row['timeframe'],
+                    'timeframe':       _normalize_timeframe(row['timeframe']),
                     'trade_reasoning': row['trade_reasoning'],
                     'sector':          row['sector'],
                 }
