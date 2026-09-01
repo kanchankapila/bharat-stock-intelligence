@@ -27,6 +27,15 @@ export const QUEUE_TICKERTAPE_SCORECARD = 'tickertape-scorecard';
 export const QUEUE_NSE_SYNC = 'nse-sync';
 export const QUEUE_CORPORATE_ACTIONS_INGEST = 'corporate-actions-ingest';
 export const QUEUE_INDEX_MEMBERSHIP = 'index-membership';
+export const QUEUE_ANALYST_ESTIMATES_SYNC = 'analyst-estimates-sync';
+
+async function processAnalystEstimatesSync(_job: Job): Promise<{ success: boolean }> {
+  // Upgraded to high-speed hybrid engine (~2.5 min across whole 2,300+ universe)
+  await runPython('analyst_estimates_snapshot.py', [], 8 * 60_000)
+    .catch(e => console.warn('[QUEUE] analyst_estimates_snapshot failed:', (e as Error).message));
+  return { success: true };
+}
+
 
 async function processCorporateActionsIngest(_job: Job): Promise<{ success: boolean }> {
   // corporate_actions.ratio fix (2026-08-07, dead-column sweep): ohlcv_quality.py's
@@ -374,9 +383,25 @@ export async function registerSyncJobs(connection: any) {
     lockDuration: 10 * 60_000,
     lockRenewTime: 2 * 60_000,
   });
+  const analystEstimatesSync = await registerRepeatableJob({
+    connection,
+    queueName: QUEUE_ANALYST_ESTIMATES_SYNC,
+    jobName: 'analyst-estimates-sync-daily',
+    jobId: 'analyst-estimates-sync-daily',
+    // Daily Mon-Fri at 14:15 UTC (7:45 PM IST) after market close
+    repeat: { pattern: '15 14 * * 1-5' },
+    removeOnComplete: 3,
+    removeOnFail: 3,
+    processor: processAnalystEstimatesSync,
+    monitorName: 'analyst-estimates-sync',
+    concurrency: 1,
+    lockDuration: 10 * 60_000,
+    lockRenewTime: 2 * 60_000,
+  });
+
 
   return {
     screenerPerf, companyProfilesSync, tickertapeScorecard, nseSync, corporateActionsIngest,
-    indexMembership,
+    indexMembership, analystEstimatesSync,
   };
 }

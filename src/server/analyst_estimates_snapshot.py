@@ -14,7 +14,6 @@ import polars as pl
 
 import argparse
 import datetime
-import time
 from typing import Callable, Optional
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
@@ -22,9 +21,6 @@ import requests
 
 from db_compat import execute, query_all
 from fetch_utils import retry_get
-
-_BATCH_SIZE = 15
-_BATCH_GAP_SEC = 0.5
 
 # ── MoneyControl API endpoints (same ones mcApiService.ts wraps) ──────────────
 
@@ -41,9 +37,6 @@ _MC_HEADERS = {
 _URL_ANALYST  = "https://api.moneycontrol.com/mcapi/v1/stock/estimates/analyst-rating?deviceType=W&scId={scId}&ex=N"
 _URL_PRICE    = "https://api.moneycontrol.com/mcapi/v1/stock/estimates/price-forecast?scId={scId}&ex=N&deviceType=W"
 _URL_EARNINGS = "https://api.moneycontrol.com/mcapi/v1/stock/estimates/earning-forecast?scId={scId}&ex=N&deviceType=W&frequency=12&financialType=C"
-
-_SLEEP_BETWEEN = 0.4   # seconds between stocks (conservative rate-limit guard)
-_BATCH_SIZE    = 5     # pause every N stocks
 
 
 # ── Pure parsing functions (no I/O, fully testable) ───────────────────────────
@@ -150,6 +143,50 @@ def _fetch_symbol(mcsymbol: str, session: requests.Session) -> dict:
     return result
 
 
+def _fetch_symbol_hybrid(symbol: str, mcsymbol: str, session: requests.Session) -> dict:
+    """Fast hybrid fetcher: structured direct engine with MoneyControl fallback."""
+    result: dict = {
+        "n_analysts": None, "final_rating": None, "buy_count": None,
+        "hold_count": None, "sell_count": None, "target_high": None,
+        "target_mean": None, "target_low": None, "eps_est_next": None,
+        "revenue_est_next": None
+    }
+    try:
+        import yfinance as yf
+        t = yf.Ticker(f"{symbol}.NS")
+        info = t.info or {}
+        t_mean = info.get("targetMeanPrice")
+        t_high = info.get("targetHighPrice")
+        t_low = info.get("targetLowPrice")
+        n_cov = info.get("numberOfAnalystOpinions")
+        rec_key = info.get("recommendationKey")
+        fwd_eps = info.get("forwardEps")
+        
+        if t_mean is not None:
+            result["target_mean"] = float(t_mean)
+            result["target_high"] = float(t_high) if t_high else None
+            result["target_low"] = float(t_low) if t_low else None
+            result["n_analysts"] = int(n_cov) if n_cov else None
+            result["final_rating"] = rec_key.upper() if rec_key else None
+            result["eps_est_next"] = float(fwd_eps) if fwd_eps else None
+            # NOTE: deliberately NOT estimating buy/hold/sell splits from
+            # recommendationMean — these columns feed ml_ensemble as features, and
+            # synthetic distributions (80/15/5 etc. of n_analysts) would poison
+            # training. Real counts arrive from the MoneyControl merge below
+            # whenever MC has the symbol; if neither source has them they stay
+            # NULL (honest unknown), never fabricated.
+    except Exception:
+        pass
+
+    if (result["target_mean"] is None or result["n_analysts"] is None
+            or result["eps_est_next"] is None or result["buy_count"] is None) and mcsymbol:
+        mc_res = _fetch_symbol(mcsymbol, session)
+        for k, v in mc_res.items():
+            if result.get(k) is None and v is not None:
+                result[k] = v
+
+    return result
+
 # ── SQL ───────────────────────────────────────────────────────────────────────
 
 _SELECT_SYMBOLS = """
@@ -206,36 +243,33 @@ def run(
         if fetch_fn:
             fields = fetch_fn(mcsymbol)
         else:
-            fields = _fetch_symbol(mcsymbol, session)
+            fields = _fetch_symbol_hybrid(symbol, mcsymbol, session)
         return symbol, fields
 
-    for batch_start in range(0, len(rows), _BATCH_SIZE):
-        batch = rows[batch_start:batch_start + _BATCH_SIZE]
-        with ThreadPoolExecutor(max_workers=len(batch)) as pool:
-            futures = [pool.submit(_process_one, r) for r in batch]
-            for fut in as_completed(futures):
-                symbol, fields = fut.result()
-                done += 1
-                if all(v is None for v in fields.values()):
-                    continue
+    workers = 12 if use_live else len(rows) or 1
+    with ThreadPoolExecutor(max_workers=workers) as pool:
+        futures = {pool.submit(_process_one, r): r["symbol"] for r in rows}
+        for fut in as_completed(futures):
+            symbol, fields = fut.result()
+            done += 1
+            if all(v is None for v in fields.values()):
+                continue
 
-                execute(_DELETE, (symbol, as_of))
-                execute(_INSERT, (
-                    symbol, as_of,
-                    fields.get("n_analysts"),
-                    fields.get("final_rating"),
-                    fields.get("buy_count"),
-                    fields.get("hold_count"),
-                    fields.get("sell_count"),
-                    fields.get("target_high"),
-                    fields.get("target_mean"),
-                    fields.get("target_low"),
-                    fields.get("eps_est_next"),
-                    fields.get("revenue_est_next"),
-                ))
-                written += 1
-        if use_live:
-            time.sleep(_BATCH_GAP_SEC)
+            execute(_DELETE, (symbol, as_of))
+            execute(_INSERT, (
+                symbol, as_of,
+                fields.get("n_analysts"),
+                fields.get("final_rating"),
+                fields.get("buy_count"),
+                fields.get("hold_count"),
+                fields.get("sell_count"),
+                fields.get("target_high"),
+                fields.get("target_mean"),
+                fields.get("target_low"),
+                fields.get("eps_est_next"),
+                fields.get("revenue_est_next"),
+            ))
+            written += 1
 
     print(f"[ANALYST-SNAP] Wrote {written}/{len(rows)} analyst snapshots as_of {as_of}.")
     return written

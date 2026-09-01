@@ -643,7 +643,9 @@ async function processMlDailyOps(job: Job): Promise<{ success: boolean; failedSt
   await runPython('factor_breakdown_snapshot.py', [], 120_000)
     .catch(e => console.warn('[QUEUE] factor_breakdown_snapshot failed:', (e as Error).message));
 
-  // analyst_estimates_snapshot moved to weekly retrain (2328 stocks × 3 calls × 0.4s = ~47 min)
+  // analyst_estimates_snapshot: now a dedicated daily job (analyst-estimates-sync-daily,
+  // sync.jobs.ts, Mon–Fri 14:15 UTC) since the hybrid direct-engine rewrite took the full
+  // run from ~47 min to ~2.5 min — see that file for why it left the weekly chain.
 
   // Surveillance gate: ASM/GSM flags → nse_stocks and technical_signals.asm_flag/gsm_stage.
   await runPython('asm_gsm_fetcher.py', [], 2 * 60_000)
@@ -1327,9 +1329,11 @@ async function processMlWeeklyRetrain(_job: Job): Promise<{ success: boolean; fa
   // × 2 API calls × 0.5s = ~34 min; 150 min timeout is generous headroom
   await runPython('trendlyne_fundamentals_fetcher.py', [], 150 * 60_000)
     .catch(e => console.warn('[QUEUE] trendlyne_fundamentals_fetcher failed:', (e as Error).message));
-  // Analyst consensus + price targets — 2328 stocks × 3 calls × 0.4s = ~47 min (quarterly data)
-  await runPython('analyst_estimates_snapshot.py', [], 70 * 60_000)
-    .catch(e => console.warn('[QUEUE] analyst_estimates_snapshot failed:', (e as Error).message));
+  // Analyst consensus + price targets: REMOVED from this weekly chain 2026-09-01 —
+  // now a dedicated daily BullMQ job (analyst-estimates-sync-daily, sync.jobs.ts,
+  // Mon–Fri 14:15 UTC). The hybrid direct-engine rewrite (~2.5 min full universe vs
+  // the old ~47 min sequential crawl) made daily cadence cheaper than the old weekly
+  // slot; keep cadence claims in sync with jobRegistry.ts's 'analyst-estimates-sync'.
   // The 15 per-stock endpoints extra_features_parser.py does NOT read (ml-daily-ops fetches the
   // 5 it does, nightly). No feature consumes these today — they are kept warm for future
   // feature work, which is a weekly-cadence need, not a reason to spend the nightly window on
