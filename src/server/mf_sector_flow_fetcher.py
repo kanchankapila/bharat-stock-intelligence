@@ -115,7 +115,7 @@ def ensure_schema() -> None:
         try:
             c = connect()
             c.execute(translate(
-                f"ALTER TABLE technical_signals ADD COLUMN {col} REAL"
+                f"ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS {col} REAL"
             ))
             c.commit()
             c.close()

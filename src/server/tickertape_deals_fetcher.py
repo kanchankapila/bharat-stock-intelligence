@@ -217,7 +217,7 @@ def parse_insider(raw: dict) -> dict | None:
 def ensure_insider_schema(conn: ConnWrapper) -> None:
     for col, typ in [("date_iso", "TEXT"), ("pct_transacted", "REAL"), ("source", "TEXT")]:
         try:
-            conn.execute(f"ALTER TABLE insider_trades ADD COLUMN {col} {typ}")
+            conn.execute(f"ALTER TABLE insider_trades ADD COLUMN IF NOT EXISTS {col} {typ}")
             conn.commit()
         except Exception:
             try:
@@ -254,7 +254,7 @@ def ensure_schema(conn: ConnWrapper) -> None:
     for col, typ in [("pct_transacted", "REAL"), ("client_name", "TEXT"),
                      ("trade_type", "TEXT"), ("category", "TEXT"), ("source", "TEXT")]:
         try:
-            conn.execute(f"ALTER TABLE block_deals ADD COLUMN {col} {typ}")
+            conn.execute(f"ALTER TABLE block_deals ADD COLUMN IF NOT EXISTS {col} {typ}")
             conn.commit()
         except Exception:
             # Already present. Postgres poisons the transaction on a failed statement, so

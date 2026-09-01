@@ -304,7 +304,15 @@ def _prefetch_next_price(conn, triples) -> dict:
     out = {}
     for i in range(0, len(uniq), _BULK_CHUNK):
         chunk = uniq[i:i + _BULK_CHUNK]
-        values_sql = ", ".join("(?, ?::date, ?)" for _ in chunk)
+        # AF-20260901: `?::date` here became `:pN::date` after convert_placeholders(), and
+        # SQLAlchemy's bind parser refuses a bind name followed directly by ':' — the
+        # literal `:pN` reached Postgres and every batched prefetch died with
+        # `syntax error at or near ":"` (136 times on 09-01), silently swallowed by the
+        # except below, so next-open entry pricing never resolved. stock_ohlcv.date is a
+        # native DATE column (live information_schema), so the VALUES side must be a real
+        # date — but spelled CAST(? AS date), which binds cleanly (:pN followed by ' AS ')
+        # instead of the un-bindable :pN::date adjacency.
+        values_sql = ", ".join("(?, CAST(? AS date), ?)" for _ in chunk)
         params = []
         for s, d, m in chunk:
             params.extend([s, d, m])
@@ -344,7 +352,11 @@ def _prefetch_sl_hits(conn, quads) -> dict:
     out = {}
     for i in range(0, len(uniq), _BULK_CHUNK):
         chunk = uniq[i:i + _BULK_CHUNK]
-        values_sql = ", ".join("(?, ?::date, ?::date, ?)" for _ in chunk)
+        # AF-20260901: CAST(? AS date) not ?::date — stock_ohlcv.date is a native DATE
+        # column and ?::date compiles to :pN::date, which SQLAlchemy's bind parser will
+        # not treat as a bind (bind name followed directly by ':'), sending the literal
+        # to Postgres as a syntax error. See _prefetch_next_price for the full note.
+        values_sql = ", ".join("(?, CAST(? AS date), CAST(? AS date), ?)" for _ in chunk)
         params = []
         for s, a, b, sl in chunk:
             params.extend([s, a, b, sl])
@@ -511,7 +523,11 @@ def _prefetch_resolved_keys(conn, triples) -> set:
     out = set()
     for i in range(0, len(uniq), _BULK_CHUNK):
         chunk = uniq[i:i + _BULK_CHUNK]
-        values_sql = ", ".join("(?, ?::date, ?)" for _ in chunk)
+        # AF-20260901: plain binds, NO date cast — signal_outcomes.signal_date is TEXT in
+        # the live schema (information_schema), so text-to-text equality is correct here;
+        # a `?::date` cast would both break SQLAlchemy bind parsing (:pN::date) and
+        # compare date = text, which Postgres rejects.
+        values_sql = ", ".join("(?, ?, ?)" for _ in chunk)
         params = []
         for s, d, h in chunk:
             params.extend([s, d, h])
@@ -543,7 +559,9 @@ def _prefetch_bar_windows(conn, triples) -> dict:
     out = {}
     for i in range(0, len(uniq), _BULK_CHUNK):
         chunk = uniq[i:i + _BULK_CHUNK]
-        values_sql = ", ".join("(?, ?::date, ?::date)" for _ in chunk)
+        # AF-20260901: CAST(? AS date) for the same bind-adjacency + native-DATE reasons
+        # as _prefetch_next_price above (stock_ohlcv.date is a native DATE column).
+        values_sql = ", ".join("(?, CAST(? AS date), CAST(? AS date))" for _ in chunk)
         params = []
         for s, a, b in chunk:
             params.extend([s, a, b])
@@ -1048,7 +1066,7 @@ def resolve_unified_outcomes(
                     SELECT COALESCE(SUM(amount), 0.0) FROM corporate_actions
                     WHERE symbol = ? AND action_type = 'DIVIDEND'
                       AND ex_date >= ? AND ex_date <= ?
-                """, (sym, next_trading_day, exit_target_date))
+                """, (sym, _norm_iso(next_trading_day), _norm_iso(exit_target_date)))
                 if div_row:
                     dividend_sum = float(div_row[0])
             except Exception:
@@ -1366,7 +1384,7 @@ def resolve_recommendation_log(
                     SELECT COALESCE(SUM(amount), 0.0) FROM corporate_actions
                     WHERE symbol = ? AND action_type = 'DIVIDEND'
                       AND ex_date >= ? AND ex_date <= ?
-                """, (sym, next_trading_day, exit_target_date))
+                """, (sym, _norm_iso(next_trading_day), _norm_iso(exit_target_date)))
                 if div_row:
                     dividend_sum = float(div_row[0])
             except Exception:

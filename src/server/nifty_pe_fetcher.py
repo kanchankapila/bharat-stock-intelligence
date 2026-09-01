@@ -107,7 +107,7 @@ def _ensure_table():
     """)
     # Add eps column if upgrading from older schema
     try:
-        execute("ALTER TABLE index_valuation ADD COLUMN eps REAL")
+        execute("ALTER TABLE index_valuation ADD COLUMN IF NOT EXISTS eps REAL")
     except Exception:
         pass
 

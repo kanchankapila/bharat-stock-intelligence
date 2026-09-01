@@ -61,7 +61,7 @@ def ensure_schema() -> None:
     for col in COLUMNS:
         try:
             conn = connect()
-            conn.execute(translate(f"ALTER TABLE technical_signals ADD COLUMN {col} REAL"))
+            conn.execute(translate(f"ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS {col} REAL"))
             conn.commit()
             conn.close()
             print(f"[CommoditySensitivity] Added column technical_signals.{col}")

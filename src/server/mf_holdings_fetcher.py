@@ -113,9 +113,9 @@ def ensure_schema(con) -> None:
     con.commit()
     # Columns on technical_signals
     for ddl in [
-        "ALTER TABLE technical_signals ADD COLUMN mf_holding_pct REAL",
-        "ALTER TABLE technical_signals ADD COLUMN mf_fund_count INTEGER",
-        "ALTER TABLE technical_signals ADD COLUMN mf_chg_vs_prev REAL",
+        "ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS mf_holding_pct REAL",
+        "ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS mf_fund_count INTEGER",
+        "ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS mf_chg_vs_prev REAL",
     ]:
         try:
             cur.execute(ddl)

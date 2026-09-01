@@ -30,8 +30,8 @@ from as_of import logical_write_floor
 # ── Schema migrations (idempotent ADD COLUMN) ────────────────────────────────
 
 _SCHEMA_MIGRATIONS = [
-    "ALTER TABLE fundamentals_history ADD COLUMN pledge_pct REAL",
-    "ALTER TABLE technical_signals ADD COLUMN pledge_chg_90d REAL",
+    "ALTER TABLE fundamentals_history ADD COLUMN IF NOT EXISTS pledge_pct REAL",
+    "ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS pledge_chg_90d REAL",
 ]
 
 # ── Snapshot SQL ─────────────────────────────────────────────────────────────

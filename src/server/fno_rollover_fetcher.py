@@ -102,8 +102,8 @@ def ensure_schema(con) -> None:
 
     # Columns on technical_signals
     for ddl in [
-        "ALTER TABLE technical_signals ADD COLUMN rollover_pct      REAL",
-        "ALTER TABLE technical_signals ADD COLUMN cost_of_carry_ann REAL",
+        "ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS rollover_pct      REAL",
+        "ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS cost_of_carry_ann REAL",
     ]:
         safe_alter(con, ddl)
 

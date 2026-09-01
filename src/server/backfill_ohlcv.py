@@ -185,7 +185,7 @@ def init_db(conn):
     # mc_ohlcv_backfill.py's ensure_adjustment_basis_column() docstring. CREATE TABLE IF NOT
     # EXISTS above is a no-op on the live table, so an existing DB needs this ALTER too.
     try:
-        conn.execute("ALTER TABLE stock_ohlcv ADD COLUMN adjustment_basis TEXT")
+        conn.execute("ALTER TABLE stock_ohlcv ADD COLUMN IF NOT EXISTS adjustment_basis TEXT")
         conn.commit()
     except Exception:
         conn.rollback()

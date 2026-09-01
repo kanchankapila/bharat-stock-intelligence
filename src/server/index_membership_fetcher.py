@@ -96,20 +96,20 @@ def ensure_schema(con) -> None:
     cur = con.cursor()
 
     nse_stocks_ddls = [
-        "ALTER TABLE nse_stocks ADD COLUMN is_nifty50       INTEGER DEFAULT 0",
-        "ALTER TABLE nse_stocks ADD COLUMN is_nifty100      INTEGER DEFAULT 0",
-        "ALTER TABLE nse_stocks ADD COLUMN is_nifty200      INTEGER DEFAULT 0",
-        "ALTER TABLE nse_stocks ADD COLUMN is_midcap150     INTEGER DEFAULT 0",
-        "ALTER TABLE nse_stocks ADD COLUMN is_smallcap250   INTEGER DEFAULT 0",
-        "ALTER TABLE nse_stocks ADD COLUMN index_flags_updated_at TEXT",
+        "ALTER TABLE nse_stocks ADD COLUMN IF NOT EXISTS is_nifty50       INTEGER DEFAULT 0",
+        "ALTER TABLE nse_stocks ADD COLUMN IF NOT EXISTS is_nifty100      INTEGER DEFAULT 0",
+        "ALTER TABLE nse_stocks ADD COLUMN IF NOT EXISTS is_nifty200      INTEGER DEFAULT 0",
+        "ALTER TABLE nse_stocks ADD COLUMN IF NOT EXISTS is_midcap150     INTEGER DEFAULT 0",
+        "ALTER TABLE nse_stocks ADD COLUMN IF NOT EXISTS is_smallcap250   INTEGER DEFAULT 0",
+        "ALTER TABLE nse_stocks ADD COLUMN IF NOT EXISTS index_flags_updated_at TEXT",
     ]
     technical_signals_ddls = [
-        "ALTER TABLE technical_signals ADD COLUMN is_nifty50       INTEGER DEFAULT 0",
-        "ALTER TABLE technical_signals ADD COLUMN is_nifty100      INTEGER DEFAULT 0",
-        "ALTER TABLE technical_signals ADD COLUMN is_nifty200      INTEGER DEFAULT 0",
-        "ALTER TABLE technical_signals ADD COLUMN is_midcap150     INTEGER DEFAULT 0",
-        "ALTER TABLE technical_signals ADD COLUMN is_smallcap250   INTEGER DEFAULT 0",
-        "ALTER TABLE technical_signals ADD COLUMN nifty_tier       INTEGER",
+        "ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS is_nifty50       INTEGER DEFAULT 0",
+        "ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS is_nifty100      INTEGER DEFAULT 0",
+        "ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS is_nifty200      INTEGER DEFAULT 0",
+        "ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS is_midcap150     INTEGER DEFAULT 0",
+        "ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS is_smallcap250   INTEGER DEFAULT 0",
+        "ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS nifty_tier       INTEGER",
     ]
 
     for ddl in nse_stocks_ddls + technical_signals_ddls:

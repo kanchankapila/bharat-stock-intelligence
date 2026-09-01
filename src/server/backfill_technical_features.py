@@ -160,7 +160,7 @@ def compute_indicators(ohlcv_rows: list[dict]) -> dict:
 
 def run(limit: int | None = None):
     con = connect()
-    safe_alter(None, "ALTER TABLE technical_signals ADD COLUMN signal_type TEXT")
+    safe_alter(None, "ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS signal_type TEXT")
 
     # Find all (symbol, signal_date) pairs needing backfill
     print("[Backfill] Finding coverage gaps...")

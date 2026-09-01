@@ -122,10 +122,10 @@ def ensure_schema(con) -> None:
     con.commit()
 
     for ddl in [
-        "ALTER TABLE technical_signals ADD COLUMN mc_cp_bull_count     INTEGER",
-        "ALTER TABLE technical_signals ADD COLUMN mc_cp_bear_count     INTEGER",
-        "ALTER TABLE technical_signals ADD COLUMN mc_cp_net_score      INTEGER",
-        "ALTER TABLE technical_signals ADD COLUMN mc_cp_avg_target_pct REAL",
+        "ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS mc_cp_bull_count     INTEGER",
+        "ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS mc_cp_bear_count     INTEGER",
+        "ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS mc_cp_net_score      INTEGER",
+        "ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS mc_cp_avg_target_pct REAL",
     ]:
         try:
             cur.execute(ddl)

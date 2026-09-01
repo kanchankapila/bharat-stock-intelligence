@@ -36,7 +36,7 @@ def ensure_schema() -> None:
     for col in ("mf_flow_vs_sector", "mf_flow_rank"):
         try:
             conn = connect()
-            conn.execute(translate(f"ALTER TABLE technical_signals ADD COLUMN {col} REAL"))
+            conn.execute(translate(f"ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS {col} REAL"))
             conn.commit()
             conn.close()
             print(f"[OWN] Added column technical_signals.{col}")

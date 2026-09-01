@@ -124,11 +124,11 @@ def ensure_schema(con) -> None:
 
     # Feature columns on technical_signals
     for ddl in [
-        "ALTER TABLE technical_signals ADD COLUMN promoter_buy_90d_cr  REAL",
-        "ALTER TABLE technical_signals ADD COLUMN promoter_sell_90d_cr REAL",
-        "ALTER TABLE technical_signals ADD COLUMN promoter_net_90d     REAL",
-        "ALTER TABLE technical_signals ADD COLUMN insider_buy_flag     INTEGER DEFAULT 0",
-        "ALTER TABLE technical_signals ADD COLUMN insider_sell_flag    INTEGER DEFAULT 0",
+        "ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS promoter_buy_90d_cr  REAL",
+        "ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS promoter_sell_90d_cr REAL",
+        "ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS promoter_net_90d     REAL",
+        "ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS insider_buy_flag     INTEGER DEFAULT 0",
+        "ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS insider_sell_flag    INTEGER DEFAULT 0",
     ]:
         try:
             cur.execute(ddl)

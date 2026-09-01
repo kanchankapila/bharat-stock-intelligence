@@ -100,11 +100,11 @@ def ensure_schema(con) -> None:
     con.commit()
 
     new_cols = [
-        "ALTER TABLE technical_signals ADD COLUMN eps_surprise_q1       REAL",
-        "ALTER TABLE technical_signals ADD COLUMN eps_surprise_q2       REAL",
-        "ALTER TABLE technical_signals ADD COLUMN eps_beat_streak       INTEGER",
-        "ALTER TABLE technical_signals ADD COLUMN eps_miss_after_streak INTEGER DEFAULT 0",
-        "ALTER TABLE technical_signals ADD COLUMN rev_surprise_q1       REAL",
+        "ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS eps_surprise_q1       REAL",
+        "ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS eps_surprise_q2       REAL",
+        "ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS eps_beat_streak       INTEGER",
+        "ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS eps_miss_after_streak INTEGER DEFAULT 0",
+        "ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS rev_surprise_q1       REAL",
     ]
     for ddl in new_cols:
         try:

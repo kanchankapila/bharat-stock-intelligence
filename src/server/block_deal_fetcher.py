@@ -107,8 +107,8 @@ def ensure_schema(con) -> None:
     """)
     con.commit()  # commit tables/indexes before ALTER
     for ddl in [
-        "ALTER TABLE technical_signals ADD COLUMN block_deal_net_qty   BIGINT",
-        "ALTER TABLE technical_signals ADD COLUMN block_deal_value_cr  REAL",
+        "ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS block_deal_net_qty   BIGINT",
+        "ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS block_deal_value_cr  REAL",
     ]:
         try:
             cur.execute(ddl)

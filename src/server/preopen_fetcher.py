@@ -83,8 +83,8 @@ def ensure_preopen_stock_schema(con) -> None:
 
     # Add IEP columns to technical_signals (skip if already present)
     for ddl in [
-        "ALTER TABLE technical_signals ADD COLUMN iep_gap_pct       REAL",
-        "ALTER TABLE technical_signals ADD COLUMN preopen_imbalance REAL",
+        "ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS iep_gap_pct       REAL",
+        "ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS preopen_imbalance REAL",
     ]:
         try:
             cur.execute(ddl)

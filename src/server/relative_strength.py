@@ -59,7 +59,7 @@ def ensure_schema() -> None:
     for col in ("rs_vs_sector_21d", "rs_vs_sector_63d"):
         try:
             conn = connect()
-            conn.execute(translate(f"ALTER TABLE technical_signals ADD COLUMN {col} REAL"))
+            conn.execute(translate(f"ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS {col} REAL"))
             conn.commit()
             conn.close()
             print(f"[RS] Added column technical_signals.{col}")

@@ -90,7 +90,7 @@ def ensure_schema(con) -> None:
     # the first run needs an explicit ALTER or every insert dies on UndefinedColumn. Hit
     # exactly that while building this. safe_alter swallows the already-exists case per
     # dialect, which is why it exists.
-    for ddl in (f"ALTER TABLE {TABLE} ADD COLUMN bullish_exit_ratio_5d REAL",):
+    for ddl in (f"ALTER TABLE {TABLE} ADD COLUMN IF NOT EXISTS bullish_exit_ratio_5d REAL",):
         safe_alter(con, ddl)
     con.commit()
 

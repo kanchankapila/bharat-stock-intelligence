@@ -71,7 +71,7 @@ def ensure_schema(con) -> None:
     ]
     for col, dtype in new_cols:
         try:
-            cur.execute(f"ALTER TABLE technical_signals ADD COLUMN {col} {dtype}")
+            cur.execute(f"ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS {col} {dtype}")
             con.commit()
         except Exception:
             con.rollback()

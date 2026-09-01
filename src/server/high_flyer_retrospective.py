@@ -67,9 +67,9 @@ def ensure_schema(con) -> None:
     """))
     # direction/wrong_call added after the table's initial ship — safe_alter is a no-op
     # once applied, so this stays correct on every run against an already-migrated DB.
-    safe_alter(cur, "ALTER TABLE high_flyer_retrospective ADD COLUMN direction TEXT DEFAULT 'up'")
-    safe_alter(cur, "ALTER TABLE high_flyer_retrospective ADD COLUMN wrong_call INTEGER DEFAULT 0")
-    safe_alter(cur, "ALTER TABLE high_flyer_retrospective ADD COLUMN prior_classification TEXT")
+    safe_alter(cur, "ALTER TABLE high_flyer_retrospective ADD COLUMN IF NOT EXISTS direction TEXT DEFAULT 'up'")
+    safe_alter(cur, "ALTER TABLE high_flyer_retrospective ADD COLUMN IF NOT EXISTS wrong_call INTEGER DEFAULT 0")
+    safe_alter(cur, "ALTER TABLE high_flyer_retrospective ADD COLUMN IF NOT EXISTS prior_classification TEXT")
     cur.execute(translate("""
         CREATE TABLE IF NOT EXISTS high_flyer_daily_stats (
             date                  TEXT PRIMARY KEY,

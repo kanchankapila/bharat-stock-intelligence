@@ -180,7 +180,7 @@ def _add_columns_if_missing(engine, table: str, cols: list[tuple[str, str]]):
                     ))
                 else:
                     conn.execute(text(
-                        f"ALTER TABLE {table} ADD COLUMN {col} {dtype}"
+                        f"ALTER TABLE {table} ADD COLUMN IF NOT EXISTS {col} {dtype}"
                     ))
         except Exception:
             pass   # column already exists on SQLite (no IF NOT EXISTS support)

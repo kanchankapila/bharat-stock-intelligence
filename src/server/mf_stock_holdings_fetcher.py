@@ -82,13 +82,13 @@ def ensure_schema(con) -> None:
     cur.execute("CREATE INDEX IF NOT EXISTS idx_mfsh_sym ON mf_stock_holdings(symbol, as_of_date DESC)")
     con.commit()
     for ddl in [
-        "ALTER TABLE technical_signals ADD COLUMN mf_net_share_chg_pct REAL",
-        "ALTER TABLE technical_signals ADD COLUMN mf_fund_count        INTEGER",
-        "ALTER TABLE technical_signals ADD COLUMN mf_funds_adding      INTEGER",
-        "ALTER TABLE technical_signals ADD COLUMN mf_funds_trimming    INTEGER",
-        "ALTER TABLE technical_signals ADD COLUMN mf_add_trim_ratio    REAL",
-        "ALTER TABLE technical_signals ADD COLUMN mf_avg_pct_assets    REAL",
-        "ALTER TABLE technical_signals ADD COLUMN mf_big_fund_flow     REAL",
+        "ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS mf_net_share_chg_pct REAL",
+        "ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS mf_fund_count        INTEGER",
+        "ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS mf_funds_adding      INTEGER",
+        "ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS mf_funds_trimming    INTEGER",
+        "ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS mf_add_trim_ratio    REAL",
+        "ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS mf_avg_pct_assets    REAL",
+        "ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS mf_big_fund_flow     REAL",
     ]:
         try:
             cur.execute(ddl); con.commit()

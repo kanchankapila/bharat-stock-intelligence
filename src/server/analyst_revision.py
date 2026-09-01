@@ -59,7 +59,7 @@ def ensure_schema() -> None:
     only one column missing) is handled cleanly without blocking other columns."""
     for col, dtype in _NEW_COLS:
         try:
-            execute(f"ALTER TABLE technical_signals ADD COLUMN {col} {dtype}")
+            execute(f"ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS {col} {dtype}")
         except Exception:
             # Column already exists — this is the normal path after first run.
             pass

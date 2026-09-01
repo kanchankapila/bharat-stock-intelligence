@@ -92,7 +92,7 @@ def ensure_adjustment_basis_column(conn) -> None:
     """
     cur = conn.cursor()
     try:
-        cur.execute("ALTER TABLE stock_ohlcv ADD COLUMN adjustment_basis TEXT")
+        cur.execute("ALTER TABLE stock_ohlcv ADD COLUMN IF NOT EXISTS adjustment_basis TEXT")
         conn.commit()
     except Exception:
         conn.rollback()

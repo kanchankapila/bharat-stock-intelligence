@@ -161,13 +161,40 @@ def ensure_schema(con) -> None:
             "ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS dvm_momentum INTEGER",
         ]:
             try:
-                cur.execute(ddl)
+                # AF-20260901: IF NOT EXISTS alone still queued a 2s-lock-timeout cancel per
+                # column on 09-01 (9 cancels in the postgres log) because the no-op ALTER
+                # still requests the ACCESS EXCLUSIVE lock before discovering the column
+                # exists. The lock-free pre-check skips the ALTER entirely on the common
+                # path; the DDL only runs when the column is genuinely missing.
+                if not _ddl_column_exists(cur, ddl):
+                    cur.execute(ddl)
                 con.commit()
             except Exception:
                 con.rollback()
     finally:
         cur.execute("SET lock_timeout = DEFAULT")
         con.commit()
+
+
+def _ddl_column_exists(cur, ddl: str) -> bool:
+    """True when the column targeted by an ``ALTER TABLE t ADD COLUMN [IF NOT EXISTS] c``
+    statement already exists in the current schema. Lock-free (information_schema lookup),
+    so gating the ALTER on it avoids queueing an ACCESS EXCLUSIVE lock request just to
+    discover the column was already there (AF-20260901 / AF-20260827-14)."""
+    toks = ddl.split()
+    if (len(toks) < 6 or toks[0].upper() != "ALTER" or toks[1].upper() != "TABLE"
+            or toks[3].upper() != "ADD" or toks[4].upper() != "COLUMN"):
+        return False
+    rest = toks[5:]
+    if rest and rest[0].upper() == "IF":  # skip IF NOT EXISTS
+        rest = rest[3:]
+    if not rest:
+        return False
+    cur.execute(
+        "SELECT 1 FROM information_schema.columns WHERE table_schema = current_schema() "
+        f"AND table_name = '{toks[2]}' AND column_name = '{rest[0]}'"
+    )
+    return cur.fetchone() is not None
 
 
 # â”€â”€ Fetch helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€

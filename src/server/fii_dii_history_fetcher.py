@@ -207,7 +207,7 @@ def ensure_schema(conn: ConnWrapper) -> None:
     this keeps a throwaway/SQLite test DB and a fresh dev box working without one."""
     for col in SEGMENT_COLS:
         try:
-            conn.execute(f"ALTER TABLE fii_dii_flow ADD COLUMN {col} REAL")
+            conn.execute(f"ALTER TABLE fii_dii_flow ADD COLUMN IF NOT EXISTS {col} REAL")
             conn.commit()
         except Exception:
             # Column already exists. Postgres poisons the transaction on a failed statement,

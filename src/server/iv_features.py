@@ -155,7 +155,7 @@ def run(only_date: str | None = None) -> int:
         ("put_wall_dist_pct",  "REAL"),
         ("near_expiry_gamma",  "REAL DEFAULT 0"),
     ]:
-        safe_alter(None, f"ALTER TABLE technical_signals ADD COLUMN {col} {typ}")
+        safe_alter(None, f"ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS {col} {typ}")
 
     # Read spot prices needed for wall computation from stock_option_features
     spot_rows = conn.execute(

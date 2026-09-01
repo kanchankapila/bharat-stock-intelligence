@@ -102,10 +102,10 @@ def ensure_schema(con) -> None:
     con.commit()
 
     for ddl in [
-        "ALTER TABLE technical_signals ADD COLUMN nt_max_pain_dist_pct REAL",
-        "ALTER TABLE technical_signals ADD COLUMN nt_oi_direction       REAL",
-        "ALTER TABLE technical_signals ADD COLUMN nt_pcr                REAL",
-        "ALTER TABLE technical_signals ADD COLUMN nt_option_volume_log  REAL",
+        "ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS nt_max_pain_dist_pct REAL",
+        "ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS nt_oi_direction       REAL",
+        "ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS nt_pcr                REAL",
+        "ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS nt_option_volume_log  REAL",
     ]:
         try:
             cur.execute(ddl)

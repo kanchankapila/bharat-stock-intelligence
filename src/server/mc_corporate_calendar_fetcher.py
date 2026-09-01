@@ -319,9 +319,9 @@ def _ensure_columns(con) -> None:
     # SQLite has no ADD COLUMN IF NOT EXISTS, so this has to be try/except-idempotent
     # rather than relying on the (Postgres-only) IF NOT EXISTS clause this previously used.
     for stmt in [
-        "ALTER TABLE technical_signals ADD COLUMN days_to_ex_div REAL",
-        "ALTER TABLE technical_signals ADD COLUMN days_to_board_meeting REAL",
-        "ALTER TABLE technical_signals ADD COLUMN upcoming_div_pct REAL",
+        "ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS days_to_ex_div REAL",
+        "ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS days_to_board_meeting REAL",
+        "ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS upcoming_div_pct REAL",
     ]:
         try:
             con.execute(stmt)

@@ -79,7 +79,7 @@ def ensure_schema() -> None:
         """
     )
     try:
-        execute("ALTER TABLE market_breadth ADD COLUMN adv_decline_ratio REAL")
+        execute("ALTER TABLE market_breadth ADD COLUMN IF NOT EXISTS adv_decline_ratio REAL")
     except Exception:
         pass   # column already exists
 

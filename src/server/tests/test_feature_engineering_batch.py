@@ -330,3 +330,144 @@ class TestZeroRowsGuard:
             fe._merge_market_context = lambda feat: feat
             # Should not raise.
             fe.run_full_pipeline(symbols=["TATA"])
+
+
+class _NonClosingConn:
+    """run_full_pipeline closes its own connection in a finally block -- forward everything
+    except close() so the test can still assert against the connection afterward."""
+    def __init__(self, real):
+        self._real = real
+
+    def __getattr__(self, name):
+        return getattr(self._real, name)
+
+    def close(self):
+        pass
+
+
+class TestRollbackAfterWriteFailure:
+    """2026-09-01 (data/model audit): one symbol's write throwing inside
+    _write_symbol_features used to abort the WHOLE shared Postgres transaction (recurring-bugs.md
+    "swallowed exception aborts the transaction") -- every symbol processed afterward on the
+    same connection failed with PendingRollbackError, not just the one that actually errored.
+    Live failure: dl-feature-refresh, 2026-08-31, "Can't reconnect until invalid transaction is
+    rolled back." Needs a REAL Postgres connection (pg_memory_conn), not a MagicMock -- the bug
+    is specifically about Postgres's own abort-the-whole-transaction semantics, which a mock
+    can't reproduce."""
+
+    def test_a_later_symbols_write_succeeds_after_an_earlier_ones_write_fails(self):
+        fe = _stub_fe()
+        con = _make_in_memory_db(symbol="BAD")
+        con.execute(
+            "INSERT INTO stock_ohlcv (symbol, date, open, high, low, close, volume) "
+            "SELECT 'GOOD', date, open, high, low, close, volume FROM stock_ohlcv WHERE symbol='BAD'"
+        )
+        con.commit()
+        fe._con = MagicMock(return_value=_NonClosingConn(con))
+
+        good_feat = _make_feat_df(2)
+        bad_feat = _make_feat_df(2)
+        bad_feat["ret_1d"] = "not_a_number"  # forces a genuine Postgres type-cast failure
+
+        class _FakeExecutor:
+            def __init__(self, *a, **k):
+                pass
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *a):
+                return False
+
+            def submit(self, fn, arg):
+                sym = arg[0]
+                fut = MagicMock()
+                fut.result = lambda: (sym, bad_feat.copy() if sym == "BAD" else good_feat.copy())
+                return fut
+
+        with patch("src.server.feature_engineering.ProcessPoolExecutor", _FakeExecutor), \
+             patch("src.server.feature_engineering.as_completed", lambda fs: list(fs)), \
+             patch("src.server.feature_engineering.SCALER_PATH", _TMP_SCALER), \
+             patch("pickle.dump"):
+            fe._fit_scaler = lambda feat, **kw: MagicMock(transform=lambda X: X.values)
+            fe._apply_scaler = lambda feat, scaler: feat
+            fe._merge_flow_features = lambda feat, sym: feat
+            fe._merge_market_context = lambda feat: feat
+            # BAD's write fails (caught + logged inside run_full_pipeline); GOOD's write must
+            # still land -- the guard below would otherwise raise "wrote 0 feature rows".
+            fe.run_full_pipeline(symbols=["BAD", "GOOD"])
+
+        good_rows = con.execute(
+            "SELECT COUNT(*) FROM feature_store WHERE symbol='GOOD'"
+        ).fetchone()[0]
+        assert good_rows == 2, (
+            "GOOD's write must succeed even though BAD's write failed first on the same "
+            "connection -- without a rollback after the failure, Postgres leaves the whole "
+            "transaction aborted and every subsequent write fails with PendingRollbackError"
+        )
+        bad_rows = con.execute(
+            "SELECT COUNT(*) FROM feature_store WHERE symbol='BAD'"
+        ).fetchone()[0]
+        assert bad_rows == 0
+
+
+class TestReconnectOnIdleConnectionDeath:
+    """2026-09-01 (data/model audit): con is opened ONCE at the top of run_full_pipeline and
+    reused for the whole run; while ProcessPoolExecutor computes a chunk of symbols, con sits
+    idle, and idle long enough it can be closed server-side without pool_pre_ping catching it
+    (pre_ping only validates at pool CHECKOUT, and this connection was checked out once and
+    never returned). Same class already fixed in strategy_optimizer.py/backtest_optimizer.py
+    (recurring-bugs.md) -- applied here as a retry-with-reconnect since writes recur throughout
+    this loop rather than happening once at the end. Live symptom: dl-feature-refresh,
+    2026-08-31, sqlalchemy.exc.PendingRollbackError from _revalidate_connection."""
+
+    def test_write_failure_from_a_dead_connection_reconnects_and_retries(self, monkeypatch):
+        from sqlalchemy.exc import PendingRollbackError
+
+        fe = _stub_fe()
+        first_con = MagicMock()
+        second_con = MagicMock()
+        fe._con = MagicMock(side_effect=[first_con, second_con])
+
+        calls = []
+
+        def fake_write(symbol, feat, only_date, con):
+            calls.append(con)
+            if con is first_con:
+                raise PendingRollbackError("Can't reconnect until invalid transaction is rolled back")
+            return 2
+
+        fe._write_symbol_features = fake_write
+
+        feat_df = _make_feat_df(2)
+
+        class _FakeExecutor:
+            def __init__(self, *a, **k):
+                pass
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *a):
+                return False
+
+            def submit(self, fn, arg):
+                fut = MagicMock()
+                fut.result = lambda: (arg[0], feat_df.copy())
+                return fut
+
+        with patch("src.server.feature_engineering.ProcessPoolExecutor", _FakeExecutor), \
+             patch("src.server.feature_engineering.as_completed", lambda fs: list(fs)), \
+             patch("src.server.feature_engineering.SCALER_PATH", _TMP_SCALER), \
+             patch("pickle.dump"):
+            fe._fit_scaler = lambda feat, **kw: MagicMock(transform=lambda X: X.values)
+            fe._apply_scaler = lambda feat, scaler: feat
+            fe._merge_flow_features = lambda feat, sym: feat
+            fe._merge_market_context = lambda feat: feat
+            # Must not raise "wrote 0 feature rows" -- the retry on the reconnected
+            # connection succeeds and the zero-rows guard never fires.
+            fe.run_full_pipeline(symbols=["ONLY"])
+
+        assert fe._con.call_count == 2, "must reconnect (call self._con() again) after the dead-connection error"
+        assert calls == [first_con, second_con], "must retry the write on the NEW connection, not the dead one"
+        first_con.close.assert_called_once()

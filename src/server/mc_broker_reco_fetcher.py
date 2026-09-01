@@ -109,7 +109,7 @@ def ensure_schema(con) -> None:
     for col, dtype in feature_cols:
         try:
             con.execute(translate(
-                f"ALTER TABLE technical_signals ADD COLUMN {col} {dtype}"
+                f"ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS {col} {dtype}"
             ))
             con.commit()
             print(f"[BrokerReco] Added column technical_signals.{col}")

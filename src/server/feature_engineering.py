@@ -47,6 +47,7 @@ import ta
 
 from db_compat import connect, read_df, use_postgres, ConnWrapper
 from as_of import read_as_of_history, logical_write_floor
+from sqlalchemy.exc import OperationalError, PendingRollbackError, InterfaceError
 
 SCALER_PATH = Path(__file__).parent / "ml_models" / "feature_scaler_v1.pkl"
 
@@ -960,7 +961,30 @@ class FeatureEngineer:
                                 scaler = self._fit_scaler(feat)
                                 feat = self._apply_scaler(feat, scaler)
                                 last_scaler = scaler
-                                n = self._write_symbol_features(symbol, feat, only_date, con)
+                                try:
+                                    n = self._write_symbol_features(symbol, feat, only_date, con)
+                                except (OperationalError, PendingRollbackError, InterfaceError) as conn_err:
+                                    # con is opened ONCE at the top of this function and reused
+                                    # across the whole run; while ProcessPoolExecutor computes a
+                                    # chunk of ~32 symbols, con sits idle, and idle long enough it
+                                    # can be closed server-side (Postgres/network timeout) without
+                                    # pool_pre_ping ever catching it -- pre_ping only validates a
+                                    # connection at pool CHECKOUT, and this one was checked out
+                                    # once and never returned. Same pattern already fixed in
+                                    # strategy_optimizer.py/backtest_optimizer.py (recurring-bugs.md
+                                    # "connection checked out once ... left idle"), applied here as
+                                    # a retry since writes recur throughout this loop rather than
+                                    # happening once at the end. close() itself can also raise (the
+                                    # same dead connection) -- discarding it regardless is fine,
+                                    # only a failure to open the NEW one is fatal to this symbol.
+                                    print(f"[FE] {symbol}: write failed on a possibly-dead "
+                                          f"connection ({conn_err}); reconnecting and retrying once")
+                                    try:
+                                        con.close()
+                                    except Exception:
+                                        pass
+                                    con = self._con()
+                                    n = self._write_symbol_features(symbol, feat, only_date, con)
                                 written += n
                                 if i % 100 == 0:
                                     print(f"[FE] {i}/{total} complete — {written} rows written")

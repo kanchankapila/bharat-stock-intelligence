@@ -143,21 +143,53 @@ def ensure_schema(con) -> None:
     cur.execute("CREATE INDEX IF NOT EXISTS idx_tlpa_sym ON trendlyne_price_analysis(symbol, date DESC)")
     con.commit()
 
-    for ddl in [
-        "ALTER TABLE technical_signals ADD COLUMN tl_vs_nifty_1m       REAL",
-        "ALTER TABLE technical_signals ADD COLUMN tl_vs_nifty_3m       REAL",
-        "ALTER TABLE technical_signals ADD COLUMN tl_vs_nifty_6m       REAL",
-        "ALTER TABLE technical_signals ADD COLUMN tl_vs_ind_1m         REAL",
-        "ALTER TABLE technical_signals ADD COLUMN tl_vs_ind_3m         REAL",
-        "ALTER TABLE technical_signals ADD COLUMN tl_seasonal_month_5y REAL",
-        "ALTER TABLE technical_signals ADD COLUMN tl_dist_3m_high_pct  REAL",
-        "ALTER TABLE technical_signals ADD COLUMN tl_dist_3m_low_pct   REAL",
-    ]:
-        try:
-            cur.execute(ddl)
-            con.commit()
-        except Exception:
-            con.rollback()
+    # AF-20260901: lock-free information_schema pre-check + IF NOT EXISTS + 2s session
+    # lock_timeout -- these columns already exist (schema-of-record is
+    # db/schema.postgres.sql) yet the ALTERs re-ran on every fetch, logging duplicate-column
+    # postgres ERRORs and queueing an ACCESS EXCLUSIVE lock on a hot table each time
+    # (mechanism documented in trendlyne_overview_fetcher.py / AF-20260827-14).
+    cur.execute("SET lock_timeout = '2s'")
+    try:
+        for ddl in [
+            "ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS tl_vs_nifty_1m       REAL",
+            "ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS tl_vs_nifty_3m       REAL",
+            "ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS tl_vs_nifty_6m       REAL",
+            "ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS tl_vs_ind_1m         REAL",
+            "ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS tl_vs_ind_3m         REAL",
+            "ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS tl_seasonal_month_5y REAL",
+            "ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS tl_dist_3m_high_pct  REAL",
+            "ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS tl_dist_3m_low_pct   REAL",
+        ]:
+            try:
+                if not _ddl_column_exists(cur, ddl):
+                    cur.execute(ddl)
+                con.commit()
+            except Exception:
+                con.rollback()
+    finally:
+        cur.execute("SET lock_timeout = DEFAULT")
+        con.commit()
+
+
+def _ddl_column_exists(cur, ddl: str) -> bool:
+    """True when the column targeted by an ``ALTER TABLE t ADD COLUMN [IF NOT EXISTS] c``
+    statement already exists in the current schema. Lock-free (information_schema lookup),
+    so gating the ALTER on it avoids queueing an ACCESS EXCLUSIVE lock request just to
+    discover the column was already there (AF-20260901 / AF-20260827-14)."""
+    toks = ddl.split()
+    if (len(toks) < 6 or toks[0].upper() != "ALTER" or toks[1].upper() != "TABLE"
+            or toks[3].upper() != "ADD" or toks[4].upper() != "COLUMN"):
+        return False
+    rest = toks[5:]
+    if rest and rest[0].upper() == "IF":  # skip IF NOT EXISTS
+        rest = rest[3:]
+    if not rest:
+        return False
+    cur.execute(
+        "SELECT 1 FROM information_schema.columns WHERE table_schema = current_schema() "
+        f"AND table_name = '{toks[2]}' AND column_name = '{rest[0]}'"
+    )
+    return cur.fetchone() is not None
 
 
 # â”€â”€ Fetch â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€

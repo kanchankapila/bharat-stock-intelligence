@@ -101,7 +101,7 @@ def ensure_technical_signals_columns(conn) -> None:
         ("days_since_upgrade",    "INTEGER"),
     ]
     for col, definition in new_cols:
-        safe_alter(None, f"ALTER TABLE technical_signals ADD COLUMN {col} {definition}")
+        safe_alter(None, f"ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS {col} {definition}")
 
 
 # ---------------------------------------------------------------------------

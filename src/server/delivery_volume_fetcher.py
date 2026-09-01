@@ -89,7 +89,7 @@ def ensure_schema(con) -> None:
     con.commit()  # commit DDL before ALTER (Postgres aborts tx on failed ALTER)
 
     # Add delivery_pct to technical_signals if not present
-    safe_alter(None, "ALTER TABLE technical_signals ADD COLUMN delivery_pct REAL")
+    safe_alter(None, "ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS delivery_pct REAL")
 
 
 def _trading_days_back(n: int, con=None) -> list[date]:

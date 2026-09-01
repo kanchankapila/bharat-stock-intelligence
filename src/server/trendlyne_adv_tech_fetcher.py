@@ -155,26 +155,58 @@ def ensure_schema(con) -> None:
         cur.execute(idx)
     con.commit()  # commit DDL before ALTER so Postgres doesn't abort the tx
 
-    # Back-fill columns on technical_signals â€” each ALTER in its own commit/rollback
-    for ddl in [
-        "ALTER TABLE technical_signals ADD COLUMN ma_bull_frac      REAL",
-        "ALTER TABLE technical_signals ADD COLUMN osc_bull_frac     REAL",
-        "ALTER TABLE technical_signals ADD COLUMN adx_tl            REAL",
-        "ALTER TABLE technical_signals ADD COLUMN atr_pct_tl        REAL",
-        "ALTER TABLE technical_signals ADD COLUMN mfi_tl            REAL",
-        "ALTER TABLE technical_signals ADD COLUMN pivot_dist_pct_tl REAL",
-        "ALTER TABLE technical_signals ADD COLUMN delivery_avg_1m_tl REAL",
-        "ALTER TABLE technical_signals ADD COLUMN beta_1y_tl        REAL",
-        "ALTER TABLE technical_signals ADD COLUMN ret_1m_tl         REAL",
-        "ALTER TABLE technical_signals ADD COLUMN ret_3m_tl         REAL",
-        "ALTER TABLE technical_signals ADD COLUMN ret_6m_tl         REAL",
-        "ALTER TABLE technical_signals ADD COLUMN ret_1y_tl         REAL",
-    ]:
-        try:
-            cur.execute(ddl)
-            con.commit()
-        except Exception:
-            con.rollback()
+    # Back-fill columns on technical_signals â€” each ALTER in its own commit/rollback.
+    # AF-20260901: these columns have existed for months (schema-of-record is
+    # db/schema.postgres.sql) yet the ALTERs re-ran on every fetch, each attempt queueing
+    # an ACCESS EXCLUSIVE lock on a hot table before failing with DuplicateColumn. Guard:
+    # lock-free information_schema pre-check + IF NOT EXISTS + 2s session lock_timeout
+    # (mechanism documented in trendlyne_overview_fetcher.py and AF-20260827-14).
+    cur.execute("SET lock_timeout = '2s'")
+    try:
+        for ddl in [
+            "ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS ma_bull_frac      REAL",
+            "ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS osc_bull_frac     REAL",
+            "ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS adx_tl            REAL",
+            "ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS atr_pct_tl        REAL",
+            "ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS mfi_tl            REAL",
+            "ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS pivot_dist_pct_tl REAL",
+            "ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS delivery_avg_1m_tl REAL",
+            "ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS beta_1y_tl        REAL",
+            "ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS ret_1m_tl         REAL",
+            "ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS ret_3m_tl         REAL",
+            "ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS ret_6m_tl         REAL",
+            "ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS ret_1y_tl         REAL",
+        ]:
+            try:
+                if not _ddl_column_exists(cur, ddl):
+                    cur.execute(ddl)
+                con.commit()
+            except Exception:
+                con.rollback()
+    finally:
+        cur.execute("SET lock_timeout = DEFAULT")
+        con.commit()
+
+
+def _ddl_column_exists(cur, ddl: str) -> bool:
+    """True when the column targeted by an ``ALTER TABLE t ADD COLUMN [IF NOT EXISTS] c``
+    statement already exists in the current schema. Lock-free (information_schema lookup),
+    so gating the ALTER on it avoids queueing an ACCESS EXCLUSIVE lock request just to
+    discover the column was already there (AF-20260901 / AF-20260827-14)."""
+    toks = ddl.split()
+    if (len(toks) < 6 or toks[0].upper() != "ALTER" or toks[1].upper() != "TABLE"
+            or toks[3].upper() != "ADD" or toks[4].upper() != "COLUMN"):
+        return False
+    rest = toks[5:]
+    if rest and rest[0].upper() == "IF":  # skip IF NOT EXISTS
+        rest = rest[3:]
+    if not rest:
+        return False
+    cur.execute(
+        "SELECT 1 FROM information_schema.columns WHERE table_schema = current_schema() "
+        f"AND table_name = '{toks[2]}' AND column_name = '{rest[0]}'"
+    )
+    return cur.fetchone() is not None
 
 
 # â”€â”€ Fetch â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€

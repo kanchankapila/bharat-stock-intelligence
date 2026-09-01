@@ -128,9 +128,9 @@ def upsert_flags(asm_symbols: set[str] | None, gsm_map: dict[str, int] | None) -
     today = date.today().isoformat()
 
     for ddl in [
-        "ALTER TABLE nse_stocks ADD COLUMN is_asm INTEGER DEFAULT 0",
-        "ALTER TABLE nse_stocks ADD COLUMN gsm_stage INTEGER DEFAULT 0",
-        "ALTER TABLE nse_stocks ADD COLUMN surveillance_updated_at TEXT",
+        "ALTER TABLE nse_stocks ADD COLUMN IF NOT EXISTS is_asm INTEGER DEFAULT 0",
+        "ALTER TABLE nse_stocks ADD COLUMN IF NOT EXISTS gsm_stage INTEGER DEFAULT 0",
+        "ALTER TABLE nse_stocks ADD COLUMN IF NOT EXISTS surveillance_updated_at TEXT",
     ]:
         try:
             cur.execute(ddl)
@@ -174,8 +174,8 @@ def backfill_technical_signals(con) -> int:
     cur = con.cursor()
 
     for ddl in [
-        "ALTER TABLE technical_signals ADD COLUMN asm_flag INTEGER DEFAULT 0",
-        "ALTER TABLE technical_signals ADD COLUMN gsm_stage INTEGER DEFAULT 0",
+        "ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS asm_flag INTEGER DEFAULT 0",
+        "ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS gsm_stage INTEGER DEFAULT 0",
     ]:
         try:
             cur.execute(ddl)

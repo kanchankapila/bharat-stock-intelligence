@@ -253,7 +253,7 @@ def score() -> int:
     conn = connect()
     cur = conn.cursor()
     try:
-        cur.execute(translate("ALTER TABLE technical_signals ADD COLUMN flyer_probability REAL"))
+        cur.execute(translate("ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS flyer_probability REAL"))
         conn.commit()
     except Exception:
         conn.rollback()

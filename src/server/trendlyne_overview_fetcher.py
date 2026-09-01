@@ -159,38 +159,71 @@ def ensure_schema(con) -> None:
     """)
     con.commit()
 
-    for ddl in [
-        "ALTER TABLE technical_signals ADD COLUMN analyst_upside_pct REAL",
-        "ALTER TABLE technical_signals ADD COLUMN analyst_count INTEGER",
-        "ALTER TABLE technical_signals ADD COLUMN analyst_buy_pct REAL",
-        "ALTER TABLE technical_signals ADD COLUMN roe_annual REAL",
-        "ALTER TABLE technical_signals ADD COLUMN roce_annual REAL",
-        "ALTER TABLE technical_signals ADD COLUMN ebitda_margin REAL",
-        "ALTER TABLE technical_signals ADD COLUMN np_margin REAL",
-        "ALTER TABLE technical_signals ADD COLUMN promoter_pct REAL",
-        "ALTER TABLE technical_signals ADD COLUMN fii_pct REAL",
-        "ALTER TABLE technical_signals ADD COLUMN mf_pct REAL",
-        "ALTER TABLE technical_signals ADD COLUMN pledge_pct REAL",
-        "ALTER TABLE technical_signals ADD COLUMN promoter_chg_qoq REAL",
-        "ALTER TABLE technical_signals ADD COLUMN fii_chg_qoq REAL",
-        "ALTER TABLE technical_signals ADD COLUMN mf_chg_qoq REAL",
-        "ALTER TABLE technical_signals ADD COLUMN pledge_chg_qoq REAL",
-        "ALTER TABLE technical_signals ADD COLUMN rev_growth_yoy_q REAL",
-        "ALTER TABLE technical_signals ADD COLUMN np_growth_yoy_q REAL",
-        "ALTER TABLE technical_signals ADD COLUMN days_since_dividend INTEGER",
-        "ALTER TABLE technical_signals ADD COLUMN last_dividend_amt REAL",
-        "ALTER TABLE trendlyne_stock_profile ADD COLUMN company_description TEXT",
-        "ALTER TABLE trendlyne_stock_profile ADD COLUMN promoter_chg_qoq REAL",
-        "ALTER TABLE trendlyne_stock_profile ADD COLUMN fii_chg_qoq REAL",
-        "ALTER TABLE trendlyne_stock_profile ADD COLUMN mf_chg_qoq REAL",
-        "ALTER TABLE trendlyne_stock_profile ADD COLUMN pledge_chg_qoq REAL",
-    ]:
-        try:
-            cur.execute(ddl)
-            con.commit()
-        except Exception:
-            con.rollback()
+    # AF-20260901: every column below already exists (db/schema.postgres.sql is
+    # schema-of-record), but these ALTERs re-ran on every fetch. Even with IF NOT EXISTS,
+    # each attempt still queues an ACCESS EXCLUSIVE lock on technical_signals -- a hot table
+    # read by dozens of jobs -- before no-op'ing (the lock-queue stall mechanism is
+    # AF-20260827-14), and every run logged ~24 duplicate-column postgres ERRORs. Guard:
+    # lock-free information_schema pre-check skips the ALTER entirely when the column
+    # exists; the 2s session lock_timeout bounds the wait for a genuinely-new column on a
+    # busy table. Restored in finally (SET LOCAL would not survive the per-DDL commits).
+    cur.execute("SET lock_timeout = '2s'")
+    try:
+        for ddl in [
+            "ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS analyst_upside_pct REAL",
+            "ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS analyst_count INTEGER",
+            "ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS analyst_buy_pct REAL",
+            "ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS roe_annual REAL",
+            "ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS roce_annual REAL",
+            "ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS ebitda_margin REAL",
+            "ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS np_margin REAL",
+            "ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS promoter_pct REAL",
+            "ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS fii_pct REAL",
+            "ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS mf_pct REAL",
+            "ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS pledge_pct REAL",
+            "ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS promoter_chg_qoq REAL",
+            "ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS fii_chg_qoq REAL",
+            "ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS mf_chg_qoq REAL",
+            "ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS pledge_chg_qoq REAL",
+            "ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS rev_growth_yoy_q REAL",
+            "ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS np_growth_yoy_q REAL",
+            "ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS days_since_dividend INTEGER",
+            "ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS last_dividend_amt REAL",
+            "ALTER TABLE trendlyne_stock_profile ADD COLUMN IF NOT EXISTS company_description TEXT",
+            "ALTER TABLE trendlyne_stock_profile ADD COLUMN IF NOT EXISTS promoter_chg_qoq REAL",
+            "ALTER TABLE trendlyne_stock_profile ADD COLUMN IF NOT EXISTS fii_chg_qoq REAL",
+            "ALTER TABLE trendlyne_stock_profile ADD COLUMN IF NOT EXISTS mf_chg_qoq REAL",
+            "ALTER TABLE trendlyne_stock_profile ADD COLUMN IF NOT EXISTS pledge_chg_qoq REAL",
+        ]:
+            try:
+                if not _ddl_column_exists(cur, ddl):
+                    cur.execute(ddl)
+                con.commit()
+            except Exception:
+                con.rollback()
+    finally:
+        cur.execute("SET lock_timeout = DEFAULT")
+        con.commit()
 
+def _ddl_column_exists(cur, ddl: str) -> bool:
+    """True when the column targeted by an ``ALTER TABLE t ADD COLUMN [IF NOT EXISTS] c``
+    statement already exists in the current schema. Lock-free (information_schema lookup),
+    so gating the ALTER on it avoids queueing an ACCESS EXCLUSIVE lock request just to
+    discover the column was already there (AF-20260901 / AF-20260827-14)."""
+    toks = ddl.split()
+    if (len(toks) < 6 or toks[0].upper() != "ALTER" or toks[1].upper() != "TABLE"
+            or toks[3].upper() != "ADD" or toks[4].upper() != "COLUMN"):
+        return False
+    rest = toks[5:]
+    if rest and rest[0].upper() == "IF":  # skip IF NOT EXISTS
+        rest = rest[3:]
+    if not rest:
+        return False
+    cur.execute(
+        "SELECT 1 FROM information_schema.columns WHERE table_schema = current_schema() "
+        f"AND table_name = '{toks[2]}' AND column_name = '{rest[0]}'"
+    )
+    return cur.fetchone() is not None
 
 # â”€â”€ Fetch helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
