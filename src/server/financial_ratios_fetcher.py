@@ -41,6 +41,12 @@ no value in fetching more often than once a month).
 
 Writes:
   tl_financial_quality  (symbol, as_of_date) — raw + derived values
+  et_cashflow_history   (symbol, year_ending) — full 6-year annual CFO/CFI/CFF series
+                          per stock (2026-09-01: the CashFlow payload was already fetched
+                          at last=6 but only period [0] was persisted — the other 5 annual
+                          periods were discarded. This table keeps them all, giving the
+                          platform its first real multi-year annual cash-flow history and
+                          enabling FCF-trend/stability features at zero extra network cost.)
   technical_signals     — fcf_yield_approx, interest_coverage, fcf_positive,
                           debt_coverage_risk, + the harvested fields above
 
@@ -87,6 +93,23 @@ def ensure_schema(con) -> None:
     cur.execute("""
         CREATE INDEX IF NOT EXISTS idx_tlfq_sym
         ON tl_financial_quality(symbol, as_of_date DESC)
+    """)
+    # 2026-09-01: full annual cash-flow series (was: only period [0] of the last=6 payload
+    # survived, the rest discarded). One row per (symbol, fiscal-year-end).
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS et_cashflow_history (
+            symbol       TEXT NOT NULL,
+            year_ending  TEXT NOT NULL,
+            cfo          REAL,
+            cfi          REAL,
+            cff          REAL,
+            fetched_at   TEXT DEFAULT CURRENT_TIMESTAMP,
+            PRIMARY KEY (symbol, year_ending)
+        )
+    """)
+    cur.execute("""
+        CREATE INDEX IF NOT EXISTS idx_ecf_sym
+        ON et_cashflow_history(symbol, year_ending DESC)
     """)
     con.commit()
 
@@ -358,6 +381,39 @@ def compute_ratios(
     }
 
 
+def parse_cashflow_series(cashflow: list[dict] | None) -> list[dict]:
+    """Flatten the ET_Stats CashFlow payload (last=6 annual periods) into one row-dict per
+    fiscal year: {"year_ending", "cfo", "cfi", "cff"}. Pure — no network/DB.
+
+    Kept periods are those with a parseable ISO yearEnding AND at least one non-None cash-flow
+    figure; fully-empty periods are dropped rather than stored as all-NULL rows (same honest-
+    unknown rule the rest of this file follows). Values are rounded to 2dp like every other
+    number this fetcher persists."""
+    rows: list[dict] = []
+    for period in cashflow or []:
+        if not isinstance(period, dict):
+            continue
+        raw_ye = period.get("yearEnding")
+        if not raw_ye:
+            continue
+        try:
+            year_ending = date.fromisoformat(str(raw_ye)[:10]).isoformat()
+        except (ValueError, TypeError):
+            continue
+        cfo = _num(period.get("netCashFlowFromOperatingActivities"))
+        cfi = _num(period.get("netCashUsedInInvestingActivities"))
+        cff = _num(period.get("netCashUsedFromFinancingActivities"))
+        if cfo is None and cfi is None and cff is None:
+            continue
+        rows.append({
+            "year_ending": year_ending,
+            "cfo": round(float(cfo), 2) if cfo is not None else None,
+            "cfi": round(float(cfi), 2) if cfi is not None else None,
+            "cff": round(float(cff), 2) if cff is not None else None,
+        })
+    return rows
+
+
 # ── Persist ──────────────────────────────────────────────────────────────────────
 
 _HARVEST_COLUMNS = [
@@ -389,6 +445,25 @@ def upsert_quality(symbol: str, today: str, row: dict, con) -> None:
             {update_clause},
             fetched_at = CURRENT_TIMESTAMP
     """, tuple(symbol if c == "symbol" else today if c == "as_of_date" else row.get(c) for c in columns))
+    con.commit()
+
+
+def upsert_cashflow_history(symbol: str, rows: list[dict], con) -> None:
+    """Persist the full annual CFO/CFI/CFF series into et_cashflow_history. Idempotent per
+    (symbol, year_ending): re-runs refresh the figures in place (annual ET data only changes
+    on restatement), so weekly runs converge instead of accumulating rows."""
+    if not rows:
+        return
+    cur = con.cursor()
+    cur.executemany("""
+        INSERT INTO et_cashflow_history (symbol, year_ending, cfo, cfi, cff)
+        VALUES (?, ?, ?, ?, ?)
+        ON CONFLICT (symbol, year_ending) DO UPDATE SET
+            cfo = excluded.cfo,
+            cfi = excluded.cfi,
+            cff = excluded.cff,
+            fetched_at = CURRENT_TIMESTAMP
+    """, [(symbol, r["year_ending"], r["cfo"], r["cfi"], r["cff"]) for r in rows])
     con.commit()
 
 
@@ -434,6 +509,7 @@ def process_stock(symbol: str, company_id: str, today: str,
     features = compute_ratios(balance=None, cashflow=cashflow, ratio=ratio, market_cap=market_cap)
 
     upsert_quality(symbol, today, features, con)
+    upsert_cashflow_history(symbol, parse_cashflow_series(cashflow), con)
     update_technical_signals(symbol, features, con, today=today)
     return features
 

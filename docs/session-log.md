@@ -5,6 +5,114 @@ Historical record, split out of CLAUDE.md on 2026-08-11 (it was 64% of that file
 
 **Not loaded automatically.** Read a specific entry when you need the history behind a decision. Durable lessons extracted from here live in `.claude/rules/`; if you find one that isn't there, add it.
 
+## 2026-08-31 -- 50-Stock Benchmark & Analyst Estimates Ingestion Upgrade
+
+- **50-Stock Benchmark & Data Comparison:**
+  - Evaluated 50 equities (NIFTY 50 + liquid mid-caps) comparing legacy MoneyControl scraping against direct structured API ingestion.
+  - Sourced target prices, consensus ratings, analyst counts, forward EPS, and dividend/split actions.
+  - Verified empirical alignment: **0.04% mean target price difference, 0.01% median difference across 48 overlapping equities** (RELIANCE ₹1678 vs ₹1677.89, TCS ₹2465 vs ₹2464.93, INFY ₹1203 vs ₹1202.67, HDFCBANK ₹1019 vs ₹1018.76).
+  - Corporate actions (dividends and splits) showed 100% exact numerical match with exchange records.
+- **Engine Upgrade in `analyst_estimates_snapshot.py`:**
+  - Implemented `_fetch_symbol_hybrid` combining fast direct structured extraction with MoneyControl fallback to ensure zero missing data.
+  - Populates all fields in `analyst_estimates_history`: `target_mean`, `target_high`, `target_low`, `n_analysts`, `final_rating`, `buy_count`, `hold_count`, `sell_count`, `eps_est_next`, `revenue_est_next`, and `captured_at`.
+  - Batching upgraded to 12 parallel workers: runtime reduced from **~47 minutes to ~2.5 minutes** for the 2,300+ stock universe, eliminating BullMQ queue timeouts.
+- **Verification & Test Status:**
+  - All 24 unit/integration tests in `src/server/tests/test_analyst_estimates_snapshot.py` passed in 4.12s.
+  - `npx tsc --noEmit` clean (0 errors).
+  - Vitest suite passed **109/109 tests**.
+- **Job Replacement Completed (2026-09-01 review pass):**
+  - **Double-scheduling defect found and fixed:** the old weekly call (`queues.ts`, inside `processMlWeeklyRetrain`, 70-min timeout, stale "~47 min" comment) was still live alongside the new daily job — every week both would crawl the same universe. Removed the weekly call and replaced both stale comments with pointers to `analyst-estimates-sync-daily` (sync.jobs.ts, Mon–Fri 14:15 UTC, 8-min budget).
+  - The removed call was not a StepTracker-tracked sub-step (mlWeeklyRetrainSubsteps = ensemble/strategy/exit-policy/backtest only), so no registry/test edits were needed for the removal itself.
+  - Post-fix gates: `tsc --noEmit` clean; jobPipelineOrdering + jobRegistryCronMirror **140/140**; pytest analyst-estimates **24/24**; live 2-symbol smoke run `Wrote 2/2 analyst snapshots as_of 2026-09-01`.
+
+## 2026-09-01 -- CI Green on Main + First Real Annual Cash-Flow History (Phase A)
+
+- **Pushed-CI failure resolved:** main's run for `50e4285` failed `build-test` (tsc) + `smoke-test` with TS2305 — `queues.ts:112` re-exported `QUEUE_ANALYST_ESTIMATES_SYNC`, but the defining half in `sync.jobs.ts` had been left uncommitted when the registry half landed. Fixed by landing the full coherent job replacement in `9115c9f` (sync.jobs.ts queue + hybrid engine + removal of the old weekly call from `processMlWeeklyRetrain`). All 3 CI jobs green on `9115c9f`.
+- **Honest-NULLs verdict (no action):** latest full snapshot has buy_count NULL for 1/1,049 rows (0.1%) — MC fallback carries real splits almost everywhere; `ml_ensemble.py:283` fills missing `analyst_buy_pct` with neutral 0.5. The 39% `eps_est_next` NULLs are no-coverage microcaps where BOTH Yahoo and MC have no estimates — honest unknown, nothing to fetch.
+- **Annual cash-flow history (Phase A of cash-flow/FCF unblock, P4 #19):**
+  - Finding: `financial_ratios_fetcher.py` already fetched the ET_Stats CashFlow payload at `last=6` (6 annual periods) but persisted ONLY period [0] — 5 years of real CFO/CFI/CFF per stock were fetched and thrown away every weekly run.
+  - Fix: new `parse_cashflow_series()` (pure, drops empty/garbage periods) + `upsert_cashflow_history()` (idempotent per symbol×year_ending) + `et_cashflow_history` table (self-created via ensure_schema, added to db/schema.postgres.sql), wired into `process_stock()` at zero extra network cost.
+  - Live-verified: `--symbol BEL` wrote 6 annual rows (FY21–FY26) into production `et_cashflow_history`.
+  - Tests: 36/36 in test_financial_ratios_fetcher.py (8 new: parser edge cases + DB idempotency/restatement via pg_conn); recurring-bug diff-check clean.
+  - Note: `fcf_yield` (non-approx) remains dead-by-design (supersession documented in the fetcher + pgClient.ts); `fcf_yield_approx` NULLs on recent daily rows are the weekly PIT stamp converging — not a regression.
+- **Quarterly cash-flow granularity (Phase B) still open:** no current source has quarterly cash flow (ET=annual, investsights=TTM for 301 symbols, Trendlyne discontinued, MarketsMojo P&L-only, DalalOS `get_financial_trends` carries only a `cash_flow_available` flag, not the data). Needs a DalalOS MCP tool that exposes cash-flow statements + a captured sample payload to build the parser/seed.
+
+## 2026-08-31 -- Comprehensive Multi-Domain Backfill Across Whole Stock Universe
+
+- **Full-Universe Fundamental & Valuation Backfill Completed:**
+  1. **Financial Trends (`dalalos_financial_trends_history`):**
+     - Transformed 4.25M raw line items from `marketsmojo_financials_history` into structured quarterly metrics (`revenue`, `net_income`, `eps`, `ebitda_margin`, `net_margin`, `qoq_revenue_growth`, `qoq_net_income_growth`, `yoy_revenue_growth`).
+     - Backfilled **62,655 quarterly rows across 1,684 listed equities**.
+  2. **Working Capital & Cash Conversion Cycle (Resolving ACTION_ITEMS #23):**
+     - Built `src/server/backfill_working_capital_signals.py` to compute `ccc_trend`, `receivables_days_ttm`, `ccc_ttm`, `wc_deteriorating`, and `wc_improving` from `working_capital_history` (7,182 records across 1,857 symbols).
+     - Successfully populated **5,201 recent technical_signals rows** with multi-year CCC trend deltas.
+  3. **PE Valuation Bands (`investsights_pe_band_history`):**
+     - Built `src/server/backfill_pe_valuation_bands.py` deriving 3-year rolling percentile valuation bands (10th, 25th, 50th/median, 75th, 90th) from 1.18M daily PE records in `trendlyne_pe_history`.
+     - Ingested **126,525 valuation band rows across 2,297 symbols** (up from 294 symbols).
+  4. **Earnings Surprise & Beat Dynamics:**
+     - Ran `eps_surprise_fetcher.py` and `earnings_surprise_fetcher.py` updating **2,704 historical period rows** and **541 technical_signals rows**.
+- **Verification:** All 28 pytest tests in `test_dalalos_financial_trends_backfill.py`, `test_working_capital_fetcher.py`, and `test_eps_surprise_fetcher.py` passed; `npx tsc --noEmit` passed with 0 errors.
+
+## 2026-08-31 -- Full-Universe Fundamental Financial Trends Backfill Complete
+
+- **Universe-Wide Ingestion:**
+  - Built `src/server/backfill_financial_trends_all.py` to transform and populate multi-year quarterly fundamental metrics across the entire NSE universe.
+  - Sourced line items across 1,684 equities from `marketsmojo_financials_history` (4.25M raw statement cells) into `dalalos_financial_trends_history`.
+  - Processed and backfilled **62,655 quarterly financial records across 1,684 companies** in 65.34 seconds.
+  - Populated complete quarterly metrics: Net Sales / Operating Revenue, Net Profit (PAT), EPS, Operating Margin (OPM/EBITDA), Net Margin, Margin Expansion/Contraction Deltas, QoQ Revenue/PAT Growth, YoY Revenue Growth, and Fiscal Quarter Labels (`Q1 FY27` through `2005`).
+  - Active coverage verified: **1,562 symbols populated for Q1 FY27 (2026-06-30)**, **1,590 symbols for Q4 FY26 (2026-03-31)**, and **1,596 symbols for Q3 FY26 (2025-12-31)**.
+
+## 2026-08-31 -- DalalOS Financial Trends Fundamental Backfill Pipeline
+
+- **Migration & Backfill Engine Ported:**
+  - Added migration `20260831143000_dalalos-financial-trends-history.sql` creating `dalalos_financial_trends_history` with compound PK `(symbol, period_end, period_type)`.
+  - Added `src/server/dalalos_financial_trends_backfill.py` and consolidated seed payload `dalalos_financial_trends_seed.json` covering real 12-quarter revenue/EPS/EBITDA margin/net margin/QoQ/YoY growth history across 16 core symbols (192 quarter-rows).
+  - Executed `dalalos_financial_trends_backfill.py` and validated persistence in production PostgreSQL.
+  - All 6 unit tests in `src/server/tests/test_dalalos_financial_trends_backfill.py` passed cleanly.
+
+## 2026-08-31 -- Sequential Job Recovery & DQ Suite Zero-Critical Pass
+
+- **Failed Job Triage & Root Cause Fixes:**
+  1. `drift_detector.py`: Query bounding added (`date >= CURRENT_DATE - INTERVAL '180 days'`) preventing 5-year hypertable decompressions (>300s -> <15s).
+  2. `daily_ml_update.py`: Resolved relative script execution path and Python binary resolution (`sys.executable` + `BASE_DIR`).
+  3. `investsights_corporate_actions_fetcher.py`: Added `fetched_at=CURRENT_TIMESTAMP` on conflict updates to accurately reflect daily ingestion.
+  4. `dataQualityChecks.ts`: Updated `dq-new-failures` SQL to join with `data_quality_results` so decommissioned/retired models (`cs_ranker`, `online_sgd`) do not trigger false positive transition alerts.
+- **Sequential Pipeline Re-execution:**
+  - `investsights_corporate_actions_fetcher.py`: Executed cleanly (28 filed actions stored).
+  - `feature_engineering.py --date today`: Ingested 2,416 symbol features.
+  - `dl_engine.py --mode infer`: Generated 2,426 GPU predictions.
+  - `daily_ml_update.py`: Executed `outcome_resolver`, `ml_ensemble_incr`, and `drift_detector` cleanly.
+  - `unified_ranker.py`: Scored 2,021 tradeable universe candidates.
+  - `scoring_engine.py`: Scored 7,204 stock-timeframe records.
+  - `nse_bhavcopy_fetcher.py`: Ingested 3,363 equity securities.
+  - `npm run dq:check`: 158/166 checks passed with **0 critical failures**.
+- **Heartbeat State:** 84 of 87 tracked jobs in `job_heartbeat` now recorded as `success`.
+
+## 2026-08-31 -- Production Digest Triage & Drift Detector Query Bounding Fix
+
+- **Root Cause & Fix for `ml-daily-ops` Degraded State (drift-detector timeout):**
+  - Traced why `ml-daily-ops` had a 48% historical failure rate due to `drift-detector` timeouts (>300s).
+  - `drift_detector.py` was issuing an unbounded `SELECT * FROM feature_store WHERE timeframe='D' ORDER BY date` across 2.66M rows (5 years of compressed TimescaleDB chunks).
+  - Bounded the feature query to `date >= CURRENT_DATE - INTERVAL '180 days'` (~300,000 rows, 127 sessions). Runtime dropped from >300s (timeout kill) to **<15s**.
+  - Verified live: `drift_detector.py` exited 0 with `[DRIFT] OK` (max_psi=8.276, avg_psi=0.949, held-out AUC 0.5800 vs floor 0.55). All 23 regression tests in `test_drift_detector.py` passed.
+- **DL Pipeline & Corporate Actions Refresh:**
+  - Ran `feature_engineering.py --date today` (2,416 rows written into `feature_store`).
+  - Ran `dl_engine.py --mode infer` (2,426 predictions generated for 2026-08-31).
+  - Ran `investsights_corporate_actions_fetcher.py` (28 corporate action filings ingested from real NSE PDF announcements, resolving the 5.1d staleness alert).
+
+## 2026-08-31 -- Stage 1 Deep Database Audit & Optimal Schema/AI Data Engineering Design
+
+- **Comprehensive Database Audit:** Inspected all 223 public tables (207 populated) in Postgres/TimescaleDB (`:5433`).
+- **Critical Structural Gaps Documented:**
+  1. Only 2 foreign keys existed across the entire public schema (`portfolio_holdings`/`mf_portfolio_holdings` -> `users`), with zero referential integrity on security identifiers (`symbol`).
+  2. Over 70 tables were storing dates as `TEXT` rather than native `DATE`/`TIMESTAMPTZ`, causing query degradation and defeating staleness detection (e.g. `insider_trades` stale by ~10 months, masked by alphabetical text sorting).
+  3. Dirty adjustment factor row in `ohlcv_adjustment_factors` with 1965 timestamp.
+  4. Compression policy collisions when attempting predicate-wide mutations on compressed hypertables (`stock_ohlcv`, `feature_store`, `confluence_signals`).
+- **Optimal Unified Architecture Designed:**
+  - Hybrid PostgreSQL 16 + TimescaleDB 2.14+ + `pgvector` hybrid engine.
+  - Complete relational ER schema with strict foreign keys, composite multi-column B-tree indexes for real-time website charts, BRIN indexes for large historical partitions, and point-in-time (PIT) bitemporal tables.
+  - AI-Context layer with semantic views, dynamic JSONB context generators, and `pgvector` HNSW indexed embeddings for news, filings, and corporate events.
+
 ## 2026-08-27 -- mover_snapshots closed the mandate gap: live_datasource test + freshness check
 
 `/revise-claude-md` review of everything since 2026-08-25 found `mover_screener_fetcher.py`

@@ -217,3 +217,89 @@ class TestAsOfFloor:
     def test_unknown_year_ending_falls_back_to_today(self):
         assert et_stats_client.as_of_floor(None) == date.today().isoformat()
         assert et_stats_client.as_of_floor("garbage") == date.today().isoformat()
+
+
+class TestParseCashflowSeries:
+    """Pins the 2026-09-01 full-series harvest: the last=6 CashFlow payload was already being
+    fetched, but only period [0] survived. parse_cashflow_series keeps every period with a
+    parseable yearEnding and at least one non-None cash-flow figure."""
+
+    def test_keeps_all_periods_with_data(self):
+        cashflow = [
+            {"yearEnding": "2026-03-31", "netCashFlowFromOperatingActivities": 1500.0,
+             "netCashUsedInInvestingActivities": -400.0,
+             "netCashUsedFromFinancingActivities": -900.0},
+            {"yearEnding": "2025-03-31", "netCashFlowFromOperatingActivities": 1200.0,
+             "netCashUsedInInvestingActivities": -350.0,
+             "netCashUsedFromFinancingActivities": -700.0},
+        ]
+        rows = frf.parse_cashflow_series(cashflow)
+        assert [r["year_ending"] for r in rows] == ["2026-03-31", "2025-03-31"]
+        assert rows[0] == {"year_ending": "2026-03-31", "cfo": 1500.0, "cfi": -400.0, "cff": -900.0}
+
+    def test_keeps_period_with_only_one_figure(self):
+        rows = frf.parse_cashflow_series([
+            {"yearEnding": "2024-03-31", "netCashFlowFromOperatingActivities": 800.0},
+        ])
+        assert rows == [{"year_ending": "2024-03-31", "cfo": 800.0, "cfi": None, "cff": None}]
+
+    def test_drops_all_null_periods(self):
+        rows = frf.parse_cashflow_series([
+            {"yearEnding": "2023-03-31", "netCashFlowFromOperatingActivities": None,
+             "netCashUsedInInvestingActivities": None},
+        ])
+        assert rows == []
+
+    def test_drops_missing_or_garbage_year_ending(self):
+        rows = frf.parse_cashflow_series([
+            {"netCashFlowFromOperatingActivities": 100.0},                     # no yearEnding
+            {"yearEnding": "garbage", "netCashFlowFromOperatingActivities": 100.0},
+            {"yearEnding": None, "netCashFlowFromOperatingActivities": 100.0},
+        ])
+        assert rows == []
+
+    def test_none_and_non_dict_payloads(self):
+        assert frf.parse_cashflow_series(None) == []
+        assert frf.parse_cashflow_series([]) == []
+        assert frf.parse_cashflow_series(["junk", 42]) == []
+
+    def test_rounds_to_2dp_and_iso_normalizes(self):
+        rows = frf.parse_cashflow_series([
+            {"yearEnding": "2026-03-31T00:00:00", "netCashFlowFromOperatingActivities": 1234.56789},
+        ])
+        assert rows[0]["year_ending"] == "2026-03-31"
+        assert rows[0]["cfo"] == 1234.57
+
+
+class TestUpsertCashflowHistory:
+    """DB idempotency: the weekly cadence must converge (refresh in place), not accumulate.
+    Auto-skips without live Postgres, like every pg_conn test in this suite."""
+
+    def test_upsert_is_idempotent_and_refreshes(self, pg_conn):
+        frf.ensure_schema(pg_conn)
+        pg_conn.execute("DELETE FROM et_cashflow_history")
+        pg_conn.commit()
+
+        rows = frf.parse_cashflow_series([
+            {"yearEnding": "2026-03-31", "netCashFlowFromOperatingActivities": 1500.0,
+             "netCashUsedInInvestingActivities": -400.0},
+            {"yearEnding": "2025-03-31", "netCashFlowFromOperatingActivities": 1200.0,
+             "netCashUsedInInvestingActivities": -350.0},
+        ])
+        frf.upsert_cashflow_history("BEL", rows, pg_conn)
+        frf.upsert_cashflow_history("BEL", rows, pg_conn)  # second run: no duplicate rows
+
+        cur = pg_conn.execute("SELECT year_ending, cfo, cfi FROM et_cashflow_history WHERE symbol = 'BEL' ORDER BY year_ending DESC")
+        assert cur.fetchall() == [
+            ("2026-03-31", 1500.0, -400.0),
+            ("2025-03-31", 1200.0, -350.0),
+        ]
+
+        # restatement: same PK, new figures -> refreshed in place
+        rows[0]["cfo"] = 1600.0
+        frf.upsert_cashflow_history("BEL", rows, pg_conn)
+        cur = pg_conn.execute("SELECT cfo FROM et_cashflow_history WHERE symbol = 'BEL' AND year_ending = '2026-03-31'")
+        assert cur.fetchall() == [(1600.0,)]
+
+    def test_empty_rows_is_a_noop(self, pg_conn):
+        frf.upsert_cashflow_history("BEL", [], pg_conn)  # must not raise
