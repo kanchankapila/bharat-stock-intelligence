@@ -15,7 +15,6 @@ interface StockPick {
   conviction_score: number;
   quant_rank: number;
   signal_score: number;
-  xgboost_score: number;
   screener_net: number;
   rsi: number | null;
   adx: number | null;
@@ -175,7 +174,6 @@ function StockDeepDive({
             </p>
             <ScoreBar label="Conviction" value={pick.conviction_score} />
             <ScoreBar label="Signal Score" value={pick.signal_score} />
-            <ScoreBar label="XGBoost" value={pick.xgboost_score} />
             <ScoreBar label="Screener Net" value={pick.screener_net} max={20} />
             <ScoreBar label="RSI" value={pick.rsi} />
             <ScoreBar label="ADX" value={pick.adx} max={50} />
