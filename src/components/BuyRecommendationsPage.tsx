@@ -12,7 +12,7 @@ import {
 import { formatISTWithLocal, relativeFromNow } from '../lib/timeFormat';
 import { CanonicalBadge } from './CanonicalSourceNote';
 import { StockTagRow } from './StockTagRow';
-import { V4QuickNav } from '../v4/components/V4QuickNav';
+import { V4QuickNav } from './v4/components/V4QuickNav';
 import stockData from '../data/stocklist';
 
 // ─── Types ────────────────────────────────────────────────────────────────────

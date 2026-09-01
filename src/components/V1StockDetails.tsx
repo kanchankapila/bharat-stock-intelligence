@@ -23,7 +23,7 @@ import MCStockInfoPanel from './MCStockInfoPanel';
 import { FinologyPanel } from './FinologyPanel';
 // Ported from v2's V2StockDetails (2026-08-20 v1 consolidation) -- self-contained, so reusable
 // as-is; genuinely absent from both this page and the separate Stock Intelligence Hub page.
-import { AiInsightsTab } from '../v2/views/stock-analysis/AiInsightsTab';
+import { AiInsightsTab } from '../components/v2/views/stock-analysis/AiInsightsTab';
 import { V1PeadConcallWidget } from './V1PeadConcallWidget';
 import { V1TradeRiskCalculatorWidget } from './V1TradeRiskCalculatorWidget';
 

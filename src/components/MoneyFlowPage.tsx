@@ -7,7 +7,7 @@ import {
   CartesianGrid, Tooltip, Legend, ReferenceLine,
 } from 'recharts';
 import { formatISTWithLocal, relativeFromNow } from '../lib/timeFormat';
-import { V4QuickNav } from '../v4/components/V4QuickNav';
+import { V4QuickNav } from './v4/components/V4QuickNav';
 
 // fii_dii_flow was deep-backfilled to 2016-01-01 (fii_dii_history_fetcher.py) -- this page
 // is the first place that history gets a real trend view instead of an 8-day snippet.

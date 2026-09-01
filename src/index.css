@@ -1,5 +1,5 @@
 @import "tailwindcss";
-@import "./v2/styles/variables.css";
+@import "./components/v2/styles/variables.css";
 /* v5.css previously loaded only when V5App.tsx itself mounted (its own `import './v5.css'`) --
    but V1Routes.tsx and App.tsx's dashboardVersion==='v6' branches both pull v5's desk-page
    components (OptionsDeskPage, RiskDeskPage, etc.) directly into v1/v6 without ever mounting
@@ -8,7 +8,7 @@
    card rendered fully unstyled/invisible. v6-theme.css's .v6-root already bridges --v5-*
    variables onto v1's own dark palette (built 2026-08-07 for this exact purpose) -- the bridge
    just had nothing to apply to. Importing here, globally, is the missing half of that fix. */
-@import "./v5/v5.css";
+@import "./components/v5/v5.css";
 
 /* Global V6 variables fallback on root so v6 components embedded in V1/V4 routes render properly */
 :root {

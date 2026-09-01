@@ -8,7 +8,7 @@ import {
 import { motion, AnimatePresence } from 'motion/react';
 import { formatISTWithLocal, relativeFromNow } from '../lib/timeFormat';
 import { CanonicalBadge } from './CanonicalSourceNote';
-import { V4QuickNav } from '../v4/components/V4QuickNav';
+import { V4QuickNav } from './v4/components/V4QuickNav';
 
 type ConvictionFilter = 'ALL' | 'S_ELITE' | 'A_HIGH' | 'B_MEDIUM' | 'C_LOW' | 'D_MARGINAL';
 type HorizonFilter    = 'ALL' | 'intraday' | 'swing' | 'long_term';

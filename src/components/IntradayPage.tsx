@@ -5,7 +5,7 @@ import {
 } from 'lucide-react';
 import { trpc } from '../lib/trpc';
 import { cn } from '../lib/utils';
-import { FnOIndexInsight } from '../v4/components/FnOIndexInsight';
+import { FnOIndexInsight } from './v4/components/FnOIndexInsight';
 
 // ── Types (loosely mirror intraday_recommendations / getIntradayBreadth) ──────
 interface IntradayRec {

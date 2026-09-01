@@ -10,7 +10,7 @@ import {
 } from 'lucide-react';
 import { formatISTWithLocal, relativeFromNow } from '../lib/timeFormat';
 import { CanonicalBadge } from './CanonicalSourceNote';
-import { V4QuickNav } from '../v4/components/V4QuickNav';
+import { V4QuickNav } from './v4/components/V4QuickNav';
 
 // ─── Style Maps ───────────────────────────────────────────────────────────────
 

@@ -7,7 +7,6 @@ import superjson from "superjson";
 import { trpc } from "./lib/trpc";
 import { initSentry, captureException } from "./lib/sentry";
 import { auth } from "./lib/firebase";
-import V5App from './v5/V5App.tsx';
 import App from './App';
 import './index.css';
 
@@ -79,7 +78,6 @@ const Main = () => {
       <QueryClientProvider client={queryClient}>
         <BrowserRouter>
           <Routes>
-            <Route path="/v5" element={<V5App />} />
             <Route path="/concept" element={<Suspense fallback={null}><ConceptLedger /></Suspense>} />
             <Route path="/*" element={<App />} />
           </Routes>

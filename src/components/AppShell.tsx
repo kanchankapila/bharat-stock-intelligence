@@ -14,14 +14,14 @@ import { useEscapeKey, SkipLink, MAIN_CONTENT_ID } from '../lib/a11y';
 import { nseStocksData } from '../data/nseStocks';
 import type { MarketData } from '../services/marketService';
 import type { User as FirebaseUser } from 'firebase/auth';
-import { useWebSocket } from '../v2/hooks/useWebSocket';
+import { useWebSocket } from './v2/hooks/useWebSocket';
 import { notifyAlert } from '../lib/browserNotify';
 import { CommandPalette } from './CommandPalette';
 // v6-theme.css's `.v6-root` was built (2026-08-07) specifically to alias v5.css's --v5-* variables
 // onto v1 AppShell's own color values ("restyled to match v1 AppShell's actual look" -- see that
 // file's header) so v5/v6-origin pages render on-theme wherever `.v6-root` wraps them. Reused here
 // (not copied) so the 8 desk/browser pages this nav now links to need zero styling changes.
-import '../v6/v6-theme.css';
+import './v6/v6-theme.css';
 
 // ─── Nav Config ───────────────────────────────────────────────────────────────
 
