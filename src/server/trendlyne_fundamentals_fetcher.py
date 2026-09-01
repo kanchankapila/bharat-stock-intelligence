@@ -330,18 +330,18 @@ def _backfill_technical_signals(symbol: str, today: str, features: dict, con) ->
     cur = con.cursor()
     cur.execute("""
         UPDATE technical_signals SET
-            eps_ttm          = CASE WHEN date >= ? THEN COALESCE(?, eps_ttm)          ELSE NULL END,
-            eps_growth_yoy   = CASE WHEN date >= ? THEN COALESCE(?, eps_growth_yoy)   ELSE NULL END,
-            eps_growth_qoq   = CASE WHEN date >= ? THEN COALESCE(?, eps_growth_qoq)   ELSE NULL END,
-            eps_acceleration = CASE WHEN date >= ? THEN COALESCE(?, eps_acceleration) ELSE NULL END,
-            pe_ttm           = CASE WHEN date >= ? THEN COALESCE(?, pe_ttm)           ELSE NULL END,
-            pe_pct_rank_252d = CASE WHEN date >= ? THEN COALESCE(?, pe_pct_rank_252d) ELSE NULL END,
-            pe_vs_median_1yr = CASE WHEN date >= ? THEN COALESCE(?, pe_vs_median_1yr) ELSE NULL END,
-            pb_pct_rank_252d = CASE WHEN date >= ? THEN COALESCE(?, pb_pct_rank_252d) ELSE NULL END,
-            div_yield_ttm    = CASE WHEN date >= ? THEN COALESCE(?, div_yield_ttm)    ELSE NULL END,
-            dvm_durability   = CASE WHEN date >= ? THEN COALESCE(?, dvm_durability)   ELSE NULL END,
-            dvm_valuation    = CASE WHEN date >= ? THEN COALESCE(?, dvm_valuation)    ELSE NULL END,
-            dvm_momentum     = CASE WHEN date >= ? THEN COALESCE(?, dvm_momentum)     ELSE NULL END
+            eps_ttm          = CASE WHEN date >= ? THEN COALESCE(?, eps_ttm)          ELSE eps_ttm END,
+            eps_growth_yoy   = CASE WHEN date >= ? THEN COALESCE(?, eps_growth_yoy)   ELSE eps_growth_yoy END,
+            eps_growth_qoq   = CASE WHEN date >= ? THEN COALESCE(?, eps_growth_qoq)   ELSE eps_growth_qoq END,
+            eps_acceleration = CASE WHEN date >= ? THEN COALESCE(?, eps_acceleration) ELSE eps_acceleration END,
+            pe_ttm           = CASE WHEN date >= ? THEN COALESCE(?, pe_ttm)           ELSE pe_ttm END,
+            pe_pct_rank_252d = CASE WHEN date >= ? THEN COALESCE(?, pe_pct_rank_252d) ELSE pe_pct_rank_252d END,
+            pe_vs_median_1yr = CASE WHEN date >= ? THEN COALESCE(?, pe_vs_median_1yr) ELSE pe_vs_median_1yr END,
+            pb_pct_rank_252d = CASE WHEN date >= ? THEN COALESCE(?, pb_pct_rank_252d) ELSE pb_pct_rank_252d END,
+            div_yield_ttm    = CASE WHEN date >= ? THEN COALESCE(?, div_yield_ttm)    ELSE div_yield_ttm END,
+            dvm_durability   = CASE WHEN date >= ? THEN COALESCE(?, dvm_durability)   ELSE dvm_durability END,
+            dvm_valuation    = CASE WHEN date >= ? THEN COALESCE(?, dvm_valuation)    ELSE dvm_valuation END,
+            dvm_momentum     = CASE WHEN date >= ? THEN COALESCE(?, dvm_momentum)     ELSE dvm_momentum END
         WHERE symbol = ?
     """, (
         today, features.get("eps_ttm"),          today, features.get("eps_growth_yoy"),

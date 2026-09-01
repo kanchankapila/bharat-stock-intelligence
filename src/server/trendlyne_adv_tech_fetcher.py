@@ -455,18 +455,18 @@ def backfill_technical_signals(symbol: str, today: str, feat: dict, con) -> None
     cur = con.cursor()
     cur.execute("""
         UPDATE technical_signals SET
-            ma_bull_frac       = CASE WHEN date >= ? THEN COALESCE(?, ma_bull_frac)       ELSE NULL END,
-            osc_bull_frac      = CASE WHEN date >= ? THEN COALESCE(?, osc_bull_frac)      ELSE NULL END,
-            adx_tl             = CASE WHEN date >= ? THEN COALESCE(?, adx_tl)             ELSE NULL END,
-            atr_pct_tl         = CASE WHEN date >= ? THEN COALESCE(?, atr_pct_tl)         ELSE NULL END,
-            mfi_tl             = CASE WHEN date >= ? THEN COALESCE(?, mfi_tl)             ELSE NULL END,
-            pivot_dist_pct_tl  = CASE WHEN date >= ? THEN COALESCE(?, pivot_dist_pct_tl)  ELSE NULL END,
-            delivery_avg_1m_tl = CASE WHEN date >= ? THEN COALESCE(?, delivery_avg_1m_tl) ELSE NULL END,
-            beta_1y_tl         = CASE WHEN date >= ? THEN COALESCE(?, beta_1y_tl)         ELSE NULL END,
-            ret_1m_tl          = CASE WHEN date >= ? THEN COALESCE(?, ret_1m_tl)          ELSE NULL END,
-            ret_3m_tl          = CASE WHEN date >= ? THEN COALESCE(?, ret_3m_tl)          ELSE NULL END,
-            ret_6m_tl          = CASE WHEN date >= ? THEN COALESCE(?, ret_6m_tl)          ELSE NULL END,
-            ret_1y_tl          = CASE WHEN date >= ? THEN COALESCE(?, ret_1y_tl)          ELSE NULL END
+            ma_bull_frac       = CASE WHEN date >= ? THEN COALESCE(?, ma_bull_frac)       ELSE ma_bull_frac END,
+            osc_bull_frac      = CASE WHEN date >= ? THEN COALESCE(?, osc_bull_frac)      ELSE osc_bull_frac END,
+            adx_tl             = CASE WHEN date >= ? THEN COALESCE(?, adx_tl)             ELSE adx_tl END,
+            atr_pct_tl         = CASE WHEN date >= ? THEN COALESCE(?, atr_pct_tl)         ELSE atr_pct_tl END,
+            mfi_tl             = CASE WHEN date >= ? THEN COALESCE(?, mfi_tl)             ELSE mfi_tl END,
+            pivot_dist_pct_tl  = CASE WHEN date >= ? THEN COALESCE(?, pivot_dist_pct_tl)  ELSE pivot_dist_pct_tl END,
+            delivery_avg_1m_tl = CASE WHEN date >= ? THEN COALESCE(?, delivery_avg_1m_tl) ELSE delivery_avg_1m_tl END,
+            beta_1y_tl         = CASE WHEN date >= ? THEN COALESCE(?, beta_1y_tl)         ELSE beta_1y_tl END,
+            ret_1m_tl          = CASE WHEN date >= ? THEN COALESCE(?, ret_1m_tl)          ELSE ret_1m_tl END,
+            ret_3m_tl          = CASE WHEN date >= ? THEN COALESCE(?, ret_3m_tl)          ELSE ret_3m_tl END,
+            ret_6m_tl          = CASE WHEN date >= ? THEN COALESCE(?, ret_6m_tl)          ELSE ret_6m_tl END,
+            ret_1y_tl          = CASE WHEN date >= ? THEN COALESCE(?, ret_1y_tl)          ELSE ret_1y_tl END
         WHERE symbol = ?
     """, (
         today, feat.get("ma_bull_frac"),

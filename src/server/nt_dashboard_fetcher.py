@@ -241,10 +241,10 @@ def backfill_technical_signals(ts_floor: str, f: dict, con) -> None:
     cur = con.cursor()
     cur.execute(translate("""
         UPDATE technical_signals SET
-            nt_max_pain_dist_pct = CASE WHEN date >= ? THEN COALESCE(?, nt_max_pain_dist_pct) ELSE NULL END,
-            nt_oi_direction      = CASE WHEN date >= ? THEN COALESCE(?, nt_oi_direction)      ELSE NULL END,
-            nt_pcr               = CASE WHEN date >= ? THEN COALESCE(?, nt_pcr)               ELSE NULL END,
-            nt_option_volume_log = CASE WHEN date >= ? THEN COALESCE(?, nt_option_volume_log) ELSE NULL END
+            nt_max_pain_dist_pct = CASE WHEN date >= ? THEN COALESCE(?, nt_max_pain_dist_pct) ELSE nt_max_pain_dist_pct END,
+            nt_oi_direction      = CASE WHEN date >= ? THEN COALESCE(?, nt_oi_direction)      ELSE nt_oi_direction END,
+            nt_pcr               = CASE WHEN date >= ? THEN COALESCE(?, nt_pcr)               ELSE nt_pcr END,
+            nt_option_volume_log = CASE WHEN date >= ? THEN COALESCE(?, nt_option_volume_log) ELSE nt_option_volume_log END
         WHERE symbol = ?
     """), (
         ts_floor, f.get("max_pain_dist_pct"),

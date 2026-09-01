@@ -46,6 +46,41 @@ Currently automated (9 checks): `date.today()` write-anchor, short calendar-day 
 - **Any table written as "today's full recomputation" needs a purge of rows the run did not produce**, not just an upsert — a row a newly-added gate now excludes keeps its stale row and stays visible to every consumer. (3 recurrences: `unified_recommendations`, `intraday_outcome_resolver`, `stock_event_triggers`.)
 - **A backfill loop that gates re-selection on one of several columns it fills** permanently excludes rows that got the first column filled but not the rest. (2 recurrences.)
 - **A provider-issued id needs the provider in the PK.** (4 recurrences — see `data-sources.md`.)
+- **A `CASE WHEN date >= floor THEN <new value> ELSE NULL END` write guard, where `floor` is
+  `logical_write_floor()` (`MAX(date) FROM stock_ohlcv`, which advances by one trading day every
+  run), silently re-nulls EVERY historical row on EVERY run — including rows a PRIOR run had just
+  correctly set. Each run's `floor` is later than the last, so `date >= floor` stops matching
+  yesterday's row the moment today exists, and `ELSE NULL` then wipes it. Net effect: no matter
+  how often (even daily) the job runs, only the single most-recent date ever stays populated —
+  looks exactly like "the column has no signal" to anything reading the table, including a
+  cross-sectional feature-coverage check. Found 2026-09-01 (data/model audit) in
+  `index_membership_fetcher.py` (`is_nifty50`/`is_nifty100`/`is_nifty200`/`is_midcap150`/
+  `is_smallcap250`/`nifty_tier`): `job_run_history` showed `'success'` every weekday for two
+  weeks straight, yet `technical_signals` held real values on only the single most-recent date at
+  any moment — every earlier date read `NULL` despite its own "successful" run. Grepping the
+  exact template (`date >= ? THEN COALESCE(?, col) ELSE NULL END`) found the **identical**
+  mistake, evidently copied fetcher-to-fetcher, in 8 more files (77 more columns):
+  `mc_chart_patterns_fetcher.py`, `mc_pricefeed_fetcher.py`, `nt_dashboard_fetcher.py`,
+  `trendlyne_adv_tech_fetcher.py`, `trendlyne_fundamentals_fetcher.py`,
+  `trendlyne_overview_fetcher.py`, `trendlyne_price_analysis_fetcher.py`,
+  `working_capital_fetcher.py`. Fixed uniformly: `ELSE NULL END` → `ELSE <col> END` (preserve the
+  row's own current value instead of nulling it), so each run becomes additive — bless today,
+  leave every other already-blessed day alone — matching what "run it daily" was already assumed
+  to achieve (a prior fix, AF-20260828-21, moved `index-membership` to a daily schedule
+  specifically to close this gap, and never noticed the `ELSE NULL` branch defeated it).
+  **Not every `date >= floor` guard is this bug** — `financial_ratios_fetcher.py` and
+  `working_capital_fetcher.py`'s OWN primary floor (`as_of_floor()`, keyed on a fiscal-year-end
+  disclosure date) barely advances, so `ELSE NULL` there rarely fires in the erosion-causing
+  direction; `mf_holdings_fetcher.py`/`mf_stock_holdings_fetcher.py` are the same shape. Preserving
+  instead of nulling is still strictly safer for these (never worse, closes a rarer fallback-path
+  version of the same bug), so they were fixed too where touched, but the acute, guaranteed-daily
+  version of this class needs `logical_write_floor()` as the PRIMARY (not fallback) floor input —
+  check which one a file uses before assuming urgency. **Tell:** cross-check `job_run_history`
+  showing repeated `'success'` against the actual per-date fill-rate of the column it's supposed
+  to write (`GROUP BY date`) — a job that "succeeds" daily but only ever shows ONE populated date
+  in the table it writes is this bug, not a scheduling gap. A mocked-cursor unit test cannot catch
+  it (only checks SQL text, not row-level effect across two runs) — needs a real UPDATE evaluated
+  against real rows across two sequential floor values (`pg_memory_conn()`, not `_FakeConn`).
 - 🤖 **A job whose skip path falls through to the same "completed/success" handler as a real run will erase that day's failures.** Have the skip path return a marker (`{ skipped: true }`) and make the success handler decline it. Same class as `measurement.md`'s "success heartbeat on a step that wrote nothing" warning. **Recurred 6 times**, not once: fixing the first instance and writing the static check (`check_skip_not_success`) immediately found 4 more live in the same file, then a 6th in a completely different shape — a SHARED `.on('completed')` handler (`jobs/registerJob.ts`) the checker structurally can't see because the processor and its handler live in different files. **When you write a static check for a class, note in the check's own comment what file layout makes the class invisible to it** — "the checker is clean" is not "the class is extinct."
 - **A lateness/deadline branch anchored on the CURRENT cadence boundary can never fire, for any input** — `now - boundary` is by construction less than `everyMs`, so any `graceMinutes` larger than the cadence puts the deadline permanently in the future. A heartbeat seeded 7 months stale still reported `late=false`. Anchor on the most recent boundary whose grace has **already expired**. Same family as "a monitor that fires on EVERY run carries no information," inverted — one that can never fire carries none either, and is harder to notice because silence reads as health.
 - **A "don't queue a duplicate catch-up" guard matching on `data.isCatchup` alone doesn't recognize the job's own currently-active legitimate run** — only another catch-up. A server restart mid-real-run sees nothing catch-up-shaped pending, concludes "missed," and queues a duplicate behind the real one. Match a currently-`active` job of the same name regardless of `isCatchup`, not just the marker field.

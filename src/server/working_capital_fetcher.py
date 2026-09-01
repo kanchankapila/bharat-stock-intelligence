@@ -230,11 +230,11 @@ def update_technical_signals(symbol: str, features: dict, con, today: str | None
     cur = con.cursor()
     cur.execute("""
         UPDATE technical_signals SET
-            receivables_days_ttm = CASE WHEN date >= ? THEN COALESCE(?, receivables_days_ttm) ELSE NULL END,
-            ccc_ttm              = CASE WHEN date >= ? THEN COALESCE(?, ccc_ttm)              ELSE NULL END,
-            ccc_trend            = CASE WHEN date >= ? THEN COALESCE(?, ccc_trend)            ELSE NULL END,
-            wc_deteriorating     = CASE WHEN date >= ? THEN COALESCE(?, wc_deteriorating)     ELSE NULL END,
-            wc_improving         = CASE WHEN date >= ? THEN COALESCE(?, wc_improving)         ELSE NULL END
+            receivables_days_ttm = CASE WHEN date >= ? THEN COALESCE(?, receivables_days_ttm) ELSE receivables_days_ttm END,
+            ccc_ttm              = CASE WHEN date >= ? THEN COALESCE(?, ccc_ttm)              ELSE ccc_ttm END,
+            ccc_trend            = CASE WHEN date >= ? THEN COALESCE(?, ccc_trend)            ELSE ccc_trend END,
+            wc_deteriorating     = CASE WHEN date >= ? THEN COALESCE(?, wc_deteriorating)     ELSE wc_deteriorating END,
+            wc_improving         = CASE WHEN date >= ? THEN COALESCE(?, wc_improving)         ELSE wc_improving END
         WHERE symbol = ?
     """, (
         floor, features.get("receivables_days_ttm"),

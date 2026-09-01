@@ -448,23 +448,23 @@ def backfill_technical_signals(symbol: str, ts_floor: str, f: dict, con) -> None
 
     cur.execute("""
         UPDATE technical_signals SET
-            mc_cagr_3y           = CASE WHEN date >= ? THEN COALESCE(?, mc_cagr_3y)           ELSE NULL END,
-            mc_cagr_5y           = CASE WHEN date >= ? THEN COALESCE(?, mc_cagr_5y)           ELSE NULL END,
-            mc_cagr_10y          = CASE WHEN date >= ? THEN COALESCE(?, mc_cagr_10y)          ELSE NULL END,
-            mc_ind_pe            = CASE WHEN date >= ? THEN COALESCE(?, mc_ind_pe)            ELSE NULL END,
-            mc_pe_vs_ind         = CASE WHEN date >= ? THEN COALESCE(?, mc_pe_vs_ind)         ELSE NULL END,
-            mc_consensus_pe      = CASE WHEN date >= ? THEN COALESCE(?, mc_consensus_pe)      ELSE NULL END,
-            mc_consensus_pb      = CASE WHEN date >= ? THEN COALESCE(?, mc_consensus_pb)      ELSE NULL END,
-            mc_del_pct_3d        = CASE WHEN date >= ? THEN COALESCE(?, mc_del_pct_3d)        ELSE NULL END,
-            mc_del_pct_5d        = CASE WHEN date >= ? THEN COALESCE(?, mc_del_pct_5d)        ELSE NULL END,
-            mc_del_pct_20d       = CASE WHEN date >= ? THEN COALESCE(?, mc_del_pct_20d)       ELSE NULL END,
-            mc_del_acceleration  = CASE WHEN date >= ? THEN COALESCE(?, mc_del_acceleration)  ELSE NULL END,
-            mc_circuit_dist_pct  = CASE WHEN date >= ? THEN COALESCE(?, mc_circuit_dist_pct)  ELSE NULL END,
-            mc_fno_eligible      = CASE WHEN date >= ? THEN COALESCE(?, mc_fno_eligible)      ELSE NULL END,
-            mc_price_cash        = CASE WHEN date >= ? THEN COALESCE(?, mc_price_cash)        ELSE NULL END,
-            mc_consensus_eps     = CASE WHEN date >= ? THEN COALESCE(?, mc_consensus_eps)     ELSE NULL END,
-            mc_eps_vs_cons       = CASE WHEN date >= ? THEN COALESCE(?, mc_eps_vs_cons)       ELSE NULL END,
-            mc_pe_fwd_discount   = CASE WHEN date >= ? THEN COALESCE(?, mc_pe_fwd_discount)   ELSE NULL END
+            mc_cagr_3y           = CASE WHEN date >= ? THEN COALESCE(?, mc_cagr_3y)           ELSE mc_cagr_3y END,
+            mc_cagr_5y           = CASE WHEN date >= ? THEN COALESCE(?, mc_cagr_5y)           ELSE mc_cagr_5y END,
+            mc_cagr_10y          = CASE WHEN date >= ? THEN COALESCE(?, mc_cagr_10y)          ELSE mc_cagr_10y END,
+            mc_ind_pe            = CASE WHEN date >= ? THEN COALESCE(?, mc_ind_pe)            ELSE mc_ind_pe END,
+            mc_pe_vs_ind         = CASE WHEN date >= ? THEN COALESCE(?, mc_pe_vs_ind)         ELSE mc_pe_vs_ind END,
+            mc_consensus_pe      = CASE WHEN date >= ? THEN COALESCE(?, mc_consensus_pe)      ELSE mc_consensus_pe END,
+            mc_consensus_pb      = CASE WHEN date >= ? THEN COALESCE(?, mc_consensus_pb)      ELSE mc_consensus_pb END,
+            mc_del_pct_3d        = CASE WHEN date >= ? THEN COALESCE(?, mc_del_pct_3d)        ELSE mc_del_pct_3d END,
+            mc_del_pct_5d        = CASE WHEN date >= ? THEN COALESCE(?, mc_del_pct_5d)        ELSE mc_del_pct_5d END,
+            mc_del_pct_20d       = CASE WHEN date >= ? THEN COALESCE(?, mc_del_pct_20d)       ELSE mc_del_pct_20d END,
+            mc_del_acceleration  = CASE WHEN date >= ? THEN COALESCE(?, mc_del_acceleration)  ELSE mc_del_acceleration END,
+            mc_circuit_dist_pct  = CASE WHEN date >= ? THEN COALESCE(?, mc_circuit_dist_pct)  ELSE mc_circuit_dist_pct END,
+            mc_fno_eligible      = CASE WHEN date >= ? THEN COALESCE(?, mc_fno_eligible)      ELSE mc_fno_eligible END,
+            mc_price_cash        = CASE WHEN date >= ? THEN COALESCE(?, mc_price_cash)        ELSE mc_price_cash END,
+            mc_consensus_eps     = CASE WHEN date >= ? THEN COALESCE(?, mc_consensus_eps)     ELSE mc_consensus_eps END,
+            mc_eps_vs_cons       = CASE WHEN date >= ? THEN COALESCE(?, mc_eps_vs_cons)       ELSE mc_eps_vs_cons END,
+            mc_pe_fwd_discount   = CASE WHEN date >= ? THEN COALESCE(?, mc_pe_fwd_discount)   ELSE mc_pe_fwd_discount END
         WHERE symbol = ?
     """, (
         ts_floor, f.get("cagr_3y"), ts_floor, f.get("cagr_5y"), ts_floor, f.get("cagr_10y"),

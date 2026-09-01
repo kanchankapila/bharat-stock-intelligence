@@ -255,7 +255,7 @@ def compute_and_upsert_signals(symbol: str, today: str, patterns: list[dict], co
 
 
 def backfill_technical_signals(symbol: str, ts_floor: str, signals: dict, con) -> None:
-    """date >= ? ELSE NULL guard added 2026-07-19 -- see mc_pricefeed_fetcher.py's
+    """date >= ? guard added 2026-07-19 -- see mc_pricefeed_fetcher.py's
     backfill_technical_signals for the full writeup of the no-date-filter bug this fixes.
 
     BUG FOUND 2026-07-28 (Finding #64 of the full-stack audit): the guard threshold
@@ -264,14 +264,21 @@ def backfill_technical_signals(symbol: str, ts_floor: str, signals: dict, con) -
     existed. On a closed-market day this job still runs, date.today() matches zero
     technical_signals rows, and the ELSE branch nulls mc_cp_bull/bear_count etc across
     a symbol's entire history. Caller must pass the last completed trading session
-    (MAX(date) FROM stock_ohlcv), not raw date.today() -- see main()."""
+    (MAX(date) FROM stock_ohlcv), not raw date.today() -- see main().
+
+    BUG FOUND 2026-09-01 (data/model audit, same class as index_membership_fetcher.py):
+    the ELSE branch was `ELSE NULL`. ts_floor is MAX(date) FROM stock_ohlcv, which advances
+    by one trading day every run, so the day-after's run pushed the floor past YESTERDAY's
+    row and re-nulled the value yesterday's own run had just correctly set -- only the
+    single most-recent date ever stayed populated, regardless of how often this ran.
+    ELSE now preserves the row's own current value instead."""
     cur = con.cursor()
     cur.execute("""
         UPDATE technical_signals SET
-            mc_cp_bull_count     = CASE WHEN date >= ? THEN COALESCE(?, mc_cp_bull_count)     ELSE NULL END,
-            mc_cp_bear_count     = CASE WHEN date >= ? THEN COALESCE(?, mc_cp_bear_count)     ELSE NULL END,
-            mc_cp_net_score      = CASE WHEN date >= ? THEN COALESCE(?, mc_cp_net_score)      ELSE NULL END,
-            mc_cp_avg_target_pct = CASE WHEN date >= ? THEN COALESCE(?, mc_cp_avg_target_pct) ELSE NULL END
+            mc_cp_bull_count     = CASE WHEN date >= ? THEN COALESCE(?, mc_cp_bull_count)     ELSE mc_cp_bull_count     END,
+            mc_cp_bear_count     = CASE WHEN date >= ? THEN COALESCE(?, mc_cp_bear_count)     ELSE mc_cp_bear_count     END,
+            mc_cp_net_score      = CASE WHEN date >= ? THEN COALESCE(?, mc_cp_net_score)      ELSE mc_cp_net_score      END,
+            mc_cp_avg_target_pct = CASE WHEN date >= ? THEN COALESCE(?, mc_cp_avg_target_pct) ELSE mc_cp_avg_target_pct END
         WHERE symbol = ?
     """, (
         ts_floor, signals.get("bull_count"), ts_floor, signals.get("bear_count"),

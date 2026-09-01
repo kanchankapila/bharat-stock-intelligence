@@ -299,14 +299,14 @@ def backfill_technical_signals(symbol: str, today_str: str, f: dict, con) -> Non
     cur = con.cursor()
     cur.execute("""
         UPDATE technical_signals SET
-            tl_vs_nifty_1m       = CASE WHEN date >= ? THEN COALESCE(?, tl_vs_nifty_1m)       ELSE NULL END,
-            tl_vs_nifty_3m       = CASE WHEN date >= ? THEN COALESCE(?, tl_vs_nifty_3m)       ELSE NULL END,
-            tl_vs_nifty_6m       = CASE WHEN date >= ? THEN COALESCE(?, tl_vs_nifty_6m)       ELSE NULL END,
-            tl_vs_ind_1m         = CASE WHEN date >= ? THEN COALESCE(?, tl_vs_ind_1m)         ELSE NULL END,
-            tl_vs_ind_3m         = CASE WHEN date >= ? THEN COALESCE(?, tl_vs_ind_3m)         ELSE NULL END,
-            tl_seasonal_month_5y = CASE WHEN date >= ? THEN COALESCE(?, tl_seasonal_month_5y) ELSE NULL END,
-            tl_dist_3m_high_pct  = CASE WHEN date >= ? THEN COALESCE(?, tl_dist_3m_high_pct)  ELSE NULL END,
-            tl_dist_3m_low_pct   = CASE WHEN date >= ? THEN COALESCE(?, tl_dist_3m_low_pct)   ELSE NULL END
+            tl_vs_nifty_1m       = CASE WHEN date >= ? THEN COALESCE(?, tl_vs_nifty_1m)       ELSE tl_vs_nifty_1m END,
+            tl_vs_nifty_3m       = CASE WHEN date >= ? THEN COALESCE(?, tl_vs_nifty_3m)       ELSE tl_vs_nifty_3m END,
+            tl_vs_nifty_6m       = CASE WHEN date >= ? THEN COALESCE(?, tl_vs_nifty_6m)       ELSE tl_vs_nifty_6m END,
+            tl_vs_ind_1m         = CASE WHEN date >= ? THEN COALESCE(?, tl_vs_ind_1m)         ELSE tl_vs_ind_1m END,
+            tl_vs_ind_3m         = CASE WHEN date >= ? THEN COALESCE(?, tl_vs_ind_3m)         ELSE tl_vs_ind_3m END,
+            tl_seasonal_month_5y = CASE WHEN date >= ? THEN COALESCE(?, tl_seasonal_month_5y) ELSE tl_seasonal_month_5y END,
+            tl_dist_3m_high_pct  = CASE WHEN date >= ? THEN COALESCE(?, tl_dist_3m_high_pct)  ELSE tl_dist_3m_high_pct END,
+            tl_dist_3m_low_pct   = CASE WHEN date >= ? THEN COALESCE(?, tl_dist_3m_low_pct)   ELSE tl_dist_3m_low_pct END
         WHERE symbol = ?
     """, (
         today_str, f.get("alpha_nifty_1m"), today_str, f.get("alpha_nifty_3m"),

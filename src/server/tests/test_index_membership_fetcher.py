@@ -91,3 +91,75 @@ class TestDateAnchorUsesLastTradingSession:
         # Should not raise even when stock_ohlcv has no rows yet.
         imf.backfill_technical_signals(conn)
         assert len(conn.cur.executed_sql) == 2
+
+
+# ── Bug 3 (found 2026-09-01, data/model audit): `ELSE NULL` on the date>=floor guard wipes
+# EVERY historical row on EVERY run, not just rows that were never blessed. logical_write_floor()
+# advances by one trading day each time the job runs (MAX(date) FROM stock_ohlcv), so on day N+1
+# the guard's floor moves past day N's row -- and `ELSE NULL` re-nulls it, discarding the value
+# day N's own run correctly set. Live-confirmed 2026-09-01: index-membership ran successfully
+# every weekday for two weeks (job_run_history all 'success'), yet technical_signals showed only
+# the single most-recent date populated (~100%) and every earlier date back to ~1.5% (residual
+# noise, not real coverage) -- exactly this mechanism, not a scheduling gap. These tests need a
+# real UPDATE evaluated against real rows (a mocked cursor can't tell "wiped" from "never set"),
+# so they use pg_memory_conn(), not _FakeConn.
+import sqlite3
+from pg_test_support import pg_memory_conn  # noqa: E402
+
+
+def _make_real_conn():
+    conn = pg_memory_conn()
+    conn.row_factory = sqlite3.Row
+    conn.execute("CREATE TABLE stock_ohlcv (symbol TEXT, date TEXT)")
+    conn.execute("""
+        CREATE TABLE nse_stocks (
+            symbol TEXT PRIMARY KEY, is_nifty50 INTEGER, is_nifty100 INTEGER,
+            is_nifty200 INTEGER, is_midcap150 INTEGER, is_smallcap250 INTEGER
+        )
+    """)
+    conn.execute("""
+        CREATE TABLE technical_signals (
+            symbol TEXT, date TEXT, is_nifty50 INTEGER, is_nifty100 INTEGER,
+            is_nifty200 INTEGER, is_midcap150 INTEGER, is_smallcap250 INTEGER,
+            nifty_tier INTEGER, PRIMARY KEY (symbol, date)
+        )
+    """)
+    conn.execute("INSERT INTO nse_stocks VALUES ('RELIANCE', 1, 1, 1, 0, 0)")
+    conn.execute("INSERT INTO technical_signals (symbol, date) VALUES ('RELIANCE', '2026-08-31')")
+    conn.execute("INSERT INTO technical_signals (symbol, date) VALUES ('RELIANCE', '2026-09-01')")
+    conn.commit()
+    return conn
+
+
+class TestBackfillPreservesPriorDaysBless:
+    def test_a_later_run_does_not_null_out_an_earlier_days_correct_value(self, monkeypatch):
+        monkeypatch.setattr(imf, "use_postgres", lambda: True)
+        conn = _make_real_conn()
+
+        # Day 1: only 08-31 exists in stock_ohlcv, so the floor is 08-31. That run correctly
+        # blesses 08-31's row.
+        conn.execute("INSERT INTO stock_ohlcv VALUES ('RELIANCE', '2026-08-31')")
+        conn.commit()
+        imf.backfill_technical_signals(conn)
+        row = conn.execute(
+            "SELECT is_nifty50 FROM technical_signals WHERE date = '2026-08-31'"
+        ).fetchone()
+        assert row["is_nifty50"] == 1, "sanity check: day 1's own run should bless its own row"
+
+        # Day 2: 09-01 lands in stock_ohlcv, so the floor advances to 09-01. This run should
+        # bless 09-01's row WITHOUT wiping 08-31's already-correct value back to NULL.
+        conn.execute("INSERT INTO stock_ohlcv VALUES ('RELIANCE', '2026-09-01')")
+        conn.commit()
+        imf.backfill_technical_signals(conn)
+
+        prior_day = conn.execute(
+            "SELECT is_nifty50 FROM technical_signals WHERE date = '2026-08-31'"
+        ).fetchone()
+        today = conn.execute(
+            "SELECT is_nifty50 FROM technical_signals WHERE date = '2026-09-01'"
+        ).fetchone()
+        assert today["is_nifty50"] == 1, "today's own run should still bless today's row"
+        assert prior_day["is_nifty50"] == 1, (
+            "a later run must not null out a value an earlier run already set correctly — "
+            "this is the live bug: only the single most-recent date ever stays populated"
+        )

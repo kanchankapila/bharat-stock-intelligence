@@ -167,11 +167,11 @@ def backfill_technical_signals(con) -> int:
     """Copy index flags + compute nifty_tier from nse_stocks → technical_signals."""
     cur = con.cursor()
 
-    # date >= today ELSE NULL guard added 2026-07-19 -- this previously used plain `=` with NO
-    # date filter (worse than COALESCE: REWRITES every historical row on every run, so index
+    # date >= today guard added 2026-07-19 -- this previously used plain `=` with NO date
+    # filter (worse than COALESCE: REWRITES every historical row on every run, so index
     # membership never reflected true historical status, only "whatever it is today"). No
-    # historical index-membership snapshot exists to backfill from, so older rows are
-    # explicitly nulled rather than left holding today's status.
+    # historical index-membership snapshot exists to backfill from, so a row this guard has
+    # never reached stays at its unblessed default -- see the ELSE branch below.
     #
     # Anchor to the last completed trading session, NOT datetime.now() -- nse-sync-weekly
     # (queues.ts) runs this fetcher Saturday 2:00 AM UTC / 7:30 AM IST, a non-trading day with
@@ -184,19 +184,30 @@ def backfill_technical_signals(con) -> int:
     # AF-20260828-21: this same date-guard, correct in isolation, meant the job only ever
     # blessed the ONE trading-day row it happened to run on -- weekly cadence left every OTHER
     # trading day's row at the column's raw schema default (0) until the following week. Fixed
-    # by also running this fetcher daily (queues.ts: index-membership-daily, weekdays), not by
-    # touching this guard -- the guard itself was never wrong.
+    # by also running this fetcher daily (queues.ts: index-membership-daily, weekdays) -- but
+    # that fix was incomplete on its own (found 2026-09-01, data/model audit): the ELSE branch
+    # here was `ELSE NULL`, and logical_write_floor() ADVANCES by one trading day on every run
+    # (MAX(date) FROM stock_ohlcv), so the day-after's run pushed the floor past YESTERDAY's row
+    # and re-nulled the value yesterday's own run had just correctly set. Confirmed live:
+    # job_run_history showed 'success' every weekday for two weeks straight, yet
+    # technical_signals held real is_nifty50/etc. values on only the single most-recent date at
+    # any moment -- every earlier date was NULL despite its own "successful" run. The ELSE
+    # branch now preserves the row's own current value instead of nulling it, so each day's run
+    # is additive (bless today, leave every other day's already-blessed value alone) rather than
+    # a rolling one-day window. See test_index_membership_fetcher.py's
+    # TestBackfillPreservesPriorDaysBless for the regression test (a mocked cursor can't catch
+    # this class -- it needs a real UPDATE evaluated against real rows across two runs).
     today = logical_write_floor(cur, fallback=datetime.now().strftime("%Y-%m-%d"))
     if use_postgres():
         cur.execute(
             """
             UPDATE technical_signals
             SET
-                is_nifty50     = CASE WHEN technical_signals.date >= ? THEN ns.is_nifty50     ELSE NULL END,
-                is_nifty100    = CASE WHEN technical_signals.date >= ? THEN ns.is_nifty100    ELSE NULL END,
-                is_nifty200    = CASE WHEN technical_signals.date >= ? THEN ns.is_nifty200    ELSE NULL END,
-                is_midcap150   = CASE WHEN technical_signals.date >= ? THEN ns.is_midcap150   ELSE NULL END,
-                is_smallcap250 = CASE WHEN technical_signals.date >= ? THEN ns.is_smallcap250 ELSE NULL END,
+                is_nifty50     = CASE WHEN technical_signals.date >= ? THEN ns.is_nifty50     ELSE technical_signals.is_nifty50     END,
+                is_nifty100    = CASE WHEN technical_signals.date >= ? THEN ns.is_nifty100    ELSE technical_signals.is_nifty100    END,
+                is_nifty200    = CASE WHEN technical_signals.date >= ? THEN ns.is_nifty200    ELSE technical_signals.is_nifty200    END,
+                is_midcap150   = CASE WHEN technical_signals.date >= ? THEN ns.is_midcap150   ELSE technical_signals.is_midcap150   END,
+                is_smallcap250 = CASE WHEN technical_signals.date >= ? THEN ns.is_smallcap250 ELSE technical_signals.is_smallcap250 END,
                 nifty_tier     = CASE WHEN technical_signals.date >= ? THEN
                     CASE
                         WHEN ns.is_nifty50     = 1 THEN 50
@@ -206,7 +217,7 @@ def backfill_technical_signals(con) -> int:
                         WHEN ns.is_smallcap250 = 1 THEN 250
                         ELSE 0
                     END
-                ELSE NULL END
+                ELSE technical_signals.nifty_tier END
             FROM nse_stocks ns
             WHERE technical_signals.symbol = ns.symbol
             """,
@@ -217,11 +228,11 @@ def backfill_technical_signals(con) -> int:
             """
             UPDATE technical_signals
             SET
-                is_nifty50     = CASE WHEN date >= ? THEN (SELECT is_nifty50     FROM nse_stocks WHERE symbol = technical_signals.symbol) ELSE NULL END,
-                is_nifty100    = CASE WHEN date >= ? THEN (SELECT is_nifty100    FROM nse_stocks WHERE symbol = technical_signals.symbol) ELSE NULL END,
-                is_nifty200    = CASE WHEN date >= ? THEN (SELECT is_nifty200    FROM nse_stocks WHERE symbol = technical_signals.symbol) ELSE NULL END,
-                is_midcap150   = CASE WHEN date >= ? THEN (SELECT is_midcap150   FROM nse_stocks WHERE symbol = technical_signals.symbol) ELSE NULL END,
-                is_smallcap250 = CASE WHEN date >= ? THEN (SELECT is_smallcap250 FROM nse_stocks WHERE symbol = technical_signals.symbol) ELSE NULL END,
+                is_nifty50     = CASE WHEN date >= ? THEN (SELECT is_nifty50     FROM nse_stocks WHERE symbol = technical_signals.symbol) ELSE is_nifty50     END,
+                is_nifty100    = CASE WHEN date >= ? THEN (SELECT is_nifty100    FROM nse_stocks WHERE symbol = technical_signals.symbol) ELSE is_nifty100    END,
+                is_nifty200    = CASE WHEN date >= ? THEN (SELECT is_nifty200    FROM nse_stocks WHERE symbol = technical_signals.symbol) ELSE is_nifty200    END,
+                is_midcap150   = CASE WHEN date >= ? THEN (SELECT is_midcap150   FROM nse_stocks WHERE symbol = technical_signals.symbol) ELSE is_midcap150   END,
+                is_smallcap250 = CASE WHEN date >= ? THEN (SELECT is_smallcap250 FROM nse_stocks WHERE symbol = technical_signals.symbol) ELSE is_smallcap250 END,
                 nifty_tier     = CASE WHEN date >= ? THEN
                     CASE
                         WHEN (SELECT is_nifty50     FROM nse_stocks WHERE symbol = technical_signals.symbol) = 1 THEN 50
@@ -231,7 +242,7 @@ def backfill_technical_signals(con) -> int:
                         WHEN (SELECT is_smallcap250 FROM nse_stocks WHERE symbol = technical_signals.symbol) = 1 THEN 250
                         ELSE 0
                     END
-                ELSE NULL END
+                ELSE nifty_tier END
             """,
             (today, today, today, today, today, today),
         )
