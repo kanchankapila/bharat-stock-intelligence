@@ -7554,3 +7554,83 @@ undeployed — the server had been up since before the merge). Checked `getJobCo
 BullMQ queues first and confirmed zero `active` jobs, so the restart could not create the
 zombie-`active` state documented 2026-08-30; the in-flight `dl_trainer.py` run was confirmed to
 descend from a terminal `bash.exe`, not pm2, so the restart could not kill it either.
+
+## 2026-09-01 — Data/model audit: exit_policy MAE regression root-caused, and a 9-fetcher recurring bug found via a feature-coverage sweep
+
+Requested as a fresh, live-database-only audit (memory files deliberately set aside) covering
+every table (213 profiled), the ML architecture, and a model/schema plan — delivered as an
+artifact, then worked the plan's action items one by one live against production.
+
+**`exit_policy.py`'s promotion-gate regression (measurement.md: MAE 4.76→5.66 after the
+feature-completeness fix) was misdiagnosed there — not a feature-widening problem.** Root cause:
+`exit_labeler.py`'s `compute_excursions()` never bounded `mfe_pct`/`mae_pct`. Three symbols have
+corrupt, frozen `stock_ohlcv` (RMCL: open=2.0/high=200.0 identical across 25+ sessions,
+`is_suspect=0` throughout), producing an exact, repeated 9900% "excursion" — 1,641 rows across
+the table exceeded a sane ±50% bound. Whichever retrain's chronological test-holdout caught more
+of those poisoned rows reported worse MAE, explaining the erratic 4.91→4.998→5.664→5.299
+sequence across four back-to-back retrains far better than "more features hurt." Fixed:
+`EXCURSION_CLAMP_PCT=50.0` added to `exit_labeler.py` (mirrors `factor_backtest.py`'s
+`RETURN_CLAMP_PCT` convention), TDD'd with a negative control
+(`test_corrupt_bar_does_not_produce_unbounded_excursion`), then backfilled all 1,641
+already-corrupted `signal_excursions` rows live via `compute_excursions()`'s own (now-fixed)
+logic — target stddev on the training window dropped 162.2→5.80. Retrained live:
+held-out MAE **4.7642→1.8021** (MFE) and **1.9244→1.2761** (MAE) — not a marginal clear of the
+promotion margin, the poisoned rows had been corrupting the fit itself, not just the evaluation.
+`model_registry` id=312 promoted automatically, live-verified active.
+
+**Feature-coverage sweep (`feature_matrix_coverage_report()` against 234,133 real training rows)
+found 27/421 features mechanically constant — 6 of them turned out not to be "no signal" but
+actively wiped every day by a bug.** `is_nifty50`/`is_nifty100`/`is_nifty200`/`is_midcap150`/
+`is_smallcap250`/`nifty_tier`: `index_membership_fetcher.py`'s write guard
+(`CASE WHEN date >= floor THEN ... ELSE NULL END`, `floor = logical_write_floor()` = `MAX(date)
+FROM stock_ohlcv`, which advances one trading day every run) re-nulled every historical row on
+every run, including rows a PRIOR run had just correctly set. `job_run_history` showed
+`index-membership` succeeding every weekday for two weeks straight while `technical_signals`
+held real values on only the single most-recent date at any given moment — a scheduling fix
+(AF-20260828-21, "run it daily") that looked complete but never actually accumulated coverage.
+Grepping the exact template (`date >= ? THEN COALESCE(?, col) ELSE NULL END`) found the
+**identical** copy-pasted mistake in **8 more fetchers, 77 more columns**:
+`mc_chart_patterns_fetcher.py`, `mc_pricefeed_fetcher.py`, `nt_dashboard_fetcher.py`,
+`trendlyne_adv_tech_fetcher.py`, `trendlyne_fundamentals_fetcher.py`,
+`trendlyne_overview_fetcher.py`, `trendlyne_price_analysis_fetcher.py`,
+`working_capital_fetcher.py`. (`financial_ratios_fetcher.py`, `mf_holdings_fetcher.py`,
+`mf_stock_holdings_fetcher.py` use a disclosure-date-anchored floor that barely advances —
+same shape, much lower urgency; left untouched.) Fixed all 9 uniformly: `ELSE NULL END` →
+`ELSE <col> END` (preserve the row's own current value instead of nulling it), so each run
+becomes additive. TDD'd with a real-Postgres regression test spanning two sequential floor
+values (`TestBackfillPreservesPriorDaysBless` — a mocked-cursor test can't see this class, it
+only inspects SQL text, not row-level effect across runs), negative-controlled, live-verified
+against production for both `index_membership_fetcher.py` and (via before/after fill-rate)
+`mc_chart_patterns_fetcher.py`. 3 pre-existing tests in `test_finding64_ts_floor_fetchers.py`
+asserted the literal substring `"ELSE NULL"` as a proxy for "the guard exists" — updated to
+assert the actual invariant (`"CASE WHEN date >=" in sql` + the floor param appears in `params`)
+rather than reverting the fix. Documented as a new class in `recurring-bugs.md`. Full suite
+re-run clean: **2,364 passed, 244 skipped, 0 failed**.
+
+Also cleaned up 4 orphaned `vitest_*` throwaway schemas left in production Postgres by crashed
+test runs (confirmed zero active connections first, matches `vitest.globalSetup.ts`'s own
+documented "crashed before teardown" failure mode) — `DROP SCHEMA ... CASCADE`. And retracted an
+initial `insider_trades` staleness finding: the scan script had picked the legacy free-text
+`date` column instead of the correctly-populated `date_iso` column the one real consumer already
+uses — no bug, no action.
+
+**Separately reviewed `claude/dalalos-finstack-mcp-integration-95d01f` (unmerged branch) on
+request.** Its own contribution is now moot: every row in `dalalos_financial_trends_history` live
+today carries `source='marketsmojo_financials'`, not `dalalos-mcp`/`bse-xbrl` — a different,
+**currently uncommitted** script from another concurrent session
+(`src/server/backfill_financial_trends_all.py`) reshapes the already-fetched
+`marketsmojo_financials_history` (4.25M raw line-items, normally scheduled, no MCP bottleneck)
+into the same table/key and overwrote every DalalOS-sourced row via `ON CONFLICT DO UPDATE`. This
+is a genuine improvement in kind (1,684 symbols / 62,655 rows / 86 quarters vs. DalalOS's ~13
+NIFTY-50-only quarters, because it eliminates the fetch bottleneck entirely instead of just
+caching it), not just in degree — but it isn't wired into the scheduler and
+`dalalos_financial_trends_history` has no freshness check despite its ingredients (`marketsmojo_
+financials_history`) refreshing regularly underneath it. Recommended not merging the branch;
+flagged the table's now-misleading name and the missing schedule/freshness-check as follow-ups
+for whoever owns the uncommitted script.
+
+Not done this session (explicitly deferred, not attempted): materializing a point-in-time-correct
+wide feature table (`full_feature_train_sql()` anchored on `stock_ohlcv` hit both a real
+TEXT-vs-DATE type mismatch and a 160+ second-per-day performance wall — needs index work first);
+a full `factor_edge.py` grading pass of all 421 features (the other 21 mechanically-constant
+ones are the real prune candidates, not chased down individually here).
