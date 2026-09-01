@@ -43,6 +43,10 @@ directly. Ranked by priority within each section.
    the promotion-bar decision that sets it, not the caller unconditionally. If it is wired, close
    this item outright.
 
+2. **Database Data Types Migration: Convert ~69 `TEXT` date tables to native `DATE`/`TIMESTAMPTZ`.** `[verified 08-31, re-verified 09-01: 69 columns confirmed live, open]` 69 core tables (`signal_outcomes`, `fii_dii_flow`, `stock_delivery_data`, `trendlyne_*`, etc.) store date strings as text. Causes index bloat, disables partition pruning, and can mask staleness checks that compare `MAX(date)` lexicographically instead of chronologically — but check the specific table before assuming it's actually stale (see item 4's correction below; `insider_trades` itself turned out fine because it already has a real `date_iso` column). Additive migration with generated/parallel typed date columns required.
+3. **Purge corrupt 1965 row from `ohlcv_adjustment_factors`.** `[verified 08-31, re-verified 09-01, open]` Two rows (`LT`, `LARSEN` — same company, two symbol spellings) at `ex_date='1965-03-06'`, `factor=0.875`. Predates the platform's 2021+ price history entirely; still open.
+4. ~~Fix stale `insider_trades` pipeline.~~ **CLOSED, not a bug — 2026-09-01.** This item was itself the mistake it described: `insider_trades` has a proper `date_iso` column (added 2026-07-30), 100% populated, current through 2026-08-28, and its one consumer (`insider_features.py`) already uses it. The "stale since Oct 2025" reading came from `MAX(date)` on the legacy free-text column, not `date_iso`. No parser bug, no restart needed. See `docs/audit-findings.md`'s corrected `AF-20260831-02`.
+
 ---
 
 ## P1 — ML / accuracy (highest trading-relevance)
