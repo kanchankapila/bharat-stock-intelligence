@@ -39,6 +39,14 @@ TB_K_DN   = 1.0     # lower barrier = −k_dn · atr_pct
 # horizon returns inside the old fixed 0.4% band, starving the model of labels).
 TB_COST_FRAC = 0.15  # neutral band = ±0.15 · atr_pct (≈0.3% at avg ATR 2%)
 
+# Bad-bar guard, not a real market bound -- mirrors factor_backtest.py's RETURN_CLAMP_PCT.
+# is_suspect is supposed to catch corrupt OHLCV before it reaches here, but isn't infallible
+# (e.g. RMCL: open=2.0/high=200.0 frozen across 25+ sessions, is_suspect=0 throughout) --
+# unclamped, that one bar produces mfe_pct=9900.0, which dominates exit_policy's holdout MAE
+# whenever it lands in a retrain's test slice. Clamping here defends the excursion labels
+# regardless of whether the upstream flag catches the next such row.
+EXCURSION_CLAMP_PCT = 50.0
+
 
 def triple_barrier_label(mfe_pct, mae_pct, mfe_before_mae, horizon_close_pct,
                          atr_pct, k_up: float = TB_K_UP, k_dn: float = TB_K_DN,
@@ -115,8 +123,8 @@ def compute_excursions(entry: float, bars: list, atr: float,
     trail_exit_day = None
 
     for i, (high, low, close) in enumerate(bars, start=1):
-        up = (high - entry) / entry * 100.0
-        dn = (low - entry) / entry * 100.0
+        up = max(-EXCURSION_CLAMP_PCT, min(EXCURSION_CLAMP_PCT, (high - entry) / entry * 100.0))
+        dn = max(-EXCURSION_CLAMP_PCT, min(EXCURSION_CLAMP_PCT, (low - entry) / entry * 100.0))
         if up > mfe_pct:
             mfe_pct, days_to_mfe = up, i
         if dn < mae_pct:
@@ -131,7 +139,8 @@ def compute_excursions(entry: float, bars: list, atr: float,
                 trail_exit_day = i
             highest_high = max(highest_high, high)
 
-    horizon_close_pct = (bars[-1][2] - entry) / entry * 100.0
+    horizon_close_pct = max(-EXCURSION_CLAMP_PCT, min(EXCURSION_CLAMP_PCT,
+                                                       (bars[-1][2] - entry) / entry * 100.0))
     if trail_exit_pct is None:
         trail_exit_pct = horizon_close_pct              # never stopped → held to horizon close
 

@@ -66,6 +66,22 @@ class TestComputeExcursions:
         assert exc["trail_exit_day"] == 1
         assert exc["trail_exit_pct"] == pytest.approx(-6.0)  # filled at 94, not at the 80 low
 
+    def test_corrupt_bar_does_not_produce_unbounded_excursion(self):
+        # Live production case: RMCL's stock_ohlcv is frozen at open=2.0/high=200.0 across
+        # 25+ consecutive sessions (a stale/corrupt feed that is_suspect never flagged). Fed
+        # through here unclamped, entry=2.0 + high=200.0 produces mfe_pct=9900.0 -- an exact,
+        # repeated sentinel-looking value that dominates exit_policy's holdout MAE whenever it
+        # lands in a retrain's test slice (measured: ~150 such rows, |error| ~9895pp each).
+        exc = compute_excursions(2.0, [(200.0, 1.9, 200.0)], atr=0.1)
+        assert exc["mfe_pct"] == pytest.approx(50.0)
+        assert exc["mae_pct"] == pytest.approx(-5.0)  # a genuine small move stays untouched
+
+    def test_normal_bar_is_unaffected_by_the_clamp(self):
+        bars = [(105, 99, 104), (110, 103, 108), (107, 95, 96)]
+        exc = compute_excursions(self.ENTRY, bars, atr=2)
+        assert exc["mfe_pct"] == pytest.approx(10.0)
+        assert exc["mae_pct"] == pytest.approx(-5.0)
+
 
 # ── Triple-barrier label (López de Prado, vol-scaled, asymmetric) ──────────────
 from exit_labeler import triple_barrier_label
