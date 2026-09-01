@@ -51,10 +51,25 @@ def _already_has_oi(index_name: str, date: str, expiry: str) -> bool:
     return bool(cnt and cnt > 0)
 
 
-def _get(url: str) -> dict:
-    req = urllib.request.Request(url, headers=HEADERS)
-    with urllib.request.urlopen(req, timeout=15) as resp:
-        return json.loads(resp.read().decode())
+def _get(url: str, retries: int = 3) -> dict:
+    # Retry added 2026-08-31: a single transient MC failure here used to drop the WHOLE
+    # day's index_option_oi silently (_fetch_expiries returns [] on error and the run
+    # no-ops) — the exact mechanism behind the missing 08-22/08-25/08-28 rows. Small
+    # fixed backoff; the fetcher already runs inside its own BullMQ job budget.
+    last_exc: Exception | None = None
+    for attempt in range(1, retries + 1):
+        req = urllib.request.Request(url, headers=HEADERS)
+        try:
+            with urllib.request.urlopen(req, timeout=15) as resp:
+                return json.loads(resp.read().decode())
+        except Exception as exc:
+            last_exc = exc
+            if attempt < retries:
+                delay = 2.0 * attempt
+                log.warning("GET %s failed (attempt %d/%d): %s — retrying in %.0fs",
+                            url.split("?")[0], attempt, retries, exc, delay)
+                time.sleep(delay)
+    raise last_exc  # type: ignore[misc]
 
 
 def _ensure_tables():
