@@ -23,9 +23,9 @@ Before triaging, confirm coverage against what actually exists, not what the inp
 to touch. Grep-derived, not remembered — this repo's history is full of "complete" reviews that
 stopped at N instances when a static check immediately found N+4 more.
 
-- **Features** — every dashboard shell (v1/v2/v3/v4/v5/v6) and every scoring/ranking-shaped tRPC
-  procedure in `router.ts`/`routers/*.ts`. Run `canonical-read-audit` and `shell-parity-audit` if
-  the input audit didn't already cover them.
+- **Features** — v1 (the only frontend since the 2026-09-01 shell consolidation, `fd0cbd4`) and
+  every scoring/ranking-shaped tRPC procedure in `router.ts`/`routers/*.ts`. Run
+  `canonical-read-audit` if the input audit didn't already cover it.
 - **Scripts** — every fetcher (`*_fetcher.py`), every engine/scorer/ranker (`*_engine.py`,
   `*_scorer.py`, `*_ranker.py`), every one-shot script under `scripts/`. `data-coverage-audit` and
   `fetcher-accuracy-review` cover fetchers; cross-check the rest against `git ls-files '*.py'` —

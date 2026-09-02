@@ -9,8 +9,7 @@ same shape: something reports healthy while quietly not delivering what it exist
 (21 of `ml_ensemble.py`'s 254 inputs 100%-NULL while the monitor read 86 pass/1 fail;
 `entry_price` NULL on 100% of a day's `recommendation_log` rows behind a query that silently
 aborted). None of those incidents checked what a human actually saw on screen. This review is
-that missing layer — one component/page at a time, or swept across a shell per
-`/shell-parity-audit`.
+that missing layer — one component/page at a time, or swept across the app.
 
 ## 1. Trace data to render, not just data to query
 

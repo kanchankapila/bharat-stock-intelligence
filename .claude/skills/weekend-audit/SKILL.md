@@ -1,6 +1,6 @@
 ---
 name: weekend-audit
-description: Weekly whole-system health sweep across repo/build, the four services, jobs, Postgres, the ML layer and the six frontend shells — runs the checks that already exist, adds only the ones nothing covers, rotates through the 15 deep audit commands, then hands every finding to the audit-loop skill to be fixed, verified and immunized. Use on a weekend, when asked to audit the whole system / check everything is running right, or when scheduling a recurring health check.
+description: Weekly whole-system health sweep across repo/build, the five services, jobs, Postgres, the ML layer and the frontend — runs the checks that already exist, adds only the ones nothing covers, rotates through the 14 deep audit commands, then hands every finding to the audit-loop skill to be fixed, verified and immunized. Use on a weekend, when asked to audit the whole system / check everything is running right, or when scheduling a recurring health check.
 ---
 
 # Weekend audit
@@ -190,14 +190,14 @@ fresh visitor gets), then spot-check one other shell.
 
 ## Lane 6 — Deep audit rotation
 
-Three per weekend, so all 15 land every 5 weeks. Pick the group by ISO week (`date +%V`) mod 5:
+Roughly three per weekend, so all 14 land every 5 weeks. Pick the group by ISO week (`date +%V`) mod 5:
 
 | week % 5 | Group | Commands |
 |---|---|---|
 | 0 | Data layer | `/data-coverage-audit` · `/fetcher-accuracy-review` · `/cross-writer-collision-audit` |
 | 1 | Backend | `/job-runtime-audit` · `/trpc-surface-review` · `/migration-safety-review` |
 | 2 | ML & measurement | `/signal-accuracy-review` · `/measurement-integrity-review` · `/ml-promotion-gate-review` |
-| 3 | Frontend & canonical | `/canonical-read-audit` · `/shell-parity-audit` · `/data-honesty-review` |
+| 3 | Frontend & canonical | `/canonical-read-audit` · `/data-honesty-review` — `/shell-parity-audit` retired 2026-09-01 (v1 is now the only frontend, nothing left to compare shells against) |
 | 4 | Silent-green | `/temporal-correctness-audit` · `/test-integrity-audit` · `/threshold-calibration-audit` |
 
 Group 4 covers the three clusters with the highest recorded recurrence counts and, until now, no
