@@ -8,11 +8,11 @@
 // (and anything else) can import buildSpecFromEvidence/writeRecommendations
 // without triggering a real DB run as an import-time side effect. run-ranker.ts
 // is the one-shot operational entrypoint that actually invokes main().
-import { createHash } from 'node:crypto';
 import {
   bulkInsertRecommendations, queryFeatureSnapshotSession, queryLatestFeatureSession,
   queryNetMeasurementEvidence, upsertModelVersion, type RecommendationInput, type createPool,
 } from '@greenfield/db';
+import { computeRankerArtifactHash } from '../stage4/artifact-hash.js';
 import { FEATURE_SET_VERSION } from '../stage4/compute-features.js';
 import { buildRankerSpec, rankSession, selectSurvivingFactors, type RankerSpec } from './ranker.js';
 
@@ -76,14 +76,17 @@ export async function writeRecommendationsForSession(
 
   const written = await bulkInsertRecommendations(insertClient, insertRows);
 
-  const artifactPayload = JSON.stringify({ variant: spec.variant, version: spec.version, factors: spec.factors });
-  const artifactHash = createHash('sha256').update(artifactPayload).digest('hex');
+  const artifactHash = computeRankerArtifactHash({ variant: spec.variant, version: spec.version, factors: spec.factors });
   await upsertModelVersion(insertClient, {
     model: MODEL_NAME, version: spec.version, state: 'shadow',
     artifactUri: `in-repo://greenfield/packages/ingestion/src/stage5/ranker.ts#${spec.version}`,
     artifactHash, trainedAt: generatedAt,
     trainWindowStart: EVIDENCE_PANEL_START, trainWindowEnd: asOfSession, embargoDays: 0,
     metrics: {
+      // `variant` travels in metrics (not just encoded in the version string)
+      // so the model-artifact-hash check can recompute this exact hash from
+      // the row alone, without inferring variant from a version-string prefix.
+      variant: spec.variant,
       unvalidated: spec.unvalidated,
       rationale: spec.rationale,
       factors: spec.factors,
