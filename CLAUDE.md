@@ -20,6 +20,14 @@ Real-time Indian stock market intelligence platform (NSE/BSE). Express + tRPC ba
 
 `docs/session-log.md` is the historical changelog (~6,100 lines — never load it whole). Not loaded automatically; grep or read a specific dated entry when you need the history behind a decision.
 
+**`docs/audit-findings.md` is the one and only open/pending-items tracker.** Any new bug, gap, or
+follow-up you find and don't fix immediately gets a row there (stable `AF-YYYYMMDD-NN` ID, never
+delete a row — close it in place with a date and evidence). Don't create a new markdown file for
+"things to do later" — this repo already did that three times (`ACTION_ITEMS.md`,
+`docs/FETCHER_HEALTH_TRACKER.md`, `docs/DATA_GAP_MANIFEST.md`) and the trackers drifted out of
+sync with each other and with the code, which is exactly what caused a 2026-09-02 consolidation
+pass to be needed. All three are now retired stubs pointing here.
+
 ## Definition of done
 
 A task is **not** done until the relevant check has actually run and passed. Claiming "done" without one is the single most repeated failure in this repo's history.
@@ -134,10 +142,11 @@ Nothing is deprecated. Before trusting any "fix applied to the nav/shell" claim,
 
 ## Closing a session
 
-Before finishing, make all three consistent with what actually happened (`/session-close` walks this against what the session actually changed):
+Before finishing, make all four consistent with what actually happened (`/session-close` walks this against what the session actually changed):
 
 1. **`docs/session-log.md`** — append what changed and what was learned.
 2. **Memory** — add/extend a file for anything durable and non-obvious; update `MEMORY.md`'s index.
 3. **`.claude/rules/`** — if you hit a bug class that will recur, add its signature to `recurring-bugs.md`. That file is what stops the next session repeating it.
+4. **`docs/audit-findings.md`** — anything you found but didn't fix gets a row here (new `AF-YYYYMMDD-NN` ID), not a new file and not just a mention in the session log. If you closed a row, update it in place with today's date and evidence; never delete a row.
 
 Run `graphify update .` if files changed significantly. Silence in any of these means a future session rediscovers the same thing from scratch.
