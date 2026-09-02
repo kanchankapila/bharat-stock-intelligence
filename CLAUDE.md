@@ -1,6 +1,6 @@
 # Bharat Stock Intelligence — Claude Instructions
 
-Real-time Indian stock market intelligence platform (NSE/BSE). Express + tRPC backend, React 19 + Vite frontend, PostgreSQL/TimescaleDB, BullMQ jobs, ~200 Python modules in `src/server/` (79 fetchers + ML engines/jobs/helpers).
+Real-time Indian stock market intelligence platform (NSE/BSE). Express + tRPC backend, React 19 + Vite frontend, PostgreSQL/TimescaleDB, BullMQ jobs, ~210 Python modules in `src/server/` (81 fetchers + ML engines/jobs/helpers).
 
 ## Read first
 
@@ -18,7 +18,7 @@ Real-time Indian stock market intelligence platform (NSE/BSE). Express + tRPC ba
 | a model, a promotion gate, a measurement harness | `.claude/rules/ml-model-bugs.md` |
 | **anything** — skim before writing Python or SQL | `.claude/rules/recurring-bugs.md` |
 
-`docs/session-log.md` is the historical changelog (~6,100 lines — never load it whole). Not loaded automatically; grep or read a specific dated entry when you need the history behind a decision.
+`docs/session-log.md` is the historical changelog (~7,600 lines — never load it whole). Not loaded automatically; grep or read a specific dated entry when you need the history behind a decision.
 
 ## Definition of done
 
@@ -59,7 +59,7 @@ Updating is **free** (local AST extraction, 0 tokens) — run it, don't ration i
 
 ## Services
 
-Four processes run concurrently (`npm start`, or pm2 in production). A change to one is not live
+Five processes run concurrently (`npm start`, or pm2 in production). A change to one is not live
 in the others — and `.ts` is not hot-reloaded, so the Node server needs `pm2 restart bharat-server`.
 
 | pm2 name | Entry point | Port (env var) | Purpose |
@@ -68,8 +68,9 @@ in the others — and `.ts` is not hot-reloaded, so the Node server needs `pm2 r
 | `ml-api` | `src/server/python_api.py` | 8000 (`PYTHON_API_PORT`) | DL training/inference, outcome resolution |
 | `chatbot` | `src/server/chatbot/app.py` | 8001 (`CHATBOT_PORT`) | LangGraph RAG agent, ChromaDB |
 | `alphaquant-api` | `backend-python/main.py` | 8002 (`PYTHON_PORT`) | Backtesting, scoring, TV bridge, optimisation |
+| `engine-worker` | `src/server/worker_service.py` | 8005 | MCP tool dispatch (`mcp/market_intelligence_mcp.py`) + ingestion health/risk-analysis endpoints — added 2026-08-29 |
 
-`ecosystem.config.cjs` registers **18** pm2 apps, not 4: these four long-running services plus a `cron_restart` tier (`gf-*` greenfield jobs, `pg-backup-nightly`, `deploy-drift-check`, `port-drift-check`). A `cron_restart` app sitting at `stopped`/`pid 0` looks identical whether it is healthily idle or dormant after a failed first launch — see `recurring-bugs.md`.
+`ecosystem.config.cjs` registers **17** pm2 apps, not 5: these five long-running services plus a `cron_restart` tier (`gf-*` greenfield jobs, `pg-backup-nightly`). `deploy-drift-check`/`port-drift-check` were deliberately removed 2026-08-28 (`b27e588`) — don't re-add them from an old memory of this file. A `cron_restart` app sitting at `stopped`/`pid 0` looks identical whether it is healthily idle or dormant after a failed first launch — see `recurring-bugs.md`.
 
 **`greenfield/` (~105 `.ts` files) is a parallel rebuild that nothing in the live app imports.** Changing it changes nothing a user sees, and vice versa. Check which tree you are in before editing.
 
@@ -77,9 +78,10 @@ in the others — and `.ts` is not hot-reloaded, so the Node server needs `pm2 r
 
 ```
 src/
-  App.tsx            main app, layout + tab routing
-  v1/ … v6/          six dashboard experiences, all lazy-loaded, all reading the same tRPC surface
-  components/        shared React components
+  App.tsx            main app, layout + tab routing — v1 only (2026-09-01 consolidation)
+  v1/V1Routes.tsx    the only route tree; renders every page, including former v2/v4/v5/v6 ones
+  components/        shared React components, incl. components/v{2,4,5,6}/ — former shell-specific
+                     pages/widgets folded in here, rendered through v1's AppShell, not standalone
   services/          marketService (live prices), aiService (routes to gemini/bedrockService — no local LLM since 2026-08-20)
   lib/trpc.ts        tRPC client
   data/              stocklist.ts (2,000 stocks, provider mappings 89-100% populated) · nseStocks.ts (2000+ NSE master)
@@ -94,24 +96,29 @@ src/server/
   jobs/*.jobs.ts     decomposed job registrations
   cacheService.ts    Redis → in-memory fallback
   dataQualityChecks.ts   freshness/coverage checks (factory-generated + hand-rolled), daily cron + Telegram
-  *.py               79 `*_fetcher.py` + ML engines/backfills — canonical ranker is unified_ranker.py
+  *.py               81 `*_fetcher.py` + ML engines/backfills — canonical ranker is unified_ranker.py
 ```
 
 Component/procedure/table inventories are deliberately **not** listed here — they rot. Grep the source.
 
-## Frontend versions
+## Frontend versions — CONSOLIDATED 2026-09-01 (`fd0cbd4`)
 
-Six dashboards coexist in one app, no separate build. `App.tsx`'s `dashboardVersion` (localStorage) picks among **v1/v2/v3/v6 only** — fallback is `v1` (that's what a fresh visitor lands on; promoted back from v6 on 2026-08-20, `App.tsx:218`). v4 and v5 aren't `dashboardVersion` values; see their rows below for how each is actually reached.
+**v1 is now the only frontend.** The six-shell / `dashboardVersion`-switcher architecture this
+section used to describe is gone: `src/v2/`, `src/v3/`, `src/v5/`, `src/v6/` (their `V2AppShell`,
+`V6Shell`, `V5App`, `V3Dashboard` and ~7,300 more lines) were deleted outright. Every page now
+renders through `V1Routes` inside the classic `AppShell`; `App.tsx` force-migrates any stored
+`dashboardVersion` to `'v1'` on mount, so there is no shell to pick anymore.
 
-| | Shell | Notes |
-|---|---|---|
-| v1 | `AppShell` | **default** — classic tab list, now nav-linking every page the other shells had (v6 screener/portfolio + the v5 desk retrofits) |
-| v2 / v3 | `V2AppShell` | v3 = Bloomberg-terminal restyle |
-| v4 | inside `V2AppShell` | `MarketCommandCenter`, `StockIntelligencePage` |
-| v5 | own route tree at `/v5` | institutional workbench + desk pages |
-| v6 | `V6Shell` | composed home + portfolio tracker + screener browser |
+The former v2/v4/v5/v6 pages and widgets weren't deleted — they were folded in as ordinary
+components under `src/components/v{2,4,5,6}/` (e.g. `v5`'s desk pages, `v6`'s Screener Browser /
+Portfolio Tracker, `v4`'s `MarketCommandCenter`), given v1's page chrome via `V1PageFrame`, and
+routed like any other v1 page. If you're looking for a page that used to live in one of the old
+shells, it's almost certainly still there, just relocated under `components/`, not gone.
 
-Nothing is deprecated. Before trusting any "fix applied to the nav/shell" claim, check *which shell* it landed in — a comment saying it was mirrored has been wrong before.
+**If you find an old reference to "six dashboards," `dashboardVersion` branching, or a specific
+shell name (`V2AppShell`, `V6Shell`, etc.) in a skill, command, or your own memory of this repo —
+it predates this consolidation and no longer reflects the live app.** There is nothing left to
+check for shell-parity against; a fix now either lands in v1 or it doesn't ship.
 
 ## Architecture facts that constrain changes
 
