@@ -57,10 +57,9 @@ first if the symptom is a job. This command is the broader sweep.
 7. **N+1 queries** inside symbol loops across ~140 fetchers and ~30 engines. `reward_engine`'s
    regime/sector lookups were one such, since batched.
 
-8. **Frontend** — six lazy-loaded shells reading the same tRPC surface. Look for duplicate or
-   uncoordinated queries across shells, missing memoization on ~2,400-row tables, unvirtualized
-   lists. **Name which shell** (`/shell-parity-audit`): "mirrored into the other shells" has been
-   a false claim before.
+8. **Frontend** — v1 is the only frontend (2026-09-01 consolidation, `fd0cbd4`) reading the same
+   tRPC surface. Look for duplicate or uncoordinated queries, missing memoization on ~2,400-row
+   tables, unvirtualized lists.
 
 ## Method — mandatory
 

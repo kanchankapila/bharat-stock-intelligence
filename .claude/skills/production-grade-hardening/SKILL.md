@@ -1,6 +1,6 @@
 ---
 name: production-grade-hardening
-description: Work through this platform's outstanding production-readiness gaps one at a time — containerizing the 4 services, a declarative fetcher framework, knowable_at point-in-time correctness, dashboard-shell consolidation, and cost-aware validation of the two live measurement leads. Two items (backup verification, deploy-drift detection) are already done; this skill is for the rest. Use when asked to "make this production grade", "harden the platform", or to continue the production-readiness work.
+description: Work through this platform's outstanding production-readiness gaps one at a time — containerizing the 5 services, a declarative fetcher framework, knowable_at point-in-time correctness, and cost-aware validation of the two live measurement leads. Three items (backup verification, deploy-drift detection, dashboard-shell consolidation) are already done; this skill is for the rest. Use when asked to "make this production grade", "harden the platform", or to continue the production-readiness work.
 ---
 
 # Production-Grade Hardening
@@ -137,17 +137,13 @@ existing helper, don't refactor beyond what's requested):
 4. Only propose a wider rollout once the pilot has run clean in production for a real cycle —
    and even then, migrate fetchers individually, not in bulk, so a regression is attributable.
 
-## 7. Consolidate six dashboard shells to one
+## 7. Consolidate six dashboard shells to one — DONE 2026-09-01 (`fd0cbd4`)
 
-**Bucket: product decision. Do not implement without explicit sign-off.**
-
-v1/v2/v3/v4/v5/v6 coexist, all reading the same tRPC surface, with a real history of "fix applied
-to the nav" being wrong about *which* shell (`/shell-parity-audit` exists because of this). This
-is the biggest maintainability tax in the frontend — but which shell has real users, and whether
-any shell-unique feature needs to be preserved, is **not** something this skill can determine from
-the repo alone. Ask the user which shell(s) have real traffic before proposing a deletion plan.
-If given the green light, use the `LegacyScoreBanner`-style deprecation-disclosure pattern
-already established in this repo (`scoring-authority.md`) rather than an abrupt removal.
+v1/v2/v3/v4/v5/v6 used to coexist, all reading the same tRPC surface, with a real history of "fix
+applied to the nav" being wrong about *which* shell. That's resolved: `src/v2/`, `src/v3/`,
+`src/v5/`, `src/v6/` were deleted outright, and their live pages/widgets were folded into
+`src/components/v{2,4,5,6}/`, rendered through v1's `AppShell` via `V1Routes`/`V1PageFrame`. v1 is
+now the only frontend — see CLAUDE.md's "Frontend versions" section. Nothing left to do here.
 
 ## How to work through this skill across sessions
 
