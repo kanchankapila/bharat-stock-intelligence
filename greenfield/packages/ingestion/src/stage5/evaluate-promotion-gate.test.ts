@@ -116,16 +116,29 @@ async function seedShadowScores(nSessions = 5) {
   }
 }
 
+/** `queryShadowPreregistration` deliberately reads the globally EARLIEST
+ * `shadow_period_preregistration` row ever recorded (spec invariant 13: the
+ * shadow period can never be shortened after the fact). On any Postgres
+ * where the real platform has genuinely preregistered once -- this project's
+ * own local greenfield DB has, since 2026-08-24, `min_dates=30` -- a fixture
+ * row written with `insertAuditMetric`'s default `generated_at=now()` is
+ * NEVER earliest and is silently ignored by every reader, which is exactly
+ * why every "reach step 2+" test here used to fail at step 1 regardless of
+ * the min_dates this function asked for. Backdating `generated_at` to a date
+ * long before this project existed makes the fixture deterministically win
+ * that ordering no matter what real data coexists in the shared table --
+ * cleaned up by afterEach's `params_hash = 'zztestgate'` filter either way,
+ * same as every other fixture in this file. */
 async function seedPreregistration(minDates: number) {
   const client = await pool.connect();
   try {
     const preregRunId = await openRun(client, { jobId: TEST_JOB_ID, codeCommit: 'test' });
     await closeRun(client, preregRunId, { status: 'succeeded', metrics: { rowsSeen: 1, rowsAccepted: 1, rowsRejected: 0, rowsWritten: 1, symbolsCovered: 0, inputWatermark: null, outputWatermark: null } });
-    await insertAuditMetric(client, {
-      runId: preregRunId, metricName: 'shadow_period_preregistration', metricVersion: 'v1',
-      dimensions: { min_dates: minDates, min_calendar_weeks: 1 }, value: null, nObservations: null,
-      dataWatermark: SESSIONS[0]!, paramsHash: 'zztestgate', codeCommit: 'test',
-    });
+    await client.query(
+      `INSERT INTO audit_metric (run_id, metric_name, metric_version, dimensions, value, n_observations, data_watermark, params_hash, code_commit, generated_at)
+       VALUES ($1, 'shadow_period_preregistration', 'v1', $2::jsonb, NULL, NULL, $3, 'zztestgate', 'test', '2000-01-01T00:00:00Z')`,
+      [preregRunId, JSON.stringify({ min_dates: minDates, min_calendar_weeks: 1 }), SESSIONS[0]],
+    );
   } finally {
     client.release();
   }

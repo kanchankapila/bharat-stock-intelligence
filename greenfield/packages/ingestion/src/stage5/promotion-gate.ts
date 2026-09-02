@@ -15,7 +15,7 @@
 import { closeRun, createPool, openRun, promoteLatestSession } from '@greenfield/db';
 import type { JobResult } from '@greenfield/contracts';
 import { evaluatePromotionGate } from './evaluate-promotion-gate.js';
-import { buildSpecFromEvidence } from './write-recommendations.js';
+import { buildSpecFromEvidence, MODEL_NAME } from './write-recommendations.js';
 
 try {
   process.loadEnvFile();
@@ -51,8 +51,11 @@ async function main(): Promise<void> {
     if (gate.promote) {
       const writeClient = await pool.connect();
       try {
-        const written = await promoteLatestSession(writeClient, spec.version);
-        console.log(`[promotion-gate] PROMOTED ${spec.version} session=${written.asOfSession} (${written.rowsUpdated} row(s) set is_publishable=true)`);
+        const written = await promoteLatestSession(writeClient, MODEL_NAME, spec.version);
+        console.log(
+          `[promotion-gate] PROMOTED ${spec.version} session=${written.asOfSession} (${written.rowsUpdated} row(s) set is_publishable=true, ` +
+          `model_version ledger ${written.modelPromoted ? 'updated to active' : 'NOT updated -- no matching model_version row found'})`,
+        );
         promoted = true;
       } finally {
         writeClient.release();

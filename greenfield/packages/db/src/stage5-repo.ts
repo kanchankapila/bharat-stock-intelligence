@@ -499,19 +499,43 @@ export async function queryRecommendationFreshness(pool: pg.Pool, rankerVersion:
  * Stage 5 may). Sets is_publishable=true for every row of the given
  * ranker_version's LATEST scored session only -- not the ranker's entire
  * shadow history, which would retroactively "publish" months of stale shadow
- * calls nobody could have acted on. */
-export async function promoteLatestSession(client: pg.ClientBase, rankerVersion: string): Promise<{ asOfSession: string | null; rowsUpdated: number }> {
+ * calls nobody could have acted on.
+ *
+ * Also flips the `model_version` LEDGER row for this (model, version) from
+ * 'shadow' to 'active' and stamps `promoted_at` -- without this, the ledger
+ * that `model-artifact-hash` and every other `state = 'active'` reader
+ * consults never reflects a real promotion, no matter how many times a
+ * promotion actually happens. Any OTHER row of the same `model` currently
+ * 'active' is retired first (state='retired', retired_at=now()), so
+ * `model_single_active_idx`'s single-active-row invariant is never
+ * transiently violated and a promoted challenger cleanly supersedes its
+ * predecessor in the ledger, not just in `recommendation`. */
+export async function promoteLatestSession(
+  client: pg.ClientBase, model: string, rankerVersion: string,
+): Promise<{ asOfSession: string | null; rowsUpdated: number; modelPromoted: boolean }> {
   const { rows } = await client.query<{ as_of_session: string | null }>(
     `SELECT max(as_of_session)::text AS as_of_session FROM recommendation WHERE ranker_version = $1`,
     [rankerVersion],
   );
   const asOfSession = rows[0]?.as_of_session ?? null;
-  if (asOfSession === null) return { asOfSession: null, rowsUpdated: 0 };
+  if (asOfSession === null) return { asOfSession: null, rowsUpdated: 0, modelPromoted: false };
   const { rowCount } = await client.query(
     `UPDATE recommendation SET is_publishable = true
      WHERE ranker_version = $1 AND as_of_session = $2
        AND generated_at = (SELECT max(generated_at) FROM recommendation WHERE ranker_version = $1 AND as_of_session = $2)`,
     [rankerVersion, asOfSession],
   );
-  return { asOfSession, rowsUpdated: rowCount ?? 0 };
+
+  await client.query(
+    `UPDATE model_version SET state = 'retired'::model_state, retired_at = now()
+     WHERE model = $1 AND state = 'active' AND version <> $2`,
+    [model, rankerVersion],
+  );
+  const { rowCount: modelRowCount } = await client.query(
+    `UPDATE model_version SET state = 'active'::model_state, promoted_at = now()
+     WHERE model = $1 AND version = $2`,
+    [model, rankerVersion],
+  );
+
+  return { asOfSession, rowsUpdated: rowCount ?? 0, modelPromoted: (modelRowCount ?? 0) > 0 };
 }

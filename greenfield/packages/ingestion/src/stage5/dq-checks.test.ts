@@ -4,7 +4,7 @@
 // stage4/dq-checks.test.ts and stage5/run-ranker.test.ts.
 import { afterEach, beforeEach, expect, test } from 'vitest';
 import pg from 'pg';
-import { bulkInsertRecommendations, closeRun, createPool, insertAuditMetric, insertDivergenceMetrics, openRun } from '@greenfield/db';
+import { bulkInsertRecommendations, closeRun, createPool, insertDivergenceMetrics, openRun } from '@greenfield/db';
 import { checkDualRunDivergenceSane, checkPromotionNotPremature, checkShadowRankVariance, checkShadowRecommendationFreshness } from './dq-checks.js';
 
 try {
@@ -97,18 +97,42 @@ test('promotion-not-premature: FAILS when a publishable row exists with NO shado
   await insertRecRow('2021-02-01', true);
   const outcome = await checkPromotionNotPremature(pool);
   expect(outcome.status).toBe('fail');
-  expect(outcome.detail).toMatch(/NO shadow period was ever preregistered/);
+  // queryShadowPreregistration reads the globally EARLIEST shadow_period_
+  // preregistration row ever recorded, by design (spec invariant 13: the
+  // shadow period can never be shortened after the fact -- see migration
+  // 011's comment). On a machine where the real platform has already
+  // preregistered for real (this project's local greenfield Postgres has,
+  // since 2026-08-24, and that can never be undone by design), the "zero
+  // preregistration ever" branch this test originally assumed can no longer
+  // be exercised against this shared table -- check which branch actually
+  // applies rather than assuming a pristine environment (same convention
+  // this file's sibling stage4/dq-checks.test.ts already uses in
+  // feature-suspect-exclusion's test for the identical reason: real
+  // ambient state, not a fixture, decides which of two legitimate outcomes
+  // is correct here).
+  const realPrereg = await pool.query(`SELECT 1 FROM audit_metric WHERE metric_name = 'shadow_period_preregistration' LIMIT 1`);
+  if (realPrereg.rows.length === 0) {
+    expect(outcome.detail).toMatch(/NO shadow period was ever preregistered/);
+  } else {
+    expect(outcome.detail).toMatch(/fewer than the preregistered min_dates=\d+ shadow sessions/);
+  }
 });
 
 test('promotion-not-premature: FAILS when publishable exists but fewer than min_dates sessions have accumulated, PASSES once enough have', async () => {
   const client = await pool.connect();
   const preregRunId = await openRun(client, { jobId: TEST_JOB_ID, codeCommit: 'test' });
   await closeRun(client, preregRunId, { status: 'succeeded', metrics: { rowsSeen: 1, rowsAccepted: 1, rowsRejected: 0, rowsWritten: 1, symbolsCovered: 0, inputWatermark: null, outputWatermark: null } });
-  await insertAuditMetric(client, {
-    runId: preregRunId, metricName: 'shadow_period_preregistration', metricVersion: 'v1',
-    dimensions: { min_dates: 3, min_calendar_weeks: 1 }, value: null, nObservations: null,
-    dataWatermark: '2021-02-01', paramsHash: 'zztestdq5', codeCommit: 'test',
-  });
+  // Backdated to always win queryShadowPreregistration's "earliest row"
+  // ordering against this DB's real 2026-08-24 preregistration -- see
+  // evaluate-promotion-gate.test.ts's seedPreregistration for the full
+  // explanation of why `insertAuditMetric`'s default `generated_at=now()`
+  // cannot do this. Cleaned up by afterEach's `params_hash = 'zztestdq5'`
+  // filter either way.
+  await client.query(
+    `INSERT INTO audit_metric (run_id, metric_name, metric_version, dimensions, value, n_observations, data_watermark, params_hash, code_commit, generated_at)
+     VALUES ($1, 'shadow_period_preregistration', 'v1', $2::jsonb, NULL, NULL, '2021-02-01', 'zztestdq5', 'test', '2000-01-01T00:00:00Z')`,
+    [preregRunId, JSON.stringify({ min_dates: 3, min_calendar_weeks: 1 })],
+  );
   client.release();
 
   // Session 1: publishable (simulates a bug bypassing the promotion gate --

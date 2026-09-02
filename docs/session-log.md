@@ -7634,3 +7634,126 @@ wide feature table (`full_feature_train_sql()` anchored on `stock_ohlcv` hit bot
 TEXT-vs-DATE type mismatch and a 160+ second-per-day performance wall — needs index work first);
 a full `factor_edge.py` grading pass of all 421 features (the other 21 mechanically-constant
 ones are the real prune candidates, not chased down individually here).
+
+## 2026-09-02 (cont.) — greenfield Stage 4/5: closed the two remaining `model_version` (artifacts data model & ledger) gaps
+
+Task: "fix the remaining items from artifacts data model and ledger." No open row in
+`docs/audit-findings.md`, `docs/session-log.md`, or claude-mem session history named this
+literally — traced it by reading `greenfield/`'s `model_version` table (Stage 4/5's model-artifact
+schema: `artifact_uri`/`artifact_hash`/a `candidate→shadow→active→retired` state machine) against
+its own consuming code, since that table + its DQ check IS this platform's artifacts data model
+and ledger. Two real, verifiable gaps found by reading, not guessed:
+
+1. **Task 4.5's `model-artifact-hash` `dq_check` never verified anything.** Its own spec table
+   entry (`BUILD_STAGE_3_4_SPEC.md`) says "active model artifact's stored hash matches [its
+   source]"; the implementation only ever returned `info` reporting presence, and its own
+   docstring admitted the negative control it promised didn't exist yet.
+2. **`promotion-gate.ts`'s `promoteLatestSession` never touched the ledger.** It flips
+   `recommendation.is_publishable=true` on a real promotion but never updated `model_version.state`
+   or stamped `promoted_at` — so the ledger permanently reads `'shadow'` even after a genuine
+   promotion, and `queryActiveModelArtifact` (`WHERE state='active'`, what the hash check reads)
+   could never find a row. Confirmed via grep: `promoted_at` had zero writers anywhere in the tree.
+
+**Fixes:**
+- `stage4/artifact-hash.ts` (new): `computeRankerArtifactHash`/`canonicalStringify` — sorts object
+  keys recursively before hashing, because Postgres `jsonb` does **not** preserve key order, so a
+  hash computed once at write time and later recomputed from a `metrics` column read back out of
+  the DB would silently disagree without this.
+- `write-recommendations.ts`: uses the shared hash function; `metrics` now also carries `variant`
+  explicitly (was previously only inferable from the version string prefix) so the DQ check can
+  reconstruct the exact hashed payload from the row alone.
+- `stage4/dq-checks.ts`'s `checkModelArtifactHash`: recomputes the hash from the active row's own
+  `metrics.variant`/`metrics.factors` + `version`, fails on a mismatch or a row with no
+  reconstructable spec, `info` only when it genuinely matches.
+- Migration 014: bumps `model-artifact-hash`'s registered `dq_check.severity` `info`→`fail`,
+  matching every other Stage 4/5 check's convention that registered severity is the ceiling the
+  check function may emit (shadow-rank-variance/dual-run-divergence-sane, migration 012).
+- `stage5-repo.ts`'s `promoteLatestSession`: now also retires any other `state='active'` row of the
+  same `model` (`retired_at=now()`) and flips the newly-promoted version to `'active'`
+  (`promoted_at=now()`) in the same client/transaction as the `recommendation` write — never
+  transiently violating `model_single_active_idx`. Signature gained a `model` parameter;
+  `promotion-gate.ts` passes `MODEL_NAME` and logs whether the ledger write actually matched a row.
+
+**Verification, against real local Postgres (`greenfield_postgres`, :5434, healthy container
+already running — no mocks):** `greenfield/` had never had `pnpm install` run in this worktree;
+installed it first. `packages/db` had no `vitest.config.ts` of its own, so `vitest run` from that
+directory silently picked up the LEGACY repo's root `vite.config.ts` (found by walking up past
+`greenfield/` entirely) and crashed on a `globalSetup` path resolved against the wrong root — added
+`packages/db/vitest.config.ts` (same fix `packages/ingestion` already has, for the same reason) to
+unblock running this session's own new tests; this is a genuine pre-existing infra gap, not
+something my diff caused. `npx tsc --noEmit` clean in both `packages/db` and `packages/ingestion`.
+Migration 014 round-tripped for real (`up` → confirmed severity/label → `down` → confirmed reverted
+→ `up` again). 7 new/rewritten tests, all against real Postgres: 2 in `stage4/dq-checks.test.ts`
+(hash match then a negative-controlled tamper → `fail`; a row with no reconstructable spec →
+`fail`, never a silent pass) and 3 new in `stage5-repo.test.ts` (ledger flips to `active` +
+`promoted_at`; a prior `active` row of the same model is retired and at most one stays `active` at
+once; `modelPromoted=false` — never throws — when no matching ledger row exists). Live-ran
+`stage4/run-dq-checks.ts` for real: `model-artifact-hash: info -- no active model_version yet`,
+correct and unchanged, since nothing has actually been promoted in this environment yet.
+
+**Real, pre-existing bug found while verifying, NOT caused by this session and NOT fixed
+(`AF-20260902-16`):** `stage5/evaluate-promotion-gate.test.ts` (6 cases) and
+`stage5/dq-checks.test.ts`'s `promotion-not-premature` case fail on this machine against this same
+real local Postgres — reproduced bit-identical against a `git stash` of this session's whole diff,
+so it predates today's work. Shape matches this repo's own "developer's Postgres IS production"
+class: `queryShadowPreregistration()`/`queryAnyPublishableRecommendationExists()` are deliberately
+GLOBAL by spec, and this DB has real `shadow_period_preregistration`/`recommendation` rows from the
+actual scheduled `gf-ranker-daily`/`gf-divergence-daily` pm2 jobs that these tests' synthetic
+per-test fixtures were never built to coexist with. Filed as `AF-20260902-16`, not chased down
+further — out of scope for the ledger fix this session was asked for.
+
+Not deployed/restarted: greenfield's pm2 jobs (`gf-stage4-dq-daily`, etc.) run `tsx` directly
+against source, same as the legacy Python fetchers — no build/restart step needed for these changes
+to take effect on their next scheduled run. Migration 014 is applied to this machine's local
+greenfield Postgres only; whoever owns the real greenfield deployment's `DATABASE_URL` needs to run
+`pnpm --filter @greenfield/db run migrate:up` there too.
+
+## 2026-09-02 (cont. 2) — closed AF-20260902-16: the "min-dates-accumulated" pre-existing test failures were a fixture backdating problem, not a real defect
+
+User asked to fix the 7 pre-existing failures flagged (not fixed) in the previous entry. Root-caused
+by reading `evaluate-promotion-gate.test.ts`'s `seedPreregistration` helper against
+`queryShadowPreregistration`'s actual SQL: that query deliberately takes the globally EARLIEST
+`shadow_period_preregistration` row ever recorded (`ORDER BY generated_at ASC LIMIT 1` — spec
+invariant 13, the shadow period can never be shortened after the fact once real preregistration has
+happened). This machine's local greenfield Postgres has a REAL such row from 2026-08-24
+(`min_dates=30`, written by `record-shadow-preregistration.ts` per the 2026-08-22 P0 entries above).
+Every failing test's fixture inserted its own preregistration via `insertAuditMetric`, whose
+`generated_at` column has no override and defaults to `now()` — always later than 2026-08-24, so
+every fixture's `min_dates` (typically `3`, chosen to make the test fast) was silently never the one
+read; `evaluatePromotionGate`/`checkPromotionNotPremature` always evaluated against the REAL
+`min_dates=30` instead, which none of these tests' small synthetic session counts (5, or fewer)
+could ever clear — hence every failure reading `firstFailure='min-dates-accumulated'` regardless of
+what the test was actually trying to exercise past that point.
+
+One test (`dq-checks.test.ts`'s "FAILS ... with NO shadow period ever preregistered") had a
+stronger version of the same problem: its premise — zero preregistration exists anywhere — is now
+permanently false on any DB where the real platform has genuinely preregistered once, by the exact
+same "can never be undone" invariant. No fixture can restore that state; the test's assumption was
+simply stale.
+
+**Fix, confined entirely to test fixtures — no production code touched, because
+`queryShadowPreregistration`'s behavior is correct as designed:**
+- `evaluate-promotion-gate.test.ts`'s `seedPreregistration` and `dq-checks.test.ts`'s one inline
+  preregistration insert now write the `shadow_period_preregistration` row directly (bypassing
+  `insertAuditMetric`) with an explicit `generated_at='2000-01-01T00:00:00Z'` — long before this
+  project existed, so it deterministically wins the "earliest" ordering against any real data that
+  might coexist in the shared table, on any machine. Still cleaned up by each file's existing
+  `afterEach` (`params_hash` filter), same as before.
+- The "zero preregistration ever" test now queries real ambient state first (`SELECT 1 FROM
+  audit_metric WHERE metric_name = 'shadow_period_preregistration' LIMIT 1`) and asserts whichever
+  of the two legitimate `checkPromotionNotPremature` outcomes actually applies — the same
+  "check reality, then branch the assertion" convention `stage4/dq-checks.test.ts`'s
+  `feature-suspect-exclusion` test already uses for an analogous situation (real quarantined
+  `market_bar` rows may or may not exist in a given environment).
+
+**Verification:** `npx tsc --noEmit` clean; `eslint --max-warnings=0` clean on both touched test
+files (also dropped `dq-checks.test.ts`'s now-unused `insertAuditMetric` import). Both files run
+clean against the real local Postgres: `evaluate-promotion-gate.test.ts` 7/7, `dq-checks.test.ts`
+13/13 (including the previously-failing 2). Full `packages/ingestion` suite: **179 passed, 1
+skipped, 0 failed** (up from 172 passed / 7 failed before this fix). Confirmed the adaptive branch
+in the "zero preregistration" test isn't vacuously always taking one side: queried this DB directly,
+confirmed exactly 1 real `shadow_period_preregistration` row exists, meaning the test is genuinely
+exercising its `else` branch (`fewer than the preregistered min_dates=...`) on this run, not a
+tautology that would pass either way. `AF-20260902-16` updated in place from `INVESTIGATE` (open) to
+`FIX` (closed) with the fix description and today's date, per this repo's "never delete a row, close
+it in place" ledger convention.
