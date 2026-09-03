@@ -1,3 +1,9 @@
+# Early torch initialization to avoid Windows C10/CUDA DLL collision (WinError 1114)
+try:
+    import torch
+except Exception:
+    pass
+
 import polars as pl
 import os
 import sys

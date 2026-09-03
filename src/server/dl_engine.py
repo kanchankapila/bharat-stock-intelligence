@@ -3,29 +3,12 @@
 BiLSTM + TFT deep learning models for multi-horizon stock prediction.
 Reads from feature_store, writes to deep_learning_predictions.
 """
-import polars as pl
-from workflow_orchestrator import WorkflowDAG, TaskNode
-
 import os
 import sys
-import json
-import math
-import pickle
-import argparse
-from datetime import datetime, timedelta
-from pathlib import Path
-from typing import Dict, List, Tuple
-
-from db_compat import connect, read_df
-from model_promotion import clears_promotion_bar, file_staleness_override_applies
-from as_of import logical_trading_date
 
 # Must be set before torch/cuBLAS initialises
 os.environ.setdefault("CUBLAS_WORKSPACE_CONFIG", ":4096:8")
 os.environ.setdefault("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True")
-
-import numpy as np
-import pandas as pd
 
 try:
     import torch
@@ -44,6 +27,46 @@ except (ImportError, OSError) as _torch_err:
         # If imported (e.g. by pytest or other services), don't kill the process.
         # But we must ensure downstream code doesn't crash on missing torch.
         torch = None
+
+        # `torch = None` alone was NOT enough: every `class X(nn.Module)` below is evaluated at
+        # import time, so a missing torch turned this "graceful" path into
+        # `NameError: name 'nn' is not defined` at dl_engine.py:181 -- a confusing crash that
+        # looks nothing like the real cause (observed 2026-09-03 while pyarrow was breaking
+        # torch's DLL load, AF-20260829-21). Bind a minimal stand-in so the module still
+        # imports; anything that actually tries to BUILD or RUN a model fails loudly and
+        # specifically instead, rather than pretending it degraded cleanly.
+        class _TorchUnavailable:
+            """Stand-in for torch.nn when torch could not be imported."""
+            class Module:  # noqa: D106 - just enough for class definitions to evaluate
+                def __init__(self, *_a, **_kw):
+                    raise RuntimeError(
+                        "PyTorch is unavailable in this process, so DL models cannot be "
+                        f"instantiated. Original import error: {_torch_err}"
+                    )
+
+            def __getattr__(self, name):  # any other nn.* attribute touched at import time
+                return type(name, (), {})
+
+        nn = _TorchUnavailable()
+        autocast = GradScaler = None
+
+import polars as pl
+from workflow_orchestrator import WorkflowDAG, TaskNode
+
+import json
+import math
+import pickle
+import argparse
+from datetime import datetime, timedelta
+from pathlib import Path
+from typing import Dict, List, Tuple
+
+from db_compat import connect, read_df
+from model_promotion import clears_promotion_bar, file_staleness_override_applies
+from as_of import logical_trading_date
+
+import numpy as np
+import pandas as pd
 
 from sklearn.metrics import roc_auc_score, accuracy_score
 
@@ -121,14 +144,18 @@ FEATURE_COLS = [
     "near_expiry_gamma",
 ]
 
-DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-if DEVICE.type == "cuda":
-    torch.backends.cudnn.enabled = False   # cuDNN LSTM backward broken on Windows/cu124; use PyTorch-native path
-    torch.backends.cudnn.benchmark = False
-    print(f"[DL] Device: cuda ({torch.cuda.get_device_name(0)}) "
-          f"{torch.cuda.get_device_properties(0).total_memory // 1024**2} MB VRAM (cudnn disabled)")
+if torch is not None:
+    DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    if DEVICE.type == "cuda":
+        torch.backends.cudnn.enabled = False   # cuDNN LSTM backward broken on Windows/cu124; use PyTorch-native path
+        torch.backends.cudnn.benchmark = False
+        print(f"[DL] Device: cuda ({torch.cuda.get_device_name(0)}) "
+              f"{torch.cuda.get_device_properties(0).total_memory // 1024**2} MB VRAM (cudnn disabled)")
+    else:
+        print("[DL] Device: cpu")
 else:
-    print("[DL] Device: cpu")
+    DEVICE = None
+    print("[DL] PyTorch not loaded; DEVICE is None")
 
 
 # ── Checkpoint width handling ────────────────────────────────────────────────

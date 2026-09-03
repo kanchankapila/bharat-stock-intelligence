@@ -52,6 +52,7 @@ const SignalTracking     = React.lazy(() => import('../components/SignalTracking
 const StockChatbot       = React.lazy(() => import('../components/StockChatbot'));
 const JobsDashboardPage   = React.lazy(() => import('../components/JobsDashboardPage'));
 const EarlyHoursSpotter   = React.lazy(() => import('../components/EarlyHoursSpotter'));
+const ChartPatternsPage   = React.lazy(() => import('../components/ChartPatternsPage'));
 const IntradayPage       = React.lazy(() => import('../components/IntradayPage'));
 const MoneyFlowPage      = React.lazy(() => import('../components/MoneyFlowPage').then(m => ({ default: m.MoneyFlowPage })));
 const V1Backtest            = React.lazy(() => import('../components/V1Backtest').then(m => ({ default: m.V1Backtest })));
@@ -217,6 +218,11 @@ const V1Routes = ({
                             } />
                             <Route path="/todays-picks" element={<TodaysPicks onSelectStock={onSelectStock} />} />
                             <Route path="/et-calls" element={<EtCallsPage onSelectStock={onSelectStock} />} />
+                            <Route path="/chart-patterns" element={
+                                <V1PageFrame title="Chart Patterns" kicker="MC PRO · TECHNICAL PICKS">
+                                    <ChartPatternsPage onSelectStock={onSelectStock} />
+                                </V1PageFrame>
+                            } />
                             <Route path="/early-spotter" element={<EarlyHoursSpotter onSelectStock={onSelectStock} />} />
                             <Route path="/screener-intelligence" element={<ScreenerIntelligencePage />} />
                             <Route path="/agent-data-scientist" element={<AgentDataScientistPage />} />

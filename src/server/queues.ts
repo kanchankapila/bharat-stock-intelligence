@@ -572,8 +572,15 @@ async function processMlDailyOps(job: Job): Promise<{ success: boolean; failedSt
     return { success: true };
   }
   // Dashboard-visible sub-tasks are wrapped in T.run(...) so their monitor state reflects the
-  // ACTUAL step outcome (T.finish() at the end). Steps not tracked here stay best-effort with a
-  // console.warn — they aren't individually dashboarded, so they can't create a false-healthy signal.
+  // ACTUAL step outcome (T.finish() at the end).
+  //
+  // 2026-09-03: every other sub-step now ends in `.catch(e => T.fail('name', e))` instead of a
+  // bare `console.warn`. The old comment here claimed an untracked console.warn step "can't
+  // create a false-healthy signal" — that was wrong, and it is exactly how mc_index_oi_fetcher
+  // sat 3 days stale while this job reported success. T.fail() records the failure into
+  // finish()'s verdict (so the job goes 'failed' and the failed-step alert names it) WITHOUT
+  // minting a per-step job_heartbeat row, which getStaleJobs() would otherwise flag stale
+  // forever. Nothing in this chain swallows a failure any more.
   const T = new StepTracker('ml-daily-ops');
   // FULL-UNIVERSE feature grid FIRST: the signal scan only writes technical_signals rows
   // for stocks that produced a tradable pattern (14-800/day), so most of the universe had
@@ -581,13 +588,13 @@ async function processMlDailyOps(job: Job): Promise<{ success: boolean; failedSt
   // This guarantees a row for every liquid stock on the latest session BEFORE the enrichment
   // engines below run, so RS/HV/aVWAP/etc. fill the whole grid, not just the signal subset.
   await runPython('backfill_technical_features.py', ['--full-today'], 10 * 60_000)
-    .catch(e => console.warn('[QUEUE] technical grid-ensurer failed:', (e as Error).message));
+    .catch(e => T.fail('technical grid-ensurer', e));
 
   // Forward-capture alt-data: MoneyControl breakout-pattern flags + technical rating onto
   // today's full grid (can't be backfilled — captured daily to accumulate for a future
   // richer breakout model). Runs after the grid-ensurer so it writes onto full-universe rows.
   await runPython('mc_techscanner_fetcher.py', [], 5 * 60_000)
-    .catch(e => console.warn('[QUEUE] mc_techscanner failed:', (e as Error).message));
+    .catch(e => T.fail('mc_techscanner', e));
 
   // Fetch extra alt-data from Indiatimes, MarketsMojo, and Trading80.
   // --scope daily: only the 5 endpoints extra_features_parser.py actually reads. It used to
@@ -596,40 +603,40 @@ async function processMlDailyOps(job: Job): Promise<{ success: boolean; failedSt
   // consumer, read 5 of them. The other 15 now run weekly (processMlWeeklyRetrain) so the raw
   // corpus stays warm without costing the nightly window. ~10,000 requests, comfortably inside.
   await runPython('extra_endpoints_fetcher.py', ['--scope', 'daily'], 30 * 60_000)
-    .catch(e => console.warn('[QUEUE] extra_endpoints_fetcher failed:', (e as Error).message));
+    .catch(e => T.fail('extra_endpoints_fetcher', e));
   // Separate step ON PURPOSE — do not fold this back into the fetcher. It used to be that
   // script's last statement, so the 30-min timeout kill (which happened every night, see the
   // fetcher's own comment) meant the parse never ran and all 14 ext_* feature columns stayed
   // at ~0%. Run as its own step, the parse still lands whatever the fetch managed to store.
   await runPython('extra_features_parser.py', [], 5 * 60_000)
-    .catch(e => console.warn('[QUEUE] extra_features_parser failed:', (e as Error).message));
+    .catch(e => T.fail('extra_features_parser', e));
 
   // Superstar-investor conviction tracking (InvestSights) — per-stock entry/exit/increase/
   // decrease by named investors, closing the gap the 2026-08-03 urls.txt field analysis
   // flagged as this platform's top new-data opportunity. ~60 sequential per-investor requests;
   // 5 min budget is generous headroom over the measured sub-minute runtime.
   await runPython('investsights_investor_activity_fetcher.py', [], 5 * 60_000)
-    .catch(e => console.warn('[QUEUE] investsights_investor_activity_fetcher failed:', (e as Error).message));
+    .catch(e => T.fail('investsights_investor_activity_fetcher', e));
 
   // InvestSights per-stock TTM/FMP-ratios/growth-metrics/DCF fair-value snapshot (onboard-
   // data-source batch, 2026-08-13) → investsights_fundamentals_history. --limit 300 (liquid-
   // by-market-cap): 4 sequential requests/symbol, measured ~2.3s/symbol incl. rate limit —
   // 20 min budget is generous headroom over the ~12 min measured full-limit runtime.
   await runPython('investsights_fundamentals_fetcher.py', ['--limit', '300'], 20 * 60_000)
-    .catch(e => console.warn('[QUEUE] investsights_fundamentals_fetcher failed:', (e as Error).message));
+    .catch(e => T.fail('investsights_fundamentals_fetcher', e));
 
   // InvestSights per-stock filings/announcements/concall/rating documents (same batch) →
   // investsights_announcement_intel. --limit 200 (heavier payload per symbol than the
   // fundamentals fetcher above, up to ~44 nested filing items/symbol).
   await runPython('investsights_announcement_intel_fetcher.py', ['--limit', '200'], 15 * 60_000)
-    .catch(e => console.warn('[QUEUE] investsights_announcement_intel_fetcher failed:', (e as Error).message));
+    .catch(e => T.fail('investsights_announcement_intel_fetcher', e));
 
   // InvestSights rolling PE-band chart (same batch) → investsights_pe_band_history. Corrected
   // 2026-08-14 to the real /market/pe-band/{symbol} path (the initial /fundamentals/{symbol}/
   // pe-band guess 404s -- see the fetcher's own docstring). 20 min budget: ~500 rows/symbol,
   // full re-upsert every run (no since-param on this endpoint).
   await runPython('investsights_pe_band_fetcher.py', ['--limit', '300'], 20 * 60_000)
-    .catch(e => console.warn('[QUEUE] investsights_pe_band_fetcher failed:', (e as Error).message));
+    .catch(e => T.fail('investsights_pe_band_fetcher', e));
 
   // MarketsMojo daily-cadence series (onboarded 2026-08-11, backfilled once, never scheduled
   // until now — their dataQualityChecks entries were set at warnDays 3/failDays 5 with no job
@@ -644,10 +651,10 @@ async function processMlDailyOps(job: Job): Promise<{ success: boolean; failedSt
   // serial = 61.7 min, which no budget could have absorbed). Now ~9 min; 20 gives real headroom.
   // --full forces a complete re-upsert if the vendor ever restates history.
   await runPython('marketsmojo_technical_fetcher.py', [], 20 * 60_000)
-    .catch(e => console.warn('[QUEUE] marketsmojo_technical_fetcher failed:', (e as Error).message));
+    .catch(e => T.fail('marketsmojo_technical_fetcher', e));
   // 81 indices, one call each — the BSE-family/sectoral coverage macro_asset_prices lacks.
   await runPython('marketsmojo_index_fetcher.py', [], 10 * 60_000)
-    .catch(e => console.warn('[QUEUE] marketsmojo_index_fetcher failed:', (e as Error).message));
+    .catch(e => T.fail('marketsmojo_index_fetcher', e));
 
   // Point-in-time fundamentals snapshot — builds the as-of trail load_training_data joins.
   // Runs in ~2s solo but its DELETE+INSERT…SELECT on fundamentals_history can block far longer on
@@ -656,13 +663,13 @@ async function processMlDailyOps(job: Job): Promise<{ success: boolean; failedSt
   // 6 min: DELETE+INSERT on fundamentals_history can block under Postgres lock/CPU contention;
   // 3 min was clipping on the 2nd daily-ops run (observed 2026-07-14 07:54 under load).
   await runPython('fundamentals_snapshot.py', [], 360_000)
-    .catch(e => console.warn('[QUEUE] fundamentals_snapshot failed:', (e as Error).message));
+    .catch(e => T.fail('fundamentals_snapshot', e));
 
   // Same rationale as fundamentals_snapshot above: stock_factor_breakdown is current-state-only
   // (overwritten in place), so this is the only way a future regime-conditional backtest of
   // unified_ranker's REGIME_CAT_TILT will ever have history to fit against.
   await runPython('factor_breakdown_snapshot.py', [], 120_000)
-    .catch(e => console.warn('[QUEUE] factor_breakdown_snapshot failed:', (e as Error).message));
+    .catch(e => T.fail('factor_breakdown_snapshot', e));
 
   // analyst_estimates_snapshot: now a dedicated daily job (analyst-estimates-sync-daily,
   // sync.jobs.ts, Mon–Fri 14:15 UTC) since the hybrid direct-engine rewrite took the full
@@ -670,14 +677,14 @@ async function processMlDailyOps(job: Job): Promise<{ success: boolean; failedSt
 
   // Surveillance gate: ASM/GSM flags → nse_stocks and technical_signals.asm_flag/gsm_stage.
   await runPython('asm_gsm_fetcher.py', [], 2 * 60_000)
-    .catch(e => console.warn('[QUEUE] asm_gsm_fetcher failed:', (e as Error).message));
+    .catch(e => T.fail('asm_gsm_fetcher', e));
 
   // Trailing chandelier stop ratchet for live ACTIVE positions (Finding #29, 2026-07-28
   // full-stack audit) -- the correct trailing-stop formula already proven in
   // exit_labeler.py/outcome_resolver.py for offline backtest grading had never been applied
   // to actual open positions before this. TS function, runs in-process (no runPython needed).
   await updateTrailingStops()
-    .catch(e => console.warn('[QUEUE] trailing stop updater failed:', (e as Error).message));
+    .catch(e => T.fail('trailing stop updater', e));
   await T.run('fii-dii-fetcher', () => runPython('fii_dii_fetcher.py', [], 90_000));
   // Deep-history top-up (endpoint-corpus audit §5-1). One call returns all 2,584 daily rows
   // back to 2016 in ~3s, so backfill and daily top-up are the same operation -- there is no
@@ -686,7 +693,7 @@ async function processMlDailyOps(job: Job): Promise<{ success: boolean; failedSt
   // (.catch) rather than fatal -- this is a supplementary third-party source, and an outage
   // must not fail the whole daily ML chain the way the drift-detector timeout did.
   await T.run('fii-dii-history', () => runPython('fii_dii_history_fetcher.py', [], 120_000))
-    .catch(e => console.warn('[QUEUE] fii_dii_history_fetcher failed (daily ops continues):', (e as Error).message));
+    .catch(e => T.fail('fii_dii_history_fetcher', e));
   // Bulk/block deals carrying pctTransacted (% of float) -- the cross-sectionally comparable
   // deal-size field NSE's own feed does not provide (endpoint-corpus audit §5-2). 5 pages of
   // 200 covers several days of deals, so a missed run self-heals on the next one.
@@ -694,9 +701,9 @@ async function processMlDailyOps(job: Job): Promise<{ success: boolean; failedSt
   // which NSE's PIT feed does not carry -- insider_features.py's ratio is near-binary, so
   // materiality (a 70%-of-float promoter exit vs a 0.01% one) is the missing dimension.
   await T.run('tickertape-deals', () => runPython('tickertape_deals_fetcher.py', ['--pages', '5', '--insider'], 180_000))
-    .catch(e => console.warn('[QUEUE] tickertape_deals_fetcher failed (daily ops continues):', (e as Error).message));
+    .catch(e => T.fail('tickertape_deals_fetcher', e));
   await runPython('pcr_fetcher.py', ['--gex'], 90_000)
-    .catch(e => console.warn('[QUEUE] pcr_fetcher failed:', (e as Error).message));
+    .catch(e => T.fail('pcr_fetcher', e));
   // Per-symbol PCR/max-pain/ATM-IV for the DEFAULT_SYMBOLS large-cap set -> stock_options_oi +
   // historical_fno_sentiment. Every OTHER pcr_fetcher.py call site in this file passes --gex
   // (index-level dealer GEX only, writes macro_asset_prices) -- this was the only call that
@@ -706,7 +713,7 @@ async function processMlDailyOps(job: Job): Promise<{ success: boolean; failedSt
   // fetcher.py/stock_option_chain_fetcher.py independently keep IT fresh). 20 symbols at NiftyTrader's
   // own 1.5s delay is ~30s, cheap enough for the daily chain.
   await runPython('pcr_fetcher.py', [], 90_000)
-    .catch(e => console.warn('[QUEUE] pcr_fetcher (per-symbol) failed:', (e as Error).message));
+    .catch(e => T.fail('pcr_fetcher (per-symbol)', e));
   // Parallel batch — safe to overlap: disjoint target tables (mc_* vs unified_signals vs
   // news_sentiment_items), no shared rows, no advisory locks, and distinct resources
   // (MoneyControl network vs DB-compute vs GPU/FinBERT). The 5-min MC scrape now runs
@@ -727,19 +734,19 @@ async function processMlDailyOps(job: Job): Promise<{ success: boolean; failedSt
   // stale indefinitely between manual triggers.
   await Promise.allSettled([
     runPython('moneycontrol_fetcher.py', [], 900_000)
-      .catch(e => console.warn('[QUEUE] moneycontrol_fetcher failed:', (e as Error).message)),
+      .catch(e => T.fail('moneycontrol_fetcher', e)),
     // technical_analysis_engine sweeps the full universe (trend/RSI/MACD/Bollinger/pattern
     // detection → unified_signals) and can exceed 120 s on a RAM-pressured box (measured
     // timeout 2026-08-26 00:07). 300 s matches the default pythonRunner limit and the
     // overhead of the 5-slot concurrency pool.
     runPython('technical_analysis_engine.py', [], 300_000)
-      .catch(e => console.warn('[QUEUE] technical_analysis_engine failed:', (e as Error).message)),
+      .catch(e => T.fail('technical_analysis_engine', e)),
     T.run('finbert-scorer', () => runPython('finbert_scorer.py', ['--days', '1'], 180_000)),
   ]);
   // iv_features reads the ATM IV that pcr_fetcher just wrote to stock_options_oi → technical_signals.iv_rank.
   // Kept serial: it writes technical_signals, which several later steps also update — avoids row-lock churn.
   await runPython('iv_features.py', ['--date', 'today'], 300_000)
-    .catch(e => console.warn('[QUEUE] iv_features failed:', (e as Error).message));
+    .catch(e => T.fail('iv_features', e));
 
   // NSE full bhavcopy -> nse_universe_history: the exchange's own record of what actually
   // traded each day, i.e. the POINT-IN-TIME universe. Every other price path here iterates
@@ -750,20 +757,34 @@ async function processMlDailyOps(job: Job): Promise<{ success: boolean; failedSt
   // the ones that died. Runs before the quality/feature steps so today's row is available.
   await T.run('nse-bhavcopy-fetcher', () => runPython('nse_bhavcopy_fetcher.py', [], 10 * 60_000));
 
+  // Reconcile today's stock_ohlcv (written earlier this evening by the stock-refresh queue's
+  // own repeatable job, sourced from Yahoo's batch quote endpoint at market close) against the
+  // bhavcopy row nse-bhavcopy-fetcher just wrote above.
+  // AF-20260903-01: live-verified 2026-09-03 that Yahoo's batch fetch can silently drop a
+  // symbol entirely — RELIANCE (NSE's most liquid stock) and, independently, PAYTM both had
+  // this happen on real recent sessions — when the miss-count exceeds MAX_INDIVIDUAL_FALLBACKS,
+  // the per-symbol retry is skipped for ALL of them, with no error. Dual-write validation
+  // phase: runs ALONGSIDE the existing Yahoo write (does not replace it yet) — see
+  // reconcile_stock_ohlcv_from_bhavcopy.py's own docstring for the cutover plan once this is
+  // proven clean over several sessions. T.run() records a reconciliation failure into the job
+  // verdict without aborting the chain, so it cannot silently no-op.
+  await T.run('reconcile-stock-ohlcv',
+    () => runPython('reconcile_stock_ohlcv_from_bhavcopy.py', [], 5 * 60_000));
+
   // Flag bad-print OHLCV bars first so outcome labels skip them (ohlcv_quality.is_suspect).
   await runPython('ohlcv_quality.py', ['--no-ingest'], 600_000)
-    .catch(e => console.warn('[QUEUE] ohlcv_quality flag failed:', (e as Error).message));
+    .catch(e => T.fail('ohlcv_quality flag', e));
 
   // Cross-sectional relative strength from (cleaned) OHLCV → technical_signals.rs_rank_21d/63d.
   // 180 s is tight on this RAM-pressured box (measured timeout 2026-08-26 00:20); 300 s
   // matches the pythonRunner default and the slot-pool overhead.
   await runPython('relative_strength.py', [], 300_000)
-    .catch(e => console.warn('[QUEUE] relative_strength failed:', (e as Error).message));
+    .catch(e => T.fail('relative_strength', e));
 
   // Cross-sectional ownership flow: sector-relative + universe-rank of MF net flow already
   // stamped on technical_signals → mf_flow_vs_sector / mf_flow_rank. Same-day, no look-ahead.
   await runPython('ownership_relative.py', [], 120_000)
-    .catch(e => console.warn('[QUEUE] ownership_relative failed:', (e as Error).message));
+    .catch(e => T.fail('ownership_relative', e));
 
   // multi_factor_scorer.py (quant_scores.mf_*) used to run here — but this step (ml-daily-ops,
   // 7:30 PM IST) runs 3.5h BEFORE quantScoringService.ts's own quant_scores upsert (11 PM IST,
@@ -773,48 +794,48 @@ async function processMlDailyOps(job: Job): Promise<{ success: boolean; failedSt
 
   // Market breadth internals (% above 200DMA, A/D ratio, 20d highs, 52w net highs/lows) from stock_ohlcv.
   await runPython('market_breadth.py', ['--days', '420'], 120_000)
-    .catch(e => console.warn('[QUEUE] market_breadth failed:', (e as Error).message));
+    .catch(e => T.fail('market_breadth', e));
 
   // Rolling 90d insider buy/sell ratio from insider_trades → technical_signals.insider_buy_pct_90d.
   await runPython('insider_features.py', [], 60_000)
-    .catch(e => console.warn('[QUEUE] insider_features failed:', (e as Error).message));
+    .catch(e => T.fail('insider_features', e));
 
   // Intraday microstructure: opening-range break, VWAP deviation, first-hour vol share.
   // Runs post-close so the full session (9:15–15:30 IST) is in intraday_ohlcv.
   await runPython('intraday_features.py', [], 60_000)
-    .catch(e => console.warn('[QUEUE] intraday_features failed:', (e as Error).message));
+    .catch(e => T.fail('intraday_features', e));
 
   // Anchored VWAP deviation (20-day rolling anchor from stock_ohlcv) → technical_signals.avwap_deviation_pct.
   await runPython('avwap_features.py', [], 120_000)
-    .catch(e => console.warn('[QUEUE] avwap_features failed:', (e as Error).message));
+    .catch(e => T.fail('avwap_features', e));
 
   // OI net-change delta (day-over-day total OI % change from stock_options_oi) → oi_net_change_pct.
   // Depends on pcr_fetcher.py having run earlier in this same daily ops cycle.
   await runPython('oi_delta_features.py', [], 60_000)
-    .catch(e => console.warn('[QUEUE] oi_delta_features failed:', (e as Error).message));
+    .catch(e => T.fail('oi_delta_features', e));
 
   // Sector-level F&O sentiment: aggregate stock_options_oi by sector → sector_fo_sentiment.
   // Depends on pcr_fetcher.py (stock_options_oi) and iv_features (per-stock IV) having run.
   await runPython('sector_fo_proxy.py', [], 60_000)
-    .catch(e => console.warn('[QUEUE] sector_fo_proxy failed:', (e as Error).message));
+    .catch(e => T.fail('sector_fo_proxy', e));
 
   // F&O rollover % and cost of carry from NSE bhavcopies → fno_rollover → technical_signals.
   await runPython('fno_rollover_fetcher.py', ['--days', '1'], 3 * 60_000)
-    .catch(e => console.warn('[QUEUE] fno_rollover_fetcher failed:', (e as Error).message));
+    .catch(e => T.fail('fno_rollover_fetcher', e));
 
   // Cash market delivery % from NSE MTO DAT → stock_delivery_volume → technical_signals.
   await runPython('delivery_volume_fetcher.py', ['--days', '1'], 2 * 60_000)
-    .catch(e => console.warn('[QUEUE] delivery_volume_fetcher failed:', (e as Error).message));
+    .catch(e => T.fail('delivery_volume_fetcher', e));
 
   // Block deals from NSE live API → stock_block_deal_daily → technical_signals.
   await runPython('block_deal_fetcher.py', ['--days', '1'], 60_000)
-    .catch(e => console.warn('[QUEUE] block_deal_fetcher failed:', (e as Error).message));
+    .catch(e => T.fail('block_deal_fetcher', e));
 
   // MC pricefeed: IND_PE, CAGR 3/5y, consensus PE/PB, delivery avg (fundamentals/delivery only —
   // price/volume columns moved to mc_price_features_ohlcv.py below, see its docstring for why).
   // 2328 stocks × 0.35s = ~14 min
   await runPython('mc_pricefeed_fetcher.py', [], 25 * 60_000)
-    .catch(e => console.warn('[QUEUE] mc_pricefeed_fetcher failed:', (e as Error).message));
+    .catch(e => T.fail('mc_pricefeed_fetcher', e));
 
   // Point-in-time mc_ma30/50/150/200_dist_pct, mc_3d_return, mc_52w_high/low_dist_pct,
   // mc_days_from_52wh, mc_ytd_return, mc_vol_ratio -- computed from stock_ohlcv (fresh as of
@@ -826,12 +847,12 @@ async function processMlDailyOps(job: Job): Promise<{ success: boolean; failedSt
   // MUST run after ohlcv_quality.py above -- it reads WHERE is_suspect=0 so a bad-print/
   // extreme-level-shift bar doesn't poison every moving-average window it falls inside.
   await runPython('mc_price_features_ohlcv.py', [], 15 * 60_000)
-    .catch(e => console.warn('[QUEUE] mc_price_features_ohlcv failed:', (e as Error).message));
+    .catch(e => T.fail('mc_price_features_ohlcv', e));
 
   // MC chart patterns: professional pattern detection with target price, stop-loss, direction.
   // 2328 stocks × 0.35s = ~14 min
   await runPython('mc_chart_patterns_fetcher.py', [], 25 * 60_000)
-    .catch(e => console.warn('[QUEUE] mc_chart_patterns_fetcher failed:', (e as Error).message));
+    .catch(e => T.fail('mc_chart_patterns_fetcher', e));
 
   // Index/F&O microstructure batch — safe to overlap like the moneycontrol/institutional/finbert
   // group above: each hits a distinct external API and writes its own dedicated index-level
@@ -843,25 +864,25 @@ async function processMlDailyOps(job: Job): Promise<{ success: boolean; failedSt
     // NiftyTrader F&O dashboard: max_pain per stock + directional OI flow (calls vs puts Δoi)
     // for all 147 F&O stocks in a single API call — daily because max pain shifts each session.
     runPython('nt_dashboard_fetcher.py', [], 2 * 60_000)
-      .catch(e => console.warn('[QUEUE] nt_dashboard_fetcher failed:', (e as Error).message)),
+      .catch(e => T.fail('nt_dashboard_fetcher', e)),
     // NiftyTrader intraday PCR time series for major indices (NIFTY, BANKNIFTY, FINNIFTY, MIDCPNIFTY).
     runPython('nt_pcr_ts_fetcher.py', [], 2 * 60_000)
-      .catch(e => console.warn('[QUEUE] nt_pcr_ts_fetcher failed:', (e as Error).message)),
+      .catch(e => T.fail('nt_pcr_ts_fetcher', e)),
     // NiftyTrader EOD strike-wise OI snapshot — feeds index_max_pain + nt_index_oi_eod.
     runPython('nt_oi_snapshot_fetcher.py', [], 2 * 60_000)
-      .catch(e => console.warn('[QUEUE] nt_oi_snapshot_fetcher failed:', (e as Error).message)),
+      .catch(e => T.fail('nt_oi_snapshot_fetcher', e)),
     // India VIX + GIFT NIFTY intraday values + EOD close → macro_asset_prices + nt_index_pcr_ts.
     runPython('nt_vix_fetcher.py', [], 60_000)
-      .catch(e => console.warn('[QUEUE] nt_vix_fetcher failed:', (e as Error).message)),
+      .catch(e => T.fail('nt_vix_fetcher', e)),
     // Market Mood Index (Tickertape fear/greed 0-100) → macro_asset_prices INDIA_MMI.
     runPython('mmi_fetcher.py', [], 60_000)
-      .catch(e => console.warn('[QUEUE] mmi_fetcher failed:', (e as Error).message)),
+      .catch(e => T.fail('mmi_fetcher', e)),
     // NiftyTrader per-strike OI change (buildup/unwinding) for index options.
     runPython('nt_change_oi_fetcher.py', [], 2 * 60_000)
-      .catch(e => console.warn('[QUEUE] nt_change_oi_fetcher failed:', (e as Error).message)),
+      .catch(e => T.fail('nt_change_oi_fetcher', e)),
     // SmartOptions Greek-enriched option chain for all F&O stocks (Delta/Gamma/Theta/Vega/IV).
     runPython('so_option_chain_fetcher.py', ['--delay', '0.3'], 30 * 60_000)
-      .catch(e => console.warn('[QUEUE] so_option_chain_fetcher failed:', (e as Error).message)),
+      .catch(e => T.fail('so_option_chain_fetcher', e)),
     // Per-stock FUTURES OI/positioning (MC FUTSTK) -> stock_futures_oi_history: open interest,
     // OI change, long/short buildup, rollover %, basis. This is the family measurement.md had
     // recorded as impossible ("no fetcher captures per-stock futures OI"); the endpoint was
@@ -869,91 +890,91 @@ async function processMlDailyOps(job: Job): Promise<{ success: boolean; failedSt
     // through factor_edge.py like everything else before anything consumes it. Budget is
     // generous because it is 2 requests per F&O name at a 0.25s pace.
     runPython('mc_stock_futures_oi_fetcher.py', [], 30 * 60_000)
-      .catch(e => console.warn('[QUEUE] mc_stock_futures_oi_fetcher failed:', (e as Error).message)),
+      .catch(e => T.fail('mc_stock_futures_oi_fetcher', e)),
     // SmartOptions cross-market F&O activity screeners (most-active-value/oi-gainers/oi-losers)
     // at the current monthly expiry -- distinct from so_option_chain_fetcher's per-stock chain
     // above (that one needs stockCode; this one is a ranked cross-market screener with no
     // per-stock id). Promoted 2026-07-30 from a stale-expiry URL found in updated_urls.json.
     runPython('trendlyne_fno_activity_fetcher.py', [], 3 * 60_000)
-      .catch(e => console.warn('[QUEUE] trendlyne_fno_activity_fetcher failed:', (e as Error).message)),
+      .catch(e => T.fail('trendlyne_fno_activity_fetcher', e)),
     // Sector Relative Rotation Graph + sector x sector correlation matrix (2026-08-06 urls.txt
     // analysis) → sector_rrg_history/sector_correlation_{pairs,stats,summary}.
     runPython('investsights_sector_intel_fetcher.py', [], 2 * 60_000)
-      .catch(e => console.warn('[QUEUE] investsights_sector_intel_fetcher failed:', (e as Error).message)),
+      .catch(e => T.fail('investsights_sector_intel_fetcher', e)),
     // Cross-sectional PE/ROE/ROCE/growth screener snapshot (onboard-data-source batch,
     // 2026-08-13) → investsights_factor_scores. Paginated batch query, not per-stock —
     // measured ~15s for the full ~5,377-row provider universe, 2 min budget is ample.
     runPython('investsights_factor_scores_fetcher.py', [], 2 * 60_000)
-      .catch(e => console.warn('[QUEUE] investsights_factor_scores_fetcher failed:', (e as Error).message)),
+      .catch(e => T.fail('investsights_factor_scores_fetcher', e)),
     // Ranked institutional buy/sell deal activity (2026-08-06 urls.txt analysis) → institutional_deal_signals.
     runPython('institutional_deals_fetcher.py', [], 2 * 60_000)
-      .catch(e => console.warn('[QUEUE] institutional_deals_fetcher failed:', (e as Error).message)),
+      .catch(e => T.fail('institutional_deals_fetcher', e)),
     // AI-generated earnings-call tone/takeaway (2026-08-06 urls.txt analysis) → concall_takeaways.
     runPython('investsights_concall_fetcher.py', [], 2 * 60_000)
-      .catch(e => console.warn('[QUEUE] investsights_concall_fetcher failed:', (e as Error).message)),
+      .catch(e => T.fail('investsights_concall_fetcher', e)),
     // StockEdge's "Higher Delivery Quantity" top-5 alert list (2026-08-15, promoted from
     // endpoint_registry.py's stockedge_high_delivery_qty, archived-only until now) → stockedge_high_delivery_alerts.
     runPython('stockedge_high_delivery_fetcher.py', [], 60_000)
-      .catch(e => console.warn('[QUEUE] stockedge_high_delivery_fetcher failed:', (e as Error).message)),
+      .catch(e => T.fail('stockedge_high_delivery_fetcher', e)),
     // Trading80's own buy/sell call list, third-party vendor calls not this platform's own
     // (2026-08-15, promoted from endpoint_registry.py's trading80_call_alerts) → trading80_call_alerts.
     runPython('trading80_call_alerts_fetcher.py', [], 60_000)
-      .catch(e => console.warn('[QUEUE] trading80_call_alerts_fetcher failed:', (e as Error).message)),
+      .catch(e => T.fail('trading80_call_alerts_fetcher', e)),
     // MarketsMojo's own model-portfolio picks, entry/exit + live P&L (2026-08-15, promoted from
     // endpoint_registry.py's marketsmojo_stock_picks_history) → marketsmojo_stock_picks.
     runPython('marketsmojo_stock_picks_fetcher.py', [], 60_000)
-      .catch(e => console.warn('[QUEUE] marketsmojo_stock_picks_fetcher failed:', (e as Error).message)),
+      .catch(e => T.fail('marketsmojo_stock_picks_fetcher', e)),
     // Trendlyne's pre-classified corporate-event feed (order wins, margin moves, estimate
     // beats/misses, block deals, ...) — 2026-08-15, promoted from endpoint_registry.py's
     // trendlyne_market_insight after re-inspection showed it arrives pre-labeled, not raw
     // headlines needing NLP (see the fetcher's own docstring) → trendlyne_market_insights.
     runPython('trendlyne_market_insight_fetcher.py', [], 60_000)
-      .catch(e => console.warn('[QUEUE] trendlyne_market_insight_fetcher failed:', (e as Error).message)),
+      .catch(e => T.fail('trendlyne_market_insight_fetcher', e)),
     // Market-wide corporate-actions calendar sourced from real NSE filings (2026-08-07
     // urls.txt open-source sourcing pass) → nse_filed_corporate_actions. Daily and cheap (one
     // API call, ~40 rows): the completeness cross-check for mc_corporate_actions_fetcher.py's
     // weekly per-stock crawl, so it should stay fresher than the thing it's checking.
     runPython('investsights_corporate_actions_fetcher.py', [], 2 * 60_000)
-      .catch(e => console.warn('[QUEUE] investsights_corporate_actions_fetcher failed:', (e as Error).message)),
+      .catch(e => T.fail('investsights_corporate_actions_fetcher', e)),
     // NDTV Profit futures basis/roll-spread/PCR, independent cross-check for fno_rollover_fetcher.py
     // (2026-08-07 urls.txt follow-up) → ndtv_fno_basis. F&O-eligible universe only (209 symbols) --
     // futures don't exist for the rest of nse_stocks. Live-measured ~7s for the full universe.
     runPython('ndtv_fno_basis_fetcher.py', [], 2 * 60_000)
-      .catch(e => console.warn('[QUEUE] ndtv_fno_basis_fetcher failed:', (e as Error).message)),
+      .catch(e => T.fail('ndtv_fno_basis_fetcher', e)),
   ]);
 
   // Earnings beat features (reads stock_earnings_beats, refreshed weekly by earnings_surprise_fetcher).
   // Writes eps_beat_last_q / eps_beat_streak_4q / eps_miss_streak_4q → technical_signals.
   await runPython('earnings_beat_features.py', [], 60_000)
-    .catch(e => console.warn('[QUEUE] earnings_beat_features failed:', (e as Error).message));
+    .catch(e => T.fail('earnings_beat_features', e));
 
   // Sector-global benchmark correlation (requires macro_asset_prices from global_macro_fetcher).
   await runPython('sector_global_corr.py', [], 3 * 60_000)
-    .catch(e => console.warn('[QUEUE] sector_global_corr failed:', (e as Error).message));
+    .catch(e => T.fail('sector_global_corr', e));
 
   // Historical Volatility (HV10/20/30/60d + IV-HV ratio) purely from stock_ohlcv — no new feed.
   await runPython('hv_features.py', [], 3 * 60_000)
-    .catch(e => console.warn('[QUEUE] hv_features failed:', (e as Error).message));
+    .catch(e => T.fail('hv_features', e));
 
   // Analyst estimate revision drift (EPS + price-target 3m change) from analyst_estimates_history.
   await runPython('analyst_revision.py', [], 2 * 60_000)
-    .catch(e => console.warn('[QUEUE] analyst_revision failed:', (e as Error).message));
+    .catch(e => T.fail('analyst_revision', e));
 
   // Commodity/FX sensitivity: 90d rolling corr of each stock vs CRUDE/GOLD/DXY/SP500.
   // Requires macro_asset_prices to be populated (global_macro_fetcher runs at session start).
   await runPython('commodity_sensitivity.py', [], 3 * 60_000)
-    .catch(e => console.warn('[QUEUE] commodity_sensitivity failed:', (e as Error).message));
+    .catch(e => T.fail('commodity_sensitivity', e));
 
   // Earnings calendar + PEAD categories + price shockers + sector earnings + market breadth.
   await runPython('mc_earnings_fetcher.py', [], 5 * 60_000)
-    .catch(e => console.warn('[QUEUE] mc_earnings_fetcher failed:', (e as Error).message));
+    .catch(e => T.fail('mc_earnings_fetcher', e));
 
   // F&O expiry countdown (days_to_expiry/is_expiry_day) -- the expiry-side counterpart to
   // days_to_next_results above. nt_fno_expiry's own expiry dates are refreshed weekly
   // (sync_nt_fno_symbols.py, ml-weekly-retrain) since they rarely change, but the countdown
   // itself must recompute daily against today's date, same as days_to_next_results.
   await runPython('expiry_features.py', [], 60_000)
-    .catch(e => console.warn('[QUEUE] expiry_features failed:', (e as Error).message));
+    .catch(e => T.fail('expiry_features', e));
 
   // Broker research recommendations: named broker BUY/SELL events → mc_broker_reco + technical_signals.
   // Timeout bumped 2min->6min (2026-07-31): fetch_recos() no longer breaks out of pagination on
@@ -962,56 +983,56 @@ async function processMlDailyOps(job: Job): Promise<{ success: boolean; failedSt
   // in any order). Fixing that means every run now scans all MAX_PAGES=15 pages regardless of
   // --days, live-measured at ~4.6 min end-to-end.
   await runPython('mc_broker_reco_fetcher.py', ['--days', '7'], 6 * 60_000)
-    .catch(e => console.warn('[QUEUE] mc_broker_reco_fetcher failed:', (e as Error).message));
+    .catch(e => T.fail('mc_broker_reco_fetcher', e));
 
   // Economic calendar: upcoming high-impact macro events → eco_calendar + macro_asset_prices.
   await runPython('mc_eco_calendar_fetcher.py', [], 60_000)
-    .catch(e => console.warn('[QUEUE] mc_eco_calendar_fetcher failed:', (e as Error).message));
+    .catch(e => T.fail('mc_eco_calendar_fetcher', e));
 
   // Corporate action calendar: ex-dividend dates + board meeting dates → corporate_actions + technical_signals.
   // Prevents false STOP_LOSS signals on ex-div days; adds pre-earnings drift feature.
   await runPython('mc_corporate_calendar_fetcher.py', [], 60_000)
-    .catch(e => console.warn('[QUEUE] mc_corporate_calendar_fetcher failed:', (e as Error).message));
+    .catch(e => T.fail('mc_corporate_calendar_fetcher', e));
 
   // NSE's own primary-market IPO calendar (current/upcoming/past issues) → nse_ipo_calendar.
   // Promoted 2026-07-30 via the `nse` (NseIndiaApi) package -- genuinely new data, no prior
   // fetcher in this codebase covered the IPO calendar.
   await runPython('nse_ipo_calendar_fetcher.py', [], 60_000)
-    .catch(e => console.warn('[QUEUE] nse_ipo_calendar_fetcher failed:', (e as Error).message));
+    .catch(e => T.fail('nse_ipo_calendar_fetcher', e));
 
   // Screener features: stamp per-stock screener ML features into technical_signals
   // (runs after screener sync so appearances are current)
   await runPython('screener_features_fetcher.py', [], 5 * 60_000)
-    .catch(e => console.warn('[QUEUE] screener_features_fetcher failed:', (e as Error).message));
+    .catch(e => T.fail('screener_features_fetcher', e));
 
   // Sector screener rotation: aggregate bull/bear signals by sector
   await runPython('screener_sector_rotation.py', [], 2 * 60_000)
-    .catch(e => console.warn('[QUEUE] screener_sector_rotation failed:', (e as Error).message));
+    .catch(e => T.fail('screener_sector_rotation', e));
 
   // Screener surfacing alerts: new screener entries → unified_signals
   await runPython('screener_signal_generator.py', [], 3 * 60_000)
-    .catch(e => console.warn('[QUEUE] screener_signal_generator failed:', (e as Error).message));
+    .catch(e => T.fail('screener_signal_generator', e));
 
   // Per-stock option chain: expected move + GEX proxy + BS-derived ATM IV + next-month IV
   // term structure → stock_option_features + stock_options_oi + technical_signals.
   // 3min -> 6min (2026-07-18): the term-structure feature adds a second per-symbol API call
   // (next-month expiry chain), roughly doubling this script's request count.
   await runPython('stock_option_chain_fetcher.py', [], 6 * 60_000)
-    .catch(e => console.warn('[QUEUE] stock_option_chain_fetcher failed:', (e as Error).message));
+    .catch(e => T.fail('stock_option_chain_fetcher', e));
   // Re-run iv_features after stock chains so per-stock iv_rank reflects BS-computed ATM IV (not just index IV from pcr_fetcher).
   await runPython('iv_features.py', [], 90_000)
-    .catch(e => console.warn('[QUEUE] iv_features (stock IV pass) failed:', (e as Error).message));
+    .catch(e => T.fail('iv_features (stock IV pass)', e));
 
   // EPS surprise streak: beat/miss history from MC actual-estimate API → eps_surprise_history + technical_signals.
   await runPython('eps_surprise_fetcher.py', [], 10 * 60_000)
-    .catch(e => console.warn('[QUEUE] eps_surprise_fetcher failed:', (e as Error).message));
+    .catch(e => T.fail('eps_surprise_fetcher', e));
 
   // financial_ratios_fetcher + working_capital_fetcher moved to weekly retrain
   // (3058 stocks × 4-5 calls = 61-102 min each; data changes quarterly not daily)
 
   // Delivery % trend + bulk/block deals + short interest proxy → technical_signals.
   await runPython('delivery_trend_fetcher.py', [], 5 * 60_000)
-    .catch(e => console.warn('[QUEUE] delivery_trend_fetcher failed:', (e as Error).message));
+    .catch(e => T.fail('delivery_trend_fetcher', e));
 
   // insider_transactions_fetcher.py moved to the weekly retrain (processMlWeeklyRetrain).
   // It cost 14m47 of the nightly critical path (measured 2026-08-12, the single largest step
@@ -1023,12 +1044,12 @@ async function processMlDailyOps(job: Job): Promise<{ success: boolean; failedSt
 
   // Credit rating events (upgrades/downgrades) from BSE → credit_rating_events + technical_signals.
   await runPython('credit_rating_fetcher.py', [], 3 * 60_000)
-    .catch(e => console.warn('[QUEUE] credit_rating_fetcher failed:', (e as Error).message));
+    .catch(e => T.fail('credit_rating_fetcher', e));
 
   // MF sector AUM flow (ET / mcxlivefeeds JSONP feed, replaces dead AMFI disclosure endpoint)
   // → mf_scheme_sector_allocation + mf_sector_allocation + technical_signals.
   await runPython('mf_sector_allocation_fetcher.py', [], 5 * 60_000)
-    .catch(e => console.warn('[QUEUE] mf_sector_allocation_fetcher failed:', (e as Error).message));
+    .catch(e => T.fail('mf_sector_allocation_fetcher', e));
 
   // Index/macro batch — same rationale as the NT/MMI/option-chain batch above: five distinct
   // external APIs, five distinct index-level destination tables (macro_asset_prices, index_valuation,
@@ -1039,32 +1060,32 @@ async function processMlDailyOps(job: Job): Promise<{ success: boolean; failedSt
   await Promise.allSettled([
     // India macro indicators: PMI, GST, IIP, auto sales, RBI rate → macro_asset_prices.
     runPython('india_macro_fetcher.py', [], 3 * 60_000)
-      .catch(e => console.warn('[QUEUE] india_macro_fetcher failed:', (e as Error).message)),
+      .catch(e => T.fail('india_macro_fetcher', e)),
     // Index PE/PB/EPS → index_valuation (MoneyControl + Trendlyne, last 30 days).
     // ~35 of the ~91 indices now fall back to a second Trendlyne round-trip per index because
     // MC's graph endpoint returns corrupted data for most sector sub-indices — a full run takes
     // 6-7 minutes, well past the old 3-minute budget.
     runPython('nifty_pe_fetcher.py', ['--days', '30'], 10 * 60_000)
-      .catch(e => console.warn('[QUEUE] nifty_pe_fetcher failed:', (e as Error).message)),
+      .catch(e => T.fail('nifty_pe_fetcher', e)),
     // Index OHLC history from MoneyControl → stock_ohlcv (covers SENSEX + indices missing from Yahoo).
     runPython('mc_index_ohlc_fetcher.py', ['--range', '5d'], 3 * 60_000)
-      .catch(e => console.warn('[QUEUE] mc_index_ohlc_fetcher failed:', (e as Error).message)),
+      .catch(e => T.fail('mc_index_ohlc_fetcher', e)),
     // NSE/BSE advance-decline raw counts → mc_advance_decline + market_breadth.adv_decline_ratio.
     runPython('mc_advance_decline_fetcher.py', [], 60_000)
-      .catch(e => console.warn('[QUEUE] mc_advance_decline_fetcher failed:', (e as Error).message)),
+      .catch(e => T.fail('mc_advance_decline_fetcher', e)),
     // Index options OI by strike → index_option_oi + index_max_pain (Nifty + BankNifty).
     runPython('mc_index_oi_fetcher.py', [], 3 * 60_000)
-      .catch(e => console.warn('[QUEUE] mc_index_oi_fetcher failed:', (e as Error).message)),
+      .catch(e => T.fail('mc_index_oi_fetcher', e)),
   ]);
 
   // BSE event classifier: news_articles → event_signal_score in technical_signals.
   await runPython('bse_event_classifier.py', [], 60_000)
-    .catch(e => console.warn('[QUEUE] bse_event_classifier failed:', (e as Error).message));
+    .catch(e => T.fail('bse_event_classifier', e));
 
   // Backfill technical features (RSI/MACD/ADX from stock_ohlcv) for any outcome that
   // still lacks a ts row — keeps ML training coverage high as new signals resolve.
   await runPython('backfill_technical_features.py', [], 5 * 60_000)
-    .catch(e => console.warn('[QUEUE] backfill_technical_features failed:', (e as Error).message));
+    .catch(e => T.fail('backfill_technical_features', e));
 
   // PEAD model retired 2026-08-20. NOT because eps_growth_yoy/qoq were NULL (that was a stale
   // claim -- verified live, they're genuinely populated: 34,756 pead_score rows / 1,673 symbols
@@ -1081,18 +1102,18 @@ async function processMlDailyOps(job: Job): Promise<{ success: boolean; failedSt
   // showed "never succeeded" for a week. Every step below is now best-effort so the run
   // always completes and the training tail always attempts (scripts are idempotent — a
   // failed one simply retries tomorrow).
-  await resolveOutcomesResilient(1).catch(e => console.warn('[QUEUE] resolveOutcomes(1) failed:', (e as Error).message));
+  await resolveOutcomesResilient(1).catch(e => T.fail('resolveOutcomes(1)', e));
   await T.run('outcome-resolver-5d', () => resolveOutcomesResilient(5));
   await T.run('outcome-resolver-15d', () => resolveOutcomesResilient(15));
 
   // Compute excursion path labels for all resolved entries:
   await runPython('exit_labeler.py', ['--limit', '500'], 10 * 60_000)
-    .catch(e => console.warn('[QUEUE] exit_labeler failed:', (e as Error).message));
+    .catch(e => T.fail('exit_labeler', e));
 
   // Now a windowed batch-resolve (was per-row N+1, routinely blew the old 180s
   // timeout on any real backlog) — give it real headroom.
   await runPython('live_screener_resolver.py', [], 20 * 60_000)
-    .catch(err => console.error('[QUEUE] live_screener_resolver.py failed:', err.message));
+    .catch(err => T.fail('live_screener_resolver.py', err));
 
   // Measured 83.6s standalone (2026-08-08) -- well inside the implicit 5min default -- but it
   // runs here alongside ~15 other ml-daily-ops steps hitting the same DB, and 11 of its last
@@ -1102,7 +1123,7 @@ async function processMlDailyOps(job: Job): Promise<{ success: boolean; failedSt
   // screener_performance.py/quant-eod-sync/alphaQuant.score elsewhere in this file.
   await T.run('performance-tracker', () => runPython('performance_tracker.py', ['--horizon', '5'], 15 * 60_000));
   await runPython('performance_tracker.py', ['--horizon', '15'], 15 * 60_000)
-    .catch(e => console.warn('[QUEUE] performance_tracker(15) failed:', (e as Error).message));
+    .catch(e => T.fail('performance_tracker(15)', e));
 
   // ── feature-matrix hygiene (2026-07-31 bias audit) ──────────────────────────────
   // Must run AFTER every enrichment fetcher above and BEFORE any training step below.
@@ -1147,7 +1168,7 @@ async function processMlDailyOps(job: Job): Promise<{ success: boolean; failedSt
   // margin, so it only ever passed on a fully idle box and was killed by the timeout on most
   // real runs. Same measure-then-budget correction as exit_labeler/exit_policy before it.
   await runPython('ml_calibration.py', [], 10 * 60_000)
-    .catch(e => console.warn('[QUEUE] ml_calibration failed:', (e as Error).message));
+    .catch(e => T.fail('ml_calibration', e));
 
   // PSI-based feature drift check — writes drift_score to dl_model_performance so
   // scoring_engine applies a win_probability haircut when distributions shift.
@@ -1179,12 +1200,12 @@ async function processMlDailyOps(job: Job): Promise<{ success: boolean; failedSt
   // technical_signals.breakout_probability. Advisory only for now (strong purged-OOF AUC
   // ~0.73 but on limited history); the weekly --train refits as coverage grows.
   await runPython('breakout_classifier.py', ['--score'], 3 * 60_000)
-    .catch(e => console.warn('[QUEUE] breakout_classifier score failed:', (e as Error).message));
+    .catch(e => T.fail('breakout_classifier score', e));
 
   // Winner attribution: which stocks actually flew today, did we have them flagged,
   // and which precursors preceded the move → rolling lift → tomorrow's candidate list.
   await runPython('high_flyer_retrospective.py', [], 10 * 60_000)
-    .catch(e => console.warn('[QUEUE] high_flyer_retrospective failed:', (e as Error).message));
+    .catch(e => T.fail('high_flyer_retrospective', e));
 
   // Push what the retrospective just computed. Its only reader was a v4 widget, and v4 is not
   // the default shell — so recall and wrong-direction numbers were being produced nightly and
@@ -1210,9 +1231,9 @@ async function processMlDailyOps(job: Job): Promise<{ success: boolean; failedSt
   // Intraday feedback loop: paper-trade today's intraday recs vs the day's OHLC, then reverse-
   // engineer which signals preceded the winners → learned blend weights the ranker leans on.
   await runPython('intraday_outcome_resolver.py', [], 120_000)
-    .catch(e => console.warn('[QUEUE] intraday_outcome_resolver failed:', (e as Error).message));
+    .catch(e => T.fail('intraday_outcome_resolver', e));
   await runPython('intraday_strategy_learner.py', [], 120_000)
-    .catch(e => console.warn('[QUEUE] intraday_strategy_learner failed:', (e as Error).message));
+    .catch(e => T.fail('intraday_strategy_learner', e));
 
   await T.run('reward-engine', () => runPython('reward_engine.py'));
   // rl_agent (Q-learning over signal episodes) REMOVED 2026-08-31: zero demonstrated edge
@@ -1319,14 +1340,14 @@ async function processMlWeeklyRetrain(_job: Job): Promise<{ success: boolean; fa
   const T = new StepTracker('ml-weekly-retrain');
   // Keep index_provider_map in sync with live provider index lists.
   await runPython('sync_mc_index_map.py', [], 60_000)
-    .catch(e => console.warn('[QUEUE] sync_mc_index_map failed:', (e as Error).message));
+    .catch(e => T.fail('sync_mc_index_map', e));
   await runPython('sync_tl_index_map.py', [], 60_000)
-    .catch(e => console.warn('[QUEUE] sync_tl_index_map failed:', (e as Error).message));
+    .catch(e => T.fail('sync_tl_index_map', e));
   await runPython('sync_nt_fno_symbols.py', [], 60_000)
-    .catch(e => console.warn('[QUEUE] sync_nt_fno_symbols failed:', (e as Error).message));
+    .catch(e => T.fail('sync_nt_fno_symbols', e));
   // Refresh earnings beat/miss history (quarterly data, no need to run daily).
   await runPython('earnings_surprise_fetcher.py', [], 20 * 60_000)
-    .catch(e => console.warn('[QUEUE] earnings_surprise_fetcher failed:', (e as Error).message));
+    .catch(e => T.fail('earnings_surprise_fetcher', e));
   // MF holdings: mf_holdings_fetcher.py REWRITTEN 2026-08-13 -- its old source
   // (mfapps.indiatimes.com's MFPortfolioHolding.cms) was dead (confirmed live, 404 for every
   // symbol, upstream retired). Repointed at ET's shareholding-pattern endpoint
@@ -1334,16 +1355,16 @@ async function processMlWeeklyRetrain(_job: Job): Promise<{ success: boolean; fa
   // codes -- also fixes a hard LIMIT 200 in the old ID-resolution path. Quarterly disclosure
   // data, weekly crawl is generous.
   await runPython('mf_holdings_fetcher.py', [], 20 * 60_000)
-    .catch(e => console.warn('[QUEUE] mf_holdings_fetcher failed:', (e as Error).message));
+    .catch(e => T.fail('mf_holdings_fetcher', e));
   // MarketsMojo quarterly-cadence series (onboarded 2026-08-11, backfilled once, never
   // scheduled). Weekly, not daily: the vendor only restates these on results/filing days, and
   // their dataQualityChecks entries are warnDays 45 to match. ~1,824 stocks x 0.5s ≈ 15 min each.
   await runPython('marketsmojo_financials_fetcher.py', [], 40 * 60_000)
-    .catch(e => console.warn('[QUEUE] marketsmojo_financials_fetcher failed:', (e as Error).message));
+    .catch(e => T.fail('marketsmojo_financials_fetcher', e));
   await runPython('marketsmojo_shareholding_fetcher.py', [], 40 * 60_000)
-    .catch(e => console.warn('[QUEUE] marketsmojo_shareholding_fetcher failed:', (e as Error).message));
+    .catch(e => T.fail('marketsmojo_shareholding_fetcher', e));
   await runPython('marketsmojo_fintrend_fetcher.py', [], 40 * 60_000)
-    .catch(e => console.warn('[QUEUE] marketsmojo_fintrend_fetcher failed:', (e as Error).message));
+    .catch(e => T.fail('marketsmojo_fintrend_fetcher', e));
   // FinStack MCP quarterly cash-flow (onboarded 2026-09-01): the platform's first real
   // QUARTERLY CFO/CFI/CFF/capex/FCF history, fetched by speaking MCP stdio to
   // `python -m finstack.server` (whose cash_flow tool wraps yfinance quarterly_cashflow).
@@ -1353,13 +1374,13 @@ async function processMlWeeklyRetrain(_job: Job): Promise<{ success: boolean; fa
   // workers ≈ 8 min, 40 min matches the sibling budgets. Host needs finstack pip-installed
   // for the PATH python (see finstack_cashflow_fetcher.py's docstring).
   await runPython('finstack_cashflow_fetcher.py', [], 40 * 60_000)
-    .catch(e => console.warn('[QUEUE] finstack_cashflow_fetcher failed:', (e as Error).message));
+    .catch(e => T.fail('finstack_cashflow_fetcher', e));
   // Trendlyne EPS/DivYield series + DVM scores — 2 calls/stock (PE/PB dropped: MC's daily
   // fetch already covers them, fed into the same history tables — see mc_pricefeed_fetcher.py).
   // Scoped to scripts/stocklist.json (~2005 stocks), not the full tlid universe: 2005 stocks
   // × 2 API calls × 0.5s = ~34 min; 150 min timeout is generous headroom
   await runPython('trendlyne_fundamentals_fetcher.py', [], 150 * 60_000)
-    .catch(e => console.warn('[QUEUE] trendlyne_fundamentals_fetcher failed:', (e as Error).message));
+    .catch(e => T.fail('trendlyne_fundamentals_fetcher', e));
   // Analyst consensus + price targets: REMOVED from this weekly chain 2026-09-01 —
   // now a dedicated daily BullMQ job (analyst-estimates-sync-daily, sync.jobs.ts,
   // Mon–Fri 14:15 UTC). The hybrid direct-engine rewrite (~2.5 min full universe vs
@@ -1370,7 +1391,7 @@ async function processMlWeeklyRetrain(_job: Job): Promise<{ success: boolean; fa
   // feature work, which is a weekly-cadence need, not a reason to spend the nightly window on
   // them. Drop this step rather than let it grow if nothing has parsed them by the next audit.
   await runPython('extra_endpoints_fetcher.py', ['--scope', 'weekly'], 90 * 60_000)
-    .catch(e => console.warn('[QUEUE] extra_endpoints_fetcher (weekly scope) failed:', (e as Error).message));
+    .catch(e => T.fail('extra_endpoints_fetcher (weekly scope)', e));
   // insider_transactions_fetcher.py: moved off the nightly chain 2026-08-13 (14m47/night for a
   // feed measured 73.7 days stale), then dropped from this weekly slot entirely 2026-08-14 --
   // NSE's corporates-pit endpoint ignores its own from/to params, so the table it fills
@@ -1390,14 +1411,14 @@ async function processMlWeeklyRetrain(_job: Job): Promise<{ success: boolean; fa
   // Best-effort: a resolver blip must NOT skip the ml_ensemble --train below (the whole
   // point of the weekly job). Every step here is idempotent and independently catchable.
   await runPython('outcome_resolver.py', ['--horizon', '5'])
-    .catch(e => console.warn('[QUEUE] weekly outcome_resolver(5) failed:', (e as Error).message));
+    .catch(e => T.fail('weekly outcome_resolver(5)', e));
   await runPython('outcome_resolver.py', ['--horizon', '15'])
-    .catch(e => console.warn('[QUEUE] weekly outcome_resolver(15) failed:', (e as Error).message));
+    .catch(e => T.fail('weekly outcome_resolver(15)', e));
   // Run exit labeler to resolve excursions. Unlike the daily-ops call (--limit 500), this
   // one is unbounded — it's the weekly catch-up sweep for the full backlog since last
   // Sunday — so it needs real headroom; 10min was SIGTERM-killing it most weeks (2026-07-19).
   await runPython('exit_labeler.py', [], 30 * 60_000)
-    .catch(e => console.warn('[QUEUE] exit_labeler failed:', (e as Error).message));
+    .catch(e => T.fail('exit_labeler', e));
   // Retrain the exit policy models. Growing-dataset timeout history: 10min killed it
   // deterministically once signal_excursions reached ~145k rows (bumped to 20min on
   // 2026-07-26, measured 703s uncontended at that size); by the 2026-08-23 run the table had
@@ -1428,7 +1449,7 @@ async function processMlWeeklyRetrain(_job: Job): Promise<{ success: boolean; fa
   // warning but let the weekly job continue to breakout_classifier, strategy-optimizer, etc.
   // and always reach T.finish() so the heartbeat is written.
   await T.run('ml-ensemble-train', () => runPython('ml_ensemble.py', ['--train', '--tune', '--score', '--label', 'triple_barrier'], 90 * 60_000))
-    .catch(e => console.warn('[QUEUE] ml-ensemble-train failed (weekly retrain continues):', (e as Error).message));
+    .catch(e => T.fail('ml-ensemble-train', e));
   // cs-ranker-train REMOVED 2026-08-31 alongside the daily score and the blend weight:
   // training a model whose live CV AUC (0.176) is worse than a coin flip only spends
   // the weekly Python-slot budget to reproduce the same verdict.
@@ -1440,15 +1461,15 @@ async function processMlWeeklyRetrain(_job: Job): Promise<{ success: boolean; fa
   // grid-search step in the same weekly pipeline.
   await T.run('strategy-optimizer', () => runPython('strategy_optimizer.py', [], 60 * 60_000));
   await runPython('backtester.py', ['--start', '2023-01-01'], 30 * 60_000)
-    .catch(e => console.warn('[QUEUE] backtester failed:', (e as Error).message));
+    .catch(e => T.fail('backtester', e));
   // Backtest-driven strategy parameter tuning (holdout-gated inside the script itself).
   // Keeps app_settings.optimal_* fresh only when out-of-sample Sharpe improves.
   await T.run('backtest-optimizer', () => runPython('backtest_optimizer.py', ['--window', '365'], 60 * 60_000))
-    .catch(e => console.warn('[QUEUE] backtest_optimizer failed (weekly retrain continues):', (e as Error).message));
+    .catch(e => T.fail('backtest_optimizer', e));
   await runPython('performance_tracker.py', ['--horizon', '5'])
-    .catch(e => console.warn('[QUEUE] weekly performance_tracker(5) failed:', (e as Error).message));
+    .catch(e => T.fail('weekly performance_tracker(5)', e));
   await runPython('performance_tracker.py', ['--horizon', '15'])
-    .catch(e => console.warn('[QUEUE] weekly performance_tracker(15) failed:', (e as Error).message));
+    .catch(e => T.fail('weekly performance_tracker(15)', e));
   // Factor-edge validation: does each candidate vendor/derived score actually predict forward
   // returns? Persists rank IC + cross-sectional AUC per horizon/regime to factor_edge_history so a
   // score that crosses the usable threshold surfaces as history accumulates. Advisory only —
@@ -1456,7 +1477,7 @@ async function processMlWeeklyRetrain(_job: Job): Promise<{ success: boolean; fa
   await runPython('factor_edge.py',
     ['--table', 'trendlyne_dvm_scores', '--scores', 'd_score,v_score,m_score',
      '--horizons', '5,10,21,63', '--by-regime', '--persist'], 15 * 60_000)
-    .catch(e => console.warn('[QUEUE] factor_edge (dvm) failed:', (e as Error).message));
+    .catch(e => T.fail('factor_edge (dvm)', e));
   // Same discipline applied to our OWN 8 unified_ranker.py engines, not just third-party scores:
   // does screener/ml/cs/confluence/technical/dl/breakout/smart_money each actually predict
   // forward returns, or is it dead weight in the blend? Advisory only for now (see
@@ -1470,7 +1491,7 @@ async function processMlWeeklyRetrain(_job: Job): Promise<{ success: boolean; fa
     ['--table', 'unified_recommendations', '--date-col', 'computed_at',
      '--scores', 'unified_score,screener_stock_score,ml_score,confluence_score,technical_score,dl_score,cs_score,breakout_score,smart_money_score',
      '--horizons', '5,10,21', '--by-regime', '--persist'], 15 * 60_000)
-    .catch(e => console.warn('[QUEUE] factor_edge (unified engines) failed:', (e as Error).message));
+    .catch(e => T.fail('factor_edge (unified engines)', e));
 
   // Equal-weight cross-sectional composite of the 6 raw engines -> engine_composite_scores.
   // Persisted so it ACCUMULATES and can be graded honestly; graded immediately below.
@@ -1479,11 +1500,11 @@ async function processMlWeeklyRetrain(_job: Job): Promise<{ success: boolean; fa
   // "no edge", NOT usable, and it is deliberately not wired into unified_ranker.py. See
   // measurement.md (including the same-day correction retracting an earlier USABLE claim).
   await runPython('engine_composite.py', [], 10 * 60_000)
-    .catch(e => console.warn('[QUEUE] engine_composite failed:', (e as Error).message));
+    .catch(e => T.fail('engine_composite', e));
   await runPython('factor_edge.py',
     ['--table', 'engine_composite_scores', '--date-col', 'date',
      '--scores', 'composite', '--horizons', '1,5,21', '--persist'], 15 * 60_000)
-    .catch(e => console.warn('[QUEUE] factor_edge (composite) failed:', (e as Error).message));
+    .catch(e => T.fail('factor_edge (composite)', e));
 
   // The RAW engine outputs, upstream of unified_ranker.py's normalization/blend. Graded by hand
   // on 2026-08-20 and never scheduled, so those verdicts were already going stale -- the same
@@ -1497,7 +1518,7 @@ async function processMlWeeklyRetrain(_job: Job): Promise<{ success: boolean; fa
     ['--table', 'technical_signals', '--date-col', 'date',
      '--scores', 'win_probability,cs_score,breakout_probability,signal_score',
      '--horizons', '1,5,21', '--persist'], 15 * 60_000)
-    .catch(e => console.warn('[QUEUE] factor_edge (technical_signals) failed:', (e as Error).message));
+    .catch(e => T.fail('factor_edge (technical_signals)', e));
   // dl_engine.py's three heads, each at its OWN native horizon (target_ret_1d/5d/15d) rather
   // than a generic grid -- grading a model against a horizon it was not trained for is the
   // mismatch that produced three wrong verdicts on 2026-08-20 (see measurement.md's correction).
@@ -1505,7 +1526,7 @@ async function processMlWeeklyRetrain(_job: Job): Promise<{ success: boolean; fa
     ['--table', 'deep_learning_predictions', '--date-col', 'prediction_date',
      '--scores', 'prob_up_1d,prob_up_5d,prob_up_15d',
      '--horizons', '1,5,15', '--persist'], 15 * 60_000)
-    .catch(e => console.warn('[QUEUE] factor_edge (dl heads) failed:', (e as Error).message));
+    .catch(e => T.fail('factor_edge (dl heads)', e));
   // mc_stock_futures_oi_fetcher.py's own docstring/queues.ts comment says this table "must be
   // graded through factor_edge.py like everything else before anything consumes it" -- that
   // grading call never existed until now, so the table was accumulating rows with no scheduled
@@ -1519,7 +1540,7 @@ async function processMlWeeklyRetrain(_job: Job): Promise<{ success: boolean; fa
     ['--table', 'stock_futures_oi_history', '--date-col', 'date',
      '--scores', 'oi_change,oi_pct_change,oi_pcr,basis,rollover_pct',
      '--horizons', '1,5,21', '--persist'], 15 * 60_000)
-    .catch(e => console.warn('[QUEUE] factor_edge (stock_futures_oi) failed:', (e as Error).message));
+    .catch(e => T.fail('factor_edge (stock_futures_oi)', e));
   // Same as ml-daily-ops above: report the tracker's real verdict rather than a blanket true.
   const verdict = T.finish();
   await alertFailedSteps('ml-weekly-retrain', verdict);

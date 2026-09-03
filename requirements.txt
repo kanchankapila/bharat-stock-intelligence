@@ -1,6 +1,7 @@
 pandas
 polars
-pyarrow
+# pyarrow deliberately NOT listed -- it breaks torch on Windows when imported first
+# (AF-20260829-21, added and reverted 2026-09-03). See backend-python/requirements.txt.
 yfinance
 ta
 sqlalchemy

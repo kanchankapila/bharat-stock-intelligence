@@ -21,6 +21,57 @@ describe('StepTracker', () => {
     expect(calls).toContainEqual({ name: 'job', state: 'success', message: undefined });
   });
 
+  // runQuiet: the anti-swallow path. A failing sub-step must reach the job verdict WITHOUT
+  // minting a per-step job_heartbeat row (getStaleJobs() would then flag it stale forever).
+  it('runQuiet writes NO per-step monitor state but still fails the job verdict', async () => {
+    const T = new StepTracker('job');
+    const r = await T.runQuiet('quiet-step', async () => { throw new Error('quiet boom'); });
+    expect(r).toBeUndefined();
+    const verdict = T.finish();
+
+    // the failure is NOT hidden: it reaches the job-level verdict and the failed-step list
+    expect(verdict.ok).toBe(false);
+    expect(verdict.failedSteps).toContain('quiet-step');
+    expect(calls).toContainEqual({
+      name: 'job', state: 'failed', message: '1 steps failed: quiet-step',
+    });
+    // ...but no heartbeat row is minted for the step itself
+    expect(calls.some(c => c.name === 'quiet-step')).toBe(false);
+  });
+
+  it('runQuiet on success is silent and leaves the job green', async () => {
+    const T = new StepTracker('job');
+    const r = await T.runQuiet('quiet-ok', async () => 7);
+    expect(r).toBe(7);
+    const verdict = T.finish();
+    expect(verdict.ok).toBe(true);
+    expect(calls.some(c => c.name === 'quiet-ok')).toBe(false);
+    expect(calls).toContainEqual({ name: 'job', state: 'success', message: undefined });
+  });
+
+  it('mixes tracked and quiet steps: only the tracked one gets a heartbeat', async () => {
+    const T = new StepTracker('job');
+    await T.run('tracked', async () => { throw new Error('t boom'); });
+    await T.runQuiet('quiet', async () => { throw new Error('q boom'); });
+    const verdict = T.finish();
+    expect(verdict.failedSteps).toEqual(['tracked', 'quiet']);
+    expect(calls).toContainEqual({ name: 'tracked', state: 'failed', message: 't boom' });
+    expect(calls.some(c => c.name === 'quiet')).toBe(false);
+  });
+
+  it('fail() records a caught failure into the job verdict without a per-step heartbeat', async () => {
+    const T = new StepTracker('job');
+    // exactly the converted call-site shape
+    await Promise.reject(new Error('py boom')).catch(e => T.fail('some_fetcher', e));
+    const verdict = T.finish();
+    expect(verdict.ok).toBe(false);
+    expect(verdict.failedSteps).toContain('some_fetcher');
+    expect(calls).toContainEqual({
+      name: 'job', state: 'failed', message: '1 steps failed: some_fetcher',
+    });
+    expect(calls.some(c => c.name === 'some_fetcher')).toBe(false);
+  });
+
   it('captures a throwing step, returns undefined, and never rethrows', async () => {
     const T = new StepTracker('job');
     const r = await T.run('step-b', async () => { throw new Error('boom'); });

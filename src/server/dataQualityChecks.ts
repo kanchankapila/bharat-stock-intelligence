@@ -1290,7 +1290,7 @@ export const DATA_QUALITY_CHECKS: DataQualityCheck[] = [
     category: 'fundamentals',
     critical: false,
     sql: `SELECT MAX(as_of_date) AS last_snapshot, COUNT(DISTINCT symbol) AS symbols
-          FROM fundamentals_history WHERE as_of_date >= date('now','-10 days')`,
+          FROM fundamentals_history WHERE as_of_date::text >= date('now','-10 days')`,
     evaluate: (row, now) => {
       const stale = daysStale(row?.last_snapshot, now);
       if (stale == null) return { status: 'warn', detail: 'No fundamentals_history snapshot in the last 10 days' };
@@ -1304,7 +1304,7 @@ export const DATA_QUALITY_CHECKS: DataQualityCheck[] = [
     category: 'fundamentals',
     critical: false,
     sql: `SELECT MAX(as_of_date) AS last_snapshot, COUNT(DISTINCT symbol) AS symbols
-          FROM analyst_estimates_history WHERE as_of_date >= date('now','-14 days')`,
+          FROM analyst_estimates_history WHERE as_of_date::text >= date('now','-14 days')`,
     evaluate: (row, now) => {
       const stale = daysStale(row?.last_snapshot, now);
       if (stale == null) return { status: 'warn', detail: 'No analyst_estimates_history snapshot in the last 14 days' };
@@ -1320,7 +1320,7 @@ export const DATA_QUALITY_CHECKS: DataQualityCheck[] = [
     category: 'options',
     critical: true,
     sql: `SELECT COUNT(*) AS total, COUNT(atm_iv) AS has_iv, MAX(date) AS last_date
-          FROM stock_options_oi WHERE date >= date('now','-5 days')`,
+          FROM stock_options_oi WHERE date::text >= date('now','-5 days')`,
     evaluate: (row, now) => {
       const stale = daysStale(row?.last_date, now);
       const total = Number(row?.total) || 0;
@@ -1336,7 +1336,7 @@ export const DATA_QUALITY_CHECKS: DataQualityCheck[] = [
     category: 'options',
     critical: false,
     sql: `SELECT COUNT(*) AS bad FROM stock_options_oi
-          WHERE date >= date('now','-5 days') AND pcr IS NOT NULL AND (pcr < 0 OR pcr > 50)`,
+          WHERE date::text >= date('now','-5 days') AND pcr IS NOT NULL AND (pcr < 0 OR pcr > 50)`,
     evaluate: (row) => {
       const bad = Number(row?.bad) || 0;
       if (bad > 0) return { status: 'warn', detail: `${bad} rows have a PCR outside [0, 50] (last 5d) — check for a divide-by-zero` };
@@ -1403,7 +1403,7 @@ export const DATA_QUALITY_CHECKS: DataQualityCheck[] = [
     category: 'outcomes',
     critical: true,
     sql: `SELECT COUNT(*) AS total, COUNT(CASE WHEN outcome = 'PENDING' THEN 1 END) AS pending
-          FROM signal_outcomes WHERE horizon_days = 15 AND signal_date <= date('now','-20 days')
+          FROM signal_outcomes WHERE horizon_days = 15 AND signal_date::text <= date('now','-20 days')
             AND signal_source = 'technical'`,
     evaluate: (row) => {
       const total = Number(row?.total) || 0;
@@ -1502,7 +1502,7 @@ export const DATA_QUALITY_CHECKS: DataQualityCheck[] = [
     category: 'macro',
     critical: false,
     sql: `SELECT MAX(date) AS last_date, COUNT(DISTINCT indicator_name) AS indicators
-          FROM macro_indicators WHERE date >= date('now','-10 days')`,
+          FROM macro_indicators WHERE date::text >= date('now','-10 days')`,
     evaluate: (row, now) => {
       const stale = daysStale(row?.last_date, now);
       if (stale == null) return { status: 'warn', detail: 'No macro_indicators rows in the last 10 days' };

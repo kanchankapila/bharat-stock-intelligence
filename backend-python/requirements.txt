@@ -12,11 +12,14 @@ pandas==2.3.3
 # CI installs THIS file, not the repo-root requirements.txt -- an import-time dep that
 # only reaches the root file is an import error on every clean checkout.
 polars==1.44.1
-# pyarrow: pl.from_pandas() (to_polars_df's pandas-input path) needs it for any pandas
-# DataFrame with a non-numpy-backed column (e.g. plain `object`/string columns, which is
-# most real frames in this codebase) -- without it to_polars_df raises `ImportError:
-# pyarrow is required...` on first real use (AF-20260829-21, found 2026-08-29).
-pyarrow==18.1.0
+# DO NOT add pyarrow here. It was added 2026-09-03 to make to_polars_df()'s pl.from_pandas()
+# path work (AF-20260829-21) and reverted the same day: on this Windows box `import pyarrow`
+# BEFORE `import torch` breaks torch outright -- `OSError: [WinError 1114] ... c10.dll`.
+# Reproduced deterministically: torch-then-pyarrow OK, pyarrow-then-torch fails, and the full
+# pytest suite went red at collection (dl_engine/nlp_engine/scoring_engine). to_polars_df has
+# ZERO call sites, so pyarrow bought nothing and cost the whole torch-dependent ML stack.
+# If to_polars_df is ever genuinely needed, build the frame dtype-aware from numpy/.tolist()
+# instead of pl.from_pandas() -- see AF-20260829-21's own recorded alternative.
 numpy==2.4.6
 scipy==1.17.1
 scikit-learn==1.8.0

@@ -14,7 +14,7 @@ os.environ.setdefault("HF_HUB_DISABLE_PROGRESS_BARS", "1")
 
 try:
     from transformers import pipeline
-except ImportError:
+except (ImportError, OSError):
     pipeline = None
 
 # Bump this version whenever keyword rules or model change.

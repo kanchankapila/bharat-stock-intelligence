@@ -201,6 +201,10 @@ export const JOB_REGISTRY: JobScheduleEntry[] = [
   // critical: this is the only survivorship-free record of the traded universe. Every day it
   // misses is a day whose delisted names are gone for good from nse_universe_history.
   { jobName: 'nse-bhavcopy-fetcher', label: 'ML Daily Ops: NSE Bhavcopy (PIT universe)', cronPattern: '20 13 * * 1-5', graceMinutes: 280, critical: true },
+  // critical: false -- dual-write validation phase (AF-20260903-01): Yahoo's own stock-refresh
+  // write is still the authoritative EOD source, this only reconciles gaps/drift against it.
+  // Not yet load-bearing enough to redden ml-daily-ops on its own if it fails.
+  { jobName: 'reconcile-stock-ohlcv', label: 'ML Daily Ops: Reconcile stock_ohlcv vs bhavcopy', cronPattern: '20 13 * * 1-5', graceMinutes: 280, critical: false },
   { jobName: 'ml-ensemble-incremental', label: 'ML Daily Ops: Ensemble Incremental', cronPattern: '20 13 * * 1-5', graceMinutes: 280, critical: false },
   { jobName: 'ml-ensemble-score', label: 'ML Daily Ops: Ensemble Score', cronPattern: '20 13 * * 1-5', graceMinutes: 280, critical: false },
   { jobName: 'drift-detector', label: 'ML Daily Ops: Drift Detector', cronPattern: '20 13 * * 1-5', graceMinutes: 280, critical: false },

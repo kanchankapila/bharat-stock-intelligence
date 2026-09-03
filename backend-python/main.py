@@ -7,6 +7,14 @@ All heavy engines live in src/server/ (the canonical location). This file:
 
 Port: PYTHON_PORT env var (default 8002).
 """
+
+# Early torch initialization to avoid Windows C10/CUDA DLL collision (WinError 1114)
+# when numerical/database libraries load first.
+try:
+    import torch
+except Exception:
+    pass
+
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse

@@ -7,7 +7,7 @@ import {
   Star, LogIn, TrendingUp, ArrowUpRight, ArrowDownRight, Menu,
   ChevronLeft, ChevronRight, Radio, Settings2, Briefcase, Calendar, Sparkles,
   FlaskConical, Layers, MonitorDot, ChartLine, X, MessageSquare, Gauge, FileDown,
-  Sunrise, Shield, SlidersHorizontal,
+  Sunrise, Shield, SlidersHorizontal, ChartCandlestick,
 } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { useEscapeKey, SkipLink, MAIN_CONTENT_ID } from '../lib/a11y';
@@ -84,6 +84,7 @@ const NAV_GROUPS: NavGroup[] = [
       { icon: TrendingUp, label: 'Options Intel', id: 'options' },
       { icon: TrendingUp, label: 'Options Desk', id: 'options-desk' },
       { icon: Zap,     label: 'Trendlyne',  id: 'trendlyne'   },
+      { icon: ChartCandlestick, label: 'Chart Patterns', id: 'chart-patterns' },
       { icon: Star,    label: 'Premium Screeners', id: 'premium-screeners' },
       { icon: Search,     label: 'Discover',    id: 'discover'    },
       { icon: Briefcase,  label: 'Smart Money', id: 'smart-money' },

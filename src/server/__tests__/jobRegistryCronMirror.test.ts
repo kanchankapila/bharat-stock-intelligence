@@ -155,7 +155,7 @@ describe('JOB_REGISTRY cronPattern/everyMs mirror consistency', () => {
   const mlDailyOpsSubsteps = [
     'fii-dii-fetcher', 'fii-dii-history', 'tickertape-deals', 'finbert-scorer',
     'outcome-resolver-5d', 'outcome-resolver-15d', 'performance-tracker',
-    'densify-feature-matrix', 'nse-bhavcopy-fetcher', 'ml-ensemble-incremental',
+    'densify-feature-matrix', 'nse-bhavcopy-fetcher', 'reconcile-stock-ohlcv', 'ml-ensemble-incremental',
     'ml-ensemble-score', 'drift-detector', 'reward-engine',
     'signal-type-stats', 'news-symbol-link',
   ];
