@@ -440,9 +440,17 @@ async function processIntradayFetcher(_job: Job): Promise<{ skipped: boolean }> 
     // completed handler used to stamp 'success' on this bare return too.
     return { skipped: true };
   }
-  // Fetches 15m bars for all 2328 NSE stocks (last 24h) — ~4 min per run.
-  await runPython('intraday_fetcher.py', ['--lookback-days', '1'], 600_000)
-    .catch(e => console.warn('[QUEUE] intraday_fetcher failed:', (e as Error).message));
+  // Fetches 15m bars for the full NSE universe (last 24h). Budget raised 600s -> 840s
+  // (2026-09-02): the old 600s left a 54s margin over a MEASURED 546s after-hours run
+  // (23:18 IST, 145,006 bars / 2,342 symbols), and market-hours runs exceeded it 6x in one
+  // day — every overage silently discarded a full fetch. 840s still fits inside the 15-min
+  // cadence, and overages now FAIL the job (no .catch) instead of vanishing.
+  //
+  // NO .catch swallow here (fixed 2026-09-02): a timed-out run silently returned success —
+  // job_heartbeat and job_run_history both said 'success' while the fetch wrote nothing, and
+  // the failures only surfaced as "untracked step failures" in the daily digest. A failed
+  // fetcher must propagate so the .on('failed') handler records it like every sibling job.
+  await runPython('intraday_fetcher.py', ['--lookback-days', '1'], 840_000);
   return { skipped: false };
 }
 
@@ -487,6 +495,19 @@ async function processGdeltSentiment(_job: Job): Promise<{ skipped: boolean }> {
   const start = new Date(end.getTime() - 3 * 24 * 60 * 60 * 1000);
   const result = await runGdeltBackfill(start, end, 150);
   console.log(`[QUEUE] gdelt-sentiment: ${result.rows} rows across ${result.companies} companies`);
+  // 2026-09-02: gdelt_sentiment had ZERO rows since 2026-08-24 while this job reported
+  // 'success' daily — live test showed api.gdeltproject.org dropping this machine's IP
+  // entirely (www.gdeltproject.org answers 301 in 0.5s; the API host times out on IPv4 and
+  // IPv6), and fetchGdeltTone converts every failed request into [] so a fully-blocked run
+  // and a healthy one are indistinguishable at this layer. "N companies attempted, 0 rows
+  // written" is a failed run, not a quiet day — fail the job so the freshness check and the
+  // digest tell the truth. A genuinely news-less GDELT day is not a thing at n=150 companies.
+  if (result.companies > 0 && result.rows === 0) {
+    throw new Error(
+      `gdelt-sentiment wrote 0 rows for ${result.companies} companies — ` +
+      `every response parsed empty (API unreachable/throttled/blocked for this IP)`,
+    );
+  }
   return { skipped: false };
 }
 

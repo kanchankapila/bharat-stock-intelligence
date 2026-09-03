@@ -121,15 +121,17 @@ export async function cacheGet<T>(key: string): Promise<T | null> {
 }
 
 export async function cacheSet(key: string, value: unknown, ttlSeconds: number): Promise<void> {
+  // Write through to L1 even when Redis is up. cacheGet promotes Redis hits into L1 for 30s,
+  // so a Redis-only set followed by an L1-hit read used to serve the STALE pre-write value
+  // for up to 30s (AF-20260902-18). Both tiers now always agree.
+  memSet(key, value, ttlSeconds);
   if (redisAvailable && redis) {
     try {
       await redis.setex(key, ttlSeconds, JSON.stringify(value));
-      return;
     } catch {
-      // fall through to memory
+      // L1 already updated — Redis write failure must not surface as a cache miss
     }
   }
-  memSet(key, value, ttlSeconds);
 }
 
 export async function cacheDel(key: string): Promise<void> {

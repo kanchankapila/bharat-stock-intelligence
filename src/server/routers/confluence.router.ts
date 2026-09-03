@@ -3,6 +3,7 @@ import { dbGet, dbAll } from '../dbAsync';
 import { router, publicProcedure, adminProcedure } from '../trpc';
 import { computeConfluenceSignals, getLatestConfluenceSignals } from '../confluenceEngine';
 import { usePostgres } from '../pgConfig';
+import { latestComputedAt, invalidateLatestComputedAt } from '../latestComputedAt';
 
 // Was `DATE(cs.computed_at)::text = so.signal_date` in both getConfluenceOutcomes queries below
 // -- wrapping confluence_signals' TimescaleDB partitioning column in DATE() defeats both
@@ -21,23 +22,10 @@ export function confluenceJoinOnSignalDate(): string {
   return `cs.computed_at >= so.signal_date::timestamptz AND cs.computed_at < so.signal_date::timestamptz + interval '1 day'`;
 }
 
-// Cached latest computed_at for confluence_signals — avoids a MAX() scan on every request.
-// TTL, not invalidate-on-write-only (trpc-surface-review, 2026-08-14): the real producer is the
-// confluence-compute BullMQ job, which runs every 30 minutes and never calls the admin-only
-// refreshConfluenceSignals() mutation this used to rely on for invalidation -- confluence_signals
-// is insert-only so this doesn't go empty the way scoring.router.ts's equivalent bug did, but it
-// silently served an increasingly stale batch with no staleness indicator. Same 5-minute TTL
-// convention as commandCenter.router.ts's _urLatestAtCC / scoring.router.ts's _urLatestAt.
-let _confluenceLatestAt: string | null = null;
-let _confluenceLatestAtExp = 0;
-
+// Cached latest computed_at for confluence_signals — shared TTL probe (consolidated
+// 2026-09-02); the TTL-rationale history lives in latestComputedAt.ts.
 async function confluenceLatestAt(): Promise<string | null> {
-  if (!_confluenceLatestAt || Date.now() > _confluenceLatestAtExp) {
-    const row = await dbGet<{ ts: string }>('SELECT MAX(computed_at) AS ts FROM confluence_signals');
-    _confluenceLatestAt = row?.ts ?? null;
-    _confluenceLatestAtExp = Date.now() + 5 * 60_000;
-  }
-  return _confluenceLatestAt;
+  return latestComputedAt('confluence_signals');
 }
 
 export const confluenceRouter = router({
@@ -116,7 +104,7 @@ export const confluenceRouter = router({
   refreshConfluenceSignals: adminProcedure
     .mutation(async () => {
       const result = await computeConfluenceSignals();
-      _confluenceLatestAt = null; // invalidate cache so next read re-queries MAX()
+      invalidateLatestComputedAt('confluence_signals'); // invalidate cache so next read re-queries MAX()
       return { success: true, ...result };
     }),
 

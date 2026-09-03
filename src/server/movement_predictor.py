@@ -48,9 +48,31 @@ import numpy as np
 import pandas as pd
 
 from db_compat import connect, read_df, translate
-from breakout_classifier import compute_ohlcv_features, FEATURE_COLS as OHLCV_FEATURE_COLS
+from breakout_classifier import compute_ohlcv_features, FEATURE_COLS as BC_FEATURE_COLS
 from model_promotion import decide_promotion_with_nan_guard, file_staleness_override_applies
 import sys
+
+# movement_predictor's feature set is deliberately FROZEN at breakout_classifier's OHLCV-only
+# features. breakout_classifier.FEATURE_COLS gained sector-relative columns
+# (rs_vs_sector_21d/63d, 2026-09-02) that compute_ohlcv_features() does not produce -- the
+# shared constant silently changed shape under this importer and the nightly train died on
+# KeyError in _lag_by_symbol (2026-09-02 20:47 IST, job_run_history). Pinning the explicit
+# list keeps this model's feature set stable across upstream extensions; adopting a new
+# feature here is a measured modelling decision, not a silent import.
+OHLCV_FEATURE_COLS = [
+    "ret_5d", "ret_21d", "ret_63d", "ret_126d",
+    "rs_rank_21d", "rs_rank_63d",
+    "dist_sma20", "dist_sma50", "dist_sma200", "above_sma200",
+    "rsi14", "hv20", "vol_ratio", "atr_pct", "dist_52w_high", "range_pct_10d",
+    "dist_20d_high", "vol_surge_5v20", "range_contraction",
+    "up_vol_ratio_10", "consec_up", "hv_ratio_10_60",
+]
+_missing = [c for c in OHLCV_FEATURE_COLS if c not in BC_FEATURE_COLS]
+if _missing:
+    raise ImportError(
+        f"breakout_classifier no longer defines OHLCV feature(s) {_missing} -- "
+        "movement_predictor's frozen list is stale; update it deliberately, not silently"
+    )
 
 TOP_PCT = 0.90            # top decile of day-range = "high movement"
 MIN_PRICE = 20.0

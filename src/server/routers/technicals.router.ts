@@ -269,22 +269,28 @@ export const technicalsRouter = router({
       return result;
     }),
 
+  // Both proxy alphaquant :8002 per call — getTvScreener triggers a full TradingView scan on
+  // the Python side on EVERY request. 60s cache absorbs page-remount re-requests; a hit is
+  // never staler than the chart's own refresh cycle, and upstream errors are not cached
+  // (fetchWithCache drops failed fetches).
   getTvTa: publicProcedure
     .input(z.object({ symbol: z.string(), exchange: z.string().optional().default('NSE') }))
-    .query(async ({ input }) => {
-      try {
-        return await alphaQuant.getTvTa({ symbol: input.symbol, exchange: input.exchange });
-      } catch (err: any) {
-        throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: err.message });
-      }
-    }),
+    .query(({ input }) =>
+      fetchWithCache(`tv:ta:${input.exchange}:${input.symbol}`, async () => {
+        try {
+          return await alphaQuant.getTvTa({ symbol: input.symbol, exchange: input.exchange });
+        } catch (err: any) {
+          throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: err.message });
+        }
+      }, 60)),
 
   getTvScreener: publicProcedure
-    .query(async () => {
-      try {
-        return await alphaQuant.getTvScreener();
-      } catch (err: any) {
-        throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: err.message });
-      }
-    }),
+    .query(() =>
+      fetchWithCache('tv:screener', async () => {
+        try {
+          return await alphaQuant.getTvScreener();
+        } catch (err: any) {
+          throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: err.message });
+        }
+      }, 60)),
 });

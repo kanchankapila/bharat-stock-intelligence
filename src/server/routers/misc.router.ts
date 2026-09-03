@@ -17,19 +17,12 @@ import {
   type FnoIndexId,
 } from "../marketIntelService";
 import { router, publicProcedure, expensiveProcedure } from "../trpc";
+import { latestComputedAt } from "../latestComputedAt";
 
-// TTL cache for MAX(computed_at), same pattern as commandCenter.router.ts/scoring.router.ts --
-// each router keeps its own local copy rather than sharing a module, matching this codebase's
-// existing convention for this helper.
-let _urLatestAtMisc: string | null = null;
-let _urLatestAtMiscExp = 0;
+// Shared TTL probe (consolidated 2026-09-02 from the per-router copies this comment used to
+// document) — same 5-minute TTL and CAST-to-TEXT semantics.
 async function urLatestAtMisc(): Promise<string | null> {
-  if (!_urLatestAtMisc || Date.now() > _urLatestAtMiscExp) {
-    const row = await dbGet<{ ts: string }>('SELECT CAST(MAX(computed_at) AS TEXT) AS ts FROM unified_recommendations');
-    _urLatestAtMisc = row?.ts ?? null;
-    _urLatestAtMiscExp = Date.now() + 5 * 60_000;
-  }
-  return _urLatestAtMisc;
+  return latestComputedAt('unified_recommendations');
 }
 
 export const miscRouter = router({

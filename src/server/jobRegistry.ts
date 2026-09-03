@@ -225,6 +225,10 @@ export const JOB_REGISTRY: JobScheduleEntry[] = [
   // job-digest (queues.ts '20 17 * * *', runs all 7 days)
   { jobName: 'job-digest', label: 'Daily Job Digest (Telegram)', cronPattern: '20 17 * * *', graceMinutes: 60, critical: false },
 
+  // Second daily job-digest send (digests.jobs.ts '45 2 * * *' = 08:15 IST, added 2026-09-02):
+  // pre-open morning digest under its own heartbeat so lateness is judged per schedule.
+  { jobName: 'job-digest-morning', label: 'Morning Job Digest (Telegram)', cronPattern: '45 2 * * *', graceMinutes: 60, critical: false },
+
   // Stock-recommendation digest. Runs after unified-ranker ('0 17 * * 1-5' = 22:30 IST) so it
   // reads the freshly-built ranking. Critical: this is the user-facing output of the whole
   // pipeline, and its predecessor (the websocketService confidence>=85 alert) went silent for

@@ -3,24 +3,16 @@ import { dbGet, dbAll } from "../dbAsync";
 import { getTopRatedStocks, syncAndScore, getStockScoreDetail } from "../scoringService";
 import { crossSourceFilter, regimeSectorFilter, qualityOversoldScanner } from "../strategySignalsService";
 import { router, publicProcedure, adminProcedure } from "../trpc";
-import { cacheGet } from "../cacheService";
+import { cacheGet, fetchWithCache } from "../cacheService";
+import { latestComputedAt, invalidateLatestComputedAt } from "../latestComputedAt";
 
 // Cached latest computed_at for unified_recommendations — avoids MAX() scan on every strategy query.
-// TTL, not invalidate-on-write-only (trpc-surface-review, 2026-08-14): the real refresh path is
-// unified_ranker.py's own BullMQ schedule, which never calls the admin-only triggerStockScoring
-// mutation this used to rely on for invalidation -- once a fresh computed_at landed, the join in
-// getBestComboSignals stopped matching this stale cached value and requireUnifiedRec silently
-// filtered every row out (stocks: []), with no error. Matches commandCenter.router.ts's
-// _urLatestAtCC, which already carries this exact 5-minute TTL for the same reason.
-let _urLatestAt: string | null = null;
-let _urLatestAtExp = 0;
+// TTL rationale (trpc-surface-review, 2026-08-14; the silent-empty-join incident) now lives in
+// latestComputedAt.ts, which carries the single shared copy of this probe. The CAST-to-TEXT
+// form is deliberate here: the value is bound into `ur.computed_at = ?` and TEXT preserves the
+// stored precision that a JS Date round-trip would truncate.
 async function urLatestAt(): Promise<string | null> {
-  if (!_urLatestAt || Date.now() > _urLatestAtExp) {
-    const row = await dbGet<{ ts: string }>('SELECT MAX(computed_at) AS ts FROM unified_recommendations');
-    _urLatestAt = row?.ts ?? null;
-    _urLatestAtExp = Date.now() + 5 * 60_000;
-  }
-  return _urLatestAt;
+  return latestComputedAt('unified_recommendations');
 }
 
 // ETNow screener IDs used by the investment picks strategy
@@ -50,7 +42,7 @@ export const scoringRouter = router({
 
   triggerStockScoring: adminProcedure
     .mutation(async () => {
-      _urLatestAt = null; // unified_ranker will write new rows
+      invalidateLatestComputedAt('unified_recommendations'); // unified_ranker will write new rows
       return syncAndScore();
     }),
 
@@ -141,8 +133,12 @@ export const scoringRouter = router({
     .input(z.object({ maxRsi: z.number().optional().default(35), maxScore: z.number().optional().default(65) }))
     .query(({ input }) => qualityOversoldScanner(input.maxRsi, input.maxScore)),
 
+  // Was uncached while polled every 5 min by InvestmentStrategy.tsx -- the price joins +
+  // screener GROUP_CONCATs reran from scratch on every request. TTL matched to the frontend's
+  // own poll interval (precedent: misc.router.ts's getTradeDecisionCockpitData), so a hit
+  // never serves data older than one poll cycle.
   getStrategyPicks: publicProcedure
-    .query(async () => {
+    .query(() => fetchWithCache('scoring:strategy-picks', async () => {
       let liveCache: Record<string, any> = {};
       try {
         const cached = await cacheGet('live-stocks-bulk');
@@ -156,29 +152,24 @@ export const scoringRouter = router({
         return { price: eodClose, priceSource: 'eod' };
       };
 
-      // Was `JOIN (SELECT symbol, MAX(date) AS max_date ... GROUP BY symbol) latest ON ...` --
-      // a full GROUP BY aggregation over the entire stock_ohlcv hypertable, then a second pass
-      // re-joining back to the same table to fetch the close. ROW_NUMBER() is this codebase's
-      // established cross-dialect equivalent of DISTINCT ON (Postgres-only, doesn't translate
-      // to SQLite -- see confluenceEngine.ts's techMap comment); a single pass over the
-      // (symbol, date DESC)-indexed rows, same result.
-      const latestPriceCte = `
-        WITH latest_prices AS (
-          SELECT symbol, close FROM (
-            SELECT symbol, close,
-                   ROW_NUMBER() OVER (PARTITION BY symbol ORDER BY date DESC) AS rn
-            FROM stock_ohlcv
-          ) t WHERE rn = 1
-        )
+      // Latest EOD close per pick. Was `(SELECT symbol, MAX(date) ... GROUP BY symbol)` then a
+      // ROW_NUMBER() window CTE -- both scanned the ENTIRE 42M-row stock_ohlcv hypertable,
+      // twice per call (live-verified 2026-09-03: ~2.8s per query). A per-symbol LATERAL
+      // LIMIT 1 over the (symbol, date DESC) index is bit-identical (A/B diffed live, zero
+      // differences on every shared symbol) in ~40ms.
+      const latestPriceJoin = `
+        LEFT JOIN LATERAL (
+          SELECT o.close FROM stock_ohlcv o WHERE o.symbol = n.symbol ORDER BY o.date DESC LIMIT 1
+        ) lp ON true
       `;
-      const invRows = await dbAll<any>(`${latestPriceCte}
+      const invRows = await dbAll<any>(`
         SELECT n.symbol, n.name as "companyName", n.sector, lp.close as "currentPrice",
                GROUP_CONCAT(DISTINCT es.screener_id) as et_screeners,
                GROUP_CONCAT(DISTINCT ms.scan_id) as mc_screeners
         FROM nse_stocks n
         JOIN etnow_screener_stocks es ON n.symbol = es.symbol
         LEFT JOIN moneycontrol_screener_stocks ms ON n.symbol = ms.symbol
-        LEFT JOIN latest_prices lp ON lp.symbol = n.symbol
+        ${latestPriceJoin}
         WHERE es.screener_id IN (${ET_INVESTMENT_IDS.map(() => '?').join(',')})
         GROUP BY n.symbol, n.name, n.sector, lp.close
         HAVING COUNT(DISTINCT es.screener_id) >= 2
@@ -207,7 +198,7 @@ export const scoringRouter = router({
         };
       }).filter(p => p.score > 30).sort((a, b) => b.score - a.score);
 
-      const intradayRows = await dbAll<any>(`${latestPriceCte}
+      const intradayRows = await dbAll<any>(`
         SELECT n.symbol, n.name as "companyName", n.sector, lp.close as "currentPrice",
                GROUP_CONCAT(DISTINCT ts.screener_id) as tl_screeners,
                GROUP_CONCAT(DISTINCT ms.scan_id) as mc_screeners
@@ -216,7 +207,7 @@ export const scoringRouter = router({
         JOIN trendlyne_screeners tls ON tls.screener_id = ts.screener_id
         LEFT JOIN screener_master sm ON sm.scan_id = ts.screener_id AND sm.source = 'Trendlyne'
         LEFT JOIN moneycontrol_screener_stocks ms ON n.symbol = ms.symbol
-        LEFT JOIN latest_prices lp ON lp.symbol = n.symbol
+        ${latestPriceJoin}
         WHERE tls.timeframe = 'intraday' OR sm.inferred_timeframe = 'intraday'
         GROUP BY n.symbol, n.name, n.sector, lp.close
         HAVING GROUP_CONCAT(DISTINCT ts.screener_id) IS NOT NULL
@@ -239,7 +230,7 @@ export const scoringRouter = router({
       }).sort((a, b) => b.score - a.score);
 
       return { investmentPicks, intradayPicks };
-    }),
+    }, 300)),
 
   getBestComboSignals: publicProcedure
     .input(z.object({

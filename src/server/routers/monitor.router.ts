@@ -277,9 +277,14 @@ async function getScriptStats(scriptId: ScriptId): Promise<Record<string, number
         return w ? { winRate: (w.optimized_win_rate * 100).toFixed(1) + '%', improvement: w.improvement_pct?.toFixed(2) + '%' } : {};
       }
       case 'ohlcv-backfill':
+        // Display-only magnitudes — a live COUNT(*) here scanned the 42M-row hypertable on
+        // every dashboard refresh (AF-20260902-16). The planner's own estimates
+        // (pg_class.reltuples / pg_stats.n_distinct, kept current by autovacuum) are the
+        // cheap honest source for a stats card. PostgreSQL stores negative n_distinct as a
+        // fraction of reltuples, so normalize it before exposing the estimate.
         return {
-          symbols: ((await dbGet("SELECT COUNT(DISTINCT symbol) as n FROM stock_ohlcv")) as any)?.n ?? 0,
-          rows: ((await dbGet("SELECT COUNT(*) as n FROM stock_ohlcv")) as any)?.n ?? 0,
+          symbols: ((await dbGet("SELECT CASE WHEN s.n_distinct < 0 THEN CEIL(-s.n_distinct * c.reltuples) ELSE s.n_distinct END::bigint AS n FROM pg_stats s JOIN pg_class c ON c.relname = s.tablename AND c.relnamespace = current_schema()::regnamespace WHERE s.schemaname = current_schema() AND s.tablename = 'stock_ohlcv' AND s.attname = 'symbol'")) as any)?.n ?? 0,
+          rows: ((await dbGet("SELECT reltuples::bigint AS n FROM pg_class WHERE relname = 'stock_ohlcv' AND relnamespace = current_schema()::regnamespace")) as any)?.n ?? 0,
         };
       case 'regime-detector': {
         const r = await dbGet("SELECT regime, COUNT(*) as n FROM market_regimes GROUP BY regime ORDER BY n DESC LIMIT 1") as any;
@@ -287,8 +292,8 @@ async function getScriptStats(scriptId: ScriptId): Promise<Record<string, number
         return r ? { days: total, latest: r.regime } : { days: 0 };
       }
       case 'feature-engineering': {
-        const sRow = await dbGet("SELECT COUNT(DISTINCT symbol) as n FROM feature_store") as any;
-        const rRow = await dbGet("SELECT COUNT(*) as n FROM feature_store") as any;
+        const sRow = await dbGet("SELECT CASE WHEN s.n_distinct < 0 THEN CEIL(-s.n_distinct * c.reltuples) ELSE s.n_distinct END::bigint AS n FROM pg_stats s JOIN pg_class c ON c.relname = s.tablename AND c.relnamespace = current_schema()::regnamespace WHERE s.schemaname = current_schema() AND s.tablename = 'feature_store' AND s.attname = 'symbol'") as any;
+        const rRow = await dbGet("SELECT reltuples::bigint AS n FROM pg_class WHERE relname = 'feature_store' AND relnamespace = current_schema()::regnamespace") as any;
         return {
           symbols: sRow?.n ?? 0,
           rows: rRow?.n ?? 0,

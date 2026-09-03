@@ -1807,6 +1807,13 @@ export const DATA_QUALITY_CHECKS: DataQualityCheck[] = [
     // explicit rather than derived: these are a handful of known model outputs, and a wrong
     // derivation (matching any *_probability, say) would silently drop coverage the day someone
     // renames one.
+    // REMOVED cs_score 2026-09-02: cs_ranker was deliberately DECOMMISSIONED 2026-08-31 (live CV
+    // AUC 0.176, worse than random — see dataQualityChecks.ts's model-registry note and
+    // queues.ts's cs_ranker removal comments); its daily --score job is unscheduled, so the
+    // column is now permanently NULL going forward and this check can only ever report it dead.
+    // Third+ instance of recurring-bugs.md's "deleting a thing does not delete the checks
+    // pointing at it" — the model-registry freshness check was removed for cs_ranker the same
+    // day, but this one was missed and false-alarmed for two days before the digest surfaced it.
     // Measured on the last ENRICHED day, not the last day with rows. These columns are written
     // by ml-daily-ops in the EVENING, enriching the previous completed session -- so the most
     // recent date in the table is always the one whose enrichment has not run yet, and reading
@@ -1833,7 +1840,6 @@ export const DATA_QUALITY_CHECKS: DataQualityCheck[] = [
           SELECT COUNT(*) AS rows,
                  COUNT(win_probability)            AS win_probability,
                  COUNT(calibrated_win_probability) AS calibrated_win_probability,
-                 COUNT(cs_score)                   AS cs_score,
                  COUNT(flyer_probability)          AS flyer_probability,
                  COUNT(movement_probability)       AS movement_probability,
                  COUNT(breakout_probability)       AS breakout_probability
@@ -1846,7 +1852,7 @@ export const DATA_QUALITY_CHECKS: DataQualityCheck[] = [
       // bar reports a false failure 6 days in 7. A weekly column needs a weekly-cadence check,
       // not this one. measurement.md also records flyer_classifier as AUC 0.81 / IC -0.041,
       // i.e. a known-bad model -- worth deciding whether it should exist at all.
-      const cols = ['win_probability', 'calibrated_win_probability', 'cs_score',
+      const cols = ['win_probability', 'calibrated_win_probability',
                     'movement_probability', 'breakout_probability'];
       const dead = cols.filter(c => Number(row?.[c] ?? 0) === 0);
       const thin = cols.filter(c => {

@@ -171,6 +171,7 @@ describe('JOB_REGISTRY.graceMinutes consistency', () => {
     'trendlyne-ratios-monthly': "jobName: 'trendlyne-ratios-monthly-check'",
     'dl-feature-refresh': "jobName: 'dl-feature-daily'",
     'job-digest': "jobName: 'job-digest-daily'",
+    'job-digest-morning': "jobName: 'job-digest-morning'",
     'recommendations-digest': "jobName: 'recommendations-digest-daily'",
     'data-quality-daily': "'data-quality-daily-run'",
   };

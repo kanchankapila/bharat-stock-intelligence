@@ -94,32 +94,45 @@ def run() -> dict:
 
         weights_changed = len(changes) > 0
 
-        # Trigger full optimizer if needed
-        if full_optimizer:
-            try:
-                requests.post(ALPHAQUANT_URL,
-                               json={"horizon_days": 15, "iterations": 200, "apply": True},
-                               timeout=30 * 60)
-                print("[OPTIMIZER] Full optimizer triggered via AlphaQuant API")
-            except Exception as exc:
-                print(f"[OPTIMIZER] Full optimizer call failed: {exc}")
+        # Commit weight changes BEFORE the long optimizer call below -- the same connection
+        # must not sit idle-in-transaction holding screener_master row locks for up to 30
+        # minutes while requests.post runs.
+        conn.commit()
 
-        underperforming = {tf: r for tf, r in avg_rates.items() if r < 55}
+    # ── DB connection intentionally closed here ──
+    # 2026-09-02 fix (same class as strategy_optimizer.py 2026-08-25/26 and
+    # backtest_optimizer.py 2026-08-27): one connection checked out at the top and reused
+    # AFTER a 25-30 min requests.post died server-side (pool_pre_ping only validates at
+    # checkout), so the final INSERT failed and the whole run reported failure — every
+    # full_optimizer-triggered run is exposed, and one died exactly this way 2026-09-02
+    # 12:26 UTC (job_run_history). The report INSERT now runs on a fresh connection.
+    underperforming = {tf: r for tf, r in avg_rates.items() if r < 55}
 
-        tf_table = "\n".join(
-            f"  {tf}: {r:.1f}% win rate" for tf, r in avg_rates.items()
-        )
-        prompt = (
-            f"You are a quantitative portfolio optimizer for Indian equities.\n"
-            f"30-day performance by timeframe:\n{tf_table}\n\n"
-            f"Weight adjustments made: {json.dumps(changes)}\n"
-            f"Full optimizer triggered: {'yes' if full_optimizer else 'no'}\n\n"
-            f"Write a 4-sentence optimization report: performance trend assessment, "
-            f"which adjustments were made and the rationale, expected improvement, "
-            f"and one metric to monitor over the next 5 trading days."
-        )
-        narrative = get_narrative(prompt)
+    # Trigger full optimizer if needed
+    if full_optimizer:
+        try:
+            requests.post(ALPHAQUANT_URL,
+                           json={"horizon_days": 15, "iterations": 200, "apply": True},
+                           timeout=30 * 60)
+            print("[OPTIMIZER] Full optimizer triggered via AlphaQuant API")
+        except Exception as exc:
+            print(f"[OPTIMIZER] Full optimizer call failed: {exc}")
 
+    tf_table = "\n".join(
+        f"  {tf}: {r:.1f}% win rate" for tf, r in avg_rates.items()
+    )
+    prompt = (
+        f"You are a quantitative portfolio optimizer for Indian equities.\n"
+        f"30-day performance by timeframe:\n{tf_table}\n\n"
+        f"Weight adjustments made: {json.dumps(changes)}\n"
+        f"Full optimizer triggered: {'yes' if full_optimizer else 'no'}\n\n"
+        f"Write a 4-sentence optimization report: performance trend assessment, "
+        f"which adjustments were made and the rationale, expected improvement, "
+        f"and one metric to monitor over the next 5 trading days."
+    )
+    narrative = get_narrative(prompt)
+
+    with ENGINE.connect() as conn:
         conn.execute(text(translate("""
             INSERT INTO agent_optimizer_reports
               (run_date, trigger, baseline_win_rate, new_win_rate,

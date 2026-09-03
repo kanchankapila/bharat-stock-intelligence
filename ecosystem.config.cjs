@@ -21,10 +21,11 @@ const VENV_PY = isWin
   ? path.resolve(__dirname, 'backend-python', 'venv', 'Scripts', 'python.exe')
   : path.resolve(__dirname, 'backend-python', 'venv', 'bin', 'python');
 
-// Inject .env into EVERY service. The Node app loads dotenv itself, but the three Python
-// services (AlphaQuant, ml-api, chatbot) only see what we hand them — without USE_POSTGRES
-// they default to SQLite and write/read the abandoned database.sqlite while the app is on
-// Postgres (the split-brain incident). Parsing .env here keeps all four on one DB engine.
+// Inject .env into EVERY service. The Node app loads dotenv itself, but the Python services
+// (AlphaQuant, ml-api, chatbot) only see what we hand them — without POSTGRES_URL they cannot
+// connect at all (SQLite has been fully decommissioned since 2026-08-17; the split-brain
+// incident this guard originally came from predates that). Parsing .env here keeps every
+// service on one DB engine.
 let dotenvVars = {};
 try {
   dotenvVars = require('dotenv').parse(fs.readFileSync(path.resolve(__dirname, '.env')));

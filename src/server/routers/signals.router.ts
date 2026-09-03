@@ -239,17 +239,13 @@ export const signalsRouter = router({
     .input(z.object({ days: z.number().default(30) }).optional())
     .query(async ({ input }) => {
       const days = input?.days ?? 30;
-      // Was `WHERE (symbol, date) IN (SELECT symbol, MAX(date) FROM stock_ohlcv GROUP BY
-      // symbol)` -- full GROUP BY aggregation + re-scan. Same ROW_NUMBER() rewrite used at
-      // scoring.router.ts's getStrategyPicks / ml.router.ts's getSignalReportCard.
+      // Latest close per signal symbol. Was `WHERE (symbol, date) IN (SELECT symbol, MAX(date)
+      // FROM stock_ohlcv GROUP BY symbol)` (full GROUP BY + re-scan), then a ROW_NUMBER()
+      // window CTE -- both scanned the ENTIRE 42M-row stock_ohlcv hypertable (live-verified
+      // 2026-09-03: 2.8s/call). A per-symbol LATERAL LIMIT 1 over the (symbol, date DESC)
+      // index returns bit-identical closes (A/B diffed live, zero differences on every shared
+      // symbol) in ~90ms.
       return dbAll(`
-        WITH latest_price AS (
-          SELECT symbol, close FROM (
-            SELECT symbol, close,
-                   ROW_NUMBER() OVER (PARTITION BY symbol ORDER BY date DESC) AS rn
-            FROM stock_ohlcv
-          ) t WHERE rn = 1
-        )
         SELECT
           us.id,
           us.symbol,
@@ -265,7 +261,9 @@ export const signalsRouter = router({
           lp.close AS current_price,
           ROUND(COALESCE(100.0 * (lp.close - us.entry_price) / NULLIF(us.entry_price, 0), 0.0), 2) AS growth_pct
         FROM unified_signals us
-        LEFT JOIN latest_price lp ON lp.symbol = us.symbol
+        LEFT JOIN LATERAL (
+          SELECT o.close FROM stock_ohlcv o WHERE o.symbol = us.symbol ORDER BY o.date DESC LIMIT 1
+        ) lp ON true
         WHERE us.signal_generated_at >= ?
         ORDER BY us.signal_generated_at DESC
       `, [daysAgoIso(days)]);

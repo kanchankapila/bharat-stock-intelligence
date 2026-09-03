@@ -25,15 +25,29 @@ const MIN_RUNS_FOR_FAIL_RATE = 5;
  *  restart -- fixed in registerJob.ts, but nothing was watching for this SHAPE of problem
  *  recurring (here or in any other job routed through the same helper). These two checks are
  *  the deterministic, dailyable slice of that audit; the reasoning-heavy part (root-causing a
- *  new pattern) still needs an actual /job-runtime-audit pass by hand. */
+ *  new pattern) still needs an actual /job-runtime-audit pass by hand.
+ *
+ *  Rewritten 2026-09-02 to read job_run_history over a rolling 7-day window instead of
+ *  job_heartbeat's LIFETIME run_count/fail_count: the lifetime ratio reported long-repaired
+ *  jobs as currently failing (2026-09-01 digest showed deploy-drift "failing 25% (186/737)" —
+ *  a job decommissioned 2026-08-28 with zero runs since — and stock-scoring/unified-ranker/
+ *  data-quality-daily all at ~30% off failures mostly weeks old). job_run_history rows exist
+ *  per actual run (job_name/status/ran_at), so removed jobs drop out of the window naturally
+ *  and the percentage means "is this job failing NOW". */
 async function getJobFailRateFlags(): Promise<string[]> {
-  const rows = await dbAll<{ job_name: string; run_count: number; fail_count: number }>(
-    'SELECT job_name, run_count, fail_count FROM job_heartbeat WHERE run_count >= ?',
+  const rows = await dbAll<{ job_name: string; total: number; fails: number }>(
+    `SELECT job_name,
+            COUNT(*) AS total,
+            COUNT(*) FILTER (WHERE status <> 'success') AS fails
+     FROM job_run_history
+     WHERE ran_at > now() - interval '7 days'
+     GROUP BY job_name
+     HAVING COUNT(*) >= ?`,
     [MIN_RUNS_FOR_FAIL_RATE],
   );
   return rows
-    .filter(r => r.fail_count / r.run_count > FAIL_RATE_WARN)
-    .map(r => `📉 \`${sanitizeMarkdown(r.job_name)}\` failing ${Math.round(100 * r.fail_count / r.run_count)}% of runs (${r.fail_count}/${r.run_count})`);
+    .filter(r => r.fails / r.total > FAIL_RATE_WARN)
+    .map(r => `📉 \`${sanitizeMarkdown(r.job_name)}\` failing ${Math.round(100 * r.fails / r.total)}% of runs (${r.fails}/${r.total}, last 7d)`);
 }
 
 /** Counts REAL catch-up queuings (not the already-deduped "skipping duplicate" path — see

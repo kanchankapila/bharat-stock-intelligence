@@ -27,8 +27,9 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 from movement_predictor import (
     build_movement_labels, _lag_by_symbol, _make_model, _purged_oof,
     ENRICH_FEATURE_COLS, MIN_PRICE, MIN_TURNOVER_CR, TOP_PCT,
+    OHLCV_FEATURE_COLS,
 )
-from breakout_classifier import compute_ohlcv_features, FEATURE_COLS as OHLCV_FEATURE_COLS
+from breakout_classifier import compute_ohlcv_features
 
 
 def _long_ohlcv(data: dict, n_days: int) -> pd.DataFrame:

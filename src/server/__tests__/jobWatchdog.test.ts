@@ -316,9 +316,12 @@ describe('buildDailyDigest', () => {
   });
 
   // job-runtime-audit (2026-08-19): the deterministic, dailyable slice of that audit.
+  // 2026-09-02: source switched from job_heartbeat lifetime ratios to job_run_history's
+  // rolling-7-day window (a decommissioned job's lifetime ratio was being reported as
+  // current health); the mock rows follow the new query shape.
   it('flags a job whose failure rate crosses the warn threshold with enough runs to mean something', async () => {
     mockDbAll.mockResolvedValue([
-      { job_name: 'ml-daily-ops', run_count: 89, fail_count: 44 },
+      { job_name: 'ml-daily-ops', total: 89, fails: 44 },
     ]);
     const digest = await buildDailyDigest(new Date('2026-07-02T15:30:00Z'));
     expect(digest).toContain('Job-runtime health');
@@ -328,10 +331,10 @@ describe('buildDailyDigest', () => {
 
   it('does not flag a job below the fail-rate threshold or with too few runs to judge', async () => {
     mockDbAll.mockResolvedValue([
-      { job_name: 'healthy-job', run_count: 40, fail_count: 2 }, // 5% -- fine
+      { job_name: 'healthy-job', total: 40, fails: 2 }, // 5% -- fine
     ]);
-    // run_count < MIN_RUNS_FOR_FAIL_RATE is filtered at the query level (mocked here as if the
-    // SQL WHERE already excluded it), so only the healthy row reaches the flag logic.
+    // fewer than MIN_RUNS_FOR_FAIL_RATE total runs is filtered at the query level (the HAVING
+    // clause), so only the healthy row reaches the flag logic.
     const digest = await buildDailyDigest(new Date('2026-07-02T15:30:00Z'));
     expect(digest).not.toContain('Job-runtime health');
   });

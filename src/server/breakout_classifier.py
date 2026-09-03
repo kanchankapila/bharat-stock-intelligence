@@ -635,8 +635,6 @@ def sector_ablation() -> dict:
     return {"ran": True, "n_dates": n_dates, "n_rows": len(augmented_df),
             "baseline_auc": baseline["auc"], "baseline_test_auc": baseline["test_auc"],
             "augmented_auc": augmented["auc"], "augmented_test_auc": augmented["test_auc"]}
-
-
 def delivery_ablation() -> dict:
     """Apples-to-apples measurement of whether stock_delivery_data helps, restricted to the
     ~300 dates it actually covers (2025-06-20 onward) so both arms train/validate on the

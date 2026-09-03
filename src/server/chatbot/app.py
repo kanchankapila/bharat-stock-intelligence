@@ -167,4 +167,8 @@ async def trigger_ingest():
 
 
 if __name__ == "__main__":
-    uvicorn.run("app:app", host="0.0.0.0", port=CHATBOT_PORT, reload=False)
+    # Loopback only, like every other service in this stack (python_api, worker_service,
+    # backend-python). The only consumers are the localhost browser client
+    # (StockChatbot.tsx hardcodes http://localhost:8001) and the nightly reingest job —
+    # binding 0.0.0.0 exposed /ingest and the LLM-spending /chat to the LAN for nothing.
+    uvicorn.run("app:app", host="127.0.0.1", port=CHATBOT_PORT, reload=False)

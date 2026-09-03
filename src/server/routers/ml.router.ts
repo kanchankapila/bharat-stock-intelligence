@@ -256,7 +256,14 @@ export const mlRouter = router({
       const activeLimit = input?.activeLimit ?? 50;
       const recentBacktests = input?.recentBacktests ?? 10;
 
-      const sourceSummary = await dbAll<any>(`
+      // Was 7 heavy queries awaited strictly serially — latency summed a 42M-row price scan,
+      // full signal_outcomes/recommendation_log aggregates and five more independent reads —
+      // and uncached despite powering a polled review page. All seven are dispatched
+      // concurrently (the sibling getSignalQualityReport already runs this shape), then the
+      // combined result is cached for 60s: the underlying tables change on batch-job cadence.
+      // Inputs are part of the cache key.
+      return fetchWithCache(`ml:signal-report-card:${horizon}:${activeLimit}:${recentBacktests}`, async () => {
+      const sourceSummary = dbAll<any>(`
         SELECT 'TECHNICAL' AS signal_source,
                COUNT(*) AS total_signals,
                SUM(CASE WHEN date::text >= date('now', '-7 days') THEN 1 ELSE 0 END) AS active_signals,
@@ -291,7 +298,7 @@ export const mlRouter = router({
         GROUP BY signal_source
       `);
 
-      const outcomeSummary = await dbAll<any>(`
+      const outcomeSummary = dbAll<any>(`
         SELECT 'TECHNICAL' AS signal_source,
                15 AS horizon_days,
                COUNT(*) AS total_outcomes,
@@ -318,18 +325,11 @@ export const mlRouter = router({
         ORDER BY signal_source, win_count DESC
       `);
 
-      // Was `WHERE (symbol, date) IN (SELECT symbol, MAX(date) FROM stock_ohlcv GROUP BY
-      // symbol)` -- a full GROUP BY aggregation over the entire stock_ohlcv hypertable to
-      // build the row-value IN list, re-scanning the table a second time to match it. Same
-      // ROW_NUMBER() rewrite used at scoring.router.ts's getStrategyPicks.
-      const activeSignalGrowth = await dbAll<any>(`
-        WITH latest_price AS (
-          SELECT symbol, close FROM (
-            SELECT symbol, close,
-                   ROW_NUMBER() OVER (PARTITION BY symbol ORDER BY date DESC) AS rn
-            FROM stock_ohlcv
-          ) t WHERE rn = 1
-        )
+      // Latest close per active signal. Was `(symbol, date) IN (SELECT symbol, MAX(date)...)`
+      // (full GROUP BY + re-scan), then a ROW_NUMBER() window CTE over the ENTIRE 42M-row
+      // stock_ohlcv hypertable (live-verified 2026-09-03: 2.8s). Per-symbol LATERAL on the
+      // (symbol, date DESC) index is bit-identical (A/B diffed live) in ~90ms.
+      const activeSignalGrowth = dbAll<any>(`
         SELECT ts.symbol || '-' || ts.date AS id,
                ts.symbol,
                ts.date AS signal_date,
@@ -342,14 +342,16 @@ export const mlRouter = router({
                lp.close AS latest_price,
                ROUND(COALESCE(100.0 * (lp.close - ts.cmp) / NULLIF(ts.cmp, 0), 0.0), 4) AS growth_pct
         FROM technical_signals ts
-        LEFT JOIN latest_price lp ON lp.symbol = ts.symbol
+        LEFT JOIN LATERAL (
+          SELECT o.close FROM stock_ohlcv o WHERE o.symbol = ts.symbol ORDER BY o.date DESC LIMIT 1
+        ) lp ON true
         WHERE ts.date::text >= date('now', '-30 days')
           AND ts.signal_score >= 5
         ORDER BY ts.date DESC
         LIMIT ?
       `, [activeLimit]);
 
-      const recommendationSummary = await dbGet<any>(`
+      const recommendationSummary = dbGet<any>(`
         SELECT COUNT(*) AS total_recommendations,
                SUM(CASE WHEN outcome = 'WIN' THEN 1 ELSE 0 END) AS win_count,
                SUM(CASE WHEN outcome = 'LOSS' THEN 1 ELSE 0 END) AS loss_count,
@@ -361,7 +363,7 @@ export const mlRouter = router({
         WHERE actual_return_pct IS NOT NULL
       `);
 
-      const recommendationSourceBreakdown = await dbAll<any>(`
+      const recommendationSourceBreakdown = dbAll<any>(`
         SELECT source,
                COUNT(*) AS total_recs,
                SUM(CASE WHEN outcome = 'WIN' THEN 1 ELSE 0 END) AS win_count,
@@ -372,7 +374,7 @@ export const mlRouter = router({
         ORDER BY total_recs DESC
       `);
 
-      const recentBacktestResults = await dbAll<any>(`
+      const recentBacktestResults = dbAll<any>(`
         SELECT run_name, start_date, end_date, win_rate, total_return_pct,
                cagr_pct, sharpe_ratio, max_drawdown_pct, alpha_pct, profit_factor, run_at
         FROM backtesting_runs
@@ -380,7 +382,7 @@ export const mlRouter = router({
         LIMIT ?
       `, [recentBacktests]);
 
-      const strategyPerformance = await dbAll<any>(`
+      const strategyPerformance = dbAll<any>(`
         SELECT strategy_name, segment, segment_value, win_rate, avg_return_pct,
                profit_factor, sharpe_ratio, max_drawdown_pct, alpha_vs_nifty,
                total_signals, last_computed
@@ -390,15 +392,18 @@ export const mlRouter = router({
         LIMIT 20
       `, [horizon]);
 
+      // Awaiting the already-dispatched promises in sequence costs only the slowest of them,
+      // not their sum — all seven queries started the moment they were declared above.
       return {
-        sourceSummary,
-        outcomeSummary,
-        activeSignalGrowth,
-        recommendationSummary,
-        recommendationSourceBreakdown,
-        recentBacktestResults,
-        strategyPerformance,
+        sourceSummary: await sourceSummary,
+        outcomeSummary: await outcomeSummary,
+        activeSignalGrowth: await activeSignalGrowth,
+        recommendationSummary: await recommendationSummary,
+        recommendationSourceBreakdown: await recommendationSourceBreakdown,
+        recentBacktestResults: await recentBacktestResults,
+        strategyPerformance: await strategyPerformance,
       };
+      }, 60);
     }),
 
   runFullBacktest: adminProcedure
@@ -498,7 +503,10 @@ export const mlRouter = router({
       }
     }),
 
-  saveBacktestStrategy: publicProcedure
+  // Unauthenticated by design (the Backtest tab works logged out — trpc.ts:41-55 adjudication;
+  // an earlier admin-gating of the sibling read silently 401'd it for every non-admin), but it
+  // IS a public INSERT, so it takes the standard public-mutation limiter instead of nothing.
+  saveBacktestStrategy: expensiveProcedure
     .input(z.object({
       name:      z.string(),
       symbol:    z.string(),

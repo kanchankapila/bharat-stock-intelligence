@@ -1080,7 +1080,12 @@ export async function enrichWithFinBERT(items: { id: string; title: string; summ
     // 60s assumed a warm OS file cache that a memory-pressured host does not guarantee. A
     // failed enrichment is caught + logged (rows stay ai_scored=0 for the next cycle), so the
     // cost of a too-short timeout is silent backlog growth, not data corruption.
-    const { stdout } = await runPython('finbert_news_sentiment.py', [b64], 180_000);
+    // 180s -> 420s (2026-09-02): it timed out twice more on 2026-09-01 with a contended box.
+    // Measured quiet baseline 2026-09-02 23:35 IST: import 31.8s + model load 2.6s + first
+    // predict 2.7s = 37s for a 1-item batch -- i.e. ~50-60s for the real 25-item cycle on an
+    // idle host, so 180s was only ~3x, and RAM pressure multiplies torch load well past that.
+    // 420s keeps ~7x over the measured baseline and still fits the 15-min cycle.
+    const { stdout } = await runPython('finbert_news_sentiment.py', [b64], 420_000);
     const jsonLine = stdout.trim().split('\n').pop() ?? '[]'; // model-load progress noise precedes it on some runs
     const results = JSON.parse(jsonLine) as { id: string; sentiment: string; score: number }[];
     for (const r of results) {

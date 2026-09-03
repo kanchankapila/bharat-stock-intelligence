@@ -56,6 +56,27 @@ export async function registerDigestJobs(connection: any) {
     onCompleted: () => console.log('[QUEUE] job-digest sent'),
   });
 
+  // Second daily send (added 2026-09-02, user request: digest morning AND night). 02:45 UTC =
+  // 08:15 IST, pre-open — reports what changed overnight (post-close jobs, catch-ups) before
+  // the trading day starts. Same queue/processor as the night send; its OWN monitorName so
+  // job_heartbeat tracks each schedule separately (one heartbeat row cannot serve two crons
+  // without lateness detection reading the wrong boundary). A separate repeatable jobId so
+  // BullMQ keeps both schedules independently.
+  const jobDigestMorning = await registerRepeatableJob({
+    connection,
+    queueName: QUEUE_JOB_DIGEST,
+    jobName: 'job-digest-morning',
+    repeat: { pattern: '45 2 * * *' }, // 08:15 IST (02:45 UTC)
+    jobId: 'job-digest-morning-repeatable',
+    removeOnComplete: 3,
+    removeOnFail: 3,
+    processor: processJobDigest,
+    monitorName: 'job-digest-morning',
+    concurrency: 1,
+    lockDuration: 5 * 60_000,
+    onCompleted: () => console.log('[QUEUE] job-digest (morning) sent'),
+  });
+
   const recommendationsDigest = await registerRepeatableJob({
     connection,
     queueName: QUEUE_RECOMMENDATIONS_DIGEST,
@@ -73,5 +94,5 @@ export async function registerDigestJobs(connection: any) {
     onCompleted: () => console.log('[QUEUE] recommendations-digest sent'),
   });
 
-  return { jobDigest, recommendationsDigest };
+  return { jobDigest, jobDigestMorning, recommendationsDigest };
 }

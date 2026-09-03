@@ -95,7 +95,7 @@ src/
   data/              stocklist.ts (2,000 stocks, provider mappings 89-100% populated) · nseStocks.ts (2000+ NSE master)
 
 src/server/
-  router.ts          ALL tRPC procedures — check here before searching elsewhere
+  router.ts          pure mergeRouters of routers/*.ts — procedures live in routers/
   routers/*.ts       domain-split procedure modules
                      (there is NO db.ts / db.sqlite-legacy.ts — deleted 2026-08-16, a2a20d2.
                       Schema-of-record is db/schema.postgres.sql, generated from live.)

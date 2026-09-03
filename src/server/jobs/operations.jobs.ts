@@ -27,10 +27,10 @@ export const QUEUE_RESEARCH_POSTCLOSE = 'research-postclose';
 export const QUEUE_OUTCOME_RESOLVER   = 'outcome-resolver';
 
 /**
- * Resolve outcomes at the given horizon. Prefer the in-process Python API (port 8002),
+ * Resolve outcomes at the given horizon. Prefer the in-process ml-api HTTP call (:8000),
  * but if it is unreachable fall back to spawning outcome_resolver.py directly — the
- * resolver is self-contained (connects straight to SQLite), so resolution must NOT
- * silently no-op just because the AlphaQuant service happens to be down.
+ * resolver is self-contained (connects straight to Postgres via db_compat), so resolution
+ * must NOT silently no-op just because ml-api happens to be down.
  */
 export async function resolveOutcomesResilient(horizon: number): Promise<void> {
   try {

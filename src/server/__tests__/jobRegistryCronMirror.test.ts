@@ -211,6 +211,7 @@ describe('JOB_REGISTRY cronPattern/everyMs mirror consistency', () => {
     { jobName: 'chatbot-reingest', marker: "jobName: 'chatbot-reingest-daily'", label: 'operations.jobs.ts' },
     { jobName: 'trendlyne-ratios-monthly', marker: "jobName: 'trendlyne-ratios-monthly-check'", label: 'trendlyneWeekly.jobs.ts' },
     { jobName: 'job-digest', marker: "jobName: 'job-digest-daily'", label: 'digests.jobs.ts' },
+    { jobName: 'job-digest-morning', marker: "jobName: 'job-digest-morning'", label: 'digests.jobs.ts (morning send)' },
     { jobName: 'recommendations-digest', marker: "jobName: 'recommendations-digest-daily'", label: 'digests.jobs.ts' },
 
     // ml-daily-ops / ml-weekly-retrain StepTracker sub-steps -- share the parent's schedule.

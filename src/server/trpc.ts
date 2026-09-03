@@ -40,8 +40,8 @@ export const adminProcedure = protectedProcedure.use(async ({ ctx, next }) => {
 
 // Per-IP rate limit for the handful of PUBLIC mutations that each cost real money or real
 // compute on the way through: an LLM call (getAIAnalysis, analyzePortfolio), a BullMQ AI-queue
-// enqueue (enqueueSignals), or a Python subprocess / full scoring pass (runBacktest,
-// runScreener, computeTimeframeScores).
+// enqueue (enqueueSignals), a Python subprocess / full scoring pass (runBacktest, runScreener),
+// or an unauthenticated write (saveBacktestStrategy).
 //
 // Rate limit rather than protectedProcedure DELIBERATELY: every one of these has a real
 // logged-out caller in the current UI (V1StockDetails, V1Backtest, v2 ScreenerPage,
@@ -49,7 +49,8 @@ export const adminProcedure = protectedProcedure.use(async ({ ctx, next }) => {
 // in -- gating them on auth would break working pages to close a cost vector that a limiter
 // closes without touching behaviour for any legitimate user. server.ts:307 already reasons this
 // way for its raw routes, but its stated premise ("tRPC procedures ... already sit behind
-// protectedProcedure/adminProcedure") does not hold: 282 of 315 procedures are publicProcedure.
+// protectedProcedure/adminProcedure") does not hold: 278 of 376 procedures are publicProcedure
+// (278 public / 55 admin / 34 protected / 9 expensive — census 2026-09-03).
 //
 // 20/min/IP is far above any human interaction rate on these screens (each is a button press)
 // and far below what makes an LLM bill or a queue flood interesting to an abuser.
