@@ -10,6 +10,7 @@ import {
   seedStage3Registry, upsertFundamentalFact,
 } from '@greenfield/db';
 import type { JobMetrics, JobResult } from '@greenfield/contracts';
+import { isWithinScheduleWindow } from '@greenfield/market-calendar';
 import { fetchWithPolicy } from '@greenfield/provider-sdk';
 import { etStatsUrl, parseEtStatsResponse, type EtStatsEvent } from './et-stats.js';
 import { MARKETSMOJO_FINANCIALS_URL, MARKETSMOJO_HEADERS, marketsMojoRequestBody, parseMarketsMojoResponse } from './marketsmojo-financials.js';
@@ -22,6 +23,8 @@ try {
 }
 
 const CODE_COMMIT = process.env.CODE_COMMIT ?? 'stage3-fundamentals';
+// ecosystem.config.cjs: cron_restart '30 9 * * 6' (09:30 IST Saturday).
+const SCHEDULE = { hour: 9, minute: 30, daysOfWeek: [6] } as const;
 const LAG_FLOOR_DAYS = 90;
 const ET_STATS_HEADERS = { Accept: 'application/json' };
 const ET_EVENTS: EtStatsEvent[] = ['Balance', 'CashFlow', 'Quarterly', 'Ratio'];
@@ -171,6 +174,14 @@ function emptyMetrics(): JobMetrics {
 }
 
 async function main(): Promise<void> {
+  // pm2 fires cron_restart apps immediately on registration/restart regardless of the cron
+  // field -- see nse/run-daily-bhavcopy.ts's guard for the live 2026-09-03 incident this
+  // fixes. --force bypasses this for a deliberate manual run.
+  if (!process.argv.includes('--force') && !isWithinScheduleWindow(new Date(), SCHEDULE)) {
+    console.log('[fundamentals] off-schedule invocation (expected ~09:30 IST Saturday) — likely a pm2 registration/restart launch, not the real cron fire. Skipping (pass --force to run manually).');
+    return;
+  }
+
   const limitArgIndex = process.argv.indexOf('--limit');
   const concurrencyArgIndex = process.argv.indexOf('--concurrency');
   const limit = limitArgIndex >= 0 ? Number(process.argv[limitArgIndex + 1]) : Infinity;

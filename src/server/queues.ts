@@ -2349,7 +2349,7 @@ export async function initQueues(): Promise<boolean> {
       recordHeartbeat('intraday-fetcher', 'failed', err?.message);
     });
 
-    // ── Mover screener capture (3:35 PM IST weekdays, after close): persists Top
+    // ── Mover screener capture (4:05 PM IST weekdays, after close): persists Top
     // Gainers/Losers (1d+1w), MarketsMojo movers, NiftyTrader gaps, MC price-shockers
     // plus computed gap/open=high/open=low/volume-shocker/breakout classes for today
     // into mover_snapshots. Ground truth for reverse_engineering_study.py; lists scroll

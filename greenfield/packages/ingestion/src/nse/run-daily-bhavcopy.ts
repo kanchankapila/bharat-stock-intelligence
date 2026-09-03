@@ -6,14 +6,26 @@
 //
 // Usage: tsx src/nse/run-daily-bhavcopy.ts
 import { createPool, seedNseBhavcopyRegistry } from '@greenfield/db';
-import { logicalSession } from '@greenfield/market-calendar';
+import { isWithinScheduleWindow, logicalSession } from '@greenfield/market-calendar';
 import { runBackfillForDate } from './backfill.js';
 
 try { process.loadEnvFile(); } catch { /* rely on process.env */ }
 
 const CODE_COMMIT = process.env.CODE_COMMIT ?? 'gf-bhavcopy-daily';
+// ecosystem.config.cjs: cron_restart '30 19 * * 1-5' (19:30 IST weekdays).
+const SCHEDULE = { hour: 19, minute: 30, daysOfWeek: [1, 2, 3, 4, 5] } as const;
 
 async function main(): Promise<void> {
+  // pm2 fires cron_restart apps immediately on registration/restart regardless of the cron
+  // field -- live-verified 2026-09-03, when an ecosystem restart at 09:20 IST hit NSE's
+  // bhavcopy URL hours before it's published, got a 404, and checkpointed today as a false
+  // 'non-trading day' -- which then silently blocked the real 19:30 IST run for the rest of
+  // the day. Exit before opening any run so an off-schedule launch leaves no checkpoint.
+  if (!process.argv.includes('--force') && !isWithinScheduleWindow(new Date(), SCHEDULE)) {
+    console.log('[bhavcopy-daily] off-schedule invocation (expected ~19:30 IST weekdays) — likely a pm2 registration/restart launch, not the real cron fire. Skipping, no checkpoint written (pass --force to run manually).');
+    return;
+  }
+
   const pool = createPool();
   await seedNseBhavcopyRegistry(pool);
 

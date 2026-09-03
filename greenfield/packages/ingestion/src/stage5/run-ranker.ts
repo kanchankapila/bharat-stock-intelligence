@@ -7,6 +7,7 @@
 // asOfSession defaults to the latest feature_snapshot session available.
 import { closeRun, createPool, openRun } from '@greenfield/db';
 import type { JobResult } from '@greenfield/contracts';
+import { isWithinScheduleWindow } from '@greenfield/market-calendar';
 import { writeRecommendationsForSession } from './write-recommendations.js';
 
 try {
@@ -16,10 +17,22 @@ try {
 }
 
 const CODE_COMMIT = process.env.CODE_COMMIT ?? 'stage5-ranker';
+// ecosystem.config.cjs: cron_restart '0 22 * * 1-5' (22:00 IST weekdays).
+const SCHEDULE = { hour: 22, minute: 0, daysOfWeek: [1, 2, 3, 4, 5] } as const;
 
 async function main(): Promise<void> {
-  const pool = createPool();
   const asOfSessionArg = process.argv[2];
+
+  // pm2 fires cron_restart apps immediately on registration/restart regardless of the cron
+  // field -- see nse/run-daily-bhavcopy.ts's guard for the live 2026-09-03 incident this fixes.
+  // Only guards the argument-less (scheduled) invocation -- an explicit asOfSession arg is a
+  // deliberate manual/backfill run and must not be blocked by this.
+  if (!asOfSessionArg && !isWithinScheduleWindow(new Date(), SCHEDULE)) {
+    console.log('[ranker] off-schedule invocation (expected ~22:00 IST weekdays) — likely a pm2 registration/restart launch, not the real cron fire. Skipping.');
+    return;
+  }
+
+  const pool = createPool();
 
   await pool.query(
     `INSERT INTO job_definition (job_id, description, timezone, catalog_version)

@@ -18,12 +18,15 @@ import {
   seedStage3Registry, upsertEventFact,
 } from '@greenfield/db';
 import type { JobResult } from '@greenfield/contracts';
+import { isWithinScheduleWindow } from '@greenfield/market-calendar';
 
 try { process.loadEnvFile(); } catch { /* rely on process.env */ }
 
 const CODE_COMMIT = process.env.CODE_COMMIT ?? 'phase2-insider-activity';
 const OLD_DATABASE_URL = process.env.OLD_DATABASE_URL ?? 'postgresql://bharat:bharat@127.0.0.1:5433/bharat_intel';
 const JOB_ID = 'phase2.insider_activity';
+// ecosystem.config.cjs: cron_restart '0 12 * * 6' (12:00 IST Saturday).
+const SCHEDULE = { hour: 12, minute: 0, daysOfWeek: [6] } as const;
 
 /** Maps typeOfTransaction text to a short normalised label stored in
  * payload.direction. Trades without a clear buy/sell direction still land in
@@ -37,6 +40,14 @@ function transactionDirection(typeOfTransaction: string): 'buy' | 'sell' | 'pled
 }
 
 async function main(): Promise<void> {
+  // pm2 fires cron_restart apps immediately on registration/restart regardless of the cron
+  // field -- see nse/run-daily-bhavcopy.ts's guard for the live 2026-09-03 incident this
+  // fixes. --force bypasses this for a deliberate manual run.
+  if (!process.argv.includes('--force') && !isWithinScheduleWindow(new Date(), SCHEDULE)) {
+    console.log('[insider-activity] off-schedule invocation (expected ~12:00 IST Saturday) — likely a pm2 registration/restart launch, not the real cron fire. Skipping (pass --force to run manually).');
+    return;
+  }
+
   const pool = createPool();
   await seedStage3Registry(pool);
 

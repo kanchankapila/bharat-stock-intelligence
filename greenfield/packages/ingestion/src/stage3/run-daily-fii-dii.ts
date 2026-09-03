@@ -11,6 +11,7 @@ import {
   openRun, closeRun, seedStage3Registry, upsertMarketFlow,
 } from '@greenfield/db';
 import type { JobResult } from '@greenfield/contracts';
+import { isWithinScheduleWindow } from '@greenfield/market-calendar';
 import { fetchWithPolicy, primeSessionCookie } from '@greenfield/provider-sdk';
 import {
   NSE_FII_DII_HEADERS, NSE_FII_DII_URL, NSE_SESSION_HEADERS, parseFiiDiiResponse,
@@ -20,8 +21,17 @@ try { process.loadEnvFile(); } catch { /* rely on process.env */ }
 
 const CODE_COMMIT = process.env.CODE_COMMIT ?? 'gf-fii-dii-daily';
 const JOB_ID = 'nse.fii_dii.daily';
+// ecosystem.config.cjs: cron_restart '0 21 * * 1-5' (21:00 IST weekdays).
+const SCHEDULE = { hour: 21, minute: 0, daysOfWeek: [1, 2, 3, 4, 5] } as const;
 
 async function main(): Promise<void> {
+  // pm2 fires cron_restart apps immediately on registration/restart regardless of the cron
+  // field -- see run-daily-bhavcopy.ts's guard for the live 2026-09-03 incident this fixes.
+  if (!process.argv.includes('--force') && !isWithinScheduleWindow(new Date(), SCHEDULE)) {
+    console.log('[fii-dii-daily] off-schedule invocation (expected ~21:00 IST weekdays) — likely a pm2 registration/restart launch, not the real cron fire. Skipping (pass --force to run manually).');
+    return;
+  }
+
   const pool = createPool();
 
   // seedStage3Registry is idempotent (ON CONFLICT DO NOTHING everywhere) and

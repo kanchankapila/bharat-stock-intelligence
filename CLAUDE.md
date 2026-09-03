@@ -146,6 +146,7 @@ check for shell-parity against; a fix now either lands in v1 or it doesn't ship.
 - Do not refactor beyond what the task requires.
 - Prefer reusing an existing helper over writing a new one — check first.
 - Multiple sessions edit this repo concurrently. Commit **by explicit path**, never `git add -A`, and re-check `git status` immediately before committing.
+- **Follow the `superpowers` plugin's workflow skills for code development work in this repo** (enabled in `.claude/settings.json`): `superpowers:brainstorming` before designing a new feature or nontrivial change, `superpowers:systematic-debugging` before proposing a fix for a bug/test failure, `superpowers:test-driven-development` before writing implementation code, `superpowers:requesting-code-review` after completing a task or before merging. This is in addition to — not instead of — this file's own `.claude/rules/` and the `/verify-gate-runner` checks; the superpowers skills are process discipline (design-first, test-first, reviewed), this file's rules are the domain-specific ones (scoring authority, measurement discipline, recurring bug classes).
 
 ## Closing a session
 

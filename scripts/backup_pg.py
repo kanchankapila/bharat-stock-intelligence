@@ -7,6 +7,8 @@ compressed, and restorable selectively with pg_restore.
 
   Backup (default):   python scripts/backup_pg.py
                       -> backups/bharat_intel_YYYYMMDD_HHMMSS.dump  (keeps last N)
+                      Only runs within ~90 min of its scheduled 23:15 IST cron_restart fire --
+                      pass --force to run it manually at any other time.
   List a dump's TOC:  python scripts/backup_pg.py --list <file>
   Restore (DESTRUCTIVE, requires --yes):
                       python scripts/backup_pg.py --restore <file> --yes
@@ -31,7 +33,7 @@ import os
 import subprocess
 import sys
 import time
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src", "server"))
@@ -47,6 +49,27 @@ HEARTBEAT_JOB = "pg-backup"
 # A dump on the same disk as the database survives corruption and deletion, not disk loss or
 # host loss -- which are the failure modes a single-box deployment actually faces. Set
 # PG_BACKUP_DIR to an off-box mount to make this a real backup rather than a local snapshot.
+
+# Target: ecosystem.config.cjs's cron_restart '15 23 * * *' (23:15 IST daily).
+_SCHEDULE_IST_HOUR, _SCHEDULE_IST_MINUTE = 23, 15
+# 5 min, not generous: pm2's croner fires a cron_restart app at the exact scheduled minute (this
+# guard runs before any DB/network work), and the nearest neighbouring job (gf-divergence-daily,
+# 22:15 IST) is only 60 min away -- a wider tolerance would let a single off-schedule pm2 restart
+# land inside BOTH jobs' acceptance windows at once. See the TS twin's isWithinScheduleWindow
+# doc comment (market-calendar/session-calendar.ts) for the full reasoning.
+_SCHEDULE_TOLERANCE_MINUTES = 5
+
+
+def _is_within_schedule_window() -> bool:
+    """True near the intended 23:15 IST fire time (see the TS twin of this guard,
+    market-calendar's isWithinScheduleWindow, for the live 2026-09-03 incident this fixes:
+    a pm2 ecosystem restart at 09:20 IST fired every cron_restart app immediately, including
+    this one -- a full pg_dump mid-morning during market hours, blocking a concurrent schema
+    migration and every other session's job_heartbeat reads for ~12 minutes)."""
+    now_ist = datetime.now(timezone.utc) + timedelta(hours=5, minutes=30)
+    target = now_ist.replace(hour=_SCHEDULE_IST_HOUR, minute=_SCHEDULE_IST_MINUTE, second=0, microsecond=0)
+    diff_minutes = abs((now_ist - target).total_seconds()) / 60
+    return min(diff_minutes, 1440 - diff_minutes) <= _SCHEDULE_TOLERANCE_MINUTES
 
 
 def _record_heartbeat(ok: bool, detail: str) -> None:
@@ -103,6 +126,12 @@ def _check_container() -> None:
 
 
 def backup() -> None:
+    if "--force" not in sys.argv[1:] and not _is_within_schedule_window():
+        print(
+            "[BACKUP] off-schedule invocation (expected ~23:15 IST daily) -- likely a pm2 "
+            "registration/restart launch, not the real cron fire. Skipping (pass --force to run manually)."
+        )
+        return
     _check_container()
     BACKUP_DIR.mkdir(parents=True, exist_ok=True)
     ts = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -221,7 +250,7 @@ def restore(path: str) -> None:
 
 if __name__ == "__main__":
     args = sys.argv[1:]
-    if not args:
+    if not args or args == ["--force"]:
         backup()
     elif args[0] == "--list" and len(args) == 2:
         list_toc(args[1])
