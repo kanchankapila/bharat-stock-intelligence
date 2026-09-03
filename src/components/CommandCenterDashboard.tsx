@@ -126,10 +126,14 @@ function EodPickCard({ pick, onSelect }: { pick: any; onSelect: (sym: string) =>
               </span>
             )}
           </span>
-          <span className={cn('text-sm font-bold', style.text)}>{pick.unified_score}</span>
+          <span className={cn('text-sm font-bold', pick.unified_score == null ? 'text-slate-600' : style.text)}>
+            {pick.unified_score == null ? 'n/a' : pick.unified_score}
+          </span>
         </div>
         <div className="h-1.5 bg-slate-700 rounded-full overflow-hidden">
-          <div className={cn('h-full rounded-full', style.dot)} style={{ width: `${pick.unified_score}%` }} />
+          {pick.unified_score != null && (
+            <div className={cn('h-full rounded-full', style.dot)} style={{ width: `${pick.unified_score}%` }} />
+          )}
         </div>
       </div>
 

@@ -126,7 +126,11 @@ export const technicalsRouter = router({
               + 0.4 * COALESCE(ts.win_probability, 0.5)
               + 0.2 * (COALESCE(cs.confluence_score, 0) / 100.0),
               3
-            ) AS confluence_composite_score
+            ) AS confluence_composite_score,
+            -- AF-20260827-09: disclosure only, not a weight/formula change (that needs
+            -- verify-gate.mjs backtest evidence) -- lets the UI show reduced confidence when
+            -- the composite above leaned on a COALESCE default instead of a real input.
+            (ts.win_probability IS NULL OR cs.confluence_score IS NULL) AS confluence_composite_partial
           FROM technical_signals ts
           LEFT JOIN nse_stocks ns ON ns.symbol = ts.symbol
           -- Was date(cs.computed_at) = ? -- wrapping confluence_signals' TimescaleDB

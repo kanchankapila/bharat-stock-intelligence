@@ -320,8 +320,10 @@ def _load_flow_sector_inputs(con) -> dict:
     for r in con.execute(
         "SELECT date::text AS d, fii_net, dii_net FROM fii_dii_flow ORDER BY date ASC"
     ).fetchall():
-        # fii_dii_flow.date is TEXT (regime_detector.py rule #6); normalize so lookup keys
-        # match the stock_ohlcv-derived grid dates exactly.
+        # fii_dii_flow.date is native DATE (AF-20260831-04, 2026-09-03 -- was TEXT); the
+        # ::text cast + str(...)[:10] here is a SQL-to-Python string boundary, not a SQL-level
+        # comparison, so it still works either way. Normalizes lookup keys so they match the
+        # stock_ohlcv-derived grid dates exactly.
         fii_by_date[str(r['d'])[:10]] = (r['fii_net'], r['dii_net'])
 
     sector_mom: dict = {}

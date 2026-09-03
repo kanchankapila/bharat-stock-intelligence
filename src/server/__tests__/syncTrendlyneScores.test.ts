@@ -72,5 +72,8 @@ test('stamps DVM onto technical_signals exactly once, regardless of per-symbol r
   // Point-in-time safety: the join MUST be on date as well as symbol. Dropping the date
   // predicate would smear the latest DVM snapshot across every historical grid row -- exactly
   // the look-ahead leak extra_features_parser.py was fixed for in 2026-07.
-  expect(sql).toContain('d.date = ts.date::text');
+  // AF-20260831-04 (2026-09-03): trendlyne_dvm_scores.date is now native DATE, same as
+  // technical_signals.date -- the ::text cast this assertion used to check for is gone
+  // (both sides DATE = DATE directly); the invariant being protected is unchanged.
+  expect(sql).toContain('d.date = ts.date');
 });

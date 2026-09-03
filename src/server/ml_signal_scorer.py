@@ -67,7 +67,7 @@ def load_training_data() -> pd.DataFrame:
             ts.volume_ratio
         FROM signal_outcomes so
         LEFT JOIN technical_signals ts
-            ON ts.symbol = so.symbol AND so.signal_date = ts.date::text
+            ON ts.symbol = so.symbol AND so.signal_date = ts.date
         WHERE so.outcome IN ('WIN', 'LOSS', 'NEUTRAL')
           AND so.return_pct IS NOT NULL
           AND so.signal_source = 'technical'

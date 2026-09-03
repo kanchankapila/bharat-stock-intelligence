@@ -11,9 +11,11 @@ const GRADE_BG: Record<string, string> = {
 
 export function AgentDataScientistPage() {
   const { data, isLoading, refetch } = trpc.getDataScientistReport.useQuery({ limit: 30 });
+  const { data: triggerErrors, refetch: refetchTriggerErrors } = trpc.getAgentTriggerErrors.useQuery();
   const runMutation = trpc.runDataScientistAgent.useMutation({
-    onSuccess: () => setTimeout(() => refetch(), 3000),
+    onSuccess: () => setTimeout(() => { refetch(); refetchTriggerErrors(); }, 3000),
   });
+  const triggerError = (triggerErrors as any)?.data_scientist;
 
   const latest = data?.latest as any;
   const history = (data?.history as any[]) ?? [];
@@ -52,6 +54,13 @@ export function AgentDataScientistPage() {
           </button>
         </div>
       </div>
+
+      {triggerError?.error && (
+        <div className="flex items-center gap-2 text-sm text-rose-400 bg-rose-950/40 border border-rose-900 rounded-lg px-3 py-2">
+          <AlertTriangle className="w-4 h-4 shrink-0" />
+          <span>Last direct run failed{triggerError.at ? ` at ${triggerError.at}` : ''}: {triggerError.error}</span>
+        </div>
+      )}
 
       {isLoading && <div className="v1-card p-6 text-sm text-slate-400 font-data animate-pulse">Loading Agent Report...</div>}
 

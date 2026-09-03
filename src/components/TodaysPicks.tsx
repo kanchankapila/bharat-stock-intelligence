@@ -134,7 +134,17 @@ export function TodaysPicks({ onSelectStock }: TodaysPicksProps) {
                 {/* Score bar */}
                 <div className="space-y-1">
                   <div className="flex justify-between text-[10px] text-slate-400">
-                    <span>Unified Score</span>
+                    <span className="flex items-center gap-1">
+                      Unified Score
+                      {pick.confluence_composite_partial && (
+                        <span
+                          className="text-slate-600"
+                          title="ML win-probability and/or confluence score were unavailable for this stock -- this score partly used a neutral default, not a real input"
+                        >
+                          *
+                        </span>
+                      )}
+                    </span>
                     <span className={cv.text}>{unifiedPct}%</span>
                   </div>
                   <div className="h-1.5 bg-slate-800 rounded-full overflow-hidden">

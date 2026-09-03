@@ -348,6 +348,15 @@ const TABLE_FRESHNESS_CHECKS: TableFreshnessConfig[] = [
   // crawl-recency check as the other marketsmojo_* fundamentals tables above.
   { id: 'marketsmojo-shareholding-history-recency', label: 'marketsmojo_shareholding_history (quarterly Promoter/FII/MF/Insurance/DII/NII holding %)',
     category: 'fundamentals', critical: false, table: 'marketsmojo_shareholding_history', dateColumn: 'fetched_at', warnDays: 45 },
+  // finstack_cashflow_fetcher.py (landed 2026-09-01) -- quarterly OCF/CFI/CFF/capex/FCF via the
+  // FinStack MCP server (a yfinance-backed wrapper; vendor coverage is a real subset of NSE names,
+  // see the fetcher's own docstring). Found missing this check entirely by the 2026-09-03
+  // data-coverage-audit (AF-20260903-02) -- the only fetcher in the repo with neither mandatory
+  // data-sources.md artifact. Same weekly-cadence/45-day-warn convention as the marketsmojo trio
+  // above (vendors restate quarterly figures around results days), which this fetcher's own
+  // docstring already anticipated ("45-day warn windows fit any future DQ check").
+  { id: 'finstack-cashflow-history-recency', label: 'finstack_cashflow_history (quarterly OCF/CFI/CFF/capex/FCF via FinStack MCP)',
+    category: 'fundamentals', critical: false, table: 'finstack_cashflow_history', dateColumn: 'fetched_at', warnDays: 45 },
   { id: 'stock-earnings-beats-recency', label: 'stock_earnings_beats',
     category: 'fundamentals', critical: false, table: 'stock_earnings_beats', dateColumn: 'fetched_at', warnDays: 10 },
   // Found 2026-08-13 (fetcher-accuracy-review sweep): stock_earnings_dates had ZERO freshness

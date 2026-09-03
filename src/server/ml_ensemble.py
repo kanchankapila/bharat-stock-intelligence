@@ -1211,7 +1211,7 @@ def full_feature_train_sql(anchor: str = 'so', date_col: str = 'signal_date') ->
                 SELECT * FROM mc_pricefeed_daily mp2
                 WHERE mp2.symbol = {A}.symbol
                   AND mp2.date <= {A}.{D}
-                  AND mp2.date >= ({A}.{D}::date - interval '7 days')::text
+                  AND mp2.date >= ({A}.{D} - interval '7 days')
                 ORDER BY mp2.date DESC
                 LIMIT 1
             ) mp ON TRUE
@@ -1222,7 +1222,7 @@ def full_feature_train_sql(anchor: str = 'so', date_col: str = 'signal_date') ->
                 FROM gdelt_sentiment g
                 WHERE g.symbol = {A}.symbol
                   AND g.date <= {A}.{D}
-                  AND g.date >= ({A}.{D}::date - interval '30 days')::text
+                  AND g.date >= ({A}.{D} - interval '30 days')
             ) gdelt ON TRUE
             LEFT JOIN proprietary_scores_history psh_az
                    ON psh_az.symbol = {A}.symbol
@@ -1265,13 +1265,13 @@ def full_feature_train_sql(anchor: str = 'so', date_col: str = 'signal_date') ->
                         AND p2.date <= {A}.{D}
                   )
             LEFT JOIN feature_store fs
-                   ON fs.symbol = {A}.symbol AND fs.date::text = {A}.{D} AND fs.timeframe = 'D'
+                   ON fs.symbol = {A}.symbol AND fs.date = {A}.{D} AND fs.timeframe = 'D'
             LEFT JOIN market_breadth mb ON mb.date = {A}.{D}
             LEFT JOIN historical_fno_sentiment hfs
                    ON hfs.symbol = {A}.symbol AND hfs.date = {A}.{D}
             LEFT JOIN (
                 SELECT
-                    date::text AS snap_date,
+                    date AS snap_date,
                     MAX(CASE WHEN symbol='GIFT_NIFTY_CHG_PCT'   THEN close END) AS gift_nifty_pct,
                     MAX(CASE WHEN symbol='NIFTY_GEX'             THEN close END) AS nifty_gex,
                     MAX(CASE WHEN symbol='INDIA_10Y'             THEN close END) AS india_10y,
@@ -1468,20 +1468,20 @@ def full_feature_score_sql() -> tuple:
             LEFT JOIN LATERAL (
                 SELECT * FROM mc_pricefeed_daily mp2
                 WHERE mp2.symbol = ts.symbol
-                  AND mp2.date <= ts.date::text
-                  AND mp2.date >= (ts.date::date - interval '7 days')::text
+                  AND mp2.date <= ts.date
+                  AND mp2.date >= (ts.date - interval '7 days')
                 ORDER BY mp2.date DESC
                 LIMIT 1
             ) mp ON TRUE
             LEFT JOIN stock_fundamentals sf ON sf.symbol = ts.symbol
             LEFT JOIN feature_store fs
                    ON fs.symbol = ts.symbol AND fs.date = ts.date AND fs.timeframe = 'D'
-            LEFT JOIN market_breadth mb ON mb.date = ts.date::text
+            LEFT JOIN market_breadth mb ON mb.date = ts.date
             LEFT JOIN historical_fno_sentiment hfs
-                   ON hfs.symbol = ts.symbol AND hfs.date = ts.date::text
+                   ON hfs.symbol = ts.symbol AND hfs.date = ts.date
             LEFT JOIN LATERAL (
                 SELECT * FROM analyst_estimates_history aeh2
-                WHERE aeh2.symbol = ts.symbol AND aeh2.as_of_date <= ts.date::text
+                WHERE aeh2.symbol = ts.symbol AND aeh2.as_of_date <= ts.date
                 ORDER BY aeh2.as_of_date DESC
                 LIMIT 1
             ) aeh ON TRUE
@@ -1493,7 +1493,7 @@ def full_feature_score_sql() -> tuple:
                       SELECT MAX(p2.date) FROM proprietary_scores_history p2
                       WHERE p2.symbol = ts.symbol AND p2.source = 'moneycontrol'
                         AND p2.score_type = 'altman_z_score'
-                        AND p2.date <= ts.date::text
+                        AND p2.date <= ts.date
                   )
             LEFT JOIN proprietary_scores_history psh_oo
                    ON psh_oo.symbol = ts.symbol
@@ -1503,7 +1503,7 @@ def full_feature_score_sql() -> tuple:
                       SELECT MAX(p2.date) FROM proprietary_scores_history p2
                       WHERE p2.symbol = ts.symbol AND p2.source = 'moneycontrol'
                         AND p2.score_type = 'ohlson_o_score'
-                        AND p2.date <= ts.date::text
+                        AND p2.date <= ts.date
                   )
             LEFT JOIN proprietary_scores_history psh_gn
                    ON psh_gn.symbol = ts.symbol
@@ -1513,7 +1513,7 @@ def full_feature_score_sql() -> tuple:
                       SELECT MAX(p2.date) FROM proprietary_scores_history p2
                       WHERE p2.symbol = ts.symbol AND p2.source = 'moneycontrol'
                         AND p2.score_type = 'graham_number'
-                        AND p2.date <= ts.date::text
+                        AND p2.date <= ts.date
                   )
             LEFT JOIN proprietary_scores_history psh_ds
                    ON psh_ds.symbol = ts.symbol
@@ -1523,7 +1523,7 @@ def full_feature_score_sql() -> tuple:
                       SELECT MAX(p2.date) FROM proprietary_scores_history p2
                       WHERE p2.symbol = ts.symbol AND p2.source = 'moneycontrol'
                         AND p2.score_type = 'dupont_score'
-                        AND p2.date <= ts.date::text
+                        AND p2.date <= ts.date
                   )
             LEFT JOIN (
                 SELECT
@@ -1760,7 +1760,7 @@ def load_training_data(label: str = 'triple_barrier') -> pd.DataFrame:
                 SELECT * FROM mc_pricefeed_daily mp2
                 WHERE mp2.symbol = so.symbol
                   AND mp2.date <= so.signal_date
-                  AND mp2.date >= (so.signal_date::date - interval '7 days')::text
+                  AND mp2.date >= (so.signal_date - interval '7 days')
                 ORDER BY mp2.date DESC
                 LIMIT 1
             ) mp ON TRUE
@@ -1776,7 +1776,7 @@ def load_training_data(label: str = 'triple_barrier') -> pd.DataFrame:
                 FROM gdelt_sentiment g
                 WHERE g.symbol = so.symbol
                   AND g.date <= so.signal_date
-                  AND g.date >= (so.signal_date::date - interval '30 days')::text
+                  AND g.date >= (so.signal_date - interval '30 days')
             ) gdelt ON TRUE
             LEFT JOIN proprietary_scores_history psh_az
                    ON psh_az.symbol = so.symbol
@@ -1819,13 +1819,13 @@ def load_training_data(label: str = 'triple_barrier') -> pd.DataFrame:
                         AND p2.date <= so.signal_date
                   )
             LEFT JOIN feature_store fs
-                   ON fs.symbol = so.symbol AND fs.date::text = so.signal_date AND fs.timeframe = 'D'
+                   ON fs.symbol = so.symbol AND fs.date = so.signal_date AND fs.timeframe = 'D'
             LEFT JOIN market_breadth mb ON mb.date = so.signal_date
             LEFT JOIN historical_fno_sentiment hfs
                    ON hfs.symbol = so.symbol AND hfs.date = so.signal_date
             LEFT JOIN (
                 SELECT
-                    date::text AS snap_date,
+                    date AS snap_date,
                     MAX(CASE WHEN symbol='GIFT_NIFTY_CHG_PCT'   THEN close END) AS gift_nifty_pct,
                     MAX(CASE WHEN symbol='NIFTY_GEX'             THEN close END) AS nifty_gex,
                     MAX(CASE WHEN symbol='INDIA_10Y'             THEN close END) AS india_10y,
@@ -2047,7 +2047,7 @@ def load_training_data(label: str = 'triple_barrier') -> pd.DataFrame:
                   AND ts.date = (
                       SELECT MAX(ts2.date) FROM technical_signals ts2
                       WHERE ts2.symbol = so.symbol
-                        AND ts2.date::text <= so.signal_date
+                        AND ts2.date <= so.signal_date
                         -- see the Postgres branch: 7 days tolerates a holiday+weekend gap
                         AND ts2.date >= date(so.signal_date, '-7 days')
                   )
@@ -2094,13 +2094,13 @@ def load_training_data(label: str = 'triple_barrier') -> pd.DataFrame:
                         AND p2.date <= so.signal_date
                   )
             LEFT JOIN feature_store fs
-                   ON fs.symbol = so.symbol AND fs.date::text = so.signal_date AND fs.timeframe = 'D'
+                   ON fs.symbol = so.symbol AND fs.date = so.signal_date AND fs.timeframe = 'D'
             LEFT JOIN market_breadth mb ON mb.date = so.signal_date
             LEFT JOIN historical_fno_sentiment hfs
                    ON hfs.symbol = so.symbol AND hfs.date = so.signal_date
             LEFT JOIN (
                 SELECT
-                    date::text AS snap_date,
+                    date AS snap_date,
                     MAX(CASE WHEN symbol='GIFT_NIFTY_CHG_PCT'   THEN close END) AS gift_nifty_pct,
                     MAX(CASE WHEN symbol='NIFTY_GEX'             THEN close END) AS nifty_gex,
                     MAX(CASE WHEN symbol='INDIA_10Y'             THEN close END) AS india_10y,
@@ -2286,17 +2286,17 @@ def load_pending_signals() -> pd.DataFrame:
             LEFT JOIN LATERAL (
                 SELECT * FROM mc_pricefeed_daily mp2
                 WHERE mp2.symbol = ts.symbol
-                  AND mp2.date <= ts.date::text
-                  AND mp2.date >= (ts.date::date - interval '7 days')::text
+                  AND mp2.date <= ts.date
+                  AND mp2.date >= (ts.date - interval '7 days')
                 ORDER BY mp2.date DESC
                 LIMIT 1
             ) mp ON TRUE
             LEFT JOIN stock_fundamentals sf ON sf.symbol = ts.symbol
             LEFT JOIN feature_store fs
                    ON fs.symbol = ts.symbol AND fs.date = ts.date AND fs.timeframe = 'D'
-            LEFT JOIN market_breadth mb ON mb.date = ts.date::text
+            LEFT JOIN market_breadth mb ON mb.date = ts.date
             LEFT JOIN historical_fno_sentiment hfs
-                   ON hfs.symbol = ts.symbol AND hfs.date = ts.date::text
+                   ON hfs.symbol = ts.symbol AND hfs.date = ts.date
             -- Latest analyst snapshot on/before today
             {as_of_join_sql('analyst_estimates_history', 'aeh', 'ts', 'symbol', 'date', False)}
             LEFT JOIN proprietary_scores_history psh_az
@@ -2307,7 +2307,7 @@ def load_pending_signals() -> pd.DataFrame:
                       SELECT MAX(p2.date) FROM proprietary_scores_history p2
                       WHERE p2.symbol = ts.symbol AND p2.source = 'moneycontrol'
                         AND p2.score_type = 'altman_z_score'
-                        AND p2.date <= ts.date::text
+                        AND p2.date <= ts.date
                   )
             LEFT JOIN proprietary_scores_history psh_oo
                    ON psh_oo.symbol = ts.symbol
@@ -2317,7 +2317,7 @@ def load_pending_signals() -> pd.DataFrame:
                       SELECT MAX(p2.date) FROM proprietary_scores_history p2
                       WHERE p2.symbol = ts.symbol AND p2.source = 'moneycontrol'
                         AND p2.score_type = 'ohlson_o_score'
-                        AND p2.date <= ts.date::text
+                        AND p2.date <= ts.date
                   )
             LEFT JOIN proprietary_scores_history psh_gn
                    ON psh_gn.symbol = ts.symbol
@@ -2327,7 +2327,7 @@ def load_pending_signals() -> pd.DataFrame:
                       SELECT MAX(p2.date) FROM proprietary_scores_history p2
                       WHERE p2.symbol = ts.symbol AND p2.source = 'moneycontrol'
                         AND p2.score_type = 'graham_number'
-                        AND p2.date <= ts.date::text
+                        AND p2.date <= ts.date
                   )
             LEFT JOIN proprietary_scores_history psh_ds
                    ON psh_ds.symbol = ts.symbol
@@ -2337,7 +2337,7 @@ def load_pending_signals() -> pd.DataFrame:
                       SELECT MAX(p2.date) FROM proprietary_scores_history p2
                       WHERE p2.symbol = ts.symbol AND p2.source = 'moneycontrol'
                         AND p2.score_type = 'dupont_score'
-                        AND p2.date <= ts.date::text
+                        AND p2.date <= ts.date
                   )
             LEFT JOIN (
                 SELECT
@@ -2599,9 +2599,9 @@ def load_pending_signals() -> pd.DataFrame:
             LEFT JOIN stock_fundamentals sf ON sf.symbol = ts.symbol
             LEFT JOIN feature_store fs
                    ON fs.symbol = ts.symbol AND fs.date = ts.date AND fs.timeframe = 'D'
-            LEFT JOIN market_breadth mb ON mb.date = ts.date::text
+            LEFT JOIN market_breadth mb ON mb.date = ts.date
             LEFT JOIN historical_fno_sentiment hfs
-                   ON hfs.symbol = ts.symbol AND hfs.date = ts.date::text
+                   ON hfs.symbol = ts.symbol AND hfs.date = ts.date
             {as_of_join_sql('analyst_estimates_history', 'aeh', 'ts', 'symbol', 'date', False)}
             LEFT JOIN proprietary_scores_history psh_az
                    ON psh_az.symbol = ts.symbol
@@ -2611,7 +2611,7 @@ def load_pending_signals() -> pd.DataFrame:
                       SELECT MAX(p2.date) FROM proprietary_scores_history p2
                       WHERE p2.symbol = ts.symbol AND p2.source = 'moneycontrol'
                         AND p2.score_type = 'altman_z_score'
-                        AND p2.date <= ts.date::text
+                        AND p2.date <= ts.date
                   )
             LEFT JOIN proprietary_scores_history psh_oo
                    ON psh_oo.symbol = ts.symbol
@@ -2621,7 +2621,7 @@ def load_pending_signals() -> pd.DataFrame:
                       SELECT MAX(p2.date) FROM proprietary_scores_history p2
                       WHERE p2.symbol = ts.symbol AND p2.source = 'moneycontrol'
                         AND p2.score_type = 'ohlson_o_score'
-                        AND p2.date <= ts.date::text
+                        AND p2.date <= ts.date
                   )
             LEFT JOIN proprietary_scores_history psh_gn
                    ON psh_gn.symbol = ts.symbol
@@ -2631,7 +2631,7 @@ def load_pending_signals() -> pd.DataFrame:
                       SELECT MAX(p2.date) FROM proprietary_scores_history p2
                       WHERE p2.symbol = ts.symbol AND p2.source = 'moneycontrol'
                         AND p2.score_type = 'graham_number'
-                        AND p2.date <= ts.date::text
+                        AND p2.date <= ts.date
                   )
             LEFT JOIN proprietary_scores_history psh_ds
                    ON psh_ds.symbol = ts.symbol
@@ -2641,7 +2641,7 @@ def load_pending_signals() -> pd.DataFrame:
                       SELECT MAX(p2.date) FROM proprietary_scores_history p2
                       WHERE p2.symbol = ts.symbol AND p2.source = 'moneycontrol'
                         AND p2.score_type = 'dupont_score'
-                        AND p2.date <= ts.date::text
+                        AND p2.date <= ts.date
                   )
             LEFT JOIN (
                 SELECT
@@ -3674,7 +3674,7 @@ def _propagate_and_gate_recommendation_log(conn: ConnWrapper) -> None:
               -- ts.date is a native DATE (2026-08-25 migration); recommendation_log.signal_date
               -- is TEXT -- compare like-for-like or PG raises "operator does not exist: date = text",
               -- which surfaces as the /api/score-pending HTTP 500.
-              AND recommendation_log.signal_date = ts.date::text
+              AND recommendation_log.signal_date = ts.date
             LIMIT 1
         )
         WHERE source = 'technical_scan'
@@ -4000,8 +4000,11 @@ def incremental_update(n_days: int = 3, n_rounds: int = 20, dry_run: bool = Fals
     # 2026-08-26: this query was executed UNCONDITIONALLY and died on Postgres with
     # `operator does not exist: date <= text` -- technical_signals.date became a native DATE
     # in the 08-25 migration while signal_outcomes.signal_date stayed TEXT. Branch on
-    # use_postgres() exactly like load_training_data() does; the ::text direction keeps
-    # SQLite-heritage fixtures green.
+    # use_postgres() exactly like load_training_data() does.
+    # 2026-09-03 (AF-20260831-04): signal_outcomes.signal_date is now ALSO native DATE, so
+    # the ::text cast this comment used to describe is gone -- both sides are DATE = DATE
+    # directly. SQLite-heritage fixtures build from the same live-Postgres-mirrored
+    # db/schema.postgres.sql, so they're DATE too; no cast needed on either side anymore.
     if use_postgres():
         q = """
             SELECT so.symbol, so.signal_date, so.horizon_days, {label_select},
@@ -4019,7 +4022,7 @@ def incremental_update(n_days: int = 3, n_rounds: int = 20, dry_run: bool = Fals
                   AND ts.date = (
                       SELECT MAX(ts2.date) FROM technical_signals ts2
                       WHERE ts2.symbol = so.symbol
-                        AND ts2.date::text <= so.signal_date
+                        AND ts2.date <= so.signal_date
                   )
             {label_join}
             WHERE {label_where}

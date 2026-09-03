@@ -274,6 +274,39 @@ class TestInformationSchemaMissingTableSchema:
         assert findings == []
 
 
+class TestScreenerCatalogExactCaseSource:
+    def test_fires_on_exact_case_source_filter(self):
+        text = (
+            '    conn.execute("""\n'
+            "        SELECT * FROM screener_catalog sc\n"
+            "        WHERE sc.source = 'Trendlyne' AND sc.active = 1\n"
+            '    """)\n'
+        )
+        findings = crb.check_screener_catalog_exact_case_source(_p(), text)
+        assert len(findings) == 1
+        assert "AF-20260816-19" in findings[0]
+
+    def test_does_not_fire_when_wrapped_in_lower(self):
+        text = (
+            '    conn.execute("""\n'
+            "        SELECT * FROM screener_catalog sc\n"
+            "        WHERE LOWER(sc.source) = 'trendlyne' AND sc.active = 1\n"
+            '    """)\n'
+        )
+        assert crb.check_screener_catalog_exact_case_source(_p(), text) == []
+
+    def test_does_not_fire_without_screener_catalog_nearby(self):
+        text = "    conn.execute(\"SELECT * FROM screener_master WHERE source = 'Trendlyne'\")\n"
+        assert crb.check_screener_catalog_exact_case_source(_p(), text) == []
+
+    def test_test_files_are_exempt(self):
+        text = "sc.source = 'trendlyne', so every capitalized row silently lost its screener_catalog rows\n"
+        findings = crb.check_screener_catalog_exact_case_source(
+            crb.REPO_ROOT / "src" / "server" / "tests" / "test_something.py", text
+        )
+        assert findings == []
+
+
 class TestMissingLiveDatasourceTest:
     # The mandate applies to fetchers that actually call an external endpoint, so every
     # fixture here must carry an HTTP client import — without one the file is a derived-feature

@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { trpc } from '../lib/trpc';
-import { RefreshCw, BarChart2 } from 'lucide-react';
+import { RefreshCw, BarChart2, AlertTriangle } from 'lucide-react';
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell } from 'recharts';
 
 type Timeframe = 'intraday' | 'swing' | 'positional' | 'investment';
@@ -11,9 +11,11 @@ const TF_LABELS: Record<Timeframe, string> = {
 export function AgentAuditorPage() {
   const [tf, setTf] = useState<Timeframe>('swing');
   const { data, isLoading, refetch } = trpc.getAuditReport.useQuery({ timeframe: tf });
+  const { data: triggerErrors, refetch: refetchTriggerErrors } = trpc.getAgentTriggerErrors.useQuery();
   const runMutation = trpc.runAuditorAgent.useMutation({
-    onSuccess: () => setTimeout(() => refetch(), 3000),
+    onSuccess: () => setTimeout(() => { refetch(); refetchTriggerErrors(); }, 3000),
   });
+  const triggerError = (triggerErrors as any)?.auditor;
 
   const report = (data?.reports as any[])?.[0];
   const attribution = report ? JSON.parse(report.signal_attribution_json || '{}') as Record<string, number> : {};
@@ -42,6 +44,13 @@ export function AgentAuditorPage() {
           </button>
         </div>
       </div>
+
+      {triggerError?.error && (
+        <div className="flex items-center gap-2 text-sm text-rose-400 bg-rose-950/40 border border-rose-900 rounded-lg px-3 py-2">
+          <AlertTriangle className="w-4 h-4 shrink-0" />
+          <span>Last direct run failed{triggerError.at ? ` at ${triggerError.at}` : ''}: {triggerError.error}</span>
+        </div>
+      )}
 
       <div className="flex gap-2">
         {(Object.keys(TF_LABELS) as Timeframe[]).map(t => (

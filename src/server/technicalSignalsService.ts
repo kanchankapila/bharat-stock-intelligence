@@ -1837,7 +1837,7 @@ export async function computeSignalTypeStats(): Promise<{ updated: number }> {
     SELECT so.symbol, so.horizon_days, so.return_pct, so.outcome, so.signals_json,
            ts.nifty_regime
     FROM signal_outcomes so
-    LEFT JOIN technical_signals ts ON ts.symbol = so.symbol AND so.signal_date = ts.date::text
+    LEFT JOIN technical_signals ts ON ts.symbol = so.symbol AND so.signal_date = ts.date
     WHERE so.outcome IN ('WIN', 'LOSS', 'NEUTRAL') AND so.signal_source = 'technical'
   `) as {
     symbol: string; horizon_days: number; return_pct: number;

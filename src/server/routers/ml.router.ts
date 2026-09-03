@@ -555,8 +555,9 @@ export const mlRouter = router({
                so.signal_date, ts.rsi
         FROM signal_outcomes so
         LEFT JOIN technical_signals ts ON so.symbol = ts.symbol
-          -- ts.date is a native DATE (2026-08-25 migration); signal_outcomes.signal_date is TEXT.
-          AND so.signal_date = ts.date::text
+          -- Both ts.date and so.signal_date are native DATE (AF-20260831-04, 2026-09-03) --
+          -- direct comparison, no cast needed.
+          AND so.signal_date = ts.date
         WHERE so.symbol = ?
           AND so.outcome IN ('WIN', 'LOSS', 'NEUTRAL')
           AND so.signal_source = 'technical'
@@ -642,7 +643,7 @@ export const mlRouter = router({
         SELECT ts.nifty_regime AS regime, ts.win_probability AS prob,
                CASE WHEN so.outcome = 'WIN' THEN 1 ELSE 0 END AS y
         FROM signal_outcomes so JOIN technical_signals ts
-          ON ts.symbol = so.symbol AND so.signal_date = ts.date::text
+          ON ts.symbol = so.symbol AND so.signal_date = ts.date
         WHERE so.outcome IN ('WIN', 'LOSS') AND ts.win_probability IS NOT NULL
           AND so.signal_date >= ? AND so.signal_source = 'technical'
       `, [cutoff]) as Array<{ regime: string | null; prob: number; y: number }>;

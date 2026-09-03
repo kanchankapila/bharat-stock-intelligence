@@ -20,13 +20,40 @@ Real-time Indian stock market intelligence platform (NSE/BSE). Express + tRPC ba
 
 `docs/session-log.md` is the historical changelog (~7,600 lines — never load it whole). Not loaded automatically; grep or read a specific dated entry when you need the history behind a decision.
 
-**`docs/audit-findings.md` is the one and only open/pending-items tracker.** Any new bug, gap, or
-follow-up you find and don't fix immediately gets a row there (stable `AF-YYYYMMDD-NN` ID, never
-delete a row — close it in place with a date and evidence). Don't create a new markdown file for
-"things to do later" — this repo already did that three times (`ACTION_ITEMS.md`,
-`docs/FETCHER_HEALTH_TRACKER.md`, `docs/DATA_GAP_MANIFEST.md`) and the trackers drifted out of
-sync with each other and with the code, which is exactly what caused a 2026-09-02 consolidation
-pass to be needed. All three are now retired stubs pointing here.
+**Resolve findings, don't just log them.** Writing a row to `docs/audit-findings.md` is not the
+deliverable — a closed row is. When you find a bug, gap, or follow-up, the default action in the
+same session is: fix it, verify the fix against live production (not just `tsc`/a green suite —
+see `measurement.md`'s reverse-engineering discipline), and close the row with a date and
+evidence, all in one pass. Filing a finding and leaving it **open** is the exception, not a
+routine outcome, and is only legitimate for one of these reasons — state which, explicitly, in
+the row itself:
+
+- **EVIDENCE lane** — the finding touches a score, weight, threshold, or classification, and
+  `measurement.md`/`ml-model-bugs.md` require measuring *before* changing it. Here "resolve
+  immediately" means run the measurement now, not defer the fix — see the EVIDENCE-lane rows in
+  `docs/audit-findings.md` for the pattern (measure, record the verdict, only then decide FIX or
+  ACCEPT).
+- **Calendar-blocked** — genuinely needs elapsed time (e.g. ~20-30 trading dates for a panel to
+  reach a reliable size) that cannot be compressed by working harder right now. The row must name
+  the unblock condition and an approximate date, not just "not enough data."
+- **Needs a user decision** — a tradeoff only the user can make (e.g. which of two designs, or
+  whether to accept a known bounded risk). Ask, don't leave it silently open.
+- **Depends on an earlier fix landing first** — genuinely sequential, and the blocking row is
+  named.
+
+Every other finding gets fixed and closed before moving on. Re-surface any open row you touch in
+a session: re-verify it live, and either close it or update its "surviving N runs" count with a
+reason it's still legitimately blocked — an open row that just sits, unre-checked, across
+sessions is itself a finding (the ledger's own header already says this; it applies to every
+session, not just `/weekend-audit` runs).
+
+**`docs/audit-findings.md` is the one and only open/pending-items tracker.** Any finding that
+isn't closed in the same pass (for one of the reasons above) gets a row there (stable
+`AF-YYYYMMDD-NN` ID, never delete a row — close it in place with a date and evidence). Don't
+create a new markdown file for "things to do later" — this repo already did that three times
+(`ACTION_ITEMS.md`, `docs/FETCHER_HEALTH_TRACKER.md`, `docs/DATA_GAP_MANIFEST.md`) and the
+trackers drifted out of sync with each other and with the code, which is exactly what caused a
+2026-09-02 consolidation pass to be needed. All three are now retired stubs pointing here.
 
 ## Definition of done
 
@@ -155,6 +182,6 @@ Before finishing, make all four consistent with what actually happened (`/sessio
 1. **`docs/session-log.md`** — append what changed and what was learned.
 2. **Memory** — add/extend a file for anything durable and non-obvious; update `MEMORY.md`'s index.
 3. **`.claude/rules/`** — if you hit a bug class that will recur, add its signature to `recurring-bugs.md`. That file is what stops the next session repeating it.
-4. **`docs/audit-findings.md`** — anything you found but didn't fix gets a row here (new `AF-YYYYMMDD-NN` ID), not a new file and not just a mention in the session log. If you closed a row, update it in place with today's date and evidence; never delete a row.
+4. **`docs/audit-findings.md`** — fix and close findings in-session by default (see "Resolve findings, don't just log them" above); anything left open needs a stated reason (EVIDENCE/calendar-blocked/needs-a-decision/depends-on-another-row). New rows get a stable `AF-YYYYMMDD-NN` ID, not a new file and not just a mention in the session log. If you closed a row, update it in place with today's date and evidence; never delete a row.
 
 Run `graphify update .` if files changed significantly. Silence in any of these means a future session rediscovers the same thing from scratch.

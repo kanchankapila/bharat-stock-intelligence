@@ -616,6 +616,43 @@ def check_information_schema_missing_table_schema(path: Path, text: str) -> list
     return findings
 
 
+_SCREENER_CATALOG_RE = re.compile(r"\bscreener_catalog\b")
+_EXACT_CASE_SOURCE_RE = re.compile(r"\bsource\s*=\s*['\"][A-Za-z]+['\"]")
+_LOWER_SOURCE_RE = re.compile(r"(?i)\blower\s*\(\s*\w*\.?source\b")
+
+
+def check_screener_catalog_exact_case_source(path: Path, text: str) -> list[str]:
+    """`screener_catalog.source` holds mixed-case values for the same provider live
+    (`trendlyne`/`Trendlyne`, `etnow`/`ETnow`, `moneycontrol`/`MoneyControl` -- AF-20260816-19,
+    877 of 2,539 rows mixed-case at last check). An exact-case `source = 'Trendlyne'` filter
+    silently drops the other spelling's rows (25.8% fewer for Trendlyne) with no error -- the
+    known readers (`intraday_ranker.py`, `movement_predictor.py`) fixed this with `LOWER()`;
+    this check exists so the next reader doesn't reintroduce it. Windowed, not a statement-span
+    parser, same tradeoff as check_information_schema_missing_table_schema above."""
+    if "tests" in path.parts:
+        return []
+    findings = []
+    lines = text.splitlines()
+    for i, line in enumerate(lines):
+        if not _SCREENER_CATALOG_RE.search(line):
+            continue
+        window = "\n".join(lines[max(0, i - 4):i + 8])
+        if _LOWER_SOURCE_RE.search(window):
+            continue
+        m = _EXACT_CASE_SOURCE_RE.search(window)
+        if not m:
+            continue
+        findings.append(
+            f"{_display_path(path)}:{i + 1}: `screener_catalog` referenced near an exact-case "
+            f"`{m.group(0)}` filter with no `LOWER(source)` in the same window -- "
+            f"screener_catalog.source holds mixed-case spellings for the same provider live "
+            f"(AF-20260816-19), so this silently drops ~26% of one provider's rows. Wrap in "
+            f"`LOWER(source) = 'lowercasevalue'`, matching intraday_ranker.py/"
+            f"movement_predictor.py."
+        )
+    return findings
+
+
 def _runpython_invoked_scripts() -> set[str]:
     """.py filenames passed as runPython()'s first argument anywhere under src/server/**/*.ts
     -- the set of scripts whose stdout pythonRunner.ts never inspects, so a diagnostic printed
@@ -793,9 +830,12 @@ def main() -> int:
         all_findings.extend(check_multiword_pg_cast(path, text))
         all_findings.extend(check_information_schema_missing_table_schema(path, text))
         all_findings.extend(check_degraded_print_to_stdout(path, text, runpython_scripts))
+        all_findings.extend(check_screener_catalog_exact_case_source(path, text))
 
     for path in ts_files:
-        all_findings.extend(check_skip_not_success(path, path.read_text(encoding="utf-8", errors="ignore")))
+        ts_text = path.read_text(encoding="utf-8", errors="ignore")
+        all_findings.extend(check_skip_not_success(path, ts_text))
+        all_findings.extend(check_screener_catalog_exact_case_source(path, ts_text))
 
     if not args.skip_live_datasource_check:
         all_findings.extend(check_missing_live_datasource_test(py_files))

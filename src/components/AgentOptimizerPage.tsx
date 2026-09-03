@@ -1,12 +1,14 @@
 import { trpc } from '../lib/trpc';
-import { RefreshCw, Settings } from 'lucide-react';
+import { RefreshCw, Settings, AlertTriangle } from 'lucide-react';
 import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, Legend } from 'recharts';
 
 export function AgentOptimizerPage() {
   const { data, isLoading, refetch } = trpc.getOptimizerReport.useQuery({ limit: 30 });
+  const { data: triggerErrors, refetch: refetchTriggerErrors } = trpc.getAgentTriggerErrors.useQuery();
   const runMutation = trpc.runOptimizerAgent.useMutation({
-    onSuccess: () => setTimeout(() => refetch(), 3000),
+    onSuccess: () => setTimeout(() => { refetch(); refetchTriggerErrors(); }, 3000),
   });
+  const triggerError = (triggerErrors as any)?.optimizer;
 
   const latest = data?.latest as any;
   const history = (data?.history as any[]) ?? [];
@@ -39,6 +41,13 @@ export function AgentOptimizerPage() {
           </button>
         </div>
       </div>
+
+      {triggerError?.error && (
+        <div className="flex items-center gap-2 text-sm text-rose-400 bg-rose-950/40 border border-rose-900 rounded-lg px-3 py-2">
+          <AlertTriangle className="w-4 h-4 shrink-0" />
+          <span>Last direct run failed{triggerError.at ? ` at ${triggerError.at}` : ''}: {triggerError.error}</span>
+        </div>
+      )}
 
       {isLoading && <div className="v1-card p-6 text-sm text-slate-400 font-data animate-pulse">Loading optimizer report...</div>}
 

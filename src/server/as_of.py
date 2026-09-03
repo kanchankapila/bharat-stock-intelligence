@@ -36,21 +36,23 @@ def as_of_join_sql(hist_table: str, alias: str, base_alias: str, base_symbol_col
     `hist_table` is a fixed set of internal table names (never user input) -- safe to
     interpolate directly, matching every call site's existing convention.
 
-    `base_date_is_text=False` for a native-DATE base column (technical_signals.date since
-    the 2026-08-25 migration): every history table here (fundamentals_history,
-    analyst_estimates_history) carries a TEXT `as_of_date`. Repo convention (recurring-bugs.md,
-    fourth recurrence) is to cast the DATE side to `::text`, NOT the TEXT side to `::date` --
-    identical ordering for ISO dates on live Postgres, and it keeps SQLite-heritage fixtures
-    (which declare every such column TEXT) green under pytest. Default True keeps every
-    signal_date-based caller (TEXT) unchanged.
+    `hist_table.as_of_date` (fundamentals_history, analyst_estimates_history) is now native
+    DATE (AF-20260831-04, 2026-09-03 migration -- was TEXT when this helper was written, which
+    is why the parameter below is named the way it is). Every current caller's base column is
+    also DATE (technical_signals.date since 2026-08-25; signal_outcomes/signal_excursions
+    .signal_date since this same migration), so in practice no cast is ever needed today --
+    `base_date_is_text=True` (the default, kept for every signal_date-based caller so no call
+    site needed touching) casts the base ref to `::date` defensively, which is a no-op on an
+    already-DATE column; `base_date_is_text=False` (technical_signals callers) skips the cast
+    since both sides are already DATE. If a FUTURE hist_table or base column is genuinely TEXT
+    again, this needs re-deriving, not blindly trusting either flag's name.
     """
     alias2 = f"{alias}2"
     # Cast ONLY the inner point-in-time predicate's right-hand side. MAX() must stay on the raw
-    # TEXT column so the outer equality ({alias}.as_of_date = (SELECT MAX(...))) remains
-    # TEXT = TEXT -- casting inside MAX() flips the outer comparison to text = date, which has
-    # no operator (caught live 2026-08-26 executing the fragment against production).
+    # DATE column so the outer equality ({alias}.as_of_date = (SELECT MAX(...))) remains
+    # DATE = DATE -- casting inside MAX() would flip the outer comparison to a mismatched type.
     base_ref = f"{base_alias}.{base_date_col}"
-    rhs = base_ref if base_date_is_text else f"{base_ref}::text"
+    rhs = f"{base_ref}::date" if base_date_is_text else base_ref
     return (
         f"LEFT JOIN {hist_table} {alias}\n"
         f"       ON {alias}.symbol = {base_alias}.{base_symbol_col}\n"

@@ -51,6 +51,21 @@ def use_postgres() -> bool:
     return True
 
 
+# AF-20260831-04: psycopg2 casts a native DATE column to a Python datetime.date object by
+# default, but every caller here (and its predecessor, the pre-2026-08-16 SQLite path) has
+# always received a plain 'YYYY-MM-DD' string -- a datetime.date breaks any code doing
+# string slicing/comparison on the value, and json.dumps() raises on it outright
+# ("Object of type date is not JSON serializable"). pgClient.ts already registers the
+# mirror-image override (types.setTypeParser(types.builtins.DATE, val => val)) for exactly
+# this reason. Registered globally (not per-engine/per-connection) so it applies to every
+# psycopg2 connection this process opens, matching that TS-side scope. 1082 is Postgres's
+# well-known builtin OID for the `date` type (stable across versions, not schema-dependent).
+import psycopg2 as _psycopg2  # noqa: E402
+_DATE_OID = 1082
+_DATE_AS_STR = _psycopg2.extensions.new_type((_DATE_OID,), "DATE_AS_STR", lambda value, cursor: value)
+_psycopg2.extensions.register_type(_DATE_AS_STR)
+
+
 # --- Connection URL / engine ---
 
 

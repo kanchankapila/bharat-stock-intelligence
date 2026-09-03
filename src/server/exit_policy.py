@@ -409,9 +409,9 @@ def load_latest_features_for_symbol(symbol: str) -> pd.DataFrame:
         LEFT JOIN stock_fundamentals sf ON sf.symbol = ts.symbol
         LEFT JOIN feature_store fs
                ON fs.symbol = ts.symbol AND fs.date = ts.date AND fs.timeframe = 'D'
-        LEFT JOIN market_breadth mb ON mb.date = ts.date::text
+        LEFT JOIN market_breadth mb ON mb.date = ts.date
         LEFT JOIN historical_fno_sentiment hfs
-               ON hfs.symbol = ts.symbol AND hfs.date = ts.date::text
+               ON hfs.symbol = ts.symbol AND hfs.date = ts.date
         {as_of_join_sql('analyst_estimates_history', 'aeh', 'ts', 'symbol', 'date', False)}
         LEFT JOIN proprietary_scores_history psh_az
                ON psh_az.symbol = ts.symbol
@@ -421,7 +421,7 @@ def load_latest_features_for_symbol(symbol: str) -> pd.DataFrame:
                   SELECT MAX(p2.date) FROM proprietary_scores_history p2
                   WHERE p2.symbol = ts.symbol AND p2.source = 'moneycontrol'
                     AND p2.score_type = 'altman_z_score'
-                    AND p2.date <= ts.date::text
+                    AND p2.date <= ts.date
               )
         LEFT JOIN proprietary_scores_history psh_oo
                ON psh_oo.symbol = ts.symbol
@@ -431,7 +431,7 @@ def load_latest_features_for_symbol(symbol: str) -> pd.DataFrame:
                   SELECT MAX(p2.date) FROM proprietary_scores_history p2
                   WHERE p2.symbol = ts.symbol AND p2.source = 'moneycontrol'
                     AND p2.score_type = 'ohlson_o_score'
-                    AND p2.date <= ts.date::text
+                    AND p2.date <= ts.date
               )
         LEFT JOIN (
             SELECT

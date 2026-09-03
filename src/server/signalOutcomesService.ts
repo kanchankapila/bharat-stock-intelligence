@@ -92,7 +92,7 @@ export async function computeSignalOutcomes(horizonDays: HorizonDays = 5): Promi
       AND NOT EXISTS (
         SELECT 1 FROM signal_outcomes so
         WHERE so.symbol = ts.symbol
-          AND so.signal_date = ts.date::text
+          AND so.signal_date = ts.date
           AND so.horizon_days = ?
           AND so.outcome != 'PENDING'
           AND so.signal_source = 'technical'

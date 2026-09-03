@@ -1,6 +1,38 @@
 import { z } from 'zod';
-import { dbGet, dbAll } from '../dbAsync';
+import { dbGet, dbAll, dbRun } from '../dbAsync';
 import { router, publicProcedure, adminProcedure } from '../trpc';
+
+// AF-20260828-26: the direct-runPython fallback path (used only when the matching BullMQ
+// queue isn't configured) used to be pure fire-and-forget (`.catch(console.error)`) -- a
+// failure only ever reached the server console, with no way for the UI to learn about it.
+// Mirrors monitor.router.ts's triggerScript `${stateKey}_error` persistence pattern (same
+// app_settings key shape, `agent_<id>_error`/`_error_at` instead of `monitor_<id>_error`) so
+// a failed direct run is readable back the same way a failed monitor script is.
+async function trackDirectAgentRun(agentId: string, run: Promise<unknown>): Promise<void> {
+  const key = `agent_${agentId}_error`;
+  try {
+    await run;
+    // Both keys, not just the error: deleting `_error` alone would strand `_error_at`
+    // forever, and getAgentTriggerErrors would then keep returning a phantom
+    // { error: '', at: <old timestamp> } entry for an agent that has since succeeded.
+    await dbRun('DELETE FROM app_settings WHERE key IN (?, ?)', [key, `${key}_at`]);
+  } catch (err: unknown) {
+    const msg = (err as Error).message ?? String(err);
+    console.error(`[AGENT] ${agentId} direct run failed:`, msg);
+    try {
+      await dbRun(
+        'INSERT INTO app_settings(key, value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value',
+        [key, msg.slice(0, 500)]
+      );
+      await dbRun(
+        'INSERT INTO app_settings(key, value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value',
+        [`${key}_at`, new Date().toISOString()]
+      );
+    } catch (persistErr: unknown) {
+      console.warn('[AGENT] failed to persist trigger error:', (persistErr as Error).message);
+    }
+  }
+}
 
 export const agentsRouter = router({
 
@@ -89,6 +121,32 @@ export const agentsRouter = router({
     return { ds, strat, audit, optim };
   }),
 
+  // AF-20260828-26: readable-back counterpart to trackDirectAgentRun above -- only ever
+  // populated when an agent ran via the direct-runPython fallback (queue unconfigured) AND
+  // failed; empty in the normal BullMQ-queued path, which has its own job-level failure
+  // visibility already.
+  getAgentTriggerErrors: publicProcedure.query(async () => {
+    const rows = await dbAll<{ key: string; value: string }>(
+      "SELECT key, value FROM app_settings WHERE key LIKE 'agent\\_%\\_error%' ESCAPE '\\'"
+    );
+    const byAgent: Record<string, { error: string; at: string | null }> = {};
+    for (const row of rows) {
+      const m = row.key.match(/^agent_(.+?)_error(_at)?$/);
+      if (!m) continue;
+      const [, agentId, isAt] = m;
+      byAgent[agentId] ??= { error: '', at: null };
+      if (isAt) byAgent[agentId].at = row.value;
+      else byAgent[agentId].error = row.value;
+    }
+    // Drop any entry with no actual error text -- defensive against a stranded `_error_at`
+    // row written before the delete-both fix above, which would otherwise render as an
+    // agent "failure" carrying an empty message.
+    for (const [agentId, v] of Object.entries(byAgent)) {
+      if (!v.error) delete byAgent[agentId];
+    }
+    return byAgent;
+  }),
+
   // ── Mutations ─────────────────────────────────────────────────────────────
 
   runDataScientistAgent: adminProcedure.mutation(async () => {
@@ -98,7 +156,7 @@ export const agentsRouter = router({
       return { queued: true };
     }
     const { runPython } = await import('../pythonRunner');
-    runPython('agents/data_scientist_agent.py', [], 10 * 60_000).catch(console.error);
+    void trackDirectAgentRun('data_scientist', runPython('agents/data_scientist_agent.py', [], 10 * 60_000));
     return { queued: false, running: true };
   }),
 
@@ -109,7 +167,7 @@ export const agentsRouter = router({
       return { queued: true };
     }
     const { runPython } = await import('../pythonRunner');
-    runPython('agents/strategist_agent.py', [], 15 * 60_000).catch(console.error);
+    void trackDirectAgentRun('strategist', runPython('agents/strategist_agent.py', [], 15 * 60_000));
     return { queued: false, running: true };
   }),
 
@@ -120,7 +178,7 @@ export const agentsRouter = router({
       return { queued: true };
     }
     const { runPython } = await import('../pythonRunner');
-    runPython('agents/auditor_agent.py', [], 15 * 60_000).catch(console.error);
+    void trackDirectAgentRun('auditor', runPython('agents/auditor_agent.py', [], 15 * 60_000));
     return { queued: false, running: true };
   }),
 
@@ -131,7 +189,7 @@ export const agentsRouter = router({
       return { queued: true };
     }
     const { runPython } = await import('../pythonRunner');
-    runPython('agents/optimizer_agent.py', [], 20 * 60_000).catch(console.error);
+    void trackDirectAgentRun('optimizer', runPython('agents/optimizer_agent.py', [], 20 * 60_000));
     return { queued: false, running: true };
   }),
 
@@ -145,14 +203,16 @@ export const agentsRouter = router({
     ];
 
     let queued = 0;
-    const directAgents: Array<{ script: string; timeout: number }> = [];
+    const directAgents: Array<{ agentId: string; script: string; timeout: number }> = [];
+    const agentIdForScript = (script: string) =>
+      script.replace(/^agents\//, '').replace(/_agent\.py$/, '');
 
     for (const { q, name, delay, script, timeout } of jobs) {
       if (q) {
         await q.add(name, {}, { delay, removeOnComplete: 1 });
         queued++;
       } else {
-        directAgents.push({ script, timeout });
+        directAgents.push({ agentId: agentIdForScript(script), script, timeout });
       }
     }
 
@@ -160,7 +220,9 @@ export const agentsRouter = router({
       const { runPython } = await import('../pythonRunner');
       const runAgents = async () => {
         for (const agent of directAgents) {
-          await runPython(agent.script, [], agent.timeout).catch(console.error);
+          // Sequential by design (pipeline stages), so one agent's failure is tracked and
+          // logged without aborting the rest -- trackDirectAgentRun swallows the rejection.
+          await trackDirectAgentRun(agent.agentId, runPython(agent.script, [], agent.timeout));
         }
       };
       void runAgents();
