@@ -225,4 +225,13 @@ describe('holiday-skip guard is wired into every targeted evening/night job', ()
     expect(idx).toBeGreaterThanOrEqual(0);
     expect(queuesSrc.slice(idx - 400, idx)).toContain('isTradingHolidayToday()');
   });
+
+  it('does not stamp a skipped stock-refresh as a successful data run', () => {
+    expect(queuesSrc).toContain('return { count: 0, persisted: 0, skipped: true }');
+    const completedIdx = queuesSrc.indexOf("stockWorker.on('completed'");
+    expect(completedIdx).toBeGreaterThanOrEqual(0);
+    const completedBody = queuesSrc.slice(completedIdx, completedIdx + 500);
+    expect(completedBody).toContain('if (result.skipped)');
+    expect(completedBody.indexOf('recordHeartbeat')).toBeGreaterThan(completedBody.indexOf('return;'));
+  });
 });

@@ -101,7 +101,7 @@ export class WebSocketSignalService {
    * Initialize WebSocket server attached to HTTP server
    */
   public initialize(httpServer: HttpServer): void {
-    this.wss = new WebSocketServer({ server: httpServer });
+    this.wss = new WebSocketServer({ server: httpServer, path: '/signals' });
 
     this.wss.on('connection', (ws: WebSocket) => {
       this.clients.add(ws);

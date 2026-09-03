@@ -231,13 +231,13 @@ let trendlyneChecklistCycleWorker: Worker | null = null;
 
 // ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ Stock-refresh worker processor (PHASE 1: Now persists OHLCV) ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬
 
-async function processStockRefresh(job: Job): Promise<{ count: number; persisted: number }> {
+async function processStockRefresh(job: Job): Promise<{ count: number; persisted: number; skipped?: boolean }> {
   // 2026-08-06: the exchange never opened on a trading holiday, so there is no new EOD OHLCV
   // bar to persist -- fetchAndPersistOHLCVData() would just re-fetch/re-write yesterday's
   // close. Never dispatched by closed-day-early-batch, so a plain holiday check is enough.
   if (await shouldSkipOnTradingHoliday(job)) {
     console.log('[QUEUE] stock-refresh skipped — trading holiday, no new EOD bar to persist');
-    return { count: 0, persisted: 0 };
+    return { count: 0, persisted: 0, skipped: true };
   }
   const { fetchAndPersistOHLCVData } = await import('./liveStockData');
   const result = await fetchAndPersistOHLCVData();
@@ -1713,6 +1713,10 @@ export async function initQueues(): Promise<boolean> {
     );
 
     stockWorker.on('completed', (job, result) => {
+      if (result.skipped) {
+        console.log('[QUEUE] stock-refresh completed without new data');
+        return;
+      }
       console.log(`[QUEUE] stock-refresh completed: ${result.count} stocks`);
       recordHeartbeat('stock-refresh', 'success');
     });
