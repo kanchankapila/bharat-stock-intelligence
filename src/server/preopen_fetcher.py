@@ -51,6 +51,7 @@ NSE_HEADERS = {
     "Referer": "https://www.nseindia.com/",
 }
 
+NSE_PREOPEN_ALL   = "https://www.nseindia.com/api/market-data-pre-open?key=ALL"
 NSE_PREOPEN_FO    = "https://www.nseindia.com/api/market-data-pre-open?key=FO"
 NSE_PREOPEN_NIFTY = "https://www.nseindia.com/api/market-data-pre-open?key=NIFTY"
 
@@ -125,13 +126,17 @@ def _parse_float(val: str | None) -> float | None:
     """Parse a comma-formatted number string like '23,969.50' or '-0.60'."""
     if val is None:
         return None
+    val_str = str(val).strip().replace(",", "")
+    if not val_str or val_str.lower() in ("-", "null", "none", "nan", ""):
+        return None
     try:
-        return float(str(val).replace(",", "").strip())
+        return float(val_str)
     except (ValueError, TypeError):
         return None
 
 
 def fetch_section(url: str) -> list[dict]:
+    """Fetch an MC pre-market API endpoint (MI or II) and return the list of items."""
     r = cffi_req.get(url, headers=HEADERS, impersonate="chrome110", timeout=10)
     r.raise_for_status()
     data = r.json()
@@ -158,7 +163,15 @@ def _find(items: list[dict], *name_fragments: str) -> dict | None:
 # NSE pre-open IEP fetch
 # ---------------------------------------------------------------------------
 
-def _nse_session() -> requests.Session:
+def _nse_session():
+    if cffi_req is not None:
+        try:
+            s = cffi_req.Session(impersonate="chrome110")
+            s.headers.update(NSE_HEADERS)
+            s.get("https://www.nseindia.com/", timeout=10)
+            return s
+        except Exception:
+            pass
     s = requests.Session()
     s.headers.update(NSE_HEADERS)
     try:
@@ -168,7 +181,7 @@ def _nse_session() -> requests.Session:
     return s
 
 
-def _fetch_nse_preopen_url(sess: requests.Session, url: str) -> list[dict]:
+def _fetch_nse_preopen_url(sess, url: str) -> list[dict]:
     try:
         r = sess.get(url, timeout=12)
         if r.status_code == 403:
@@ -183,7 +196,7 @@ def _fetch_nse_preopen_url(sess: requests.Session, url: str) -> list[dict]:
 
 
 def fetch_nse_preopen(con) -> int:
-    """Fetch NSE pre-open IEP data for F&O + Nifty 50 stocks.
+    """Fetch NSE pre-open IEP data for the entire market (2,150+ equities in 1 call).
 
     Writes to preopen_stock_snapshot and backfills the most recent
     technical_signals row per symbol with iep_gap_pct + preopen_imbalance.
@@ -193,12 +206,21 @@ def fetch_nse_preopen(con) -> int:
     ensure_preopen_stock_schema(con)
 
     sess = _nse_session()
-    raw_fo    = _fetch_nse_preopen_url(sess, NSE_PREOPEN_FO)
-    raw_nifty = _fetch_nse_preopen_url(sess, NSE_PREOPEN_NIFTY)
+    raw_all = _fetch_nse_preopen_url(sess, NSE_PREOPEN_ALL)
 
-    # Merge, dedup by symbol (FO takes priority if duplicate)
+    if raw_all:
+        raw_items = raw_all
+        print(f"[NSE PreOpen] Fetched entire equity market in 1 call ({len(raw_items)} items from key=ALL)")
+    else:
+        # Graceful fallback to FO + NIFTY if ALL fails or is blocked
+        print("[NSE PreOpen] key=ALL returned empty; falling back to key=FO + key=NIFTY...")
+        raw_fo    = _fetch_nse_preopen_url(sess, NSE_PREOPEN_FO)
+        raw_nifty = _fetch_nse_preopen_url(sess, NSE_PREOPEN_NIFTY)
+        raw_items = raw_nifty + raw_fo
+
+    # Merge, dedup by symbol
     merged: dict[str, dict] = {}
-    for item in (raw_nifty + raw_fo):
+    for item in raw_items:
         meta = item.get("metadata") or {}
         sym = (meta.get("symbol") or "").strip().upper()
         if sym:
@@ -242,44 +264,39 @@ def fetch_nse_preopen(con) -> int:
 
     cur = con.cursor()
 
-    # Upsert into preopen_stock_snapshot
-    for row in rows:
-        cur.execute(translate("""
-            INSERT INTO preopen_stock_snapshot
-                (symbol, snapshot_date, iep, prev_close, iep_gap_pct,
-                 total_buy_qty, total_sell_qty, preopen_imbalance, last_price, fetched_at)
-            VALUES (?,?,?,?,?,?,?,?,?,?)
-            ON CONFLICT(symbol, snapshot_date) DO UPDATE SET
-                iep               = excluded.iep,
-                prev_close        = excluded.prev_close,
-                iep_gap_pct       = excluded.iep_gap_pct,
-                total_buy_qty     = excluded.total_buy_qty,
-                total_sell_qty    = excluded.total_sell_qty,
-                preopen_imbalance = excluded.preopen_imbalance,
-                last_price        = excluded.last_price,
-                fetched_at        = excluded.fetched_at
-        """), row)
+    # Batch upsert into preopen_stock_snapshot
+    upsert_sql = translate("""
+        INSERT INTO preopen_stock_snapshot
+            (symbol, snapshot_date, iep, prev_close, iep_gap_pct,
+             total_buy_qty, total_sell_qty, preopen_imbalance, last_price, fetched_at)
+        VALUES (?,?,?,?,?,?,?,?,?,?)
+        ON CONFLICT(symbol, snapshot_date) DO UPDATE SET
+            iep               = excluded.iep,
+            prev_close        = excluded.prev_close,
+            iep_gap_pct       = excluded.iep_gap_pct,
+            total_buy_qty     = excluded.total_buy_qty,
+            total_sell_qty    = excluded.total_sell_qty,
+            preopen_imbalance = excluded.preopen_imbalance,
+            last_price        = excluded.last_price,
+            fetched_at        = excluded.fetched_at
+    """)
+    cur.executemany(upsert_sql, rows)
     con.commit()
 
-    # Backfill today's technical_signals row per symbol.
-    # date = ? guard (2026-07-19): previously matched created_at = MAX(created_at), but
-    # technical_signals.created_at is NULL for 100% of rows in production (nothing else in
-    # this codebase sets it) -- MAX(created_at) is therefore always NULL, and `created_at =
-    # NULL` never matches in SQL, so this UPDATE has never actually written a row, ever.
-    # Uses snapshot_date (this batch's own date), not a fresh now() call, to stay consistent
-    # with what was just written to preopen_stock_snapshot above.
-    for (sym, sd, _iep, _pc, iep_gap_pct, _bq, _sq, preopen_imbalance, _lp, _fa) in rows:
-        if iep_gap_pct is None and preopen_imbalance is None:
-            continue
-        cur.execute(
-            """
+    # Backfill today's technical_signals row per symbol
+    sig_updates = [
+        (iep_gap_pct, preopen_imbalance, sym, sd)
+        for (sym, sd, _iep, _pc, iep_gap_pct, _bq, _sq, preopen_imbalance, _lp, _fa) in rows
+        if iep_gap_pct is not None or preopen_imbalance is not None
+    ]
+    if sig_updates:
+        update_sql = """
             UPDATE technical_signals
             SET iep_gap_pct = ?, preopen_imbalance = ?
             WHERE symbol = ? AND date = ?
-            """,
-            (iep_gap_pct, preopen_imbalance, sym, sd),
-        )
-    con.commit()
+        """
+        cur.executemany(update_sql, sig_updates)
+        con.commit()
 
     # Summary
     gap_ups   = sum(1 for r in rows if r[4] is not None and r[4] > 1.0)

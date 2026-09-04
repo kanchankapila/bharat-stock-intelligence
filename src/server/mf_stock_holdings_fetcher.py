@@ -272,6 +272,8 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Per-stock mutual-fund ownership flow")
     parser.add_argument("--symbol", default=None)
     parser.add_argument("--limit", type=int, default=None)
+    parser.add_argument("--force", action="store_true", default=False,
+                        help="Force re-fetch all symbols even if fresh within last 25 days")
     args = parser.parse_args()
 
     con = connect()
@@ -281,8 +283,20 @@ def main() -> None:
         print("[MFHoldings] No stocks with a companyid found.")
         con.close(); return
 
+    # Smart 25-day cadence check: mutual funds report monthly on month-end
+    if not args.force and not args.symbol:
+        from fetch_utils import filter_stale_symbols
+        fresh_cutoff = (date.today() - timedelta(days=25)).isoformat()
+        stale_stocks = filter_stale_symbols(con, stocks, "mf_stock_holdings",
+                                            date_col="fetched_at", as_of_date=fresh_cutoff)
+        skipped = len(stocks) - len(stale_stocks)
+        if skipped > 0:
+            print(f"[MFHoldings] Smart cadence skip: {skipped}/{len(stocks)} symbols already fresh within last 25 days. Processing {len(stale_stocks)} remaining.")
+            stocks = stale_stocks
+
     print(f"[MFHoldings] Processing {len(stocks)} stocks — per-stock MF ownership flow…")
     session = requests.Session(); session.headers.update(HEADERS)
+
     ok = accumulating = 0
     for i, (symbol, cid) in enumerate(stocks, 1):
         try:

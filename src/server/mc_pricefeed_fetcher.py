@@ -311,8 +311,8 @@ def extract_features(d: dict) -> dict:
         "ret_ytd":              _sf(d.get("clYtdPerChange")),
         "high_52w":             h52,
         "low_52w":              l52,
-        "high_52w_date":        d.get("52HDate"),
-        "low_52w_date":         d.get("52LDate"),
+        "high_52w_date":        d.get("52HDate") if d.get("52HDate") else None,
+        "low_52w_date":         d.get("52LDate") if d.get("52LDate") else None,
         "dist_52w_high":        dist_52h,
         "dist_52w_low":         dist_52l,
         "days_from_52wh":       _days_since(d.get("52HDate")),
@@ -520,6 +520,8 @@ def _load_stocks(symbol_filter: str | None, con) -> list[tuple[str, str]]:
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--symbol", default=None)
+    parser.add_argument("--force", action="store_true", default=False,
+                        help="Force re-fetch even if data is already fresh for today")
     args = parser.parse_args()
 
     con = connect()
@@ -530,9 +532,17 @@ def main() -> None:
         print("[MCPricefeed] No stocks with mcsymbol found.")
         return
 
+    today = date.today().isoformat()
+    if not args.force and not args.symbol:
+        from fetch_utils import filter_stale_symbols
+        stocks = filter_stale_symbols(con, stocks, "mc_pricefeed_daily", date_col="date", as_of_date=today)
+        if not stocks:
+            print(f"[MCPricefeed] All stocks already up to date for {today}. Zero network calls needed.")
+            con.close()
+            return
+
     print(f"[MCPricefeed] Fetching {len(stocks)} stocks in batches of {BATCH_SIZE} ({BATCH_GAP_SEC}s gap)…")
     session = requests.Session()
-    today = date.today().isoformat()
     # ts_floor anchors backfill_technical_signals' write guard to the last completed trading
     # session (not raw date.today()) -- see that function's docstring for why. `today` above
     # is kept as-is for upsert_row/append_pe_pb_history, which genuinely want the actual

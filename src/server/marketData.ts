@@ -54,10 +54,18 @@ export async function fetchAllIndianIndices() {
 export async function fetchIndexSpot(symbol: string, exchange?: string) {
   let url = `https://webapi.niftytrader.in/webapi/symbol/today-spot-data?symbol=${encodeURIComponent(symbol)}`;
   if (exchange) url += `&exchange=${exchange}`;
+  let authHeaders: Record<string, string> = {};
+  try {
+    const { getNiftyTraderHeaders } = await import('./niftytraderService');
+    authHeaders = await getNiftyTraderHeaders();
+  } catch {
+    // ignore
+  }
   const response = await fetch(url, {
     headers: {
       'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)',
       'Accept': 'application/json',
+      ...authHeaders,
     },
     signal: AbortSignal.timeout(8000),
   });
@@ -71,6 +79,7 @@ export async function fetchIndexSpot(symbol: string, exchange?: string) {
     changePct: Number(d.change_per ?? 0),
   };
 }
+
 
 export async function fetchMCRatios(symbol: string) {
   const map = getStockMapping(symbol);

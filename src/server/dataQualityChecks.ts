@@ -672,6 +672,21 @@ const TABLE_FRESHNESS_CHECKS: TableFreshnessConfig[] = [
   { id: 'mover-snapshots-freshness', label: 'mover_snapshots (ground-truth mover screener captures)',
     category: 'flows', critical: false, table: 'mover_snapshots', dateColumn: 'trade_date',
     warnDays: 3, failDays: 5 },
+  // niftytrader_live_screener_snapshots (niftytrader_live_screener_job.py, added 2026-09-04):
+  // per-filter parallel capture, */15 during market hours. captured_at is a TEXT UTC timestamp.
+  //
+  // warnDays/failDays are DAYS, and daysStale() returns a fractional day — so the original
+  // `warnDays: 2, failDays: 4` alongside a comment describing 2- and 4-HOUR thresholds was
+  // 24x looser than intended. Corrected to 1/2 rather than to 2/24 and 4/24, because an
+  // hours-scale bar is the wrong instrument twice over: this job only fires 09:15-15:30 IST,
+  // so a 4-hour failure bar would go red every single evening and all weekend (a monitor that
+  // always fires carries no information), and this file's own header says these thresholds
+  // exist to catch multi-day silent breakage, with cron-aware lateness left to
+  // jobHeartbeat/JOB_REGISTRY. 1/2 + tradingDayAware matches live-screener-runs-freshness,
+  // which is the same */15 market-hours NiftyTrader capture.
+  { id: 'nt-live-screener-freshness', label: 'niftytrader_live_screener_snapshots (per-filter live screener)',
+    category: 'flows', critical: false, table: 'niftytrader_live_screener_snapshots',
+    dateColumn: 'captured_at', tradingDayAware: true, warnDays: 1, failDays: 2 },
 ];
 
 export const DATA_QUALITY_CHECKS: DataQualityCheck[] = [

@@ -433,13 +433,13 @@ class NLPScreenerInference:
     # where the generic layers are confidently wrong rather than merely silent. FinBERT is a
     # financial NEWS model; a screener NAME is not a news sentence, so it does not get to
     # overrule an explicit domain rule.
-    _RISK_SUBJECT = r'(?:pledge|leverage|debt|npa|default|dilution|insolven|bankrupt|encumbr)'
+    _RISK_SUBJECT = r'(?:pledge\w*|leverage\w*|debt\w*|npa|default\w*|dilution\w*|insolven\w*|bankrupt\w*|encumbr\w*)'
     _RISK_UP = re.compile(
         r'(?:high|rising|increas\w*|growing|surg\w*|more|heavy)\s+\w*\s*' + _RISK_SUBJECT
         + r'|' + _RISK_SUBJECT + r'\s+(?:ris\w+|increas\w+|up)')
     _RISK_DOWN = re.compile(
         r'(?:low|falling|decreas\w*|declin\w*|reduc\w*|zero|no)\s*\w*\s*' + _RISK_SUBJECT
-        + r'|' + _RISK_SUBJECT[:-1] + r')\s*free')
+        + r'|' + _RISK_SUBJECT + r'\s*free')
     # Cheap on a valuation MULTIPLE is bullish; the same word on a momentum/quality metric is
     # not. Scoped to the multiples explicitly so "low delivery"/"low volume" never match.
     _MULTIPLE = r'(?:p\s*/?\s*[ebs]\b|pe\b|pb\b|ps\b|price[ -]to[ -](?:book|sales|earning\w*|cash)' \
@@ -735,16 +735,3 @@ if __name__ == "__main__":
     for name, desc in tests:
         r = nlp.infer(name, desc)
         print(f"[{r['sentiment']:8s}] [{r['category']:12s}] [{r['timeframe']:10s}] conf={r['confidence']:.2f}  | {name}")
-try:
-    import polars as pl
-except ImportError:
-    pl = None
-from workflow_orchestrator import WorkflowDAG, TaskNode
-
-def to_polars_df(data):
-    """Converts pandas DataFrame or list of dicts to Polars DataFrame for fast vector math."""
-    if pl is None:
-        return data
-    if hasattr(data, 'empty') and data.empty:
-        return pl.DataFrame()
-    return pl.from_pandas(data) if hasattr(data, 'to_numpy') else pl.DataFrame(data)

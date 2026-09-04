@@ -75,17 +75,86 @@ def reconcile(conn: ConnWrapper, trade_date: str | None = None, overwrite: bool 
     conflict = ("DO UPDATE SET open=excluded.open, high=excluded.high, low=excluded.low, "
                 "close=excluded.close, volume=excluded.volume, "
                 "adjustment_basis=excluded.adjustment_basis" if overwrite else "DO NOTHING")
-    sql = ("INSERT INTO stock_ohlcv (symbol, date, open, high, low, close, volume, adjustment_basis) "
-           "VALUES (?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT (symbol, date) " + conflict)
+    sql_ohlcv = ("INSERT INTO stock_ohlcv (symbol, date, open, high, low, close, volume, adjustment_basis) "
+                 "VALUES (?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT (symbol, date) " + conflict)
 
-    written = 0
-    for r in src:
+    # Ensure stock_delivery_volume exists
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS stock_delivery_volume (
+            symbol          TEXT NOT NULL,
+            date            TEXT NOT NULL,
+            series          TEXT,
+            qty_traded      BIGINT,
+            deliverable_qty BIGINT,
+            delivery_pct    REAL,
+            fetched_at      TEXT DEFAULT CURRENT_TIMESTAMP,
+            PRIMARY KEY (symbol, date)
+        )
+    """)
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_sdv_date ON stock_delivery_volume(date)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_sdv_symbol ON stock_delivery_volume(symbol, date DESC)")
+
+    deliv_conflict = ("DO UPDATE SET qty_traded=excluded.qty_traded, "
+                      "deliverable_qty=excluded.deliverable_qty, delivery_pct=excluded.delivery_pct, "
+                      "fetched_at=CURRENT_TIMESTAMP" if overwrite else "DO NOTHING")
+    sql_deliv = ("INSERT INTO stock_delivery_volume (symbol, date, series, qty_traded, deliverable_qty, delivery_pct, fetched_at) "
+                 "VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP) ON CONFLICT (symbol, date) " + deliv_conflict)
+
+    src_full = conn.execute(
+        "SELECT n.symbol, n.open, n.high, n.low, n.close, n.volume, n.series, n.deliv_qty, n.deliv_pct "
+        "FROM nse_universe_history n "
+        "JOIN nse_stocks m ON m.symbol = n.symbol "
+        "WHERE n.date = ? AND n.series = 'EQ' AND n.close IS NOT NULL AND n.close > 0",
+        (trade_date,),
+    ).fetchall()
+
+    ohlcv_batch = []
+    deliv_batch = []
+    for r in src_full:
         r = dict(r)
-        conn.execute(sql, (r["symbol"], trade_date, r["open"], r["high"], r["low"],
+        ohlcv_batch.append((r["symbol"], trade_date, r["open"], r["high"], r["low"],
                             r["close"], r["volume"], "nse_bhavcopy_raw"))
-        written += 1
+        if r.get("deliv_pct") is not None:
+            deliv_batch.append((r["symbol"], trade_date, r.get("series", "EQ"),
+                                r.get("volume"), r.get("deliv_qty"), r.get("deliv_pct")))
+
+    if hasattr(conn, "executemany"):
+        conn.executemany(sql_ohlcv, ohlcv_batch)
+        if deliv_batch:
+            conn.executemany(sql_deliv, deliv_batch)
+    else:
+        for item in ohlcv_batch:
+            conn.execute(sql_ohlcv, item)
+        for item in deliv_batch:
+            conn.execute(sql_deliv, item)
     conn.commit()
-    return {"trade_date": trade_date, "read": len(src), "written": written}
+
+    # Backfill technical_signals.delivery_pct where null for this session
+    tech_filled = 0
+    try:
+        cur = conn.cursor()
+        cur.execute("""
+            UPDATE technical_signals
+            SET delivery_pct = (
+                SELECT delivery_pct FROM stock_delivery_volume
+                WHERE symbol = technical_signals.symbol AND date = ?
+                LIMIT 1
+            )
+            WHERE date = ? AND delivery_pct IS NULL
+        """, (trade_date, trade_date))
+        tech_filled = cur.rowcount
+        conn.commit()
+    except Exception as te:
+        print(f"[RECONCILE] technical_signals delivery_pct backfill skipped: {te}")
+
+    return {
+        "trade_date": trade_date,
+        "read": len(src_full),
+        "written": len(ohlcv_batch),
+        "deliv_written": len(deliv_batch),
+        "tech_filled": max(tech_filled, 0),
+    }
+
 
 
 def main() -> int:
@@ -105,10 +174,11 @@ def main() -> int:
         print(f"[RECONCILE] {result['skipped']}")
         return 0
     print(f"[RECONCILE] {result['trade_date']}: {result['written']}/{result['read']} "
-          f"stock_ohlcv rows reconciled against nse_universe_history "
-          f"({'overwrite' if overwrite else 'fill-only'})")
+          f"stock_ohlcv rows and {result.get('deliv_written', 0)} delivery rows reconciled against nse_universe_history "
+          f"({'overwrite' if overwrite else 'fill-only'}), filled {result.get('tech_filled', 0)} technical_signals.delivery_pct")
     return 0
 
 
 if __name__ == "__main__":
     sys.exit(main())
+

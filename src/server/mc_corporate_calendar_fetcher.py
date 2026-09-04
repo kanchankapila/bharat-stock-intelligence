@@ -169,7 +169,90 @@ def _upsert_corporate_actions(con, events: list[dict], scid_map: dict) -> int:
     return inserted
 
 
+NSE_CA_URL = "https://www.nseindia.com/api/corporates-corporateActions?index=equities"
+
+
+def _fetch_nse_corporate_actions(con, ex_div: dict, dry_run: bool = False) -> int:
+    """Fetch official NSE corporate actions in 1 bulk call (0.2s) and ingest into corporate_actions."""
+    import re
+    try:
+        if cffi_req is not None:
+            sess = cffi_req.Session(impersonate="chrome110")
+        else:
+            sess = _req.Session()
+        sess.headers.update({
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+            "Accept": "application/json, text/html",
+            "Referer": "https://www.nseindia.com/",
+        })
+        try:
+            sess.get("https://www.nseindia.com/", timeout=10)
+        except Exception:
+            pass
+        r = sess.get(NSE_CA_URL, timeout=12)
+        if r.status_code != 200:
+            log.warning("NSE corporate actions HTTP %s", r.status_code)
+            return 0
+        data = r.json()
+        if not isinstance(data, list):
+            return 0
+    except Exception as e:
+        log.warning("Failed to fetch NSE corporate actions: %s", e)
+        return 0
+
+    today = date.today()
+    inserted = 0
+    for item in data:
+        sym = (item.get("symbol") or "").strip().upper()
+        if not sym:
+            continue
+        subj = (item.get("subject") or "").strip()
+        ex_str = (item.get("exDate") or "").strip()
+        if not ex_str or ex_str == "-":
+            continue
+        try:
+            ex_dt = datetime.strptime(ex_str, "%d-%b-%Y").date()
+        except Exception:
+            continue
+
+        action_type = "OTHER"
+        amt = None
+        if "dividend" in subj.lower():
+            action_type = "DIVIDEND_SPECIAL" if "special" in subj.lower() else "DIVIDEND"
+            m = re.search(r"(?:re|rs\.?)\s*([\d\.]+)", subj, re.IGNORECASE)
+            if m:
+                try:
+                    amt = float(m.group(1))
+                except Exception:
+                    pass
+        elif "bonus" in subj.lower():
+            action_type = "BONUS"
+        elif "split" in subj.lower() or "sub-division" in subj.lower():
+            action_type = "SPLIT"
+
+        if not dry_run:
+            con.execute(
+                """
+                INSERT INTO corporate_actions (symbol, ex_date, action_type, amount, ratio, source, ingested_at)
+                VALUES (?, ?, ?, ?, NULL, 'NSE_BULK', NOW())
+                ON CONFLICT (symbol, ex_date, action_type)
+                DO UPDATE SET amount = COALESCE(EXCLUDED.amount, corporate_actions.amount), ingested_at = NOW()
+                """,
+                (sym, ex_dt.isoformat(), action_type, amt),
+            )
+            inserted += 1
+
+        # Also update ex_div forward lookup if upcoming within lookahead
+        if action_type in ("DIVIDEND", "DIVIDEND_SPECIAL") and today <= ex_dt <= (today + timedelta(days=_LOOKAHEAD_DAYS)):
+            days = (ex_dt - today).days
+            if sym not in ex_div or days < ex_div[sym]["days"]:
+                ex_div[sym] = {"days": days, "amount": amt}
+
+    return inserted
+
+
 def _build_forward_maps(events: list[dict], scid_map: dict) -> tuple[dict, dict, dict]:
+
     """
     Returns:
       sym_ex_div:   symbol → (min_days_to_ex, div_amount)
@@ -281,14 +364,15 @@ def _refresh_historical_div(con, symbols: set[str], today: date) -> int:
         """
         SELECT symbol, MAX(ex_date) as last_ex, MAX(amount) FILTER (WHERE ex_date = (
             SELECT MAX(ex_date) FROM corporate_actions ca2
-            WHERE ca2.symbol = ca.symbol AND action_type IN ('DIVIDEND','DIVIDEND_SPECIAL') AND ex_date <= to_char(NOW(), 'YYYY-MM-DD')
+            WHERE ca2.symbol = ca.symbol AND action_type IN ('DIVIDEND','DIVIDEND_SPECIAL') AND ex_date <= CURRENT_DATE
         )) as last_amt
         FROM corporate_actions ca
         WHERE action_type IN ('DIVIDEND', 'DIVIDEND_SPECIAL')
-          AND ex_date <= to_char(NOW(), 'YYYY-MM-DD')
+          AND ex_date <= CURRENT_DATE
           AND symbol = ANY(ARRAY[{}])
         GROUP BY symbol
         """.format(",".join(f"'{s}'" for s in symbols))
+
     ).fetchall()
     updated = 0
     for sym, last_ex, last_amt in rows:
@@ -363,11 +447,19 @@ def run(dry_run: bool = False):
     n_ca = _upsert_corporate_actions(con, events, scid_map) if not dry_run else 0
     if n_ca:
         con.commit()
-    log.info("Upserted %d dividend records into corporate_actions", n_ca)
+    log.info("Upserted %d dividend records into corporate_actions (MC)", n_ca)
 
     # Build forward-looking maps
     ex_div, board = _build_forward_maps(events, scid_map)
+
+    # Ingest official NSE bulk feed (dividends, splits, bonuses) in 1 call (0.2s)
+    n_nse = _fetch_nse_corporate_actions(con, ex_div, dry_run)
+    if n_nse:
+        con.commit()
+    log.info("Upserted %d corporate actions from official NSE bulk feed", n_nse)
+
     log.info("Upcoming ex-div: %d symbols | Board meetings: %d symbols", len(ex_div), len(board))
+
     for sym, v in sorted(ex_div.items(), key=lambda x: x[1]["days"])[:10]:
         amt = f"₹{v['amount']}" if v["amount"] else "?"
         log.info("  ex-div %s: %dd  %s", sym, v["days"], amt)

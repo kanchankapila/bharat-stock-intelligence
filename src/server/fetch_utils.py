@@ -248,8 +248,105 @@ def cap_to_run_budget(rows, label: str, requests_per_row: int = 1,
           f"from the DB; a partial run here is normal, not a failure.")
     return rows[:max_rows]
 
+
+# ── Smart Delta-Fetch (Skip Already-Fresh Symbols) ───────────────────────────
+
+def filter_stale_symbols(conn, symbols: list, table_name: str,
+                         date_col: str = "date", as_of_date: str | None = None) -> list:
+    """Filter out symbols that already have an up-to-date row in `table_name` for `as_of_date`.
+
+    Accepts `symbols` as either a list of string symbols ['RELIANCE', 'TCS'] or a list of tuples
+    [('RELIANCE', 'RI'), ('TCS', 'TCS')] matching fetcher loops.
+
+    Returns the subset of `symbols` that are missing or stale.
+    """
+    if not symbols:
+        return []
+
+    target_date = as_of_date or time.strftime("%Y-%m-%d")
+    try:
+        cur = conn.cursor()
+        query = f"SELECT DISTINCT symbol FROM {table_name} WHERE {date_col} >= ?"
+        cur.execute(query, (target_date,))
+        rows = cur.fetchall()
+        fresh_symbols = set()
+        for r in rows:
+            if hasattr(r, '__getitem__'):
+                try:
+                    s = r['symbol'] if 'symbol' in r else r[0]
+                except Exception:
+                    s = list(dict(r).values())[0]
+            else:
+                s = str(r)
+            if s:
+                fresh_symbols.add(str(s).strip().upper())
+    except Exception as e:
+        print(f"[DELTA-FETCH] Warning: could not query {table_name} freshness ({e}) - processing all symbols")
+        return symbols
+
+
+    stale = []
+    skipped_count = 0
+    for item in symbols:
+        sym = (item[0] if isinstance(item, (tuple, list)) else item).upper()
+        if sym in fresh_symbols:
+            skipped_count += 1
+        else:
+            stale.append(item)
+
+    if skipped_count > 0:
+        print(f"[DELTA-FETCH] {table_name}: {skipped_count}/{len(symbols)} symbols already fresh for {target_date} — skipped network calls. Processing {len(stale)} remaining.")
+    return stale
+
+
+# ── Async httpx High-Throughput Fetcher Utilities ────────────────────────────
+
+async def async_retry_get(client, url: str, retries: int = 3, backoff_base: float = 1.0, **kwargs):
+    """Asynchronous HTTP GET with exponential backoff and jitter."""
+    import asyncio
+    last_exc = None
+    for attempt in range(1, retries + 1):
+        try:
+            resp = await client.get(url, **kwargs)
+            resp.raise_for_status()
+            return resp
+        except Exception as e:
+            last_exc = e
+            if attempt == retries:
+                break
+            sleep_s = backoff_base * (2 ** (attempt - 1)) + random.uniform(0, 0.3)
+            await asyncio.sleep(sleep_s)
+    raise last_exc
+
+
+async def async_batch_fetch(urls: list[str], headers: dict | None = None,
+                            concurrency: int = 10, timeout: float = 10.0) -> list:
+    """Fetch multiple URLs concurrently with controlled concurrency semaphore."""
+    import httpx
+    import asyncio
+
+    sem = asyncio.Semaphore(concurrency)
+    results = []
+
+    async def _fetch_one(client, u):
+        async with sem:
+            try:
+                resp = await client.get(u, headers=headers)
+                if resp.status_code == 200:
+                    return {"url": u, "status": 200, "data": resp.text, "error": None}
+                return {"url": u, "status": resp.status_code, "data": None, "error": f"HTTP {resp.status_code}"}
+            except Exception as exc:
+                return {"url": u, "status": None, "data": None, "error": str(exc)}
+
+    async with httpx.AsyncClient(headers=headers, timeout=timeout) as client:
+        tasks = [_fetch_one(client, url) for url in urls]
+        results = await asyncio.gather(*tasks, return_exceptions=False)
+    return results
+
+
 def to_polars_df(data):
     """Converts pandas DataFrame or list of dicts to Polars DataFrame for fast vector operations."""
     if hasattr(data, 'empty') and data.empty:
         return pl.DataFrame()
     return pl.from_pandas(data) if hasattr(data, 'to_numpy') else pl.DataFrame(data)
+

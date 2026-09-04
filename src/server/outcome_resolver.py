@@ -1176,7 +1176,7 @@ def resolve_dl_predictions(conn: ConnWrapper, dry_run: bool = False) -> dict[str
             SELECT id, symbol, prediction_date
             FROM deep_learning_predictions
             WHERE {col_out} IS NULL
-              AND substr(prediction_date, 1, 10) <= ?
+              AND prediction_date <= ?
             ORDER BY prediction_date DESC
             LIMIT 5000
         """, (cutoff,)).fetchall()
@@ -1252,11 +1252,11 @@ def expire_stale_pending(conn: ConnWrapper, horizon_days: int, dry_run: bool = F
     # unified + rec_log stale PENDING counts (for logging)
     uni_stale = conn.execute("""
         SELECT COUNT(*) FROM unified_signal_outcomes
-        WHERE outcome = 'PENDING' AND horizon_days = ? AND substr(signal_date,1,10) < ?
+        WHERE outcome = 'PENDING' AND horizon_days = ? AND signal_date < ?
     """, (horizon_days, cutoff)).fetchone()[0]
     rec_stale = conn.execute("""
         SELECT COUNT(*) FROM recommendation_log
-        WHERE outcome = 'PENDING' AND COALESCE(horizon_days, 15) = ? AND substr(signal_date,1,10) < ?
+        WHERE outcome = 'PENDING' AND COALESCE(horizon_days, 15) = ? AND signal_date < ?
     """, (horizon_days, cutoff)).fetchone()[0]
 
     if dry_run:
@@ -1272,13 +1272,13 @@ def expire_stale_pending(conn: ConnWrapper, horizon_days: int, dry_run: bool = F
     conn.execute("""
         UPDATE unified_signal_outcomes
         SET outcome = 'NEUTRAL', return_pct = 0.0, computed_at = CURRENT_TIMESTAMP
-        WHERE outcome = 'PENDING' AND horizon_days = ? AND substr(signal_date,1,10) < ?
+        WHERE outcome = 'PENDING' AND horizon_days = ? AND signal_date < ?
     """, (horizon_days, cutoff))
     conn.execute("""
         UPDATE recommendation_log
         SET outcome = 'NEUTRAL', actual_return_pct = 0.0,
             status = 'RESOLVED', resolved_at = CURRENT_TIMESTAMP
-        WHERE outcome = 'PENDING' AND COALESCE(horizon_days, 15) = ? AND substr(signal_date,1,10) < ?
+        WHERE outcome = 'PENDING' AND COALESCE(horizon_days, 15) = ? AND signal_date < ?
     """, (horizon_days, cutoff))
     conn.commit()
     print(f"[OutcomeResolver] Expired stale {horizon_days}D PENDING -> NEUTRAL "

@@ -4,6 +4,7 @@ try:
 except Exception:
     pass
 
+import asyncio
 import polars as pl
 import os
 import sys
@@ -31,15 +32,17 @@ app = FastAPI(title="Bharat Stock Intelligence - ML Orchestration API")
 _executor = ThreadPoolExecutor(max_workers=4)
 
 
-def run_in_thread(fn, *args, **kwargs):
-    return _executor.submit(fn, *args, **kwargs).result()
+async def run_in_thread(fn, *args, **kwargs):
+    """Run a blocking function in the thread pool without blocking the event loop."""
+    loop = asyncio.get_event_loop()
+    return await loop.run_in_executor(_executor, lambda: fn(*args, **kwargs))
 
 @app.post("/api/score-pending")
 async def score_pending():
     """Triggers ML Ensemble Scoring"""
     try:
         logger.info("Starting ml_ensemble.run(do_train=False, do_score=True)")
-        run_in_thread(ml_ensemble.run, do_train=False, do_score=True)
+        await run_in_thread(ml_ensemble.run, do_train=False, do_score=True)
         logger.info("Finished ml_ensemble.run")
         return {"status": "success"}
     except Exception as e:
@@ -51,7 +54,7 @@ async def train_dl():
     """Triggers DL Trainer"""
     try:
         logger.info("Starting dl_engine.train_lstm()")
-        run_in_thread(dl_engine.train_lstm, version=1)
+        await run_in_thread(dl_engine.train_lstm, version=1)
         logger.info("Finished dl_engine.train_lstm()")
         return {"status": "success"}
     except Exception as e:
@@ -59,11 +62,11 @@ async def train_dl():
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/api/resolve-outcomes")
-async def resolve_outcomes(horizon: int):
+async def resolve_outcomes(horizon: int = 15):
     """Triggers Outcome Resolver for a specific horizon"""
     try:
         logger.info(f"Starting outcome_resolver (horizon={horizon})")
-        run_in_thread(outcome_resolver.run, horizon_days=horizon)
+        await run_in_thread(outcome_resolver.run, horizon_days=horizon)
         logger.info("Finished outcome_resolver")
         return {"status": "success"}
     except Exception as e:
@@ -75,7 +78,7 @@ async def infer_dl():
     """Triggers DL Inference"""
     try:
         logger.info("Starting dl_engine.run_inference()")
-        run_in_thread(dl_engine.run_inference)
+        await run_in_thread(dl_engine.run_inference)
         logger.info("Finished dl_engine.run_inference()")
         return {"status": "success"}
     except Exception as e:
@@ -87,8 +90,3 @@ if __name__ == "__main__":
     logger.info(f"Starting Python API on port {port}...")
     uvicorn.run("python_api:app", host="127.0.0.1", port=port, reload=False)
 
-def to_polars_df(data):
-    """Converts pandas DataFrame or list of dicts to Polars DataFrame for fast vector operations."""
-    if hasattr(data, 'empty') and data.empty:
-        return pl.DataFrame()
-    return pl.from_pandas(data) if hasattr(data, 'to_numpy') else pl.DataFrame(data)

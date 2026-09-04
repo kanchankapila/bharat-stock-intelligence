@@ -105,6 +105,21 @@ export class TelegramNotificationService {
         console.log('[TelegramService] Telegram message chunk sent successfully');
       } catch (error: any) {
         console.error('[TelegramService] Failed to dispatch telegram notification:', error.response?.data || error.message);
+        // Fallback: If Telegram rejected Markdown formatting (e.g. unescaped underscores/asterisks),
+        // retry once sending as plain text so the notification is never dropped.
+        const desc = error.response?.data?.description || '';
+        if (desc.includes("can't parse entities") || desc.includes("entity")) {
+          try {
+            await axios.post(url, {
+              chat_id: chatId,
+              text: chunk,
+            });
+            console.log('[TelegramService] Telegram message chunk sent via plain-text fallback');
+            continue;
+          } catch (retryErr: any) {
+            console.error('[TelegramService] Plain-text fallback also failed:', retryErr.response?.data || retryErr.message);
+          }
+        }
         allSuccess = false;
       }
     }

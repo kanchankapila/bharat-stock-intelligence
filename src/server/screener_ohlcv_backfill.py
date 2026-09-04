@@ -12,6 +12,7 @@ Run once after a new screener sync that adds previously unseen symbols.
 """
 
 import polars as pl
+import pandas as pd
 import datetime
 import time
 import sys
@@ -45,6 +46,18 @@ def get_missing_symbols(conn) -> list[str]:
     return [r[0] for r in rows]
 
 
+def _get_ticker_df(data: pd.DataFrame, ticker: str) -> pd.DataFrame | None:
+    """Extract per-ticker DataFrame from a yfinance batch-download result regardless of MultiIndex orientation."""
+    if not isinstance(data.columns, pd.MultiIndex):
+        return data
+    levels = [data.columns.get_level_values(i).unique().tolist() for i in range(data.columns.nlevels)]
+    if ticker in levels[0]:
+        return data[ticker]
+    if ticker in levels[1]:
+        return data.xs(ticker, axis=1, level=1)
+    return None
+
+
 def fetch_and_store(conn, symbols: list[str]) -> int:
     """Fetch OHLCV for a batch of NSE symbols from Yahoo Finance, store in stock_ohlcv."""
     tickers = [f"{s}.NS" for s in symbols]
@@ -62,42 +75,51 @@ def fetch_and_store(conn, symbols: list[str]) -> int:
         return 0
 
     stored = 0
+    records = []
     for sym, ticker in zip(symbols, tickers):
         try:
-            if len(symbols) == 1:
-                df = data
-            else:
-                if ticker not in data.columns.get_level_values(0):
-                    continue
-                df = data[ticker]
-
+            df = _get_ticker_df(data, ticker) if len(symbols) > 1 else data
             if df is None or df.empty:
+                continue
+
+            if isinstance(df.columns, pd.MultiIndex):
+                df = df.droplevel(level=-1, axis=1)
+
+            if "Close" not in df.columns:
                 continue
 
             df = df.dropna(subset=["Close"])
             for idx, row in df.iterrows():
                 date_str = str(idx)[:10]
-                try:
-                    conn.execute("""
-                        INSERT INTO stock_ohlcv (symbol, date, open, high, low, close, volume)
-                        VALUES (?, ?, ?, ?, ?, ?, ?)
-                        ON CONFLICT (symbol, date) DO NOTHING
-                    """, (
-                        sym, date_str,
-                        round(float(row["Open"]), 4) if "Open" in row else None,
-                        round(float(row["High"]), 4) if "High" in row else None,
-                        round(float(row["Low"]), 4)  if "Low"  in row else None,
-                        round(float(row["Close"]), 4),
-                        int(row["Volume"]) if "Volume" in row and row["Volume"] == row["Volume"] else None,
-                    ))
-                    stored += 1
-                except Exception:
-                    pass
+                records.append((
+                    sym, date_str,
+                    round(float(row["Open"]), 4) if "Open" in row else None,
+                    round(float(row["High"]), 4) if "High" in row else None,
+                    round(float(row["Low"]), 4)  if "Low"  in row else None,
+                    round(float(row["Close"]), 4),
+                    int(row["Volume"]) if "Volume" in row and row["Volume"] == row["Volume"] else None,
+                    "split_dividend",
+                ))
         except Exception as e:
             print(f"  [WARN] {sym}: {e}", file=sys.stderr)
             continue
 
-    conn.commit()
+    if records:
+        try:
+            conn.executemany("""
+                INSERT INTO stock_ohlcv (symbol, date, open, high, low, close, volume, adjustment_basis)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT (symbol, date) DO UPDATE SET
+                  open=excluded.open, high=excluded.high, low=excluded.low,
+                  close=excluded.close, volume=excluded.volume,
+                  adjustment_basis=excluded.adjustment_basis
+            """, records)
+            conn.commit()
+            stored = len(records)
+        except Exception as ex:
+            print(f"  [WARN] batch insert error: {ex}", file=sys.stderr)
+            conn.rollback()
+
     return stored
 
 

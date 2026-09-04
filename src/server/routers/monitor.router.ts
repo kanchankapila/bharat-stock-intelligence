@@ -343,7 +343,8 @@ async function getScriptStats(scriptId: ScriptId): Promise<Record<string, number
       case 'tickertape-scorecard':
         return { rows: ((await dbGet("SELECT COUNT(*) as n FROM proprietary_scores_history WHERE source = 'tickertape' AND date = (SELECT MAX(date) FROM proprietary_scores_history WHERE source = 'tickertape')")) as any)?.n ?? 0 };
       case 'intraday-breadth-capture':
-        return { snapshotsToday: ((await dbGet("SELECT COUNT(*) as n FROM intraday_breadth_snapshots WHERE date = CURRENT_DATE::text")) as any)?.n ?? 0 };
+        return { snapshotsToday: ((await dbGet("SELECT COUNT(*) as n FROM intraday_breadth_snapshots WHERE date = CURRENT_DATE")) as any)?.n ?? 0 };
+
       default:
         return {};
     }

@@ -102,10 +102,11 @@ def ensure_schema(con) -> None:
 
     # Columns on technical_signals
     for ddl in [
-        "ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS rollover_pct      REAL",
-        "ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS cost_of_carry_ann REAL",
+        "ALTER TABLE technical_signals ADD COLUMN rollover_pct      REAL",
+        "ALTER TABLE technical_signals ADD COLUMN cost_of_carry_ann REAL",
     ]:
         safe_alter(con, ddl)
+
 
     con.commit()
 
@@ -267,6 +268,8 @@ def main() -> None:
                         help="Backfill last N trading days (default: 1 = yesterday)")
     parser.add_argument("--date",  type=str, default=None,
                         help="Fetch a single specific date (YYYY-MM-DD)")
+    parser.add_argument("--force", action="store_true", default=False,
+                        help="Force re-fetch and re-compute even if date is already populated")
     args = parser.parse_args()
 
     con = connect()
@@ -280,8 +283,19 @@ def main() -> None:
     else:
         dates = _trading_days_back(args.days)
 
+    cur = con.cursor()
     total_rows = 0
     for i, trade_date in enumerate(dates):
+        d_str = trade_date.isoformat()
+        if not args.force:
+            cur.execute("SELECT count(*) FROM fno_rollover WHERE date = ?", (d_str,))
+            row = cur.fetchone()
+            existing_cnt = row[0] if row else 0
+            if existing_cnt and existing_cnt >= 180:
+                print(f"[Rollover] {trade_date}: already populated with {existing_cnt} symbols. Skipping download.")
+                total_rows += existing_cnt
+                continue
+
         print(f"[Rollover] Fetching {trade_date} ({i+1}/{len(dates)})…")
         raw = fetch_bhavcopy(trade_date, session)
         if raw is None:
@@ -292,6 +306,7 @@ def main() -> None:
         upsert_rows(rows, con)
         print(f"[Rollover] {trade_date}: {len(rows)} symbols saved")
         total_rows += len(rows)
+
 
         if i < len(dates) - 1:
             time.sleep(RATE_LIMIT_SEC)

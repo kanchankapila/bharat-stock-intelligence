@@ -103,10 +103,15 @@ export const QUEUE_MOVER_CAPTURE       = 'mover-screener-capture';
 // Intraday slot capture of the NT live cross-section (mover_screener_fetcher.py
 // --intraday): one POST -> ntlive_<HHMM>_market + local screens, several times a day.
 export const QUEUE_MOVER_INTRADAY      = 'mover-intraday-capture';
+// Per-filter live screener capture (niftytrader_live_screener_job.py):
+// each filter selected once, parallel requests, append-only, every 15 min during market hours
+export const QUEUE_NT_LIVE_FILTER       = 'nt-live-filter-capture';
 let moverQueue: Queue | undefined;
 let moverWorker: Worker | undefined;
 let moverIntradayQueue: Queue | undefined;
 let moverIntradayWorker: Worker | undefined;
+let ntLiveFilterQueue: Queue | undefined;
+let ntLiveFilterWorker: Worker | undefined;
 export { QUEUE_RESEARCH_PREMARKET, QUEUE_RESEARCH_POSTCLOSE, QUEUE_OUTCOME_RESOLVER } from './jobs/operations.jobs';
 export { QUEUE_SCREENER_PERFORMANCE, QUEUE_COMPANY_PROFILES_SYNC, QUEUE_TICKERTAPE_SCORECARD } from './jobs/sync.jobs';
 export { QUEUE_NSE_SYNC, QUEUE_ANALYST_ESTIMATES_SYNC } from './jobs/sync.jobs';
@@ -860,9 +865,10 @@ async function processMlDailyOps(job: Job): Promise<{ success: boolean; failedSt
     .catch(e => T.fail('mc_price_features_ohlcv', e));
 
   // MC chart patterns: professional pattern detection with target price, stop-loss, direction.
-  // 2328 stocks × 0.35s = ~14 min
-  await runPython('mc_chart_patterns_fetcher.py', [], 25 * 60_000)
+  // Upgraded to bulk market API: 1 request fetches all market patterns in ~0.5s (was 25 min).
+  await runPython('mc_chart_patterns_fetcher.py', [], 2 * 60_000)
     .catch(e => T.fail('mc_chart_patterns_fetcher', e));
+
 
   // Index/F&O microstructure batch — safe to overlap like the moneycontrol/institutional/finbert
   // group above: each hits a distinct external API and writes its own dedicated index-level
@@ -2454,6 +2460,53 @@ export async function initQueues(): Promise<boolean> {
     moverIntradayWorker.on('failed', (_, err) => {
       console.error('[QUEUE] mover-intraday-capture failed:', err.message);
       recordHeartbeat('mover-intraday-capture', 'failed', err?.message);
+    });
+
+    // ── NiftyTrader Live Filter capture (*/15 during market hours, weekdays):
+    // Each filter selected once, parallel requests (ThreadPoolExecutor), append-only.
+    // Runs every 15 minutes from 09:15-15:30 IST (03:45-10:00 UTC).
+    // The Python script checks market hours at runtime and skips outside 09:15-15:30 IST.
+    // 28 filters x ~1000 rows each = ~28k rows per run, ~224k rows/day (8 runs x 28 filters).
+    ntLiveFilterQueue = new Queue(QUEUE_NT_LIVE_FILTER, { connection });
+    const nlfRep = await ntLiveFilterQueue.getRepeatableJobs();
+    for (const r of nlfRep) await ntLiveFilterQueue.removeRepeatableByKey(r.key);
+    await ntLiveFilterQueue.add('nt-live-filter-slot', {}, {
+      repeat: { pattern: '*/15 3-10 * * 1-5', tz: 'Etc/UTC' },  // 09:15-15:30 IST (with runtime check)
+      jobId: 'nt-live-filter-slot',
+      removeOnComplete: 3,
+      removeOnFail: 3,
+    });
+    ntLiveFilterWorker = new Worker(
+      QUEUE_NT_LIVE_FILTER,
+      async () => {
+        if (await shouldSkipOnTradingHoliday({ name: 'nt-live-filter-slot' })) {
+          return { skipped: true };
+        }
+        // The cron is '*/15 3-10 * * 1-5' -- a coarse hour range that fires from 08:30 IST to
+        // 16:15 IST, wider than the real 09:15-15:30 session, and the Python script no-ops
+        // outside those hours. Without this guard those out-of-session invocations returned
+        // { skipped: false } and the completed handler stamped 'success', overwriting whatever
+        // the last REAL capture reported -- recurring-bugs.md's skip-path-stamped-as-success
+        // class, which has already recurred 6 times in this repo. Same isMarketOpen() guard the
+        // sibling intraday workers use.
+        if (!(await isMarketOpen())) {
+          console.log('[QUEUE] nt-live-filter-capture skipped — outside NSE market hours');
+          return { skipped: true };
+        }
+        // 600s timeout: 71 filters x 15s timeout each / 5 concurrency = ~213s minimum
+        await runPython('niftytrader_live_screener_job.py', ['--concurrency', '5'], 600_000);
+        return { skipped: false };
+      },
+      { connection, concurrency: 1, lockDuration: 15 * 60 * 1000, lockRenewTime: 3 * 60 * 1000 },
+    );
+    ntLiveFilterWorker.on('completed', (_job, result?: { skipped?: boolean }) => {
+      console.log('[QUEUE] nt-live-filter-capture completed');
+      if (result?.skipped) return;
+      recordHeartbeat('nt-live-filter-capture', 'success');
+    });
+    ntLiveFilterWorker.on('failed', (_, err) => {
+      console.error('[QUEUE] nt-live-filter-capture failed:', err.message);
+      recordHeartbeat('nt-live-filter-capture', 'failed', err?.message);
     });
 
     // ── Mover STUDY (weekly, Saturday 14:00 IST = 08:30 UTC): rebuilds computed classes

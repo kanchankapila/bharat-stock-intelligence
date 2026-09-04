@@ -22,8 +22,13 @@ import json
 from pathlib import Path
 
 import requests
+import sys
+import os
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from fetch_utils import retry_get
+
+
 
 SCORECARD_URL = "https://analyze.api.tickertape.in/stocks/scorecard/{sid}"
 
@@ -77,8 +82,45 @@ def fetch_scorecard(sid: str, session: requests.Session) -> list[dict] | None:
         import time
         time.sleep(RATE_LIMIT_SEC)
 
+SCREENER_URL = "https://api.tickertape.in/screener/query"
+
+
+def fetch_screener_query(session: requests.Session | None = None,
+                         project: list[str] | None = None,
+                         offset: int = 0, count: int = 500) -> list[dict]:
+    """Fetch bulk universe attributes (beta, pe, pb, divYield, etc.) in chunks of 500."""
+    sess = session or requests.Session()
+    if project is None:
+        project = ["sid", "ticker", "mrktCap", "pe", "pb", "divYield", "beta"]
+    body = {
+        "match": {},
+        "sortBy": "marketCap",
+        "sortOrder": -1,
+        "project": project,
+        "offset": offset,
+        "count": count
+    }
+    headers = {
+        "Accept": "application/json",
+        "Content-Type": "application/json",
+        "User-Agent": (
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+            "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+        ),
+    }
+    try:
+        r = sess.post(SCREENER_URL, headers=headers, json=body, timeout=15)
+        if r.status_code == 200:
+            return r.json().get("data", {}).get("results", []) or []
+        return []
+    except Exception as e:
+        print(f"  [Tickertape screener query] error at offset={offset}: {e}")
+        return []
+
+
 def to_polars_df(data):
     """Converts pandas DataFrame or list of dicts to Polars DataFrame for fast vector operations."""
     if hasattr(data, 'empty') and data.empty:
         return pl.DataFrame()
     return pl.from_pandas(data) if hasattr(data, 'to_numpy') else pl.DataFrame(data)
+

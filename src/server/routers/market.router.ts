@@ -218,7 +218,8 @@ export const marketRouter = router({
           sensex:    { indId: id('SENSEX'),     ...sx  },
           bankNifty: { indId: id('NIFTY BANK'), ...bnk },
         };
-      } catch (e) { console.error('[MARKET OVERVIEW] NiftyTrader per-index fetch failed, falling back to MC:', e); }
+      } catch (e) { console.warn('[MARKET OVERVIEW] NiftyTrader per-index fetch unavailable, falling back to MC:', (e as Error)?.message || e); }
+
 
       const parse = (s: unknown) => parseFloat(String(s ?? '0').replace(/,/g, '')) || 0;
       const extractId = (name: string, url: string) => {

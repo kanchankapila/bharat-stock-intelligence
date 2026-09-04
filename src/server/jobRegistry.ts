@@ -212,6 +212,9 @@ export const JOB_REGISTRY: JobScheduleEntry[] = [
   // rl-agent-update removed 2026-08-31 with rl_agent.py (no demonstrated edge; tables dropped).
   { jobName: 'signal-type-stats', label: 'ML Daily Ops: Signal Type Stats', cronPattern: '20 13 * * 1-5', graceMinutes: 280, critical: false },
   { jobName: 'news-symbol-link', label: 'ML Daily Ops: News Symbol Link', cronPattern: '20 13 * * 1-5', graceMinutes: 280, critical: false },
+  { jobName: 'event-triggers', label: 'ML Daily Ops: Event Triggers', cronPattern: '20 13 * * 1-5', graceMinutes: 280, critical: false },
+  { jobName: 'breakout-classifier-train', label: 'ML Daily Ops: Breakout Classifier Train', cronPattern: '20 13 * * 1-5', graceMinutes: 280, critical: false },
+  { jobName: 'movement-predictor-train', label: 'ML Daily Ops: Movement Predictor Train', cronPattern: '20 13 * * 1-5', graceMinutes: 280, critical: false },
 
   // Same story for ml-weekly-retrain's (cron '0 5 * * 6') StepTracker sub-steps.
   { jobName: 'ml-ensemble-train', label: 'ML Weekly Retrain: Ensemble Train', cronPattern: '0 5 * * 6', graceMinutes: 400, critical: false },
@@ -225,9 +228,18 @@ export const JOB_REGISTRY: JobScheduleEntry[] = [
   // cs-ranker-train removed 2026-08-31: model deactivated (live CV AUC 0.176, worse than
   // random) and its blend weight zeroed — see unified_ranker.py's REGIME_WEIGHTS note.
   { jobName: 'backtest-optimizer', label: 'ML Weekly Retrain: Backtest Optimizer', cronPattern: '0 5 * * 6', graceMinutes: 400, critical: false },
+  { jobName: 'mover-study-weekly', label: 'Mover Reverse Engineering Study', cronPattern: '30 8 * * 6', graceMinutes: 180, critical: false },
+  // Registered 2026-09-04 alongside the job itself. Without an entry here the name still gets a
+  // job_heartbeat row (its worker calls recordHeartbeat directly), and getStaleJobs() applies a
+  // generic 26h staleness warning to any heartbeat whose name is in NEITHER JOB_REGISTRY,
+  // MONITOR_SCRIPTS nor DATA_QUALITY_CHECKS -- so an unregistered live job emits a permanent
+  // false STALE alert every day. graceMinutes 180 because the capture legitimately stops at the
+  // 15:30 IST close while the coarse '*/15 3-10' cron keeps firing until 16:15 IST.
+  { jobName: 'nt-live-filter-capture', label: 'NiftyTrader Live Filter Capture', cronPattern: '*/15 3-10 * * 1-5', graceMinutes: 180, critical: false },
 
   // job-digest (queues.ts '20 17 * * *', runs all 7 days)
   { jobName: 'job-digest', label: 'Daily Job Digest (Telegram)', cronPattern: '20 17 * * *', graceMinutes: 60, critical: false },
+
 
   // Second daily job-digest send (digests.jobs.ts '45 2 * * *' = 08:15 IST, added 2026-09-02):
   // pre-open morning digest under its own heartbeat so lateness is judged per schedule.

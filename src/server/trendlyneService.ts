@@ -300,7 +300,23 @@ async function fetchTrendlyneAdvTechnicalAnalysisRaw(symbol: string, timeframe: 
       console.warn(`[TRENDLYNE] TA API failed with status ${response.status} for ${symbol}.`);
       return null;
     }
-    const data = await response.json();
+    const contentType = response.headers.get('content-type') || '';
+    if (contentType.includes('text/html')) {
+      console.warn(`[TRENDLYNE] TA API returned HTML instead of JSON for ${symbol}.`);
+      return null;
+    }
+    const text = await response.text();
+    if (text.trim().startsWith('<')) {
+      console.warn(`[TRENDLYNE] TA API returned HTML payload for ${symbol}.`);
+      return null;
+    }
+    let data: any;
+    try {
+      data = JSON.parse(text);
+    } catch {
+      console.warn(`[TRENDLYNE] TA API returned invalid JSON for ${symbol}.`);
+      return null;
+    }
     if (data.html || !data.body) {
       console.warn(`[TRENDLYNE] TA API returned gated/invalid payload for ${symbol}.`);
       return null;
@@ -310,6 +326,7 @@ async function fetchTrendlyneAdvTechnicalAnalysisRaw(symbol: string, timeframe: 
     console.error(`Error fetching Adv Technical Analysis for ${symbol}:`, error);
     return null;
   }
+
 }
 
 export async function fetchCompanyOverview(symbol: string): Promise<TrendlyneOverviewData | null> {

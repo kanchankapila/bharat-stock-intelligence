@@ -102,6 +102,7 @@ NT_HEADERS = {
 # same-definition cross-provider cohorts: agreement between OUR computed class and THEIRS
 # on independent universes is exactly the corroboration signal the study scores.
 NT_EOD_SCREENS = [
+    ("nteod_universe",        {}),  # 1 request captures all ~1,026 active stocks with full technicals
     ("nteod_gap_up",          {"gap_up_opening": True}),
     ("nteod_gap_down",        {"gap_down_opening": True}),
     ("nteod_gap_up_unfill",   {"gap_up_opening_unfill": True}),
@@ -113,6 +114,7 @@ NT_EOD_SCREENS = [
     ("nteod_near_low_close",  {"close_nearday_low": True}),
     ("nteod_high_delivery",   {"high_delivery_age_qty": True}),
 ]
+
 MC_SHOCKERS_URL = "https://api.moneycontrol.com/mcapi/v1/earnings/price-shockers?limit=50&page=1"
 # ET's long-standing /ET_Stats/gainers listing went hard-down server-side on 2026-08-25
 # ("503 - DNS failure" from their edge for EVERY marketstats listing route while

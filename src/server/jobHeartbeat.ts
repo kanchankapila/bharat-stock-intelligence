@@ -122,7 +122,8 @@ export async function getStaleJobs(): Promise<Array<{ job: string; hoursStale: n
     // Same bug class as recurring-bugs.md's "deleting a thing does not delete the checks pointing
     // at it" -- exclude explicitly here too, matching the exclusion already applied in
     // dataQualityChecks.ts's own read path.
-    const decommissionedJobs = new Set(['deploy-drift', 'port-drift']);
+    const decommissionedJobs = new Set(['deploy-drift', 'port-drift', 'dl-inference']);
+
     const rows = await dbAll('SELECT job_name, last_success_at FROM job_heartbeat') as
       Array<{ job_name: string; last_success_at: number | null }>;
     const stale: Array<{ job: string; hoursStale: number | null }> = [];

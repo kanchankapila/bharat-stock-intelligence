@@ -155,6 +155,37 @@ class BaseFetcher(Generic[T]):
         record_dlq(self.conn, self.fetcher_name, self.domain, url, f"Failed after {self.max_retries} attempts")
         return None
 
+    async def async_fetch_url(self, client: httpx.AsyncClient, url: str, headers: Optional[Dict[str, str]] = None) -> Optional[str]:
+        """Asynchronous URL fetcher with exponential backoff, rate governor, and DLQ recording."""
+        import asyncio
+        self.governor.acquire()
+        default_headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            "Accept": "application/json, text/html, */*",
+        }
+        if headers:
+            default_headers.update(headers)
+
+        for attempt in range(1, self.max_retries + 1):
+            try:
+                resp = await client.get(url, headers=default_headers)
+                if resp.status_code == 200:
+                    self.governor.record_success()
+                    return resp.text
+                elif resp.status_code in (403, 429):
+                    self.governor.record_error(resp.status_code)
+                    record_dlq(self.conn, self.fetcher_name, self.domain, url, f"HTTP {resp.status_code}: Rate limited / forbidden")
+                    return None
+                else:
+                    logger.warning("Attempt %d HTTP %d for %s", attempt, resp.status_code, url)
+            except Exception as exc:
+                logger.warning("Attempt %d network error for %s: %s", attempt, url, exc)
+            await asyncio.sleep(1.0 * (2 ** (attempt - 1)))
+
+        self.governor.record_error()
+        record_dlq(self.conn, self.fetcher_name, self.domain, url, f"Failed after {self.max_retries} attempts")
+        return None
+
     def validate_item(self, raw_item: Dict[str, Any]) -> Optional[T]:
         """Validates raw dict payload against Pydantic schema if defined."""
         if not self.schema:

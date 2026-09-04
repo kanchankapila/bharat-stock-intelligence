@@ -158,7 +158,9 @@ describe('JOB_REGISTRY cronPattern/everyMs mirror consistency', () => {
     'densify-feature-matrix', 'nse-bhavcopy-fetcher', 'reconcile-stock-ohlcv', 'ml-ensemble-incremental',
     'ml-ensemble-score', 'drift-detector', 'reward-engine',
     'signal-type-stats', 'news-symbol-link',
+    'event-triggers', 'breakout-classifier-train', 'movement-predictor-train',
   ];
+
   const mlWeeklyRetrainSubsteps = ['ml-ensemble-train', 'strategy-optimizer', 'exit-policy-train', 'backtest-optimizer'];
 
   const pinned: Array<{ jobName: string; marker: string; label: string }> = [
@@ -210,7 +212,10 @@ describe('JOB_REGISTRY cronPattern/everyMs mirror consistency', () => {
     { jobName: 'outcome-resolver', marker: "jobName: 'outcome-resolver-daily'", label: 'operations.jobs.ts' },
     { jobName: 'chatbot-reingest', marker: "jobName: 'chatbot-reingest-daily'", label: 'operations.jobs.ts' },
     { jobName: 'trendlyne-ratios-monthly', marker: "jobName: 'trendlyne-ratios-monthly-check'", label: 'trendlyneWeekly.jobs.ts' },
+    { jobName: 'mover-study-weekly', marker: "'mover-study-weekly'", label: 'queues.ts' },
+    { jobName: 'nt-live-filter-capture', marker: "'nt-live-filter-slot'", label: 'queues.ts' },
     { jobName: 'job-digest', marker: "jobName: 'job-digest-daily'", label: 'digests.jobs.ts' },
+
     { jobName: 'job-digest-morning', marker: "jobName: 'job-digest-morning'", label: 'digests.jobs.ts (morning send)' },
     { jobName: 'recommendations-digest', marker: "jobName: 'recommendations-digest-daily'", label: 'digests.jobs.ts' },
 

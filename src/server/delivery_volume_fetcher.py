@@ -89,7 +89,8 @@ def ensure_schema(con) -> None:
     con.commit()  # commit DDL before ALTER (Postgres aborts tx on failed ALTER)
 
     # Add delivery_pct to technical_signals if not present
-    safe_alter(None, "ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS delivery_pct REAL")
+    safe_alter(None, "ALTER TABLE technical_signals ADD COLUMN delivery_pct REAL")
+
 
 
 def _trading_days_back(n: int, con=None) -> list[date]:
@@ -210,7 +211,10 @@ def main() -> None:
                         help="Backfill last N trading days (default: 1)")
     parser.add_argument("--date", type=str, default=None,
                         help="Fetch a single date (YYYY-MM-DD)")
+    parser.add_argument("--force", action="store_true", default=False,
+                        help="Force re-fetch even if data is already populated")
     args = parser.parse_args()
+
 
     con = connect()
     ensure_schema(con)
@@ -226,8 +230,19 @@ def main() -> None:
 
     total = failed = 0
     for i, trade_date in enumerate(dates):
+        # Delta check: if bhavcopy or prior run already stored >= 1000 stocks for trade_date, skip MTO download
+        if not args.force:
+            cur = con.cursor()
+            cur.execute("SELECT count(*) FROM stock_delivery_volume WHERE date = ?", (trade_date.isoformat(),))
+            c = cur.fetchone()
+            count = c[0] if isinstance(c, (tuple, list)) else (c['count'] if hasattr(c, '__getitem__') and 'count' in c else list(dict(c).values())[0])
+            if count and int(count) >= 1000:
+                print(f"[Delivery] {trade_date}: already has {count} rows (from bhavcopy/prior fetch) — skipped redundant MTO download.")
+                continue
+
         print(f"[Delivery] Fetching {trade_date} ({i+1}/{len(dates)})…")
         rows = fetch_mto(trade_date, session)
+
         if rows is None:
             failed += 1
             print(f"[Delivery] {trade_date}: FETCH FAILED (not a holiday — investigate)")

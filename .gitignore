@@ -117,3 +117,10 @@ logs/
 
 # Personal trade journal (trade-desk skill) — user data, not source
 trade_journal.jsonl
+
+# Stray artifacts (2026-09-04): a 0-byte db.sqlite3 appeared in the tree despite SQLite
+# being fully decommissioned (see CLAUDE.md) and nothing in src/ referencing it; and Excel
+# writes ~$*.xlsx lock files next to any open workbook. Neither belongs in git, and a
+# committed db.sqlite3 would be actively misleading about which database this platform uses.
+db.sqlite3
+~$*.xlsx

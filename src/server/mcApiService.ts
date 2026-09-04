@@ -342,7 +342,16 @@ export async function mcFetchJson<T = any>(url: string, retries: number = 3, sym
           return await res.json();
         }
         const text = await res.text();
-        try { return JSON.parse(text); } catch { console.warn('[mcApiService] JSON parse failed:', text.slice(0, 200)); return null; }
+        const trimmed = text.trim();
+        if (trimmed.startsWith('<') || contentType.includes('text/html') || (!trimmed.startsWith('{') && !trimmed.startsWith('['))) {
+          return null;
+        }
+        try { 
+          return JSON.parse(text); 
+        } catch { 
+          return null; 
+        }
+
       } catch (e) {
         lastError = e instanceof Error ? e : new Error(String(e));
         if (attempt < retries) {

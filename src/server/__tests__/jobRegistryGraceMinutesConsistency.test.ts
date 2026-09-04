@@ -149,6 +149,8 @@ describe('JOB_REGISTRY.graceMinutes consistency', () => {
     // marker for the same reason as the group above -- a long scheduling-rationale comment sits
     // between the job-name literal and the lockDuration.
     'mover-study-weekly': 'moverStudyWorker = new Worker',
+    // Own queue + Worker (lockDuration 15min), registered 2026-09-04.
+    'nt-live-filter-capture': 'ntLiveFilterWorker = new Worker',
     'market-regime-refresh': "'regime-intraday'",
     'intraday-ranker': "'regime-intraday'",
     'closed-day-early-batch': "'closed-day-early-batch'",

@@ -38,7 +38,7 @@ class TickertapeScorecardFetcherBaseFetcher(BaseFetcher[TickertapeScorecardFetch
 
 import argparse
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from datetime import date
+from datetime import date, timedelta
 
 import requests
 
@@ -82,6 +82,7 @@ def compute_ordinal_scores(scorecard_data: list[dict] | None) -> dict[str, dict]
     return result
 
 
+
 # ── Persist ──────────────────────────────────────────────────────────────────────
 
 def upsert_scores(symbol: str, today: str, scores: dict[str, dict], con) -> int:
@@ -121,6 +122,8 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Tickertape scorecard ordinal tags")
     parser.add_argument("--symbol", default=None, help="Single stock NSE symbol")
     parser.add_argument("--limit", type=int, default=None, help="Process first N stocks")
+    parser.add_argument("--force", action="store_true", default=False,
+                        help="Force re-fetch all stocks even if fresh within last 7 days")
     args = parser.parse_args()
 
     con = connect()
@@ -131,8 +134,20 @@ def main() -> None:
         con.close()
         return
 
+    # Smart weekly cadence skip: categorical scorecards change slowly
+    if not args.force and not args.symbol:
+        from fetch_utils import filter_stale_symbols
+        fresh_cutoff = (date.today() - timedelta(days=7)).isoformat()
+        stale_stocks = filter_stale_symbols(con, stocks, "proprietary_scores_history",
+                                            date_col="date", as_of_date=fresh_cutoff)
+        skipped = len(stocks) - len(stale_stocks)
+        if skipped > 0:
+            print(f"[TickertapeScorecard] Smart weekly skip: {skipped}/{len(stocks)} stocks already fresh within last 7 days. Processing {len(stale_stocks)} remaining.")
+            stocks = stale_stocks
+
     print(f"[TickertapeScorecard] Fetching {len(stocks)} stocks in batches of {BATCH_SIZE}…")
     session = requests.Session()
+
     session.headers.update(HEADERS)
     today = date.today().isoformat()
 
