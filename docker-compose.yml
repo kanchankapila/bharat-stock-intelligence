@@ -60,15 +60,32 @@ services:
       # explicit .wslconfig now caps WSL2/Docker Desktop at 14GB, so 6GB is well within
       # that ceiling with room for Redis + Docker overhead alongside it.
       # shared_buffers = 25% of TS_TUNE_MEMORY (matches the ratio this file already used).
-      TS_TUNE_MEMORY: 6GB
+      # 2026-09-05: 6GB->8GB. The container was measured sitting at 5.343GiB/6GiB (89%) at
+      # rest, i.e. permanently near its own cap. Baseline allocation before a single query
+      # ran was already ~3.3GB (1.5GB shared_buffers + 1GB shm_size, which counts toward the
+      # limit, + up to 0.77GB of maintenance_work_mem across 3 autovacuum workers), leaving
+      # under 2.7GB for all 60 connections' work_mem. .wslconfig was retuned the same day
+      # (14GB->12GB, plus autoMemoryReclaim=gradual, which WSL2 does NOT do by default --
+      # memory freed inside the VM was never being returned to Windows), so the VM budget is
+      # 8GB here + ~0.04GB redis + ~1GB VM/kernel overhead = ~9GB of 12GB.
+      TS_TUNE_MEMORY: 8GB
       TS_TUNE_NUM_CPUS: "4"
+    # work_mem 32MB->16MB (2026-09-05). work_mem is allocated PER SORT/HASH NODE, PER
+    # CONNECTION, PER PARALLEL WORKER -- not once. At 32MB against max_connections=60 it was
+    # an unbounded multiplier on a hard-capped container, and the platform's real analytical
+    # queries (the 42M-row window CTE behind AF-20260902-15) hit several sort nodes each.
+    # Raise it per-session with SET LOCAL work_mem in the few jobs that genuinely need it
+    # rather than paying for it on all 60 connections. shared_buffers/effective_cache_size
+    # follow the 8GB cap: 25% and ~75% respectively (the old effective_cache_size=4GB also
+    # overstated reality -- there was never 4GB of page cache inside a 6GB container after
+    # shared_buffers, which biases the planner toward index/nested-loop plans).
     command: >
       postgres
       -c max_connections=60
-      -c shared_buffers=1536MB
-      -c work_mem=32MB
+      -c shared_buffers=2GB
+      -c work_mem=16MB
       -c maintenance_work_mem=256MB
-      -c effective_cache_size=4GB
+      -c effective_cache_size=6GB
       -c wal_buffers=16MB
       -c checkpoint_completion_target=0.9
       -c effective_io_concurrency=200
@@ -83,7 +100,7 @@ services:
     deploy:
       resources:
         limits:
-          memory: 6g
+          memory: 8g
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-bharat} -d ${POSTGRES_DB:-bharat_intel}"]
       interval: 10s
