@@ -1058,7 +1058,13 @@ async function processMlDailyOps(job: Job): Promise<{ success: boolean; failedSt
 
   // MF sector AUM flow (ET / mcxlivefeeds JSONP feed, replaces dead AMFI disclosure endpoint)
   // → mf_scheme_sector_allocation + mf_sector_allocation + technical_signals.
-  await runPython('mf_sector_allocation_fetcher.py', [], 5 * 60_000)
+  // 45 min, not the original 5: measured live 2026-09-04 at 24m10s end-to-end against the real
+  // universe (exit 0, 13 sectors aggregated, 2,315 technical_signals rows updated) -- so this
+  // step could never once have completed inside its old budget, and it was one of the three
+  // ml-daily-ops steps reporting failed every night. Sized at ~2x measured rather than just
+  // over it: recurring-bugs.md's repeated defect here is picking a budget with no headroom and
+  // never revisiting it as the work grows. Fits inside the job's own 3.5h withJobTimeout.
+  await runPython('mf_sector_allocation_fetcher.py', [], 45 * 60_000)
     .catch(e => T.fail('mf_sector_allocation_fetcher', e));
 
   // Index/macro batch — same rationale as the NT/MMI/option-chain batch above: five distinct

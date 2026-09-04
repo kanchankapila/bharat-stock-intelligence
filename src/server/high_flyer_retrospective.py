@@ -32,6 +32,7 @@ Run:  python high_flyer_retrospective.py            # latest completed session
 
 import polars as pl
 import argparse
+import sys
 import json
 import math
 
@@ -393,10 +394,24 @@ def _process_day(con, close, volume, day, prev_day) -> dict:
     stats = read_df(
         "SELECT flyer_n, universe_n, precursor_counts_json FROM high_flyer_daily_stats "
         "ORDER BY date DESC LIMIT ?", (LIFT_WINDOW_DAYS,))
-    lifts = compute_lifts([
-        {"flyer_n": int(s.flyer_n), "universe_n": int(s.universe_n),
-         "precursor_counts": json.loads(s.precursor_counts_json)}
-        for s in stats.itertuples(index=False)])
+    # SKIP rows with no precursor counts rather than coercing them: read_df returns a pandas
+    # frame, so a SQL NULL arrives as float NaN and json.loads(NaN) raises TypeError, killing
+    # the whole run. Live production has at least one such row (2026-08-11), and it aborted
+    # every high_flyer_retrospective run in ml-daily-ops. Skipping is the right call, not
+    # defaulting to {} -- an empty counts dict would be indistinguishable from a real day on
+    # which no precursor fired, and would silently dilute the lift denominators.
+    usable, skipped = [], 0
+    for s in stats.itertuples(index=False):
+        raw = s.precursor_counts_json
+        if not isinstance(raw, str) or not raw.strip():
+            skipped += 1
+            continue
+        usable.append({"flyer_n": int(s.flyer_n), "universe_n": int(s.universe_n),
+                       "precursor_counts": json.loads(raw)})
+    if skipped:
+        print(f"[HighFlyer] skipped {skipped}/{len(stats)} stat day(s) with no "
+              f"precursor_counts_json when computing lifts", file=sys.stderr)
+    lifts = compute_lifts(usable)
     cur.execute(translate(
         'INSERT INTO app_settings (key, value) VALUES (?, ?) '
         'ON CONFLICT (key) DO UPDATE SET value = excluded.value'),

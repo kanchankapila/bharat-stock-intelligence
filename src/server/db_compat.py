@@ -442,11 +442,21 @@ def safe_alter(conn_or_none, ddl: str) -> bool:
         True  â€” column was added (or IF NOT EXISTS made it a no-op on PG).
         False â€” the DDL still failed after IF NOT EXISTS (warning printed).
     """
-    # Inject "IF NOT EXISTS" between "ADD COLUMN" and the column name.
-    # Works for any case variant of "add column".
+    # Inject "IF NOT EXISTS" between "ADD COLUMN" and the column name, but ONLY when the
+    # caller has not already written it. 8 of the 9 ADD COLUMN call sites in src/server do
+    # include it, and the unconditional injection turned those into
+    # "ADD COLUMN IF NOT EXISTS IF NOT EXISTS <col>" -- a syntax error, swallowed by the
+    # except below into a print() and a False return, so the column was silently never added
+    # and the caller carried on to INSERT into it.
+    #
+    # Found 2026-09-04 via high_flyer_retrospective.py, which self-migrates 3 columns this way
+    # (direction/wrong_call/prior_classification) and then failed every ml-daily-ops run on
+    # `column "direction" does not exist`. The same 3 columns were removed from
+    # db/schema.postgres.sql by AF-20260903-04's regen as "phantom" -- they were phantom
+    # precisely BECAUSE this helper could never create them.
     import re as _re
     pg_ddl = _re.sub(
-        r"(?i)\bADD\s+COLUMN\b",
+        r"(?i)\bADD\s+COLUMN\b(?!\s+IF\s+NOT\s+EXISTS\b)",
         "ADD COLUMN IF NOT EXISTS",
         ddl,
         count=1,
