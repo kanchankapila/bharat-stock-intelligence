@@ -7841,3 +7841,55 @@ header they point at still exists under the same name post-restructure).
 **Not done, and said so rather than silently skipped**: a full live re-run of every backtest
 behind every "Already tested" row — that's hours of compute across ~20+ scripts and the user
 explicitly chose the lighter option over it via the clarifying question.
+
+## 2026-09-04 (cont.) — acted on the "Pipeline Day Sheet" scheduler-review report: duration tracking, coverage checks, delta-fetch on 3 fetchers + ohlcv_quality
+
+User handed over a rendered scheduler-review report (open reliability items + 4 ranked
+suggestions) and asked to fix all open items and implement the suggestions, asking wherever there
+was doubt. Used the `audit-loop` skill. Full detail in `docs/audit-findings.md`,
+`AF-20260904-02` through `AF-20260904-07`.
+
+**Open items reconciled, not re-fixed**: two of the report's three "open" reliability items
+(`nse-bhavcopy-fetcher` 34.2% lifetime fail rate, `stock-scoring` 30.6%) were already resolved by
+earlier commits (the bhavcopy-lag walk-back fix, the pm2 EADDRINUSE crash-loop repair) — both
+show 100% success on every run since 2026-08-28. Re-verified against live `job_run_history`
+before touching anything, per this repo's own reconcile-first discipline, rather than trusting
+the report's cumulative percentages.
+
+**Suggestion #1 — `job_run_history.duration_ms`** (migration `20260904120000`, nullable,
+additive): threaded through `StepTracker` (all ~183 `T.run()`/`T.runQuiet()` step names, plus a
+job-level summary) and `registerRepeatableJob()`'s shared handlers (reads BullMQ's own
+`job.processedOn`, free). The ~30 standalone `recordHeartbeat()` call sites hand-written in
+`queues.ts` are a follow-up, not done this pass.
+
+**Suggestion #2 — `bulk-endpoint-fetcher-coverage`** data-quality check (distinct-symbols-per-date
+vs. expected universe) for `nse_universe_history`/`preopen_stock_snapshot`/`so_option_chain`.
+Deliberately excludes `mc_pattern_signals` (the user already accepted that table's coverage
+trade-off in `AF-20260904-01`). **Found a live instance of the exact class while calibrating
+thresholds**: `preopen_stock_snapshot` was stuck at exactly 210 symbols/day (the F&O-eligible
+count, not the ~2,366 canonical universe) every day 2026-08-27 through 09-03 — already fixed
+same-day by a concurrent session's commit (`be475d86`), but nothing had been monitoring it.
+
+**Suggestion #3 — delta-fetch**, user-approved scope of 3 fetchers (not all 5 candidates
+surfaced): `trendlyne_fundamentals_fetcher.py` (7-day window), `financial_ratios_fetcher.py`
+(20-day), `working_capital_fetcher.py` (25-day, mirrors `mf_stock_holdings_fetcher.py`'s
+existing precedent exactly). All three take `--force`. `filter_stale_symbols()` itself — used by
+4 pre-existing fetchers — had zero test coverage anywhere in the repo; added 5 unit tests.
+`mc_stockvitals_history_fetcher.py`/`extra_endpoints_fetcher.py` deliberately not touched.
+
+**Suggestion #4 — `ohlcv_quality.py` delta-fetch**, user-approved after investigation showed it's
+genuinely NOT redundant with bhavcopy (per-symbol yfinance split/dividend data bhavcopy's CSV
+doesn't carry). New `ohlcv_corporate_actions_checked` marker table, mirroring
+`marketsmojo_financials_fetcher.py`'s `AF-20260816-20` pattern (`corporate_actions` is an EVENT
+table, so a plain freshness-column skip would misread most of a healthy universe as stale).
+
+**Concurrent-session hazard, live**: mid-session, discovered another session had pushed a commit
+(`4826001d`, the pre-open volume-tracking work seen uncommitted at session start) directly to
+this same local repo, and a `git stash pop` attempt surfaced a stash entry belonging to a
+*different* concurrent session — left completely untouched, switched to a non-git negative-control
+technique (temporary source edit + revert) for the rest of the session.
+
+**Verification**: `tsc --noEmit` clean; `vitest run` 1153/1153 (0 failed); `pytest` (full mandated
+suite) 2400 passed / 249 skipped / 0 failed (50m11s); `schema:regen`+`schema:drift` clean
+(226=226). All fixes live-verified against production (direct script runs, not just unit tests).
+Committed `3db5e144`; `bharat-server` restarted, confirmed online with no new errors.
