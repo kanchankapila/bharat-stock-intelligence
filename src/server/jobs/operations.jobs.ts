@@ -48,26 +48,26 @@ export async function resolveOutcomesResilient(horizon: number): Promise<void> {
   }
 }
 
-async function processResearchPremarket(_job: Job): Promise<{ success: boolean }> {
+async function processResearchPremarket(_job: Job): Promise<{ success: boolean; skipped?: boolean }> {
   const { generateDailyReport } = await import('../researchEngine');
   const today = new Date().toISOString().split('T')[0];
   await generateDailyReport(today, 'PRE_MARKET');
   return { success: true };
 }
 
-async function processResearchPostclose(_job: Job): Promise<{ success: boolean }> {
+async function processResearchPostclose(_job: Job): Promise<{ success: boolean; skipped?: boolean }> {
   const { generateDailyReport } = await import('../researchEngine');
   const today = new Date().toISOString().split('T')[0];
   await generateDailyReport(today, 'POST_CLOSE');
   return { success: true };
 }
 
-async function processOutcomeResolver(job: Job): Promise<{ success: boolean; failedSteps?: string[] }> {
+async function processOutcomeResolver(job: Job): Promise<{ success: boolean; skipped?: boolean; failedSteps?: string[] }> {
   // 2026-08-06: skip the standalone 09:30 IST trigger on a trading holiday -- closed-day-early-
   // batch already dispatches a 'closed-day-early'-named run at ~07:10 IST that morning.
   if (await shouldSkipOnTradingHoliday(job)) {
     console.log('[QUEUE] outcome-resolver skipped — trading holiday (closed-day-early-batch already ran this morning)');
-    return { success: true };
+    return { success: true, skipped: true };
   }
   // Every step below is best-effort but no longer silent: two of them used to end in
   // .catch(console.warn/error), and the three resolveOutcomesResilient() calls swallowed their

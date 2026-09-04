@@ -29,7 +29,7 @@ export const QUEUE_CORPORATE_ACTIONS_INGEST = 'corporate-actions-ingest';
 export const QUEUE_INDEX_MEMBERSHIP = 'index-membership';
 export const QUEUE_ANALYST_ESTIMATES_SYNC = 'analyst-estimates-sync';
 
-async function processAnalystEstimatesSync(_job: Job): Promise<{ success: boolean }> {
+async function processAnalystEstimatesSync(_job: Job): Promise<{ success: boolean; skipped?: boolean }> {
   // Upgraded to high-speed hybrid engine (~2.5 min across whole 2,300+ universe)
   // No .catch here on purpose: this job IS this one step, so swallowing the failure and
   // returning success:true made a dead fetcher indistinguishable from a healthy one. Letting it
@@ -41,7 +41,7 @@ async function processAnalystEstimatesSync(_job: Job): Promise<{ success: boolea
 }
 
 
-async function processCorporateActionsIngest(_job: Job): Promise<{ success: boolean }> {
+async function processCorporateActionsIngest(_job: Job): Promise<{ success: boolean; skipped?: boolean }> {
   // corporate_actions.ratio fix (2026-08-07, dead-column sweep): ohlcv_quality.py's
   // ingest_corporate_actions() genuinely writes real split ratios from yfinance's own
   // .splits data (live-verified: HDFCBANK 2025 1:2, WIPRO 2024 1:2, RELIANCE 2024 1:2 --
@@ -60,14 +60,14 @@ async function processCorporateActionsIngest(_job: Job): Promise<{ success: bool
   return { success: true };
 }
 
-async function processScreenerPerf(job: Job): Promise<{ success: boolean; failedSteps?: string[] } | void> {
+async function processScreenerPerf(job: Job): Promise<{ success: boolean; skipped?: boolean; failedSteps?: string[] } | void> {
   // 2026-08-07: skip entirely on a trading holiday -- every phase here (discovery/enrichment,
   // Bayesian tier scoring, PIT snapshot, live-screener train/backtest) re-derives from
   // screener_appearances/signal_outcomes/stock_ohlcv, none of which gained a new row on a day
   // the exchange never opened. Same reasoning as processStockScoring/processQuantScoring.
   if (await shouldSkipOnTradingHoliday(job)) {
     console.log('[QUEUE] screener-performance skipped — trading holiday, nothing new to re-derive');
-    return;
+    return { success: true, skipped: true };
   }
   // Every step below reports through T (2026-09-04). It used to wrap only step 8b
   // (ml-promotion-gate-review, 2026-08-19) while the other ten ended in a bare
@@ -148,14 +148,14 @@ async function processCompanyProfilesSync(_job: Job): Promise<void> {
   await syncAndAnalyzeCompanyProfiles();
 }
 
-async function processTickertapeScorecard(_job: Job): Promise<{ success: boolean }> {
+async function processTickertapeScorecard(_job: Job): Promise<{ success: boolean; skipped?: boolean }> {
   // Single-step job: a .catch here reported success:true while the only thing this job does
   // had failed. Let it throw so BullMQ marks the run failed and the heartbeat says so.
   await runPython('tickertape_scorecard_fetcher.py', [], 60 * 60_000);
   return { success: true };
 }
 
-async function processIndexMembership(_job: Job): Promise<{ success: boolean }> {
+async function processIndexMembership(_job: Job): Promise<{ success: boolean; skipped?: boolean }> {
   // AF-20260828-21: index_membership_fetcher.py was only invoked from nse-sync-weekly
   // (Saturday), so its own date-guarded write (`date >= logical_write_floor()`, added
   // 2026-07-19 specifically to stop overwriting HISTORICAL rows with today's membership --

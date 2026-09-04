@@ -189,11 +189,17 @@ async function main() {
   const reset = hasCounterReset(diff);
 
   const stderrClass = classifyStderr(res.failedReason);
+  // A processor that gated itself (weekend, market-closed, already-ran) returns { skipped: true }.
+  // Recording that as 'success' would reproduce, inside the sweep's own results, the exact
+  // "skip path stamped as success" defect the sweep exists to find -- and a skip that wrote no
+  // rows is indistinguishable from a silent failure unless it is labelled.
+  const skipped = Boolean(res.returnvalue && (res.returnvalue as any).skipped);
   const status = reset ? 'unmeasured_counter_reset'
-    : res.state === 'completed' ? 'success'
+    : res.state === 'completed' ? (skipped ? 'skipped' : 'success')
     : res.state.startsWith('timeout') ? 'timeout' : 'failed';
 
   console.log(`[SWEEP] status=${status} duration=${(durationMs / 1000).toFixed(1)}s rows=${totalRowDelta(diff)} tables=${Object.keys(diff).length}`);
+  if (skipped) console.log(`    skip reason (job returnvalue): ${JSON.stringify(res.returnvalue).slice(0, 240)}`);
   if (Object.keys(diff).length) console.log(summarise(diff));
   else console.log('    (no tables written -- this is the finding, not a gap)');
   if (res.failedReason) console.log(`[SWEEP] error: ${String(res.failedReason).slice(0, 400)}`);

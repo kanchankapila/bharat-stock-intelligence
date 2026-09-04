@@ -32,7 +32,7 @@ vi.mock('../dataQualityChecks', async () => {
   };
 });
 
-import { getLateJobs, getStaleJobs } from '../jobHeartbeat';
+import { getLateJobs, getStaleJobs, bullJobDurationMs } from '../jobHeartbeat';
 
 describe('getLateJobs', () => {
   beforeEach(() => { mockRows.length = 0; });
@@ -147,5 +147,42 @@ describe('getStaleJobs', () => {
     const stale = await getStaleJobs();
     vi.useRealTimers();
     expect(stale.map(s => s.job)).toContain('event-triggers');
+  });
+});
+
+/**
+ * duration_ms landed 2026-09-04 but was populated on only 21 of 432 job_run_history rows (4.9%)
+ * measured 2026-09-05 -- recordHeartbeat is the write chokepoint, but it has no way to derive a
+ * duration itself, and the ~44 hand-wired worker handlers in queues.ts all called it without one.
+ * The job object those handlers already receive carries BullMQ's own processedOn/finishedOn, so
+ * the duration is available at every call site without threading a timer through anything.
+ *
+ * The undefined-job case is not hypothetical: BullMQ passes `undefined` to an 'failed' handler
+ * when the job could not be loaded, so a helper that assumes a job would throw inside an error
+ * handler -- turning a recorded failure into a lost one.
+ */
+describe('bullJobDurationMs', () => {
+  it('returns the processing duration when BullMQ recorded both timestamps', () => {
+    expect(bullJobDurationMs({ processedOn: 1_000, finishedOn: 4_500 } as any)).toBe(3_500);
+  });
+
+  it('returns undefined for a job BullMQ never loaded, rather than throwing in a failed handler', () => {
+    expect(bullJobDurationMs(undefined)).toBeUndefined();
+    expect(bullJobDurationMs(null as any)).toBeUndefined();
+  });
+
+  it('returns undefined when either timestamp is missing', () => {
+    expect(bullJobDurationMs({ processedOn: 1_000 } as any)).toBeUndefined();
+    expect(bullJobDurationMs({ finishedOn: 4_500 } as any)).toBeUndefined();
+  });
+
+  it('returns undefined rather than a negative duration if the clocks disagree', () => {
+    expect(bullJobDurationMs({ processedOn: 9_000, finishedOn: 1_000 } as any)).toBeUndefined();
+  });
+
+  it('counts a sub-millisecond job as 0, not as missing', () => {
+    // 0 is a real measurement; coercing it to undefined would silently drop the fastest jobs
+    // from every duration statistic, which is exactly the population most likely to be a no-op.
+    expect(bullJobDurationMs({ processedOn: 5_000, finishedOn: 5_000 } as any)).toBe(0);
   });
 });

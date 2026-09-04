@@ -44,7 +44,7 @@ import {
 import { fetchTrendlyneChecklist } from './trendlyneService';
 
 import { pythonApi } from './pythonApi';
-import { recordHeartbeat, startHeartbeatMonitor } from './jobHeartbeat';
+import { recordHeartbeat, startHeartbeatMonitor, bullJobDurationMs } from './jobHeartbeat';
 import { startJobWatchdog, buildDailyDigest } from './jobWatchdog';
 import { telegramService, sanitizeMarkdown } from './telegramService';
 import { sendAccuracyDigest } from './signalAccuracyDigest';
@@ -577,14 +577,14 @@ async function alertFailedSteps(
   }
 }
 
-async function processMlDailyOps(job: Job): Promise<{ success: boolean; failedSteps?: string[] }> {
+async function processMlDailyOps(job: Job): Promise<{ success: boolean; skipped?: boolean; failedSteps?: string[] }> {
   // 2026-08-06: skip the standalone 19:30 IST trigger on a trading holiday -- closed-day-early-
   // batch (queues.ts's QUEUE_CLOSED_DAY) already dispatches a 'closed-day-early'-named run at
   // ~07:10 IST that morning. Running the full ~120-script chain again that same evening off an
   // exchange that never opened would just re-fetch/re-score identical data twice.
   if (await shouldSkipOnTradingHoliday(job)) {
     console.log('[QUEUE] ml-daily-ops skipped — trading holiday (closed-day-early-batch already ran this morning)');
-    return { success: true };
+    return { success: true, skipped: true };
   }
   // Dashboard-visible sub-tasks are wrapped in T.run(...) so their monitor state reflects the
   // ACTUAL step outcome (T.finish() at the end).
@@ -1355,7 +1355,7 @@ async function processTrendlyneChecklistCycle(_job: Job): Promise<{ skipped: boo
 
 // ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ DL Python runner ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬
 
-async function processMlWeeklyRetrain(_job: Job): Promise<{ success: boolean; failedSteps?: string[] }> {
+async function processMlWeeklyRetrain(_job: Job): Promise<{ success: boolean; skipped?: boolean; failedSteps?: string[] }> {
   // Dashboard sub-tasks (ml-ensemble-train, strategy-optimizer) run under T.run so their monitor
   // state reflects the REAL outcome via T.finish() — not the blanket 'success' the completed
   // handler used to stamp. Untracked steps stay best-effort with console.warn.
@@ -1608,14 +1608,14 @@ async function quantPhase(steps: Promise<unknown>[]): Promise<void> {
   if (failed) throw (failed as PromiseRejectedResult).reason;
 }
 
-async function processQuantEodSync(job: Job): Promise<{ success: boolean }> {
+async function processQuantEodSync(job: Job): Promise<{ success: boolean; skipped?: boolean }> {
   // 2026-08-06: skip entirely on a trading holiday, no morning replacement -- every phase here
   // (proprietary-score syncs, fundamentals resync, multi-factor scoring) re-derives from the
   // same closed-exchange session's unchanged data. Not wired into closed-day-early-batch's
   // dispatch, same reasoning as processStockScoring/processQuantScoring in screeners.jobs.ts.
   if (await shouldSkipOnTradingHoliday(job)) {
     console.log('[QUEUE] quant-eod-sync skipped — trading holiday, nothing new to sync');
-    return { success: true };
+    return { success: true, skipped: true };
   }
   console.log('[QUEUE] quant-eod-sync starting...');
   try {
@@ -1767,11 +1767,11 @@ export async function initQueues(): Promise<boolean> {
       }
       console.log(`[QUEUE] stock-refresh completed: ${result.count} stocks`);
       if (result?.success === false) return;
-      recordHeartbeat('stock-refresh', 'success');
+      recordHeartbeat('stock-refresh', 'success', undefined, bullJobDurationMs(job));
     });
     stockWorker.on('failed', (job, err) => {
       console.error(`[QUEUE] stock-refresh failed:`, err.message);
-      recordHeartbeat('stock-refresh', 'failed', err?.message);
+      recordHeartbeat('stock-refresh', 'failed', err?.message, bullJobDurationMs(job));
     });
     stockWorker.on('error', (err) => {
       if ((err as any).code === -2 || err.message?.includes('Missing lock')) return;
@@ -1806,12 +1806,12 @@ export async function initQueues(): Promise<boolean> {
 
     signalWorker.on('completed', (job) => {
       console.log(`[QUEUE] ai-signals job ${job?.data?.symbol} completed successfully`);
-      recordHeartbeat('ai-signals', 'success');
+      recordHeartbeat('ai-signals', 'success', undefined, bullJobDurationMs(job));
     });
 
     signalWorker.on('failed', (job, err) => {
       console.warn(`[QUEUE] ai-signals job ${job?.data?.symbol} failed:`, err.message);
-      recordHeartbeat('ai-signals', 'failed', err.message);
+      recordHeartbeat('ai-signals', 'failed', err.message, bullJobDurationMs(job));
     });
 
     signalWorker.on('stalled', (jobId) => {
@@ -1944,13 +1944,13 @@ export async function initQueues(): Promise<boolean> {
       },
     );
 
-    signalOutcomesWorker.on('completed', (_job) => {
+    signalOutcomesWorker.on('completed', (job) => {
       console.log('[QUEUE] signal-outcomes completed');
-      recordHeartbeat('signal-outcomes', 'success');
+      recordHeartbeat('signal-outcomes', 'success', undefined, bullJobDurationMs(job));
     });
-    signalOutcomesWorker.on('failed', (_job, err) => {
+    signalOutcomesWorker.on('failed', (job, err) => {
       console.error('[QUEUE] signal-outcomes failed:', err.message);
-      recordHeartbeat('signal-outcomes', 'failed', err.message);
+      recordHeartbeat('signal-outcomes', 'failed', err.message, bullJobDurationMs(job));
     });
 
     // ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ News sentiment queue (every 30 seconds) ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬
@@ -2163,7 +2163,7 @@ export async function initQueues(): Promise<boolean> {
         } else if (job.name === 'bse-announcements-refresh-hot') {
           if (!(await svc.isResultsSeasonActive())) {
             console.log('[QUEUE] bse-announcements-refresh-hot skipped — not results season');
-            return;
+            return { skipped: true };
           }
           await svc.runBseAnnouncementsCycle();
         } else if (job.name === 'gnews-market-refresh') {
@@ -2181,7 +2181,7 @@ export async function initQueues(): Promise<boolean> {
         } else if (job.name === 'nse-financial-results-refresh-hot') {
           if (!(await svc.isResultsSeasonActive())) {
             console.log('[QUEUE] nse-financial-results-refresh-hot skipped — not results season');
-            return;
+            return { skipped: true };
           }
           await svc.runNseFinancialResultsCycle();
         } else if (job.name === 'mc-earnings-news-refresh') {
@@ -2189,7 +2189,7 @@ export async function initQueues(): Promise<boolean> {
         } else if (job.name === 'mc-earnings-news-refresh-hot') {
           if (!(await svc.isResultsSeasonActive())) {
             console.log('[QUEUE] mc-earnings-news-refresh-hot skipped — not results season');
-            return;
+            return { skipped: true };
           }
           await svc.runMcEarningsNewsCycle();
         } else if (job.name === 'mc-deals-news-refresh') {
@@ -2209,13 +2209,13 @@ export async function initQueues(): Promise<boolean> {
       },
     );
 
-    newsSentimentWorker.on('completed', (_job) => {
+    newsSentimentWorker.on('completed', (job) => {
       console.log('[QUEUE] news-sentiment completed');
-      recordHeartbeat('news-sentiment', 'success');
+      recordHeartbeat('news-sentiment', 'success', undefined, bullJobDurationMs(job));
     });
-    newsSentimentWorker.on('failed', (_job, err) => {
+    newsSentimentWorker.on('failed', (job, err) => {
       console.error('[QUEUE] news-sentiment failed:', err.message);
-      recordHeartbeat('news-sentiment', 'failed', err?.message);
+      recordHeartbeat('news-sentiment', 'failed', err?.message, bullJobDurationMs(job));
     });
     newsSentimentWorker.on('error', (err) => {
       if ((err as any).code === -2 || err.message?.includes('Missing lock')) return;
@@ -2262,14 +2262,14 @@ export async function initQueues(): Promise<boolean> {
       },
     );
 
-    trendlyneIntradayWorker.on('completed', (_job, result?: { skipped?: boolean }) => {
+    trendlyneIntradayWorker.on('completed', (job, result?: { skipped?: boolean }) => {
       console.log('[QUEUE] trendlyne-intraday completed');
       if (result?.skipped) return;
-      recordHeartbeat('trendlyne-intraday', 'success');
+      recordHeartbeat('trendlyne-intraday', 'success', undefined, bullJobDurationMs(job));
     });
-    trendlyneIntradayWorker.on('failed', (_job, err) => {
+    trendlyneIntradayWorker.on('failed', (job, err) => {
       console.error('[QUEUE] trendlyne-intraday failed:', err.message);
-      recordHeartbeat('trendlyne-intraday', 'failed', err.message);
+      recordHeartbeat('trendlyne-intraday', 'failed', err.message, bullJobDurationMs(job));
     });
     trendlyneIntradayWorker.on('error', (err) => {
       if ((err as any).code === -2 || err.message?.includes('Missing lock')) return;
@@ -2335,11 +2335,11 @@ export async function initQueues(): Promise<boolean> {
       // processor (reflecting real outcomes), so this handler no longer blanket-marks success.
       console.log('[QUEUE] ml-daily-ops completed');
     });
-    mlDailyOpsWorker.on('failed', (_job, err) => {
+    mlDailyOpsWorker.on('failed', (job, err) => {
       // Processor threw before finish() ran (steps are best-effort, so this is a harness/uncaught
       // error, not a step failure) — mark the job failed so it isn't seen as healthy.
       console.error('[QUEUE] ml-daily-ops failed:', err.message);
-      recordHeartbeat('ml-daily-ops', 'failed', err?.message);
+      recordHeartbeat('ml-daily-ops', 'failed', err?.message, bullJobDurationMs(job));
     });
 
     // -- ML weekly retrain + optimize (Sunday 10:30 IST = 05:00 UTC, see the repeat pattern below) --
@@ -2388,14 +2388,14 @@ export async function initQueues(): Promise<boolean> {
       processIntradayFetcher,
       { connection, concurrency: 1, lockDuration: 10 * 60 * 1000, lockRenewTime: 2 * 60 * 1000 },
     );
-    intradayFetcherWorker.on('completed', (_job, result?: { skipped?: boolean }) => {
+    intradayFetcherWorker.on('completed', (job, result?: { skipped?: boolean }) => {
       console.log('[QUEUE] intraday-fetcher completed');
       if (result?.skipped) return;
-      recordHeartbeat('intraday-fetcher', 'success');
+      recordHeartbeat('intraday-fetcher', 'success', undefined, bullJobDurationMs(job));
     });
-    intradayFetcherWorker.on('failed', (_, err) => {
+    intradayFetcherWorker.on('failed', (job, err) => {
       console.error('[QUEUE] intraday-fetcher failed:', err.message);
-      recordHeartbeat('intraday-fetcher', 'failed', err?.message);
+      recordHeartbeat('intraday-fetcher', 'failed', err?.message, bullJobDurationMs(job));
     });
 
     // ── Mover screener capture (4:05 PM IST weekdays, after close): persists Top
@@ -2417,14 +2417,14 @@ export async function initQueues(): Promise<boolean> {
       processMoverCapture,
       { connection, concurrency: 1, lockDuration: 10 * 60 * 1000, lockRenewTime: 2 * 60 * 1000 },
     );
-    moverWorker.on('completed', (_job, result?: { skipped?: boolean }) => {
+    moverWorker.on('completed', (job, result?: { skipped?: boolean }) => {
       console.log('[QUEUE] mover-screener-capture completed');
       if (result?.skipped) return;
-      recordHeartbeat('mover-screener-capture', 'success');
+      recordHeartbeat('mover-screener-capture', 'success', undefined, bullJobDurationMs(job));
     });
-    moverWorker.on('failed', (_, err) => {
+    moverWorker.on('failed', (job, err) => {
       console.error('[QUEUE] mover-screener-capture failed:', err.message);
-      recordHeartbeat('mover-screener-capture', 'failed', err?.message);
+      recordHeartbeat('mover-screener-capture', 'failed', err?.message, bullJobDurationMs(job));
     });
 
     // ── Mover INTRADAY slot capture (hourly 10:00-14:00 IST weekdays + holiday guard):
@@ -2452,14 +2452,14 @@ export async function initQueues(): Promise<boolean> {
       },
       { connection, concurrency: 1, lockDuration: 6 * 60 * 1000, lockRenewTime: 2 * 60 * 1000 },
     );
-    moverIntradayWorker.on('completed', (_job, result?: { skipped?: boolean }) => {
+    moverIntradayWorker.on('completed', (job, result?: { skipped?: boolean }) => {
       console.log('[QUEUE] mover-intraday-capture completed');
       if (result?.skipped) return;   // skip must not stamp over a real failure's heartbeat
-      recordHeartbeat('mover-intraday-capture', 'success');
+      recordHeartbeat('mover-intraday-capture', 'success', undefined, bullJobDurationMs(job));
     });
-    moverIntradayWorker.on('failed', (_, err) => {
+    moverIntradayWorker.on('failed', (job, err) => {
       console.error('[QUEUE] mover-intraday-capture failed:', err.message);
-      recordHeartbeat('mover-intraday-capture', 'failed', err?.message);
+      recordHeartbeat('mover-intraday-capture', 'failed', err?.message, bullJobDurationMs(job));
     });
 
     // ── NiftyTrader Live Filter capture (*/15 during market hours, weekdays):
@@ -2499,14 +2499,14 @@ export async function initQueues(): Promise<boolean> {
       },
       { connection, concurrency: 1, lockDuration: 15 * 60 * 1000, lockRenewTime: 3 * 60 * 1000 },
     );
-    ntLiveFilterWorker.on('completed', (_job, result?: { skipped?: boolean }) => {
+    ntLiveFilterWorker.on('completed', (job, result?: { skipped?: boolean }) => {
       console.log('[QUEUE] nt-live-filter-capture completed');
       if (result?.skipped) return;
-      recordHeartbeat('nt-live-filter-capture', 'success');
+      recordHeartbeat('nt-live-filter-capture', 'success', undefined, bullJobDurationMs(job));
     });
-    ntLiveFilterWorker.on('failed', (_, err) => {
+    ntLiveFilterWorker.on('failed', (job, err) => {
       console.error('[QUEUE] nt-live-filter-capture failed:', err.message);
-      recordHeartbeat('nt-live-filter-capture', 'failed', err?.message);
+      recordHeartbeat('nt-live-filter-capture', 'failed', err?.message, bullJobDurationMs(job));
     });
 
     // ── Mover STUDY (weekly, Saturday 14:00 IST = 08:30 UTC): rebuilds computed classes
@@ -2539,14 +2539,14 @@ export async function initQueues(): Promise<boolean> {
       },
       { connection, concurrency: 1, lockDuration: 75 * 60 * 1000, lockRenewTime: 5 * 60 * 1000 },
     );
-    moverStudyWorker.on('completed', (_job, result?: { skipped?: boolean }) => {
+    moverStudyWorker.on('completed', (job, result?: { skipped?: boolean }) => {
       console.log('[QUEUE] mover-study-weekly completed');
       if (result?.skipped) return;
-      recordHeartbeat('mover-study-weekly', 'success');
+      recordHeartbeat('mover-study-weekly', 'success', undefined, bullJobDurationMs(job));
     });
-    moverStudyWorker.on('failed', (_, err) => {
+    moverStudyWorker.on('failed', (job, err) => {
       console.error('[QUEUE] mover-study-weekly failed:', err.message);
-      recordHeartbeat('mover-study-weekly', 'failed', err?.message);
+      recordHeartbeat('mover-study-weekly', 'failed', err?.message, bullJobDurationMs(job));
     });
 
     // ── GDELT sentiment (daily, 19:00 UTC = 12:30 AM IST, every day incl. weekends -- news
@@ -2570,13 +2570,13 @@ export async function initQueues(): Promise<boolean> {
       processGdeltSentiment,
       { connection, concurrency: 1, lockDuration: 20 * 60 * 1000, lockRenewTime: 3 * 60 * 1000 },
     );
-    gdeltSentimentWorker.on('completed', () => {
+    gdeltSentimentWorker.on('completed', (job) => {
       console.log('[QUEUE] gdelt-sentiment completed');
-      recordHeartbeat('gdelt-sentiment', 'success');
+      recordHeartbeat('gdelt-sentiment', 'success', undefined, bullJobDurationMs(job));
     });
-    gdeltSentimentWorker.on('failed', (_, err) => {
+    gdeltSentimentWorker.on('failed', (job, err) => {
       console.error('[QUEUE] gdelt-sentiment failed:', err.message);
-      recordHeartbeat('gdelt-sentiment', 'failed', err?.message);
+      recordHeartbeat('gdelt-sentiment', 'failed', err?.message, bullJobDurationMs(job));
     });
 
     // ── Live Screener paced collector (every 15 min, '*/15 3-10 * * 1-5' = 03:00-10:45 UTC =
@@ -2599,16 +2599,16 @@ export async function initQueues(): Promise<boolean> {
       processLiveScreenerCollect,
       { connection, concurrency: 1, lockDuration: 8 * 60 * 1000 }
     );
-    liveScreenerCollectWorker.on('completed', (_job, result?: { skipped?: boolean; success?: boolean }) => {
+    liveScreenerCollectWorker.on('completed', (job, result?: { skipped?: boolean; success?: boolean }) => {
       console.log('[QUEUE] live-screener-collect completed');
       if (result?.skipped) return;
       // processLiveScreenerCollect's StepTracker already wrote the verdict -- don't clobber it.
       if (result?.success === false) return;
-      recordHeartbeat('live-screener-collect', 'success');
+      recordHeartbeat('live-screener-collect', 'success', undefined, bullJobDurationMs(job));
     });
-    liveScreenerCollectWorker.on('failed', (_, err) => {
+    liveScreenerCollectWorker.on('failed', (job, err) => {
       console.error('[QUEUE] live-screener-collect failed:', err.message);
-      recordHeartbeat('live-screener-collect', 'failed', err.message);
+      recordHeartbeat('live-screener-collect', 'failed', err.message, bullJobDurationMs(job));
     });
 
 
@@ -2804,13 +2804,13 @@ export async function initQueues(): Promise<boolean> {
         stalledInterval: 15 * 60 * 1000,
         maxStalledCount: 3,
       });
-    dlRetrainEmergencyWorker.on('completed', () => {
+    dlRetrainEmergencyWorker.on('completed', (job) => {
       console.log('[QUEUE] dl-retrain-emergency done');
-      recordHeartbeat('dl-retrain-emergency', 'success');
+      recordHeartbeat('dl-retrain-emergency', 'success', undefined, bullJobDurationMs(job));
     });
-    dlRetrainEmergencyWorker.on('failed', (_, err) => {
+    dlRetrainEmergencyWorker.on('failed', (job, err) => {
       console.error('[QUEUE] dl-retrain-emergency failed:', err.message);
-      recordHeartbeat('dl-retrain-emergency', 'failed', err.message);
+      recordHeartbeat('dl-retrain-emergency', 'failed', err.message, bullJobDurationMs(job));
     });
 
     // ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ OHLCV Backfill ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬
@@ -2824,7 +2824,7 @@ export async function initQueues(): Promise<boolean> {
         // are one-off catch-up runs, not routine daily waste).
         if (job.name === 'ohlcv-gap-fill-daily' && await shouldSkipOnTradingHoliday(job)) {
           console.log('[QUEUE] ohlcv-gap-fill-daily skipped — trading holiday, no new session to gap-fill');
-          return { success: true };
+          return { success: true, skipped: true };
         }
         const mode = (job.data?.mode as string) || 'gap-fill';
         const lookback = (job.data?.lookback as number) || 30;
@@ -2996,13 +2996,13 @@ export async function initQueues(): Promise<boolean> {
       { connection, concurrency: 2, lockDuration: 30 * 60_000 }
     );
 
-    trendlyneDailyFetchWorker.on('completed', () => {
+    trendlyneDailyFetchWorker.on('completed', (job) => {
       console.log('[QUEUE] trendlyne-daily-fetch completed');
-      recordHeartbeat('trendlyne-daily-fetch', 'success');
+      recordHeartbeat('trendlyne-daily-fetch', 'success', undefined, bullJobDurationMs(job));
     });
-    trendlyneDailyFetchWorker.on('failed', (_, e) => {
+    trendlyneDailyFetchWorker.on('failed', (job, e) => {
       console.error('[QUEUE] trendlyne-daily-fetch failed:', e.message);
-      recordHeartbeat('trendlyne-daily-fetch', 'failed', e?.message);
+      recordHeartbeat('trendlyne-daily-fetch', 'failed', e?.message, bullJobDurationMs(job));
     });
 
     const trendlyneWeeklyJobs = await registerTrendlyneWeeklyJobs(connection);
@@ -3021,7 +3021,7 @@ export async function initQueues(): Promise<boolean> {
         // 20-min delay after ml-daily-ops) that same morning.
         if (await shouldSkipOnTradingHoliday(job)) {
           console.log('[QUEUE] unified-ranker skipped — trading holiday (closed-day-early-batch already ran this morning)');
-          return;
+          return { skipped: true };
         }
         console.log('[QUEUE] unified-ranker starting...');
         // 30 min: a full run now takes 15-20+ min (700k-row confluence window scans +
@@ -3070,13 +3070,13 @@ export async function initQueues(): Promise<boolean> {
         removeOnFail: { age: 86400 * 3, count: 20 },
       },
     );
-    unifiedRankerWorkerInstance.on('completed', () => {
+    unifiedRankerWorkerInstance.on('completed', (job) => {
       console.log('[QUEUE] unified-ranker done');
-      recordHeartbeat('unified-ranker', 'success');
+      recordHeartbeat('unified-ranker', 'success', undefined, bullJobDurationMs(job));
     });
-    unifiedRankerWorkerInstance.on('failed', (_, err) => {
+    unifiedRankerWorkerInstance.on('failed', (job, err) => {
       console.error('[QUEUE] unified-ranker failed:', err.message);
-      recordHeartbeat('unified-ranker', 'failed', err.message);
+      recordHeartbeat('unified-ranker', 'failed', err.message, bullJobDurationMs(job));
     });
 
     await registerDigestJobs(connection);
@@ -3160,13 +3160,13 @@ export async function initQueues(): Promise<boolean> {
       },
       { connection, concurrency: 1, lockDuration: 5 * 60_000 },
     );
-    dataQualityDailyWorker.on('completed', () => {
+    dataQualityDailyWorker.on('completed', (job) => {
       console.log('[QUEUE] data-quality-daily sent');
-      recordHeartbeat('data-quality-daily', 'success');
+      recordHeartbeat('data-quality-daily', 'success', undefined, bullJobDurationMs(job));
     });
-    dataQualityDailyWorker.on('failed', (_, err) => {
+    dataQualityDailyWorker.on('failed', (job, err) => {
       console.error('[QUEUE] data-quality-daily failed:', err.message);
-      recordHeartbeat('data-quality-daily', 'failed', err.message);
+      recordHeartbeat('data-quality-daily', 'failed', err.message, bullJobDurationMs(job));
     });
 
     const dataQualityRepeatables = await dataQualityDailyQueue.getRepeatableJobs();
@@ -3185,13 +3185,13 @@ export async function initQueues(): Promise<boolean> {
       processTrendlyneChecklistCycle,
       { connection, concurrency: 1, lockDuration: 20 * 60 * 1000, lockRenewTime: 3 * 60 * 1000 },
     );
-    trendlyneChecklistCycleWorker.on('completed', (_job, result?: { skipped?: boolean }) => {
+    trendlyneChecklistCycleWorker.on('completed', (job, result?: { skipped?: boolean }) => {
       if (result?.skipped) return;
-      recordHeartbeat('trendlyne-checklist-cycle', 'success');
+      recordHeartbeat('trendlyne-checklist-cycle', 'success', undefined, bullJobDurationMs(job));
     });
-    trendlyneChecklistCycleWorker.on('failed', (_job, err) => {
+    trendlyneChecklistCycleWorker.on('failed', (job, err) => {
       console.error('[QUEUE] trendlyne-checklist-cycle failed:', err.message);
-      recordHeartbeat('trendlyne-checklist-cycle', 'failed', err.message);
+      recordHeartbeat('trendlyne-checklist-cycle', 'failed', err.message, bullJobDurationMs(job));
     });
 
     // Only kick off the self-rescheduling chain if one isn't already pending —

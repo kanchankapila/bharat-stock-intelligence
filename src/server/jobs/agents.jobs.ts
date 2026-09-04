@@ -30,7 +30,7 @@ async function processAgentDataScientist(_job: Job): Promise<{ success: boolean;
   return { success: true, grade: row?.quality_grade };
 }
 
-async function processAgentStrategist(_job: Job): Promise<{ success: boolean }> {
+async function processAgentStrategist(_job: Job): Promise<{ success: boolean; skipped?: boolean }> {
   await runPython('agents/strategist_agent.py', [], 15 * 60_000);
 
   const highPicks = await dbAll<any>(`
@@ -62,12 +62,12 @@ async function processAgentStrategist(_job: Job): Promise<{ success: boolean }> 
   return { success: true };
 }
 
-async function processAgentAuditor(_job: Job): Promise<{ success: boolean }> {
+async function processAgentAuditor(_job: Job): Promise<{ success: boolean; skipped?: boolean }> {
   await runPython('agents/auditor_agent.py', [], 15 * 60_000);
   return { success: true };
 }
 
-async function processAgentOptimizer(_job: Job): Promise<{ success: boolean }> {
+async function processAgentOptimizer(_job: Job): Promise<{ success: boolean; skipped?: boolean }> {
   // 40 min, not 20: optimizer_agent.py's own AlphaQuant call (fires only when the win rate has
   // stayed below 50% for 5+ consecutive days, so not every run) carries its OWN 30-minute
   // requests.post(..., timeout=30*60) -- a 20-minute outer runPython budget kills the process

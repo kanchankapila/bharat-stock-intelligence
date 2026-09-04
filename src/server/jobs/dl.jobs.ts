@@ -39,12 +39,12 @@ export const QUEUE_DL_RETRAIN_WEEKLY  = 'dl-retrain-weekly';
 
 export async function processDLPython(
   script: string, args: string[] = [], timeoutMs = 6 * 60 * 60_000,
-): Promise<{ success: boolean }> {
+): Promise<{ success: boolean; skipped?: boolean }> {
   await runPython(script, args, timeoutMs);
   return { success: true };
 }
 
-async function processDlMacroFetch(_job: Job): Promise<{ success: boolean; failedSteps?: string[] }> {
+async function processDlMacroFetch(_job: Job): Promise<{ success: boolean; skipped?: boolean; failedSteps?: string[] }> {
   // Explicit timeout, not processDLPython's 6h default: this worker's lockDuration is
   // only 5 min, so an unbounded default lets a hang block the lock indefinitely instead
   // of failing cleanly -- exactly what caused a live incident (repeated "could not renew
@@ -90,14 +90,14 @@ function _currentIstDateString(): string {
   return new Date(Date.now() + 5.5 * 60 * 60 * 1000).toISOString().slice(0, 10);
 }
 
-async function processDlInference(job: Job): Promise<{ success: boolean }> {
+async function processDlInference(job: Job): Promise<{ success: boolean; skipped?: boolean }> {
   // 2026-08-06: skip entirely on a trading holiday, no morning replacement -- dl-feature-refresh
   // is also skipped on the same day (see processDlFeatureRefresh above), so feature_store has no
   // new row to infer against; re-running would just reproduce yesterday's prediction under
   // logical_trading_date()'s resolved date.
   if (await shouldSkipOnTradingHoliday(job)) {
     console.log('[QUEUE] dl-inference skipped — trading holiday, no new feature row to infer against');
-    return { success: true };
+    return { success: true, skipped: true };
   }
   // The scheduled fallback (job.name === 'dl-infer-daily', see registerDlJobs below) only
   // exists to catch the rare case the chain trigger never fired -- on a normal night it would
@@ -106,14 +106,14 @@ async function processDlInference(job: Job): Promise<{ success: boolean }> {
   // carries a different job.name ('dl-infer-after-feature-refresh') and is never skipped here.
   if (job.name === 'dl-infer-daily' && _lastDlInferenceRunIstDate === _currentIstDateString()) {
     console.log('[QUEUE] dl-inference (fallback) skipped — already ran today via the dl-feature-refresh chain trigger');
-    return { success: true };
+    return { success: true, skipped: true };
   }
   const result = await processDLPython('dl_engine.py', ['--mode', 'infer']);
   _lastDlInferenceRunIstDate = _currentIstDateString();
   return result;
 }
 
-async function processDlRegimeUpdate(_job: Job): Promise<{ success: boolean }> {
+async function processDlRegimeUpdate(_job: Job): Promise<{ success: boolean; skipped?: boolean }> {
   // Same fix as processDlMacroFetch above: explicit timeout, not the 6h default, since this
   // worker's lockDuration is only 5 min.
   //
@@ -125,7 +125,7 @@ async function processDlRegimeUpdate(_job: Job): Promise<{ success: boolean }> {
   return processDLPython('regime_detector.py', ['--mode', 'update'], 4 * 60_000);
 }
 
-async function processDlRetrainWeekly(job: Job): Promise<{ success: boolean }> {
+async function processDlRetrainWeekly(job: Job): Promise<{ success: boolean; skipped?: boolean }> {
   const trigger = job.data?.trigger || 'scheduled';
   // Explicit 24h timeout, not processDLPython's 6h default: a real full-universe BiLSTM
   // retrain (~2100 symbols, chunked training + walk-forward validation retraining

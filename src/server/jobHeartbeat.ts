@@ -75,6 +75,32 @@ const UPSERT_SQL = `
     fail_count      = job_heartbeat.fail_count + ?
 `;
 
+/**
+ * Duration of a BullMQ job from its own processedOn/finishedOn timestamps.
+ *
+ * recordHeartbeat() is the write chokepoint for job_run_history but cannot derive a duration
+ * itself -- it only ever receives a name and a status. The ~44 hand-wired worker handlers in
+ * queues.ts DO hold the job, and BullMQ already timestamps it, so the duration is free at the
+ * call site with no timer threaded through anything. Measured 2026-09-05 before this existed:
+ * duration_ms was populated on 21 of 432 rows (4.9%), i.e. runtime tracking was effectively
+ * absent for every job not migrated onto registerRepeatableJob().
+ *
+ * Returns undefined rather than throwing for a job BullMQ never loaded -- it passes `undefined`
+ * to a 'failed' handler in that case, and a throw there would convert a recorded failure into a
+ * lost one. A genuine 0 is preserved: coercing it to undefined would drop the fastest jobs from
+ * every statistic, and those are exactly the ones most likely to be silently no-opping.
+ */
+export function bullJobDurationMs(
+  job: { processedOn?: number | null; finishedOn?: number | null } | undefined | null,
+): number | undefined {
+  const started = job?.processedOn;
+  const finished = job?.finishedOn;
+  if (typeof started !== 'number' || typeof finished !== 'number') return undefined;
+  if (!Number.isFinite(started) || !Number.isFinite(finished)) return undefined;
+  const d = finished - started;
+  return d >= 0 ? d : undefined;
+}
+
 export async function recordHeartbeat(
   jobName: string, status: 'success' | 'failed', error?: string, durationMs?: number,
 ): Promise<void> {

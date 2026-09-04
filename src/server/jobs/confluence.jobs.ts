@@ -81,7 +81,7 @@ async function processConfluenceCompute(_job: Job): Promise<{ computed: number; 
   return result;
 }
 
-async function processConfluenceOutcomes(job: Job): Promise<{ success: boolean; failedSteps?: string[] } | void> {
+async function processConfluenceOutcomes(job: Job): Promise<{ success: boolean; skipped?: boolean; failedSteps?: string[] } | void> {
   // 2026-08-06: skip entirely on a trading holiday, no morning replacement -- confluence
   // outcomes/reliability are graded against price action that didn't happen (exchange never
   // opened), and confluence_ml_engine --train would just refit on an unchanged dataset.
@@ -89,7 +89,7 @@ async function processConfluenceOutcomes(job: Job): Promise<{ success: boolean; 
   // getLateJobs() is not holiday-aware, so see HOLIDAY_SKIP_NOTE at the foot of this file.
   if (await shouldSkipOnTradingHoliday(job)) {
     console.log('[QUEUE] confluence-outcomes skipped — trading holiday, nothing new to grade');
-    return;
+    return { success: true, skipped: true };
   }
   // Sequential, not Promise.all: confluence_ml_engine --train is CPU-heavy (multiprocessing)
   // and the old concurrent 120s budget both starved the tracker AND timeout-killed the
