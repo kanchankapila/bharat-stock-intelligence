@@ -2598,3 +2598,58 @@ lever is label/loss-side calibration, **not gate tampering** — the bar that fi
 
 - **REGIME_WEIGHTS re-check executed early on the expanded sample — shipped weights CONFIRMED, no edit (2026-08-25).** The 2026-08-13 ml×0.5 derivation's own comment pins a trigger ("re-run blend_walkforward.py once ~20+ further sessions accumulate"); only ~8 had accrued when this session reached the item, but the harness was run anyway across ALL data (46 sessions, 74,246 rows, 2,407 symbols): BASE mean 5d open-entry rank IC **0.0406**, 26/33 days positive, 9 top-30→next-day-top-15 gainer hits, mean edge +0.134pp — vs TILT dIC **−0.0003**, same hits, edge +0.139pp. Pre-declared bar (dIC>0 AND |t|≥~2) not met by the alternative ⇒ weights stay verbatim. This is a validation, NOT a reweight; do not cite it as an improvement.
 - **technical_signals.date TEXT→DATE shipped (20260825120000), with a runner trap worth remembering.** Audit first: 87,076 rows, 0 NULLs, 0 non-ISO values ⇒ single-statement ALTER safe. node-pg-migrate's sql-file mode then executed ONLY THE FIRST STATEMENT of the initial file — which led with `--` comments — logged "Migrations complete!", inserted the ledger row, and left the column TEXT. Statement-first/comments-after layout applied cleanly on the manual rerun (verified via information_schema, not the tool's exit code). Corollary: **a migration's ledger row proves execution of a statement, not THE statement you meant** — always verify the effect, never the log. Writers unaffected (ISO literals/params cast implicitly); writer smoke-tested post-change incl. BETWEEN range predicate; db/schema.postgres.sql canonical DDL updated so new throwaway test schemas get DATE natively.
+
+## Narrative log moved out of measurement.md during the 2026-09-04 restructure
+
+The block below (2026-08-27 through 2026-08-30) used to live at the top of `measurement.md` as
+"Current state, as of the last full re-measurement." It was accumulating faster than anyone was
+reading it — four dated re-confirmation passes stacked on top of each other in one paragraph —
+and per user feedback was part of why the file read as a wall of old evidence blocking new
+attempts rather than a live reference. Nothing here was wrong; it just belonged in the append-only
+history, not the front page. `measurement.md` now carries a short dated snapshot instead and
+points here for the derivation.
+
+Every harness (`factor_edge.py`, `factor_backtest.py`, `assembly_ablation.py`,
+`blend_walkforward.py`, `screener_combo_finder.py`) was re-run against live production on
+2026-08-27. Headline: nothing cleared `USABLE` on a terminal-return grading, `unified_score` was
+still no-edge, and two older claims were retracted that day (`REGIME_WEIGHTS` no longer beat equal
+weighting on the re-shrunk weights; `unified_score`'s 5d IC was +0.017, not the ~0.0001 long quoted
+— still no-edge, but that number stopped being re-confirmed).
+
+Re-run in full 2026-08-29 (explicit user request for a full harness pass): `factor_edge.py` re-run
+live against `technical_signals` (both entries), `engine_composite_scores` (both entries), and
+`unified_recommendations`' 8 engines, all `--persist`ed; `assembly_ablation.py`, `factor_backtest.py
+--factor momentum_12_1`, `screener_combo_finder.py --tier1`, and `blend_walkforward.py` also
+re-run. Nothing reversed. Every verdict reproduced with only mild continued decay, the expected
+pattern for a weak signal: `win_probability` close 1/5/21d 0.037/0.068/0.085 (from 0.039/0.070/
+0.091 on 2026-08-27); `engine_composite_scores` close 5d IC 0.073 (from 0.076); `dl_score` 21d IC
+0.098, bit-identical to 2026-08-27. `ml_breakout_probability` (USABLE, 44 dates) and
+`breakout_probability`'s h=10 LOW-DATA read (19 dates) reproduced unchanged.
+
+What reproduced exactly and mattered most: the screener bisection. Adding `screener` to the
+6-engine blend cost −0.0136 IC @5d / −0.0163 @21d; `smart_money` was inert. Fourth independent
+confirmation the screener engine is actively harmful. Third shrink, 2026-08-30: `screener`'s
+`REGIME_WEIGHTS` set to 0.0 in every regime (was ~0.054–0.115), freed weight redistributed
+proportionally across the other 6 non-pinned engines (`breakout` stays fixed at its own
+independent audit-derived ceiling). All 221 `unified_ranker`-related pytest cases passed;
+`unified_ranker.py` runs as a fresh subprocess per scheduled invocation, so no `pm2 restart` was
+needed. `momentum_12_1` and the capitulation triple both reproduced bit-identical to their prior
+runs. `blend_walkforward.py`'s TILT alternative still failed its pre-declared bar (dIC −0.0006).
+
+Verified again 2026-08-30 (scheduler audit, read-back not re-run): `factor_edge_history`'s
+2026-08-30T00:22 persisted run (written by that night's `ml-weekly-retrain`) was read back
+column-by-column against the file and every number in the 2026-08-29 block above reproduced
+exactly — a read-back confirmation, not a fifth independent measurement.
+
+What changed on 2026-08-30, newly discovered that day: the active ensemble's CV moved to 0.5305
+(from 0.5203) — same honest triple-barrier label, genuinely comparable, a small real improvement
+that changed nothing about the verdict (0.53 still sits inside the live realized AUC band). A
+warning was raised that the NEXT ensemble CV would not be comparable to 0.5305 because of
+uncommitted purged-CV/feature-pruning changes to `ml_ensemble.py` reviewed that day — see
+`ml-model-bugs.md`'s purged-splitter entries for what those changes were. `online_sgd` reported
+val_AUC 0.5017 (chance, as expected). Two promotion gates rejected again (`cs_ranker`,
+`exit_policy`), both reproducing `ml-model-bugs.md`'s feature-completeness finding. 11
+`technical_signals.ext_*` vendor columns were newly graded and all LOW-DATA at 4 dates (superseded
+2026-09-04 — see the current file, they cleared to 39 dates). No BiLSTM had trained since
+2026-08-25 due to a scheduler defect (`dl-retrain-weekly`'s Saturday run left `active` in BullMQ
+with no surviving worker after a pm2 restart); re-run 2026-08-30 as a make-up.

@@ -7791,3 +7791,53 @@ Two real bugs found and fixed while verifying (not assumed away):
 **Left open, correctly, per the new policy's own exceptions** (all re-verified current, none forced): AF-20260816-11 (EVIDENCE — no single anchor-threshold fix exists, needs a per-column-cadence redesign), AF-20260823-71 (EVIDENCE — lowering a price floor is a scoring-substance change), AF-20260823-72 (ACCEPT — a design question, already visible via the e2e check), AF-20260823-81 (EVIDENCE — needs a fresh post-fix probe re-run, now old enough to be worth revisiting in a dedicated session), AF-20260831-02 and AF-20260902-09 (both genuinely calendar-blocked, need ~15-20 more trading dates).
 
 Not committed — left for the user to review given the size of the diff (108 new migration files + 11 modified `.py`/`.ts` files).
+
+## 2026-09-04 — measurement.md restructured: staleness fixed, not deleted (user-requested)
+
+User reported `measurement.md` (and memory generally) reads as stale and blocks trying new
+ideas by citing old calculations, and asked to either bring it fully current or remove it
+outright. Given a live re-verification of every claim in a 40KB file would be hours of
+compute and outright deletion would throw away real, hard-won findings (the capitulation
+triple, the screener-sentiment inversion, 14 inverted `feature_store` factors), asked which
+tradeoff the user wanted via `AskUserQuestion` rather than guessing — chose "restructure +
+spot-refresh."
+
+**What was actually stale, live-verified rather than assumed:** three populations had
+silently cleared their LOW-DATA floor since they were last written up and nobody had gone
+back to grade them — `smart_money_score` (14→21 non-zero dates), `technical_signals.ext_*`
+vendor columns (4→39 dates), `ccc_trend` (now 82 dates, well past "needs a second fiscal
+year"). All three are now flagged as **ready to grade, not yet graded** rather than left
+reading as still-blocked. Two others (`movement_probability` post-fix, `stock_futures_oi_
+history`) grew but are correctly still under the floor. `REGIME_WEIGHTS['screener']=0.0` and
+the active ensemble's CV (0.5305) were re-verified live and are unchanged.
+
+**What was restructured, not re-measured:** the file's biggest problem wasn't wrong numbers —
+most were 2-6 days old, not actually stale by the calendar — it was tone and shape. A ~90-line
+"Current state" block had become an accumulating narrative log (four dated "verified again /
+what changed" passages stacked on each other) that read as a wall of settled evidence rather
+than a live reference. Moved verbatim to `docs/measurement-history.md` (nothing deleted,
+relocated) and replaced with a short dated "Snapshot" section. The "Already tested" table's
+own intro line said re-testing "costs days" — corrected to "usually a single command, minutes"
+since that's what this session and others have repeatedly demonstrated. Every "do not re-run"
+line was reworded toward "re-run is welcome, state what changed" — which was already this
+file's actual policy, just not its dominant tone. File went 226→151 lines with zero findings
+removed (checked: `git diff --stat` shows the table row counts unchanged).
+
+Also live-spot-checked `data-sources.md`'s vendor-onboarding-freeze stat (116/421 ungraded
+`ml_ensemble.py` features, from 2026-08-21) — couldn't cheaply re-derive it with a different
+methodology without producing a misleading number, so tagged it with its actual age and an
+explicit "re-run the same constants-sweep before citing the exact count" note instead of
+either leaving it silently stale or guessing a replacement. Spot-checked two behavioral claims
+in `scoring-authority.md` against live code (`getTopRatedStocks`/`getStrategyStocks` fallback
+logic) — both still accurate, no change needed; that file doesn't have the same problem
+(architecture decision record, not a decaying-statistic table).
+
+**Deliberately left alone**: `ml-model-bugs.md` and `recurring-bugs.md`. Checked whether they
+exhibit the same "stale claim blocking exploration" pattern — they don't. They're bug-class
+catalogs (signature → why it breaks → recurrence count), not backtest-verdict tables, and none
+of their cross-references into `measurement.md` broke (verified via grep — every section
+header they point at still exists under the same name post-restructure).
+
+**Not done, and said so rather than silently skipped**: a full live re-run of every backtest
+behind every "Already tested" row — that's hours of compute across ~20+ scripts and the user
+explicitly chose the lighter option over it via the clarifying question.

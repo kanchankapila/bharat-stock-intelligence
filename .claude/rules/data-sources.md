@@ -121,8 +121,13 @@ Indices use a separate `indexData` array in `src/server/stockMapping.ts` with `{
 ## Vendor-onboarding freeze (added 2026-08-30)
 
 **Before onboarding a new vendor/provider, first check whether the existing feature backlog is
-graded.** `ml_ensemble.py`'s own training matrix has **116 of 421 features (28%) with no measured
-cross-sectional signal** (`ml_label_and_promotion_gate_2026_08_21` memory) — each new vendor adds
+graded.** `ml_ensemble.py`'s own training matrix had **116 of 421 features (28%) with no measured
+cross-sectional signal as of 2026-08-21** (`ml_label_and_promotion_gate_2026_08_21` memory) — that
+count is now 2+ weeks old and has not been re-run since; treat it as directional evidence that the
+backlog is large, not as today's exact figure, and re-run the same constants-sweep methodology
+before using the specific number 116/421 to block a decision. The policy below doesn't depend on
+the exact count staying current — a large ungraded backlog either way is reason enough to check it
+first. Each new vendor adds
 more raw columns into `build_features()`/`feature_store` that are, by default, untested and
 correlated with what's already there (most published factors on this platform's data are
 negative or null — see `measurement.md`'s "Already tested" table, 14/23 Bonferroni-significant
