@@ -65,6 +65,10 @@ aggregates. A check that is ~90% false positive gets ignored within a week and t
 nothing while looking like it does. Catching it needs type information this script does not
 have.
 
+ 10. A job sub-step in queues.ts / *.jobs.ts whose only failure handler is a console.* log.
+     The chain stays fault-tolerant but the failure never reaches the job verdict or any
+     monitor, so a dead fetcher reads as a healthy job; see check_job_step_catch_console.
+
   8. A `print()` inside an `except Exception` block ("degraded read" -- a query that falls
      back to an empty/default result instead of raising, because a missing/renamed table
      must not crash a nightly job) with no `file=sys.stderr`. `pythonRunner.ts`'s
@@ -796,6 +800,58 @@ def check_missing_live_datasource_test(fetcher_files: list[Path]) -> list[str]:
     return findings
 
 
+
+# --- Class 10: a job sub-step whose only failure handler is a console.* log -------------------
+# queues.ts / jobs/*.jobs.ts are multi-step BullMQ processors. A sub-step written as
+#   await runPython('x.py', ...).catch(e => console.warn('[QUEUE] x failed:', ...));
+# keeps the chain fault-tolerant (correct) but makes the failure invisible to every monitor
+# (not correct): the processor returns normally, the worker's 'completed' handler stamps the
+# heartbeat 'success', and a fetcher can stop writing entirely with the job still green. That
+# is how mc_index_oi_fetcher sat 3 days stale. 157 such sites existed across these files on
+# 2026-09-03/04; all were converted to StepTracker (T.fail / T.run / T.runQuiet), which keeps
+# the don't-abort-the-siblings property AND degrades the job verdict.
+#
+# Deliberately scoped to the job-processor files -- a console.warn in a request handler or a
+# service module is not this class. An intentional exception carries a `swallow-ok:` marker on
+# the same line or the line above, with a reason (see dl.jobs.ts's chain-dispatch).
+_CATCH_CONSOLE_RE = re.compile(
+    r"\.catch\(\s*(?:\(\s*\w+\s*(?::[^)]*)?\)|\w+)\s*=>\s*console\.(?:warn|error|log)\b"
+)
+
+
+def check_job_step_catch_console(path: Path, text: str) -> list[str]:
+    """See class 10 in the module docstring."""
+    name = path.as_posix()
+    if not (name.endswith("queues.ts") or name.endswith(".jobs.ts")):
+        return []
+    findings = []
+    lines = text.splitlines()
+    for i, line in enumerate(lines):
+        if not _CATCH_CONSOLE_RE.search(line):
+            continue
+        if line.lstrip().startswith("//") or line.lstrip().startswith("*"):
+            continue
+        # The marker may sit anywhere in the contiguous comment block directly above the call,
+        # not just on the immediately preceding line: a real exception needs a real reason, and
+        # a reason worth writing rarely fits on one line (dl.jobs.ts's is five).
+        context = [line]
+        j = i - 1
+        while j >= 0 and (lines[j].lstrip().startswith("//") or lines[j].lstrip().startswith("*")):
+            context.append(lines[j])
+            j -= 1
+        if any("swallow-ok:" in c for c in context):
+            continue
+        findings.append(
+            f"{_display_path(path)}:{i + 1}: job sub-step failure is only console-logged, so the "
+            f"parent job still reports success and no monitor ever sees it. Route it through the "
+            f"processor's StepTracker instead -- `.catch(e => T.fail('<step>', e))` is a drop-in "
+            f"replacement that keeps the surrounding await/void shape. If it is genuinely not "
+            f"attributable to a job verdict, add a `swallow-ok: <reason>` marker in the comment "
+            f"block directly above it."
+        )
+    return findings
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("paths", nargs="*", help="specific files to check")
@@ -835,6 +891,7 @@ def main() -> int:
     for path in ts_files:
         ts_text = path.read_text(encoding="utf-8", errors="ignore")
         all_findings.extend(check_skip_not_success(path, ts_text))
+        all_findings.extend(check_job_step_catch_console(path, ts_text))
         all_findings.extend(check_screener_catalog_exact_case_source(path, ts_text))
 
     if not args.skip_live_datasource_check:

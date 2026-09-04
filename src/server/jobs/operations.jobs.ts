@@ -21,6 +21,7 @@ import { pythonApi } from '../pythonApi';
 import { updateMonitorState } from '../monitoringService';
 import { registerRepeatableJob } from './registerJob';
 import { shouldSkipOnTradingHoliday } from '../marketStatusService';
+import { StepTracker } from '../jobSteps';
 
 export const QUEUE_RESEARCH_PREMARKET = 'research-premarket';
 export const QUEUE_RESEARCH_POSTCLOSE = 'research-postclose';
@@ -31,14 +32,19 @@ export const QUEUE_OUTCOME_RESOLVER   = 'outcome-resolver';
  * but if it is unreachable fall back to spawning outcome_resolver.py directly — the
  * resolver is self-contained (connects straight to Postgres via db_compat), so resolution
  * must NOT silently no-op just because ml-api happens to be down.
+ *
+ * THROWS when the fallback fails too (2026-09-04). It used to .catch(console.error) there, which
+ * meant "ml-api is down AND the fallback is broken" — i.e. nothing resolved this horizon at all —
+ * returned normally and left every caller reporting success. Both callers already handle a throw:
+ * queues.ts's processMlDailyOps wraps these in T.run/T.fail, and processOutcomeResolver below now
+ * does too, so raising here surfaces the failure without aborting the sibling horizons.
  */
 export async function resolveOutcomesResilient(horizon: number): Promise<void> {
   try {
     await pythonApi.resolveOutcomes(horizon);
   } catch (e) {
     console.warn(`[API] resolve-outcomes(${horizon}) failed, falling back to runPython:`, (e as Error).message);
-    await runPython('outcome_resolver.py', ['--horizon', String(horizon)], 180_000)
-      .catch(err => console.error(`[QUEUE] outcome_resolver.py fallback(${horizon}) failed:`, (err as Error).message));
+    await runPython('outcome_resolver.py', ['--horizon', String(horizon)], 180_000);
   }
 }
 
@@ -56,27 +62,36 @@ async function processResearchPostclose(_job: Job): Promise<{ success: boolean }
   return { success: true };
 }
 
-async function processOutcomeResolver(job: Job): Promise<{ success: boolean }> {
+async function processOutcomeResolver(job: Job): Promise<{ success: boolean; failedSteps?: string[] }> {
   // 2026-08-06: skip the standalone 09:30 IST trigger on a trading holiday -- closed-day-early-
   // batch already dispatches a 'closed-day-early'-named run at ~07:10 IST that morning.
   if (await shouldSkipOnTradingHoliday(job)) {
     console.log('[QUEUE] outcome-resolver skipped — trading holiday (closed-day-early-batch already ran this morning)');
     return { success: true };
   }
+  // Every step below is best-effort but no longer silent: two of them used to end in
+  // .catch(console.warn/error), and the three resolveOutcomesResilient() calls swallowed their
+  // own fallback failure internally, so this job reported success even when nothing resolved.
+  const T = new StepTracker('outcome-resolver');
   // Flag bad-print OHLCV bars first so outcome labels skip them (ohlcv_quality.is_suspect).
   await runPython('ohlcv_quality.py', ['--no-ingest'], 180_000)
-    .catch(e => console.warn('[QUEUE] ohlcv_quality flag failed:', (e as Error).message));
+    .catch(e => T.fail('ohlcv_quality', e));
 
-  await resolveOutcomesResilient(1);
-  await resolveOutcomesResilient(5);
-  await resolveOutcomesResilient(15);
+  // 5d/15d are real registered monitor ids (jobRegistry.ts, monitorScripts.ts) fed by BOTH this
+  // job and ml-daily-ops, so T.run writes their true per-horizon state -- exactly as
+  // queues.ts's processMlDailyOps already does. 1d has no monitor id of its own, so it stays
+  // quiet and surfaces only through this job's verdict (same as queues.ts:1111).
+  await T.runQuiet('outcome-resolver-1d', () => resolveOutcomesResilient(1));
+  await T.run('outcome-resolver-5d', () => resolveOutcomesResilient(5));
+  await T.run('outcome-resolver-15d', () => resolveOutcomesResilient(15));
 
   // Now a windowed batch-resolve (was per-row N+1, routinely blew the old 180s
   // timeout on any real backlog) — give it real headroom.
   await runPython('live_screener_resolver.py', [], 20 * 60_000)
-    .catch(err => console.error('[QUEUE] live_screener_resolver.py failed:', err.message));
+    .catch(err => T.fail('live_screener_resolver', err));
 
-  return { success: true };
+  const verdict = T.finish();
+  return { success: verdict.ok, failedSteps: verdict.failedSteps };
 }
 
 export const QUEUE_CHATBOT_REINGEST = 'chatbot-reingest';
@@ -193,17 +208,19 @@ export async function registerOperationsJobs(connection: any) {
     // lockDuration that caused "job stalled" failures (2026-07-04).
     lockDuration: 45 * 60 * 1000,
     lockRenewTime: 10 * 60 * 1000,
-    // outcome-resolver-daily also drives 3 downstream monitor ids that have no BullMQ queue of
-    // their own (they're graded as part of this job, not separately scheduled).
-    onCompleted: () => {
-      updateMonitorState('outcome-resolver-5d', 'success');
-      updateMonitorState('outcome-resolver-15d', 'success');
-      updateMonitorState('performance-tracker', 'success');
-    },
+    // outcome-resolver-5d/-15d are written by processOutcomeResolver's own StepTracker now, per
+    // horizon and per outcome (2026-09-04). They used to be stamped HERE, blanket 'success' on
+    // any completion -- so a run where resolveOutcomesResilient(5) failed outright still marked
+    // outcome-resolver-5d green, the same false-healthy shape as the skip-as-success class.
+    //
+    // 'performance-tracker' was stamped here too and is now dropped entirely: this job never
+    // runs performance_tracker.py (only ml-daily-ops does, queues.ts:1130), so both the success
+    // AND failure stamps were reporting on work that happens in a different job. The test suite
+    // already encodes that -- monitorScriptsGraceMinutesConsistency's `driving` map lists
+    // ml-daily-ops as performance-tracker's sole source.
     onFailed: (err: any) => {
       updateMonitorState('outcome-resolver-5d', 'failed', err.message);
       updateMonitorState('outcome-resolver-15d', 'failed', err.message);
-      updateMonitorState('performance-tracker', 'failed', err.message);
     },
   });
 

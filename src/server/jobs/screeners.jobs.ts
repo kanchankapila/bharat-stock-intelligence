@@ -19,6 +19,7 @@ import { syncAllScreenerStocksToDB } from '../trendlyneScreener';
 import { registerRepeatableJob } from './registerJob';
 import { runPython } from '../pythonRunner';
 import { shouldSkipOnTradingHoliday } from '../marketStatusService';
+import { StepTracker } from '../jobSteps';
 
 export const QUEUE_STOCK_SCORING          = 'stock-scoring';
 export const QUEUE_MC_SCREENER_SYNC       = 'mc-screener-sync';
@@ -107,19 +108,12 @@ async function processTrendlyneScreenerSync(job: Job): Promise<{ success: boolea
   return { success: true };
 }
 
-export async function processScreenerSyncsMaster(job: Job): Promise<{ success: boolean }> {
-  if (await shouldSkipOnTradingHoliday(job)) {
-    console.log('[QUEUE] screener-syncs-master skipped — trading holiday, nothing new to sync');
-    return { success: true };
-  }
-  console.log('[QUEUE] Starting consolidated master screener syncs pipeline...');
-  await processEtMarketstatsSync(job).catch(e => console.warn('[QUEUE] et-marketstats step warning:', e.message));
-  await processTrendlyneScreenerSync(job).catch(e => console.warn('[QUEUE] trendlyne-screener step warning:', e.message));
-  await processMcScreenerSync(job).catch(e => console.warn('[QUEUE] mc-screener step warning:', e.message));
-  await processEtnowScreenerSync(job).catch(e => console.warn('[QUEUE] etnow-screener step warning:', e.message));
-  console.log('[QUEUE] Consolidated master screener syncs pipeline complete.');
-  return { success: true };
-}
+// processScreenerSyncsMaster (removed 2026-09-04) used to live here: a "consolidated master"
+// that ran all four screener syncs behind four `.catch(console.warn)` step-warning handlers.
+// It had ZERO call sites and no registerRepeatableJob registration anywhere in the tree, while
+// processMcScreenerSync / processEtnowScreenerSync / processEtMarketstatsSync /
+// processTrendlyneScreenerSync are each registered as their own job below. Deleted rather than
+// un-swallowed: wiring it up would have double-run all four against their own schedules.
 async function processFundamentalsSync(job: Job): Promise<{ success: boolean }> {
   const phase2Only = job.data?.phase2Only === true;
   console.log(`[QUEUE] Starting fundamentals sync (phase2Only=${phase2Only})...`);
@@ -128,7 +122,7 @@ async function processFundamentalsSync(job: Job): Promise<{ success: boolean }> 
   return { success: true };
 }
 
-async function processQuantScoring(job: Job): Promise<{ success: boolean }> {
+async function processQuantScoring(job: Job): Promise<{ success: boolean; failedSteps?: string[] }> {
   // 2026-08-06: same reasoning as processStockScoring above -- skip entirely, no morning
   // replacement, since quant_scores would just be re-derived from the same unchanged inputs.
   if (await shouldSkipOnTradingHoliday(job)) {
@@ -136,6 +130,12 @@ async function processQuantScoring(job: Job): Promise<{ success: boolean }> {
     return { success: true };
   }
   console.log('[QUEUE] Starting quant strategy scoring...');
+  // The four sub-steps after runQuantScoring() each ended in .catch(console.warn), so
+  // quant_scores.mf_*/beta_1y/sortino_ratio could stop being written entirely while this job
+  // still reported success. They stay non-fatal (canonical quant scoring above already
+  // succeeded, and one factor snapshot failing must not lose the other) but now degrade the
+  // job verdict through registerJob.ts's success===false branch.
+  const T = new StepTracker('quant-scoring');
   const { runQuantScoring } = await import('../quantScoringService');
   await runQuantScoring();
   // Multi-factor alpha score (Quality/Momentum/Value/Risk-Adj/Macro) -> quant_scores.mf_*.
@@ -143,7 +143,7 @@ async function processQuantScoring(job: Job): Promise<{ success: boolean }> {
   // used to run inside ml-daily-ops at 7:30 PM IST, 3.5h BEFORE this 11 PM job, exactly
   // inverting the dependency its own docstring claims. Moved here 2026-08.
   await runPython('multi_factor_scorer.py', [], 180_000)
-    .catch(e => console.warn('[QUEUE] multi_factor_scorer failed:', (e as Error).message));
+    .catch(e => T.fail('multi_factor_scorer', e));
   // Beta/Sortino/VaR95 -> quant_scores.beta_1y/beta_6m/sortino_ratio/var_95 (2026-08-07,
   // dead-column sweep). risk_metrics_engine.py was fully built (reads stock_ohlcv, computes
   // rolling stats vs NIFTY50, writes via UPDATE quant_scores ... WHERE symbol=?) but was never
@@ -157,7 +157,7 @@ async function processQuantScoring(job: Job): Promise<{ success: boolean }> {
   // import, NIFTY50 benchmark load), not a per-symbol cost, so a naive linear extrapolation
   // from it would have badly overestimated. 5min budget is ample margin over the real number.
   await runPython('risk_metrics_engine.py', [], 5 * 60_000)
-    .catch(e => console.warn('[QUEUE] risk_metrics_engine failed:', (e as Error).message));
+    .catch(e => T.fail('risk_metrics_engine', e));
 
   // Point-in-time snapshot, taken HERE because quant_scores is only settled once all three
   // writers above have run (runQuantScoring -> multi_factor_scorer -> risk_metrics_engine).
@@ -177,7 +177,7 @@ async function processQuantScoring(job: Job): Promise<{ success: boolean }> {
   // data-quality check fails if that table gains one this misses.
   const { snapshotQuantScores } = await import('../quantScoringService');
   await snapshotQuantScores()
-    .catch(e => console.warn('[QUEUE] quant_scores snapshot failed:', (e as Error).message));
+    .catch(e => T.fail('quant_scores_snapshot', e));
   // Persist the two validated standalone paper screens for cheap API/UI reads. Both remain
   // outside unified_ranker: their evidence supports paper trading, not dilution into the
   // canonical multi-engine blend (and this repo has measured that COMBINING made things worse
@@ -212,9 +212,10 @@ async function processQuantScoring(job: Job): Promise<{ success: boolean }> {
     const args = ['--factor', factor, '--top-k', '50', '--start', '2024-01-01', '--persist-picks'];
     if (provisional[factor]) args.push('--allow-provisional');
     await runPython('factor_backtest.py', args, 15 * 60_000)
-      .catch(e => console.warn(`[QUEUE] factor picks snapshot (${factor}) failed:`, (e as Error).message));
+      .catch(e => T.fail(`factor_picks_${factor}`, e));
   }
-  return { success: true };
+  const verdict = T.finish();
+  return { success: verdict.ok, failedSteps: verdict.failedSteps };
 }
 
 export async function registerScreenerJobs(connection: any) {

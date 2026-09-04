@@ -500,6 +500,71 @@ class TestSkipNotSuccess:
         assert crb.check_skip_not_success(path, path.read_text(encoding="utf-8")) == []
 
 
+
+class TestJobStepCatchConsole:
+    """check_job_step_catch_console -- class 10. The shape converted across queues.ts and
+    jobs/*.jobs.ts on 2026-09-03/04: a sub-step whose only failure handler is a console.* log,
+    so the chain stays fault-tolerant (right) but the failure never reaches the job verdict or
+    any monitor (wrong) -- a fetcher can stop writing entirely with the job still green."""
+
+    def test_fires_on_the_real_bug_shape(self):
+        text = (
+            "async function processX(_job) {\n"
+            "  await runPython('mc_index_oi_fetcher.py', [], 60_000)\n"
+            "    .catch(e => console.warn('[QUEUE] mc_index_oi_fetcher failed:', (e as Error).message));\n"
+            "  return { success: true };\n"
+            "}\n"
+        )
+        findings = crb.check_job_step_catch_console(_ts(), text)
+        assert len(findings) == 1
+        assert "console-logged" in findings[0]
+
+    def test_fires_on_the_typed_and_console_error_variants(self):
+        text = (
+            "  await a().catch((e: unknown) => console.error('[QUEUE] a failed:', e));\n"
+            "  await b().catch(err => console.log('[QUEUE] b failed:', err));\n"
+        )
+        assert len(crb.check_job_step_catch_console(_ts(), text)) == 2
+
+    def test_stepTracker_conversion_is_not_flagged(self):
+        """The fix shape. T.fail keeps the await/void shape and reaches finish()'s verdict."""
+        text = (
+            "  await runPython('x.py', [], 60_000).catch(e => T.fail('x', e));\n"
+            "  await T.run('y', () => runPython('y.py', [], 60_000));\n"
+            "  await T.runQuiet('z', () => runPython('z.py', [], 60_000));\n"
+        )
+        assert crb.check_job_step_catch_console(_ts(), text) == []
+
+    def test_swallow_ok_marker_on_the_line_above_suppresses_it(self):
+        """dl.jobs.ts's chain-dispatch: fires outside any processor, so there is no verdict to
+        attach it to. The marker must carry a reason, and must be honoured."""
+        text = (
+            "  // swallow-ok: no job verdict in scope, the fixed schedule is the mitigation\n"
+            "  q.add('j', {}).catch(e => console.error('[QUEUE] dispatch failed:', e));\n"
+        )
+        assert crb.check_job_step_catch_console(_ts(), text) == []
+
+    def test_a_commented_out_example_is_not_flagged(self):
+        """This repo's own rule files and code comments quote the bug shape verbatim."""
+        text = "  // .catch(e => console.warn('[QUEUE] x failed:', (e as Error).message));\n"
+        assert crb.check_job_step_catch_console(_ts(), text) == []
+
+    def test_only_applies_to_job_processor_files(self):
+        """A console.warn in a router/service is not this class -- there is no job verdict."""
+        text = "  await a().catch(e => console.warn('[API] a failed:', e));\n"
+        assert crb.check_job_step_catch_console(_ts("routers/market.router.ts"), text) == []
+        assert len(crb.check_job_step_catch_console(_ts("jobs/sync.jobs.ts"), text)) == 1
+
+    def test_the_pattern_is_not_vacuous(self):
+        """Emptiness self-test (recurring-bugs.md): a check whose regex silently matches
+        NOTHING passes every file and protects nothing. This one shipped broken exactly that
+        way once -- a shell heredoc collapsed the trailing word-boundary escape into a literal
+        0x08 byte, so the compiled pattern could never match and the whole check read clean
+        against a tree that still had 40 live instances."""
+        assert "\\x08" not in repr(crb._CATCH_CONSOLE_RE.pattern)
+        probe = "  await a().catch(e => console.warn('[QUEUE] boom:', e));\n"
+        assert crb._CATCH_CONSOLE_RE.search(probe) is not None
+
 class TestDiffRefResolution:
     """CI died with a raw CalledProcessError traceback (exit 128) when its base ref was the
     all-zero SHA of a new-branch push and the HEAD~1 fallback hit a shallow clone."""

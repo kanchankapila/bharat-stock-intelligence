@@ -31,8 +31,12 @@ export const QUEUE_ANALYST_ESTIMATES_SYNC = 'analyst-estimates-sync';
 
 async function processAnalystEstimatesSync(_job: Job): Promise<{ success: boolean }> {
   // Upgraded to high-speed hybrid engine (~2.5 min across whole 2,300+ universe)
-  await runPython('analyst_estimates_snapshot.py', [], 8 * 60_000)
-    .catch(e => console.warn('[QUEUE] analyst_estimates_snapshot failed:', (e as Error).message));
+  // No .catch here on purpose: this job IS this one step, so swallowing the failure and
+  // returning success:true made a dead fetcher indistinguishable from a healthy one. Letting it
+  // throw marks the BullMQ job failed and stamps the heartbeat 'failed' via registerJob.ts's
+  // 'failed' handler. (Multi-step jobs use StepTracker instead — one bad step must not abort
+  // the siblings there; here there are no siblings to protect.)
+  await runPython('analyst_estimates_snapshot.py', [], 8 * 60_000);
   return { success: true };
 }
 
@@ -50,8 +54,9 @@ async function processCorporateActionsIngest(_job: Job): Promise<{ success: bool
   // extrapolated ~70min for the ~2,366-symbol universe; budget below is a generous multiple
   // of that estimate (not yet confirmed against a real full-universe run), matching this
   // codebase's convention of erring wide rather than under-budgeting an unmeasured full run.
-  await runPython('ohlcv_quality.py', [], 150 * 60_000)
-    .catch(e => console.warn('[QUEUE] ohlcv_quality (full ingest) failed:', (e as Error).message));
+  // Single-step job: a .catch here reported success:true while the only thing this job does
+  // had failed. Let it throw so BullMQ marks the run failed and the heartbeat says so.
+  await runPython('ohlcv_quality.py', [], 150 * 60_000);
   return { success: true };
 }
 
@@ -64,54 +69,59 @@ async function processScreenerPerf(job: Job): Promise<{ success: boolean; failed
     console.log('[QUEUE] screener-performance skipped — trading holiday, nothing new to re-derive');
     return;
   }
-  // T.run wraps ONLY step 8b below (ml-promotion-gate-review, 2026-08-19) -- this job's
-  // promotion-gated retrain step was a bare .catch(console.warn), same class already fixed for
-  // ml-daily-ops/ml-weekly-retrain's siblings, invisible to every monitor because this whole
-  // function otherwise never throws. Named to match this job's own monitorName ('screener-
-  // performance') so finish()'s job-level write agrees with (not duplicates) the one
-  // registerJob.ts's completed handler now also writes from this function's returned verdict.
+  // Every step below reports through T (2026-09-04). It used to wrap only step 8b
+  // (ml-promotion-gate-review, 2026-08-19) while the other ten ended in a bare
+  // .catch(console.warn) -- so this whole function never threw and never reported a failure,
+  // and a step that stopped writing entirely still left the job green. Named to match this
+  // job's own monitorName ('screener-performance') so finish()'s job-level write agrees with
+  // (not duplicates) the one registerJob.ts's completed handler writes from the returned verdict.
+  //
+  // T.fail() (not T.run) for the .catch sites so the surrounding await/void shape is untouched;
+  // both are quiet — see jobSteps.ts's runQuiet docstring for why per-step heartbeats are wrong
+  // here. Step 3 gets T.run because it had NO .catch at all: a failure there aborted the seven
+  // steps after it, which is the opposite failure mode but the same silent outcome.
   const T = new StepTracker('screener-performance');
   // 1. Sync newly discovered Trendlyne screener PKs. "known" mode only re-fetches PKs
   // missing from the DB, but with ~612 known PKs and a 0.4s rate limit that can still
   // run 20+ minutes in practice — the old 10-min timeout routinely SIGTERM'd it mid-run
   // (execFile kills before any stderr flushes, logged as an opaque "Command failed").
   await runPython('trendlyne_screener_discovery.py', [], 30 * 60_000)
-    .catch(e => console.warn('[QUEUE] trendlyne_screener_discovery failed:', (e as Error).message));
+    .catch(e => T.fail('trendlyne_screener_discovery', e));
 
   // 2. Bulk-enrich signal_keywords + screener_url; INSERT 858 missing catalog entries; fix sector_theme bias
   await runPython('screener_catalog_enricher.py', [], 5 * 60_000)
-    .catch(e => console.warn('[QUEUE] screener_catalog_enricher failed:', (e as Error).message));
+    .catch(e => T.fail('screener_catalog_enricher', e));
 
   // 2b. Backfill OHLCV for any symbols that appeared in screeners but are missing from stock_ohlcv
   await runPython('screener_ohlcv_backfill.py', [], 20 * 60_000)
-    .catch(e => console.warn('[QUEUE] screener_ohlcv_backfill failed:', (e as Error).message));
+    .catch(e => T.fail('screener_ohlcv_backfill', e));
 
   // 3. Compute performance metrics for all screeners (K_PRIOR adaptive; phase_e updates confidence)
   // 45 min: this routinely outlives the old 15-min budget now that screener_appearances has
   // months of history (12 of its last 14 runs were timeout-killed with an empty "Command failed").
-  await runPython('screener_performance.py', [], 45 * 60_000);
+  await T.run('screener-performance-compute', () => runPython('screener_performance.py', [], 45 * 60_000));
 
   // 4. Stamp per-stock screener ML features into technical_signals
   await runPython('screener_features_fetcher.py', [], 5 * 60_000)
-    .catch(e => console.warn('[QUEUE] screener_features_fetcher failed:', (e as Error).message));
+    .catch(e => T.fail('screener_features_fetcher', e));
 
   // 5. Aggregate sector screener rotation signals
   await runPython('screener_sector_rotation.py', [], 2 * 60_000)
-    .catch(e => console.warn('[QUEUE] screener_sector_rotation failed:', (e as Error).message));
+    .catch(e => T.fail('screener_sector_rotation', e));
 
   // 6. Generate screener surfacing alerts → unified_signals
   await runPython('screener_signal_generator.py', [], 3 * 60_000)
-    .catch(e => console.warn('[QUEUE] screener_signal_generator failed:', (e as Error).message));
+    .catch(e => T.fail('screener_signal_generator', e));
 
   // 7. Resolve live screener outcomes (needs ohlcv data to be fresh first)
   await runPython('live_screener_resolver.py', [], 20 * 60_000)
-    .catch(e => console.warn('[QUEUE] live_screener_resolver failed:', (e as Error).message));
+    .catch(e => T.fail('live_screener_resolver', e));
 
   // 8. Recompute optimal filter combinations using the latest resolved outcomes. Trains both
   // the swing-horizon model and an isolated same-day intraday model in one run (see
   // live_screener_optimizer.py's optimize_combinations()).
   await runPython('live_screener_optimizer.py', [], 5 * 60_000)
-    .catch(e => console.warn('[QUEUE] live_screener_optimizer failed:', (e as Error).message));
+    .catch(e => T.fail('live_screener_optimizer', e));
 
   // 8b. Retrain the ML win-probability classifier on the same freshly-resolved outcomes.
   // Gated behind a held-out-AUC promotion check inside the script itself, so a worse
@@ -120,16 +130,14 @@ async function processScreenerPerf(job: Job): Promise<{ success: boolean; failed
 
   // 9. Auto-backtest top combinations so frontend cockpit always has fresh performance data
   await runPython('backtest_live_screener.py', ['--auto-backtest-top', '5'], 10 * 60_000)
-    .catch(e => console.warn('[QUEUE] backtest_live_screener auto-backtest failed:', (e as Error).message));
+    .catch(e => T.fail('backtest_live_screener', e));
   await runPython('backtest_live_screener.py', ['--auto-backtest-top', '5', '--intraday'], 10 * 60_000)
-    .catch(e => console.warn('[QUEUE] backtest_live_screener intraday auto-backtest failed:', (e as Error).message));
+    .catch(e => T.fail('backtest_live_screener_intraday', e));
 
-  try {
+  await T.runQuiet('screener-classification', async () => {
     const { classifyAllScreeners } = await import('../screenerClassifier');
     await classifyAllScreeners();
-  } catch (e: unknown) {
-    console.error('[QUEUE] screener classification failed:', (e as Error).message);
-  }
+  });
 
   const verdict = T.finish();
   return { success: verdict.ok, failedSteps: verdict.failedSteps };
@@ -141,8 +149,9 @@ async function processCompanyProfilesSync(_job: Job): Promise<void> {
 }
 
 async function processTickertapeScorecard(_job: Job): Promise<{ success: boolean }> {
-  await runPython('tickertape_scorecard_fetcher.py', [], 60 * 60_000)
-    .catch(e => console.warn('[QUEUE] tickertape_scorecard_fetcher failed:', (e as Error).message));
+  // Single-step job: a .catch here reported success:true while the only thing this job does
+  // had failed. Let it throw so BullMQ marks the run failed and the heartbeat says so.
+  await runPython('tickertape_scorecard_fetcher.py', [], 60 * 60_000);
   return { success: true };
 }
 
@@ -161,13 +170,19 @@ async function processIndexMembership(_job: Job): Promise<{ success: boolean }> 
   // reliability reason to look for an alternate provider -- the fix is cadence, not source.
   // Kept as its own job (not folded into nse-sync-weekly, which stays weekly for its other,
   // genuinely-weekly-cadence steps) so this doesn't risk that job's existing budget/timeout.
-  await runPython('index_membership_fetcher.py', [], 60_000)
-    .catch(e => console.warn('[QUEUE] index_membership_fetcher failed:', (e as Error).message));
+  // Single-step job: a .catch here reported success:true while the only thing this job does
+  // had failed. Let it throw so BullMQ marks the run failed and the heartbeat says so.
+  await runPython('index_membership_fetcher.py', [], 60_000);
   return { success: true };
 }
 
-async function processNSESync(_job: Job): Promise<{ success: boolean; stockCount: number }> {
+async function processNSESync(_job: Job): Promise<{ success: boolean; stockCount: number; failedSteps?: string[] }> {
   console.log('[QUEUE] Starting NSE master data sync...');
+  // Five backfill sub-steps below were each `(non-blocking)` .catch/try-catch handlers, so the
+  // job returned success:true with every one of them dead. Non-blocking is right -- one bad
+  // backfill must not abort the others -- but silent is not, so they report through T and
+  // degrade the job verdict via registerJob.ts's success===false branch.
+  const T = new StepTracker('nse-sync');
   try {
     const { syncNSEStocksToDatabase } = await import('../nseService');
     const result = await syncNSEStocksToDatabase();
@@ -189,40 +204,37 @@ async function processNSESync(_job: Job): Promise<{ success: boolean; stockCount
     // classification changes rarely and a full weekly refresh also self-heals any transient
     // per-symbol MC miss from the prior run.
     await runPython('backfill_sector_mc.py', ['--enumerate', '--write', '--report-unmapped'], 900_000)
-      .catch(err => console.warn('[QUEUE] MC sector backfill failed (non-blocking):', (err as Error).message));
+      .catch(err => T.fail('backfill_sector_mc', err));
     // Backfill canonical nse_stocks.sector from already-resolved confluence data, then
     // propagate to historical signal tables. Keeps sector segmentation healthy over time.
     await runPython('backfill_sectors.py', [], 120_000)
-      .catch(err => console.warn('[QUEUE] sector backfill failed (non-blocking):', (err as Error).message));
+      .catch(err => T.fail('backfill_sectors', err));
     // Provider-mapping backfill (2026-08-05): mcsymbol/tlid resolution -- npm run sync:mappings
     // was manual-only (a package.json script, never scheduled), so newly-added nse_stocks rows
     // (this same job's syncNSEStocksToDatabase() call, above, can insert brand-new symbols)
     // silently accumulated with no provider mapping forever. Live production had 544/2366
     // ACTIVE symbols missing mcsymbol or tlid before this was first run by hand. Imported
     // rather than shelled out to, matching how syncNSEStocksToDatabase itself is called above.
-    try {
+    await T.runQuiet('stock-mapping-sync', async () => {
       const { syncMappings } = await import('../../../scripts/syncAllStockMappings');
       const mapResult = await syncMappings();
       console.log(`[QUEUE] stock-mapping sync completed (updated ${mapResult.updatedCount}, `
         + `skipped ${mapResult.skippedCount}, failed ${mapResult.failedCount})`);
-    } catch (err) {
-      console.warn('[QUEUE] stock-mapping sync failed (non-blocking):', (err as Error).message);
-    }
+    });
     // Index membership flags (Nifty50/100/200/Midcap150/Smallcap250) — passive ETF flow signal.
     await runPython('index_membership_fetcher.py', [], 60_000)
-      .catch(err => console.warn('[QUEUE] index_membership_fetcher failed (non-blocking):', (err as Error).message));
+      .catch(err => T.fail('index_membership_fetcher', err));
     // nse_stocks.market_cap/pe_ratio/dividend_yield fallback backfill (2026-08-07, dead-column
     // sweep) — see backfillNseStocksFundamentalsFallback()'s own doc comment in nseService.ts.
     // Pure DB-to-DB copy, no external call, so it costs nothing to run every week alongside the
     // sector backfills above.
-    try {
+    await T.runQuiet('nse-stocks-fundamentals-fallback', async () => {
       const { backfillNseStocksFundamentalsFallback } = await import('../nseService');
       const { updated } = await backfillNseStocksFundamentalsFallback();
       console.log(`[QUEUE] nse_stocks fundamentals-fallback backfill: ${updated} rows updated`);
-    } catch (err: any) {
-      console.warn('[QUEUE] nse_stocks fundamentals-fallback backfill failed (non-blocking):', err.message);
-    }
-    return { success: true, stockCount };
+    });
+    const verdict = T.finish();
+    return { success: verdict.ok, stockCount, failedSteps: verdict.failedSteps };
   } catch (err: any) {
     console.error('[QUEUE] NSE sync failed:', err.message);
     throw err;

@@ -28,6 +28,7 @@ import { Job } from 'bullmq';
 import { runPython } from '../pythonRunner';
 import { updateMonitorState } from '../monitoringService';
 import { registerRepeatableJob } from './registerJob';
+import { StepTracker } from '../jobSteps';
 import { shouldSkipOnTradingHoliday } from '../marketStatusService';
 
 export const QUEUE_DL_MACRO_FETCH    = 'dl-macro-fetch';
@@ -43,20 +44,25 @@ export async function processDLPython(
   return { success: true };
 }
 
-async function processDlMacroFetch(_job: Job): Promise<void> {
+async function processDlMacroFetch(_job: Job): Promise<{ success: boolean; failedSteps?: string[] }> {
   // Explicit timeout, not processDLPython's 6h default: this worker's lockDuration is
   // only 5 min, so an unbounded default lets a hang block the lock indefinitely instead
   // of failing cleanly -- exactly what caused a live incident (repeated "could not renew
   // lock" errors + a growing pile of stuck python.exe processes, since a stuck subprocess
   // was never killed and each BullMQ retry spawned another one alongside it).
+  const T = new StepTracker('dl-macro-fetch');
   await processDLPython('global_macro_fetcher.py', [], 2 * 60_000);
   // MC global: 15 indices (Nikkei/HangSeng/KOSPI/etc) + currencies + ADRs + commodities → mc_global_snapshot + macro_asset_prices.
+  // The two steps below were .catch(console.warn): mc_global_snapshot / macro_asset_prices /
+  // sector_global_corr_* could stop being written entirely with this job still green.
   await runPython('mc_global_macro_fetcher.py', [], 60_000)
-    .catch(e => console.warn('[QUEUE] mc_global_macro_fetcher failed:', (e as Error).message));
+    .catch(e => T.fail('mc_global_macro_fetcher', e));
   // Sector-global correlation depends on macro_asset_prices populated above.
   await runPython('sector_global_corr.py', [], 3 * 60_000)
-    .catch(e => console.warn('[QUEUE] sector_global_corr failed:', (e as Error).message));
+    .catch(e => T.fail('sector_global_corr', e));
   // Bond yields (India G-Sec + US/UK/DE 10yr) are now fetched inside global_macro_fetcher.py.
+  const verdict = T.finish();
+  return { success: verdict.ok, failedSteps: verdict.failedSteps };
 }
 
 async function processDlFeatureRefresh(job: Job): Promise<{ success: boolean; skipped?: boolean }> {
@@ -204,7 +210,12 @@ export async function registerDlJobs(connection: any) {
     if (result?.skipped) return;
     inference.queue.add('dl-infer-after-feature-refresh', {}, { removeOnComplete: 3, removeOnFail: 3 })
       .then(() => console.log('[QUEUE] dl-inference dispatched right after dl-feature-refresh (chain trigger)'))
-      .catch(e => console.warn('[QUEUE] Failed to chain-dispatch dl-inference after dl-feature-refresh:', (e as Error).message));
+      // swallow-ok: no job verdict exists to attach this to -- the 'completed' handler has
+      // already returned, so there is no StepTracker in scope, and stamping 'dl-engine-infer'
+      // failed would report on a run that has not happened. console.error (not warn) because an
+      // enqueue failure here is a Redis-level fault; the fixed dl-infer-daily schedule above is
+      // the functional mitigation, so a lost chain-dispatch delays inference, it does not skip it.
+      .catch(e => console.error('[QUEUE] Failed to chain-dispatch dl-inference after dl-feature-refresh:', (e as Error).message));
   });
 
   const regimeUpdate = await registerRepeatableJob({

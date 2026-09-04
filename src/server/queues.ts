@@ -231,7 +231,7 @@ let trendlyneChecklistCycleWorker: Worker | null = null;
 
 // ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ Stock-refresh worker processor (PHASE 1: Now persists OHLCV) ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬
 
-async function processStockRefresh(job: Job): Promise<{ count: number; persisted: number; skipped?: boolean }> {
+async function processStockRefresh(job: Job): Promise<{ count: number; persisted: number; skipped?: boolean; success?: boolean; failedSteps?: string[] }> {
   // 2026-08-06: the exchange never opened on a trading holiday, so there is no new EOD OHLCV
   // bar to persist -- fetchAndPersistOHLCVData() would just re-fetch/re-write yesterday's
   // close. Never dispatched by closed-day-early-batch, so a plain holiday check is enough.
@@ -241,8 +241,13 @@ async function processStockRefresh(job: Job): Promise<{ count: number; persisted
   }
   const { fetchAndPersistOHLCVData } = await import('./liveStockData');
   const result = await fetchAndPersistOHLCVData();
-  await checkPriceAlerts().catch(e => console.error('[QUEUE] checkPriceAlerts failed:', (e as Error).message));
-  return result;
+  // Alert delivery must not abort the OHLCV persist that already succeeded, but it used to be
+  // a bare .catch(console.error) -- every ACTIVE price_alerts row could silently stop firing
+  // with stock-refresh still stamped green. The completed handler below honours success:false.
+  const T = new StepTracker('stock-refresh');
+  await checkPriceAlerts().catch(e => T.fail('checkPriceAlerts', e));
+  const verdict = T.finish();
+  return { ...result, success: verdict.ok, failedSteps: verdict.failedSteps };
 }
 
 // Evaluates ACTIVE price_alerts against the just-refreshed live prices and pushes a broadcastAlert
@@ -400,7 +405,7 @@ async function processWalkForwardOptimize(job: Job): Promise<any> {
 
 // ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ ML daily ops worker processor ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬
 
-async function processLiveScreenerCollect(_job: Job): Promise<{ skipped: boolean }> {
+async function processLiveScreenerCollect(_job: Job): Promise<{ skipped: boolean; success?: boolean; failedSteps?: string[] }> {
   if (!(await isMarketOpen())) {
     console.log('[QUEUE] live-screener-collect skipped — outside NSE market hours');
     // Skipped is not a success -- same bug class as technical-signals (2026-08-12): an
@@ -410,13 +415,17 @@ async function processLiveScreenerCollect(_job: Job): Promise<{ skipped: boolean
   }
   const { runLiveScreenerCollection } = await import('./liveScreenerCollector');
   await runLiveScreenerCollection();
+  // The two scoring steps below are non-fatal to collection but were .catch(console.warn):
+  // live_screener_appearances.ml_win_probability and the capitulation filter_key could stop
+  // being written every 15 min with this job still green.
+  const T = new StepTracker('live-screener-collect');
 
   // Score this cycle's matches against the currently-active ML model right after
   // collecting them, so the Intraday Edge tab's ml_win_probability is fresh every 15 min.
   // No-ops quietly (prints, doesn't throw) until live_screener_ml_ranker.py --train has
   // produced a first model.
   await runPython('live_screener_ml_ranker.py', ['--score'], 3 * 60_000)
-    .catch(e => console.warn('[QUEUE] live_screener_ml_ranker --score failed:', (e as Error).message));
+    .catch(e => T.fail('live_screener_ml_ranker_score', e));
 
   // 'todayCapitulation' (2026-08-13): gap-down + opened-at-the-low + top-loser-of-the-day,
   // computed live from intraday_ohlcv (not a NiftyTrader API filter like the ones above).
@@ -427,8 +436,9 @@ async function processLiveScreenerCollect(_job: Job): Promise<{ skipped: boolean
   // live_screener_appearances table under that filter_key -- same run cadence, no schema
   // change, no new consumer needed.
   await runPython('live_capitulation_screener.py', [], 3 * 60_000)
-    .catch(e => console.warn('[QUEUE] live_capitulation_screener failed:', (e as Error).message));
-  return { skipped: false };
+    .catch(e => T.fail('live_capitulation_screener', e));
+  const verdict = T.finish();
+  return { skipped: false, success: verdict.ok, failedSteps: verdict.failedSteps };
 }
 
 async function processIntradayFetcher(_job: Job): Promise<{ skipped: boolean }> {
@@ -1733,12 +1743,18 @@ export async function initQueues(): Promise<boolean> {
       },
     );
 
+    // The success===false guard below: processStockRefresh's own StepTracker already wrote this
+    // job's true verdict, and a blanket 'success' stamp here would overwrite it -- the same shape
+    // registerJob.ts guards for. Kept OUTSIDE the handler body on purpose: holidayJobSkip.test.ts
+    // asserts on a 500-char slice measured from the handler's opening line, so a comment inside it
+    // pushes recordHeartbeat out of that window (recurring-bugs.md's marker-distance class).
     stockWorker.on('completed', (job, result) => {
       if (result.skipped) {
         console.log('[QUEUE] stock-refresh completed without new data');
         return;
       }
       console.log(`[QUEUE] stock-refresh completed: ${result.count} stocks`);
+      if (result?.success === false) return;
       recordHeartbeat('stock-refresh', 'success');
     });
     stockWorker.on('failed', (job, err) => {
@@ -2524,9 +2540,11 @@ export async function initQueues(): Promise<boolean> {
       processLiveScreenerCollect,
       { connection, concurrency: 1, lockDuration: 8 * 60 * 1000 }
     );
-    liveScreenerCollectWorker.on('completed', (_job, result?: { skipped?: boolean }) => {
+    liveScreenerCollectWorker.on('completed', (_job, result?: { skipped?: boolean; success?: boolean }) => {
       console.log('[QUEUE] live-screener-collect completed');
       if (result?.skipped) return;
+      // processLiveScreenerCollect's StepTracker already wrote the verdict -- don't clobber it.
+      if (result?.success === false) return;
       recordHeartbeat('live-screener-collect', 'success');
     });
     liveScreenerCollectWorker.on('failed', (_, err) => {
@@ -2565,16 +2583,16 @@ export async function initQueues(): Promise<boolean> {
       async () => {
         // 3 min: NSE preopen endpoints respond slowly (or hang) when hit outside the
         // 9:00-9:15 IST window -- e.g. a restart catch-up job -- and 60s killed those runs.
-        await runPython('preopen_fetcher.py', [], 3 * 60_000)
-          .then(() => recordHeartbeat('preopen-snapshot', 'success'))
-          .catch(e => {
-            console.warn('[QUEUE] preopen_fetcher failed:', (e as Error).message);
-            recordHeartbeat('preopen-snapshot', 'failed', (e as Error).message);
-          });
+        // Both steps report through one tracker named for this job's registered monitor id.
+        // early_hours_predictor was a bare .catch(console.warn), so early_hours_predictions
+        // could stop being written while 'preopen-snapshot' still read green off the fetcher
+        // alone; T.finish() now writes that id from BOTH steps' outcomes.
+        const T = new StepTracker('preopen-snapshot');
+        await T.runQuiet('preopen_fetcher', () => runPython('preopen_fetcher.py', [], 3 * 60_000));
 
         console.log('[QUEUE] Running early_hours_predictor...');
-        await runPython('early_hours_predictor.py', [], 60_000)
-          .catch(e => console.warn('[QUEUE] early_hours_predictor failed:', (e as Error).message));
+        await T.runQuiet('early_hours_predictor', () => runPython('early_hours_predictor.py', [], 60_000));
+        T.finish();
       },
       // No lockDuration previously -- fell back to BullMQ's 30s default while this worker
       // awaits up to 2 sequential 60s runPython calls (120s worst case), causing repeated
@@ -2593,6 +2611,19 @@ export async function initQueues(): Promise<boolean> {
     // lines inside the opts object pushed that distance to 4189 and broke the market-regime-
     // refresh + intraday-ranker cases of that test (CI, 2026-08-31) -- the same proximity-parser
     // fragility recurring-bugs.md already records for the 'ml-daily-ops' marker in this file.
+    // The intraday chain's steps 1-3 report through one StepTracker named for this job's own
+    // registered monitor id. pcr_fetcher and intraday_regime were bare .catch(console.warn), so
+    // the intraday PCR/GEX refresh and app_settings.intraday_regime could both stop updating for
+    // a whole session while that id still read green off market_regime_fetcher alone. The ranker
+    // step uses T.run (not runQuiet) because 'intraday-ranker' is its own registered monitor id
+    // and keeps its per-step heartbeat. The breadth capture keeps its own heartbeat too -- its
+    // closed-market semantics differ (see monitorScripts.ts's intraday-breadth-capture entry) --
+    // and is deliberately untouched.
+    //
+    // This explanation lives ABOVE the queue declaration, not inside the worker body, because
+    // jobRegistryGraceMinutesConsistency.test.ts locates this worker's lockDuration by scanning
+    // forward at most 4000 chars from the job-name literal below; prose in between eats that
+    // budget (recurring-bugs.md's marker-distance class -- third instance in this file).
     const QUEUE_REGIME = 'market-regime-refresh';
     const regimeQueue = new Queue(QUEUE_REGIME, { connection });
     const regimeRep = await regimeQueue.getRepeatableJobs();
@@ -2629,31 +2660,23 @@ export async function initQueues(): Promise<boolean> {
           console.warn('[QUEUE] intraday breadth capture failed:', (e as Error).message);
           recordHeartbeat('intraday-breadth-capture', 'failed', (e as Error).message);
         }
+        const T = new StepTracker('market-regime-refresh');
         // 1) fetch live macro (VIX/USDINR/basis) → macro_asset_prices
-        await runPython('market_regime_fetcher.py', [], 60_000)
-          .then(() => recordHeartbeat('market-regime-refresh', 'success'))
-          .catch(e => {
-            console.warn('[QUEUE] market_regime_fetcher failed:', (e as Error).message);
-            recordHeartbeat('market-regime-refresh', 'failed', (e as Error).message);
-          });
+        await T.runQuiet('market_regime_fetcher', () => runPython('market_regime_fetcher.py', [], 60_000));
         // 1b) Nifty PCR + dealer GEX (index-level only, ~90s) → macro_asset_prices. Previously
         // only refreshed once/day inside ml-daily-ops/quant-eod-sync, so the intraday regime
         // nowcast below fused a stale EOD PCR all session. This is the lightweight index-only
         // call (NOT so_option_chain_fetcher.py/stock_option_chain_fetcher.py, the ~30min/3min
         // per-stock scrapes that stay EOD-only) -- cheap enough for a 15-min cadence.
         await runPython('pcr_fetcher.py', ['--gex'], 90_000)
-          .catch(e => console.warn('[QUEUE] pcr_fetcher (intraday) failed:', (e as Error).message));
+          .catch(e => T.fail('pcr_fetcher_intraday', e));
         // 2) fuse VIX/basis/MMI/breadth/PCR → app_settings.intraday_regime (non-fatal: ranker
         //    defaults to NEUTRAL if this is missing)
         await runPython('intraday_regime.py', [], 60_000)
-          .catch(e => console.warn('[QUEUE] intraday_regime failed:', (e as Error).message));
+          .catch(e => T.fail('intraday_regime', e));
         // 3) rank stocks for intraday off the fresh regime → intraday_recommendations
-        await runPython('intraday_ranker.py', [], 5 * 60_000)
-          .then(() => recordHeartbeat('intraday-ranker', 'success'))
-          .catch(e => {
-            console.warn('[QUEUE] intraday_ranker failed:', (e as Error).message);
-            recordHeartbeat('intraday-ranker', 'failed', (e as Error).message);
-          });
+        await T.run('intraday-ranker', () => runPython('intraday_ranker.py', [], 5 * 60_000));
+        T.finish();
       },
       // Generous lockDuration: four sequential runPython calls (~8.5 min worst case) plus the
       // shared 5-concurrent-subprocess semaphore wait, so BullMQ doesn't consider it stalled.

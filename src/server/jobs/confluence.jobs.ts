@@ -28,6 +28,7 @@ import { Job } from 'bullmq';
 import { runPython } from '../pythonRunner';
 import { isMarketOpen, shouldSkipOnTradingHoliday } from '../marketStatusService';
 import { registerRepeatableJob } from './registerJob';
+import { StepTracker } from '../jobSteps';
 import { makeConnection } from '../queues';
 
 export const QUEUE_CONFLUENCE_COMPUTE = 'confluence-compute';
@@ -80,7 +81,7 @@ async function processConfluenceCompute(_job: Job): Promise<{ computed: number; 
   return result;
 }
 
-async function processConfluenceOutcomes(job: Job): Promise<void> {
+async function processConfluenceOutcomes(job: Job): Promise<{ success: boolean; failedSteps?: string[] } | void> {
   // 2026-08-06: skip entirely on a trading holiday, no morning replacement -- confluence
   // outcomes/reliability are graded against price action that didn't happen (exchange never
   // opened), and confluence_ml_engine --train would just refit on an unchanged dataset.
@@ -101,10 +102,16 @@ async function processConfluenceOutcomes(job: Job): Promise<void> {
   // (652,679 outcomes tracked) -- bumped to 20 min for real headroom against a normal day's
   // incremental volume plus margin, matching the "give real headroom" precedent already used for
   // alphaQuant's own daily scoring job (see alphaQuantClient.ts).
+  // Per-step .catch keeps a failure in one from aborting the other -- but it used to end in
+  // console.warn, so both could fail and this job still reported success. T.fail preserves the
+  // don't-abort-the-sibling property and degrades the job verdict.
+  const T = new StepTracker('confluence-outcomes');
   await runPython('confluence_outcome_tracker.py', [], 20 * 60_000)
-    .catch(e => console.warn('[QUEUE] confluence_outcome_tracker failed:', (e as Error).message));
+    .catch(e => T.fail('confluence_outcome_tracker', e));
   await runPython('confluence_ml_engine.py', ['--train'], 15 * 60_000)
-    .catch(e => console.warn('[QUEUE] confluence_ml_engine --train failed:', (e as Error).message));
+    .catch(e => T.fail('confluence_ml_engine_train', e));
+  const verdict = T.finish();
+  return { success: verdict.ok, failedSteps: verdict.failedSteps };
 }
 
 export async function registerConfluenceJobs() {

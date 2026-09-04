@@ -145,6 +145,10 @@ describe('JOB_REGISTRY.graceMinutes consistency', () => {
     'research-postclose': "jobName: 'research-postclose-daily'",
     'dl-macro-fetch': "jobName: 'dl-macro-daily'",
     'preopen-snapshot': "'preopen-daily'",
+    // Own queue + Worker (lockDuration 75min), registered 2026-09-04. Uses the Worker-variable
+    // marker for the same reason as the group above -- a long scheduling-rationale comment sits
+    // between the job-name literal and the lockDuration.
+    'mover-study-weekly': 'moverStudyWorker = new Worker',
     'market-regime-refresh': "'regime-intraday'",
     'intraday-ranker': "'regime-intraday'",
     'closed-day-early-batch': "'closed-day-early-batch'",
@@ -184,6 +188,10 @@ describe('JOB_REGISTRY.graceMinutes consistency', () => {
     'densify-feature-matrix', 'nse-bhavcopy-fetcher', 'reconcile-stock-ohlcv', 'ml-ensemble-incremental',
     'ml-ensemble-score', 'drift-detector', 'reward-engine',
     'signal-type-stats', 'news-symbol-link',
+    // Added 2026-09-04 alongside their JOB_REGISTRY entries: all three are T.run steps inside
+    // processMlDailyOps (queues.ts), sharing ml-daily-ops's own '20 13 * * 1-5' cron, so they
+    // have no Worker/lockDuration of their own to measure.
+    'event-triggers', 'breakout-classifier-train', 'movement-predictor-train',
   ];
   const mlWeeklyRetrainSubsteps = ['ml-ensemble-train', 'strategy-optimizer', 'exit-policy-train', 'backtest-optimizer'];
   const eventDrivenIds = ['ai-signals', 'dl-retrain-emergency'];
