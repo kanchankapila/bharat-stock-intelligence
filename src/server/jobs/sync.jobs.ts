@@ -143,9 +143,13 @@ async function processScreenerPerf(job: Job): Promise<{ success: boolean; skippe
   return { success: verdict.ok, failedSteps: verdict.failedSteps };
 }
 
-async function processCompanyProfilesSync(_job: Job): Promise<void> {
+async function processCompanyProfilesSync(_job: Job): Promise<{ success: boolean; skipped?: boolean }> {
   const { syncAndAnalyzeCompanyProfiles } = await import('../companyProfileSyncService');
-  await syncAndAnalyzeCompanyProfiles();
+  // Was Promise<void>, which discarded the verdict entirely -- so even after
+  // syncAndAnalyzeCompanyProfiles stopped hardcoding success:true, the job would still have
+  // reported success on a total failure. Both halves are needed for the failure to surface.
+  const verdict = await syncAndAnalyzeCompanyProfiles();
+  return { success: verdict.success };
 }
 
 async function processTickertapeScorecard(_job: Job): Promise<{ success: boolean; skipped?: boolean }> {

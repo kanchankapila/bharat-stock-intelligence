@@ -16,6 +16,30 @@ import { analyzeCompanyProfile } from '../services/aiService';
 // needed.
 const SHARD_COUNT = 7;
 
+/**
+ * Job verdict for a profile-sync run.
+ *
+ * This used to be a hardcoded `success: true`, so the job reported success no matter what --
+ * live on 2026-09-05 it logged "Success: 0, Failed: 2" and still recorded 'success' in
+ * job_run_history, because GEMINI_API_KEY is present in .env but EMPTY, so no symbol's analysis
+ * can succeed. That is the "success heartbeat on a step that wrote nothing" class.
+ *
+ * "Nothing was due" and "everything attempted failed" both write zero rows, and only the second
+ * is a fault. A partial failure stays a success: the successes are real work that landed, and
+ * per-symbol upstream errors are routine across a multi-hundred-symbol universe.
+ */
+export function profileSyncVerdict(
+  successCount: number,
+  failCount: number,
+): { success: boolean; processed: number; failed: number } {
+  const attempted = successCount + failCount;
+  return {
+    success: attempted === 0 ? true : successCount > 0,
+    processed: successCount,
+    failed: failCount,
+  };
+}
+
 export async function syncAndAnalyzeCompanyProfiles() {
   console.log('[PROFILE SYNC] Fetching Trendlyne overview + company descriptions (also feeds the ML overview features)...');
 
@@ -105,5 +129,5 @@ export async function syncAndAnalyzeCompanyProfiles() {
   }
 
   console.log(`[PROFILE SYNC] Completed. Success: ${successCount}, Failed: ${failCount}`);
-  return { success: true, processed: successCount, failed: failCount };
+  return profileSyncVerdict(successCount, failCount);
 }

@@ -194,8 +194,15 @@ async function main() {
   // "skip path stamped as success" defect the sweep exists to find -- and a skip that wrote no
   // rows is indistinguishable from a silent failure unless it is labelled.
   const skipped = Boolean(res.returnvalue && (res.returnvalue as any).skipped);
+  // A processor that returns { success: false } has FAILED, but BullMQ still marks the job
+  // 'completed' because nothing threw -- registerJob.ts's handler is what turns that into a
+  // failed heartbeat. Reading only the BullMQ state would report such a run as a success and
+  // reproduce, in the sweep's own output, the defect the sweep exists to detect (seen live
+  // 2026-09-05: company-profiles-sync returned success:false and the harness said 'success').
+  const selfReportedFailure = Boolean(res.returnvalue && (res.returnvalue as any).success === false);
   const status = reset ? 'unmeasured_counter_reset'
-    : res.state === 'completed' ? (skipped ? 'skipped' : 'success')
+    : res.state === 'completed'
+      ? (selfReportedFailure ? 'failed' : skipped ? 'skipped' : 'success')
     : res.state.startsWith('timeout') ? 'timeout' : 'failed';
 
   console.log(`[SWEEP] status=${status} duration=${(durationMs / 1000).toFixed(1)}s rows=${totalRowDelta(diff)} tables=${Object.keys(diff).length}`);
