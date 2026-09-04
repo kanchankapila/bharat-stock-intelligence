@@ -3,7 +3,8 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
 import pytest
 
-from fetch_utils import FetchTracker, retry_get, _is_waf_challenge
+from fetch_utils import FetchTracker, retry_get, _is_waf_challenge, filter_stale_symbols
+from pg_test_support import pg_memory_conn
 
 
 # ── abort_after_consecutive_fails circuit breaker (2026-08-13) ──────────────────
@@ -105,3 +106,60 @@ def test_retry_get_still_retries_an_ordinary_failure():
     resp = retry_get(session, "https://example.com/x", retries=3, backoff_base=0.01)
     assert resp is ok
     assert session.calls == 3
+
+
+# ── filter_stale_symbols (2026-09-04): four fetchers gate their per-symbol network loop on
+# this, but the helper itself had no test at all -- added while wiring it into
+# working_capital_fetcher.py / financial_ratios_fetcher.py / trendlyne_fundamentals_fetcher.py.
+
+def _seed_freshness_table(conn, rows):
+    conn.execute("CREATE TABLE t (symbol TEXT, fetched_at TEXT)")
+    for sym, dt in rows:
+        conn.execute("INSERT INTO t (symbol, fetched_at) VALUES (?, ?)", (sym, dt))
+    conn.commit()
+
+
+def test_filter_stale_symbols_skips_only_symbols_fresh_at_or_after_the_cutoff():
+    conn = pg_memory_conn()
+    _seed_freshness_table(conn, [("RELIANCE", "2026-09-01"), ("TCS", "2026-08-01")])
+    result = filter_stale_symbols(
+        conn, ["RELIANCE", "TCS", "INFY"], "t", date_col="fetched_at", as_of_date="2026-08-25",
+    )
+    # RELIANCE fresh (09-01 >= cutoff) -> skipped. TCS stale (08-01 < cutoff) -> kept.
+    # INFY has no row at all -> kept (missing counts as stale, never silently dropped).
+    assert result == ["TCS", "INFY"]
+
+
+def test_filter_stale_symbols_accepts_tuple_rows_and_filters_on_the_first_element():
+    conn = pg_memory_conn()
+    _seed_freshness_table(conn, [("RELIANCE", "2026-09-01")])
+    result = filter_stale_symbols(
+        conn, [("RELIANCE", "RI"), ("TCS", "TC")], "t", date_col="fetched_at", as_of_date="2026-08-25",
+    )
+    assert result == [("TCS", "TC")]
+
+
+def test_filter_stale_symbols_is_case_insensitive_on_symbol_matching():
+    conn = pg_memory_conn()
+    _seed_freshness_table(conn, [("reliance", "2026-09-01")])
+    result = filter_stale_symbols(
+        conn, ["RELIANCE", "TCS"], "t", date_col="fetched_at", as_of_date="2026-08-25",
+    )
+    assert result == ["TCS"]
+
+
+def test_filter_stale_symbols_degrades_to_processing_everyone_on_a_query_error():
+    class _BrokenConn:
+        def cursor(self):
+            raise RuntimeError("table does not exist")
+    # A freshness-check failure must never silently drop symbols from the run -- fail open,
+    # not closed, per this file's own except-branch comment ("processing all symbols").
+    result = filter_stale_symbols(_BrokenConn(), ["RELIANCE", "TCS"], "t")
+    assert result == ["RELIANCE", "TCS"]
+
+
+def test_filter_stale_symbols_returns_empty_for_an_empty_input_without_querying():
+    class _MustNotBeCalled:
+        def cursor(self):
+            raise AssertionError("filter_stale_symbols must not query the DB for an empty list")
+    assert filter_stale_symbols(_MustNotBeCalled(), [], "t") == []

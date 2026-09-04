@@ -75,7 +75,9 @@ const UPSERT_SQL = `
     fail_count      = job_heartbeat.fail_count + ?
 `;
 
-export async function recordHeartbeat(jobName: string, status: 'success' | 'failed', error?: string): Promise<void> {
+export async function recordHeartbeat(
+  jobName: string, status: 'success' | 'failed', error?: string, durationMs?: number,
+): Promise<void> {
   try {
     await ensureTable();
     const now = Date.now();
@@ -93,10 +95,12 @@ export async function recordHeartbeat(jobName: string, status: 'success' | 'fail
     // chokepoint covers all of them instead of the ones someone remembers to add.
     // Separate try/catch on purpose: a failure appending history must not prevent the
     // heartbeat upsert above from being observed as written.
+    // duration_ms (added 2026-09-04, scheduler-review finding): nullable -- most call sites
+    // still pass none, so a caller with no cheap start time is unaffected, not broken.
     try {
       await dbRun(
-        `INSERT INTO job_run_history (job_name, status, ran_at, error) VALUES (?, ?, to_timestamp(? / 1000.0), ?)`,
-        [jobName, status, now, err],
+        `INSERT INTO job_run_history (job_name, status, ran_at, error, duration_ms) VALUES (?, ?, to_timestamp(? / 1000.0), ?, ?)`,
+        [jobName, status, now, err, durationMs ?? null],
       );
     } catch { /* history is diagnostic; never break a job for it */ }
   } catch {

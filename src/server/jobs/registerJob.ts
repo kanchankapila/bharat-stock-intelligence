@@ -202,7 +202,7 @@ export interface RepeatableJobConfig {
    *  Several jobs instead use updateMonitorState() (monitoringService.ts, MONITOR_SCRIPTS-driven
    *  DB-freshness checks) — a genuinely different mechanism, not interchangeable, so this must be
    *  passed explicitly per job rather than defaulted or guessed. */
-  monitorFn?: (name: string, status: 'success' | 'failed', detail?: string) => void;
+  monitorFn?: (name: string, status: 'success' | 'failed', detail?: string, durationMs?: number) => void;
   /** Wires the standard `.on('error', ...)` handler several jobs already had by hand: ignore
    *  benign lock-contention noise (stalled-lock race / "Missing lock"), log anything else as
    *  `[QUEUE] <monitorName> error: <message>`. Off by default — most jobs never had this handler
@@ -263,8 +263,11 @@ export async function registerRepeatableJob(
 
   const monitor = cfg.monitorFn ?? recordHeartbeat;
 
-  worker.on('completed', (_job, result) => {
+  worker.on('completed', (job, result) => {
     console.log(`[QUEUE] ${cfg.monitorName} completed`);
+    // duration_ms (2026-09-04): BullMQ already stamps processedOn when the worker picked the
+    // job up, free for the taking here -- no new bookkeeping needed.
+    const durationMs = job.processedOn ? Date.now() - job.processedOn : undefined;
     // A skip is not a success: stamping one erases the day's real failures. The four jobs fixed
     // for this in 2026-08-12 each hand-rolled this guard in queues.ts's own completed handlers;
     // every job routed through THIS helper was still missing it. Skip paths return
@@ -281,16 +284,18 @@ export async function registerRepeatableJob(
     // all -- every existing caller, today -- keeps behaving exactly as before.
     if (r?.success === false) {
       monitor(cfg.monitorName, 'failed',
-        r.failedSteps?.length ? `${r.failedSteps.length} step(s) failed: ${r.failedSteps.join(', ')}` : undefined);
+        r.failedSteps?.length ? `${r.failedSteps.length} step(s) failed: ${r.failedSteps.join(', ')}` : undefined,
+        durationMs);
       cfg.onCompleted?.(result);
       return;
     }
-    monitor(cfg.monitorName, 'success');
+    monitor(cfg.monitorName, 'success', undefined, durationMs);
     cfg.onCompleted?.(result);
   });
-  worker.on('failed', (_job, err) => {
+  worker.on('failed', (job, err) => {
     console.error(`[QUEUE] ${cfg.monitorName} failed:`, err?.message);
-    monitor(cfg.monitorName, 'failed', err?.message);
+    const durationMs = job?.processedOn ? Date.now() - job.processedOn : undefined;
+    monitor(cfg.monitorName, 'failed', err?.message, durationMs);
     cfg.onFailed?.(err);
   });
   if (cfg.suppressLockErrors) {

@@ -51,4 +51,19 @@ describe('recordHeartbeat appends run-level history', () => {
     expect(hb.run_count).toBe(1);
     expect(hb.fail_count).toBe(1);
   });
+
+  // 2026-09-04, scheduler-review finding: job_run_history had status + ran_at but no
+  // duration, so nothing could answer "which step got slower this month" without a
+  // hand-run stopwatch. duration_ms is nullable/additive -- a caller with no cheap start
+  // time (the default 3-arg call) must still write a row, just with NULL duration.
+  it('records duration_ms when the caller has one, and leaves it NULL when it does not', async () => {
+    await recordHeartbeat(JOB, 'success', undefined, 4321);
+    await recordHeartbeat(JOB, 'failed', 'boom');
+
+    const rows = await dbAll<{ status: string; duration_ms: number | null }>(
+      'SELECT status, duration_ms FROM job_run_history WHERE job_name = ? ORDER BY id', [JOB],
+    );
+    expect(rows[0].duration_ms).toBe(4321);
+    expect(rows[1].duration_ms).toBeNull();
+  });
 });

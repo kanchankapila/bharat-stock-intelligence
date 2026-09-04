@@ -59,7 +59,7 @@ Run:
 import polars as pl
 
 import argparse
-from datetime import date
+from datetime import date, timedelta
 
 import requests
 
@@ -533,6 +533,8 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="FCF yield (approx) + interest coverage from ET_Stats")
     parser.add_argument("--symbol", default=None, help="Single stock NSE symbol")
     parser.add_argument("--limit", type=int, default=None, help="Process first N stocks")
+    parser.add_argument("--force", action="store_true", default=False,
+                        help="Force re-fetch all symbols even if fresh within last 20 days")
     args = parser.parse_args()
 
     con = connect()
@@ -543,6 +545,22 @@ def main() -> None:
         print("[FinancialRatios] No stocks with a companyid found.")
         con.close()
         return
+
+    # Smart 20-day cadence check: this job runs WEEKLY (trendlyne-midweek-batch), but FCF
+    # yield / interest coverage are earnings-driven and only move meaningfully on quarterly
+    # results -- a 20-day window (shorter than mf_stock_holdings_fetcher.py's 25-day monthly
+    # window, since this job's own cadence is weekly not monthly) still lets every symbol
+    # refresh at least monthly while skipping ~3 of every 4 weekly passes for a symbol whose
+    # ratios can't have changed.
+    if not args.force and not args.symbol:
+        from fetch_utils import filter_stale_symbols
+        fresh_cutoff = (date.today() - timedelta(days=20)).isoformat()
+        stale_stocks = filter_stale_symbols(con, stocks, "tl_financial_quality",
+                                            date_col="fetched_at", as_of_date=fresh_cutoff)
+        skipped = len(stocks) - len(stale_stocks)
+        if skipped > 0:
+            print(f"[FinancialRatios] Smart cadence skip: {skipped}/{len(stocks)} symbols already fresh within last 20 days. Processing {len(stale_stocks)} remaining.")
+            stocks = stale_stocks
 
     print(f"[FinancialRatios] Processing {len(stocks)} stocks — FCF yield (approx) + interest coverage…")
     session = requests.Session()

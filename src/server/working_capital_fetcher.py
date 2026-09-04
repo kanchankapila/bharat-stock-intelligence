@@ -304,6 +304,8 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Cash Conversion Cycle (annual) from ET_Stats")
     parser.add_argument("--symbol", default=None, help="Single stock NSE symbol")
     parser.add_argument("--limit", type=int, default=None, help="Process first N stocks")
+    parser.add_argument("--force", action="store_true", default=False,
+                        help="Force re-fetch all symbols even if fresh within last 25 days")
     args = parser.parse_args()
 
     con = connect()
@@ -314,6 +316,21 @@ def main() -> None:
         print("[WorkingCapital] No stocks with a companyid found.")
         con.close()
         return
+
+    # Smart 25-day cadence check, same window as mf_stock_holdings_fetcher.py's sibling
+    # monthly-cadence fetcher: this job only runs monthly (isFirstRunOfMonth gate in
+    # trendlyneWeekly.jobs.ts) against data that changes at most once a FISCAL YEAR, so a
+    # symbol fetched within the last 25 days is not going to have new working-capital figures
+    # -- this just protects a manual re-run or catch-up retry from re-costing the full universe.
+    if not args.force and not args.symbol:
+        from fetch_utils import filter_stale_symbols
+        fresh_cutoff = (date.today() - timedelta(days=25)).isoformat()
+        stale_stocks = filter_stale_symbols(con, stocks, "working_capital_history",
+                                            date_col="fetched_at", as_of_date=fresh_cutoff)
+        skipped = len(stocks) - len(stale_stocks)
+        if skipped > 0:
+            print(f"[WorkingCapital] Smart cadence skip: {skipped}/{len(stocks)} symbols already fresh within last 25 days. Processing {len(stale_stocks)} remaining.")
+            stocks = stale_stocks
 
     print(f"[WorkingCapital] Processing {len(stocks)} stocks — cash conversion cycle (annual)…")
     session = requests.Session()

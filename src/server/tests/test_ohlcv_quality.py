@@ -9,6 +9,10 @@ from ohlcv_quality import (  # noqa: E402
     parse_dividend_actions,
     is_bad_print,
     flag_bad_prints,
+    ingest_corporate_actions,
+    load_recently_checked,
+    mark_checked,
+    CORPORATE_ACTIONS_STALENESS_DAYS,
 )
 
 
@@ -109,3 +113,96 @@ def test_flag_bad_prints_respects_corporate_action_allowlist():
     flagged = {r[0] for r in conn.execute("SELECT DISTINCT symbol FROM stock_ohlcv WHERE is_suspect=1").fetchall()}
     assert 'BAD' in flagged
     assert 'CORP' not in flagged
+
+
+# ── ingest_corporate_actions cadence skip (2026-09-04, scheduler-review suggestion #4) ──────
+#
+# corporate_actions is an EVENT table -- a symbol with no recent split/dividend has NO row in
+# it, so the skip can't be driven off that table (would treat the vast majority of the universe
+# as permanently stale). ohlcv_corporate_actions_checked is the dedicated per-symbol marker,
+# mirroring marketsmojo_financials_checked's AF-20260816-20 pattern exactly.
+
+def make_checked_db():
+    conn = pg_memory_conn()
+    conn.executescript("""
+        CREATE TABLE corporate_actions (
+            symbol TEXT, ex_date TEXT, action_type TEXT, ratio REAL, amount REAL,
+            PRIMARY KEY (symbol, ex_date, action_type)
+        );
+        CREATE TABLE ohlcv_corporate_actions_checked (
+            symbol TEXT PRIMARY KEY, checked_at TIMESTAMPTZ NOT NULL
+        );
+    """)
+    return conn
+
+
+def test_load_recently_checked_only_returns_symbols_within_the_staleness_window():
+    conn = make_checked_db()
+    fresh = (pd.Timestamp.now(tz='UTC') - pd.Timedelta(days=1)).isoformat()
+    stale = (pd.Timestamp.now(tz='UTC') - pd.Timedelta(days=CORPORATE_ACTIONS_STALENESS_DAYS + 5)).isoformat()
+    conn.execute("INSERT INTO ohlcv_corporate_actions_checked VALUES ('RELIANCE', ?)", (fresh,))
+    conn.execute("INSERT INTO ohlcv_corporate_actions_checked VALUES ('TCS', ?)", (stale,))
+    conn.commit()
+
+    checked = load_recently_checked(conn)
+    assert checked == {'RELIANCE'}
+
+
+def test_mark_checked_is_idempotent_upsert():
+    conn = make_checked_db()
+    mark_checked(conn, 'RELIANCE')
+    conn.commit()
+    first = conn.execute("SELECT checked_at FROM ohlcv_corporate_actions_checked WHERE symbol='RELIANCE'").fetchone()
+
+    mark_checked(conn, 'RELIANCE')
+    conn.commit()
+    rows = conn.execute("SELECT checked_at FROM ohlcv_corporate_actions_checked WHERE symbol='RELIANCE'").fetchall()
+    assert len(rows) == 1  # still exactly one row, not a duplicate
+    assert rows[0][0] >= first[0]  # timestamp advanced, not frozen at the first check
+
+
+class _FakeTicker:
+    def __init__(self, calls, ticker):
+        calls.append(ticker)
+        self.splits = pd.Series(dtype=float)
+        self.dividends = pd.Series(dtype=float)
+
+
+def _fake_yfinance_module(calls):
+    module = type(sys)('yfinance')
+    module.Ticker = lambda ticker: _FakeTicker(calls, ticker)
+    return module
+
+
+def test_ingest_corporate_actions_skips_a_recently_checked_symbol(monkeypatch):
+    conn = make_checked_db()
+    mark_checked(conn, 'RELIANCE')  # checked just now -- must be skipped
+    conn.commit()
+
+    calls = []
+    monkeypatch.setitem(sys.modules, 'yfinance', _fake_yfinance_module(calls))
+    ingest_corporate_actions(conn, ['RELIANCE', 'TCS'])
+
+    assert calls == ['TCS.NS']  # RELIANCE skipped, TCS actually queried
+
+
+def test_ingest_corporate_actions_force_bypasses_the_skip(monkeypatch):
+    conn = make_checked_db()
+    mark_checked(conn, 'RELIANCE')
+    conn.commit()
+
+    calls = []
+    monkeypatch.setitem(sys.modules, 'yfinance', _fake_yfinance_module(calls))
+    ingest_corporate_actions(conn, ['RELIANCE'], force=True)
+
+    assert calls == ['RELIANCE.NS']
+
+
+def test_ingest_corporate_actions_marks_a_no_action_symbol_checked_too(monkeypatch):
+    conn = make_checked_db()
+    calls = []
+    monkeypatch.setitem(sys.modules, 'yfinance', _fake_yfinance_module(calls))
+    ingest_corporate_actions(conn, ['RELIANCE'])
+
+    # An empty response is still an answer -- the symbol must not look permanently uncheckable.
+    assert load_recently_checked(conn) == {'RELIANCE'}

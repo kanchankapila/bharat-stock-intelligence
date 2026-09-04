@@ -2227,6 +2227,91 @@ export const DATA_QUALITY_CHECKS: DataQualityCheck[] = [
     },
   },
 
+  {
+    id: 'bulk-endpoint-fetcher-coverage',
+    label: 'Bulk-endpoint fetchers cover the universe a single-call swap claims to, not just today\'s responders',
+    category: 'reference',
+    critical: false,
+    // Hand-rolled, same reason as trendlyne-per-symbol-fetcher-coverage above: a bulk-endpoint
+    // rewrite (one market-wide call replacing N per-stock calls) is a genuine fetch-time win, but
+    // is not automatically the same WORK — the bulk response only contains symbols the endpoint
+    // currently has something to say about, where the old per-symbol loop wrote an explicit
+    // COALESCE/zero row for every symbol regardless. makeFreshnessCheck() (MAX(date) only) cannot
+    // see the difference: AF-20260904-01 measured mc_pattern_signals collapse from 2,338 to 68
+    // symbols/day on exactly this kind of rewrite while its freshness check stayed green
+    // throughout (accepted by the user as a deliberate trade-off, not tracked here — see that
+    // ledger row for why this check deliberately does not include mc_pattern_signals: the
+    // accepted baseline is ~68-82 active-pattern symbols, not the full universe, so a coverage
+    // check against the OLD 2,338-symbol denominator would misreport a healthy day as failing).
+    //
+    // The three tables below are the ones actually built on a bulk single-call swap besides
+    // mc_pattern_signals, per the 2026-09-04 scheduler-review report. Thresholds calibrated
+    // against a real live read the same day, not guessed:
+    //   - nse_universe_history (bhavcopy): 2,329/2,366 canonical nse_stocks (98.4%) on 09-04,
+    //     consistently ~98% across the preceding week. The table also carries ~1,000 non-canonical
+    //     securities (ETFs etc, matching AF-20260903-01's finding) that inflate a raw distinct-
+    //     symbol count, so this joins against nse_stocks to count only the canonical universe.
+    //   - preopen_stock_snapshot: stuck at EXACTLY 210 symbols/day (matching nse_stocks'
+    //     fno_eligible=1 count) every day 2026-08-27..09-03 -- an unmeasured version of the same
+    //     collapse class, caught only by this session cross-checking the report's own "coverage
+    //     went up, not down" claim against live data. Fixed same-day by commit be475d86; today
+    //     (09-04) already reads 2,364/2,366 (99.9%). This check exists so the NEXT regression of
+    //     this exact shape is caught in a day, not a week.
+    //   - so_option_chain (SmartOptions): F&O contracts only exist for nse_stocks.fno_eligible=1
+    //     names (210), and even those don't all publish an active chain every day -- observed
+    //     range 151-164 (72-78%) on 6 of the last 7 sessions, with one real dip to 36 (17%) on
+    //     2026-09-01 that self-recovered the next session. Thresholds set to tolerate the normal
+    //     band and catch a repeat of the 09-01-shaped dip, not to demand 100% (structurally
+    //     unreachable for this table).
+    sql: `WITH canon AS (SELECT COUNT(*)::float AS n FROM nse_stocks),
+               fno AS (SELECT COUNT(*)::float AS n FROM nse_stocks WHERE fno_eligible = 1),
+               bhav_latest AS (SELECT MAX(date) d FROM nse_universe_history),
+               preopen_latest AS (SELECT MAX(snapshot_date) d FROM preopen_stock_snapshot),
+               opt_latest AS (SELECT MAX(date) d FROM so_option_chain)
+          SELECT (SELECT n FROM canon) AS canon_universe,
+                 (SELECT n FROM fno) AS fno_universe,
+                 (SELECT COUNT(DISTINCT nuh.symbol) FROM nse_universe_history nuh
+                    WHERE nuh.date = (SELECT d FROM bhav_latest)
+                      AND EXISTS (SELECT 1 FROM nse_stocks ns WHERE ns.symbol = nuh.symbol)) AS bhav_n,
+                 (SELECT d FROM bhav_latest) AS bhav_date,
+                 (SELECT COUNT(DISTINCT symbol) FROM preopen_stock_snapshot
+                    WHERE snapshot_date = (SELECT d FROM preopen_latest)) AS preopen_n,
+                 (SELECT d FROM preopen_latest) AS preopen_date,
+                 (SELECT COUNT(DISTINCT symbol) FROM so_option_chain
+                    WHERE date = (SELECT d FROM opt_latest)) AS opt_n,
+                 (SELECT d FROM opt_latest) AS opt_date`,
+    evaluate: (row) => {
+      const canonUniverse = Number(row?.canon_universe ?? 0);
+      const fnoUniverse = Number(row?.fno_universe ?? 0);
+      if (canonUniverse === 0 || fnoUniverse === 0) {
+        return { status: 'fail', detail: 'nse_stocks universe is empty — cannot compute any coverage ratio.' };
+      }
+      const parts = [
+        { name: 'nse_universe_history', n: Number(row?.bhav_n ?? 0), date: row?.bhav_date, universe: canonUniverse, failBelow: 0.85, warnBelow: 0.95 },
+        { name: 'preopen_stock_snapshot', n: Number(row?.preopen_n ?? 0), date: row?.preopen_date, universe: canonUniverse, failBelow: 0.85, warnBelow: 0.95 },
+        { name: 'so_option_chain', n: Number(row?.opt_n ?? 0), date: row?.opt_date, universe: fnoUniverse, failBelow: 0.25, warnBelow: 0.50 },
+      ].map(p => ({ ...p, pct: p.n / p.universe }));
+      const detail = parts
+        .map(p => `${p.name} ${p.n}/${p.universe} (${(p.pct * 100).toFixed(1)}%) on ${p.date ?? 'never'}`)
+        .join('; ');
+      const dead = parts.filter(p => p.pct < p.failBelow);
+      const thin = parts.filter(p => p.pct >= p.failBelow && p.pct < p.warnBelow);
+      if (dead.length) {
+        return {
+          status: 'fail',
+          detail: `${detail}. ${dead.map(p => p.name).join(', ')} fell below its coverage floor — ` +
+                  `consistent with a bulk-endpoint swap now returning only a sliver of symbols ` +
+                  `while the freshness check on the same table stays green (recurring-bugs.md: ` +
+                  `"a fresh table is not a delivered feature").`,
+        };
+      }
+      if (thin.length) {
+        return { status: 'warn', detail: `${detail}. ${thin.map(p => p.name).join(', ')} below its normal band.` };
+      }
+      return { status: 'pass', detail };
+    },
+  },
+
   // ── News sources added 2026-08-13, source-scoped (hand-rolled, not the TABLE_FRESHNESS_CHECKS
   // factory) -- all four write into the same shared news_sentiment_items table the existing
   // 'news-sentiment-freshness' check already covers, so a bare MAX(fetched_at) over the whole

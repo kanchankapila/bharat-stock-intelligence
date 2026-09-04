@@ -50,7 +50,7 @@ import json
 import os
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 
 import requests
 from requests.adapters import HTTPAdapter
@@ -463,6 +463,8 @@ def _process_one(symbol: str, tlid: str, today: str, session: requests.Session) 
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--symbol", default=None)
+    parser.add_argument("--force", action="store_true", default=False,
+                        help="Force re-fetch all symbols even if fresh within last 7 days")
     args = parser.parse_args()
 
     con = connect()
@@ -478,6 +480,35 @@ def main() -> None:
     con.close()
 
     stocks = _load_stocks(args.symbol, skip_done_for_date=None if args.symbol else today)
+
+    # Smart 7-day cadence check, on top of the same-day resume above: EPS_TTM/dividend-yield
+    # are quarterly-cadence data (see class docstring), so re-fetching a symbol whose EPS/
+    # dividend series was already pulled this week wastes this fetcher's share of the shared
+    # trendlyne.com WAF request allowance (fetch_utils.TRENDLYNE_RUN_REQUEST_BUDGET) on data
+    # that cannot have changed. Window kept short (7d, not the 20-25d used by the
+    # monthly-cadence financial_ratios_fetcher.py/working_capital_fetcher.py) because this
+    # fetcher's _backfill_technical_signals also refreshes PE/PB percentile ranks derived from
+    # today's PRICE (via _pe_features_from_db/_pb_features_from_db, which read local history,
+    # not the network) -- skipping a symbol here also defers that refresh, so the window is
+    # bounded to at most a week of staleness on the price-driven half, not the quarter the
+    # EPS/dividend half alone would tolerate.
+    if not args.force and not args.symbol:
+        from fetch_utils import filter_stale_symbols
+        fresh_cutoff = (date.today() - timedelta(days=7)).isoformat()
+        # con was already closed above (today's logical_write_floor lookup is the only thing
+        # it was needed for) -- open a fresh one for this check, same as _load_stocks does
+        # internally for its own skip_done_for_date query.
+        stale_con = connect()
+        try:
+            stale_stocks = filter_stale_symbols(stale_con, stocks, "trendlyne_dvm_scores",
+                                                date_col="date", as_of_date=fresh_cutoff)
+        finally:
+            stale_con.close()
+        skipped = len(stocks) - len(stale_stocks)
+        if skipped > 0:
+            print(f"[TLFund] Smart cadence skip: {skipped}/{len(stocks)} symbols already fresh within last 7 days. Processing {len(stale_stocks)} remaining.")
+            stocks = stale_stocks
+
     stocks = cap_to_run_budget(stocks, "TLFund", requests_per_row=2)
     if not stocks:
         print("[TLFund] No stocks with tlid found.")

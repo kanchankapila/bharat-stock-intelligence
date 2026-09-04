@@ -52,12 +52,15 @@ describe('registerRepeatableJob: a skip must not be stamped as a success', () =>
     );
     const successFalseIdx = handler.search(/success\s*===\s*false/);
     const failedStampIdx = handler.indexOf("monitor(cfg.monitorName, 'failed'");
-    const blanketSuccessIdx = handler.lastIndexOf("monitor(cfg.monitorName, 'success')");
+    // Matches the call regardless of how many more positional args follow 'success' (e.g. the
+    // 2026-09-04 durationMs param) -- recurring-bugs.md's marker-distance class warns against
+    // exactly this: an exact-closing-paren match breaks the moment the call signature grows.
+    const blanketSuccessIdx = handler.lastIndexOf("monitor(cfg.monitorName, 'success'");
     expect(successFalseIdx).toBeGreaterThanOrEqual(0);
     expect(failedStampIdx).toBeGreaterThan(successFalseIdx);
     // The success:false branch must itself return, so it never falls through to the blanket stamp.
     const branchBody = handler.slice(successFalseIdx, handler.indexOf('return;', failedStampIdx));
-    expect(branchBody).not.toContain("monitor(cfg.monitorName, 'success')");
+    expect(branchBody).not.toContain("monitor(cfg.monitorName, 'success'");
     expect(blanketSuccessIdx).toBeGreaterThan(failedStampIdx);
   });
 

@@ -17,6 +17,7 @@ stock_ohlcv.is_suspect so label/feature code can exclude them. A corporate-actio
 import polars as pl
 import argparse
 import datetime
+from datetime import timedelta, timezone
 
 from db_compat import connect, ConnWrapper
 from hypertable_safe_write import safe_keyed_update
@@ -24,6 +25,16 @@ import sys
 
 BAD_PRINT_THRESHOLD = 0.35   # > 35% day-over-day vs BOTH neighbours = suspect spike
 ACTION_WINDOW_DAYS = 3       # don't flag within ±3d of a known ex-date
+
+# ingest_corporate_actions() is one of the report's two 150-minute steps (scheduler-review,
+# 2026-09-04) -- a per-symbol yfinance .splits/.dividends call across the whole universe every
+# run. Splits/dividends are declared a handful of times a year per stock, so re-checking a
+# symbol we already asked within the last week wastes almost the entire run for almost no new
+# data. Same staleness window as marketsmojo_financials_fetcher.py's STALENESS_DAYS, same
+# reasoning: short enough that a stock whose corporate-action calendar changes (a newly
+# announced split) is caught within a week, long enough to skip the vast majority of a universe
+# that has nothing new to report on any given day.
+CORPORATE_ACTIONS_STALENESS_DAYS = 7
 
 # is_bad_print/flag_bad_prints only catch a transient single-bar SPIKE (deviates from both
 # neighbours, then reverts) -- by design a genuine level shift is kept, since that's meant to
@@ -84,12 +95,48 @@ def is_bad_print(prev_close, cur_close, next_close,
 
 # ── DB jobs ─────────────────────────────────────────────────────────────────────
 
-def ingest_corporate_actions(conn: ConnWrapper, symbols) -> dict:
+def load_recently_checked(conn, staleness_days: int = CORPORATE_ACTIONS_STALENESS_DAYS) -> set[str]:
+    """Symbols checked within the staleness window -- corporate_actions itself is an EVENT
+    table (no row at all for a symbol with no recent split/dividend), so it cannot answer
+    "did we already check this symbol recently" the way a plain freshness column could. Same
+    shape as marketsmojo_financials_fetcher.py's identically-named function."""
+    cutoff = (datetime.datetime.now(timezone.utc) - timedelta(days=staleness_days)).isoformat()
+    rows = conn.execute(
+        "SELECT symbol FROM ohlcv_corporate_actions_checked WHERE checked_at >= ?", (cutoff,)
+    ).fetchall()
+    return {(r[0] if isinstance(r, (list, tuple)) else r['symbol']) for r in rows}
+
+
+def mark_checked(conn, symbol: str) -> None:
+    conn.execute(
+        """
+        INSERT INTO ohlcv_corporate_actions_checked (symbol, checked_at) VALUES (?, ?)
+        ON CONFLICT(symbol) DO UPDATE SET checked_at = excluded.checked_at
+        """,
+        (symbol, datetime.datetime.now(timezone.utc).isoformat()),
+    )
+
+
+def ingest_corporate_actions(conn: ConnWrapper, symbols, force: bool = False) -> dict:
     """Fetch split + dividend ex-dates per symbol from yfinance into corporate_actions
-    (the bad-print allowlist). Splits/bonuses come via .splits, cash dividends via .dividends."""
+    (the bad-print allowlist). Splits/bonuses come via .splits, cash dividends via .dividends.
+
+    Skips a symbol checked within CORPORATE_ACTIONS_STALENESS_DAYS (force=True bypasses this,
+    e.g. for an explicit single-symbol re-check)."""
     import yfinance as yf
+    all_symbols = list(symbols)
+    if force:
+        stocks = all_symbols
+    else:
+        recently_checked = load_recently_checked(conn)
+        stocks = [s for s in all_symbols if s not in recently_checked]
+        skipped = len(all_symbols) - len(stocks)
+        if skipped > 0:
+            print(f"[OHLCVQuality] Smart cadence skip: {skipped}/{len(all_symbols)} symbols "
+                  f"already checked within last {CORPORATE_ACTIONS_STALENESS_DAYS} days. "
+                  f"Processing {len(stocks)} remaining.")
     total = 0
-    for sym in symbols:
+    for sym in stocks:
         try:
             t = yf.Ticker(f"{sym}.NS")
             splits = parse_split_actions(t.splits)
@@ -111,8 +158,11 @@ def ingest_corporate_actions(conn: ConnWrapper, symbols) -> dict:
                 "ON CONFLICT(symbol, ex_date, action_type) DO UPDATE SET amount=excluded.amount",
                 (sym, ex_date, amt))
             total += 1
+        # Mark checked regardless of whether this symbol had any actions -- an empty result
+        # is still an answer, same convention as marketsmojo_financials_fetcher.py's run().
+        mark_checked(conn, sym)
     conn.commit()
-    print(f"[OHLCVQuality] ingested {total} corporate actions across {len(symbols)} symbols")
+    print(f"[OHLCVQuality] ingested {total} corporate actions across {len(stocks)} symbols")
     return {'actions': total}
 
 
@@ -264,12 +314,12 @@ def flag_malformed_bars(conn: ConnWrapper) -> dict:
     return {'flagged': len(rows)}
 
 
-def run(ingest: bool = True):
+def run(ingest: bool = True, force_ingest: bool = False):
     conn = connect()
     try:
         if ingest:
             symbols = [r[0] for r in conn.execute("SELECT DISTINCT symbol FROM stock_ohlcv").fetchall()]
-            ingest_corporate_actions(conn, symbols)
+            ingest_corporate_actions(conn, symbols, force=force_ingest)
         flag_bad_prints(conn)          # owns the reset
         flag_extreme_level_shifts(conn)
         flag_malformed_bars(conn)
@@ -280,8 +330,11 @@ def run(ingest: bool = True):
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--no-ingest', action='store_true')
+    parser.add_argument('--force-ingest', action='store_true',
+                        help='Re-check every symbol\'s corporate actions even if checked '
+                             f'within the last {CORPORATE_ACTIONS_STALENESS_DAYS} days')
     args = parser.parse_args()
-    run(ingest=not args.no_ingest)
+    run(ingest=not args.no_ingest, force_ingest=args.force_ingest)
 
 def to_polars_df(data):
     """Converts pandas DataFrame or list of dicts to Polars DataFrame for fast vector operations."""

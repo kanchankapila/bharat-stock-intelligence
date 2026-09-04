@@ -8,6 +8,7 @@ vi.mock('../monitoringService', () => ({
 }));
 
 import { StepTracker } from '../jobSteps';
+import { updateMonitorState } from '../monitoringService';
 
 describe('StepTracker', () => {
   beforeEach(() => { calls.length = 0; });
@@ -89,5 +90,27 @@ describe('StepTracker', () => {
     const job = calls.find(c => c.name === 'job');
     expect(job?.state).toBe('failed');
     expect(job?.message).toBe('2 steps failed: bad-1,bad-2');
+  });
+
+  // 2026-09-04, scheduler-review finding: _exec() already computed `ms` per step but
+  // finish() discarded it before this fix -- job_run_history could never answer "which
+  // step got slower." Asserts the 4th positional arg (opaque to the `calls` mock above,
+  // which only captures the first 3), via the mock's own recorded call args.
+  it('passes each step\'s measured duration through as the 4th updateMonitorState arg', async () => {
+    const mocked = vi.mocked(updateMonitorState);
+    mocked.mockClear();
+    const T = new StepTracker('job');
+    await T.run('slow-step', () => new Promise(resolve => setTimeout(() => resolve(1), 20)));
+    T.finish();
+
+    const stepCall = mocked.mock.calls.find(c => c[0] === 'slow-step');
+    expect(stepCall).toBeDefined();
+    expect(typeof stepCall![3]).toBe('number');
+    expect(stepCall![3]).toBeGreaterThanOrEqual(15); // setTimeout(20) with slack for CI jitter
+
+    // The job-level summary duration is the sum of its steps' ms, not left NULL either.
+    const jobCall = mocked.mock.calls.find(c => c[0] === 'job');
+    expect(typeof jobCall![3]).toBe('number');
+    expect(jobCall![3]).toBeGreaterThanOrEqual(15);
   });
 });

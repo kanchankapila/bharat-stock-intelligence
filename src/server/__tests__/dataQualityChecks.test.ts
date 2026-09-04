@@ -442,6 +442,52 @@ describe('trendlyne-screener-constituent-coverage (hand-rolled: per-screener, ag
   });
 });
 
+describe('bulk-endpoint-fetcher-coverage (hand-rolled: a fresh table is not a delivered feature, AF-20260904-01/02/03)', () => {
+  const byId = (id: string) => DATA_QUALITY_CHECKS.find(c => c.id === id)!;
+  const check = () => byId('bulk-endpoint-fetcher-coverage');
+  const healthyRow = {
+    canon_universe: 2366, fno_universe: 210,
+    bhav_n: 2329, bhav_date: '2026-09-04',
+    preopen_n: 2364, preopen_date: '2026-09-04',
+    opt_n: 160, opt_date: '2026-09-04',
+  };
+
+  it('passes at the live-measured 2026-09-04 baseline for all three tables — must not cry wolf on correct data', () => {
+    expect(check().evaluate(healthyRow, new Date()).status).toBe('pass');
+  });
+
+  it('fails on the exact shape AF-20260904-01 measured: bhavcopy-style table collapses to a sliver of the canonical universe', () => {
+    // mc_pattern_signals' real 2,338 -> 68 collapse, reproduced against nse_universe_history's
+    // shape (not literally that table, which this check deliberately excludes per its own
+    // comment — the point is the mechanism, a bulk response containing only currently-active
+    // rows instead of one row per symbol).
+    const r = check().evaluate({ ...healthyRow, bhav_n: 68 }, new Date());
+    expect(r.status).toBe('fail');
+    expect(r.detail).toContain('nse_universe_history');
+  });
+
+  it('fails on the exact shape this session measured live: preopen stuck at the F&O-only count for a week', () => {
+    const r = check().evaluate({ ...healthyRow, preopen_n: 210 }, new Date());
+    expect(r.status).toBe('fail');
+    expect(r.detail).toContain('preopen_stock_snapshot');
+  });
+
+  it('does not fail so_option_chain at its normal ~72-78% F&O-coverage band', () => {
+    expect(check().evaluate({ ...healthyRow, opt_n: 151 }, new Date()).status).toBe('pass');
+  });
+
+  it('fails so_option_chain on the real 2026-09-01 dip (36/210), but not the normal band', () => {
+    const r = check().evaluate({ ...healthyRow, opt_n: 36 }, new Date());
+    expect(r.status).toBe('fail');
+    expect(r.detail).toContain('so_option_chain');
+  });
+
+  it('fails outright when nse_stocks itself is empty rather than dividing by zero into a false pass', () => {
+    expect(check().evaluate({ ...healthyRow, canon_universe: 0 }, new Date()).status).toBe('fail');
+    expect(check().evaluate(undefined, new Date()).status).toBe('fail');
+  });
+});
+
 describe('generated freshness checks (TABLE_FRESHNESS_CHECKS via makeFreshnessCheck)', () => {
   const now = new Date('2026-08-03T12:00:00Z'); // a Monday
   const byId = (id: string) => DATA_QUALITY_CHECKS.find(c => c.id === id)!;

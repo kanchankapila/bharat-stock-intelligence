@@ -90,7 +90,7 @@ export class StepTracker {
     // Quiet steps deliberately get no per-step heartbeat (see runQuiet's docstring) but DO
     // count toward the failed list and the job-level verdict below.
     for (const r of this.recs) {
-      if (!r.quiet) updateMonitorState(r.name, r.ok ? 'success' : 'failed', r.error);
+      if (!r.quiet) updateMonitorState(r.name, r.ok ? 'success' : 'failed', r.error, r.ms);
     }
 
     const names = failed.map(r => r.name);
@@ -99,10 +99,16 @@ export class StepTracker {
     if (process.env.VITEST !== 'true' && process.env.NODE_ENV !== 'test') {
       console.log(`[QUEUE] ${this.jobName}: ${line}`);
     }
+    // Steps run sequentially (each T.run()/runQuiet() call is awaited before the next), so
+    // summing their own ms is the job-level wall time for the tracked portion -- an
+    // approximation (any untracked gap between steps isn't counted) but far better than the
+    // NULL this row got before 2026-09-04.
+    const totalMs = this.recs.reduce((sum, r) => sum + r.ms, 0);
     updateMonitorState(
       this.jobName,
       failed.length ? 'failed' : 'success',
       failed.length ? `${failed.length} steps failed: ${names.join(',')}` : undefined,
+      totalMs,
     );
     return { ok: failed.length === 0, failedSteps: names };
   }
