@@ -41,6 +41,8 @@ from sqlalchemy import text
 
 from db_compat import get_engine
 from fetch_utils import retry_get, FetchTracker
+from so_chain_source import chain_rows, has_chain
+from as_of import logical_write_floor
 import sys
 
 # Live-measured 2026-08-28 against NiftyTrader's option-chain endpoint (fetch_symbol_niftytrader,
@@ -333,7 +335,16 @@ class PCRFetcher:
         if not records:
             return 0
 
-        today = datetime.date.today().isoformat()
+        # logical_write_floor(), not date.today(): this is recurring-bugs.md's
+        # date.today()-as-a-write-anchor class. Two concrete problems it caused here, both
+        # observed live 2026-09-04 rather than reasoned about -- (1) a post-close run that
+        # crosses midnight IST stamps rows for a session that never happened, and (2) it
+        # disagreed with stock_option_chain_fetcher.py, the OTHER writer of this same table,
+        # which already anchors on logical_write_floor() -- so the same trading session's
+        # option data was being split across two different `date` values (12 rows dated
+        # 2026-09-04 from here, 152 dated 2026-09-03 from there), which every consumer joining
+        # on (symbol, date) then reads as a coverage collapse.
+        today = logical_write_floor(fallback=datetime.date.today().isoformat())
         now   = datetime.datetime.now().isoformat()
         saved = 0
 
@@ -557,14 +568,89 @@ class PCRFetcher:
         else:
             print("[GEX] GEX fetch failed — nothing saved")
 
-    def _fetch_one_paced(self, sym: str, delay: float) -> dict | None:
+    def fetch_symbol_from_so_chain(self, symbol: str) -> dict | None:
+        """Derive the same record shape as fetch_symbol() from `so_option_chain`.
+
+        The staleness/expiry guards and the front-month selection live in so_chain_source so
+        stock_option_chain_fetcher.py shares exactly one copy of them -- see that module's
+        docstring for why this fallback exists and what it measured.
+        """
+        try:
+            got = chain_rows(self.engine, symbol)
+            if not got:
+                return None
+            _as_of, underlying, near = got
+
+            def _i(v):
+                return int(v) if v is not None else 0
+
+            near_call_oi = sum(_i(r["ce_oi"]) for r in near)
+            near_put_oi = sum(_i(r["pe_oi"]) for r in near)
+            near_call_vol = sum(_i(r["ce_volume"]) for r in near)
+            near_put_vol = sum(_i(r["pe_volume"]) for r in near)
+
+            near_strikes = [
+                (float(r["strike"]), float(r["ce_iv"] or 0), float(r["pe_iv"] or 0))
+                for r in near if r["strike"] is not None
+            ]
+            atm_iv, iv_skew = compute_atm_iv_skew(near_strikes, underlying)
+
+            max_pain, best_pain = underlying, float("inf")
+            for sp, _c, _p in near_strikes:
+                pain = 0.0
+                for r in near:
+                    st = float(r["strike"] or 0)
+                    if sp > st:
+                        pain += _i(r["ce_oi"]) * (sp - st)
+                    elif sp < st:
+                        pain += _i(r["pe_oi"]) * (st - sp)
+                if pain < best_pain:
+                    best_pain, max_pain = pain, sp
+
+            # chain_rows() returns the front-month slice only, so near totals ARE the totals
+            # available from this source -- market_pcr therefore equals pcr here, unlike the
+            # NiftyTrader path where a multi-expiry payload makes them differ.
+            return {
+                "symbol":        symbol,
+                "expiry":        near[0]["expiry"],
+                "call_oi":       near_call_oi,
+                "put_oi":        near_put_oi,
+                "pcr":           near_put_oi / near_call_oi if near_call_oi > 0 else None,
+                "pcr_vol":       near_put_vol / near_call_vol if near_call_vol > 0 else None,
+                "total_call_oi": near_call_oi,
+                "total_put_oi":  near_put_oi,
+                "market_pcr":    near_put_oi / near_call_oi if near_call_oi > 0 else None,
+                "atm_iv":        atm_iv,
+                "iv_skew":       iv_skew,
+                "max_pain":      max_pain,
+            }
+        except Exception as e:
+            print(f"[PCR] {symbol}: so_option_chain fallback error - {e}", file=sys.stderr)
+            return None
+
+    def _fetch_one_paced(self, sym: str, delay: float) -> tuple[dict | None, bool]:
+        """Returns (record, covered). `covered` is False only when NO source carries this
+        symbol at all -- distinct from a source carrying it and the fetch failing."""
         rec = self.fetch_symbol_niftytrader(sym)
+        if rec is not None:
+            time.sleep(delay)
+            return rec, True
+        # DB-only fallback: no network call, so the inter-request pacing sleep would buy
+        # nothing. Return straight away rather than idling the worker.
+        fallback = self.fetch_symbol_from_so_chain(sym)
+        if fallback is not None:
+            return fallback, True
         time.sleep(delay)
-        return rec
+        return None, self.so_chain_has(sym)
+
+    def so_chain_has(self, symbol: str) -> bool:
+        """True when a usable chain exists for `symbol`; see so_chain_source.has_chain()."""
+        return has_chain(self.engine, symbol)
 
     def run(self, symbols: list[str], delay: float = 1.5):
         print(f"[PCR] Fetching {len(symbols)} symbols at {datetime.datetime.now()}")
         results = []
+        uncovered: list[str] = []
         tracker = FetchTracker("pcr_fetcher")
 
         # Parallel fetch (network only) -- tracker.record()/results.append() stay on the main
@@ -579,9 +665,14 @@ class PCRFetcher:
             for fut in as_completed(futures):
                 sym = futures[fut]
                 done += 1
-                rec = fut.result()
+                rec, covered = fut.result()
                 print(f"[PCR] ({done}/{len(symbols)}) {sym}...")
-                tracker.record(sym, ok=rec is not None)
+                if rec is None and not covered:
+                    # Not a fetch failure: no surviving source carries this symbol at all.
+                    # Recorded and printed below, never silently dropped -- see so_chain_has().
+                    uncovered.append(sym)
+                else:
+                    tracker.record(sym, ok=rec is not None)
                 if rec:
                     results.append(rec)
                     pcr_str = f"{rec['pcr']:.3f}" if rec['pcr'] is not None else "N/A"
@@ -589,6 +680,10 @@ class PCRFetcher:
 
         saved = self.save(results)
         print(f"\n[PCR] Done. Saved {saved}/{len(symbols)} symbols to stock_options_oi.")
+        if uncovered:
+            print(f"[PCR] {len(uncovered)}/{len(symbols)} symbol(s) have no chain in ANY "
+                  f"surviving source and are NOT counted as fetch failures: "
+                  f"{', '.join(sorted(uncovered))}", file=sys.stderr)
         tracker.finish()  # exits non-zero if the failure rate crosses threshold
 
         if results:

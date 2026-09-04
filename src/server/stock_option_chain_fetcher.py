@@ -237,6 +237,9 @@ def fetch_chain(session: requests.Session, symbol: str, expiry: str | None = Non
     return data["resultData"]
 
 
+from so_chain_source import chain_rows, has_chain, as_niftytrader_payload
+
+
 def _f(row, *keys):
     """Normalise field names — NiftyTrader uses snake_case keys, occasionally CE_/PE_-prefixed."""
     for k in keys:
@@ -506,6 +509,7 @@ def main():
     session.headers.update(HEADERS)
 
     successes = 0
+    uncovered: list[str] = []
     failures  = 0
     move_pcts = []
     done = 0
@@ -513,7 +517,15 @@ def main():
     def _fetch_one(symbol):
         result_data = fetch_chain(session, symbol)
         if result_data is None:
-            return symbol, None
+            # Both vendor APIs for this data went dead 2026-09-04 (see so_chain_source's
+            # docstring for the measurements). Re-shape our own already-fetched SmartOptions
+            # chain into the payload compute_features() already understands, rather than
+            # writing a second copy of the feature maths against a different schema.
+            got = chain_rows(engine, symbol)
+            if got is None:
+                return symbol, None
+            _as_of, spot, rows = got
+            result_data = as_niftytrader_payload(spot, rows)
         row = compute_features(result_data, symbol)
         if row is None:
             return symbol, None
@@ -537,8 +549,15 @@ def main():
                 symbol, row = fut.result()
                 done += 1
                 if row is None:
-                    print(f"[StockOptionChain] {done}/{len(symbols)} {symbol}: no data or empty chain")
-                    failures += 1
+                    # A symbol no surviving source carries is a coverage fact, not a fetch
+                    # failure -- see so_chain_source.has_chain()'s docstring. Counting it as a
+                    # failure would make this step red every night for as long as the vendors
+                    # stay down, which is a monitor that carries no information.
+                    if has_chain(engine, symbol):
+                        print(f"[StockOptionChain] {done}/{len(symbols)} {symbol}: no data or empty chain")
+                        failures += 1
+                    else:
+                        uncovered.append(symbol)
                     continue
                 try:
                     upsert_features(engine, row, today)
@@ -569,6 +588,25 @@ def main():
         f"[StockOptionChain] Done. {successes}/{len(symbols)} stocks processed. "
         f"Expected move avg: {avg_move:.1f}%"
     )
+    if uncovered:
+        print(f"[StockOptionChain] {len(uncovered)}/{len(symbols)} symbol(s) have no chain in "
+              f"ANY surviving source and are NOT counted as fetch failures.", file=sys.stderr)
+
+    # Exit non-zero when the run wrote nothing. Without this the script printed
+    # "Done. 0/214 stocks processed" and exited 0, so ml-daily-ops' stock_option_chain_fetcher
+    # step reported SUCCESS through a total outage -- stock_options_oi silently stopped
+    # updating after 2026-09-02 and only the data-quality check noticed. This is
+    # recurring-bugs.md's "success heartbeat on a step that wrote nothing" class.
+    attempted = successes + failures
+    if attempted and successes == 0:
+        print(f"[StockOptionChain] FAILED: 0/{attempted} attempted symbols produced a row - "
+              f"exiting non-zero so this run is flagged instead of reported as success.",
+              file=sys.stderr)
+        sys.exit(1)
+    if attempted >= 10 and failures / attempted > 0.15:
+        print(f"[StockOptionChain] FAILED: {failures}/{attempted} attempted symbols failed "
+              f"({failures / attempted:.0%} > 15%) - exiting non-zero.", file=sys.stderr)
+        sys.exit(1)
 
 
 if __name__ == "__main__":
