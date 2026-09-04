@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { addJobWithCatchup } from '../jobs/registerJob';
 
 /**
@@ -38,7 +38,8 @@ function makeQueue(opts: {
     if (states.length === 1 && states[0] === 'failed') return failedHistory;
     return inFlight.filter(j => states.includes(j.state ?? 'delayed'));
   });
-  return { name: 'test-queue', add, removeRepeatableByKey, getRepeatableJobs, getJobs } as any;
+  const drain = vi.fn().mockResolvedValue(undefined);
+  return { name: 'test-queue', add, removeRepeatableByKey, getRepeatableJobs, getJobs, drain } as any;
 }
 
 describe('addJobWithCatchup', () => {
@@ -167,5 +168,83 @@ describe('addJobWithCatchup', () => {
     });
     expect(queue.add).toHaveBeenCalledTimes(2);
     expect(queue.add.mock.calls[1][1]).toMatchObject({ isCatchup: true });
+  });
+});
+
+/**
+ * SCHEDULER_PAUSED is the switch used to take the whole platform off its schedule for a
+ * controlled one-job-at-a-time validation sweep, without stopping bharat-server (workers must
+ * stay alive so each job can still be enqueued by hand).
+ *
+ * The gate has to sit AFTER the stale-repeatable removal loop and BEFORE queue.add(): clearing
+ * the repeatable is what actually stops the cron firing, and skipping the add is what stops it
+ * being re-registered. Suppressing the catch-up is the point, not a side effect -- a paused
+ * window looks exactly like a long outage to the missed-schedule detector, so resuming without
+ * this gate would queue one catch-up per paused job at once, which is the duplicate-catch-up
+ * storm recorded on 2026-08-30.
+ */
+describe('addJobWithCatchup under SCHEDULER_PAUSED', () => {
+  beforeEach(() => { vi.clearAllMocks(); delete process.env.SCHEDULER_PAUSED; });
+  afterEach(() => { delete process.env.SCHEDULER_PAUSED; });
+
+  it('registers neither the repeatable nor a catchup when SCHEDULER_PAUSED=1', async () => {
+    process.env.SCHEDULER_PAUSED = '1';
+    const queue = makeQueue({ staleRepeatable: true, inFlight: [] });
+    await addJobWithCatchup(queue, 'test-job', {}, {
+      repeat: { pattern: '0 0 * * *' },
+      jobId: 'test-job-id',
+    });
+    expect(queue.add).not.toHaveBeenCalled();
+  });
+
+  it('still clears an existing repeatable when SCHEDULER_PAUSED=1, so the cron cannot fire', async () => {
+    process.env.SCHEDULER_PAUSED = '1';
+    const queue = makeQueue({ staleRepeatable: true, inFlight: [] });
+    await addJobWithCatchup(queue, 'test-job', {}, {
+      repeat: { pattern: '0 0 * * *' },
+      jobId: 'test-job-id',
+    });
+    expect(queue.removeRepeatableByKey).toHaveBeenCalledWith('key-1');
+  });
+
+  it('schedules normally when SCHEDULER_PAUSED is unset', async () => {
+    const queue = makeQueue({ staleRepeatable: false, inFlight: [] });
+    await addJobWithCatchup(queue, 'test-job', {}, {
+      repeat: { pattern: '0 0 * * *' },
+      jobId: 'test-job-id',
+    });
+    expect(queue.add).toHaveBeenCalled();
+  });
+});
+
+/**
+ * Live gap found 2026-09-05: clearing the repeatable registration does NOT remove the delayed
+ * "next occurrence" placeholder BullMQ had already materialised for it. With the repeatables
+ * gone but 10 delayed jobs still sitting in Redis across 8 queues, two of them
+ * (trendlyne-checklist-cycle, gdelt-sentiment) were still due to fire inside the paused window
+ * -- i.e. the pause silently did not hold. Draining waiting+delayed is what makes
+ * SCHEDULER_PAUSED mean what it says.
+ */
+describe('SCHEDULER_PAUSED drains already-materialised delayed jobs', () => {
+  beforeEach(() => { vi.clearAllMocks(); delete process.env.SCHEDULER_PAUSED; });
+  afterEach(() => { delete process.env.SCHEDULER_PAUSED; });
+
+  it('drains waiting and delayed jobs when SCHEDULER_PAUSED=1', async () => {
+    process.env.SCHEDULER_PAUSED = '1';
+    const queue = makeQueue({ staleRepeatable: true, inFlight: [] });
+    await addJobWithCatchup(queue, 'test-job', {}, {
+      repeat: { pattern: '0 0 * * *' },
+      jobId: 'test-job-id',
+    });
+    expect(queue.drain).toHaveBeenCalledWith(true);
+  });
+
+  it('does NOT drain when SCHEDULER_PAUSED is unset', async () => {
+    const queue = makeQueue({ staleRepeatable: false, inFlight: [] });
+    await addJobWithCatchup(queue, 'test-job', {}, {
+      repeat: { pattern: '0 0 * * *' },
+      jobId: 'test-job-id',
+    });
+    expect(queue.drain).not.toHaveBeenCalled();
   });
 });

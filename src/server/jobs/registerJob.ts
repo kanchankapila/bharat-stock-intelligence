@@ -55,6 +55,28 @@ export async function addJobWithCatchup(
     }
   }
 
+  // SCHEDULER_PAUSED takes the whole platform off its schedule for a controlled
+  // one-job-at-a-time validation sweep, while leaving bharat-server (and therefore every
+  // Worker) running so each job can still be enqueued by hand. It sits here, after the
+  // removal loop and before the add, deliberately: clearing the repeatable is what stops the
+  // cron firing, skipping the add is what stops it being re-registered, and returning before
+  // the missed-schedule detector below is what stops the resume from queueing one catch-up per
+  // paused job at once -- a paused window is indistinguishable from a long outage to that
+  // detector, which is the duplicate-catch-up storm recorded 2026-08-30.
+  if (process.env.SCHEDULER_PAUSED === '1') {
+    // Removing the repeatable registration does NOT remove the delayed "next occurrence"
+    // placeholder BullMQ already materialised from it. Found live 2026-09-05: repeatables
+    // cleared, yet 10 delayed jobs remained across 8 queues and two were still due to fire
+    // inside the paused window -- the pause did not actually hold. drain(true) covers
+    // waiting + delayed; active is deliberately left alone so an in-flight job finishes.
+    await queue.drain(true);
+    // queue.name is included so the paused-boot log doubles as the authoritative
+    // queue -> jobName map the sweep runner needs; parsing queues.ts for it statically would
+    // drift the moment a registration moves.
+    console.log(`[QUEUE] SCHEDULER_PAUSED=1 queue=${queue.name} job=${jobName} left unscheduled (repeatable cleared, queue drained, no catch-up queued)`);
+    return;
+  }
+
   await queue.add(jobName, data, opts);
 
   if (!opts.repeat || (!opts.repeat.pattern && !opts.repeat.every && !opts.repeat.cron)) {
