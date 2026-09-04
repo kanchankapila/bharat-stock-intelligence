@@ -67,25 +67,35 @@ def ensure_preopen_stock_schema(con) -> None:
     cur = con.cursor()
     cur.execute(translate("""
         CREATE TABLE IF NOT EXISTS preopen_stock_snapshot (
-            symbol            TEXT NOT NULL,
-            snapshot_date     TEXT NOT NULL,
-            iep               REAL,
-            prev_close        REAL,
-            iep_gap_pct       REAL,
-            total_buy_qty     REAL,
-            total_sell_qty    REAL,
-            preopen_imbalance REAL,
-            last_price        REAL,
-            fetched_at        TEXT DEFAULT CURRENT_TIMESTAMP,
+            symbol              TEXT NOT NULL,
+            snapshot_date       TEXT NOT NULL,
+            iep                 REAL,
+            prev_close          REAL,
+            iep_gap_pct         REAL,
+            total_buy_qty       REAL,
+            total_sell_qty      REAL,
+            preopen_imbalance   REAL,
+            last_price          REAL,
+            total_traded_volume REAL,
+            fetched_at          TEXT DEFAULT CURRENT_TIMESTAMP,
             PRIMARY KEY (symbol, snapshot_date)
         )
     """))
     con.commit()
 
-    # Add IEP columns to technical_signals (skip if already present)
+    # Add IEP/volume columns to preopen_stock_snapshot + technical_signals (skip if already
+    # present -- this table has been live since before total_traded_volume existed, so
+    # existing installs need the ALTER even though a fresh CREATE TABLE above already has it).
+    # total_traded_volume added 2026-09-04: NSE's pre-open response already carries the actual
+    # MATCHED quantity at the call-auction clearing price (totalTradedVolume/finalQuantity) --
+    # distinct from total_buy_qty/total_sell_qty above, which are UNMATCHED order-book depth
+    # used for the imbalance signal. This is real pre-market traded volume that was sitting
+    # unused in a response this fetcher already makes; no new request needed.
     for ddl in [
+        "ALTER TABLE preopen_stock_snapshot ADD COLUMN IF NOT EXISTS total_traded_volume REAL",
         "ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS iep_gap_pct       REAL",
         "ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS preopen_imbalance REAL",
+        "ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS preopen_volume    REAL",
     ]:
         try:
             cur.execute(ddl)
@@ -244,6 +254,11 @@ def fetch_nse_preopen(con) -> int:
         last_price = _parse_float(meta.get("lastPrice") or meta.get("ltp"))
         buy_qty    = _parse_float(preopen_mkt.get("totalBuyQuantity") or meta.get("totalBuyQuantity") or meta.get("buyQuantity"))
         sell_qty   = _parse_float(preopen_mkt.get("totalSellQuantity") or meta.get("totalSellQuantity") or meta.get("sellQuantity"))
+        # Actual MATCHED quantity at the call-auction clearing price -- not the same thing as
+        # buy_qty/sell_qty above, which are unmatched order-book depth. finalQuantity is the
+        # fallback name the same field carries when totalTradedVolume is absent from a given
+        # response shape; both were confirmed live 2026-09-04 to hold the identical value.
+        traded_vol = _parse_float(preopen_mkt.get("totalTradedVolume") or preopen_mkt.get("finalQuantity"))
 
         iep_gap_pct = None
         if iep is not None and prev_close and prev_close != 0:
@@ -259,7 +274,7 @@ def fetch_nse_preopen(con) -> int:
             sym, snapshot_date,
             iep, prev_close, iep_gap_pct,
             buy_qty, sell_qty, preopen_imbalance,
-            last_price, fetched_at,
+            last_price, traded_vol, fetched_at,
         ))
 
     cur = con.cursor()
@@ -268,45 +283,50 @@ def fetch_nse_preopen(con) -> int:
     upsert_sql = translate("""
         INSERT INTO preopen_stock_snapshot
             (symbol, snapshot_date, iep, prev_close, iep_gap_pct,
-             total_buy_qty, total_sell_qty, preopen_imbalance, last_price, fetched_at)
-        VALUES (?,?,?,?,?,?,?,?,?,?)
+             total_buy_qty, total_sell_qty, preopen_imbalance, last_price,
+             total_traded_volume, fetched_at)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?)
         ON CONFLICT(symbol, snapshot_date) DO UPDATE SET
-            iep               = excluded.iep,
-            prev_close        = excluded.prev_close,
-            iep_gap_pct       = excluded.iep_gap_pct,
-            total_buy_qty     = excluded.total_buy_qty,
-            total_sell_qty    = excluded.total_sell_qty,
-            preopen_imbalance = excluded.preopen_imbalance,
-            last_price        = excluded.last_price,
-            fetched_at        = excluded.fetched_at
+            iep                  = excluded.iep,
+            prev_close           = excluded.prev_close,
+            iep_gap_pct          = excluded.iep_gap_pct,
+            total_buy_qty        = excluded.total_buy_qty,
+            total_sell_qty       = excluded.total_sell_qty,
+            preopen_imbalance    = excluded.preopen_imbalance,
+            last_price           = excluded.last_price,
+            total_traded_volume  = excluded.total_traded_volume,
+            fetched_at           = excluded.fetched_at
     """)
     cur.executemany(upsert_sql, rows)
     con.commit()
 
     # Backfill today's technical_signals row per symbol
     sig_updates = [
-        (iep_gap_pct, preopen_imbalance, sym, sd)
-        for (sym, sd, _iep, _pc, iep_gap_pct, _bq, _sq, preopen_imbalance, _lp, _fa) in rows
-        if iep_gap_pct is not None or preopen_imbalance is not None
+        (iep_gap_pct, preopen_imbalance, traded_vol, sym, sd)
+        for (sym, sd, _iep, _pc, iep_gap_pct, _bq, _sq, preopen_imbalance, _lp, traded_vol, _fa)
+        in rows
+        if iep_gap_pct is not None or preopen_imbalance is not None or traded_vol is not None
     ]
     if sig_updates:
         update_sql = """
             UPDATE technical_signals
-            SET iep_gap_pct = ?, preopen_imbalance = ?
+            SET iep_gap_pct = ?, preopen_imbalance = ?, preopen_volume = ?
             WHERE symbol = ? AND date = ?
         """
         cur.executemany(update_sql, sig_updates)
         con.commit()
 
     # Summary
-    gap_ups   = sum(1 for r in rows if r[4] is not None and r[4] > 1.0)
-    gap_downs = sum(1 for r in rows if r[4] is not None and r[4] < -1.0)
-    buy_heavy = sum(1 for r in rows if r[7] is not None and r[7] > 0.3)
-    sell_heavy= sum(1 for r in rows if r[7] is not None and r[7] < -0.3)
+    gap_ups    = sum(1 for r in rows if r[4] is not None and r[4] > 1.0)
+    gap_downs  = sum(1 for r in rows if r[4] is not None and r[4] < -1.0)
+    buy_heavy  = sum(1 for r in rows if r[7] is not None and r[7] > 0.3)
+    sell_heavy = sum(1 for r in rows if r[7] is not None and r[7] < -0.3)
+    with_vol   = sum(1 for r in rows if r[9] is not None)
     print(
         f"[NSE PreOpen] {len(rows)} stocks | "
         f"Gap-up >1%: {gap_ups} | Gap-down <-1%: {gap_downs} | "
-        f"Buy-heavy (>0.3): {buy_heavy} | Sell-heavy (<-0.3): {sell_heavy}"
+        f"Buy-heavy (>0.3): {buy_heavy} | Sell-heavy (<-0.3): {sell_heavy} | "
+        f"With traded volume: {with_vol}"
     )
     return len(rows)
 
