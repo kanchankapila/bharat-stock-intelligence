@@ -66,10 +66,19 @@ async function snapshot(chunkParent: Record<string, string>): Promise<Snapshot> 
   // pg_stat only flushes a backend's counters at commit or on a timer, so a job that has just
   // finished may not be fully reflected yet. Ask for a flush of our own view first.
   await pool.query(`SELECT pg_stat_force_next_flush()`).catch(() => {});
+  // Measure APPLICATION data only. 'public' holds the real tables and '_timescaledb_internal'
+  // holds the _hyper_N_M_chunk relations that hypertable writes actually land on (rolled up to
+  // their parents below). '_timescaledb_catalog' is deliberately EXCLUDED: it is TimescaleDB's
+  // own bookkeeping (chunk, chunk_index, chunk_constraint, compression_settings...), and a
+  // compression policy dropping and recreating chunks mid-run resets those relations' stats,
+  // producing a negative delta that tripped hasCounterReset() and voided an otherwise perfectly
+  // good measurement -- seen live 2026-09-05 on sync-fundamentals-weekly, which had written
+  // 96,806 rows in 398s. Housekeeping churn is not job output and must not decide the verdict.
   const { rows } = await pool.query(
     `SELECT relname, n_tup_ins, n_tup_upd, n_tup_del
        FROM pg_stat_user_tables
-      WHERE n_tup_ins + n_tup_upd + n_tup_del > 0`,
+      WHERE schemaname IN ('public', '_timescaledb_internal')
+        AND n_tup_ins + n_tup_upd + n_tup_del > 0`,
   );
   return rollupChunks(rows as any, chunkParent);
 }
