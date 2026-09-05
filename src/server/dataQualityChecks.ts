@@ -227,8 +227,17 @@ const TABLE_FRESHNESS_CHECKS: TableFreshnessConfig[] = [
   // engine_composite.py's equal-weight blend of the 6 raw engines. Research-only (measured
   // "no edge" -- real IC, AUC short of 0.55), but it must keep accumulating or it can never be
   // re-graded, and a silently-dead producer would look identical to one that is simply flat.
+  // Thresholds are the PRODUCER's cadence, not a house default. engine_composite.py runs inside
+  // processMlWeeklyRetrain -- WEEKLY, Saturdays -- and backfills the whole preceding week, so
+  // max(date) legitimately reaches 7-8 days old just before each run. The previous warn 3 / fail
+  // 5 was copied from the daily-cadence sibling below and therefore FAILED on days 5-7 of every
+  // single week, by construction, whether or not anything was wrong: measured 2026-09-05, this
+  // check read 'fail' at 8 days old while ml-weekly-retrain had run normally on 2026-08-29 and
+  // was not yet due again. A monitor whose verdict is decided by the calendar rather than by the
+  // data carries no information (see ml-model-bugs.md's drift_detector entry). Warn at 10 = one
+  // missed weekly run; fail at 14 = two.
   { id: 'engine-composite-freshness', label: 'engine_composite_scores (equal-weight raw-engine composite, research)',
-    category: 'ml', critical: false, table: 'engine_composite_scores', dateColumn: 'date', warnDays: 3, failDays: 5 },
+    category: 'ml', critical: false, table: 'engine_composite_scores', dateColumn: 'date', warnDays: 10, failDays: 14 },
   // exit_labeler.py's path-based MFE/MAE/tb_label excursions -- the entire training input for
   // exit_policy.py (target/stop regressors) and the triple_barrier label ml_ensemble.py trains
   // on. Had NO freshness check at all (found 2026-08-30 investigating why exit_policy.py's
