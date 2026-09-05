@@ -28,6 +28,25 @@ Currently automated (9 checks): `date.today()` write-anchor, short calendar-day 
 | `ORDER BY col DESC` with possible NaN | Postgres sorts NaN **highest** — NaN rows rank #1. Wrap in `NULLIF(col, 'NaN'::float8)`. |
 | Fixing NaN at the source | Does **not** clean rows the bug already wrote. `run()` purges only the `computed_at` it is currently writing; poisoned historical rows survive a source fix for weeks. |
 
+- **`pd.DataFrame(rows_of_dicts)` converts Python `None` to `NaN` in any column that also holds
+  a real float — so an `if x is None` guard downstream can never fire, and the NaN then reaches
+  the database.** Found 2026-09-05 in `analyst_revision.py`: `compute_revisions()` correctly
+  emitted `None` for a missing metric, `write_revisions()` correctly checked `is None` before
+  writing, and the check was dead code because the value was `NaN` by the time it was read. The
+  failure surfaced two layers away as `psycopg2.errors.NumericValueOutOfRange: bigint out of
+  range` — because `technical_signals.analyst_count_chg` is `bigint` and Postgres cannot cast NaN
+  to an integer type. That error reads like an overflow and sends you hunting for a huge number
+  that does not exist.
+  **Two things make this class nasty:** (1) it only appears when the column has a MIX of floats
+  and Nones — a column of all-`None` stays `object` dtype and keeps its Nones, so a naive test
+  fixture passes against unfixed code and proves nothing (this happened here on the first
+  attempt, and the suite caught it); (2) the module already had NaN-safe `_float`/`_int` helpers
+  and already used them on the INPUT side, so a reviewer greps, sees the helpers, and moves on.
+  **Tell:** any `pd.DataFrame(...)` built from dicts that may contain `None`, whose values are
+  later tested with `is None` or passed to `executemany`. Coerce at the DB boundary with an
+  explicit `math.isfinite` check, and write NULL — never 0.0, which fabricates a real-looking
+  reading (see the sentinel-instead-of-NULL entry above).
+
 ## SQL dialect (`db_compat` / `sqlTranslate`)
 
 | Signature | Why it breaks |

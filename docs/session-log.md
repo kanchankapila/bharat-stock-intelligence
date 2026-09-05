@@ -7893,3 +7893,131 @@ technique (temporary source edit + revert) for the rest of the session.
 suite) 2400 passed / 249 skipped / 0 failed (50m11s); `schema:regen`+`schema:drift` clean
 (226=226). All fixes live-verified against production (direct script runs, not just unit tests).
 Committed `3db5e144`; `bharat-server` restarted, confirmed online with no new errors.
+
+## 2026-09-05 (part 2) — dead datasources that weren't, and the real cause of the alert flood
+
+Continuation of the controlled job-validation sweep. The user's standing asks this half: fix the
+pm2 warns/errors permanently, explore alternate datasources, confirm jobs are wired and writing,
+and explain why Telegram keeps reporting delays and misses.
+
+### The headline: NiftyTrader was never dead, it had MOVED (AF-20260905-16)
+
+Every NiftyTrader call in the repo (27 files) pointed at `webapi.niftytrader.in`, which answers
+HTTP 200 with `Unauthorized`. That was verified dead three independent ways — plain `requests`,
+full browser headers, and `curl_cffi` Chrome TLS/JA3 impersonation — plus checks that the site
+issues **no cookies at all**, that the API host sends no `Set-Cookie`, and that unknown routes
+return a *distinct* `Url not found` (so the route existed and was gated). Every measurement was
+correct. The conclusion drawn from them — "no client-side change can fix this" — was also
+correct, and completely useless.
+
+The user pasted a captured browser `fetch(...)`. The vendor had moved the API to
+`www.niftytrader.in/api/niftytrader/*`. Probed route-by-route on both hosts BEFORE editing
+anything: **6 routes came back** (`option/option-chain-data`, `Symbol/other-stock-spot-data`,
+`symbol/psymbol-list`, `symbol/stock-index-data`, `symbol/today-spot-data`,
+`symbol/top-gainers-data`), 8 already worked on both, and 3 that looked dead on both turned out
+to be POST endpoints my GET probe was calling wrongly. Minimum requirement measured too:
+**nothing** — no token, no cookie, not even a User-Agent — so this is a plain base-URL change
+with no credential to store or rotate. The user's session JWT was deliberately not used.
+
+Live before/after: `nt_vix_fetcher` logged `Unauthorized` at 12:33 and now writes INDIAVIX
+close=10.68 (194 ticks) and GIFTNIFTY 23999.5 (289 ticks); `pcr_fetcher` went **12/20 to 20/20,
+0 failed**, permanently removing the warn line the user pasted.
+
+**This is now a standing rule** in `data-sources.md` and in memory: when a source stops returning
+data, ASK — and ask specifically for a captured browser fetch. "I have proven this endpoint
+cannot be made to work" is not "this data is unobtainable."
+
+### Option-chain coverage: 34 F&O names had zero rows for 30 days (AF-20260905-17/18/19)
+
+`so_option_chain` was silently missing TCS, TITAN, TATASTEEL, TRENT, VEDL, WIPRO and 28 others
+while the job exited 0 daily. Two hypotheses were measured and **both were wrong**: not the
+30-minute timeout (a full 210-symbol pass costs **115 seconds**), not a missing expiry lookup
+(all 8 uncovered names have correct `nt_fno_expiry` rows). The real cause is Trendlyne's
+cumulative **request allowance** — the timed pass succeeded ~160 requests then failed 41 of the
+last 50 in a block — combined with `ORDER BY symbol`, so every run restarted at 360ONE and died
+at the same alphabetical point forever. Proven conclusively: a second full pass immediately after
+the probe returned `ok=0 fail=210`, the budget genuinely spent.
+
+Fixed by rotation (`resume_order`, least-recently-covered first), not pacing — pacing cannot help
+against a count and parallelism spends it faster. The coverage guard is **cumulative**, not
+per-run: a per-run floor would fire on every run, since a healthy rotated pass and a starved
+alphabetical one both cover ~76%. The first draft *was* such a floor and was caught before
+shipping.
+
+Two more findings fell out of the same investigation:
+- `_nearest_thursday()` returned a date **nothing expires on**. Live `nt_fno_expiry` shows every
+  expiry is a TUESDAY, and the weekly Tuesdays carry exactly one symbol (the index) against 216
+  on month-end ones — equity F&O is monthly-only. The repo's own live_datasource test had said so
+  in prose and nothing ever acted on it. Fixed in both languages.
+- **NSE's own option chain is not dead either.** `so_chain_source.py` records it as "200 with a
+  literal empty `{}`" — true only WITHOUT an `expiry` parameter. With one, `option-chain-v3`
+  returns 97KB and 47 strikes, for every previously-starved name. Added as a third source
+  (`nse_option_chain_source.py`), a coverage fallback rather than a replacement since NSE
+  publishes no Greeks — written NULL, never 0.0. Cross-validated: NSE-derived TCS max-pain 2340.0
+  exactly matches NiftyTrader's independently-computed 2340.
+
+### Why Telegram keeps reporting delays and misses (AF-20260905-23)
+
+Two causes, and the first was mine.
+
+1. **`SCHEDULER_PAUSED=1` was still live in `bharat-server`** from this session's own sweep, so
+   every scheduled job had been unscheduled since ~02:00. Today's alerts were the pause. Resumed
+   17:10 — all 65 jobs re-registered, catch-ups staggered 5 to 100 min, no storm (the pause path
+   deliberately returns before the missed-schedule detector, which is what prevents one).
+
+2. **Structurally, the flood has ONE cause, not many.** `ml-daily-ops` is a ~20-step sequential
+   job that was failing 49% of the time (108 runs / 53 fails). When it dies partway, every step
+   after the failure point never records a heartbeat, and each then reports STALE independently,
+   hourly, forever. Of the 8 real repeat offenders in the logs, 5 are `ml-daily-ops` steps. After
+   today's budget and NaN fixes the forced run completed **19 ok / 1 failed**, and
+   `event-triggers`, `breakout-classifier-train` and `movement-predictor-train` all show
+   last_success 2.6h ago — they were never broken, they were never reached.
+
+Two things confirmed NOT defects, so nobody re-investigates them: `ai-signals` (28 days idle) is
+genuinely event-driven with no `cronPattern` and the cron-aware checker correctly ignores it; the
+192 `ECONNREFUSED :5433` lines were a single contained event on 2026-08-31.
+
+### The one failure in the forced run: NaN into a bigint column (AF-20260905-20)
+
+`analyst_revision` died on `bigint out of range` — which reads like an overflow but is Postgres
+refusing to cast **NaN** to `analyst_count_chg`'s `bigint`. New recurring-bug class, now written
+up: **`pd.DataFrame(rows_of_dicts)` converts `None` to `NaN`** in any column that also holds a
+real float, so the script's own `if x is None` skip guard was dead code. Its NaN-safe helpers
+existed and were used on the input side only.
+
+This mattered more than a normal crash: `measurement.md` predicted the analyst-revision trio
+would unblock ~2026-09-05, and it did, exactly. 1,052 symbols now have a qualifying 90-day prior
+snapshot — and this bug was throwing all of it away. Live-verified after the fix: 280 NaN eps + 1
+NaN count now write as NULL, every count is a real int, and 1,036 of 1,052 match real rows on a
+trading day. First real rows land Monday.
+
+A test fixture was wrong on the first attempt and the suite caught it: a column of all-`None`
+stays `object` dtype and keeps its Nones, so it would have passed against unfixed code.
+
+### Also fixed
+
+- **Telegram markdown (AF-20260905-21)** — `19 ok, 1 failed: analyst_revision`: one underscore
+  opens an italic run that never closes, so Telegram 400s. Every step/table/script name here is
+  snake_case, so delivery was a coin flip on parity. The plain-text retry meant nothing was ever
+  lost, which is exactly why it went unfixed — the cost was a permanent error-level line nobody
+  could act on. Escapes only on an ODD count, so deliberate `*bold*` survives.
+- **Sweep harness (AF-20260905-22)** — its 4th false verdict: it credited `ohlcv-gap-fill` with
+  282,823 rows written by a concurrent `ml-daily-ops`, because the job was enqueued onto a queue
+  name with no worker and sat in `waiting` for the whole budget. Status is now a pure tested
+  function with `never_started`, plus pre-flight refusal on a workerless queue and on concurrent
+  activity (`--allow-concurrent` stamps CONTAMINATED onto the row).
+
+### Gates
+
+tsc clean; vitest **1206 passed** (from 1184); pytest **2430 passed / 249 skipped, 0 failed**
+(from 2404). Graphify refreshed to HEAD (17,998 nodes / 29,307 edges).
+
+### Still open
+
+- Monday 2026-09-08 top-up for the ~20 market-hours-gated jobs (AF-20260905-12), now including
+  first-ever verification of the analyst trio actually landing.
+- `GEMINI_API_KEY` is empty and blocks `company-profiles-sync` (AF-20260905-03) — needs the user.
+- `confluence-signals-freshness` re-check on the first normal weekend post-resume (AF-20260905-09).
+- Greenfield containers still stopped; `gf-*` jobs unswept.
+- `dl-feature-refresh` / `reconcile-stock-ohlcv` ordering, blocked on the bhavcopy cutover
+  (AF-20260905-15).

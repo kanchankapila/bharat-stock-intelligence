@@ -47,9 +47,17 @@ pending" below for what each of these means and what's still needed.
   `movement_probability` post-fix: ~11 dates (was 7 on 2026-08-29, floor ~20 — the exact count
   depends on which join you use, re-derive rather than trust this to the date); `stock_futures_oi_
   history` OI/basis/rollover columns: 9 dates (was ~3 on 2026-08-27, floor ~20).
-- **The analyst-revision trio (`eps_revision_3m_pct`/`target_revision_3m_pct`/`analyst_count_chg`)
-  is still 0 rows.** This file's own prediction was "unblocks ~2026-09-05" — that's tomorrow, not
-  yet reached. Don't read the still-zero count as the prediction being wrong.
+- **The analyst-revision trio UNBLOCKED ON SCHEDULE, 2026-09-05 — and a bug was destroying the
+  data on arrival.** This file predicted "unblocks ~2026-09-05" and that was exactly right: 1,052
+  symbols now have a qualifying 90-day prior snapshot (`analyst_estimates_history` spans
+  2026-06-21 to 2026-09-05, and the lookback window's lower edge only just reaches it). But
+  `analyst_revision.py` crashed on every run with `bigint out of range` — pandas converts the
+  script's `None`s to `NaN` in a float64 column, defeating its own skip guard, and
+  `technical_signals.analyst_count_chg` is `bigint`, which cannot take a NaN. Fixed and
+  live-verified 2026-09-05 (AF-20260905-20): 280 NaN eps + 1 NaN count now write as NULL, and
+  1,036 of 1,052 rows match real `technical_signals` rows on a trading day.
+  **Still ungraded** — the first real rows land Monday 2026-09-08, and ~20 dates are needed
+  before `factor_edge.py` can say anything. Do not grade this before ~2026-10.
 
 ## Accuracy comes from realized returns, never a proxy
 
@@ -86,7 +94,7 @@ Any cross-sectional forward-return measurement on this data:
 - **`_blend` normalizes all 8 engines onto the same 0–100 scale before averaging** (fixed 2026-08-22). `ZERO_DISPERSION_MIN_SD = 5.0` is calibrated for this 0–100 scale only — applying it to a raw 0–1 probability column (e.g. `win_probability`) will read nearly every engine as collapsed; this has already produced one confidently-wrong ablation result.
 - **`calibrated_win_probability`'s 2–7 distinct-value collapse on days when the day's raw `win_probability` spread lands inside one isotonic step is NOT a defect — do not "fix" it.** Tested directly: tie-breaking within a collapsed band to restore raw ordering costs 23% of h=5 IC for +0.007 at h=21 — the collapse is the isotonic fit correctly discarding within-band ordering that doesn't predict at 5d. Monitored by `ur-engine-dispersion-collapse` (warns 60%/fails 80%) and `ur-engine-score-zero-not-null`. **Last read 2026-08-29**: `ml`'s collapse rate over the last 10 ranker dates was 80%, and `dq:check` reported WARN not FAIL. **Resolved 2026-09-05 — there was no discrepancy to chase:** the 80% "documented fail threshold" came from a STALE COMMENT in `dataQualityChecks.ts` (it claimed warn 60 / fail 80); `evaluate()` has always used **warn >= 75%, fail >= 90%**, so WARN at 80% was correct behaviour. The comment has been corrected; the code was deliberately left alone, since this same file establishes that `ml`'s collapse is the isotonic fit working as intended and must not be "fixed". Re-verified live 2026-09-05: still ml 80% / dl 0% / technical 0%, still WARN.
 - **Two population boundaries apply to `unified_recommendations`' reporting `*_score` columns and must be filtered on, never pooled across:** `2026-08-18` (zero-vs-NULL fix — before this date a `0.0` in `ml_score`/`dl_score`/etc. could mean either "engine scored zero" or "engine never ran," pre-fix rows must NOT be repaired/backfilled); `2026-08-23` (trading-day calendar-cutoff fixes — before this date `dl_score` was silently zero on ~5 of 8 Mondays).
-- **7 `technical_signals` columns have never been written, and none is a bug** — `fcf_yield`/`created_at` are droppable schema debris; `eps_revision_3m_pct`/`target_revision_3m_pct`/`analyst_count_chg`/`pledge_chg_90d` are calendar-blocked, **confirmed still 0 rows as of 2026-09-04**, predicted unblock ~2026-09-05 (tomorrow) for the analyst trio. `ccc_trend` is no longer in this list — **it now has 82 dates and is ready to grade**, see the Snapshot above.
+- **7 `technical_signals` columns have never been written, and none is a bug** — `fcf_yield`/`created_at` are droppable schema debris; `pledge_chg_90d` is calendar-blocked. **The analyst trio (`eps_revision_3m_pct`/`target_revision_3m_pct`/`analyst_count_chg`) is no longer in this list** — its calendar constraint cleared on 2026-09-05 exactly as predicted, and the writer bug that was discarding the data was fixed the same day (see the Snapshot above and AF-20260905-20). First rows land 2026-09-08. `ccc_trend` is no longer in this list — **it now has 82 dates and is ready to grade**, see the Snapshot above.
 - **The DL BiLSTM's first real walk-forward AUC (0.6493, 2026-08-25) was rejected by the saturation guard** (`frac_saturated=0.536` > `MAX_SATURATION_FRAC=0.5`) — champion stays v3. The guard working as designed, not a bug. If saturation persists across future retrains, the next lever is label/loss-side calibration, not gate tampering. Check `model_registry` for a fresher BiLSTM row before quoting this as current — none had trained as of 2026-08-30 (a scheduler defect, since fixed).
 - **`stock_futures_oi_history`** (F&O long/short buildup, rollover, basis) — `oi_change`/`oi_pct_change`/`oi_pcr`/`basis`/`rollover_pct` all still LOW-DATA at **9 dates as of 2026-09-04** (was ~3 on 2026-08-27). `oiBuildup` deliberately not graded — vendor text label. Re-check once ~20 dates accumulate.
 
