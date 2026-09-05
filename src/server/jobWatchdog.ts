@@ -72,8 +72,44 @@ function getRecentCatchupCounts(now: Date): Map<string, number> {
   return counts;
 }
 
+/**
+ * True when the platform has been deliberately taken off its schedule.
+ *
+ * Must match `registerJob.ts`'s own gate exactly (`=== '1'`). If the two ever disagree the
+ * platform can end up half-paused -- jobs unscheduled while the watchdog still alerts on them,
+ * or the reverse -- which is worse than either state alone.
+ */
+export function schedulerIsPaused(): boolean {
+  return process.env.SCHEDULER_PAUSED === '1';
+}
+
+/**
+ * Filters the late list down to what is worth alerting a human about.
+ *
+ * A deliberately-unscheduled job is not late. SCHEDULER_PAUSED clears every repeatable and
+ * drains every queue, so getLateJobs() -- which asks "what has missed its cron slot" -- returns
+ * essentially the whole registry, and the watchdog then sent one "Job running late" Telegram per
+ * critical job every 15 minutes for the length of the pause. Measured live 2026-09-05, that was
+ * the mechanical cause of the delay/miss alerts being investigated: the jobs were fine, they had
+ * been switched off on purpose, and the alerting layer was never told.
+ *
+ * Deliberately NOT a blanket mute -- the caller reports the pause itself once instead, so a
+ * pause is visible rather than a blind spot.
+ */
+export function lateJobsToAlert<T>(late: T[]): T[] {
+  return schedulerIsPaused() ? [] : late;
+}
+
 export async function checkAndAlertLateJobs(now: Date = new Date()): Promise<void> {
-  const late = await getLateJobs(now);
+  const allLate = await getLateJobs(now);
+  const late = lateJobsToAlert(allLate);
+  if (schedulerIsPaused()) {
+    // One line, not one Telegram per job: the pause stays visible without a 15-minute alert
+    // storm about jobs that were switched off on purpose.
+    console.log(`[WATCHDOG] SCHEDULER_PAUSED=1 — suppressing ${allLate.length} late-job alert(s); ` +
+                `jobs are deliberately unscheduled, not late.`);
+    return;
+  }
   const registryByName = new Map(JOB_REGISTRY.map(j => [j.jobName, j]));
 
   for (const item of late) {
@@ -285,6 +321,17 @@ export async function buildDailyDigest(now: Date = new Date()): Promise<string> 
     lines.push('', '*Event-driven (no fixed schedule):*', ...eventDriven.map(j => `⏳ ${j.label}`));
   }
 
+  // A pause makes essentially every scheduled job read as "late". Silently filtering that out
+  // would turn a pause into a blind spot -- the digest would look green while nothing ran. State
+  // it once, at the top, so the reader knows why the section below says what it says.
+  if (schedulerIsPaused()) {
+    lines.unshift(
+      '⏸️ *SCHEDULER PAUSED* (`SCHEDULER_PAUSED=1`) — every job below is deliberately ' +
+      'unscheduled, so "late" here means "switched off", not "failed". Per-job late alerts ' +
+      'are suppressed while this is set.',
+      '',
+    );
+  }
   return lines.join('\n');
 }
 
