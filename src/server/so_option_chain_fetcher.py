@@ -60,6 +60,14 @@ SO_HEADERS = {
     "Referer": "https://smartoptions.trendlyne.com/",
 }
 
+# A per-RUN coverage floor would be the wrong monitor here and would fire on every single run:
+# rotation does not raise per-run coverage (the request allowance still cuts each pass off at
+# ~160 of 210), it makes the CUMULATIVE coverage converge. So the guard below is cumulative --
+# how many symbols are still un-refreshed after this run -- and the floor is calibrated in
+# STALE_DAYS against the real defect, which was 34 names sitting at infinity.
+STALE_DAYS = 3
+MAX_STALE_SYMBOLS = 45
+
 CHAIN_URL = (
     "https://smartoptions.trendlyne.com/phoenix/api/fno/option/chain/"
     "?stockCode={symbol}&expDate={expiry}"
@@ -143,11 +151,32 @@ def _build_col_map(table_headers: list) -> dict:
     return col
 
 
-def _nearest_thursday() -> str:
-    """Next Thursday (NSE weekly expiry) >= today."""
-    today = _date.today()
-    days_ahead = (3 - today.weekday()) % 7  # 3 = Thursday
-    return (today + timedelta(days=days_ahead)).isoformat()
+def last_tuesday_expiry(today: _date | None = None) -> str:
+    """The monthly equity-F&O expiry on or after `today`: the month's LAST TUESDAY.
+
+    Replaces `_nearest_thursday()`, which returned a date nothing expires on. Measured
+    against live `nt_fno_expiry` 2026-09-05: every upcoming expiry is a Tuesday
+    (2026-09-08/15/22/29, 2026-10-27; 2026-11-23 is a Monday where a holiday shifted it
+    back), and the weekly Tuesdays carry exactly ONE symbol -- the index -- while the
+    month-end Tuesdays carry 216. Equity F&O is monthly-only, so a stock's fallback must
+    resolve to the month-end contract, never a weekly.
+
+    This is only reached when `nt_fno_expiry` has no row for the symbol (4 of 210 F&O
+    names as measured), so it deliberately does NOT model holiday shifts -- it cannot,
+    without the very table whose absence put us here. A one-session-late fallback yields
+    an empty chain for one day; a Thursday yields an empty chain forever.
+    """
+    today = today or _date.today()
+    for month_offset in (0, 1):
+        y, m = today.year, today.month + month_offset
+        y, m = (y + (m - 1) // 12, (m - 1) % 12 + 1)
+        # First day of the following month, stepped back to the last Tuesday of this one.
+        nxt = _date(y + (1 if m == 12 else 0), 1 if m == 12 else m + 1, 1)
+        last = nxt - timedelta(days=1)
+        last_tue = last - timedelta(days=(last.weekday() - 1) % 7)
+        if last_tue >= today:
+            return last_tue.isoformat()
+    raise AssertionError("unreachable: next month's last Tuesday is always in the future")
 
 
 def _get_nearest_expiry(symbol: str, exchange: str = "NSE") -> str:
@@ -162,7 +191,7 @@ def _get_nearest_expiry(symbol: str, exchange: str = "NSE") -> str:
             return rows[0]["expiry"][:10]
     except Exception:
         pass
-    return _nearest_thursday()
+    return last_tuesday_expiry()
 
 
 def _get_fno_symbols() -> list[str]:
@@ -174,6 +203,40 @@ def _get_fno_symbols() -> list[str]:
         return [r["symbol"] for r in rows]
     except Exception:
         return []
+
+
+def resume_order(symbols: list[str], last_covered: dict[str, str | None]) -> list[str]:
+    """Order the universe so the least-recently-covered names go FIRST.
+
+    Trendlyne enforces a cumulative REQUEST ALLOWANCE, not a rate limit (measured 2026-09-05:
+    a full 210-symbol pass costs 115s, succeeds for ~160 requests, then fails 41 of the last
+    50 in a block). No pacing completes a full pass, and parallelising spends the allowance
+    faster rather than buying coverage -- so the only convergent shape is to rotate WHERE the
+    allowance runs out, exactly as recorded for the screener crawlers.
+
+    Before this, `_get_fno_symbols()`'s `ORDER BY symbol` meant every run restarted at 360ONE
+    and died in the same place, so 34 names after ~SRF -- TCS, TITAN, TATASTEEL, TRENT, VEDL,
+    WIPRO among them -- had zero rows in 30 days while the job exited 0 daily.
+
+    A symbol absent from `last_covered` is never-covered and sorts first; ties break
+    alphabetically so a run is reproducible.
+    """
+    return sorted(symbols, key=lambda s: (last_covered.get(s) or "", s))
+
+
+def _coverage_map(symbols: list[str]) -> dict[str, str | None]:
+    """Newest so_option_chain date per symbol. Degrades to {} (i.e. plain alphabetical) on a
+    read failure rather than aborting -- a rotation we cannot compute is not worth failing a
+    fetch over, and the stderr coverage guard below still reports the outcome either way."""
+    try:
+        rows = query_all(
+            "SELECT symbol, max(date)::text AS d FROM so_option_chain GROUP BY symbol"
+        )
+        return {r["symbol"]: r["d"] for r in rows}
+    except Exception as e:
+        print(f"[so_chain] coverage map unavailable, falling back to alphabetical: {e}",
+              file=sys.stderr)
+        return {}
 
 
 def _sf(v) -> float | None:
@@ -345,9 +408,13 @@ def run(
             # fallback: top liquid F&O stocks
             symbols = ["NIFTY", "BANKNIFTY", "FINNIFTY", "RELIANCE", "TCS",
                        "INFY", "HDFCBANK", "SBIN", "ITC", "BEL"]
+        # Least-recently-covered first, so Trendlyne's request allowance runs out somewhere
+        # NEW each run instead of always at the same alphabetical point. See resume_order().
+        symbols = resume_order(symbols, _coverage_map(symbols))
 
     print(f"[so_chain] Fetching option chains for {len(symbols)} symbols ...")
     ok = fail = 0
+    written: set[str] = set()
     for i, sym in enumerate(symbols):
         exp = expiry or _get_nearest_expiry(sym)
         print(f"  [{i+1}/{len(symbols)}] {sym} (expiry={exp}) ...", end=" ", flush=True)
@@ -372,11 +439,38 @@ def run(
             n = save_chain(chain_rows, summary)
             mp = summary["max_pain"] if summary else None
             print(f"{n} strikes  maxPain={mp}")
+            written.add(sym)
             ok += 1
         if delay > 0:
             time.sleep(delay)
 
     print(f"[so_chain] Done. ok={ok} fail={fail} total={ok+fail}")
+
+    # Coverage guard -- CUMULATIVE, not per-run, and on stderr.
+    #
+    # The allowance failure is silent by construction: a dropped symbol is just a "no data"
+    # line and the process still exits 0, which is how 34 F&O names went 30 days with zero
+    # rows while the job reported success every day. A per-run floor cannot see that, because
+    # a healthy rotated run and a starved alphabetical one both cover ~76% of the universe --
+    # the difference is WHICH names, over time. So ask the question that actually distinguishes
+    # them: after this run, how many symbols are still stale?
+    #
+    # stderr, not stdout: the subprocess wrapper only inspects stderr, so a stdout-only
+    # degradation message is invisible to the one thing that would surface it
+    # (recurring-bugs.md, "degraded-read print() to stdout").
+    if not target_symbol:
+        cutoff = (_date.today() - timedelta(days=STALE_DAYS)).isoformat()
+        after = _coverage_map(symbols)
+        stale = sorted(s for s in symbols if (after.get(s) or "")[:10] < cutoff)
+        print(f"[so_chain] cumulative coverage: {len(symbols) - len(stale)}/{len(symbols)} "
+              f"symbols refreshed within {STALE_DAYS}d")
+        if len(stale) > MAX_STALE_SYMBOLS:
+            print(
+                f"[so_chain] COVERAGE: {len(stale)} symbols have no chain newer than {cutoff} "
+                f"(floor {MAX_STALE_SYMBOLS}). Starved: {', '.join(stale[:25])}"
+                + (f" (+{len(stale) - 25} more)" if len(stale) > 25 else ""),
+                file=sys.stderr,
+            )
 
 
 if __name__ == "__main__":

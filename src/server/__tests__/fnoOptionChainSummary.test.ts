@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { parseFnoChainBody } from '../fnoService';
+import { parseFnoChainBody, lastTuesdayExpiry } from '../fnoService';
 
 // Minimal fixture shaped like a real smartoptions.trendlyne.com/phoenix/api/fno/option/chain/
 // response (headers use `unique_name`, matching so_option_chain_fetcher.py's own convention).
@@ -45,5 +45,33 @@ describe('parseFnoChainBody', () => {
 
   it('returns null when the response shape does not match (Trendlyne column layout changed)', () => {
     expect(parseFnoChainBody('NIFTY', '2026-08-25', { tableHeaders: [], tableData: [] })).toBeNull();
+  });
+});
+
+describe('lastTuesdayExpiry (NSE monthly equity-F&O expiry)', () => {
+  // Mirror of so_option_chain_fetcher.py's last_tuesday_expiry, tested against the same live
+  // nt_fno_expiry readings: every upcoming expiry is a Tuesday, and equity F&O is monthly-only
+  // (the weekly Tuesdays carry 1 symbol -- the index -- against 216 on month-end Tuesdays).
+  // The Thursday this replaced is a date on which nothing expires.
+  it('resolves to this month\'s last Tuesday while it is still upcoming', () => {
+    expect(lastTuesdayExpiry(new Date('2026-09-05T00:00:00Z'))).toBe('2026-09-29');
+  });
+
+  it('still resolves to expiry day on expiry day', () => {
+    expect(lastTuesdayExpiry(new Date('2026-09-29T00:00:00Z'))).toBe('2026-09-29');
+  });
+
+  it('rolls to next month once this month\'s expiry has passed', () => {
+    expect(lastTuesdayExpiry(new Date('2026-09-30T00:00:00Z'))).toBe('2026-10-27');
+    expect(lastTuesdayExpiry(new Date('2026-10-28T00:00:00Z'))).toBe('2026-11-24');
+  });
+
+  it('never returns a Thursday, and never returns a past date', () => {
+    for (let i = 0; i < 366; i++) {
+      const d = new Date(Date.UTC(2026, 0, 1 + i));
+      const got = new Date(lastTuesdayExpiry(d) + 'T00:00:00Z');
+      expect(got.getUTCDay()).toBe(2); // Tuesday
+      expect(got.getTime()).toBeGreaterThanOrEqual(d.getTime());
+    }
   });
 });
