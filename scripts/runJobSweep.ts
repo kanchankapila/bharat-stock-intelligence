@@ -177,7 +177,7 @@ async function main() {
   const t0 = Date.now();
 
   const sweepJobId = `sweep-${sweepId}-${jobName}-${t0}`;
-  await queue.add(jobName, { isSweep: true }, { jobId: sweepJobId, removeOnComplete: false, removeOnFail: false });
+  await queue.add(jobName, { isSweep: true }, { jobId: sweepJobId, removeOnComplete: false, removeOnFail: false, keepLogs: 50 });
 
   const res = await waitForJob(queue, sweepJobId, timeoutMs);
   const durationMs = Date.now() - t0;
@@ -200,9 +200,16 @@ async function main() {
   // reproduce, in the sweep's own output, the defect the sweep exists to detect (seen live
   // 2026-09-05: company-profiles-sync returned success:false and the harness said 'success').
   const selfReportedFailure = Boolean(res.returnvalue && (res.returnvalue as any).success === false);
+  // 'gone' means the job finished and was then EVICTED before we could read its terminal
+  // state -- several queues register with removeOnComplete: N, which trims the completed set.
+  // It is NOT a failure, and classifying it as one manufactures false positives: live
+  // 2026-09-05, sync-fundamentals-weekly wrote 2,258 rows with clean stderr, an empty error and
+  // no failure row in job_run_history, yet was recorded 'failed' purely because its job record
+  // had been trimmed. Reported distinctly so the row delta is still usable as evidence.
   const status = reset ? 'unmeasured_counter_reset'
     : res.state === 'completed'
       ? (selfReportedFailure ? 'failed' : skipped ? 'skipped' : 'success')
+    : res.state === 'gone' ? 'completed_evicted'
     : res.state.startsWith('timeout') ? 'timeout' : 'failed';
 
   console.log(`[SWEEP] status=${status} duration=${(durationMs / 1000).toFixed(1)}s rows=${totalRowDelta(diff)} tables=${Object.keys(diff).length}`);
