@@ -34,6 +34,9 @@ import argparse
 import datetime
 from typing import Optional
 
+import math
+import sys
+
 import pandas as pd
 
 from db_compat import execute, read_df, executemany
@@ -155,6 +158,38 @@ def _int(val) -> Optional[int]:
         return None
 
 
+
+def revision_row_params(eps_rev, tgt_rev, n_chg, symbol, today):
+    """Coerce one computed revision row into DB parameters, or None to drop the row.
+
+    Every value crossing this boundary must be finite-or-NULL. Two live failures make that
+    non-negotiable (2026-09-05, ml-daily-ops step `analyst_revision`):
+
+      * `compute_revisions()` returns `pd.DataFrame(results)`, and pandas converts Python
+        `None` to `NaN` in a float64 column. The caller's `if x is None` guard therefore never
+        fired, and rows with no usable metric were written anyway.
+      * `technical_signals.analyst_count_chg` is **bigint**. Postgres cannot cast NaN to an
+        integer type and reports it as `NumericValueOutOfRange: bigint out of range` -- which
+        reads like an overflow and sends you hunting for a huge number that does not exist.
+
+    NaN/inf become NULL, never 0.0: a fabricated zero here means "analysts did not revise",
+    which is a real and different finding, and is indistinguishable after the fact
+    (recurring-bugs.md's sentinel-instead-of-NULL class).
+    """
+    def finite(v):
+        f = _float(v)
+        return f if f is not None and math.isfinite(f) else None
+
+    eps = finite(eps_rev)
+    tgt = finite(tgt_rev)
+    cnt = finite(n_chg)
+    cnt = int(cnt) if cnt is not None else None
+
+    if eps is None and tgt is None and cnt is None:
+        return None
+    return (eps, tgt, cnt, symbol, today)
+
+
 # ─── Write-back ───────────────────────────────────────────────────────────────
 
 # date = ? guard (2026-07-19) instead of MAX(date) -- see bse_event_classifier.py's
@@ -184,22 +219,38 @@ def write_revisions(revisions: pd.DataFrame) -> tuple[int, int]:
     params = []
     skipped = 0
     for r in revisions.itertuples(index=False):
-        # If ALL three metrics are None, nothing to write — count as skipped
-        if r.eps_revision_3m_pct is None and r.target_revision_3m_pct is None and r.analyst_count_chg is None:
+        # revision_row_params returns None when no metric survives coercion -- it must do the
+        # skip check, not this loop: pandas turned the computed `None`s into NaN, and `is None`
+        # silently stopped matching them. See its docstring.
+        row = revision_row_params(
+            r.eps_revision_3m_pct, r.target_revision_3m_pct, r.analyst_count_chg,
+            r.symbol, today,
+        )
+        if row is None:
             skipped += 1
             continue
-        params.append((
-            r.eps_revision_3m_pct,
-            r.target_revision_3m_pct,
-            r.analyst_count_chg,
-            r.symbol,
-            today,
-        ))
+        params.append(row)
 
     if not params:
         return 0, skipped
 
     n = executemany(_UPDATE_SQL, params)
+
+    # Built rows but matched none: the UPDATE is anchored on `date = today`, so this means
+    # technical_signals has no row for today's logical trading date -- the metrics were computed
+    # correctly and then thrown away. recurring-bugs.md's #1 class ("exact-match write target ->
+    # UPDATE matches 0 rows, silently"): without this the script prints "0 symbols updated" and
+    # exits 0, indistinguishable from having had nothing to do.
+    #
+    # stderr, not stdout: pythonRunner only inspects stderr, so a stdout-only message is invisible
+    # to the one thing that would surface it.
+    if n == 0:
+        print(
+            f"[AnalystRevision] DEGRADED: computed {len(params)} symbols but matched 0 rows in "
+            f"technical_signals for date={today}. Nothing was written. Expected on a non-trading "
+            f"day (no grid row exists yet); a real defect on a trading day.",
+            file=sys.stderr,
+        )
     return n, skipped
 
 
