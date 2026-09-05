@@ -1,4 +1,5 @@
 import os
+import sys
 
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
 GEMINI_MODEL = os.environ.get("GEMINI_MODEL", "gemini-2.0-flash")
@@ -25,5 +26,12 @@ def get_narrative(prompt: str) -> str:
         resp = _get_llm().invoke(prompt)
         return str(getattr(resp, "content", resp)).strip()
     except Exception as exc:
-        print(f"[NARRATIVE] Narrative unavailable: {exc}")
+        # stderr, not stdout: pythonRunner only inspects stderr, so a stdout-only degradation
+        # message is invisible to the one thing that would surface it (recurring-bugs.md's
+        # "degraded-read print() to stdout" class, which is otherwise statically checked).
+        # This was not hypothetical -- measured 2026-09-05, 54 of 230 agent_audit_reports,
+        # 23 of 88 agent_optimizer_reports and 30 of 95 agent_data_scientist_reports carry a
+        # placeholder narrative instead of real prose, and nothing ever reported it because the
+        # jobs correctly exit 0 (the narrative is best-effort over numbers already computed).
+        print(f"[NARRATIVE] Narrative unavailable: {exc}", file=sys.stderr)
         return f"[Narrative unavailable: {exc}]"

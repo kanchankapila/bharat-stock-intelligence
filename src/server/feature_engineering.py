@@ -84,6 +84,40 @@ _FEATURE_STORE_CONFLICT = (
 FII_LAG_DAYS = 1
 
 
+
+def recover_from_failed_statement(con, symbol: str, exc: Exception) -> bool:
+    """Recover a connection after a per-symbol statement failed. Returns True if `con` is usable
+    again, False if the caller must discard and reopen it.
+
+    On Postgres a failed statement aborts the entire transaction: without this, every later
+    symbol on the same connection dies with "current transaction is aborted" /
+    PendingRollbackError, each reporting the abort rather than its own cause. One symbol's real
+    error silently becomes a total run failure -- observed live 2026-08-31, where
+    dl-feature-refresh logged "[FE] ERROR processing <SYM>" for symbol after symbol, all of them
+    the same downstream abort. SQLite tolerates the pattern, which is why it survived the
+    Postgres migration (recurring-bugs.md).
+
+    Reports on stderr because pythonRunner only inspects stderr; a stdout-only message here is
+    invisible to the one hook that would surface it.
+
+    rollback() itself can raise when the connection is genuinely dead. That is swallowed on
+    purpose: the caller's next write will fail loudly and take its own reconnect path, and
+    turning a dead socket into a second exception here only buries the original cause.
+    """
+    print(f"[FE] ERROR processing {symbol}: {exc}", file=sys.stderr)
+    try:
+        con.rollback()
+        return True
+    except Exception as rb_err:
+        # rollback() failing means the connection is genuinely gone, not merely aborted -- which
+        # is what the live 2026-08-31 trace actually was (SQLAlchemy _revalidate_connection ->
+        # PendingRollbackError, i.e. it tried to RECONNECT while a transaction was pending).
+        # Rolling back cannot fix that; only reopening can, so tell the caller to.
+        print(f"[FE] rollback after {symbol} failed ({rb_err}) -- connection is dead, "
+              f"reopening before the next symbol", file=sys.stderr)
+        return False
+
+
 class FeatureEngineer:
     def __init__(self):
         self.scaler: Optional[RobustScaler] = None
@@ -989,7 +1023,17 @@ class FeatureEngineer:
                                 if i % 100 == 0:
                                     print(f"[FE] {i}/{total} complete — {written} rows written")
                         except Exception as e:
-                            print(f"[FE] ERROR processing {symbol}: {e}")
+                            # Must recover the connection, not just log: on Postgres this
+                            # statement's failure has aborted the whole transaction, so without
+                            # it every remaining symbol dies reporting the abort rather than its
+                            # own cause -- which is exactly how one symbol's error became a
+                            # whole-run failure on 2026-08-31.
+                            if not recover_from_failed_statement(con, symbol, e):
+                                try:
+                                    con.close()
+                                except Exception:
+                                    pass
+                                con = self._con()
                         if i % 200 == 0:
                             con.commit()
 
