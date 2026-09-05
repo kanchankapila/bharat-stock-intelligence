@@ -59,6 +59,7 @@ export class TelegramNotificationService {
    * Send custom Markdown message to Telegram Chat
    */
   public async sendMarkdownMessage(text: string): Promise<boolean> {
+    text = balanceMarkdownEntities(text);
     const { botToken, chatId, enabled } = await this.getSettings();
     if (!enabled || !botToken || !chatId) {
       console.warn('[TelegramService] Dispatched but botToken/chatId is missing or disabled');
@@ -168,3 +169,36 @@ _${sanitizeMarkdown(reasoning)}_
 }
 
 export const telegramService = new TelegramNotificationService();
+
+/**
+ * Neutralises UNTERMINATED Telegram legacy-Markdown entities, leaving balanced ones intact.
+ *
+ * Telegram rejects a message with an unclosed entity: HTTP 400 "can't parse entities: Can't
+ * find end of the entity starting at byte offset N". Live 2026-09-05 14:08:08 the ml-daily-ops
+ * completion notice read `19 ok, 1 failed: analyst_revision` -- one underscore, read as the
+ * start of an italic run that never closes. Every job step, table and script name here is
+ * snake_case, so any notification naming one is a coin flip on whether the count is even.
+ *
+ * There is already a plain-text retry, so nothing is ever LOST -- which is exactly why this
+ * went unfixed: the cost is a permanent error-level log line plus silently dropped formatting
+ * in precisely the messages that report failures. Same shape as recurring-bugs.md's
+ * "a monitor that fires on every run", one layer down: a recurring error nobody can act on
+ * trains you to ignore the error level.
+ *
+ * Escaping only on an ODD count is deliberate: a blanket escape would destroy the intentional
+ * `*bold*` headers every digest uses, and Telegram honours backslash escapes for these
+ * characters in legacy Markdown.
+ */
+export function balanceMarkdownEntities(text: string): string {
+  let out = text;
+  for (const d of ['`', '*', '_']) {
+    const unescaped = new RegExp(`(^|[^\\\\])\\${d}`, 'g');
+    const count = (out.match(unescaped) || []).length;
+    if (count % 2 === 1) out = out.replace(unescaped, (_m, p) => `${p}\\${d}`);
+  }
+  // A link is `[label](url)`: an opening bracket with no matching `](` can never terminate.
+  const opens = (out.match(/(^|[^\\])\[/g) || []).length;
+  const closes = (out.match(/\]\(/g) || []).length;
+  if (opens !== closes) out = out.replace(/(^|[^\\])\[/g, (_m, p) => `${p}\\[`);
+  return out;
+}

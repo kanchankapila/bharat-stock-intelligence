@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { rollupChunks, diffSnapshots, hasCounterReset, classifyStderr, totalRowDelta } from '../jobSweep';
+import { rollupChunks, diffSnapshots, hasCounterReset, classifyStderr, totalRowDelta, sweepStatus } from '../jobSweep';
 
 /**
  * The sweep decides "did this job actually write anything" by diffing pg_stat_user_tables
@@ -147,5 +147,57 @@ describe('totalRowDelta', () => {
 
   it('is zero for an empty diff, which is how a no-write run is detected', () => {
     expect(totalRowDelta({})).toBe(0);
+  });
+});
+
+describe('sweepStatus', () => {
+  const base = {
+    state: 'completed',
+    everActive: true,
+    counterReset: false,
+    skipped: false,
+    selfReportedFailure: false,
+  };
+
+  it('reports never_started when the job never left waiting', () => {
+    // A job enqueued onto a queue name that has no Worker sits in `waiting` forever and then
+    // trips the sweep timeout -- indistinguishable from a slow job unless the transition into
+    // `active` is observed. Live 2026-09-05: ohlcv-gap-fill-daily was enqueued onto 'backfill'
+    // instead of 'ohlcv-backfill' and was reported as a 30-minute `timeout` that had written
+    // 282,823 rows -- rows that belonged to a concurrently-running ml-daily-ops.
+    expect(sweepStatus({ ...base, state: 'timeout(waiting)', everActive: false })).toBe('never_started');
+  });
+
+  it('still reports timeout when the job did start and then ran long', () => {
+    expect(sweepStatus({ ...base, state: 'timeout(active)', everActive: true })).toBe('timeout');
+  });
+
+  it('prefers never_started over a counter reset, because the delta is not the job\'s either way', () => {
+    expect(sweepStatus({ ...base, state: 'timeout(waiting)', everActive: false, counterReset: true }))
+      .toBe('never_started');
+  });
+
+  it('reports unmeasured_counter_reset for a job that did run', () => {
+    expect(sweepStatus({ ...base, counterReset: true })).toBe('unmeasured_counter_reset');
+  });
+
+  it('reports a self-reported failure as failed even though BullMQ completed the job', () => {
+    expect(sweepStatus({ ...base, selfReportedFailure: true })).toBe('failed');
+  });
+
+  it('reports a gated no-op as skipped, not success', () => {
+    expect(sweepStatus({ ...base, skipped: true })).toBe('skipped');
+  });
+
+  it('reports an evicted completed job distinctly from a failure', () => {
+    expect(sweepStatus({ ...base, state: 'gone' })).toBe('completed_evicted');
+  });
+
+  it('reports success for a plain completed run', () => {
+    expect(sweepStatus(base)).toBe('success');
+  });
+
+  it('reports failed for a thrown failure', () => {
+    expect(sweepStatus({ ...base, state: 'failed' })).toBe('failed');
   });
 });

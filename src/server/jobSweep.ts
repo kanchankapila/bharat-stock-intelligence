@@ -123,3 +123,43 @@ export function classifyStderr(stderr: string | null | undefined): 'clean' | 'be
   if (BENIGN.some(re => re.test(s))) return 'benign_warning';
   return 'real_error';
 }
+
+export interface SweepObservation {
+  /** Terminal BullMQ state, or `timeout(<last observed state>)` when the sweep gave up waiting. */
+  state: string;
+  /** Whether the job was ever observed in `active`. */
+  everActive: boolean;
+  counterReset: boolean;
+  /** The processor returned a `{ skipped: true }` marker (holiday/market-closed/already-ran gate). */
+  skipped: boolean;
+  /** The processor returned `{ success: false }` without throwing, so BullMQ still says completed. */
+  selfReportedFailure: boolean;
+}
+
+/**
+ * The sweep's verdict for one run. Pure, so every precedence decision below is testable -- each
+ * of these orderings was written after the inline version got one of them WRONG against live
+ * production and reported a confident false verdict:
+ *
+ *  - never_started outranks everything, including a counter reset. A job that never left
+ *    `waiting` did not write the rows measured in its window; something else did. Live
+ *    2026-09-05: ohlcv-gap-fill-daily was enqueued onto queue 'backfill' (no Worker) rather
+ *    than 'ohlcv-backfill', sat waiting for the full 30-minute budget, and was recorded as a
+ *    `timeout` crediting it with 282,823 rows that a concurrently-running ml-daily-ops had
+ *    written. Reporting that as a slow job is worse than reporting nothing.
+ *  - A self-reported `{ success: false }` is a failure even though BullMQ says completed;
+ *    reading only the BullMQ state reproduces, inside the sweep, the very "skip/failure path
+ *    stamped as success" defect the sweep exists to detect.
+ *  - `gone` means completed-then-evicted by removeOnComplete, NOT failed.
+ */
+export function sweepStatus(o: SweepObservation): string {
+  if (!o.everActive && o.state.startsWith('timeout')) return 'never_started';
+  if (o.counterReset) return 'unmeasured_counter_reset';
+  if (o.state === 'completed') {
+    if (o.selfReportedFailure) return 'failed';
+    return o.skipped ? 'skipped' : 'success';
+  }
+  if (o.state === 'gone') return 'completed_evicted';
+  if (o.state.startsWith('timeout')) return 'timeout';
+  return 'failed';
+}

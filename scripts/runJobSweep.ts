@@ -28,6 +28,7 @@ import {
   hasCounterReset,
   totalRowDelta,
   classifyStderr,
+  sweepStatus,
   type Snapshot,
 } from '../src/server/jobSweep';
 
@@ -92,17 +93,25 @@ function redisConn() {
   };
 }
 
+/**
+ * Polls one job to a terminal state, reporting whether it was ever observed in `active`.
+ * That flag is not bookkeeping: a job sitting in `waiting` because nothing consumes its queue
+ * reaches the timeout looking exactly like a slow job, and the row delta measured across its
+ * window then gets credited to a job that never ran. See sweepStatus()'s `never_started`.
+ */
 async function waitForJob(queue: Queue, jobId: string, timeoutMs: number) {
   const started = Date.now();
+  let everActive = false;
   for (;;) {
     const job = await queue.getJob(jobId);
-    if (!job) return { state: 'gone', failedReason: null as string | null, returnvalue: null as any };
+    if (!job) return { state: 'gone', failedReason: null as string | null, returnvalue: null as any, everActive };
     const state = await job.getState();
+    if (state === 'active') everActive = true;
     if (state === 'completed' || state === 'failed') {
-      return { state, failedReason: job.failedReason ?? null, returnvalue: job.returnvalue ?? null };
+      return { state, failedReason: job.failedReason ?? null, returnvalue: job.returnvalue ?? null, everActive: everActive || Boolean(job.processedOn) };
     }
     if (Date.now() - started > timeoutMs) {
-      return { state: `timeout(${state})`, failedReason: `sweep timeout after ${timeoutMs}ms`, returnvalue: null };
+      return { state: `timeout(${state})`, failedReason: `sweep timeout after ${timeoutMs}ms`, returnvalue: null, everActive };
     }
     await new Promise(r => setTimeout(r, 2000));
   }
@@ -130,6 +139,31 @@ function summarise(diff: Snapshot) {
     .slice(0, 12)
     .map(([t, d]) => `    ${t}: +${d.ins} ins / ${d.upd} upd / ${d.del} del`)
     .join('\n');
+}
+
+/**
+ * Names of jobs currently `active` on any OTHER queue. The sweep measures writes platform-wide,
+ * so anything else running during the window is contamination, not signal.
+ */
+async function activeElsewhere(connection: any, exceptQueue: string): Promise<string[]> {
+  const r = new Redis(connection);
+  const out: string[] = [];
+  try {
+    const metaKeys = await r.keys('bull:*:meta');
+    const names = [...new Set(metaKeys.map(k => k.split(':')[1]))];
+    for (const n of names) {
+      if (n === exceptQueue) continue;
+      const q = new Queue(n, { connection });
+      try {
+        for (const j of await q.getJobs(['active'], 0, 10)) out.push(`${n}/${j.name}`);
+      } finally {
+        await q.close();
+      }
+    }
+  } finally {
+    await r.quit().catch(() => {});
+  }
+  return out;
 }
 
 async function main() {
@@ -180,7 +214,37 @@ async function main() {
   const connection = redisConn();
   const queue = new Queue(queueName, { connection });
 
+  // PRE-FLIGHT 1 -- does anything actually consume this queue? BullMQ creates a queue on first
+  // use, so a typo'd or stale queue name is accepted silently and the job waits forever. Live
+  // 2026-09-05 this cost a 30-minute run and produced a confidently wrong 282,823-row verdict.
+  const workers = await queue.getWorkers();
+  if (workers.length === 0) {
+    console.error(`[SWEEP] ABORT: queue '${queueName}' has no registered worker.`);
+    console.error(`[SWEEP] Nothing would consume the job; it would sit in 'waiting' until the sweep timeout`);
+    console.error(`[SWEEP] and any rows written in that window would be credited to it wrongly.`);
+    console.error(`[SWEEP] Check the queue name against the QUEUE_* constants in src/server/queues.ts.`);
+    process.exitCode = 1;
+    await queue.close();
+    await pool.end();
+    return;
+  }
+
+  // PRE-FLIGHT 2 -- is another job running right now? The row delta is measured platform-wide,
+  // so a concurrent job's writes land inside this job's window and are indistinguishable from
+  // its own. Refuse by default; --allow-concurrent proceeds but stamps the confound onto the
+  // recorded row so the number is never read later as if it were clean.
+  const concurrent = await activeElsewhere(connection, queueName);
+  if (concurrent.length && !flag('allow-concurrent')) {
+    console.error(`[SWEEP] ABORT: ${concurrent.length} job(s) already active elsewhere: ${concurrent.join(', ')}`);
+    console.error(`[SWEEP] Their writes would be attributed to this job. Wait, or pass --allow-concurrent.`);
+    process.exitCode = 1;
+    await queue.close();
+    await pool.end();
+    return;
+  }
+
   console.log(`[SWEEP] ${queueName} :: ${jobName}  (timeout ${Math.round(timeoutMs / 60000)}m)`);
+  if (concurrent.length) console.log(`[SWEEP] WARNING: running concurrently with ${concurrent.join(', ')} -- row_delta is contaminated`);
   const before = await snapshot(chunkParent);
   const startedAt = new Date();
   const t0 = Date.now();
@@ -202,24 +266,23 @@ async function main() {
   // Recording that as 'success' would reproduce, inside the sweep's own results, the exact
   // "skip path stamped as success" defect the sweep exists to find -- and a skip that wrote no
   // rows is indistinguishable from a silent failure unless it is labelled.
+  // A processor that gated itself (weekend, market-closed, already-ran) returns { skipped: true }.
   const skipped = Boolean(res.returnvalue && (res.returnvalue as any).skipped);
   // A processor that returns { success: false } has FAILED, but BullMQ still marks the job
   // 'completed' because nothing threw -- registerJob.ts's handler is what turns that into a
-  // failed heartbeat. Reading only the BullMQ state would report such a run as a success and
-  // reproduce, in the sweep's own output, the defect the sweep exists to detect (seen live
-  // 2026-09-05: company-profiles-sync returned success:false and the harness said 'success').
+  // failed heartbeat.
   const selfReportedFailure = Boolean(res.returnvalue && (res.returnvalue as any).success === false);
-  // 'gone' means the job finished and was then EVICTED before we could read its terminal
-  // state -- several queues register with removeOnComplete: N, which trims the completed set.
-  // It is NOT a failure, and classifying it as one manufactures false positives: live
-  // 2026-09-05, sync-fundamentals-weekly wrote 2,258 rows with clean stderr, an empty error and
-  // no failure row in job_run_history, yet was recorded 'failed' purely because its job record
-  // had been trimmed. Reported distinctly so the row delta is still usable as evidence.
-  const status = reset ? 'unmeasured_counter_reset'
-    : res.state === 'completed'
-      ? (selfReportedFailure ? 'failed' : skipped ? 'skipped' : 'success')
-    : res.state === 'gone' ? 'completed_evicted'
-    : res.state.startsWith('timeout') ? 'timeout' : 'failed';
+  const status = sweepStatus({
+    state: res.state,
+    everActive: res.everActive,
+    counterReset: reset,
+    skipped,
+    selfReportedFailure,
+  });
+  if (status === 'never_started') {
+    console.error(`[SWEEP] the job never left 'waiting' -- nothing consumed queue '${queueName}'.`);
+    console.error(`[SWEEP] the ${totalRowDelta(diff)} rows measured in this window are NOT this job's. Check the queue name against queues.ts.`);
+  }
 
   console.log(`[SWEEP] status=${status} duration=${(durationMs / 1000).toFixed(1)}s rows=${totalRowDelta(diff)} tables=${Object.keys(diff).length}`);
   if (skipped) console.log(`    skip reason (job returnvalue): ${JSON.stringify(res.returnvalue).slice(0, 240)}`);
@@ -232,7 +295,9 @@ async function main() {
     started_at: startedAt, finished_at: new Date(), duration_ms: durationMs,
     status, stderr_class: stderrClass, error: res.failedReason ? String(res.failedReason).slice(0, 4000) : null,
     tables_written: diff, row_delta: totalRowDelta(diff),
-    notes: `queue=${queueName}`,
+    notes: concurrent.length
+      ? `queue=${queueName}; CONTAMINATED: ran concurrently with ${concurrent.join(', ')}`
+      : `queue=${queueName}`,
   });
 
   await queue.close();
