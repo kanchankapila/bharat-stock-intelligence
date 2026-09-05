@@ -217,7 +217,14 @@ async function processNSESync(_job: Job): Promise<{ success: boolean; stockCount
       .catch(err => T.fail('backfill_sector_mc', err));
     // Backfill canonical nse_stocks.sector from already-resolved confluence data, then
     // propagate to historical signal tables. Keeps sector segmentation healthy over time.
-    await runPython('backfill_sectors.py', [], 120_000)
+    // Budget 120s -> 600s (2026-09-05). Killed at 120s inside nse-sync on 2026-09-05 (that
+    // run reported '2 ok, 2 failed'), and this step is not a handful of API calls -- it
+    // backfills nse_stocks.sector and then PROPAGATES it across historical signal tables,
+    // i.e. bulk SQL over multi-million-row tables, several of which are compressed
+    // hypertables where a wide UPDATE has to decompress. Its own sibling two lines above
+    // (backfill_sector_mc.py, a ~9-10 min measured enumerate) already carries 900s; 120s
+    // here was the outlier, not the norm.
+    await runPython('backfill_sectors.py', [], 600_000)
       .catch(err => T.fail('backfill_sectors', err));
     // Provider-mapping backfill (2026-08-05): mcsymbol/tlid resolution -- npm run sync:mappings
     // was manual-only (a package.json script, never scheduled), so newly-added nse_stocks rows
