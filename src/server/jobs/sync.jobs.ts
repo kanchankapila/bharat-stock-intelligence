@@ -176,7 +176,13 @@ async function processIndexMembership(_job: Job): Promise<{ success: boolean; sk
   // genuinely-weekly-cadence steps) so this doesn't risk that job's existing budget/timeout.
   // Single-step job: a .catch here reported success:true while the only thing this job does
   // had failed. Let it throw so BullMQ marks the run failed and the heartbeat says so.
-  await runPython('index_membership_fetcher.py', [], 60_000);
+  // Budget raised 60s -> 180s (2026-09-05). Measured the SAME script twice on the same day:
+  // 28.2s standalone (writing 108,109 rows) via the job sweep, but it blew the 60s budget and
+  // was killed when run inside ml-daily-ops alongside other steps -- and had already been
+  // killed identically in production on 2026-09-04. A budget calibrated against an idle box
+  // has no headroom under the contention the job actually runs in. 180s is ~6x the measured
+  // standalone cost, matching this file's sibling budgets.
+  await runPython('index_membership_fetcher.py', [], 180_000);
   return { success: true };
 }
 
@@ -226,7 +232,7 @@ async function processNSESync(_job: Job): Promise<{ success: boolean; stockCount
         + `skipped ${mapResult.skippedCount}, failed ${mapResult.failedCount})`);
     });
     // Index membership flags (Nifty50/100/200/Midcap150/Smallcap250) — passive ETF flow signal.
-    await runPython('index_membership_fetcher.py', [], 60_000)
+    await runPython('index_membership_fetcher.py', [], 180_000)
       .catch(err => T.fail('index_membership_fetcher', err));
     // nse_stocks.market_cap/pe_ratio/dividend_yield fallback backfill (2026-08-07, dead-column
     // sweep) — see backfillNseStocksFundamentalsFallback()'s own doc comment in nseService.ts.

@@ -724,13 +724,18 @@ class MoneyControlFetcher:
             with self.engine.begin() as conn:
                 for r in rows:
                     conn.execute(text("""
-                        INSERT INTO mc_earnings_forecast (symbol, date, metric_type, high, low, avg, actual)
-                        VALUES (:symbol, :date, :metric_type, :high, :low, :avg, :actual)
+                        INSERT INTO mc_earnings_forecast (symbol, date, metric_type, high, low, avg, actual, fetched_at)
+                        VALUES (:symbol, :date, :metric_type, :high, :low, :avg, :actual, CURRENT_TIMESTAMP)
                         ON CONFLICT(symbol, date, metric_type) DO UPDATE SET
                             high   = excluded.high,
                             low    = excluded.low,
                             avg    = excluded.avg,
-                            actual = excluded.actual
+                            actual = excluded.actual,
+                            -- LAST-SEEN by design: this backs the freshness check, which asks
+                            -- "did the fetcher touch this recently", not "when was it first
+                            -- published". `date` cannot answer either -- it is a fiscal period
+                            -- label ('Mar 2026'), so max() over it is lexicographic.
+                            fetched_at = CURRENT_TIMESTAMP
                     """), r)
 
     def _parse_hits_misses(self, symbol: str, data: dict):

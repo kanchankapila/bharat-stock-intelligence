@@ -1,6 +1,7 @@
 import { execFile, spawn } from 'child_process';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import { classifyStderr } from './jobSweep';
 
 // Anchor to this module's location, NOT process.cwd(): a server accidentally started
 // from a .claude worktree copy would otherwise resolve the venv inside the worktree,
@@ -332,12 +333,20 @@ export async function runPython(
           fullStderr: stderr,
         });
       } else {
-        log.warn(`[PY] ${script} finished successfully with warnings/stderr output`, {
-          script,
-          args,
-          stderrSnippet: stderr.slice(0, 300),
-          fullStderr: stderr,
-        });
+        // A script that EXITED 0 has succeeded; non-empty stderr does not contradict that.
+        // Measured against the live pm2 log 2026-09-05: of 154 warn lines, ~40 were
+        // "[PY] <script> finished successfully with warnings" where the stderr was a
+        // transformers GPU efficiency hint or scrapy's own INFO: progress lines -- i.e. the
+        // dominant "warning" in this platform's logs was not a warning at all, and that noise
+        // floor is most of what makes the Telegram digest look alarming. classifyStderr is
+        // reused from jobSweep.ts rather than reimplemented here, so there is exactly one
+        // definition of what counts as benign (and it is negative-controlled: a traceback
+        // underneath benign chatter still classifies as a real error).
+        const cls = classifyStderr(stderr);
+        const line = `[PY] ${script} finished successfully (stderr: ${cls})`;
+        const meta = { script, args, stderrClass: cls, stderrSnippet: stderr.slice(0, 300), fullStderr: stderr };
+        if (cls === 'real_error') log.warn(line, meta);
+        else log.info(line, meta);
       }
     }
   }

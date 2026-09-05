@@ -1551,6 +1551,7 @@ CREATE TABLE IF NOT EXISTS "mc_earnings_forecast" (
   "low" DOUBLE PRECISION,
   "avg" DOUBLE PRECISION,
   "actual" DOUBLE PRECISION,
+  "fetched_at" TEXT DEFAULT CURRENT_TIMESTAMP,
   PRIMARY KEY ("symbol", "date", "metric_type")
 );
 

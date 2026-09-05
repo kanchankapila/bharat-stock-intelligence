@@ -437,8 +437,14 @@ const TABLE_FRESHNESS_CHECKS: TableFreshnessConfig[] = [
   // mc_* tables throughout this section, not the weekly Trendlyne-family pattern below.
   { id: 'mc-analyst-ratings-freshness', label: 'mc_analyst_ratings (MC consensus buy/hold/sell counts)',
     category: 'fundamentals', critical: false, table: 'mc_analyst_ratings', dateColumn: 'fetched_at', warnDays: 3, failDays: 5 },
+  // dateColumn was 'date' until 2026-09-05, which is NOT an ingestion date: it is TEXT holding
+  // fiscal period labels ('Mar 2026', 'Sep 2026', 19 distinct values), so max() over it is
+  // LEXICOGRAPHIC ('Sep' > 'Mar') and the check reported a number that drifted one day per day
+  // and said nothing about whether the fetcher ran -- measured 4.1 days on 2026-09-05, i.e. due
+  // to flip to a permanent fail the next day. Repointed at the new fetched_at column
+  // (migration 20260905130000), matching its four moneycontrol_fetcher.py siblings.
   { id: 'mc-earnings-forecast-freshness', label: 'mc_earnings_forecast (MC forward estimates)',
-    category: 'fundamentals', critical: false, table: 'mc_earnings_forecast', dateColumn: 'date', warnDays: 3, failDays: 5 },
+    category: 'fundamentals', critical: false, table: 'mc_earnings_forecast', dateColumn: 'fetched_at', warnDays: 3, failDays: 5 },
   // 2026-08-13: 3 more moneycontrol_fetcher.py siblings, same daily crawl -- gained fetched_at
   // this session (migration 1786990000000) after fetcher-accuracy-review found they had no
   // timestamp column at all.
