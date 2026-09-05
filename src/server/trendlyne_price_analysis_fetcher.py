@@ -53,7 +53,8 @@ import tl_fetch
 from db_compat import connect
 from as_of import logical_write_floor
 from fetch_utils import (retry_get, FetchTracker, filter_numeric_tlids,
-                         TRENDLYNE_MAX_CONCURRENT, cap_to_run_budget,
+                         TRENDLYNE_MAX_CONCURRENT, cap_to_run_budget, WAF_BLOCKED,
+                         _is_waf_challenge,
                          run_deadline, past_deadline)
 import os
 import sys
@@ -205,6 +206,13 @@ def _fetch(tlid: str, session: requests.Session) -> dict | None:
             return None
         return data.get("body") or {}
     except Exception as e:
+        # A WAF challenge means OUR ALLOWANCE ended, not that this stock has no data. Returning
+        # the sentinel lets the caller stop the slice cleanly and resume next run, instead of
+        # booking ~2,100 phantom "failures" that trip FetchTracker's threshold and fail the job
+        # -- which is what made trendlyne-midweek fail 48 of 58 runs while writing real rows.
+        if _is_waf_challenge(e):
+            print(f"  [{tlid}] allowance exhausted (WAF): {e}", file=sys.stderr)
+            return WAF_BLOCKED
         print(f"  [{tlid}] price-analysis error: {e}", file=sys.stderr)
         return None
 
@@ -467,7 +475,15 @@ def main() -> None:
     # cleanly and letting the next run resume from the DB is already the designed behaviour
     # (see cap_to_run_budget: 'a partial run here is normal, not a failure').
     deadline = run_deadline(float(os.environ.get('TRENDLYNE_SLICE_DEADLINE_SEC', '480')))
+    allowance_gone = False
     for batch_start in range(0, len(stocks), BATCH_SIZE):
+        # Once the vendor's allowance is spent every further request is a 405; continuing only
+        # burns wall-clock and hammers a WAF that is already refusing us.
+        if allowance_gone:
+            print(f"[TLPriceAnalysis] Allowance exhausted at {done}/{len(stocks)} stocks -- "
+                  "stopping cleanly; the next scheduled run resumes from the DB.",
+                  file=sys.stderr)
+            break
         if past_deadline(deadline):
             print(f"[TLPriceAnalysis] Slice deadline reached at {done}/{len(stocks)} stocks -- "
                   "stopping cleanly; the next scheduled run resumes from the DB.",
@@ -479,6 +495,10 @@ def main() -> None:
             for fut in as_completed(futures):
                 symbol, tlid, body = fut.result()
                 done += 1
+                if body is WAF_BLOCKED:
+                    tracker.record_allowance_exhausted(symbol)
+                    allowance_gone = True
+                    continue
                 if body is None:
                     print(f"  [{done}/{len(stocks)}] {symbol}: no data")
                     tracker.record(symbol, ok=False)

@@ -28,6 +28,22 @@ import time
 import random
 
 
+class _WafBlocked:
+    """Sentinel returned by a fetcher's per-item fetch when the WAF refused because our
+    cumulative request allowance ended, as distinct from `None` (this item has no data).
+
+    A distinct object rather than an exception because these fetches run inside a
+    ThreadPoolExecutor: an exception would have to be re-raised per future and would abort
+    sibling requests that are already in flight and perfectly valid.
+    """
+    __slots__ = ()
+    def __repr__(self) -> str:  # pragma: no cover - debugging aid
+        return "<WAF_BLOCKED>"
+
+
+WAF_BLOCKED = _WafBlocked()
+
+
 def _is_waf_challenge(exc: Exception) -> bool:
     """True if `exc` is an HTTPError whose response carries AWS WAF's own
     `x-amzn-waf-action` header (e.g. 'captcha', 'challenge') -- an unambiguous signal from
@@ -94,6 +110,7 @@ class FetchTracker:
         self.succeeded: list[str] = []
         self.failed: list[str] = []
         self._consecutive_fails = 0
+        self.allowance_blocked: list[str] = []
 
     def record(self, item: str, ok: bool) -> None:
         (self.succeeded if ok else self.failed).append(item)
@@ -119,6 +136,26 @@ class FetchTracker:
                   f"blocked/down, not worth grinding through the rest of the run at the same rate.")
             sys.exit(1)
 
+    def record_allowance_exhausted(self, item: str) -> None:
+        """The vendor refused because OUR REQUEST ALLOWANCE ended -- not because this item failed.
+
+        Trendlyne enforces a cumulative request count, not a rate (measured from the other side
+        in so_option_chain_fetcher.resume_order: ~160 requests succeed, then a block of refusals).
+        When it ends, the vendor is saying "no more this run". That is the slice finishing, and
+        since every caller resumes from the DB, the remainder converges over successive runs.
+
+        Counting those items as failures is what made trendlyne-midweek the platform's noisiest
+        job at 48 failures in 58 runs: measured live 2026-09-05 it wrote 6,325 rows, logged
+        "Resuming: 106 of 2234 already fetched", and then exited non-zero purely because the
+        blocked tail tripped the 15% threshold. `cap_to_run_budget`'s own comment already said
+        "a partial run here is normal, not a failure"; the tracker had never been told.
+
+        Deliberately does NOT touch _consecutive_fails: abort_after_consecutive_fails exists for
+        a total upstream outage, and an allowance ending mid-run is the opposite situation --
+        the expected end of a healthy slice.
+        """
+        self.allowance_blocked.append(item)
+
     @property
     def total(self) -> int:
         return len(self.succeeded) + len(self.failed)
@@ -137,7 +174,40 @@ class FetchTracker:
             more = f" (+{len(self.failed) - 15} more)" if len(self.failed) > 15 else ""
             print(f"[FETCH SUMMARY] {self.job_name}: failed items — {preview}{more}")
 
+        # An allowance-limited run that made progress is convergence, not failure -- but one
+        # that achieved NOTHING is a real outage and must still exit non-zero, or this becomes a
+        # way to silence a dead datasource.
+        if self.allowance_blocked:
+            n = len(self.allowance_blocked)
+            if self.succeeded:
+                print(f"[FETCH SUMMARY] {self.job_name}: vendor allowance exhausted after "
+                      f"{len(self.succeeded)} item(s); {n} not attempted this run. This is a "
+                      f"partial slice, not a failure -- the next run resumes from the DB.",
+                      file=sys.stderr)
+            else:
+                # Loud, but NOT a non-zero exit. The allowance is cumulative AND SHARED across
+                # every Trendlyne fetcher, so a run starting after a sibling spent the budget
+                # legitimately gets zero items -- gating on that fires on a benign, expected
+                # case, which is the always-fires defect (ml-model-bugs.md, drift_detector).
+                # One run cannot tell "budget already spent" from "vendor gone"; only elapsed
+                # time can, and the freshness checks already do exactly that.
+                print(f"[FETCH SUMMARY] {self.job_name}: allowance exhausted with ZERO items "
+                      f"fetched ({n} blocked). Nothing landed this run. Sustained silence is "
+                      f"gated by the table's freshness check (dataQualityChecks.ts), not by "
+                      f"this exit code.", file=sys.stderr)
+
+        # A run the allowance truncated is judged on "did anything land" (handled above), not on
+        # its fail RATE. Two reasons, and the second is the load-bearing one:
+        #   1. the sample is tiny -- 14 attempts cannot distinguish a 28% rate from a 2% one;
+        #   2. the sample is BIASED. These fetchers resume from the DB, so the remainder they
+        #      work through is precisely the set of symbols not yet fetched today, which is
+        #      enriched for the ones that already failed. A resumed slice's fail rate is
+        #      therefore systematically higher than the universe rate the threshold was
+        #      calibrated against, and comparing them is a category error.
+        # The failed items are still printed above, so the information is kept -- only the
+        # exit-code gate is dropped.
         if (exit_on_threshold
+                and not self.allowance_blocked
                 and total >= self.min_total_for_threshold
                 and self.fail_rate > self.fail_threshold):
             print(f"[FETCH SUMMARY] {self.job_name}: failure rate {rate_pct:.1f}% exceeds "

@@ -61,7 +61,8 @@ import tl_fetch
 from db_compat import connect
 from as_of import logical_write_floor
 from fetch_utils import (retry_get, FetchTracker, filter_numeric_tlids,
-                         TRENDLYNE_MAX_CONCURRENT, cap_to_run_budget,
+                         TRENDLYNE_MAX_CONCURRENT, cap_to_run_budget, WAF_BLOCKED,
+                         _is_waf_challenge,
                          run_deadline, past_deadline)
 import os
 import sys
@@ -227,6 +228,11 @@ def fetch_adv_tech(tlid: str, session: requests.Session) -> dict | None:
             params = body if body else None
         return params
     except Exception as e:
+        # A WAF challenge means OUR ALLOWANCE ended, not that this stock has no data -- see
+        # fetch_utils.FetchTracker.record_allowance_exhausted.
+        if _is_waf_challenge(e):
+            print(f"  [{tlid}] allowance exhausted (WAF): {e}", file=sys.stderr)
+            return WAF_BLOCKED
         print(f"  fetch error (tlid={tlid}): {e}", file=sys.stderr)
         return None
 
@@ -632,7 +638,13 @@ def main() -> None:
     # cleanly and letting the next run resume from the DB is already the designed behaviour
     # (see cap_to_run_budget: 'a partial run here is normal, not a failure').
     deadline = run_deadline(float(os.environ.get('TRENDLYNE_SLICE_DEADLINE_SEC', '480')))
+    allowance_gone = False
     for batch_start in range(0, len(stocks), BATCH_SIZE):
+        if allowance_gone:
+            print(f"[TLAdvTech] Allowance exhausted at {done}/{len(stocks)} stocks -- "
+                  "stopping cleanly; the next scheduled run resumes from the DB.",
+                  file=sys.stderr)
+            break
         if past_deadline(deadline):
             print(f"[TLAdvTech] Slice deadline reached at {done}/{len(stocks)} stocks -- "
                   "stopping cleanly; the next scheduled run resumes from the DB.",
@@ -644,6 +656,10 @@ def main() -> None:
             for fut in as_completed(futures):
                 symbol, tlid, params = fut.result()
                 done += 1
+                if params is WAF_BLOCKED:
+                    tracker.record_allowance_exhausted(symbol)
+                    allowance_gone = True
+                    continue
                 if params is None:
                     print(f"  [{done}/{len(stocks)}] {symbol}: SKIP (no data)")
                     skipped += 1
