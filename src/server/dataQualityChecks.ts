@@ -2481,8 +2481,17 @@ export const DATA_QUALITY_CHECKS: DataQualityCheck[] = [
     // rate was invisible: engine_coverage_count records it per row and nothing aggregated it.
     //
     // A sustained rise means an engine is dying, not calibrating. Thresholds sit above the
-    // measured baseline (39%) so today's normal does not alarm: warn at 60% of the trailing
-    // 10 dates, fail at 80%.
+    // measured baseline (39%) so today's normal does not alarm: warn at 75% of the trailing
+    // 10 dates, fail at 90%.
+    //
+    // Corrected 2026-09-05: this comment previously said "warn at 60% ... fail at 80%",
+    // which the code has never done -- evaluate() below uses 0.75 and 0.9. The stale
+    // numbers were quoted onward into measurement.md, which then read ml's 80% as sitting
+    // at a "documented fail threshold" it was not. The CODE is the better-calibrated side
+    // and is left unchanged: measurement.md separately establishes that ml's collapse is
+    // calibrated_win_probability's isotonic fit correctly discarding within-band ordering
+    // ("NOT a defect -- do not 'fix' it"), so failing at 80% would alarm on known-benign
+    // behaviour. Only the comment was wrong.
     //
     // NOTE the scale: ZERO_DISPERSION_MIN_SD = 5.0 is calibrated for 0-100 engine scores and
     // is meaningless against raw model outputs (win_probability is 0-1, sd ~0.07 -- every
