@@ -40,7 +40,7 @@ from db_compat import connect, query_scalar
 # NiftyTrader API configuration
 # ---------------------------------------------------------------------------
 
-NT_LIVE_SCREENER_URL = "https://webapi.niftytrader.in/webapi/Screener/live-market-filter-data"
+NT_LIVE_SCREENER_URL = "https://www.niftytrader.in/api/niftytrader/Screener/live-market-filter-data"
 
 NT_HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",

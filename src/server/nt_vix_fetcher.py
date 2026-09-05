@@ -50,7 +50,7 @@ NT_HEADERS = {
     "Referer": "https://www.niftytrader.in/",
 }
 
-SPOT_URL = "https://webapi.niftytrader.in/webapi/Symbol/other-stock-spot-data?symbol={symbol}"
+SPOT_URL = "https://www.niftytrader.in/api/niftytrader/Symbol/other-stock-spot-data?symbol={symbol}"
 
 # NT URL param → canonical name (for DB storage)
 _SYMBOLS: list[tuple[str, str]] = [

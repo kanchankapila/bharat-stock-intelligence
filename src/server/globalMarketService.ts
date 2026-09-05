@@ -18,7 +18,7 @@ export interface GlobalMarketResponse {
 
 export async function fetchGlobalMarketData(): Promise<GlobalMarketData[]> {
   try {
-    const response = await fetch("https://webapi.niftytrader.in/webapi/usstock/global-market", { signal: AbortSignal.timeout(10000) });
+    const response = await fetch("https://www.niftytrader.in/api/niftytrader/usstock/global-market", { signal: AbortSignal.timeout(10000) });
     if (!response.ok) {
       throw new Error(`Failed to fetch global market data: ${response.statusText}`);
     }

@@ -4,7 +4,7 @@ nt_pcr_ts_fetcher.py
 Fetches intraday Put/Call Ratio time series from NiftyTrader for major indices
 and stores minute-level data in nt_index_pcr_ts.
 
-API: https://webapi.niftytrader.in/webapi/option/oi-pcr-data
+API: https://www.niftytrader.in/api/niftytrader/option/oi-pcr-data
      ?symbolName={nt_symbol}&reqType=nse_pcr_data&reqDate=
 
 Index symbols are read from index_provider_map (provider='nt_index').
@@ -54,7 +54,7 @@ NT_HEADERS = {
     "Referer": "https://www.niftytrader.in/",
 }
 
-PCR_BASE_URL = "https://webapi.niftytrader.in/webapi/option/oi-pcr-data"
+PCR_BASE_URL = "https://www.niftytrader.in/api/niftytrader/option/oi-pcr-data"
 
 # provider → reqType used in PCR API
 _REQ_TYPE = {

@@ -66,7 +66,7 @@ NSE_INDICES_URL  = "https://www.nseindia.com/api/allIndices"
 # Fallback: NiftyTrader dashboard-data carries maxPain + expiry data but not spot/futures.
 # Basis is skipped gracefully when NSE is unavailable.
 NSE_FUTURES_URL  = "https://www.nseindia.com/api/liveEquity-derivatives?index=nifty50"
-NT_DASHBOARD_URL = "https://webapi.niftytrader.in/webapi/Option/dashboard-data"
+NT_DASHBOARD_URL = "https://www.niftytrader.in/api/niftytrader/Option/dashboard-data"
 NT_HEADERS_BASIS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
     "Accept": "application/json",

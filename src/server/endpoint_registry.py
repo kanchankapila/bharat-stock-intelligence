@@ -423,7 +423,7 @@ CURATED_EXTRA_ENDPOINTS: tuple[EndpointDefinition, ...] = (
     # trendlyne_overview_fetcher.py/trendlyne_adv_tech_fetcher.py/trendlyne_price_analysis_fetcher.py;
     # sector-industry-analysis/global-indices-analysis are already fetched by sync_tl_index_map.py)
     # or genuinely unreachable (www.ndtvprofit.com, ticker.finology.in -- 403 even with full
-    # browser headers; api.niftytrader.in -- 404, a retired subdomain, webapi.niftytrader.in is
+    # browser headers; api.niftytrader.in -- 404, a retired subdomain, www.niftytrader.in/api/niftytrader is
     # the live one and already used elsewhere; www.moneycontrol.com/mc/widget/* -- returns HTML
     # server-rendered fragments, not a real JSON API). The handful below are the ones that
     # survived: genuinely new data, not already fetched anywhere, live-verified working.

@@ -323,7 +323,7 @@ class TestLiveSources:
 
 
     def test_nt_top_gainers_parses_webapi_shape(self, monkeypatch):
-        # live shape (verified 2026-08-24): webapi.niftytrader.in returns
+        # live shape (verified 2026-08-24): www.niftytrader.in/api/niftytrader returns
         # resultData.topGainers rows keyed symbol_name/change_percent
         #
         # _nt_bearer_token() hits app_settings via db_compat -- unmocked, this test's

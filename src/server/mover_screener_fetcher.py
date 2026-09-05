@@ -68,9 +68,9 @@ ET_GAINERS_URL = ("https://etmarketsapis.indiatimes.com/ET_Stats/gainers"
                   "?pagesize=50&marketcap=largecap%2Cmidcap%2Csmallcap&duration={dur}"
                   "&sort=intraday&sortby=percentchange&sortorder={order}&pageno=1")
 MOJO_MOVERS_URL = "https://frapi.marketsmojo.com/market_Gainersloser/getData?exchange=0&type={t}&"
-# `webapi.niftytrader.in/webapi/symbol/top-gainers-data` 401s unconditionally now, even with a
+# `www.niftytrader.in/api/niftytrader/symbol/top-gainers-data` 401s unconditionally now, even with a
 # freshly-issued, otherwise-valid Bearer token that DOES work against the sibling
-# `webapi.niftytrader.in/webapi/Screener/live-market-filter-data` endpoint below -- confirmed
+# `www.niftytrader.in/api/niftytrader/Screener/live-market-filter-data` endpoint below -- confirmed
 # live 2026-08-28 with two independently-obtained tokens, so this isn't a stale-token problem.
 # The site's own Next.js API proxy route (`www.niftytrader.in/api/niftytrader/symbol/...`, one
 # host over from `webapi.`) serves the identical data successfully with the same Bearer token
@@ -82,12 +82,12 @@ NT_GAINERS_URL = "https://www.niftytrader.in/api/niftytrader/symbol/top-gainers-
 # paths in ai_endpoint_memory.json all 404). Unauthenticated POST, empty body = full
 # ~1,026-stock universe; boolean filter flags narrow server-side. Rows self-label with
 # t0_date, so weekend/holiday runs land on the right session automatically.
-NT_EOD_SCREENER_URL = "https://webapi.niftytrader.in/webapi/Screener/advance-eod-screener-filter"
+NT_EOD_SCREENER_URL = "https://www.niftytrader.in/api/niftytrader/Screener/advance-eod-screener-filter"
 # Intraday variant of the same screener. PRIME-GATED (401 without auth, probed live):
 # needs the Bearer JWT that niftytraderAuthService.ts maintains in
 # app_settings.niftytrader_auth_token. Best-effort only -- skipped silently when the
 # token is absent/expired; the EOD screens above always run.
-NT_LIVE_SCREENER_URL = "https://webapi.niftytrader.in/webapi/Screener/live-market-filter-data"
+NT_LIVE_SCREENER_URL = "https://www.niftytrader.in/api/niftytrader/Screener/live-market-filter-data"
 
 NT_HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",

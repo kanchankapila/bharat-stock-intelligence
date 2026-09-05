@@ -4,7 +4,7 @@ nt_oi_snapshot_fetcher.py
 Fetches a strike-wise option OI snapshot for major indices from NiftyTrader
 and stores it in nt_index_oi_eod (one row per strike per expiry, EOD snapshot).
 
-API: https://webapi.niftytrader.in/webapi/Option/oi-time-range
+API: https://www.niftytrader.in/api/niftytrader/Option/oi-time-range
      ?symbol={nt_symbol}&start_time={start}&end_time={end}&expiry=&exchange=nse
 
 Index symbols are read from index_provider_map (provider='nt_index').
@@ -60,7 +60,7 @@ NT_HEADERS = {
 }
 
 OI_URL = (
-    "https://webapi.niftytrader.in/webapi/Option/oi-time-range"
+    "https://www.niftytrader.in/api/niftytrader/Option/oi-time-range"
     "?symbol={symbol}&start_time={time}&end_time={time}&expiry=&exchange={exchange}"
 )
 

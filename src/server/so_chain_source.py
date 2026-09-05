@@ -5,7 +5,7 @@ Why this exists (2026-09-04)
 Both option-chain network sources this platform used went dead on the same day, and BOTH
 consumers failed silently rather than loudly:
 
-  - NiftyTrader (`webapi.niftytrader.in/webapi/option/option-chain-data`) answers HTTP 200
+  - NiftyTrader (`www.niftytrader.in/api/niftytrader/option/option-chain-data`) answers HTTP 200
     with {"result":0,"resultMessage":"Unauthorized: You are not authorized to access this
     resource."}. This is the path `pcr_fetcher.fetch_symbol_niftytrader` and
     `stock_option_chain_fetcher.fetch_chain` both use.

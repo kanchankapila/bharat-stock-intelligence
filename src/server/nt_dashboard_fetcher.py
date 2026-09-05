@@ -56,7 +56,7 @@ from db_compat import connect, translate
 from as_of import logical_write_floor
 import sys
 
-DASHBOARD_URL = "https://webapi.niftytrader.in/webapi/Option/dashboard-data"
+DASHBOARD_URL = "https://www.niftytrader.in/api/niftytrader/Option/dashboard-data"
 
 HEADERS = {
     "Accept": "application/json, text/plain, */*",

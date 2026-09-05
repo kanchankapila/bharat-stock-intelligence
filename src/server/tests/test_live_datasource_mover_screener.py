@@ -113,7 +113,7 @@ class TestNiftyTraderTopGainersLive:
 
 
 class TestNiftyTraderEodScreenerLive:
-    """webapi.niftytrader.in/webapi/Screener/advance-eod-screener-filter, reverse-engineered
+    """www.niftytrader.in/api/niftytrader/Screener/advance-eod-screener-filter, reverse-engineered
     2026-08-25. Tests one representative screen (gap-up) rather than all ten -- they share
     one endpoint and one parser (_rows_from_nt_screener), so one real request exercises the
     whole family's parsing path; test_mover_screener_fetcher.py's fake-session unit tests

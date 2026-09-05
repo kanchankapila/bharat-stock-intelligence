@@ -166,3 +166,52 @@ freshness-check mandate above). The cost of skipping it is diffuse and slow (a s
 slightly-more-correlated feature matrix that nobody prioritizes cleaning up) rather than a single
 sharp failure, which is exactly why it needs to be a written rule instead of relying on it being
 obviously worth doing in the moment.
+
+## A source that stops returning data: ASK, don't conclude "dead" (added 2026-09-05)
+
+**Whenever a datasource stops returning data — 404, 401/Unauthorized, an empty body, a
+restructured response — report it to the user and ask, before concluding it is dead and before
+hunting for a replacement yourself.** This is a standing user instruction, not a judgement call,
+and it applies to every case rather than only to obviously-broken URLs.
+
+Ask for either an alternative URL **or a captured browser fetch / DevTools network entry** from
+the working site. Name the captured-fetch option explicitly — it is the one that actually works.
+
+**Why this is a rule and not a preference.** NiftyTrader had been recorded here as dead for
+weeks: `webapi.niftytrader.in` answered every request with
+`{"result":0,"resultMessage":"Unauthorized: You are not authorized to access this resource."}`.
+That was verified three independent ways on 2026-09-05 — plain `requests`, full browser headers,
+and `curl_cffi` Chrome TLS impersonation (the JA3 fix that works for Trendlyne) — plus a check
+that the site issues **no cookies at all** and that the API host sends no `Set-Cookie`. The
+endpoint also returned a *distinct* `Url not found` for unknown routes, proving the route existed
+and was gated. Every one of those measurements was correct, and the conclusion drawn from them
+("no client-side change can fix this") was correct too — and completely useless.
+
+The user then pasted a captured `fetch(...)` from their browser. The vendor had simply **moved
+the API**: `webapi.niftytrader.in/webapi/*` → `www.niftytrader.in/api/niftytrader/*`. Measured
+route by route, 6 dead routes came back immediately — `option/option-chain-data`,
+`Symbol/other-stock-spot-data` (INDIA VIX), `symbol/psymbol-list`, `symbol/stock-index-data`,
+`symbol/today-spot-data`, `symbol/top-gainers-data` — and they require **no token, no cookie and
+no headers at all**. 27 files across `.py` and `.ts` were pointing at a retired host.
+
+**The lesson to generalise:** *"I have proven this endpoint cannot be made to work"* is not the
+same as *"this data is unobtainable."* A vendor that moved, versioned, or re-fronted its API is
+indistinguishable from one that revoked access, when observed only from outside. The user has a
+logged-in browser and its network tab holds the answer; asking costs one message and no tokens.
+
+**Two things that are still yours to do, not the user's:**
+
+1. **Verify a user-supplied alternative route by route, not in aggregate.** Of NiftyTrader's 19
+   routes: 6 were fixed by the move, 8 already worked on both hosts (so no regression risk), and
+   3 fail on *both* — meaning they are a separate, still-open problem the migration does not
+   solve. Reporting "the fix works" without that breakdown would have hidden the remaining 3.
+2. **Determine the MINIMUM the new call needs.** Test with headers, then without each one. Here
+   the answer was "nothing" — which turned a fix that would have required storing a JWT with a
+   3-week expiry into a plain base-URL change with no credential to rotate. Do not store a
+   user-supplied cookie/token in the repo before checking whether the endpoint needs it; if it
+   genuinely does, it belongs in `.env`, never in code.
+
+Related failure shape, different cause: a vendor that answers but *rations* — see
+`trendlyne_waf_request_allowance_2026_08_17` in memory and `so_option_chain_fetcher.py`'s
+`resume_order()`. A cumulative request allowance also presents as "this source doesn't work",
+but no amount of asking helps there; rotation does.

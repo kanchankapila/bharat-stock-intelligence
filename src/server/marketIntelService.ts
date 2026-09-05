@@ -462,7 +462,7 @@ export async function fetchStockEarningsSummary(scId: string) {
 
 export async function fetchFNOSymbols() {
   const headers = await getNiftyTraderHeaders();
-  const res = await fetch("https://webapi.niftytrader.in/webapi/symbol/psymbol-list", {
+  const res = await fetch("https://www.niftytrader.in/api/niftytrader/symbol/psymbol-list", {
     headers: { ...headers, "platform_type": "1" },
     signal: AbortSignal.timeout(10000)
   });
@@ -471,7 +471,7 @@ export async function fetchFNOSymbols() {
 }
 
 export async function fetchOptionChain(symbol: string) {
-  const url = `https://webapi.niftytrader.in/webapi/option/option-chain-data?symbol=${encodeURIComponent(symbol)}&exchange=nse&expiryDate=&atmBelow=0&atmAbove=0`;
+  const url = `https://www.niftytrader.in/api/niftytrader/option/option-chain-data?symbol=${encodeURIComponent(symbol)}&exchange=nse&expiryDate=&atmBelow=0&atmAbove=0`;
   const headers = await getNiftyTraderHeaders();
   const res = await fetch(url, {
     headers: { ...headers, "platform_type": "1" },
@@ -499,7 +499,7 @@ export async function fetchIndicesList() {
 }
 
 export async function fetchIndiaVix() {
-  const url = `https://webapi.niftytrader.in/webapi/Symbol/other-stock-spot-data?symbol=INDIA+VIX`;
+  const url = `https://www.niftytrader.in/api/niftytrader/Symbol/other-stock-spot-data?symbol=INDIA+VIX`;
   const res = await fetch(url, { headers: { 'User-Agent': 'Mozilla/5.0' }, signal: AbortSignal.timeout(10000) });
   if (!res.ok) throw new Error('Vix fetch error');
   return res.json();
@@ -528,7 +528,7 @@ export async function fetchLiveMarketScreener(filters: Record<string, boolean>) 
 
   const payload = { ...defaultPayload, ...filters };
 
-  const url = `https://webapi.niftytrader.in/webapi/Screener/live-market-filter-data`;
+  const url = `https://www.niftytrader.in/api/niftytrader/Screener/live-market-filter-data`;
   const headers = await getNiftyTraderHeaders();
   const res = await fetch(url, {
     method: 'POST',
@@ -576,7 +576,7 @@ export async function fetchEODMarketScreener(filters: Record<string, boolean>) {
   };
 
   const payload = { ...defaultPayload, ...filters };
-  const url = `https://webapi.niftytrader.in/webapi/Screener/advance-eod-screener-filter`;
+  const url = `https://www.niftytrader.in/api/niftytrader/Screener/advance-eod-screener-filter`;
   const headers = await getNiftyTraderHeaders();
   const res = await fetch(url, {
     method: 'POST',

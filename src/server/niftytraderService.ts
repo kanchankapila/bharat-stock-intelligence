@@ -70,19 +70,19 @@ export async function fetchNiftyTraderStockData(symbol: string): Promise<NiftyTr
       const headers = await getNiftyTraderHeaders();
 
       const [industryRes, analysisRes, financialRes] = await Promise.all([
-        fetch("https://webapi.niftytrader.in/webapi/Analysis/stock-industry-data", {
+        fetch("https://www.niftytrader.in/api/niftytrader/Analysis/stock-industry-data", {
           headers,
           body,
           method: "POST",
           signal: AbortSignal.timeout(25000)
         }),
-        fetch("https://webapi.niftytrader.in/webapi/Analysis/stock-analysis-data", {
+        fetch("https://www.niftytrader.in/api/niftytrader/Analysis/stock-analysis-data", {
           headers,
           body,
           method: "POST",
           signal: AbortSignal.timeout(25000)
         }),
-        fetch("https://webapi.niftytrader.in/webapi/Analysis/stock-financial-data", {
+        fetch("https://www.niftytrader.in/api/niftytrader/Analysis/stock-financial-data", {
           headers,
           body,
           method: "POST",

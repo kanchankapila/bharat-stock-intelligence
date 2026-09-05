@@ -23,7 +23,7 @@ export interface OptionChainData {
 }
 
 export async function fetchFnoSymbols(): Promise<string[]> {
-  const url = 'https://webapi.niftytrader.in/webapi/symbol/psymbol-list';
+  const url = 'https://www.niftytrader.in/api/niftytrader/symbol/psymbol-list';
   try {
     const headers = await getNiftyTraderHeaders();
     const response = await fetch(url, {
@@ -52,7 +52,7 @@ export async function fetchOptionChain(symbol: string): Promise<any> {
                           symbol.toUpperCase() === 'NIFTY FIN SERVICE' ? 'FINNIFTY' :
                           symbol.toUpperCase();
 
-  const url = `https://webapi.niftytrader.in/webapi/option/option-chain-data?symbol=${normalizedSymbol}&exchange=nse&expiryDate=&atmBelow=0&atmAbove=0`;
+  const url = `https://www.niftytrader.in/api/niftytrader/option/option-chain-data?symbol=${normalizedSymbol}&exchange=nse&expiryDate=&atmBelow=0&atmAbove=0`;
   
   console.log(`[OPTION CHAIN] Fetching for ${normalizedSymbol}...`);
   

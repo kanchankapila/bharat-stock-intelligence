@@ -423,7 +423,7 @@ export async function fetchTrendlyneStockOptionChain(symbol: string, expiryDate?
   let expDate = expiryDate;
   if (!expDate) {
     try {
-      const expUrl = 'https://webapi.niftytrader.in/webapi/Symbol/symbol-expiry-all?symbol=nifty&exchange=nse';
+      const expUrl = 'https://www.niftytrader.in/api/niftytrader/Symbol/symbol-expiry-all?symbol=nifty&exchange=nse';
       const res = await fetch(expUrl, {
         headers: {
           'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',

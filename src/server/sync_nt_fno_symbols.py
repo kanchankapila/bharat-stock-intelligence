@@ -8,8 +8,8 @@ Syncs NiftyTrader F&O universe into:
      with their current lot size from /psymbol-list.
 
 APIs used:
-  https://webapi.niftytrader.in/webapi/symbol/stock-index-data
-  https://webapi.niftytrader.in/webapi/symbol/psymbol-list?exchange=false
+  https://www.niftytrader.in/api/niftytrader/symbol/stock-index-data
+  https://www.niftytrader.in/api/niftytrader/symbol/psymbol-list?exchange=false
 
 Run:
   python sync_nt_fno_symbols.py
@@ -35,7 +35,7 @@ NT_HEADERS = {
     "Referer": "https://www.niftytrader.in/",
 }
 
-# `webapi.niftytrader.in/webapi/symbol/stock-index-data` 401s unconditionally now, even with a
+# `www.niftytrader.in/api/niftytrader/symbol/stock-index-data` 401s unconditionally now, even with a
 # freshly-issued, otherwise-valid Bearer token (confirmed live 2026-08-28, same finding as
 # mover_screener_fetcher.py's NT_GAINERS_URL -- see that file's comment for the full trace). The
 # site's own Next.js API proxy (`www.niftytrader.in/api/niftytrader/symbol/...`) serves the
@@ -43,7 +43,7 @@ NT_HEADERS = {
 # unaffected -- confirmed still working unauthenticated on the old `webapi.` host -- so only this
 # one URL moves, not every NT endpoint in this file.
 INDEX_DATA_URL  = "https://www.niftytrader.in/api/niftytrader/symbol/stock-index-data"
-PSYMBOL_URL     = "https://webapi.niftytrader.in/webapi/symbol/psymbol-list?exchange=false"
+PSYMBOL_URL     = "https://www.niftytrader.in/api/niftytrader/symbol/psymbol-list?exchange=false"
 
 
 def _nt_bearer_token():
@@ -176,7 +176,7 @@ def sync_fno_symbols(dry_run: bool = False) -> int:
 
 def sync_fno_expiries(dry_run: bool = False) -> int:
     """Fetch active F&O expiries from NiftyTrader and upsert into nt_fno_expiry."""
-    url = "https://webapi.niftytrader.in/webapi/Symbol/symbol-expiry-all?symbol=nifty&exchange=nse"
+    url = "https://www.niftytrader.in/api/niftytrader/Symbol/symbol-expiry-all?symbol=nifty&exchange=nse"
     data = _fetch(url)
     if data is None:
         return 0

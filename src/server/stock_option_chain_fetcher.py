@@ -50,7 +50,7 @@ from sqlalchemy import text
 # ─── NiftyTrader endpoint (same base URL used by pcr_fetcher and optionChainService) ──
 
 NIFTYTRADER_CHAIN_URL = (
-    "https://webapi.niftytrader.in/webapi/option/option-chain-data"
+    "https://www.niftytrader.in/api/niftytrader/option/option-chain-data"
     "?symbol={symbol}&exchange=nse&expiryDate=&atmBelow=0&atmAbove=0"
 )
 

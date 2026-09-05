@@ -188,7 +188,7 @@ async function getNearExpiry() {
   if (cachedExpiry && Date.now() - lastExpiryFetch < 3600000) return cachedExpiry;
   
   try {
-    const url = 'https://webapi.niftytrader.in/webapi/Symbol/symbol-expiry-all?symbol=nifty&exchange=nse';
+    const url = 'https://www.niftytrader.in/api/niftytrader/Symbol/symbol-expiry-all?symbol=nifty&exchange=nse';
     const response = await fetch(url, {
       headers: {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
@@ -333,11 +333,32 @@ async function resolveFnoExpiry(symbol: string): Promise<string> {
     [symbol.toUpperCase(), new Date().toISOString().slice(0, 10)]
   ).catch(() => []);
   if (rows[0]) return rows[0].expiry.slice(0, 10);
-  // Fallback: nearest Thursday (NSE weekly expiry), matching so_option_chain_fetcher.py's
-  // own _nearest_thursday() -- only reached if nt_fno_expiry hasn't synced this symbol yet.
-  const d = new Date();
-  d.setDate(d.getDate() + ((4 - d.getDay() + 7) % 7));
-  return d.toISOString().slice(0, 10);
+  return lastTuesdayExpiry();
+}
+
+/**
+ * The monthly equity-F&O expiry on or after `from`: the month's LAST TUESDAY. Mirror of
+ * so_option_chain_fetcher.py's `last_tuesday_expiry`, and reached on the same condition --
+ * nt_fno_expiry has no row for this symbol yet.
+ *
+ * Replaces a nearest-THURSDAY fallback that returned a date nothing expires on. Measured
+ * against live nt_fno_expiry 2026-09-05: every upcoming expiry is a Tuesday, and the weekly
+ * Tuesdays carry exactly one symbol (the index) against 216 on the month-end ones -- equity
+ * F&O is monthly-only, so a stock must resolve to the month-end contract.
+ *
+ * Deliberately does not model holiday shifts (2026-11-23 is a Monday for that reason): it
+ * cannot, without the very table whose absence put us on this path. A one-session-late
+ * fallback costs one empty chain; a Thursday costs every chain, forever.
+ */
+export function lastTuesdayExpiry(from: Date = new Date()): string {
+  const day = Date.UTC(from.getUTCFullYear(), from.getUTCMonth(), from.getUTCDate());
+  for (const offset of [0, 1]) {
+    const firstOfNext = new Date(Date.UTC(from.getUTCFullYear(), from.getUTCMonth() + offset + 1, 1));
+    const last = new Date(firstOfNext.getTime() - 86400_000);
+    const lastTue = new Date(last.getTime() - (((last.getUTCDay() - 2) + 7) % 7) * 86400_000);
+    if (lastTue.getTime() >= day) return lastTue.toISOString().slice(0, 10);
+  }
+  throw new Error('unreachable: the next month always has an upcoming last Tuesday');
 }
 
 // Pure parser (no network) so the column-resolution logic is independently testable.

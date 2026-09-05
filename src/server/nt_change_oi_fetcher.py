@@ -8,7 +8,7 @@ Complements nt_oi_snapshot_fetcher.py (absolute OI) — this shows where new
 money is flowing in vs flowing out, which is the primary indicator for
 support/resistance confirmation.
 
-API: https://webapi.niftytrader.in/webapi/Option/change-oi-time-range
+API: https://www.niftytrader.in/api/niftytrader/Option/change-oi-time-range
      ?symbol={nt_symbol}&start_time={time}&end_time={time}&expiry=&exchange={exchange}
 
 Runs for all indices in index_provider_map (provider nt_index + nt_index_bse).
@@ -54,7 +54,7 @@ NT_HEADERS = {
 }
 
 CHANGE_OI_URL = (
-    "https://webapi.niftytrader.in/webapi/Option/change-oi-time-range"
+    "https://www.niftytrader.in/api/niftytrader/Option/change-oi-time-range"
     "?symbol={symbol}&start_time={time}&end_time={time}&expiry=&exchange={exchange}"
 )
 

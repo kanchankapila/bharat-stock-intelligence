@@ -84,7 +84,7 @@ NSE_INDEX_CHAIN_URL  = "https://www.nseindia.com/api/option-chain-equities?symbo
 # sourced here instead. NiftyTrader does NOT populate equity IV (calls_iv/puts_iv=0),
 # so atm_iv/iv_skew stay None for stocks — a documented vendor limit, not a bug.
 NIFTYTRADER_CHAIN_URL = (
-    "https://webapi.niftytrader.in/webapi/option/option-chain-data"
+    "https://www.niftytrader.in/api/niftytrader/option/option-chain-data"
     "?symbol={symbol}&exchange=nse&expiryDate=&atmBelow=0&atmAbove=0"
 )
 NIFTYTRADER_HEADERS = {

@@ -41,7 +41,7 @@ export const trendlyneRouter = router({
       const symbol = input.symbol.toUpperCase();
       try {
         const res = await fetch(
-          `https://webapi.niftytrader.in/webapi/Symbol/symbol-expiry-all?symbol=${symbol}&exchange=nse`,
+          `https://www.niftytrader.in/api/niftytrader/Symbol/symbol-expiry-all?symbol=${symbol}&exchange=nse`,
           { headers: { 'User-Agent': 'Mozilla/5.0', 'Accept': 'application/json' } }
         );
         if (res.ok) {

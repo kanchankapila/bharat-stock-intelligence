@@ -45,14 +45,14 @@ export async function fetchAllIndianIndices() {
   return mcFetchJson(url);
 }
 
-// NiftyTrader's per-symbol spot feed (webapi.niftytrader.in/webapi/symbol/today-spot-data) --
+// NiftyTrader's per-symbol spot feed (www.niftytrader.in/api/niftytrader/symbol/today-spot-data) --
 // live-verified to carry NIFTY/BANKNIFTY/SENSEX individually (real captured URLs in urls.txt:
 // symbol=NIFTY+BANK, symbol=sensex&exchange=bse). Used to fetch the 3 headline indices via 3
 // distinct URLs instead of one shared MoneyControl "all indices" call, so a tight 5s poll
 // spreads load across endpoints rather than hammering a single one; fetchAllIndianIndices()
 // above remains the fallback source if this fails.
 export async function fetchIndexSpot(symbol: string, exchange?: string) {
-  let url = `https://webapi.niftytrader.in/webapi/symbol/today-spot-data?symbol=${encodeURIComponent(symbol)}`;
+  let url = `https://www.niftytrader.in/api/niftytrader/symbol/today-spot-data?symbol=${encodeURIComponent(symbol)}`;
   if (exchange) url += `&exchange=${exchange}`;
   let authHeaders: Record<string, string> = {};
   try {
@@ -374,7 +374,7 @@ export async function fetchIndexGraph(indId: string, range: string = '1d', type:
 }
 
 export async function fetchNiftyTraderBreakouts() {
-  const url = `https://webapi.niftytrader.in/webapi/Resource/nse-break-out-data`;
+  const url = `https://www.niftytrader.in/api/niftytrader/Resource/nse-break-out-data`;
   try {
     const response = await fetch(url, {
       headers: {
