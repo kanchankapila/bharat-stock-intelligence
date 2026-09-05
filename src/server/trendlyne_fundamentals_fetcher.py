@@ -53,6 +53,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import date, datetime, timedelta, timezone
 
 import requests
+import tl_fetch
 from requests.adapters import HTTPAdapter
 
 from db_compat import connect
@@ -516,9 +517,13 @@ def main() -> None:
 
     print(f"[TLFund] Processing {len(stocks)} stocks in batches of {BATCH_SIZE} "
           f"({BATCH_GAP_SEC}s gap) - EPS/DivYield + DVM...")
-    session = requests.Session()
-    session.headers.update(HEADERS)
-    session.mount("https://", HTTPAdapter(pool_connections=BATCH_SIZE, pool_maxsize=BATCH_SIZE))
+    # curl_cffi Chrome-TLS-impersonated session (tl_fetch) -- see the sibling comment in
+    # trendlyne_overview_fetcher.py. HTTPAdapter.mount is requests-only, so it is applied
+    # only on the fallback path; TLSession does its own connection handling.
+    session = tl_fetch.create_session()
+    if not isinstance(session, tl_fetch.TLSession):
+        session.headers.update(HEADERS)
+        session.mount("https://", HTTPAdapter(pool_connections=BATCH_SIZE, pool_maxsize=BATCH_SIZE))
     ok = 0
     done = 0
 

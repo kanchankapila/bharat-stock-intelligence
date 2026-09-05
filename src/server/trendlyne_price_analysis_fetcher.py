@@ -53,7 +53,9 @@ import tl_fetch
 from db_compat import connect
 from as_of import logical_write_floor
 from fetch_utils import (retry_get, FetchTracker, filter_numeric_tlids,
-                         TRENDLYNE_MAX_CONCURRENT, cap_to_run_budget)
+                         TRENDLYNE_MAX_CONCURRENT, cap_to_run_budget,
+                         run_deadline, past_deadline)
+import os
 import sys
 
 ANALYSIS_URL = "https://trendlyne.com/share-price/price-performance-analysis/{tlid}/"
@@ -457,7 +459,20 @@ def main() -> None:
         symbol, tlid = args
         return symbol, tlid, _fetch(tlid, session)
 
+    # Time-box the slice. cap_to_run_budget above bounds it by REQUEST COUNT (the WAF's own
+    # unit), which says nothing about elapsed time: when upstream slows to ~6s/request the
+    # 110-request slice overruns the 10-minute runPython budget and the run is KILLED mid-work.
+    # That budget cannot simply be raised -- it is deliberately below the 20-minute cadence so
+    # two catch-up runs can never overlap and double-spend the shared allowance. Stopping
+    # cleanly and letting the next run resume from the DB is already the designed behaviour
+    # (see cap_to_run_budget: 'a partial run here is normal, not a failure').
+    deadline = run_deadline(float(os.environ.get('TRENDLYNE_SLICE_DEADLINE_SEC', '480')))
     for batch_start in range(0, len(stocks), BATCH_SIZE):
+        if past_deadline(deadline):
+            print(f"[TLPriceAnalysis] Slice deadline reached at {done}/{len(stocks)} stocks -- "
+                  "stopping cleanly; the next scheduled run resumes from the DB.",
+                  file=sys.stderr)
+            break
         batch = stocks[batch_start:batch_start + BATCH_SIZE]
         with ThreadPoolExecutor(max_workers=len(batch)) as pool:
             futures = [pool.submit(_fetch_one, item) for item in batch]

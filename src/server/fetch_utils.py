@@ -230,6 +230,32 @@ TRENDLYNE_MAX_CONCURRENT = 1
 TRENDLYNE_RUN_REQUEST_BUDGET = 110
 
 
+def run_deadline(seconds: float) -> float:
+    """Monotonic deadline for a resumable fetcher slice, `seconds` from now.
+
+    cap_to_run_budget() above bounds a slice by REQUEST COUNT, which is the right constraint for
+    Trendlyne's WAF allowance (a per-session count, not a rate). It does not bound WALL TIME, and
+    the two are independent: trendlyne-catchup's 110-request slice is sized for ~2-4 min against a
+    10-minute runPython budget, and that budget is deliberately BELOW the 20-minute cadence so two
+    catch-up runs can never overlap and double-spend the shared allowance -- so when upstream slows
+    to ~6s/request the slice overruns and the run is killed mid-work rather than the budget simply
+    being raised. Measured 2026-09-05: 5 timeout kills in 30 days, the most frequent on the platform.
+
+    Stopping early is already the designed behaviour for these fetchers -- see cap_to_run_budget's
+    "a partial run here is normal, not a failure" -- it just had no notion of elapsed time.
+
+    Monotonic rather than time.time() so a system clock adjustment mid-run cannot extend or
+    collapse the window.
+    """
+    return time.monotonic() + seconds
+
+
+def past_deadline(deadline: float | None) -> bool:
+    """True once `deadline` (from run_deadline) has passed. None means no deadline, so a caller
+    that has not opted in behaves exactly as before."""
+    return deadline is not None and time.monotonic() >= deadline
+
+
 def cap_to_run_budget(rows, label: str, requests_per_row: int = 1,
                       limit: int = TRENDLYNE_RUN_REQUEST_BUDGET):
     """Trim a resumable work list to this run's WAF allowance, logging what was deferred.

@@ -55,6 +55,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import date, datetime, timedelta
 
 import requests
+import tl_fetch
 
 from db_compat import connect
 from fetch_utils import filter_numeric_tlids, TRENDLYNE_MAX_CONCURRENT, cap_to_run_budget
@@ -725,8 +726,14 @@ def main() -> None:
 
     stocks = cap_to_run_budget(stocks, "TLOverview", requests_per_row=2)
     print(f"[TLOverview] Processing {len(stocks)} stocks in batches of {BATCH_SIZE} ({BATCH_GAP_SEC}s gap) - analyst + fundamentals...")
-    session = requests.Session()
-    session.headers.update(HEADERS)
+    # curl_cffi Chrome-TLS-impersonated session (tl_fetch), same switch the two catch-up
+    # fetchers already use. Trendlyne's WAF fingerprints the TLS ClientHello, so a plain
+    # urllib/requests handshake is the cheapest signal it has -- headers alone do not help.
+    # create_session() falls back to requests+legacy headers when Scrapling is missing or
+    # TRENDLYNE_USE_SCRAPLING=0, so this is strictly additive.
+    session = tl_fetch.create_session()
+    if not isinstance(session, tl_fetch.TLSession):
+        session.headers.update(HEADERS)
     today = date.today().isoformat()
     # Separate anchor for the technical_signals UPDATE below: this job runs DAILY including
     # weekends (company-profiles-sync, '0 4 * * *') -- on a Sat/Sun `today` has no grid-ensurer
