@@ -51,16 +51,22 @@ describe('registerRepeatableJob: a skip must not be stamped as a success', () =>
       registerJobSrc.indexOf("worker.on('failed'"),
     );
     const successFalseIdx = handler.search(/success\s*===\s*false/);
-    const failedStampIdx = handler.indexOf("monitor(cfg.monitorName, 'failed'");
-    // Matches the call regardless of how many more positional args follow 'success' (e.g. the
-    // 2026-09-04 durationMs param) -- recurring-bugs.md's marker-distance class warns against
-    // exactly this: an exact-closing-paren match breaks the moment the call signature grows.
-    const blanketSuccessIdx = handler.lastIndexOf("monitor(cfg.monitorName, 'success'");
+    // Match the monitor() call by SHAPE, not by the name of the variable holding the monitor
+    // name. Two prior breakages of this test were both renames, not behaviour changes: the
+    // 2026-09-04 durationMs param, and the 2026-09-06 switch from cfg.monitorName to a
+    // per-JOB resolved name (two schedules can share one queue, so the heartbeat name has to
+    // come from the job rather than the worker). recurring-bugs.md's marker-distance class in
+    // its literal-string form -- the assertion below is about ORDER of branches, so the
+    // identifier is incidental and must not be part of the match.
+    const failedStampIdx = handler.search(/monitor\([A-Za-z_$][\w$.]*, 'failed'/);
+    const blanketSuccess = /monitor\([A-Za-z_$][\w$.]*, 'success'/g;
+    const successHits = [...handler.matchAll(blanketSuccess)].map(m => m.index ?? -1);
+    const blanketSuccessIdx = successHits.length ? successHits[successHits.length - 1] : -1;
     expect(successFalseIdx).toBeGreaterThanOrEqual(0);
     expect(failedStampIdx).toBeGreaterThan(successFalseIdx);
     // The success:false branch must itself return, so it never falls through to the blanket stamp.
     const branchBody = handler.slice(successFalseIdx, handler.indexOf('return;', failedStampIdx));
-    expect(branchBody).not.toContain("monitor(cfg.monitorName, 'success'");
+    expect(branchBody).not.toMatch(/monitor\([A-Za-z_$][\w$.]*, 'success'/);
     expect(blanketSuccessIdx).toBeGreaterThan(failedStampIdx);
   });
 

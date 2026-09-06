@@ -242,6 +242,36 @@ export interface RepeatableJobConfig {
  * jobs in queues.ts (stock-refresh, ai-signals, technical-signals, nse-sync, ...) need those
  * and are not yet migrated onto this helper; do not force them through it as-is.
  */
+
+/**
+ * jobName -> monitorName, so a heartbeat is attributed to the JOB rather than to whichever
+ * Worker happened to pick it up.
+ *
+ * registerRepeatableJob creates `new Worker(queueName, ...)` per call, so two schedules sharing
+ * a queue (job-digest-daily at 22:50 IST and job-digest-morning at 08:15 IST) leave TWO workers
+ * competing on it, each closing over its own cfg.monitorName. Which name a run recorded under
+ * was therefore a race. Measured 2026-09-06: `job-digest-morning` had no job_heartbeat row at
+ * all -- NEVER RUN in every status view -- while `job-digest` absorbed both schedules' outcomes.
+ * digests.jobs.ts's own comment already stated the intent ("its OWN monitorName so job_heartbeat
+ * tracks each schedule separately"); only the mechanism was missing.
+ */
+const MONITOR_NAME_BY_JOB = new Map<string, string>();
+
+export function registerMonitorName(jobName: string, monitorName: string): void {
+  MONITOR_NAME_BY_JOB.set(jobName, monitorName);
+}
+
+/** The registered monitor name for `jobName`, else `fallback` (ad-hoc and catch-up jobs). */
+export function resolveMonitorName(jobName: string | undefined, fallback: string): string {
+  return (jobName && MONITOR_NAME_BY_JOB.get(jobName)) || fallback;
+}
+
+/** Test-only: clear the registry between cases. */
+export function __resetMonitorNames(): void {
+  MONITOR_NAME_BY_JOB.clear();
+}
+
+
 export async function registerRepeatableJob(
   cfg: RepeatableJobConfig,
 ): Promise<{ queue: Queue; worker: Worker }> {
@@ -281,12 +311,15 @@ export async function registerRepeatableJob(
   if (cfg.stalledInterval !== undefined) workerOpts.stalledInterval = cfg.stalledInterval;
   if (cfg.maxStalledCount !== undefined) workerOpts.maxStalledCount = cfg.maxStalledCount;
 
+  registerMonitorName(cfg.jobName, cfg.monitorName);
+
   const worker = new Worker(cfg.queueName, cfg.processor, workerOpts);
 
   const monitor = cfg.monitorFn ?? recordHeartbeat;
 
   worker.on('completed', (job, result) => {
-    console.log(`[QUEUE] ${cfg.monitorName} completed`);
+    const mName = resolveMonitorName(job?.name, cfg.monitorName);
+    console.log(`[QUEUE] ${mName} completed`);
     // duration_ms (2026-09-04): BullMQ already stamps processedOn when the worker picked the
     // job up, free for the taking here -- no new bookkeeping needed.
     const durationMs = job.processedOn ? Date.now() - job.processedOn : undefined;
@@ -305,19 +338,20 @@ export async function registerRepeatableJob(
     // Strict `=== false` (not falsy) so a processor that never reports success/failedSteps at
     // all -- every existing caller, today -- keeps behaving exactly as before.
     if (r?.success === false) {
-      monitor(cfg.monitorName, 'failed',
+      monitor(mName, 'failed',
         r.failedSteps?.length ? `${r.failedSteps.length} step(s) failed: ${r.failedSteps.join(', ')}` : undefined,
         durationMs);
       cfg.onCompleted?.(result);
       return;
     }
-    monitor(cfg.monitorName, 'success', undefined, durationMs);
+    monitor(mName, 'success', undefined, durationMs);
     cfg.onCompleted?.(result);
   });
   worker.on('failed', (job, err) => {
-    console.error(`[QUEUE] ${cfg.monitorName} failed:`, err?.message);
+    const fName = resolveMonitorName(job?.name, cfg.monitorName);
+    console.error(`[QUEUE] ${fName} failed:`, err?.message);
     const durationMs = job?.processedOn ? Date.now() - job.processedOn : undefined;
-    monitor(cfg.monitorName, 'failed', err?.message, durationMs);
+    monitor(fName, 'failed', err?.message, durationMs);
     cfg.onFailed?.(err);
   });
   if (cfg.suppressLockErrors) {

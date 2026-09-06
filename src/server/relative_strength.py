@@ -19,6 +19,7 @@ Run:  python relative_strength.py
 import polars as pl
 import argparse
 import datetime
+import os
 
 import pandas as pd
 
@@ -168,6 +169,37 @@ def build_rs_features(ohlcv: pd.DataFrame) -> pd.DataFrame:
     return out
 
 
+
+# Only dates within this many CALENDAR days of today are re-written. The returns still need
+# LOOKBACK_DAYS of history to COMPUTE; this narrows only the WRITE.
+#
+# Why: rs_rank_* are cross-sectional percentiles AS OF date D, computed from a window ending at
+# D, so once D's bars are final the value is final. Rewriting four months of them nightly is
+# write amplification -- and measured 2026-09-06 it was a ~99,866-row UPDATE against a
+# technical_signals holding ~106,500 rows, issued while sibling ml-daily-ops steps write the
+# same table. The step died on a LOCK TIMEOUT ("while locking tuple ... in relation
+# technical_signals"), not on compute: standalone the computation finishes in 39.8s against a
+# 300s budget. Raising the budget would have enlarged the lock footprint, not fixed it.
+#
+# 10 calendar days, not 3: a Fri->Mon gap is 3 calendar days and a long weekend 4, so a short
+# window can contain no trading session at all (recurring-bugs.md's short-lookback class).
+# 0 means "write everything" -- for the first backfill, or after a bhavcopy reconciliation
+# restates historical bars.
+WRITE_WINDOW_DAYS = int(os.environ.get("RS_WRITE_WINDOW_DAYS", "10"))
+
+
+def rows_to_write(feats, today=None, window_days: int | None = None):
+    """Narrow a computed RS frame to the rows whose values can still change."""
+    if feats is None or len(feats) == 0:
+        return feats
+    window = WRITE_WINDOW_DAYS if window_days is None else window_days
+    if window <= 0:
+        return feats
+    today = today or datetime.date.today()
+    cutoff = (today - datetime.timedelta(days=window)).isoformat()
+    return feats[feats["date"].astype(str) >= cutoff]
+
+
 def filter_to_existing(feats: pd.DataFrame, existing_pairs: set) -> pd.DataFrame:
     """Keep only the (symbol, date) rows that actually exist in technical_signals. RS is computed
     for the whole universe (~560k symbol-dates) but only a few thousand have a technical_signals
@@ -213,6 +245,14 @@ def run(only_date: str | None = None) -> int:
     # Only update rows that exist in technical_signals (avoids ~560k no-op UPDATEs on PG).
     ts = read_df("SELECT symbol, date FROM technical_signals")
     existing = set(zip(ts["symbol"], ts["date"].astype(str)))
+    # Narrow the WRITE set before the UPDATE, not after: this used to issue a ~99,866-row
+    # executemany against technical_signals (~106,500 rows) every night, alongside sibling
+    # ml-daily-ops steps writing the same table, and died on a lock timeout. See rows_to_write.
+    before_n = len(feats)
+    feats = rows_to_write(feats)
+    if len(feats) != before_n:
+        print(f"[RS] write window: {len(feats)} of {before_n} computed rows are recent enough "
+              f"to have changed (RS_WRITE_WINDOW_DAYS={WRITE_WINDOW_DAYS}; set 0 to backfill)")
     feats = filter_to_existing(feats, existing)
     if feats.empty:
         print("[RS] No matching technical_signals rows to update.")
