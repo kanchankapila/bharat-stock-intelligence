@@ -8,6 +8,7 @@ refuses anything with diverged/non-finite weights).
 """
 
 import polars as pl
+import os
 import subprocess
 import sys
 import math
@@ -182,6 +183,58 @@ def _run(cmd: str, timeout_sec: int = 1800) -> int:
         return 1
 
 
+
+def _pid_alive(pid: int) -> bool:
+    """Cross-platform: True if a process with this PID currently exists.
+
+    No new dependency (psutil is not in requirements.txt): shells out to the platform's own
+    process lister, matching this repo's existing subprocess-heavy style. Errors fail SAFE
+    (assume alive) -- a check that cannot determine liveness must never be the reason a real
+    lock gets cleared out from under a running retrain.
+    """
+    if pid is None or pid <= 0:
+        return False
+    try:
+        if sys.platform == "win32":
+            r = subprocess.run(["tasklist", "/FI", f"PID eq {pid}", "/NH"],
+                                capture_output=True, text=True, timeout=5)
+            return str(pid) in (r.stdout or "")
+        os.kill(pid, 0)
+        return True
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True  # exists, just owned by someone else
+    except Exception:
+        return True  # cannot tell -> fail safe, do not clear a possibly-live lock
+
+
+def lock_is_stale(lock_time_str, owner_pid=None, now=None, pid_alive=_pid_alive,
+                   stale_seconds: int = STALE_LOCK_SECONDS) -> bool:
+    """A lock is stale if its OWNING PROCESS is provably gone, or -- when that cannot be
+    determined (no recorded PID, an old lock row) -- once `stale_seconds` has elapsed.
+
+    Provenance over elapsed time, for the identical reason registerJob.ts's
+    isStaleActiveJob() exists one layer up at the BullMQ level: dl-retrain-weekly ran 14h48m
+    on 2026-09-05, was killed by an unrelated pm2 restart (its OS PID confirmed gone), and the
+    very next attempt ~22h later -- under the 25h wall-clock window -- was refused with
+    "Retrain already running", doing nothing in 4 seconds. Wall-clock alone cannot distinguish
+    a genuinely long retrain (this job legitimately runs past 14h) from a dead one; PID
+    existence can, and dl_trainer.py runs as its own OS process, so its PID is exactly what the
+    lock needs to record.
+    """
+    if owner_pid and owner_pid > 0 and not pid_alive(owner_pid):
+        return True
+    if not lock_time_str:
+        return True
+    try:
+        lock_time = datetime.fromisoformat(lock_time_str)
+    except Exception:
+        return True
+    now = now or datetime.now()
+    return (now - lock_time).total_seconds() > stale_seconds
+
+
 def retrain_models(trigger: str = "scheduled") -> dict:
     con = connect()
 
@@ -189,26 +242,20 @@ def retrain_models(trigger: str = "scheduled") -> dict:
     lock_val = _get_setting(con, LOCK_KEY)
     if lock_val == "1":
         lock_time_str = _get_setting(con, "dl_retrain_acquired_at")
-        is_stale = False
-        if lock_time_str:
-            try:
-                lock_time = datetime.fromisoformat(lock_time_str)
-                if (datetime.now() - lock_time).total_seconds() > STALE_LOCK_SECONDS:
-                    is_stale = True
-            except Exception:
-                is_stale = True
-        else:
-            is_stale = True
+        owner_pid_str = _get_setting(con, "dl_retrain_owner_pid")
+        owner_pid = int(owner_pid_str) if owner_pid_str and owner_pid_str.isdigit() else None
 
-        if not is_stale:
+        if not lock_is_stale(lock_time_str, owner_pid=owner_pid):
             print("[TRAINER] Retrain already running — skipping")
             con.close()
             return {"status": "SKIPPED", "reason": "lock_held"}
         else:
-            print("[TRAINER] Stale lock detected, clearing lock and proceeding.")
+            print(f"[TRAINER] Stale lock detected (owner pid {owner_pid} gone or wall-clock "
+                  f"expired) -- clearing lock and proceeding.")
 
     _set_setting(con, LOCK_KEY, "1")
     _set_setting(con, "dl_retrain_acquired_at", datetime.now().isoformat())
+    _set_setting(con, "dl_retrain_owner_pid", str(os.getpid()))
     _set_setting(con, STEP_LOG_KEY, "[]")  # clear the previous run's step log at the start of a new one
     con.close()
 

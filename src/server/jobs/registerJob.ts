@@ -35,12 +35,36 @@ let _catchupSlot = 0;
  * was already holding a not-yet-fired slot whose time has since passed, which a naive
  * remove+re-add would otherwise silently forfeit (`staleNextMissed` below).
  */
+// Queues already checked for orphaned active jobs THIS boot, so a queue shared across several
+// addJobWithCatchup call sites (multiple jobNames on one queue) is not re-scanned each time.
+const RECLAIM_CHECKED = new WeakSet<Queue>();
+
 export async function addJobWithCatchup(
   queue: Queue,
   jobName: string,
   data: any,
   opts: any = {}
 ) {
+  // Reclaim BEFORE anything else, including the SCHEDULER_PAUSED early-return below: a paused
+  // boot is exactly when a prior restart's zombie needs clearing, and this must cover every
+  // queue in the codebase, not only ones built through registerRepeatableJob.
+  //
+  // addJobWithCatchup is the single scheduling chokepoint every queue calls (36 call sites, no
+  // bypasses) -- unlike registerRepeatableJob, which only queues built through jobs/*.jobs.ts's
+  // newer pattern go through. Found 2026-09-06: ml-daily-ops (built via a raw `new Queue()` /
+  // `new Worker()` in queues.ts, the older pattern most queues still use) sat `active` for
+  // 118+ minutes with the SAME job id across a restart that had just deployed the
+  // registerRepeatableJob-only version of this fix, because ml-daily-ops never calls that
+  // function. Putting the reclaim here instead covers every queue uniformly.
+  if (!RECLAIM_CHECKED.has(queue)) {
+    RECLAIM_CHECKED.add(queue);
+    const orphans = await reclaimStaleActiveJobs(queue);
+    for (const o of orphans) {
+      console.warn(`[QUEUE] ${queue.name}: reclaimed orphaned job ${o.name} (id=${o.id}, was `
+                 + `active ${o.ageMin}m across a restart) -- queue is free again`);
+    }
+  }
+
   if (opts.repeat && (opts.repeat.pattern || opts.repeat.cron) && !opts.repeat.tz) {
     opts.repeat.tz = 'Etc/UTC';
   }
