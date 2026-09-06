@@ -5,6 +5,7 @@ Reads from feature_store, writes to deep_learning_predictions.
 """
 import os
 import sys
+import time
 
 # Must be set before torch/cuBLAS initialises
 os.environ.setdefault("CUBLAS_WORKSPACE_CONFIG", ":4096:8")
@@ -256,6 +257,9 @@ def _onehot_vol_regime(df: pd.DataFrame) -> pd.DataFrame:
         regime = col[4:]  # "LOW", "MED", "HIGH", "SPIKE"
         df[col] = (df["vol_regime"] == regime).astype(np.float32)
     return df
+
+
+from dl_sequence_loader import load_sequences_bounded
 
 
 def load_symbol_sequences(
@@ -560,19 +564,30 @@ def train_lstm(version: int = 1) -> Dict:
         _train_one_fold(model, X_c, y5_c, yr5_c, epochs=30, y15=y15_c, scaler=amp_scaler)
         chunk_X.clear(); chunk_y5.clear(); chunk_y15.clear(); chunk_yr5.clear()
 
-    for i, sym in enumerate(symbols):
-        try:
-            # Explicit N_FEATURES: training data MUST be today's full widened width even if
-            # an old legacy-width champion happens to be loaded in-process -- otherwise a
-            # candidate trained after the 2026-08-24 widening would silently inherit the
-            # active checkpoint's narrower column count via _resolve_input_width().
-            X, y5, y15, yr5, _ = load_symbol_sequences(sym, n_features=N_FEATURES)
-            if len(X) > 0:
-                chunk_X.append(X); chunk_y5.append(y5)
-                chunk_y15.append(y15); chunk_yr5.append(yr5)
-        except Exception as e:
-            print(f"[DL] Skip {sym}: {e}")
-        if (i + 1) % _CHUNK_SIZE == 0:
+    # Parallel + time-bounded. Serial per-symbol loading is what made dl-retrain-weekly run
+    # 14h48m and produce nothing on 2026-09-05 (AF-20260906-01): the GPU idled at 15-24% while
+    # ~8 CPU cores waited on ~2,300 individual Postgres round-trips. The work is I/O-bound, so
+    # a small thread pool hides that latency; the deadline exists because train_lstm() is called
+    # IN-PROCESS by dl_trainer, where _run()'s 1800s subprocess cap does not apply and nothing
+    # bounded it but the 24h BullMQ lock.
+    #
+    # Explicit N_FEATURES: training data MUST be today's full widened width even if an old
+    # legacy-width champion happens to be loaded in-process -- otherwise a candidate trained
+    # after the 2026-08-24 widening would silently inherit the active checkpoint's narrower
+    # column count via _resolve_input_width().
+    load_budget = float(os.environ.get("DL_LOAD_BUDGET_SEC", str(90 * 60)))
+    load_deadline = time.monotonic() + load_budget if load_budget > 0 else None
+
+    def _load(sym):
+        X, y5, y15, yr5, _ = load_symbol_sequences(sym, n_features=N_FEATURES)
+        return (X, y5, y15, yr5) if len(X) > 0 else None
+
+    loaded = 0
+    for X, y5, y15, yr5 in load_sequences_bounded(symbols, _load, deadline=load_deadline):
+        chunk_X.append(X); chunk_y5.append(y5)
+        chunk_y15.append(y15); chunk_yr5.append(yr5)
+        loaded += 1
+        if loaded % _CHUNK_SIZE == 0:
             _flush_chunk()
 
     _flush_chunk()  # remaining symbols
@@ -586,14 +601,14 @@ def train_lstm(version: int = 1) -> Dict:
     metrics: Dict = {"directional_accuracy": float("nan"), "roc_auc": float("nan")}
     val_symbols = symbols[:min(50, len(symbols))]
     val_X, val_y5, val_y15, val_yr5 = [], [], [], []
-    for sym in val_symbols:
-        try:
-            Xv, y5v, y15v, yr5v, _ = load_symbol_sequences(sym)
-            if len(Xv) > 0:
-                val_X.append(Xv); val_y5.append(y5v)
-                val_y15.append(y15v); val_yr5.append(yr5v)
-        except Exception:
-            pass
+
+    def _load_val(sym):
+        Xv, y5v, y15v, yr5v, _ = load_symbol_sequences(sym)
+        return (Xv, y5v, y15v, yr5v) if len(Xv) > 0 else None
+
+    for Xv, y5v, y15v, yr5v in load_sequences_bounded(val_symbols, _load_val):
+        val_X.append(Xv); val_y5.append(y5v)
+        val_y15.append(y15v); val_yr5.append(yr5v)
     if val_X:
         X_val   = np.concatenate(val_X)
         y5_val  = np.concatenate(val_y5)
