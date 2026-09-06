@@ -272,10 +272,72 @@ export function __resetMonitorNames(): void {
 }
 
 
+
+/** Wall-clock ms at which THIS process started consuming queues. */
+export const PROCESS_BOOTED_AT = Date.now();
+
+/**
+ * True when an `active` job cannot belong to this process, i.e. it was orphaned by a worker
+ * that died mid-run.
+ *
+ * A pm2 restart kills the worker but leaves the job `active` in Redis until BullMQ's stalled
+ * reclaim fires -- and the long-running queues set lockDuration to 24h precisely because the
+ * work takes hours, so with concurrency: 1 the queue can be blocked for a day. The
+ * duplicate-catch-up guard then correctly declines to queue a replacement ("an instance is
+ * already active"), so the job silently does not run, and nothing in pm2 or getJobCounts
+ * distinguishes it from a genuinely long run. Observed twice on 2026-09-06.
+ *
+ * Keyed on process start, NOT on an age threshold: a three-hour-old job is healthy if this
+ * process has been up four hours and definitely orphaned if it has been up thirty seconds.
+ * Elapsed time cannot tell those apart; provenance can.
+ */
+export function isStaleActiveJob(job: { processedOn?: number | null }, bootedAt: number): boolean {
+  return typeof job?.processedOn === 'number' && job.processedOn < bootedAt;
+}
+
+/**
+ * Fail any `active` job this process could not have started, freeing its queue on boot.
+ * Returns the jobs it reclaimed, so the caller can log what it found.
+ */
+export async function reclaimStaleActiveJobs(queue: any, bootedAt = PROCESS_BOOTED_AT) {
+  const reclaimed: Array<{ name: string; id: string; ageMin: number }> = [];
+  let active: any[] = [];
+  try {
+    active = await queue.getJobs(['active'], 0, 50);
+  } catch {
+    return reclaimed;   // a queue we cannot read is not worth failing boot over
+  }
+  for (const job of active) {
+    if (!isStaleActiveJob(job, bootedAt)) continue;
+    const ageMin = Math.round((Date.now() - (job.processedOn ?? Date.now())) / 60_000);
+    try {
+      await job.moveToFailed(
+        new Error(`orphaned: worker exited mid-run; job predates this process (active ${ageMin}m)`),
+        '0', true,
+      );
+      reclaimed.push({ name: job.name, id: String(job.id), ageMin });
+    } catch { /* another instance may have reclaimed it first */ }
+  }
+  return reclaimed;
+}
+
+
 export async function registerRepeatableJob(
   cfg: RepeatableJobConfig,
 ): Promise<{ queue: Queue; worker: Worker }> {
   const queue = new Queue(cfg.queueName, { connection: cfg.connection });
+
+  // Free any job orphaned by a worker that died mid-run (a pm2 restart, a crash). These queues
+  // set lockDuration to 24h because the work legitimately takes hours, so BullMQ's stalled
+  // reclaim will not free them for a day -- during which concurrency: 1 blocks the queue and
+  // the duplicate-catch-up guard correctly refuses a replacement, so the job silently does not
+  // run. Hit twice on 2026-09-06. See isStaleActiveJob for why this keys on process start
+  // rather than job age.
+  const orphans = await reclaimStaleActiveJobs(queue);
+  for (const o of orphans) {
+    console.warn(`[QUEUE] ${cfg.queueName}: reclaimed orphaned job ${o.name} (id=${o.id}, was `
+               + `active ${o.ageMin}m across a restart) -- queue is free again`);
+  }
 
   const repeatables = await queue.getRepeatableJobs();
   for (const r of repeatables) {
