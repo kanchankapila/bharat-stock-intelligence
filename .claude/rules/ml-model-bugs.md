@@ -41,6 +41,46 @@ cover classes that stayed in `recurring-bugs.md`.
 
 - **A dispersion/variance threshold is calibrated for ONE scale and is silently meaningless on another.** `ZERO_DISPERSION_MIN_SD = 5.0` in `unified_ranker.py` is written for 0–100 engine scores. Applied to raw model outputs — `win_probability` is 0–1 with sd ≈ 0.07 — *every* engine reads as collapsed. A 2026-08-22 ablation did exactly that, dropped `ml` on 33 of 43 dates and `technical` on 33, and flipped its own equal-weight arm negative, producing a confident wrong result that looked like a finding about the ranker. Same family as this file's "the same constant thresholding two quantities that aren't the same statistic" entry (`drift_detector`'s `PSI_CRIT` against both a per-feature and a mean-across-features statistic), and as measurement.md's flat-cost-per-rebalance reordering. **Tell:** any comparison of a raw model output against a constant whose sibling usages read a normalized/percentile column — check what the constant's *other* call sites are measuring before reusing it. Note the real-scale reading is a genuine finding in its own right and is now monitored (`ur-engine-dispersion-collapse`): on the correct 0–100 scale `dl` collapses on 39% of ranker dates, `ml` 34%, `technical` 18% — intended behaviour for an honestly-flat engine, but nothing was reporting the rate.
 
+- **A "D-1" / lagged feature built by joining a table to itself on a `prev_date` key silently
+  carries the CURRENT day's value whenever the source column is an as-of quantity rather than a
+  pre-lagged one — and every downstream robustness test will pass.** Found 2026-09-06 reviewing
+  an intraday research report that claimed **+3.6%/day net, t=+14.9, 86% win rate, profit factor
+  49.6** on an untouched holdout. Measured directly against the study's own panel:
+
+      corr(d1_ret, return of day D  ) = 1.000000   exact match 100.0000%
+      corr(d1_ret, return of day D-1) = 0.031025   exact match   0.1736%
+
+  The variable the whole study ranked on WAS the return of the day being traded. Mechanism:
+  `daily["prev_close"] = g["close"].shift(1)` is pre-lagged, but `daily["ret_1d"] =
+  g["close"].pct_change()` is as-of day D. A single join on `prev_date` pulls the date-D row and
+  relabels every column `*_d1`, which is correct for the `prev_*` family and look-ahead for
+  every as-of column (`ret_1d`, `rsi14`, `atr14`, `vol_surge`, `hi_252`...). The two families
+  must be joined differently and were not.
+
+  **Why nothing caught it, which is the part worth remembering:**
+  1. **The script's own sanity check validated the family that could not fail.** It asserted
+     `ph_d1 == prev_high` — a pre-lagged column — so it passed and conferred false confidence
+     while every as-of column was wrong.
+  2. **The "decisive" robustness test addressed the wrong failure mode.** Delaying entry to
+     11:45 was presented as ruling out a price-print artifact. It rules out contamination in the
+     ENTRY PRICE; it cannot rule out contamination in the SELECTION VARIABLE, because if you
+     already know the day's winner, entering later still works.
+  3. **Train ≈ holdout was read as robustness.** +3.72% vs +3.64% is the opposite tell: a real
+     edge decays out of sample, and identical magnitude means the same bug is in both arms.
+
+  **Tells, cheapest first — any one of these beats reading the join:**
+  - an IC above ~0.15 on a price-derived factor (published equity factors run 0.02-0.05; 0.56
+    means something is correlated with itself);
+  - `P(pick lands in the top decile)` far above the 10% base rate — 87% here;
+  - a daily return that compounds to an absurd annual figure (+3.6%/day is ~6.6 million %/yr);
+  - a profit factor above ~5, or a long-only daily win rate above ~65%.
+
+  **The standing check to add to any such harness:** before running a backtest, assert
+  `abs(corr(selection_variable, same_day_return)) < 0.2`. One line, and it would have caught
+  this in seconds. Same family as this file's `movement_predictor` entry, where an implausibly
+  HIGH score (AUC 0.894) was the tell that `score()` skipped the lag `load_training_data()`
+  applied — an implausibly good number is at least as suspicious as an implausibly bad one.
+
 ## Models, labels & promotion gates
 
 - **A second script that hand-rolls its own training-data SQL instead of importing the canonical feature-engineering function's OWN query silently drifts to a fraction of the real feature set, and the decline shows up as "the model is getting worse," not as an obvious bug.** `cs_ranker.py` and `exit_policy.py` both `import build_features` from `ml_ensemble.py` (correctly sharing the feature-*transform* code) but each wrote its own SELECT for the training *query* feeding it — `build_features()`'s `num(col, default)` silently defaults any column the caller's SQL didn't fetch to a constant, so neither script errored, both just trained on hollowed-out data. Measured 2026-08-30: `cs_ranker.py` used 29 of `build_features()`'s 304 raw inputs, `exit_policy.py` used 23 — and both had multiple consecutive promotion-gate REJECTIONs with declining metrics (`cs_ranker` rho trending 0.161→0.161→0.133→0.158→0.081→0.088 over 6 rejections; `exit_policy` MFE holdout MAE 4.76→4.91→5.00 across 2), which read as "the model doesn't work" rather than "the query is starving it." Fixed by extracting `ml_ensemble.py`'s own maintained ~275-column query into shared `full_feature_train_sql()`/`full_feature_score_sql()` functions (parameterized on anchor table/date column) and rewiring both scripts to use them, `load_training_data()` itself left untouched. **The fix did not uniformly help — this is the finding, not a footnote**: re-trained live 2026-08-30, `cs_ranker` improved (rho 0.0875→0.1403, still short of baseline 0.1758) but `exit_policy` got WORSE (MFE MAE 4.998→5.66, moving further from baseline 4.7642) — the extra features added noise for that specific regression target rather than signal. **Tell:** any second/third script importing a shared feature-*engineering* function should also import (or call) that module's own training-data *query*, not reimplement a narrower one by hand; a `num()`/`.get(col, default)`-style silent-default pattern anywhere in the shared function means a caller's incomplete SELECT fails silently, so diff the caller's SELECT columns against every `num('col', ...)`/`row.get('col')` call in the shared function before trusting either script's metrics. **Corollary: "give the model more features" is not a one-way lever** — verify the effect per model, not per fix, exactly as `measurement.md`'s discipline already demands for any other scoring change. **Third instance, found same day by directly checking every other `build_features` importer after this entry was written**: `online_learner.py`'s `load_recent_outcomes()` — feeding the DAILY SGD/PassiveAggressive online-learning update (`ml-daily-ops`'s `online-learner` step, not weekly), not the score-time path — had the same ~30-column hand-rolled SELECT, and its own docstring wrongly claimed it matched `ml_ensemble.load_training_data`'s columns. **A worse shape than the first two**: this file's sibling `load_pending_signals()` already correctly delegated to the canonical wide query, so the online model trained on a narrow constant-padded vector but scored on the real wide one — a genuine train/serve feature-distribution skew, not just a narrower fit. Fixed the same way. Grepping every `build_features` importer found no further instances after this fix, but nothing prevents a newly-written script from reintroducing the pattern — the tell above is the durable check, not "count now equals zero."

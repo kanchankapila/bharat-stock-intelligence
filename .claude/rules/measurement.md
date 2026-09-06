@@ -100,7 +100,26 @@ Any cross-sectional forward-return measurement on this data:
 
 ## Open / pending — re-check or act, ranked by how close each is to answerable
 
-- **Ready to grade now, nobody has yet (see Snapshot above for the full context):** `smart_money_score` (21 dates), `technical_signals.ext_*` vendor columns (39 dates), `ccc_trend` (82 dates). All three were LOW-DATA the last time anyone wrote them up and none of them still is. This is the single highest-value thing to do with this file today if you want a concrete task.
+- **GRADED 2026-09-06 — all three came back NO EDGE. This item is closed; do not re-run it as
+  "the highest-value task" again.** `factor_edge.py --entry open --persist`, results in
+  `factor_edge_history`:
+  - `smart_money_score` (unified_recommendations, `--date-col computed_at`): rank_IC **+0.004**
+    /AUC 0.502 @1d, **-0.016**/0.488 @5d. Still **LOW-DATA at 18 usable dates**, not the 21 the
+    Snapshot claimed — forward-price matching costs 3 dates, so "non-zero dates in the table" is
+    not the same number as "dates the harness can grade". Consistent with the 2026-08-29 read.
+  - `technical_signals.ext_*` (10 vendor columns): **every one "no edge" at 1d and 5d.** Best
+    reading is `ext_t80_tech_score` at 21d — rank_IC **+0.185**, AUC **0.574** — but on only
+    **17 dates**, under the floor. That is the one worth re-checking once it clears 20; treat it
+    as a lead, not a result.
+  - `ccc_trend`: **negative at every horizon on a well-powered panel** — rank_IC -0.006/-0.035/
+    -0.042, AUC 0.496/0.491/0.488 at 1/5/21d across 64/60/44 dates. Not underpowered, just no
+    edge (mildly inverted), which is the same direction as most of this file's other findings.
+  - **Data-integrity finding from the same run:** `ext_mojo_quality_rank` and
+    `ext_t80_quality_rank` are **100% identical, corr = 1.0** across all 28,584 rows — the same
+    numbers stored under two vendor names. Two "independent vendors agreeing" on quality is one
+    column counted twice. (`ext_is_overall_score`/`ext_is_percentile_rank` are corr 0.988 but a
+    monotone transform of each other, which is why their rank-ICs match exactly — expected, not
+    a defect.) See AF-20260906-06.
 - **`technical`'s next-session-entry directional call** (t=+2.13 at 1d on 12 dates as of the last check, under this file's own 20-date bar) — likely has more dates by now, cheap to re-check.
 - **`earnings_beat_yoy`/`earnings_beat_qoq`, `screener_breadth`, the 3 named results screeners** — all underpowered (3–27 periods), genuinely calendar-blocked until ~12+ months of history exists in their source tables.
 - **`cs_ranker`'s active model has a declining self-reported CV-AUC across 3 consecutive retrains** (0.176 active vs 0.161/0.161/0.133 rejected) — flagged, not confirmed as a bug (self-reported CV-AUC on a thin date-split holdout is exactly the kind of number this file warns not to trust blindly). Worth a dedicated look; check whether a 4th retrain has happened since.
