@@ -366,6 +366,27 @@ def load_inference_sequence(
 
 # ── Walk-Forward Validation ──────────────────────────────────────────────────
 
+
+def clone_model_like(model: "BiLSTMModel") -> "BiLSTMModel":
+    """An independent copy of `model` at ITS input width, not the module default.
+
+    walk_forward_validate previously did `BiLSTMModel()` -- today's N_FEATURES -- and then
+    loaded the source's weights into it, which raises a size-mismatch RuntimeError for any
+    model of a different width. Latent in production (train_lstm passes the model it just built
+    at N_FEATURES, so the widths always match) but fatal for the one case that matters when
+    auditing the promotion gate: validating an EXISTING champion. lstm_v3.pt, the active
+    champion, is a pre-widening 78-input checkpoint, so AF-20260906-02's measurement could not
+    run at all until this was fixed.
+
+    Same defect the inference loader already fixed after the 2026-08-24 widening via
+    _checkpoint_input_width; the fix was applied there and not here.
+    """
+    width = model.lstm1.weight_ih_l0.shape[1]
+    clone = BiLSTMModel(n_features=width).to(DEVICE)
+    clone.load_state_dict(model.state_dict())
+    return clone
+
+
 def walk_forward_validate(model: BiLSTMModel, X: np.ndarray, y5: np.ndarray,
                            y15: np.ndarray, yr5: np.ndarray,
                            fold_size: int = 30) -> Dict:
@@ -397,8 +418,8 @@ def walk_forward_validate(model: BiLSTMModel, X: np.ndarray, y5: np.ndarray,
         X_tr, y_tr = X[:train_end], y5[:train_end]
         X_te, y_te = X[val_end:test_end], y5[val_end:test_end]
 
-        model_copy = BiLSTMModel().to(DEVICE)
-        model_copy.load_state_dict(model.state_dict())
+        # Width from the SOURCE model, not the module default -- see clone_model_like.
+        model_copy = clone_model_like(model)
         # Fresh scaler per fold: reusing a stale scaler across folds can accumulate scale
         # adjustments and destabilize the loss (observed: late folds failed with NaN even
         # with scaling, likely due to scaler state corruption across prior fold iterations).

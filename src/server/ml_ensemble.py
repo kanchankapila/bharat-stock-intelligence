@@ -45,7 +45,7 @@ from db_compat import connect, read_df, use_postgres, ConnWrapper, now_utc_iso
 from as_of import as_of_join_sql
 from model_promotion import (clears_promotion_bar, rejections_since,
                               staleness_override_applies,
-                              live_edge_verdict, live_edge_is_unproven,
+                              live_edge_verdict, live_edge_is_unproven, promotion_decision,
                               DEFAULT_STALENESS_MAX_DAYS, DEFAULT_STALENESS_MAX_REJECTIONS)
 try:
     from purged_cv import make_purged_group_time_series_split
@@ -3421,16 +3421,31 @@ def promote_or_register(conn: ConnWrapper, ensemble: dict) -> int:
         staleness_override, age_days = staleness_override_applies(
             baseline['trained_at'], rejections, STALENESS_MAX_DAYS, STALENESS_MAX_REJECTIONS)
 
-    if baseline is not None and not clears_bar and not staleness_override and not baseline_untrustworthy:
+    # REALIZED edge decides, not self-reported CV. The incumbent once held the best cv_roc_auc
+    # of all 59 candidates (0.7664) while grading 0.493-0.535 against realized forward returns;
+    # a gate reading only the candidate's own number cannot see that, and the better the overfit
+    # the harder it defends it. clears_cv_bar/clears_test_gate remain NECESSARY (a candidate must
+    # not be worse) but are no longer SUFFICIENT. See model_promotion.promotion_decision.
+    decision = promotion_decision(
+        candidate_cv=new_cv_auc,
+        baseline_cv=baseline['cv_auc'] if baseline else None,
+        clears_cv_bar=clears_cv_bar,
+        clears_test_gate=clears_test_gate,
+        label_changed=label_changed,
+        edge=edge,
+        staleness_override=staleness_override,
+        has_baseline=baseline is not None,
+    )
+    if not decision.promote:
         try:
             with open(CANDIDATE_PATH, 'wb') as f:
                 pickle.dump(ensemble, f, protocol=pickle.HIGHEST_PROTOCOL)
         except Exception as e:
             print(f"[Ensemble] Could not save candidate: {e}", file=sys.stderr)
-        reasons = []
-        if not clears_cv_bar:
+        reasons = [decision.reason]
+        if not clears_cv_bar and baseline is not None:
             reasons.append(f"cv_auc={new_cv_auc:.4f} < active {baseline['cv_auc']:.4f}+{PROMOTION_MARGIN}")
-        if not clears_test_gate:
+        if not clears_test_gate and baseline is not None:
             reasons.append(f"test_auc={new_test_auc} < active {baseline['test_auc']:.4f}-{TEST_AUC_TOLERANCE}")
         note = (f"label={new_label}; REJECTED " + "; ".join(reasons) +
                 f" (baseline stale {age_days:.1f}d, {rejections} rejections so far; "

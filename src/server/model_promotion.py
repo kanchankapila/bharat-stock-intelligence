@@ -21,6 +21,7 @@ import polars as pl
 from workflow_orchestrator import WorkflowDAG, TaskNode
 import datetime
 import math
+from dataclasses import dataclass
 from typing import Optional, Tuple
 
 
@@ -244,3 +245,90 @@ def to_polars_df(data):
     if hasattr(data, 'empty') and data.empty:
         return pl.DataFrame()
     return pl.from_pandas(data) if hasattr(data, 'to_numpy') else pl.DataFrame(data)
+
+
+@dataclass(frozen=True)
+class PromotionDecision:
+    promote: bool
+    reason: str
+
+
+def promotion_decision(
+    *,
+    candidate_cv: Optional[float],
+    baseline_cv: Optional[float],
+    clears_cv_bar: bool,
+    clears_test_gate: bool,
+    label_changed: bool,
+    edge: Optional[dict],
+    staleness_override: bool,
+    has_baseline: bool,
+) -> PromotionDecision:
+    """Decide promotion with REALIZED edge as the primary input, not self-reported CV.
+
+    Why this exists: the active ensemble once held the best cv_roc_auc of all 59 registered
+    candidates (0.7664) while the same model, graded against realized forward returns, scored
+    hit_auc 0.493/0.512/0.535. A gate whose only input is a number the candidate computed about
+    itself cannot detect overfitting, and the better the overfit the harder it defends it.
+
+    `live_edge_verdict` already existed but only as an OVERRIDE -- it could let a candidate
+    through past a demonstrably hollow incumbent, but could not stop one getting in on CV alone,
+    which is the direction that actually causes harm. This makes it the gate.
+
+    Precedence (order matters; each step's docstring says why it sits where it does):
+      1. NaN candidate is refused before any override can carry it. With the CV comparison
+         bypassed there is nothing else left to catch a diverged model, and `float(nan or 0.0)`
+         is NaN, not 0.0 -- this codebase's own recurring truthiness trap.
+      2. No incumbent -> promote. Nothing to defend.
+      3. Incumbent untrustworthy (label changed, or realized edge measured-and-failing) -> its CV
+         is not evidence and cannot block.
+      4. Incumbent has a PROVEN realized edge -> CV superiority alone must not displace it.
+      5. Incumbent ungraded, or its reading is below the reliability floor -> refuse. Previously
+         CV decided by default here, which is precisely the hole the incident above came
+         through. `staleness_override` remains the escape hatch so this cannot deadlock.
+    """
+    if candidate_cv is None or not math.isfinite(candidate_cv):
+        return PromotionDecision(False, "candidate cv_auc is not a finite number")
+
+    if not has_baseline:
+        return PromotionDecision(True, "no incumbent to defend")
+
+    edge_unproven, edge_reason = live_edge_is_unproven(edge)
+
+    # NOTE ON ORDER, because the first version of this got it wrong and the existing suite
+    # caught it: the test-AUC gate is checked AFTER the untrustworthy-baseline branches, not
+    # before. Both clears_cv_bar and clears_test_gate are BASELINE-RELATIVE comparisons, so when
+    # the incumbent's own numbers are not evidence -- a different label, or a realized edge at
+    # chance -- both are equally meaningless and both must be bypassed. Checking the test gate
+    # first let a hollow incumbent keep defending itself with a second self-reported number
+    # after the first had been disqualified.
+    if label_changed:
+        return PromotionDecision(True, "incumbent trained on a different label; its CV is not comparable")
+
+    if edge_unproven:
+        return PromotionDecision(True, f"incumbent has no realized edge to defend ({edge_reason})")
+
+    if staleness_override:
+        return PromotionDecision(True, "staleness override: incumbent is old and has rejected repeatedly")
+
+    # From here the incumbent's numbers ARE trustworthy, so its relative gates apply.
+    if not clears_test_gate:
+        return PromotionDecision(False, "candidate fails the held-out test-AUC gate")
+
+    if edge is None or edge.get("dates", 0) < LIVE_EDGE_MIN_DATES:
+        # NOT "promote because CV says so". An ungraded incumbent means we do not know whether
+        # its CV reflects skill, and CV alone is exactly the evidence this gate exists to stop
+        # trusting. Grade it (factor_edge.py --persist) and the decision becomes answerable.
+        return PromotionDecision(
+            False,
+            f"incumbent is not graded against realized returns ({edge_reason}); "
+            f"CV alone is not evidence -- run factor_edge.py --persist for this column",
+        )
+
+    # Incumbent's realized edge holds. CV superiority is not sufficient to displace it.
+    return PromotionDecision(
+        False,
+        f"incumbent's realized edge holds ({edge_reason}); a candidate must beat it live, "
+        f"not on CV (candidate cv={candidate_cv:.4f} vs baseline cv="
+        f"{baseline_cv if baseline_cv is None else round(baseline_cv, 4)})",
+    )
