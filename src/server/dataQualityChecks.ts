@@ -527,9 +527,23 @@ const TABLE_FRESHNESS_CHECKS: TableFreshnessConfig[] = [
   // this registry was never updated to match when that one was fixed. Matched to the same 10h
   // ceiling here (9/12 = 0.375/0.5 days) rather than re-deriving a tighter number, so both
   // registries agree on what "stale" means for the same underlying table.
+  // Thresholds derived from the PRODUCER's real cadence, not from a round number.
+  // `isConfluenceComputeWindow` (confluence.jobs.ts) runs this engine only at IST hours 06-07
+  // and 17-23, so the largest gap in a perfectly healthy day is 07:59 -> 17:00 = 9h01m, and the
+  // 15-min check poll can observe up to ~9h15m of that.
+  //
+  // The previous warn 0.375d (9h) therefore fired EVERY afternoon by construction -- the
+  // always-fires defect (ml-model-bugs.md, drift_detector) -- and fail 0.5d (12h) left no room
+  // at all: a single skipped evening window (a deploy, a restart, this session's own sweep
+  // pause) takes the gap to 07:59 -> 06:00 next day = 22h and pages as critical on a table
+  // that is behaving exactly as designed.
+  //
+  // warn 10h clears the healthy 9h15m maximum; fail 14h still catches a genuinely missed
+  // evening window (22h) and a dead producer, which is what this check is for. Same
+  // calibrate-to-the-producer fix as engine-composite-freshness (AF-20260905-04).
   { id: 'confluence-signals-freshness', label: 'confluence_signals (canonical confluence engine)',
     category: 'scoring', critical: true, table: 'confluence_signals', dateColumn: 'computed_at',
-    tradingDayAware: false, warnDays: 0.375, failDays: 0.5 },
+    tradingDayAware: false, warnDays: 10 / 24, failDays: 14 / 24 },
   { id: 'unified-signals-freshness', label: 'unified_signals',
     category: 'signals', critical: false, table: 'unified_signals', dateColumn: 'signal_date', warnDays: 3, failDays: 5 },
   { id: 'screener-appearances-freshness', label: 'screener_appearances (feeds screener_momentum_score)',

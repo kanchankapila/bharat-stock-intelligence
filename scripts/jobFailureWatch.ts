@@ -39,8 +39,12 @@ function arg(name: string, dflt?: string): string | undefined {
 async function main() {
   const hours = Number(arg('hours', '6'));
   const since = arg('since');
+  // `ran_at` is stored UTC while a bare `--since 08:53` is wall-clock local, so comparing them
+  // directly silently reports zero rows for a window that is actually full of them (observed
+  // 2026-09-06: "0 runs" while news-sentiment and trendlyne-catchup were completing every few
+  // minutes). Anchor the local time in the session timezone, then let Postgres convert.
   const cutoff = since
-    ? `(CURRENT_DATE + TIME '${since}')`
+    ? `((CURRENT_DATE + TIME '${since}') AT TIME ZONE current_setting('TimeZone'))`
     : `(now() - interval '${hours} hours')`;
 
   const { rows: runs } = await pool.query(

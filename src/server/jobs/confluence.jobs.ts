@@ -54,7 +54,27 @@ export function isConfluenceComputeWindow(now = new Date()): boolean {
   return (hour >= 17 && hour <= 23) || hour === 6 || hour === 7;
 }
 
-async function processConfluenceCompute(_job: Job): Promise<{ computed: number; elite: number; strong: number; skipped?: boolean }> {
+
+/**
+ * Whether to actually compute, given the clock and an explicit force flag.
+ *
+ * The window gate stays the default -- outside IST 06-07 / 17-23 the engine's inputs are
+ * provably static and recomputing is waste. But the gate alone leaves no way to CATCH UP after
+ * a window is missed, and a missed window is routine: a deploy, a restart, or a maintenance
+ * pause all skip one, after which confluence_signals ages from its healthy ~9h maximum to ~22h
+ * and the critical freshness check pages until the next window opens hours later.
+ *
+ * Guards on `=== true` rather than truthiness: job data round-trips through Redis as JSON, so a
+ * stray `force: "false"` or `force: 0` must not silently defeat the gate.
+ */
+export function shouldComputeConfluence(
+  opts: { now?: Date; force?: unknown } = {},
+): boolean {
+  if (opts.force === true) return true;
+  return isConfluenceComputeWindow(opts.now ?? new Date());
+}
+
+async function processConfluenceCompute(job: Job): Promise<{ computed: number; elite: number; strong: number; skipped?: boolean }> {
   // Positional signal (whole-universe, heavy). Skip during market hours so it doesn't compete with
   // the intraday pipeline for CPU/DB — its consumers (positional dashboards + the post-close
   // unified_ranker) don't need intraday freshness. The pre-open compute carries through the session
@@ -69,9 +89,12 @@ async function processConfluenceCompute(_job: Job): Promise<{ computed: number; 
     console.log('[QUEUE] confluence-compute skipped — market hours (positional signal runs off-hours)');
     return { computed: 0, elite: 0, strong: 0, skipped: true };
   }
-  if (!isConfluenceComputeWindow()) {
+  if (!shouldComputeConfluence({ force: (job?.data as any)?.force })) {
     console.log('[QUEUE] confluence-compute skipped — outside the evening-landing/pre-open window (inputs are static)');
     return { computed: 0, elite: 0, strong: 0, skipped: true };
+  }
+  if ((job?.data as any)?.force === true && !isConfluenceComputeWindow()) {
+    console.log('[QUEUE] confluence-compute FORCED outside its window — catch-up for a missed window');
   }
   const { computeConfluenceSignals, runMLProbabilityOverlay } = await import('../confluenceEngine');
   const result = await computeConfluenceSignals();
