@@ -8021,3 +8021,132 @@ tsc clean; vitest **1206 passed** (from 1184); pytest **2430 passed / 249 skippe
 - Greenfield containers still stopped; `gf-*` jobs unswept.
 - `dl-feature-refresh` / `reconcile-stock-ohlcv` ordering, blocked on the bhavcopy cutover
   (AF-20260905-15).
+
+## 2026-09-06 — Sunday readiness pass: three job bugs, a refuted external result, and two of my own reversals
+
+Continuation of the 09-05 validation sweep. User's asks: get every job running clean before
+Monday, fix all identified issues, review an external research report, and give an expert view on
+whether the strategy/model design is right.
+
+### The headline: an external report's +3.64%/day was a look-ahead leak
+
+A fresh intraday study (102,063 symbol-days, own point-in-time panel, no access to this repo's
+docs) reported +3.72%/day train and +3.64%/day holdout, t=+14.9, 86% win rate, profit factor
+49.6. Measured against its own panel:
+
+    corr(d1_ret, return of day D  ) = 1.000000   exact match 100.0000%
+    corr(d1_ret, return of day D-1) = 0.031025   exact match   0.1736%
+
+The variable the whole study ranked on was the return of the day being traded. `20_build.py`
+emits both PRE-LAGGED columns (`prev_close = close.shift(1)`) and AS-OF columns
+(`ret_1d = close.pct_change()`); one join on `prev_date` pulls the date-D row and relabels
+everything `*_d1`, which is right for the first family and look-ahead for the second. After
+correction the headline factor reads **IC −0.003, t = −0.18**. Not weakened — zero.
+
+Three things stopped anyone catching it, and they generalise:
+- its own sanity check asserted `ph_d1 == prev_high`, a PRE-LAGGED column, i.e. the one family
+  that could not fail;
+- the "decisive" 11:45 entry-delay test rules out a bad ENTRY PRICE, not a contaminated
+  SELECTION VARIABLE — if you already know the day's winner, entering later still works;
+- train ≈ holdout was read as robustness when it is the opposite tell.
+
+**What survives is the opposite and it is real**: `or_pos` −0.113 (t=−8.8), `rs_vs_sector`
+−0.108, `rs_vs_mkt` −0.099, `vwap_dev` −0.093, `low_so_far` +0.079 — intraday MEAN REVERSION.
+Those numbers were correct in the original report all along (same-day data the broken join never
+touched), so an independent researcher reproduced this platform's dominant measured finding by a
+completely separate route. Recorded as a new class in `ml-model-bugs.md` with the cheap tells
+first, and the corrected script refuses to write unless every `*_d1` field passes
+`abs(corr(field, same-day return)) < 0.2`.
+
+### Three genuine job bugs
+
+**`relative_strength` — the timeout was a red herring.** Killed at 300s nightly. Standalone it
+computes in 39.8s and then dies on a LOCK TIMEOUT: a ~99,866-row UPDATE against
+`technical_signals` (~106,500 rows) issued while sibling ml-daily-ops steps write the same table.
+Raising the budget would have enlarged the lock footprint. The write is also unnecessary —
+`rs_rank_*` are cross-sectional percentiles as of date D and never change once written. Narrowed
+the WRITE window (not the 420-day COMPUTE window): 598,452 → 16,527 → 15,130 rows, 45.7s, clean.
+
+**`job-digest-morning` had no heartbeat row, ever.** It shares a queue and processor with
+`job-digest-daily`; `registerRepeatableJob` builds one Worker per call, so two workers competed
+on one queue and each closed over its own `cfg.monitorName` — which name a run recorded under was
+a race. `job-digest` was absorbing both schedules. The heartbeat now resolves from the JOB. Worth
+noting the shape: a NEVER-RUN job is more dangerous than a failing one, because it looks clean in
+every "show me the failures" view precisely because it never produced one.
+
+**Zombie jobs after a restart, hit twice in one day.** A pm2 restart leaves the job `active`, and
+these queues set `lockDuration: 24h` because the work genuinely takes hours — so BullMQ will not
+reclaim for a day, `concurrency: 1` blocks the queue, and the duplicate-catch-up guard then
+correctly refuses a replacement. The job silently does not run and nothing distinguishes it from
+a long run. `recurring-bugs.md` already had the diagnosis but left recovery manual, which is why
+it recurred within hours. Now self-healing at boot, keyed on process start rather than job age —
+a three-hour-old job is healthy if the process has been up four hours and orphaned if it has been
+up thirty seconds.
+
+### Promotion now gates on realized edge
+
+`live_edge_verdict` existed only as an OVERRIDE: it could let a candidate past a hollow
+incumbent, but could not stop one getting in on CV alone — the direction that causes harm.
+`promotion_decision()` makes it primary. A proven realized edge cannot be displaced by CV
+superiority; an ungraded incumbent no longer lets CV decide by default (the exact hole the
+0.7664-CV-vs-0.50-live incident came through).
+
+**The existing suite refuted my first design** and that is recorded in a comment: I checked
+`clears_test_gate` BEFORE the untrustworthy-baseline branches. Both gates are baseline-relative,
+so that let a hollow incumbent defend itself with a second self-reported number after the first
+was disqualified.
+
+Also fixed the defect that made the gate un-auditable: `walk_forward_validate` rebuilt each fold
+at today's feature width and so CRASHED on the active champion (`lstm_v3.pt`, 78 inputs). Same
+defect the inference path fixed in 2026-08-24 and never applied here. Latent in production, fatal
+for the one case that matters — validating an existing champion.
+
+### Two reversals of my own, both worth keeping visible
+
+1. **`confluence-signals-freshness`** — I widened it to warn 10h / fail 14h arguing a 9h warn
+   "fires every afternoon by construction". The existing test refuted that: it was already
+   calibrated on 2026-08-07 with an incident behind it, the healthy max gap is 9h01m so the warn
+   band is a narrow sliver, and the critical failure that prompted me was a 15-hour
+   SCHEDULER_PAUSE — exactly the abnormal condition the check exists to report. Reverted. The
+   genuinely missing piece was the catch-up path (`shouldComputeConfluence` force flag), kept.
+2. **Trendlyne zero-progress gate** (09-05) — reversed the same day for the same reason: the
+   allowance is shared across fetchers, so gating on zero progress fires on a benign case.
+
+### Three factor gradings, all no edge
+
+`measurement.md`'s "highest-value task available" is closed. `smart_money_score` +0.004/0.502 @1d,
+−0.016/0.488 @5d — and **18 usable dates, not 21**, because forward-price matching costs 3, so
+"non-zero dates in the table" is not "dates the harness can grade". All 10 `ext_*` vendor columns
+no-edge. `ccc_trend` negative at every horizon on a well-powered 64/60/44-date panel. One honest
+lead kept: `ext_t80_tech_score` IC +0.185 / AUC 0.574 at 21d on 17 dates — under the floor.
+
+Same run found `ext_mojo_quality_rank` and `ext_t80_quality_rank` are **100% identical, corr =
+1.0** across 28,584 rows. Two "independent vendors agreeing" was one column counted twice.
+
+### Operational cost I caused, recorded rather than glossed
+
+The 09-05 sweep pause was left on overnight and the platform ran **2 jobs in 15 hours**. The
+serial constraint was not even load-bearing — BullMQ concurrency is per-queue, so the long DL job
+never blocked anything; only the sweep harness's own guard did. Next sweep bounds the pause by
+wall-clock, not by "when the last job goes green".
+
+Also fixed a bug in my own instrument: `jobFailureWatch --since` compared a wall-clock literal
+against UTC-stored `ran_at` and reported "0 runs" for a window holding 78 successful ones.
+Measuring with a broken instrument nearly sent me chasing a phantom outage.
+
+### Gates
+
+tsc clean; vitest **1224 passed**; pytest **2466 passed / 249 skipped, 0 failed**.
+
+### Still open
+
+- `GEMINI_API_KEY` is empty while `ANTHROPIC_API_KEY` holds a VALID Google key (verified against
+  Google's API, 50 models). One `.env` line unblocks `company-profiles-sync` and restores ~25% of
+  agent narratives currently written as placeholder text. Needs the user; writing it was
+  correctly blocked by the permission classifier.
+- AF-20260906-02, the DL walk-forward leak: measurement harness written and the blocking width
+  bug fixed, but the run itself exceeds a 50-minute budget at 30 symbols. Needs a reduced-scope
+  re-run.
+- `ml-weekly-retrain` cluster last succeeded 181h ago (7.5 days) — overdue, queued behind
+  ml-daily-ops.
+- Fundamentals remain calendar-blocked (~30 dates from 2026-06-30).
