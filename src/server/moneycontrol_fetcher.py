@@ -462,7 +462,16 @@ class MoneyControlFetcher:
 
             rows = []
             for i in range(len(t_arr)):
-                dt_str = datetime.datetime.fromtimestamp(t_arr[i]).strftime("%Y-%m-%d %H:%M:%S")
+                # epoch -> AWARE UTC, never bare fromtimestamp(): on this IST box the local-time
+                # render stamped every bar +5:30 into the future ("09:15 IST" became "09:15 UTC"),
+                # duplicated intraday_fetcher.py's correct rows under shifted PK stamps, and in the
+                # 09:15-10:00 UTC range COLLIDED with the legit 14:45-15:30 IST bars' stamps on
+                # (symbol, datetime, interval) -- each run's writer overwrote the other's prices.
+                # Found live 2026-09-09: ~3.2k rows/day stamped 11:00-15:30 UTC (21:00 IST close
+                # bars that do not exist). Same bug class as db_compat.now_utc_iso.
+                dt_str = datetime.datetime.fromtimestamp(
+                    t_arr[i], tz=datetime.timezone.utc
+                ).strftime("%Y-%m-%d %H:%M:%S+00")
                 rows.append({
                     "symbol": symbol,
                     "datetime": dt_str,

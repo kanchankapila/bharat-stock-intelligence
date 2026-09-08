@@ -13,9 +13,15 @@ exit model actually needs:
   mfe_before_mae         — did the gain come before the pain? (trailing-stop viability)
   trail_exit_pct / _day  — return & day of a chandelier-trailed exit (highest-high − k·ATR)
   horizon_close_pct      — buy-and-hold-to-horizon baseline to beat
+  vol_rank               — ATR percentile rank vs. trailing history (barrier regime)
 
 Writes signal_excursions(symbol, signal_date, horizon_days). Long-only, matching the
 resolver's convention. ATR is measured from the 14 bars preceding entry (leak-free).
+
+Triple-barrier labels use DYNAMIC volatility-adjusted barriers: the barrier multipliers
+widen/narrow with the stock's own trailing ATR percentile rank (vol_rank), so low-vol
+regimes get tighter barriers (fewer false neutrals) and high-vol regimes get wider ones
+(fewer whipsaw losses). Defaults reproduce the fixed scheme at vol_rank=1.0.
 
 Run:  python exit_labeler.py
       python exit_labeler.py --horizon 15
@@ -23,21 +29,101 @@ Run:  python exit_labeler.py
 """
 
 import polars as pl
+import pandas as pd
+import numpy as np
 import argparse
 import datetime
 
-from db_compat import read_df, executemany, query_all, execute
+from db_compat import read_df, executemany, query_all, execute, safe_alter, now_utc_iso
 
 CHANDELIER_ATR_MULT = 3.0   # trailing stop = highest-high-since-entry − 3×ATR (mirrors resolver)
 ATR_WINDOW = 14
 
-# Triple-barrier defaults: vol-scaled, asymmetric (reward:risk 2:1).
-TB_K_UP   = 2.0     # upper barrier = +k_up · atr_pct
-TB_K_DN   = 1.0     # lower barrier = −k_dn · atr_pct
-# Cost band as a fraction of ATR rather than a fixed %; this keeps the neutral
-# zone proportional to realized volatility (low-vol stocks had nearly all
-# horizon returns inside the old fixed 0.4% band, starving the model of labels).
-TB_COST_FRAC = 0.15  # neutral band = ±0.15 · atr_pct (≈0.3% at avg ATR 2%)
+# Triple-barrier BASE multipliers: vol-scaled, asymmetric (reward:risk 2:1 at the old
+# fixed setting). Actual barriers are ADJUSTED BY VOLATILITY REGIME via vol_rank:
+#   upper = (k_up_at_lo + vol_rank·(k_up_at_hi − k_up_at_lo)) · atr_pct
+# With the defaults below: 1.0x→2.0x ATR upper, −0.5x→−1.0x ATR lower, ±0.10→±0.20 ATR cost band.
+BASE_TB_K_UP_LO = 1.0     # upper-barrier multiplier at vol_rank=0 (low-vol regime)
+BASE_TB_K_UP_HI = 2.0     # upper-barrier multiplier at vol_rank=1 (high-vol regime)
+BASE_TB_K_DN_LO = 0.5     # |lower| multiplier at vol_rank=0
+BASE_TB_K_DN_HI = 1.0     # |lower| multiplier at vol_rank=1
+BASE_TB_COST_LO = 0.10    # cost-band fraction of ATR at vol_rank=0
+BASE_TB_COST_HI = 0.20    # cost-band fraction of ATR at vol_rank=1
+# Back-compat aliases (legacy callers / tests may import these)
+TB_K_UP = BASE_TB_K_UP_HI
+TB_K_DN = BASE_TB_K_DN_HI
+TB_COST_FRAC = BASE_TB_COST_LO + (BASE_TB_COST_HI - BASE_TB_COST_LO) * 0.5  # 0.15 midpoint
+
+# How many trailing ATR observations define the volatility regime (per signal, per symbol).
+# 20 trailing daily ATRs ≈ one trading month — matches the audit's vol-lookback recommendation.
+VOL_RANK_LOOKBACK = 20
+
+
+def _lerp(lo: float, hi: float, t: float) -> float:
+    """Linear interpolation lo→hi at t∈[0,1], clamped."""
+    return lo + max(0.0, min(1.0, t)) * (hi - lo)
+
+
+def calculate_dynamic_triple_barrier_multipliers(vol_rank: float):
+    """
+    Barrier multipliers for a given volatility regime.
+
+    Args:
+        vol_rank: ATR percentile rank in [0, 1] (1 = current ATR is the highest of the
+                  trailing window; 0 = lowest). Falls back to the legacy fixed scheme
+                  (2.0 / −1.0 / ±0.15 ATR) when None.
+
+    Returns:
+        (k_up, k_dn, cost_frac) — positive floats; lower barrier is applied as −k_dn.
+    """
+    if vol_rank is None:
+        return BASE_TB_K_UP_HI, BASE_TB_K_DN_HI, TB_COST_FRAC
+    t = max(0.0, min(1.0, float(vol_rank)))
+    k_up = _lerp(BASE_TB_K_UP_LO, BASE_TB_K_UP_HI, t)
+    k_dn = _lerp(BASE_TB_K_DN_LO, BASE_TB_K_DN_HI, t)
+    cost_frac = _lerp(BASE_TB_COST_LO, BASE_TB_COST_HI, t)
+    return k_up, k_dn, cost_frac
+
+
+def compute_trailing_atr_series(prior_bars: list, window: int = ATR_WINDOW,
+                                count: int = VOL_RANK_LOOKBACK) -> list:
+    """
+    ATR for each of the trailing `count` sessions, leak-free: ATR_i uses only bars
+    strictly before session i. `prior_bars`: (high, low, close) tuples ASCENDING,
+    ending on the bar immediately before entry. Returns ATR list ASCENDING IN TIME —
+    [oldest ATR, ..., entry-time ATR]; the LAST element is the entry-time ATR (same
+    value compute_atr() returns). Each ATR uses a full `window`-bar range, so all
+    values in the series are directly comparable (no short-window bias at the tail).
+    """
+    n = len(prior_bars)
+    if n < window + 1:
+        return []
+    # e (exclusive end) walks oldest→newest: ATR for the bar at index e-1 uses bars[:e].
+    # The oldest e needs ≥ window+1 bars so every ATR in the series spans the full window.
+    lo = max(window + 1, n - count + 1)
+    out = []
+    for e in range(lo, n + 1):
+        atr = compute_atr(prior_bars[:e], window)
+        if atr > 0:
+            out.append(atr)
+    return out
+
+
+def compute_vol_rank(prior_bars: list, window: int = ATR_WINDOW,
+                     lookback: int = VOL_RANK_LOOKBACK) -> float:
+    """
+    Percentile rank of the entry-time ATR within the trailing `lookback` ATR history
+    (leak-free — every ATR in the comparison series uses only bars before its own date).
+    Returns a float in [0, 1]; 0.5 when there is not enough history (neutral default so
+    barriers revert to ~midpoint, never wider than the legacy fixed scheme).
+    """
+    series = compute_trailing_atr_series(prior_bars, window, lookback)
+    if len(series) < 2:
+        return 0.5
+    current = series[-1]
+    hist = series[:-1]
+    # Fraction of trailing ATRs the current one exceeds — the audit's vol-percentile rank.
+    return sum(1 for a in hist if a <= current) / len(hist)
 
 # Bad-bar guard, not a real market bound -- mirrors factor_backtest.py's RETURN_CLAMP_PCT.
 # is_suspect is supposed to catch corrupt OHLCV before it reaches here, but isn't infallible
@@ -49,13 +135,16 @@ EXCURSION_CLAMP_PCT = 50.0
 
 
 def triple_barrier_label(mfe_pct, mae_pct, mfe_before_mae, horizon_close_pct,
-                         atr_pct, k_up: float = TB_K_UP, k_dn: float = TB_K_DN,
-                         cost_frac: float = TB_COST_FRAC):
+                         atr_pct, vol_rank: float = None,
+                         k_up: float = None, k_dn: float = None,
+                         cost_frac: float = None):
     """López de Prado triple-barrier label from precomputed excursions.
 
-    Barriers are volatility-scaled and asymmetric: upper = +k_up·atr_pct,
-    lower = −k_dn·atr_pct. Returns 1 (win), 0 (loss), or None (neutral / undecidable,
-    excluded from training).
+    Barriers are volatility-scaled, asymmetric, and REGIME-ADAPTIVE: when `vol_rank`
+    (ATR percentile vs. trailing history) is supplied, multipliers interpolate
+    1.0x→2.0x ATR upper / −0.5x→−1.0x ATR lower / ±0.10→±0.20 ATR cost band from
+    low-vol to high-vol regimes. Explicit k_up/k_dn/cost_frac override everything.
+    Returns 1 (win), 0 (loss), or None (neutral / undecidable, excluded from training).
 
       - If both barriers are touched, `mfe_before_mae` decides which came first.
       - If only one is touched, it wins.
@@ -65,6 +154,12 @@ def triple_barrier_label(mfe_pct, mae_pct, mfe_before_mae, horizon_close_pct,
     """
     if horizon_close_pct is None:
         return None
+
+    if k_up is None or k_dn is None or cost_frac is None:
+        d_up, d_dn, d_cost = calculate_dynamic_triple_barrier_multipliers(vol_rank)
+        k_up = d_up if k_up is None else k_up
+        k_dn = d_dn if k_dn is None else k_dn
+        cost_frac = d_cost if cost_frac is None else cost_frac
 
     if atr_pct and atr_pct > 0:
         upper = k_up * atr_pct
@@ -107,12 +202,15 @@ def compute_atr(prior_bars: list, window: int = ATR_WINDOW) -> float:
 
 
 def compute_excursions(entry: float, bars: list, atr: float,
-                       chandelier_mult: float = CHANDELIER_ATR_MULT) -> dict:
+                       chandelier_mult: float = CHANDELIER_ATR_MULT,
+                       vol_rank: float = None) -> dict:
     """Replay the holding window and return excursion + trailing-exit labels.
 
     `entry`: fill price. `bars`: list of (high, low, close) ascending, position open at entry.
     `atr`: ATR at entry for the chandelier stop. Day numbering is 1-based (day 1 = first bar
-    after entry). Returns a dict of the signal_excursions value columns (entry-relative %)."""
+    after entry). `vol_rank`: ATR percentile vs. trailing history in [0,1] — drives the
+    DYNAMIC triple-barrier multipliers (None → legacy fixed scheme).
+    Returns a dict of the signal_excursions value columns (entry-relative %)."""
     if entry <= 0 or not bars:
         return {}
 
@@ -148,7 +246,7 @@ def compute_excursions(entry: float, bars: list, atr: float,
     atr_pct = round(atr / entry * 100.0, 4) if atr and atr > 0 else 0.0
     tb_label = triple_barrier_label(
         round(mfe_pct, 4), round(mae_pct, 4), mfe_before_mae,
-        round(horizon_close_pct, 4), atr_pct,
+        round(horizon_close_pct, 4), atr_pct, vol_rank=vol_rank,
     )
 
     return {
@@ -157,6 +255,7 @@ def compute_excursions(entry: float, bars: list, atr: float,
         "days_to_mfe": days_to_mfe,
         "days_to_mae": days_to_mae,
         "mfe_before_mae": mfe_before_mae,
+        "vol_rank": round(vol_rank, 4) if vol_rank is not None else None,
         "trail_exit_pct": round(trail_exit_pct, 4),
         "trail_exit_day": trail_exit_day,
         "horizon_close_pct": round(horizon_close_pct, 4),
@@ -190,6 +289,16 @@ def _entries(horizon: int | None, limit: int | None) -> list:
     if limit:
         sql += f" LIMIT {int(limit)}"
     return query_all(sql, tuple(params))
+
+
+def _ensure_vol_rank_column() -> None:
+    """
+    Add signal_excursions.vol_rank if the live table predates the dynamic-barrier upgrade.
+    Wrapped in SET lock_timeout='2s' per AF-20260829-26 (bare ALTERs on a hot table queue an
+    ACCESS EXCLUSIVE lock and stall every concurrent reader); node-pg-migrate owns the
+    production migration, this keeps throwaway/SQLite test DBs and fresh dev boxes working.
+    """
+    safe_alter(None, "ALTER TABLE signal_excursions ADD COLUMN IF NOT EXISTS vol_rank DOUBLE PRECISION")
 
 
 def _mark_delisted(candidate_symbols: list[str]) -> None:
@@ -231,6 +340,7 @@ def _mark_delisted(candidate_symbols: list[str]) -> None:
 def run(horizon: int | None = None, limit: int | None = None) -> int:
     """Compute excursion labels for signal_outcomes entries and upsert signal_excursions.
     Returns rows written."""
+    _ensure_vol_rank_column()
     entries = _entries(horizon, limit)
     if not entries:
         print("[EXIT] No entries to label.")
@@ -241,6 +351,9 @@ def run(horizon: int | None = None, limit: int | None = None) -> int:
     stale_missing: list[str] = []   # zero forward bars AND the horizon window has long since
                                      # elapsed — likely delisted/suspended, not "too recent to label"
     today = datetime.date.today()
+    # Prior-bar pull: ATR needs ATR_WINDOW+1 bars; the vol-rank regime needs VOL_RANK_LOOKBACK
+    # trailing daily ATRs on top of that (each ATR_i consumes ATR_WINDOW+1 bars of history).
+    PRIOR_BARS = ATR_WINDOW + VOL_RANK_LOOKBACK + 2
     for e in entries:
         symbol, signal_date, hd, entry = e["symbol"], e["signal_date"], e["horizon_days"], e["entry_price"]
         ohlcv = read_df(
@@ -266,19 +379,23 @@ def run(horizon: int | None = None, limit: int | None = None) -> int:
             "SELECT high, low, close FROM stock_ohlcv "
             "WHERE symbol = ? AND date <= ? AND COALESCE(is_suspect,0) = 0 "
             "ORDER BY date DESC LIMIT ?",
-            (symbol, signal_date, ATR_WINDOW + 1),
+            (symbol, signal_date, PRIOR_BARS),
         )
-        atr = compute_atr(list(prior[["high", "low", "close"]].itertuples(index=False, name=None))[::-1])
+        prior_bars = list(prior[["high", "low", "close"]].itertuples(index=False, name=None))[::-1]
+        atr = compute_atr(prior_bars)
+        # Dynamic triple-barrier regime: ATR percentile vs. the trailing VOL_RANK_LOOKBACK
+        # ATRs (leak-free — every comparison ATR uses only bars before its own date).
+        vol_rank = compute_vol_rank(prior_bars)
         bars = list(ohlcv[["high", "low", "close"]].itertuples(index=False, name=None))
-        exc = compute_excursions(float(entry), bars, atr)
+        exc = compute_excursions(float(entry), bars, atr, vol_rank=vol_rank)
         if not exc:
             continue
         rows.append((
             symbol, signal_date, int(hd), float(entry),
             exc["mfe_pct"], exc["mae_pct"], exc["days_to_mfe"], exc["days_to_mae"],
             exc["mfe_before_mae"], exc["trail_exit_pct"], exc["trail_exit_day"],
-            exc["horizon_close_pct"], exc["atr_pct"], exc["tb_label"],
-            datetime.datetime.now().isoformat(),
+            exc["horizon_close_pct"], exc["atr_pct"], exc["tb_label"], exc.get("vol_rank"),
+            now_utc_iso(),
         ))
 
     if missing_ohlcv:
@@ -300,8 +417,9 @@ def run(horizon: int | None = None, limit: int | None = None) -> int:
         """INSERT INTO signal_excursions
              (symbol, signal_date, horizon_days, entry_price,
               mfe_pct, mae_pct, days_to_mfe, days_to_mae, mfe_before_mae,
-              trail_exit_pct, trail_exit_day, horizon_close_pct, atr_pct, tb_label, computed_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+              trail_exit_pct, trail_exit_day, horizon_close_pct, atr_pct, tb_label,
+              vol_rank, computed_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
            ON CONFLICT(symbol, signal_date, horizon_days) DO UPDATE SET
              entry_price       = excluded.entry_price,
              mfe_pct           = excluded.mfe_pct,
@@ -314,6 +432,7 @@ def run(horizon: int | None = None, limit: int | None = None) -> int:
              horizon_close_pct = excluded.horizon_close_pct,
              atr_pct           = excluded.atr_pct,
              tb_label          = excluded.tb_label,
+             vol_rank          = excluded.vol_rank,
              computed_at       = excluded.computed_at""",
         rows,
     )
@@ -327,9 +446,3 @@ if __name__ == "__main__":
     parser.add_argument("--limit", type=int, help="Cap number of entries (newest first)")
     args = parser.parse_args()
     run(horizon=args.horizon, limit=args.limit)
-
-def to_polars_df(data):
-    """Converts pandas DataFrame or list of dicts to Polars DataFrame for fast vector operations."""
-    if hasattr(data, 'empty') and data.empty:
-        return pl.DataFrame()
-    return pl.from_pandas(data) if hasattr(data, 'to_numpy') else pl.DataFrame(data)

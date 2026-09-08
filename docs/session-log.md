@@ -5,6 +5,16 @@ Historical record, split out of CLAUDE.md on 2026-08-11 (it was 64% of that file
 
 **Not loaded automatically.** Read a specific entry when you need the history behind a decision. Durable lessons extracted from here live in `.claude/rules/`; if you find one that isn't there, add it.
 
+## 2026-09-09 -- Live Verification of the 09-08 Datasource Freshness Audit: Report Largely Falsified, 4 Bugs Fixed
+
+- **Context:** the 2026-09-08 23:00 IST "Master Datasource & Database Table Freshness Audit" claimed 98.2% fresh, "all EOD jobs executed", "no remediation required". Verified every claim live against Postgres, Redis/BullMQ, `job_run_history`, PM2. Result: per-table Section 2 mostly accurate, but the Executive Summary/Conclusion were false. Full 16-row claim-by-claim table now in `datasource_audit_report.md` §5; ledger rows AF-20260909-01…06.
+- **The big one (AF-20260909-06):** `ml-daily-ops` (18:50 IST EOD batch) was **orphaned mid-run by the 15:10 UTC pm2 restart** on 09-08 — `reclaimStaleActiveJobs` failed it ("job predates this process, active 132m") and nothing re-queued it, so block deals / performance_tracker / exit labels / mf_sector_allocation all missed 09-08 while every sibling job stayed green. A green heartbeat elsewhere is not evidence this chain ran. Instance fixed by enqueueing `manual-makeup-20260908-ml-daily-ops` (verified active, chain writing). The mechanism gap (reclaimed-active jobs are failed, never retried) left OPEN — needs a design decision (retry guard vs alert-on-reclaim).
+- **mover_snapshots mislabel (AF-20260909-02):** the 16:05 IST capture races stock-refresh (16:00) / ohlcv gap-fill (16:20); `resolve_trade_date()` (MAX stock_ohlcv.date) returned yesterday, so 09-08's whole capture was labeled 09-07 and its calc classes silently dropped. Fixed by moving the cron to 16:50 IST (queues.ts; queue not registry-tracked) + `--backfill-days 3` restored 875 calc rows. **`pm2 restart bharat-server` still pending — must wait for the make-up to finish (~04:30 IST) or the restart orphans it again.**
+- **intraday_ohlcv +5:30 stamp corruption (AF-20260909-03):** `moneycontrol_fetcher._fetch_intraday` used bare `fromtimestamp()` → naive IST stored as UTC → ~1.09M phantom-future bars ("15:30 UTC close" = 21:00 IST), colliding with legit late-session bars on the PK. Writer fixed to aware-UTC; purged 53,135 recent-window rows (MAX(datetime) back to the true 15:30 IST close). Historical ~1.04M rows left: full delete hits `timescaledb.max_tuples_decompressed_per_dml_transaction` on compressed chunks. Same naive-IST class as `exit_labeler.py:398` — also fixed to `now_utc_iso()` (AF-20260909-04).
+- **Not a bug, verified then left alone (AF-20260909-01):** `tl_financial_quality`'s 20-day smart-cadence skip defeats its weekly schedule by design ("refresh at least monthly", ET annual data). The report's "weekly, FRESH 09-06" framing was the error. Launched the fetcher to prove the skip fires clean (0 fetches, exit 0). Also corrected: `mf_sector_allocation` is NOT empty (25 rows, 2026-08); `insider_trades` is 76,652 rows / 09-07 (report said 10K/09-01); row counts stock_ohlcv 2.68M (not 10.2M), confluence 6.63M (not 1.8M), macro 131K (not 1.5M), finstack 55 (not 12K+), mojo picks 7 (not 80+). Corrected freshness ~93–95% at report time, not 98.2%.
+- **Gates:** `npx tsc --noEmit` clean; full `python -m pytest src/server/__tests__/ src/server/tests/ tests/chatbot/` and `npx vitest run` executed post-change (queues.ts cron literal, exit_labeler.py, moneycontrol_fetcher.py).
+
+
 ## 2026-08-31 -- 50-Stock Benchmark & Analyst Estimates Ingestion Upgrade
 
 - **50-Stock Benchmark & Data Comparison:**
@@ -8150,3 +8160,36 @@ tsc clean; vitest **1224 passed**; pytest **2466 passed / 249 skipped, 0 failed*
 - `ml-weekly-retrain` cluster last succeeded 181h ago (7.5 days) — overdue, queued behind
   ml-daily-ops.
 - Fundamentals remain calendar-blocked (~30 dates from 2026-06-30).
+
+## 2026-09-07 — quant snapshot freshness remediation
+
+- Root-caused the new `quant-scores-history-freshness` failure to a stale `::text` cast in
+  `src/server/quantScoringService.ts:snapshotQuantScores()`: `snapshot_date` had been migrated to
+  native `DATE`, so every snapshot failed with Postgres `42804` even while the parent quant job
+  could record success.
+- Removed the casts from both the INSERT and verification query, added a regression guard in
+  `src/server/__tests__/quantScoresWriterOrder.test.ts`, and ran the real writer against
+  production. It inserted 2,424 rows for 2026-09-04; live history now has 17 sessions / 41,208
+  rows. `dq:check` reports 163/169 checks passed, 0 critical failures, and the quant freshness
+  check passes.
+- Deployed with `pm2 restart bharat-server --update-env`; the process is online and `/` returns
+  HTTP 200. Full Vitest passed (1,229 passed / 41 skipped); `tsc --noEmit` passed. The full Python
+  gate was attempted but interrupted after 240.74s at 1,442 passed / 249 skipped, with no test
+  failure reported.
+- The screener sentiment divergence remains evidence-blocked rather than auto-synced: the live
+  panel has only 5 post-2026-08-29 dates, below the approximately 20-date floor required before
+  changing a scoring input. The existing ledger row remains open for that measurement.
+
+## 2026-09-07 — screener neutral-label review and correction
+
+- Reviewed all **566** `screener_master` neutral labels and **720** `screener_catalog` neutral
+  labels against the canonical classifier. Most are intentionally neutral sector lists, generic
+  universes, or indecision patterns; only **8 master** and **9 catalog** rows had explicit
+  directional evidence.
+- Applied the bounded correction in production: 8 master neutrals and 9 catalog neutrals became
+  bearish; the remaining **558 master neutrals** were preserved. The catalog now follows the
+  authoritative `screener_master.inferred_sentiment` for matching screeners.
+- Live DQ changed from 163/169 to **164/169**, with **0 critical failures**; all **972** matching
+  catalog/master pairs now agree. Added regression coverage for directional-only correction and
+  ambiguous-neutral preservation; focused suite passes **11/11**. The full Python suite was
+  attempted but did not return a complete summary in the runner, so it is not claimed green.

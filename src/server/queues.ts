@@ -2375,9 +2375,14 @@ export async function initQueues(): Promise<boolean> {
     // 30-min cadence needlessly doubled worst-case CMP staleness for no reason -- 15 min
     // matches the source data's own granularity, ~4min runtime leaves ample headroom.
     intradayFetcherQueue = new Queue(QUEUE_INTRADAY_FETCHER, { connection });
-    const intradayRep = await intradayFetcherQueue.getRepeatableJobs();
-    for (const r of intradayRep) await intradayFetcherQueue.removeRepeatableByKey(r.key);
-    await intradayFetcherQueue.add('intraday-fetcher', {}, {
+    // addJobWithCatchup, not a raw add (2026-09-08): the raw remove-all-then-add shape is how
+    // this queue lost its next-run delayed job across the 2026-09-07 restarts — BullMQ only
+    // creates the NEXT delayed occurrence when a worker processes the current one, so any boot
+    // that tears the registration down without a worker ever processing leaves the queue dead
+    // forever (observed live: repeat config present, delayed=0, no captures for 2 trading
+    // days). addJobWithCatchup removes only STALE repeatables (next < now), reclaims orphaned
+    // actives, and queues a catch-up when the schedule was missed — self-healing by design.
+    await addJobWithCatchup(intradayFetcherQueue, 'intraday-fetcher', {}, {
       repeat: { pattern: '*/15 3-10 * * 1-5', tz: 'Etc/UTC' },
       jobId: 'intraday-fetcher',
       removeOnComplete: 5,
@@ -2398,16 +2403,24 @@ export async function initQueues(): Promise<boolean> {
       recordHeartbeat('intraday-fetcher', 'failed', err?.message, bullJobDurationMs(job));
     });
 
-    // ── Mover screener capture (4:05 PM IST weekdays, after close): persists Top
+    // ── Mover screener capture (4:50 PM IST weekdays, after close + after OHLCV lands): persists Top
     // Gainers/Losers (1d+1w), MarketsMojo movers, NiftyTrader gaps, MC price-shockers
     // plus computed gap/open=high/open=low/volume-shocker/breakout classes for today
     // into mover_snapshots. Ground truth for reverse_engineering_study.py; lists scroll
     // away within a day, so the capture is the only durable record.
     moverQueue = new Queue(QUEUE_MOVER_CAPTURE, { connection });
-    const moverRep = await moverQueue.getRepeatableJobs();
-    for (const r of moverRep) await moverQueue.removeRepeatableByKey(r.key);
-    await moverQueue.add('mover-capture-daily', {}, {
-      repeat: { pattern: '35 10 * * 1-5', tz: 'Etc/UTC' },
+    // addJobWithCatchup, not a raw add — same 2026-09-08 dead-repeatable failure as
+    // intraday-fetcher (see the comment there for the mechanism).
+    await addJobWithCatchup(moverQueue, 'mover-capture-daily', {}, {
+      // 16:50 IST (was 16:05 IST): the capture labels everything resolve_trade_date() returns —
+      // MAX(date) from stock_ohlcv — and at 16:05 the day's bars had not landed yet
+      // (stock-refresh 16:00 IST, ohlcv gap-fill 16:20 IST), so the whole post-close capture
+      // (live EOD screens + calc_* classes) was labeled with YESTERDAY's session and today's
+      // calc classes were silently dropped (df filtered to a date that did not exist yet).
+      // Found live 2026-09-09: trade_date 09-07 rows captured on 09-08 16:05, zero 09-08 rows.
+      // 16:50 IST lands after both writers with margin; jobRegistryCronMirror does not track
+      // this queue (not in JOB_REGISTRY — only its parent ml-daily-ops is).
+      repeat: { pattern: '20 11 * * 1-5', tz: 'Etc/UTC' },
       jobId: 'mover-capture-daily',
       removeOnComplete: 3,
       removeOnFail: 3,
@@ -2433,9 +2446,9 @@ export async function initQueues(): Promise<boolean> {
     // 11:30 gain5 cohort look like by close?"). Hourly, not */15 -- each slot is a full
     // universe snapshot (~2.3k rows) and the study needs distinct times, not noise.
     moverIntradayQueue = new Queue(QUEUE_MOVER_INTRADAY, { connection });
-    const miRep = await moverIntradayQueue.getRepeatableJobs();
-    for (const r of miRep) await moverIntradayQueue.removeRepeatableByKey(r.key);
-    await moverIntradayQueue.add('mover-intraday-slot', {}, {
+    // addJobWithCatchup, not a raw add — same 2026-09-08 dead-repeatable failure as
+    // intraday-fetcher (see the comment there for the mechanism).
+    await addJobWithCatchup(moverIntradayQueue, 'mover-intraday-slot', {}, {
       repeat: { pattern: '0 4-8 * * 1-5', tz: 'Etc/UTC' },   // 09:30/10:30/11:30/12:30/13:30 IST
       jobId: 'mover-intraday-slot',
       removeOnComplete: 3,
@@ -2468,9 +2481,10 @@ export async function initQueues(): Promise<boolean> {
     // The Python script checks market hours at runtime and skips outside 09:15-15:30 IST.
     // 28 filters x ~1000 rows each = ~28k rows per run, ~224k rows/day (8 runs x 28 filters).
     ntLiveFilterQueue = new Queue(QUEUE_NT_LIVE_FILTER, { connection });
-    const nlfRep = await ntLiveFilterQueue.getRepeatableJobs();
-    for (const r of nlfRep) await ntLiveFilterQueue.removeRepeatableByKey(r.key);
-    await ntLiveFilterQueue.add('nt-live-filter-slot', {}, {
+    // addJobWithCatchup, not a raw add — same 2026-09-08 dead-repeatable failure as
+    // intraday-fetcher (see the comment there for the mechanism); this queue was one of
+    // the two the DQ freshness checks caught live (2 trading days of zero captures).
+    await addJobWithCatchup(ntLiveFilterQueue, 'nt-live-filter-slot', {}, {
       repeat: { pattern: '*/15 3-10 * * 1-5', tz: 'Etc/UTC' },  // 09:15-15:30 IST (with runtime check)
       jobId: 'nt-live-filter-slot',
       removeOnComplete: 3,
@@ -2586,9 +2600,10 @@ export async function initQueues(): Promise<boolean> {
     //    Comment corrected 2026-08-30 -- it previously claimed '9:00-15:30 IST', which no cron
     //    field in this repeat has ever produced.
     liveScreenerCollectQueue = new Queue(QUEUE_LIVE_SCREENER_COLLECT, { connection });
-    const lsRepeatables = await liveScreenerCollectQueue.getRepeatableJobs();
-    for (const r of lsRepeatables) await liveScreenerCollectQueue.removeRepeatableByKey(r.key);
-    await liveScreenerCollectQueue.add('live-screener-collect', {}, {
+    // addJobWithCatchup, not a raw add — same 2026-09-08 dead-repeatable failure as
+    // intraday-fetcher (see the comment there for the mechanism); this queue was one of
+    // the two the DQ freshness checks caught live (2 trading days of zero captures).
+    await addJobWithCatchup(liveScreenerCollectQueue, 'live-screener-collect', {}, {
       repeat: { pattern: '*/15 3-10 * * 1-5', tz: 'Etc/UTC' },
       jobId: 'live-screener-collect-repeatable',
       removeOnComplete: 5,
@@ -2623,9 +2638,12 @@ export async function initQueues(): Promise<boolean> {
     // GIFT Nifty level + Asia sentiment + global risk score captured before Indian market opens.
     const QUEUE_PREOPEN = 'preopen-snapshot';
     const preopenQueue = new Queue(QUEUE_PREOPEN, { connection });
-    const preopenRep = await preopenQueue.getRepeatableJobs();
-    for (const r of preopenRep) await preopenQueue.removeRepeatableByKey(r.key);
-    await preopenQueue.add('preopen-daily', {}, {
+    // addJobWithCatchup, not a raw add — same 2026-09-08 dead-repeatable failure as
+    // intraday-fetcher (see the comment there for the mechanism). A restart catch-up of this
+    // job mid-session is safe: the processor's own 3-minute timeouts exist precisely because
+    // NSE preopen endpoints misbehave outside 9:00-9:15 IST (T.runQuiet swallows the failure),
+    // and the isCatchup guard means at most ONE catch-up ever queues regardless of restarts.
+    await addJobWithCatchup(preopenQueue, 'preopen-daily', {}, {
       // tz is mandatory here: with no tz, BullMQ/cron-parser falls back to the Node process's
       // local timezone, which on this deployment is Asia/Kolkata -- so '40 3' was firing at
       // 3:40 AM IST (hours before NSE's 9:00-9:15 IST preopen session even opens) instead of
