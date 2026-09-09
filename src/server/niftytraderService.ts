@@ -44,13 +44,21 @@ export async function getNiftyTraderHeaders(): Promise<Record<string, string>> {
     "content-type": "application/json",
     "platform_type": "1",
     "priority": "u=1, i",
+    // 2026-09-08 live probe: NiftyTrader's WAF 403s any request that lacks BOTH `Origin` AND
+    // `sec-fetch-site: same-origin` (tested 8 header variants against live-market-filter-data via
+    // requests with the exact TS header set + the same Bearer token: exact TS copy -> 403, +Origin
+    // alone -> 403, +Origin + same-origin -> 200). This broke live-screener-collect on 2026-09-08
+    // (45/45 filters 403) while the Python sibling (niftytrader_live_screener_job.py) kept
+    // working — its NT_HEADERS already carry both. The Python `sec-fetch-site: same-site` this
+    // file used to send was the last difference to flip.
+    "origin": "https://www.niftytrader.in",
+    "referer": "https://www.niftytrader.in/",
     "sec-ch-ua": "\"Google Chrome\";v=\"149\", \"Chromium\";v=\"149\", \"Not)A;Brand\";v=\"24\"",
     "sec-ch-ua-mobile": "?0",
     "sec-ch-ua-platform": "\"Windows\"",
     "sec-fetch-dest": "empty",
     "sec-fetch-mode": "cors",
-    "sec-fetch-site": "same-site",
-    "Referer": "https://www.niftytrader.in/"
+    "sec-fetch-site": "same-origin",
   };
 }
 

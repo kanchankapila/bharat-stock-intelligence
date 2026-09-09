@@ -130,3 +130,153 @@ class TestTripleBarrierLabel:
     def test_asymmetric_downside_barrier_is_tighter(self):
         # mae -1.2 ≤ lower(-1) loses, even though upside barrier (+2) is untouched
         assert self._lab(mfe_pct=1.5, mae_pct=-1.2) == 0
+
+
+# ── Dynamic volatility-adjusted barriers ───────────────────────────────────────
+from exit_labeler import (
+    calculate_dynamic_triple_barrier_multipliers,
+    compute_vol_rank,
+    compute_trailing_atr_series,
+    BASE_TB_K_UP_LO, BASE_TB_K_UP_HI,
+    BASE_TB_K_DN_LO, BASE_TB_K_DN_HI,
+    BASE_TB_COST_LO, BASE_TB_COST_HI,
+)
+
+
+class TestDynamicBarrierMultipliers:
+    def test_low_vol_regime_tightens_all(self):
+        k_up, k_dn, cost = calculate_dynamic_triple_barrier_multipliers(0.0)
+        assert k_up == pytest.approx(BASE_TB_K_UP_LO)      # 1.0x ATR
+        assert k_dn == pytest.approx(BASE_TB_K_DN_LO)      # 0.5x ATR
+        assert cost == pytest.approx(BASE_TB_COST_LO)      # 0.10x ATR
+
+    def test_high_vol_regime_matches_legacy_fixed_scheme(self):
+        k_up, k_dn, cost = calculate_dynamic_triple_barrier_multipliers(1.0)
+        assert k_up == pytest.approx(BASE_TB_K_UP_HI)      # 2.0x ATR (legacy)
+        assert k_dn == pytest.approx(BASE_TB_K_DN_HI)      # 1.0x ATR (legacy)
+        assert cost == pytest.approx(BASE_TB_COST_LO + (BASE_TB_COST_HI - BASE_TB_COST_LO))
+
+    def test_midpoint_is_halfway(self):
+        k_up, k_dn, cost = calculate_dynamic_triple_barrier_multipliers(0.5)
+        assert k_up == pytest.approx((BASE_TB_K_UP_LO + BASE_TB_K_UP_HI) / 2)
+        assert k_dn == pytest.approx((BASE_TB_K_DN_LO + BASE_TB_K_DN_HI) / 2)
+        assert cost == pytest.approx(0.15)  # the legacy ±0.15 ATR cost band
+
+    def test_none_reproduces_legacy_scheme(self):
+        k_up, k_dn, cost = calculate_dynamic_triple_barrier_multipliers(None)
+        assert k_up == pytest.approx(2.0)
+        assert k_dn == pytest.approx(1.0)
+        assert cost == pytest.approx(0.15)
+
+    def test_out_of_range_input_is_clamped(self):
+        k_up_lo, _, _ = calculate_dynamic_triple_barrier_multipliers(-5.0)
+        k_up_hi, _, _ = calculate_dynamic_triple_barrier_multipliers(5.0)
+        assert k_up_lo == pytest.approx(BASE_TB_K_UP_LO)
+        assert k_up_hi == pytest.approx(BASE_TB_K_UP_HI)
+
+    def test_reward_risk_ratio_never_degrades_below_legacy(self):
+        # The 2:1 asymmetric profile is the strategy's edge; the dynamic scheme must keep
+        # upper ≥ 2·|lower| in every regime.
+        for t in (0.0, 0.25, 0.5, 0.75, 1.0):
+            k_up, k_dn, _ = calculate_dynamic_triple_barrier_multipliers(t)
+            assert k_up >= 2.0 * k_dn - 1e-9
+
+
+class TestComputeVolRank:
+    def _bars_with_constant_atr(self, atr_value, n=40):
+        """n ascending bars each producing exactly atr_value of true range."""
+        bars = [(10.0, 10.0, 10.0)]                    # seed bar (prev_close source)
+        price = 10.0
+        for _ in range(n - 1):
+            high = price + atr_value
+            low = price
+            close = price                              # TR = high−low = atr_value exactly
+            bars.append((high, low, close))
+        return bars
+
+    def test_insufficient_history_returns_neutral_half(self):
+        assert compute_vol_rank([]) == 0.5
+        assert compute_vol_rank([(10, 9, 9.5)]) == 0.5
+
+    def test_flat_volatility_ranks_in_range(self):
+        bars = self._bars_with_constant_atr(1.0)
+        vr = compute_vol_rank(bars)
+        assert 0.0 <= vr <= 1.0
+
+    def test_spike_in_vol_ranks_high(self):
+        # 14 calm sessions (TR 1.0), then 22 storm sessions (TR 5.0) ending at entry:
+        # entry-time ATR = 5.0, trailing ATR history mostly 1.0–5.0 → rank pinned at the top.
+        bars = [(10.0, 10.0, 10.0)]
+        for _ in range(14):
+            bars.append((11.0, 10.0, 10.0))
+        for _ in range(22):
+            bars.append((15.0, 10.0, 10.0))
+        vr = compute_vol_rank(bars)
+        assert vr > 0.8, f"vol spike should rank high, got {vr}"
+
+    def test_calm_after_storm_ranks_low(self):
+        # Mirror image: 22 storm sessions, then 14 calm sessions ending at entry.
+        # Entry-time ATR = 1.0 while the trailing history is storm-dominated → rank 0.
+        bars = [(10.0, 10.0, 10.0)]
+        for _ in range(22):
+            bars.append((15.0, 10.0, 10.0))
+        for _ in range(14):
+            bars.append((11.0, 10.0, 10.0))
+        vr = compute_vol_rank(bars)
+        assert vr < 0.2, f"vol calm should rank low, got {vr}"
+
+    def test_is_leak_free(self):
+        # The ATR series' last element must equal compute_atr(prior_bars) — i.e. the
+        # entry-time ATR computed only from bars at or before the signal date.
+        bars = self._bars_with_constant_atr(2.0, n=40)
+        series = compute_trailing_atr_series(bars)
+        assert series, "expected a non-empty ATR series"
+        assert series[-1] == pytest.approx(compute_atr(bars))
+
+
+class TestVolRankBarrierIntegration:
+    """vol_rank must change the label in exactly the direction the audit intends."""
+
+    def test_low_vol_regime_lowers_the_win_threshold(self):
+        # atr_pct=1.0, vol_rank=0 → upper barrier = 1.0x ATR = 1.0%. mfe 1.2 ≥ 1.0 → WIN,
+        # whereas the legacy fixed scheme (2.0x) would leave it to the time-barrier rule.
+        label = triple_barrier_label(mfe_pct=1.2, mae_pct=-0.3, mfe_before_mae=1,
+                                     horizon_close_pct=0.05, atr_pct=1.0, vol_rank=0.0)
+        assert label == 1
+
+    def test_high_vol_regime_keeps_the_legacy_threshold(self):
+        # Same excursion, vol_rank=1 → upper barrier = 2.0% → not touched → time-barrier
+        # rule: horizon close +0.05 is INSIDE the cost band (0.2) → NEUTRAL.
+        label = triple_barrier_label(mfe_pct=1.2, mae_pct=-0.3, mfe_before_mae=1,
+                                     horizon_close_pct=0.05, atr_pct=1.0, vol_rank=1.0)
+        assert label is None
+
+    def test_wide_cost_band_in_high_vol_neutralizes_noise(self):
+        # atr 2.0, vol_rank=1 → cost band ±0.4%; close +0.3% → neutral (not a win).
+        label = triple_barrier_label(mfe_pct=0.5, mae_pct=-0.3, mfe_before_mae=1,
+                                     horizon_close_pct=0.3, atr_pct=2.0, vol_rank=1.0)
+        assert label is None
+        # Same close, vol_rank=0 → cost band ±0.2%; close +0.3% clears it → win.
+        label = triple_barrier_label(mfe_pct=0.5, mae_pct=-0.3, mfe_before_mae=1,
+                                     horizon_close_pct=0.3, atr_pct=2.0, vol_rank=0.0)
+        assert label == 1
+
+    def test_tight_lower_barrier_in_low_vol_gives_earlier_loss_signal(self):
+        # atr 2.0: mae −1.2 hits the vol_rank=0 lower barrier (−1.0) but not the legacy
+        # vol_rank=1 one (−2.0).
+        assert triple_barrier_label(mfe_pct=0.5, mae_pct=-1.2, mfe_before_mae=0,
+                                    horizon_close_pct=-0.3, atr_pct=2.0, vol_rank=0.0) == 0
+        # high-vol: lower barrier −2.0 untouched → time-barrier; −0.3 within ±0.4 band → None
+        assert triple_barrier_label(mfe_pct=0.5, mae_pct=-1.2, mfe_before_mae=0,
+                                    horizon_close_pct=-0.3, atr_pct=2.0, vol_rank=1.0) is None
+
+    def test_excursions_thread_vol_rank_and_echo_it(self):
+        bars = [(105, 99, 104), (110, 103, 108), (107, 95, 96)]
+        exc = compute_excursions(100.0, bars, atr=2, vol_rank=0.37)
+        assert exc["vol_rank"] == pytest.approx(0.37)
+        assert "tb_label" in exc  # label computed without error
+
+    def test_excursions_default_vol_rank_is_none(self):
+        bars = [(105, 99, 104), (110, 103, 108), (107, 95, 96)]
+        exc = compute_excursions(100.0, bars, atr=2)
+        assert exc["vol_rank"] is None

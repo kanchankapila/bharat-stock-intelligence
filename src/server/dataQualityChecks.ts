@@ -2512,7 +2512,7 @@ export const DATA_QUALITY_CHECKS: DataQualityCheck[] = [
     sql: `WITH d AS (SELECT DISTINCT computed_at::date AS dt FROM unified_recommendations
                       ORDER BY 1 DESC LIMIT 10)
           SELECT count(*) AS dates,
-                 count(*) FILTER (WHERE sd_ml   < 5.0) AS collapse_ml,
+                 count(*) FILTER (WHERE sd_ml   < 3.0) AS collapse_ml,
                  count(*) FILTER (WHERE sd_dl   < 5.0) AS collapse_dl,
                  count(*) FILTER (WHERE sd_tech < 5.0) AS collapse_technical
             FROM (SELECT ur.computed_at::date AS dt,

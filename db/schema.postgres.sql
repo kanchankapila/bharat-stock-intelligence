@@ -2431,7 +2431,9 @@ CREATE TABLE IF NOT EXISTS "recommendation_log" (
   "actual_return_pct" DOUBLE PRECISION,
   "outcome" TEXT,
   "resolved_at" TIMESTAMPTZ,
-  "horizon_days" BIGINT DEFAULT 15
+  "horizon_days" BIGINT DEFAULT 15,
+  "round_trip_cost_pct" DOUBLE PRECISION,
+  "cost_adjusted_target_1" DOUBLE PRECISION
 );
 CREATE UNIQUE INDEX idx_rec_log_uniq ON public.recommendation_log USING btree (symbol, signal_date, timeframe, source);
 CREATE INDEX idx_rec_outcome ON public.recommendation_log USING btree (outcome, signal_date DESC);
@@ -2774,6 +2776,7 @@ CREATE TABLE IF NOT EXISTS "signal_excursions" (
   "computed_at" TIMESTAMPTZ DEFAULT now(),
   "atr_pct" DOUBLE PRECISION,
   "tb_label" BIGINT,
+  "vol_rank" DOUBLE PRECISION,
   PRIMARY KEY ("symbol", "signal_date", "horizon_days")
 );
 CREATE INDEX idx_sexc_date ON public.signal_excursions USING btree (signal_date DESC);
@@ -4165,6 +4168,7 @@ CREATE TABLE IF NOT EXISTS "unified_recommendations" (
   "trade_reasoning" TEXT,
   "classification" TEXT,
   "position_size_pct" DOUBLE PRECISION,
+  "est_cost_bps" DOUBLE PRECISION,
   "engine_coverage_count" INTEGER,
   "cs_score" DOUBLE PRECISION,
   "breakout_score" DOUBLE PRECISION,

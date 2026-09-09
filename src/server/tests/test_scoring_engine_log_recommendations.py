@@ -28,6 +28,17 @@ class _FakeSelf:
     def _restrict_to_tradeable_universe(self, candidates):
         return candidates
 
+    def _compute_cost_map(self, symbols):
+        """Stub: returns empty cost map (cost computation is tested separately in
+        test_indian_market_costs.py; this file is verifying target_2/target_3 population)."""
+        return {}
+
+    def _ensure_cost_columns(self):
+        """Stub: the real one runs `ALTER TABLE ... ADD COLUMN IF NOT EXISTS` via
+        safe_alter against Postgres; this file's sqlite schema already declares the
+        cost columns, and DDL is not what this file is checking."""
+        return None
+
 
 def _make_engine():
     engine = create_engine("sqlite:///:memory:")
@@ -52,6 +63,7 @@ def _make_engine():
                 symbol TEXT, rec_type TEXT, signal_date TEXT, generated_at TEXT,
                 timeframe TEXT, entry_price REAL, stop_loss REAL,
                 target_1 REAL, target_2 REAL, target_3 REAL,
+                round_trip_cost_pct REAL, cost_adjusted_target_1 REAL,
                 confidence_score REAL, screener_score REAL,
                 quant_score REAL, sentiment_score REAL,
                 reasoning TEXT, source TEXT, status TEXT, horizon_days INTEGER,

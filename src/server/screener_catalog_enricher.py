@@ -144,6 +144,60 @@ def classify_screener(name: str) -> str | None:
 
     return None
 
+
+def sync_catalog_bias_from_master(con) -> int:
+    """Accept screener_master's latest sentiment classification in the catalog."""
+    result = con.execute("""
+        UPDATE screener_catalog AS sc
+        SET signal_bias = sm.inferred_sentiment
+        FROM screener_master AS sm
+        WHERE sm.scan_id = sc.screener_id
+          AND LOWER(sm.source) = LOWER(sc.source)
+          AND sm.inferred_sentiment IN ('bullish', 'bearish', 'neutral')
+          AND sc.signal_bias IS DISTINCT FROM sm.inferred_sentiment
+    """)
+    return result.rowcount
+
+
+def reclassify_directional_neutrals(con) -> tuple[int, int]:
+    """Promote only neutral rows with an explicit directional classifier result."""
+    master_changed = 0
+    for row in con.execute("""
+        SELECT scan_id, source, name, inferred_category
+        FROM screener_master
+        WHERE inferred_sentiment IS NULL OR LOWER(inferred_sentiment) = 'neutral'
+    """).fetchall():
+        bias, _, _, _ = resolve_screener_defaults(
+            row['inferred_category'] or 'other', None, row['name'] or ''
+        )
+        if bias not in ('bullish', 'bearish'):
+            continue
+        con.execute(
+            "UPDATE screener_master SET inferred_sentiment = ? WHERE scan_id = ? AND LOWER(source) = LOWER(?)",
+            (bias, row['scan_id'], row['source']),
+        )
+        master_changed += 1
+
+    catalog_changed = 0
+    for row in con.execute("""
+        SELECT screener_id, source, screener_name, category
+        FROM screener_catalog
+        WHERE LOWER(signal_bias) = 'neutral'
+    """).fetchall():
+        bias, _, _, _ = resolve_screener_defaults(
+            row['category'] or 'other', None, row['screener_name'] or ''
+        )
+        if bias not in ('bullish', 'bearish'):
+            continue
+        con.execute(
+            "UPDATE screener_catalog SET signal_bias = ? WHERE screener_id = ? AND LOWER(source) = LOWER(?)",
+            (bias, row['screener_id'], row['source']),
+        )
+        catalog_changed += 1
+
+    return master_changed, catalog_changed
+
+
 def resolve_screener_defaults(category: str, sentiment: str | None, name: str) -> tuple[str, str, str, float]:
     """Pure: (signal_bias, cat_norm, investment_horizon, confidence) for a screener_master
     row being inserted into screener_catalog (Step 5)."""
@@ -350,6 +404,12 @@ def run():
 
     con.commit()
     print(f"[CatalogEnricher] screener_catalog: {inserted} new rows inserted from screener_master")
+
+    master_neutrals, catalog_neutrals = reclassify_directional_neutrals(con)
+    synced_biases = sync_catalog_bias_from_master(con)
+    con.commit()
+    print(f"[CatalogEnricher] directional neutrals: {master_neutrals} master / {catalog_neutrals} catalog corrected")
+    print(f"[CatalogEnricher] screener_catalog: {synced_biases} signal biases accepted from screener_master")
 
     # ── Step 5b: Backfill category for EXISTING rows the CATEGORY_DEFAULTS bug already hit ──
     # The Step 5 fix above only stops NEW rows losing their category -- it does nothing for the

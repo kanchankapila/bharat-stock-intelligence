@@ -148,6 +148,7 @@ class TestGetterUsesPortableSqlAndTheRightColumn:
 from unified_ranker import (  # noqa: E402
     ZERO_DISPERSION_MIN_SYMBOLS,
     ZERO_DISPERSION_MIN_SD,
+    _stddev,
     drop_zero_dispersion_engines,
     _blend,
     _normalize_to_100,
@@ -191,6 +192,19 @@ class TestDropZeroDispersionEngines:
         vals = {f'S{i}': 69.1 + (i % 6) for i in range(n)}   # spans 69.1-74.1
         kept, dropped = drop_zero_dispersion_engines({'ml': vals})
         assert dropped == ['ml']
+
+    def test_keeps_ml_scores_in_the_trusted_raw_probability_band(self):
+        """Raw-first ML scores can carry useful ordering below the generic 5-point floor."""
+        n = ZERO_DISPERSION_MIN_SYMBOLS + 10
+        vals = {f'S{i}': 33.5 + (i % 11) for i in range(n)}
+        assert 3.0 < _stddev(vals.values()) < ZERO_DISPERSION_MIN_SD
+        kept, dropped = drop_zero_dispersion_engines({'ml': vals})
+        assert dropped == []
+        assert 'ml' in kept
+
+        # The engine-specific floor must not weaken the shared protection for DL/technical.
+        kept, dropped = drop_zero_dispersion_engines({'dl': vals})
+        assert dropped == ['dl']
 
     def test_floor_is_on_stddev_so_a_lone_outlier_does_not_rescue_a_flat_engine(self):
         """A range test is fooled by one extreme value; stddev dilutes it with n. Not immune,

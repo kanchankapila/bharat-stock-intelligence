@@ -9,9 +9,10 @@ from sqlalchemy.exc import SQLAlchemyError
 from nlp_engine import NLPScreenerInference, NLP_VERSION
 from typing import Dict, Any, List
 
-from db_compat import get_engine, connect as db_connect, now_utc_iso
+from db_compat import get_engine, connect as db_connect, now_utc_iso, safe_alter, use_postgres
 import as_of
 from technical_analysis_engine import compute_atr_barriers
+from indian_market_costs import round_trip_cost_bps
 
 
 # ── Pure functions: regime-edge-adjusted ML win_probability consumption ────────
@@ -1154,8 +1155,86 @@ class AlphaQuantScoringEngine:
                   f"candidates not in the tradeable universe (no master entry or no recent price)")
         return keep
 
+    _COST_COLS_ENSURED = False
+
+    @classmethod
+    def _ensure_cost_columns(cls) -> None:
+        """Add recommendation_log's cost columns if the live table predates the cost feature.
+
+        node-pg-migrate owns the production migration (20260909120000); this keeps throwaway
+        test DBs and fresh dev boxes working -- the identical arrangement exit_labeler uses for
+        signal_excursions.vol_rank. Wrapped via safe_alter's SET lock_timeout='2s' per
+        AF-20260829-26 (bare ALTERs on a hot table queue an ACCESS EXCLUSIVE lock and stall
+        every concurrent reader). One process-level flag: _log_recommendations runs once per
+        scoring run, and re-probing information_schema on every run is wasted round-trips.
+        """
+        if AlphaQuantScoringEngine._COST_COLS_ENSURED:
+            return
+        safe_alter(None, "ALTER TABLE recommendation_log ADD COLUMN IF NOT EXISTS round_trip_cost_pct DOUBLE PRECISION")
+        safe_alter(None, "ALTER TABLE recommendation_log ADD COLUMN IF NOT EXISTS cost_adjusted_target_1 DOUBLE PRECISION")
+        AlphaQuantScoringEngine._COST_COLS_ENSURED = True
+
+    def _compute_cost_map(self, symbols: list) -> dict:
+        """Compute round-trip transaction cost for each symbol.
+
+        Returns {symbol: round_trip_cost_pct} using the full Indian-market fee schedule
+        (STT, exchange fees, stamp duty, GST, brokerage, slippage) from indian_market_costs.
+
+        Costs are liquidity-scaled: participation_rate is estimated from a notional
+        ₹10 lakh position vs the stock's 20-day average daily turnover.
+        """
+        if not symbols:
+            return {}
+        cost_map = {}
+        try:
+            with self.engine.connect() as conn:
+                placeholders = ', '.join(f':s{i}' for i in range(len(symbols)))
+                rows = conn.execute(text(f"""
+                    SELECT ts.symbol, ts.cmp,
+                           COALESCE(
+                               (SELECT AVG(close * volume) FROM stock_ohlcv so
+                                WHERE so.symbol = ts.symbol AND so.date >= CURRENT_DATE - 20),
+                               0
+                           ) AS adt,
+                           COALESCE(
+                               (SELECT cs.atr FROM confluence_signals cs
+                                WHERE cs.symbol = ts.symbol AND cs.atr IS NOT NULL
+                                ORDER BY cs.computed_at DESC LIMIT 1),
+                               ts.cmp * 0.02
+                           ) AS atr
+                    FROM technical_signals ts
+                    WHERE ts.symbol IN ({placeholders})
+                      AND ts.date = (SELECT MAX(date) FROM technical_signals ts2 WHERE ts2.symbol = ts.symbol)
+                """), {f's{i}': s for i, s in enumerate(symbols)}).fetchall()
+                for row in rows:
+                    sym = row[0]
+                    cmp_val = float(row[1]) if row[1] else 0.0
+                    adt = float(row[2]) if row[2] else 0.0
+                    atr = float(row[3]) if row[3] else cmp_val * 0.02
+                    # Estimate participation rate: ₹10L notional vs ADT
+                    notional = 1_000_000.0
+                    participation = (notional / adt) if adt > 0 else 0.01
+                    participation = min(participation, 0.25)  # cap at 25% of ADT
+                    # Daily volatility as percentage
+                    daily_vol_pct = (atr / cmp_val * 100.0) if cmp_val > 0 else 2.0
+                    cost = round_trip_cost_bps(
+                        notional=notional,
+                        asset_class='equity',
+                        trade_type='intraday',
+                        participation_rate=participation,
+                        volatility_pct=daily_vol_pct,
+                    )
+                    cost_map[sym] = cost
+        except Exception as e:
+            print(f"[ScoringEngine] cost map computation failed: {e}")
+        return cost_map
+
     def _log_recommendations(self, results: list):
         """Write top BUY/STRONG BUY recommendations to recommendation_log for outcome tracking."""
+        # The cost columns below are new (2026-09-09); make sure they exist before the INSERT
+        # needs them -- a fresh dev box or a live table that predates the feature would
+        # otherwise fail the whole upsert with `column "round_trip_cost_pct" does not exist`.
+        self._ensure_cost_columns()
         now        = now_utc_iso()  # see db_compat.now_utc_iso() docstring
         today      = datetime.date.today().isoformat()
         candidates = [r for r in results if r.get('classification') in ('Strong Buy', 'Buy')]
@@ -1206,6 +1285,9 @@ class AlphaQuantScoringEngine:
         except Exception as e:
             print(f"[ScoringEngine] price/ATR lookup for recommendation_log failed (entry_price will be null): {e}")
 
+        # Compute transaction costs for each symbol (STT, fees, slippage)
+        cost_map = self._compute_cost_map(symbols)
+
         rows = []
         for r in candidates:
             cmp_val, sentiment_val, atr_val, quant_val = price_atr_map.get(r['symbol'], (None, None, None, None))
@@ -1219,6 +1301,12 @@ class AlphaQuantScoringEngine:
                 target_2 = round(entry_price + 2 * (target_1 - entry_price), 2)
                 target_3 = round(entry_price + 3 * (target_1 - entry_price), 2)
 
+            # Cost-adjusted expected return: subtract round-trip cost from target
+            round_trip_cost_pct = cost_map.get(r['symbol'])
+            cost_adjusted_target_1 = None
+            if entry_price and entry_price > 0 and target_1 and round_trip_cost_pct:
+                cost_adjusted_target_1 = round(entry_price + (target_1 - entry_price) * (1 - round_trip_cost_pct * 100 / ((target_1 - entry_price) / entry_price * 100)), 2) if target_1 != entry_price else target_1
+
             rows.append({
                 'symbol':         r['symbol'],
                 'rec_type':       'BUY' if r['classification'] == 'Buy' else 'STRONG_BUY',
@@ -1230,6 +1318,8 @@ class AlphaQuantScoringEngine:
                 'target_1':       target_1,
                 'target_2':       target_2,
                 'target_3':       target_3,
+                'round_trip_cost_pct': round_trip_cost_pct,
+                'cost_adjusted_target_1': cost_adjusted_target_1,
                 'confidence_score': r.get('confidence'),
                 'screener_score': r.get('score'),
                 'quant_score':    float(quant_val) if quant_val is not None else None,

@@ -84,6 +84,54 @@ def test_tl_screener_url_builds_a_real_trendlyne_url():
     assert "9999" in url
 
 
+def test_catalog_accepts_master_sentiment_for_matching_screener():
+    conn = pg_memory_conn()
+    conn.executescript("""
+        CREATE TABLE screener_master (
+            scan_id TEXT, source TEXT, inferred_sentiment TEXT
+        );
+        CREATE TABLE screener_catalog (
+            screener_id TEXT, source TEXT, signal_bias TEXT
+        );
+    """)
+    conn.execute("INSERT INTO screener_master VALUES ('s1', 'Trendlyne', 'bearish')")
+    conn.execute("INSERT INTO screener_catalog VALUES ('s1', 'trendlyne', 'neutral')")
+    conn.commit()
+
+    changed = sce.sync_catalog_bias_from_master(conn)
+
+    assert changed == 1
+    assert conn.execute(
+        "SELECT signal_bias FROM screener_catalog WHERE screener_id = 's1'"
+    ).fetchone()[0] == 'bearish'
+
+
+def test_directional_neutral_reclassification_leaves_ambiguous_rows_neutral():
+    conn = pg_memory_conn()
+    conn.executescript("""
+        CREATE TABLE screener_master (
+            scan_id TEXT, source TEXT, name TEXT, inferred_category TEXT,
+            inferred_sentiment TEXT
+        );
+        CREATE TABLE screener_catalog (
+            screener_id TEXT, source TEXT, screener_name TEXT,
+            category TEXT, signal_bias TEXT
+        );
+    """)
+    conn.execute("INSERT INTO screener_master VALUES ('s1', 'MoneyControl', 'FII Selling', 'other', 'neutral')")
+    conn.execute("INSERT INTO screener_master VALUES ('s2', 'MoneyControl', 'Banking Stocks', 'sector_theme', 'neutral')")
+    conn.execute("INSERT INTO screener_catalog VALUES ('s1', 'moneycontrol', 'FII Selling', 'other', 'neutral')")
+    conn.execute("INSERT INTO screener_catalog VALUES ('s2', 'moneycontrol', 'Banking Stocks', 'sector_theme', 'neutral')")
+    conn.commit()
+
+    changed = sce.reclassify_directional_neutrals(conn)
+
+    assert changed == (1, 1)
+    assert conn.execute("SELECT inferred_sentiment FROM screener_master WHERE scan_id = 's1'").fetchone()[0] == 'bearish'
+    assert conn.execute("SELECT signal_bias FROM screener_catalog WHERE screener_id = 's1'").fetchone()[0] == 'bearish'
+    assert conn.execute("SELECT inferred_sentiment FROM screener_master WHERE scan_id = 's2'").fetchone()[0] == 'neutral'
+
+
 def test_step2_name_lookup_matches_capitalized_trendlyne_source():
     """AF-20260816-19 (docs/audit-findings.md): screener_catalog.source holds both 'trendlyne'
     and 'Trendlyne' live (343 rows capitalized, confirmed 2026-08-19). Step 2's name-lookup JOIN

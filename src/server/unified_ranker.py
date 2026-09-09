@@ -14,6 +14,7 @@ from datetime import date, datetime, timedelta, timezone
 
 from db_compat import connect
 import as_of
+from indian_market_costs import round_trip_cost_bps
 
 CSV_PATH         = Path(__file__).parent.parent.parent / 'screener_scoring_v2.csv'
 CORRECTIONS_PATH = Path(__file__).parent.parent.parent / 'screener_corrections.csv'
@@ -546,11 +547,19 @@ ZERO_DISPERSION_MIN_SYMBOLS = 50   # below this a flat map is thin coverage, not
 # 138 engine-days, bucketed by 2 on the 0-100 score scale:
 #   [0,2): 31   [2,4): 4   [4,6): 4   [6,8): 4   [8,10): 4   [10,12): 13   ... [28,30): 38
 # Bimodal: a collapsed mode massed under 2 and the healthy mode from ~10 up, with a sparse
-# valley between. 5.0 sits in that valley and errs toward keeping. It fires on real dates, not
-# only pathological ones: ml_score is under it on 13 of 38 days, dl_score 15, technical 7 --
-# the collapse is episodic (regime-dependent isotonic calibration), which is exactly why the
-# check has to be dynamic per run rather than an engine being removed from REGIME_WEIGHTS.
+# valley between. 5.0 sits in that valley and errs toward keeping for every engine except the
+# raw-first ML map below. It fires on real dates, not only pathological ones: dl_score 15 and
+# technical 7 times -- the collapse is episodic (regime-dependent isotonic calibration), which
+# is exactly why the check has to be dynamic per run rather than an engine being removed from
+# REGIME_WEIGHTS.
 ZERO_DISPERSION_MIN_SD = 5.0
+
+# ML now intentionally reads raw win_probability before percentile normalization. Its trusted
+# SIDEWAYS distribution has a 3.2-4.6 point standard deviation (and live AUC 0.58), so applying
+# the mixed-engine 5-point floor discarded useful cross-sectional ordering on every recent run.
+# 3.0 remains above the observed <=2 collapsed mode while leaving that proven operating band in
+# the blend. Other engines retain the conservative shared floor above.
+ZERO_DISPERSION_MIN_SD_BY_ENGINE = {"ml": 3.0}
 
 
 def _stddev(vals):
@@ -569,9 +578,10 @@ def drop_zero_dispersion_engines(engine_maps):
     kept, dropped = {}, []
     for name, m in engine_maps.items():
         vals = list(m.values())
+        min_sd = ZERO_DISPERSION_MIN_SD_BY_ENGINE.get(name, ZERO_DISPERSION_MIN_SD)
         if len(vals) >= ZERO_DISPERSION_MIN_SYMBOLS and (
             (max(vals) - min(vals)) <= ZERO_DISPERSION_EPS
-            or _stddev(vals) < ZERO_DISPERSION_MIN_SD
+            or _stddev(vals) < min_sd
         ):
             dropped.append(name)
             continue
@@ -793,6 +803,64 @@ def apply_correlation_cap(weights: dict, clusters: dict,
                 if clusters.get(sym) == cid:
                     out[sym] *= scale
     return {k: round(v, 4) for k, v in out.items()}
+
+
+# ── Transaction cost penalty (#cost-aware sizing) ─────────────────────────────
+# High transaction costs (STT, stamp duty, slippage on illiquid names) eat into
+# expected returns. This function reduces raw position sizes for symbols where
+# round-trip costs are high relative to expected edge. Symbols with costs
+# exceeding the expected edge are zeroed out entirely.
+#
+# The penalty is: size_multiplier = max(0, 1 - round_trip_cost_pct / expected_edge_pct)
+# where expected_edge_pct is the symbol's expected return above risk-free rate.
+# For simplicity, we use a platform-wide default edge estimate that can be
+# overridden per symbol if the ML ensemble provides one.
+DEFAULT_EXPECTED_EDGE_PCT = 5.0  # 5% expected edge (conservative for Indian equities)
+MAX_COST_TO_EDGE_RATIO = 0.5     # if costs exceed 50% of expected edge, halve the size
+
+
+def apply_cost_penalty(
+    raw_sizes: dict,
+    cost_map: dict,
+    default_edge_pct: float = DEFAULT_EXPECTED_EDGE_PCT,
+) -> dict:
+    """Reduce position sizes for high-transaction-cost symbols.
+
+    Args:
+        raw_sizes: {symbol: raw_conviction_size} before normalization
+        cost_map: {symbol: round_trip_cost_pct} from indian_market_costs
+        default_edge_pct: Expected edge as percentage (e.g. 5.0 for 5%)
+
+    Returns:
+        Cost-adjusted raw_sizes dict (same keys, reduced values)
+    """
+    if not cost_map or default_edge_pct <= 0:
+        return raw_sizes
+
+    adjusted = {}
+    for sym, size in raw_sizes.items():
+        if size <= 0:
+            adjusted[sym] = size
+            continue
+        cost_pct = cost_map.get(sym)
+        if cost_pct is None or cost_pct <= 0:
+            adjusted[sym] = size
+            continue
+        # Cost as percentage points
+        cost_pct_points = cost_pct * 100.0
+        # Penalty: reduce size proportionally to cost/edge ratio
+        ratio = cost_pct_points / default_edge_pct
+        if ratio >= 1.0:
+            # Costs exceed expected edge — don't trade
+            adjusted[sym] = 0.0
+        elif ratio >= MAX_COST_TO_EDGE_RATIO:
+            # Costs are significant — scale down
+            penalty = 1.0 - (ratio - MAX_COST_TO_EDGE_RATIO) / (1.0 - MAX_COST_TO_EDGE_RATIO)
+            adjusted[sym] = size * max(0.0, penalty)
+        else:
+            # Costs are manageable — small reduction
+            adjusted[sym] = size * (1.0 - 0.3 * ratio)
+    return adjusted
 
 
 # Bounded score-fallback for directionless stocks (2026-08-05 pipeline-review finding,
@@ -1759,6 +1827,61 @@ class UnifiedRanker:
             self._degraded(f"[UnifiedRanker] _get_realized_vol failed: {e}")
             self.conn.rollback()
             return {}
+
+    def _compute_cost_map(self, symbols: list) -> dict:
+        """Compute round-trip transaction cost for each symbol.
+
+        Returns {symbol: round_trip_cost_pct} using the full Indian-market fee schedule
+        (STT, exchange fees, stamp duty, GST, brokerage, slippage) from indian_market_costs.
+
+        Costs are liquidity-scaled: participation_rate is estimated from a notional
+        ₹10 lakh position vs the stock's 20-day average daily turnover.
+        """
+        if not symbols:
+            return {}
+        cost_map = {}
+        try:
+            placeholders = ', '.join(f':s{i}' for i in range(len(symbols)))
+            rows = self.conn.execute(f"""
+                SELECT ts.symbol, ts.cmp,
+                       COALESCE(
+                           (SELECT AVG(close * volume) FROM stock_ohlcv so
+                            WHERE so.symbol = ts.symbol AND so.date >= CURRENT_DATE - 20),
+                           0
+                       ) AS adt,
+                       COALESCE(
+                           (SELECT cs.atr FROM confluence_signals cs
+                            WHERE cs.symbol = ts.symbol AND cs.atr IS NOT NULL
+                            ORDER BY cs.computed_at DESC LIMIT 1),
+                           ts.cmp * 0.02
+                       ) AS atr
+                FROM technical_signals ts
+                WHERE ts.symbol IN ({placeholders})
+                  AND ts.date = (SELECT MAX(date) FROM technical_signals ts2 WHERE ts2.symbol = ts.symbol)
+            """, {f's{i}': s for i, s in enumerate(symbols)}).fetchall()
+            for row in rows:
+                sym = row[0]
+                cmp_val = float(row[1]) if row[1] else 0.0
+                adt = float(row[2]) if row[2] else 0.0
+                atr = float(row[3]) if row[3] else cmp_val * 0.02
+                # Estimate participation rate: ₹10L notional vs ADT
+                notional = 1_000_000.0
+                participation = (notional / adt) if adt > 0 else 0.01
+                participation = min(participation, 0.25)  # cap at 25% of ADT
+                # Daily volatility as percentage
+                daily_vol_pct = (atr / cmp_val * 100.0) if cmp_val > 0 else 2.0
+                cost = round_trip_cost_bps(
+                    notional=notional,
+                    asset_class='equity',
+                    trade_type='intraday',
+                    participation_rate=participation,
+                    volatility_pct=daily_vol_pct,
+                )
+                cost_map[sym] = cost
+        except Exception as e:
+            self._degraded(f"[UnifiedRanker] _compute_cost_map failed: {e}")
+            self.conn.rollback()
+        return cost_map
 
     def _get_cs_scores(self):
         # Calendar days cannot span a trading-day gap: Fri->Mon is 3 calendar days and a
@@ -2734,6 +2857,17 @@ class UnifiedRanker:
             _tot, ', '.join(f'{k}={v} ({v/max(1,_tot)*100:.1f}%)' for k, v in fired.items())),
             file=sys.stderr)
         _report_buy_floor_selectivity(results)
+
+        # Cost-aware position sizing: compute round-trip costs and penalize
+        # high-cost symbols (illiquid small-caps, high-slippage names)
+        cost_map = self._compute_cost_map(all_symbols)
+        if cost_map:
+            raw_sizes = apply_cost_penalty(raw_sizes, cost_map)
+            penalized = sum(1 for s in raw_sizes.values() if s == 0)
+            if penalized:
+                print(f"[UnifiedRanker] cost penalty zeroed {penalized} symbols (costs >= expected edge)",
+                      file=sys.stderr)
+
         position_sizes = normalize_position_sizes(raw_sizes, sectors=sector_map)
 
         # Correlation-cluster cap (#27/#30 follow-up, 2026-08-05): the sector cap alone can miss

@@ -173,6 +173,16 @@ def build_features(df: pd.DataFrame) -> pd.DataFrame:
     # Rsi deviation from neutral zone
     feat['rsi_deviation']  = (feat['rsi'] - 50).abs()
 
+    # ── Dynamic triple-barrier regime (vol_rank) ────────────────────────────────
+    # ATR percentile rank vs. trailing ~20 sessions (exit_labeler.compute_vol_rank,
+    # leak-free). Labels are generated with barriers that WIDEN in high-vol regimes and
+    # NARROW in low-vol ones, so a model that can see the same regime driver has a fair
+    # shot at learning "when the label class is predictably easier/harder". Supplied at
+    # training time by signal_outcomes⋈signal_excursions.se.vol_rank; at score time it is
+    # recomputed from stock_ohlcv in score_pending(). Default 0.5 = neutral (mid-barrier
+    # fallback from exit_labeler when history is insufficient), never stale-NULL.
+    feat['vol_rank'] = num('vol_rank', 0.5).clip(0, 1)
+
     # Market breadth — used as interaction term only (standalone was noise, tested 2026-06)
     feat['breadth_x_score'] = (
         num('pct_above_200dma', 0.5).clip(0, 1) * feat['signal_score']
@@ -327,6 +337,28 @@ def build_features(df: pd.DataFrame) -> pd.DataFrame:
     feat['avwap_deviation_pct'] = num('avwap_deviation_pct', 0.0).clip(-15, 15)
     # Interaction: strong signal with price already extended above AVWAP → mean-reversion risk
     feat['avwap_x_score'] = feat['avwap_deviation_pct'] * feat['signal_score'] / 10.0
+
+    # ── Microstructure signals (OFI, VPIN, VWAP z-score, relative volume) ──
+    # ofi_20: 20-period order flow imbalance (signed volume / total volume).
+    # Positive = buying pressure accumulation; negative = distribution.
+    # Normalized to [-1, 1]; neutral default 0.0.
+    feat['ofi_20'] = num('ofi_20', 0.0).clip(-1, 1)
+    # vpin_50: 50-period Volume-Synchronized Probability of Informed Trading proxy.
+    # Higher = more informed trading (toxic flow) → wider spreads, worse fills.
+    # Range [0, 1]; neutral default 0.3 (typical daily-bar background).
+    feat['vpin_50'] = num('vpin_50', 0.3).clip(0, 1)
+    # vwap_zscore_20: z-score of VWAP deviation over 20-day lookback.
+    # |z| > 2 = statistically extended from VWAP (mean-reversion risk).
+    # Neutral default 0.0 (at VWAP); capped at ±4.
+    feat['vwap_zscore_20'] = num('vwap_zscore_20', 0.0).clip(-4, 4)
+    # rel_vol_20: current volume / 20-day average volume.
+    # > 1.5 = unusually high activity (institutional); < 0.5 = low interest.
+    # Neutral default 1.0; capped at 5.0.
+    feat['rel_vol_20'] = num('rel_vol_20', 1.0).clip(0, 5)
+    # Interaction: high OFI × high relative volume = strong volume-confirmed buying
+    feat['ofi_x_relvol'] = feat['ofi_20'] * (feat['rel_vol_20'] - 1.0).clip(-1, 4) / 4.0
+    # Interaction: high VPIN × strong signal = potential adverse selection (fade)
+    feat['vpin_x_score'] = feat['vpin_50'] * feat['signal_score'] / 10.0
 
     # ── OI-change delta (from oi_delta_features.py) ──
     # oi_net_change_pct: day-over-day % change in total open interest (calls + puts).
@@ -1596,8 +1628,13 @@ def load_training_data(label: str = 'triple_barrier') -> pd.DataFrame:
                        "\n          AND so.signal_source = 'technical'")
 
     if use_postgres():
+        # vol_rank rides the same signal_excursions join that supplies the label (se), so it
+        # only exists in the triple_barrier branch; the horizon branch (legacy, se never
+        # joined) leaves the feature NULL→0.5 via build_features' default.
+        vol_rank_select = "se.vol_rank AS vol_rank," if label == 'triple_barrier' else ""
         q = f"""
             SELECT so.symbol, so.signal_date, so.horizon_days, {label_select},
+                   {vol_rank_select}
                    so.signal_score, so.signals_json, so.return_pct,
                    ts.rsi, ts.adx, ts.nifty_regime, ts.cmp, ts.sma200, ts.volume_ratio,
                    ts.fii_3d_net,
@@ -2149,6 +2186,45 @@ def load_training_data(label: str = 'triple_barrier') -> pd.DataFrame:
     return df
 
 
+def _enrich_vol_rank(df: pd.DataFrame) -> pd.DataFrame:
+    """Compute vol_rank (ATR percentile vs. trailing history) for each pending signal
+    from stock_ohlcv prior bars — mirrors exit_labeler.compute_vol_rank's leak-free logic.
+
+    At training time this feature comes from signal_excursions.vol_rank (populated by
+    exit_labeler.py). Pending signals have no excursions row yet, so we recompute it
+    on-the-fly here. Without this, the model scores every pending signal at the neutral
+    default (0.5), blind to the dynamic-barrier regime it was trained to recognize.
+    """
+    if df.empty:
+        return df
+
+    # Deferred import: exit_labeler imports db_compat only, no circular dependency,
+    # but keeping it local avoids pulling exit_labeler's module-level code at startup.
+    from exit_labeler import compute_vol_rank as _vol_rank
+
+    # Batch-fetch prior bars per symbol: ATR_WINDOW(14) + VOL_RANK_LOOKBACK(20) + buffer.
+    # exit_labeler uses 36; we use the same ceiling so the series is directly comparable.
+    PRIOR_BARS = 36
+    vol_ranks = []
+    for _, row in df.iterrows():
+        symbol = row['symbol']
+        signal_date = row['signal_date']
+        prior = read_df(
+            "SELECT high, low, close FROM stock_ohlcv "
+            "WHERE symbol = ? AND date <= ? AND COALESCE(is_suspect,0) = 0 "
+            "ORDER BY date DESC LIMIT ?",
+            (symbol, signal_date, PRIOR_BARS),
+        )
+        if prior.empty:
+            vol_ranks.append(0.5)
+            continue
+        prior_bars = list(prior[["high", "low", "close"]].itertuples(index=False, name=None))[::-1]
+        vol_ranks.append(_vol_rank(prior_bars))
+
+    df['vol_rank'] = vol_ranks
+    return df
+
+
 def load_pending_signals() -> pd.DataFrame:
     if use_postgres():
         q = f"""
@@ -2678,7 +2754,7 @@ def load_pending_signals() -> pd.DataFrame:
         """
     df = read_df(q)
     df['horizon_days'] = 15
-    return df
+    return _enrich_vol_rank(df)
 
 
 # ── Model Building ────────────────────────────────────────────────────────────
@@ -3150,6 +3226,25 @@ def train_ensemble(X: pd.DataFrame, y: pd.Series, dates: pd.Series | None = None
             # Clip so a near-empty regime bucket doesn't get an extreme, unstable weight.
             regime_weights = np.clip(regime_weights, 0.2, 5.0)
             weights = (weights if weights is not None else np.ones(len(X))) * regime_weights
+
+    # Asymmetric false-breakout penalty: a false positive (predict WIN → actual LOSS) costs
+    # more than a false negative (predict LOSS → actual WIN) because capital is deployed and
+    # lost vs. merely preserved. Upweight LOSS samples so the model requires stronger evidence
+    # before predicting a WIN, reducing false breakouts at the cost of some missed winners.
+    # Applied multiplicatively with the two weights above — it corrects a different bias
+    # (asymmetric misclassification cost), not overlapping labels or regime imbalance.
+    try:
+        from asymmetric_loss import compute_asymmetric_weights_with_neutral
+        asym_weights = compute_asymmetric_weights_with_neutral(
+            y,
+            false_breakout_penalty=2.0,
+            neutral_weight=0.5,
+            positive_label=1,
+            neutral_label=0,
+        )
+        weights = (weights if weights is not None else np.ones(len(X))) * asym_weights
+    except Exception:
+        pass  # asymmetric loss is optional; training continues without it
 
     X, feature_filter_report = drop_untrainable_features(X)
     dropped_count = len(feature_filter_report.get('dropped', {}))
@@ -4048,6 +4143,7 @@ def incremental_update(n_days: int = 3, n_rounds: int = 20, dry_run: bool = Fals
     else:
         q = """
             SELECT so.symbol, so.signal_date, so.horizon_days, {label_select},
+                   {vol_rank_select}
                    so.signal_score, so.signals_json,
                    ts.rsi, ts.adx, ts.nifty_regime, ts.cmp, ts.sma200, ts.volume_ratio,
                    ts.fii_3d_net, ts.above_sma200, ts.pcr_oi, ts.pcr_vol,
@@ -4077,10 +4173,12 @@ def incremental_update(n_days: int = 3, n_rounds: int = 20, dry_run: bool = Fals
                         "AND se.signal_date = so.signal_date "
                         "AND se.horizon_days = so.horizon_days"),
             label_where="se.tb_label IS NOT NULL",
+            vol_rank_select="se.vol_rank AS vol_rank,",
         )
     else:
         q = q.format(label_select="so.outcome", label_join="",
-                     label_where="so.outcome IN ('WIN','LOSS')")
+                     label_where="so.outcome IN ('WIN','LOSS')",
+                     vol_rank_select="")
     df = read_df(q, (cutoff,))
     # Need enough rows for both a real incremental-training slice AND a held-out gate slice --
     # the old threshold (5) left no room for a holdout at all, which is exactly how this used to
