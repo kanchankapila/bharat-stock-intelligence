@@ -1,5 +1,12 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { registerMonitorName, resolveMonitorName, __resetMonitorNames } from '../jobs/registerJob';
+
+// Policy (AF-20260909-11): every test file importing jobs/registerJob mocks telegramService —
+// these tests drive monitor-name helpers only, but the mock keeps the policy uniform.
+vi.mock('../telegramService', () => ({
+  telegramService: { sendMarkdownMessage: vi.fn().mockResolvedValue(true) },
+  sanitizeMarkdown: (t: string) => t,
+}));
 
 /**
  * Two schedules sharing one queue must record heartbeats under their OWN names.

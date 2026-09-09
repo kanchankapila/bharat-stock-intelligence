@@ -59,6 +59,16 @@ export class TelegramNotificationService {
    * Send custom Markdown message to Telegram Chat
    */
   public async sendMarkdownMessage(text: string): Promise<boolean> {
+    // Under vitest, an unmocked send must NEVER reach the real Telegram API: a test that forgot
+    // to vi.mock this module would otherwise message the production chat. Found 2026-09-09 —
+    // addJobWithCatchupReclaims.test.ts (fixture job 'orphan' on 'fake-queue') sent 15 live
+    // "[ALERT] Orphaned job reclaimed" messages during ordinary `vitest run` passes because the
+    // dynamic import in registerJob.ts's alert path resolved to THIS real module. Belt to the
+    // per-file vi.mock braces: this guard covers every current and future test file at once.
+    if (process.env.VITEST) {
+      console.warn('[TelegramService] send suppressed under vitest (unmocked test path)');
+      return false;
+    }
     text = balanceMarkdownEntities(text);
     const { botToken, chatId, enabled } = await this.getSettings();
     if (!enabled || !botToken || !chatId) {

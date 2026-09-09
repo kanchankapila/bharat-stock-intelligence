@@ -1,5 +1,13 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { isStaleActiveJob } from '../jobs/registerJob';
+
+// Policy (AF-20260909-11): every test file importing jobs/registerJob mocks telegramService —
+// this one only exercises the pure isStaleActiveJob helper, but the mock costs one line and
+// removes the whole "can this test reach the real Telegram?" question.
+vi.mock('../telegramService', () => ({
+  telegramService: { sendMarkdownMessage: vi.fn().mockResolvedValue(true) },
+  sanitizeMarkdown: (t: string) => t,
+}));
 
 /**
  * A job left `active` by a killed worker blocks its queue until the lock expires.

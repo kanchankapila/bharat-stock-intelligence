@@ -18,7 +18,17 @@ import { addJobWithCatchup } from '../jobs/registerJob';
  * another export of that same module (an ESM binding, not a mock-replaceable property), so a
  * spy-based version of this test could never observe the real wiring. Testing the actual
  * moveToFailed side effect is also the more honest test regardless.
+ *
+ * The reclaim path fires a REAL Telegram alert through a dynamic import of telegramService.
+ * Without this mock, every full-suite run sent live "job: orphan (queue fake-queue)" messages
+ * to the production Telegram chat (found 2026-09-09: 15 such alerts in one day). Same mock as
+ * orphanRequeue.test.ts; telegramService additionally refuses to send under VITEST.
  */
+vi.mock('../telegramService', () => ({
+  telegramService: { sendMarkdownMessage: vi.fn().mockResolvedValue(true) },
+  sanitizeMarkdown: (t: string) => t,
+}));
+
 function makeOrphanJob(id: string, processedOn: number) {
   return { id, name: 'orphan', processedOn, moveToFailed: vi.fn().mockResolvedValue(undefined) };
 }

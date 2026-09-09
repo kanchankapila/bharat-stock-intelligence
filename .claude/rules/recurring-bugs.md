@@ -232,6 +232,21 @@ Currently automated (9 checks): `date.today()` write-anchor, short calendar-day 
   threshold. Fixed 2026-09-09: gate reuses the scan's own actionable threshold (`signalScore >= 5`, 7 in BEAR —
   the same values that mirror into `recommendation_log`), one digest per date with retry-on-failure, and the
   send routed through `telegramService` so balancing/chunking/429-retry/DB-configured settings all apply.
+- **A test that can reach a network side effect without a mock WILL, on some full-suite run, perform it against production.**
+  `addJobWithCatchupReclaims.test.ts` drove the real reclaim→requeue path; the dynamic `import('../telegramService')` inside
+  `alertOrphanedJob` resolved to the REAL service, so `vitest run` sent live `job: orphan (queue fake-queue)` alerts to the
+  production chat — 15 of them on 2026-09-09, with zero test failures, because no test asserted on sends. This is the test-side
+  twin of "a developer's Postgres IS production": side effects need the same isolation as data. **Tell:** Telegram messages
+  whose job/queue names match test fixtures (no production queue is named `fake-queue`); a chat that receives N identical
+  alerts after a `vitest run`. Fixed 2026-09-09 at two layers: per-file `vi.mock('../telegramService')` on every
+  registerJob-importing test (policy), and a runtime guard in `sendMarkdownMessage` (`process.env.VITEST` → no-op) so any
+  future unmocked test is inert. Immunized by repo-doctor's `tests-mock-telegram` + `tg-vitest-guard` checks.
+- **A digest/lateness flag is a snapshot — cross-check the LIVE state before chasing it.** The 09-09 evening digest flagged
+  `nt-live-filter-capture` "~16h late" and ml dispersion "dying (ml 100%)" while both were already healthy (32/32 capture
+  slots that day; latest DQ read ml 0% after the recovered runs). Digests build from state that 15-min pollers keep moving;
+  verify against the log's latest completed slot and a fresh heartbeat before spending a session on the flag. Related
+  measurement trap: `job_heartbeat` stores naive-UTC epochs and pg's JSON rendering appends a bogus `Z` to
+  `AT TIME ZONE`-converted values — UTC instants read as IST wall times and vice versa; use raw epoch math (repo-doctor does).
 ## Investigating production without breaking it
 
 - **A client-side timeout does NOT cancel the server-side query — it orphans it**, and on a big table that orphan can hold a lock that blocks the whole platform for hours, which then gets misdiagnosed as a storage-engine cost problem. Diagnose lock contention (`pg_stat_activity`, `wait_event_type = 'Lock'`) before theorizing about decompression/storage cost — a query "hanging" on one specific table while others respond normally is lock contention until proven otherwise. Prevent it with a server-side `SET LOCAL statement_timeout`, not a client-side `timeout` wrapper.

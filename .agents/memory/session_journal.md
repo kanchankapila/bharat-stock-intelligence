@@ -29,3 +29,16 @@ Lean, incremental checkpoint of decisions / known bugs / state. Newest first.
   holding date-only strings (MAX works lexicographically; `substring(computed_at,1,10)` valid);
   Telegram creds live in `app_settings` (`telegram_bot_token`/`telegram_chat_id`/`telegram_enabled`)
   with env fallback; app log timestamps are **IST** while crons/DB are UTC.
+- **Evening addendum (AF-20260909-11..13):** the digest's 15 `orphan (fake-queue)` alerts were
+  the TEST SUITE phoning home — `addJobWithCatchupReclaims.test.ts` lacked the telegramService
+  mock, so `vitest run` sent live alerts. Fixed per-file + a `process.env.VITEST` guard inside
+  `sendMarkdownMessage` (inert in prod). ml-weekly-retrain make-up enqueued (fires ~23:36 IST
+  09-09, after the ml-daily-ops chain; Saturday repeatable intact). NiftyTrader-capture "16h
+  late" and ml-dispersion "100%" were stale-snapshot false alarms (capture 32/32 slots; latest
+  DQ reads ml 0%). `job_heartbeat` stores naive-UTC epochs — pg JSON adds a bogus `Z` to
+  `AT TIME ZONE` output; use raw epoch math.
+- **Built `.claude/skills/repo-doctor/`** (SKILL.md + doctor.mjs): one consolidated
+  codebase/DB/frontend/logs health check encoding every recurring bug class; run
+  `node .claude/skills/repo-doctor/doctor.mjs` (add `--full` for tsc+vite build). First run:
+  33 checks, 26 PASS / 6 documented-benign WARN / 0 FAIL. Rule in its SKILL.md: new bug class
+  ⇒ new named check + recurring-bugs row + AF ledger row.

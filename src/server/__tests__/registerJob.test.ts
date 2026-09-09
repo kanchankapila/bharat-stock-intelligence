@@ -1,6 +1,14 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { addJobWithCatchup } from '../jobs/registerJob';
 
+// Policy (AF-20260909-11): EVERY test file importing jobs/registerJob mocks telegramService,
+// because the reclaim path fires a REAL Telegram alert through a dynamic import. Belt to the
+// process.env.VITEST guard inside sendMarkdownMessage itself.
+vi.mock('../telegramService', () => ({
+  telegramService: { sendMarkdownMessage: vi.fn().mockResolvedValue(true) },
+  sanitizeMarkdown: (t: string) => t,
+}));
+
 /**
  * Regression coverage for the 2026-08-03 fix: addJobWithCatchup used to decide "missed" by
  * looking only at completed/failed job history, which is blind to a catchup already queued by
