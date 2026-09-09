@@ -1,5 +1,9 @@
 # In-Place Rebuild Spec — Bharat Stock Intelligence (adapted from NEW_SYSTEM_MASTER_PROMPT.md)
 
+> **ARCHIVED (historical).** Same disposition as `NEW_SYSTEM_MASTER_PROMPT.md` — a rebuild-spec from
+> the greenfield effort, now a live shadow; not current architecture. Canonical docs are `CLAUDE.md`
+> and `README.md`.
+
 _This document is the in-place counterpart to `docs/NEW_SYSTEM_MASTER_PROMPT.md`. That file's
 "PROMPT TO USE" section was written generically, for a fresh empty repo. This file takes the same
 non-negotiables and maps each one onto this actual codebase — what already satisfies it, what's

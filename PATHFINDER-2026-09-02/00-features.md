@@ -1,5 +1,10 @@
 # 00 — Feature Inventory & Boundaries (2026-09-02)
 
+> **ARCHIVED snapshot.** This PATHFINDER-2026-09-02 directory is a dated, one-off exploration of
+> repo `04d20db`; the counts and structure here went stale the day after it was written. If you
+> need current counts/structure, check the live tree and the graph (CLAUDE.md → "Knowledge
+> graph") — do not treat anything in `PATHFINDER-2026-09-02/` as current.
+
 Repo: bharat-stock-intelligence @ `04d20db`. Counts verified this session:
 213 Python modules in `src/server/` (81 `*_fetcher.py`), 28 tRPC router modules
 (7,912 lines, 376 procedures: 278 public / 55 admin / 34 protected / 9 expensive),

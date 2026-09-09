@@ -1,5 +1,10 @@
 # Master Prompt: Bharat Stock Intelligence V2 — Ground-Up Rebuild
 
+> **ARCHIVED (historical).** This is a bootstrap prompt for the ground-up `greenfield/` rebuild —
+> now a live shadow pipeline (see README → "Greenfield shadow pipeline" for its current state).
+> Do not treat this document as current architecture; the canonical platform docs are `CLAUDE.md`
+> and `README.md`. Kept for the original design rationale only.
+
 _This is a prompt document, not application code. Paste the "PROMPT TO USE" section below into
 a fresh Claude Code session (empty repo) to bootstrap the new system. The rest of this file is
 the rationale — why each decision was made, sourced from concrete incidents in the current

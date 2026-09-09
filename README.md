@@ -28,7 +28,7 @@ A local-first quantitative intelligence platform for NSE/BSE equities. Synthesiz
 │  Signal Pipeline (Node)                                             │
 │  technicalSignalsService → confluenceEngine → scoring_engine.py    │
 │                                                                     │
-│  ML Pipeline (Python, ~200 modules incl. 79 *_fetcher.py)          │
+│  ML Pipeline (Python, ~210 modules incl. 81 *_fetcher.py)          │
 │  feature_engineering → regime_detector → ml_ensemble → dl_engine  │
 │  outcome_resolver → performance_tracker → reward_engine → rl_agent │
 │  online_learner → strategy_optimizer → backtester                  │
@@ -42,8 +42,8 @@ A local-first quantitative intelligence platform for NSE/BSE equities. Synthesiz
                          ▼
 ┌─────────────────────────────────────────────────────────────────────┐
 │  Frontend  React 19 · Vite · TailwindCSS 4 · Recharts              │
-│  Six dashboard experiences (v1 default … v6), all lazy-loaded,     │
-│  all reading the same tRPC surface — see "Frontend Versions" below │
+│  One v1 shell (classic AppShell tab list) — former v2–v6 pages     │
+│  folded in as components under src/components/v{2,4,5,6}/          │
 └─────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -68,12 +68,15 @@ testing requirements, and known broken sources.
 A change to one service is not live in the others, and none of the `.py`/`.ts` files are
 hot-reloaded — a code change needs `pm2 restart <name>` (or `npm start`'s dev-mode watchers).
 
-### Frontend Versions
+### Frontend — one v1 shell (2026-08-29 consolidation)
 
-Six dashboard shells coexist in one app, no separate build — `App.tsx`'s `dashboardVersion`
-(localStorage) picks among v1/v2/v3/v6; v4 lives inside the v2 shell and v5 is its own route
-tree at `/v5`. **v1 is the default** (classic tab list, nav-links every page the other shells
-have). Nothing is deprecated — all six read the same tRPC procedures.
+Every page renders through `V1Routes` inside the classic `AppShell`; `App.tsx` force-migrates any
+stored `dashboardVersion` to `'v1'` on mount. The former v2/v4/v5/v6 pages weren't deleted — they
+were folded in as ordinary components under `src/components/v{2,4,5,6}/` (e.g. v5's desk pages,
+v6's Screener Browser / Portfolio Tracker, v4's `MarketCommandCenter`), given v1's page chrome via
+`V1PageFrame`, and routed like any other v1 page. Old references to "six dashboards,"
+`dashboardVersion` branching, or shell names (`V2AppShell`, `V6Shell`, …) predate this
+consolidation and do not reflect the live app.
 
 ---
 
@@ -286,10 +289,8 @@ Starts both Express tRPC server (port 3000) and Vite dev server.
 
 ## Navigation Pages
 
-> These routes are v1 (the default shell, `AppShell`). v2/v3 use a Bloomberg-terminal-styled
-> `V2AppShell` (also home to v4's `MarketCommandCenter`/`StockIntelligencePage`); v5 is a separate
-> institutional-workbench route tree at `/v5`; v6 (`V6Shell`) composes its own home/portfolio/
-> screener pages. All six read the same tRPC procedures — see "Frontend Versions" above.
+> These routes are v1 — the only shell (the 2026-08-29 consolidation folded v2–v6 into
+> components under `src/components/v{2,4,5,6}/`; see "Frontend — one v1 shell" above).
 
 | Route | Page |
 |---|---|

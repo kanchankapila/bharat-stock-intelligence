@@ -143,7 +143,7 @@ v1/v2/v3/v4/v5/v6 used to coexist, all reading the same tRPC surface, with a rea
 applied to the nav" being wrong about *which* shell. That's resolved: `src/v2/`, `src/v3/`,
 `src/v5/`, `src/v6/` were deleted outright, and their live pages/widgets were folded into
 `src/components/v{2,4,5,6}/`, rendered through v1's `AppShell` via `V1Routes`/`V1PageFrame`. v1 is
-now the only frontend — see CLAUDE.md's "Frontend versions" section. Nothing left to do here.
+now the only frontend — see CLAUDE.md's "Frontend — one v1 shell (2026-08-29 consolidation)" section. Nothing left to do here.
 
 ## How to work through this skill across sessions
 

@@ -18,8 +18,9 @@ of this. This skill exists for the gaps those cannot see:
   `data_quality_history` (added 2026-08-15) is the append-only counterpart — query that for
   verdict-over-time. It starts on 2026-08-15, so anything older than that is only comparable via
   this skill's own ledger.
-- **The frontend has zero monitoring and zero component tests.** Six shells, `v6` is what a fresh
-  visitor lands on.
+- **The frontend has zero monitoring and zero component tests.** Since the 2026-08-29
+  consolidation it is one v1 shell (`AppShell`/`V1Routes`); there is no v-something a fresh
+  visitor "lands on" any more — old shell names predate the consolidation.
 - **The 12 deep audits are run only when someone remembers.** Rotation below fixes that.
 
 Read `.claude/rules/recurring-bugs.md` before starting. Run lanes in order; a red lane does not

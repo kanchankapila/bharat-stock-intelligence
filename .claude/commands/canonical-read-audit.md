@@ -6,15 +6,19 @@ description: Check every dashboard shell and every scoring/ranking-shaped tRPC p
 
 Read `.claude/rules/scoring-authority.md` in full first, specifically the line that
 "consolidation" means "keeping UI reads from bypassing the canonical table, not deleting the
-input tables." Nothing currently checks that this actually holds across all six frontend
-shells. Also skim `.claude/rules/measurement.md`'s "Known state of the edge" — a surface built
+input tables." Nothing currently checks that this actually holds across the frontend —
+currently one v1 shell (`AppShell` via `V1Routes`; former v2–v6 folded into
+`src/components/v{2,4,5,6}/` since the 2026-08-29 consolidation). Also skim
+`.claude/rules/measurement.md`'s "Known state of the edge" — a surface built
 on an input that file has already measured as null-to-negative or inverted is a finding here,
 even if it's technically "the ranker's own input," because a user looking at that surface has
 no way to know it's not the canonical ranking.
 
 ## 1. Enumerate every score/ranking-shaped surface
 
-Across all six shells (`AppShell`/v1, `V2AppShell`/v2+v3, v4, v5's own route tree, `V6Shell`/v6)
+Every page renders through the single v1 shell — `src/App.tsx` force-migrates `dashboardVersion`
+to `'v1'`, and the pre-consolidation shells (`V2AppShell`, v4, v5's old route tree, `V6Shell`)
+exist only as components under `src/components/v{2,4,5,6}/`. Enumerate across the live routes
 and the shared `src/components/` pool:
 
 ```bash
@@ -41,12 +45,14 @@ that procedure's server-side implementation to the table(s) it queries.
   best call.
 - **Reads something else entirely** (raw OHLCV, a single non-ranking table) — not in scope here.
 
-## 3. Special-case the default landing shell
+## 3. The frontend has ONE landing shell since the 2026-08-29 consolidation
 
-`App.tsx`'s `dashboardVersion` fallback is `v6` — that's what a fresh visitor with no
-localStorage sees. Trace `V6Shell.tsx` and every page under `src/v6/pages/` explicitly, list
-every tRPC call it makes, and state plainly whether `unified_recommendations` appears anywhere
-in that shell's call graph. If it doesn't, that is the headline finding, not a footnote.
+`App.tsx` force-migrates any stored `dashboardVersion` to `'v1'` on mount, and every page renders
+through `V1Routes` inside `AppShell`; the former v2–v6 shells were folded into
+`src/components/v{2,4,5,6}/`. Trace the v1 pages' tRPC calls explicitly, list every procedure they
+make, and state plainly whether `unified_recommendations` appears anywhere in that call graph. If
+it doesn't, that is the headline finding, not a footnote. (There is no `V6Shell` / `src/v6/` /
+`dashboardVersion` switching left to check for — those references predate the consolidation.)
 
 ## 4. Cross-check the orphaned-procedure surface
 
