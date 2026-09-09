@@ -65,10 +65,16 @@ describe('addJobWithCatchup reclaims orphans on its own queue', () => {
   it('does not re-scan the same queue object across multiple call sites in one boot', async () => {
     // 36 call sites can share a queue (e.g. multiple jobNames on one queue); re-scanning an
     // already-checked queue on every call is wasted Redis round-trips at boot.
+    // AF-20260909-06: the orphan scan itself now also runs the requeue guard's in-flight check
+    // (a different query, ['active','waiting','delayed']) WITHIN that single scan -- what this
+    // test protects is that the second addJobWithCatchup call site triggers NO additional
+    // orphan scan, i.e. exactly one active-only getJobs per queue per boot.
     const orphan = makeOrphanJob('shared-queue-orphan', Date.now() - 60 * 60_000);
     const queue = fakeQueue([orphan]);
     await addJobWithCatchup(queue, 'job-a', {}, {});
     await addJobWithCatchup(queue, 'job-b', {}, {});
-    expect(queue.getJobs).toHaveBeenCalledTimes(1);
+    const activeScans = queue.getJobs.mock.calls.filter(
+      (c: any[]) => c[0].length === 1 && c[0][0] === 'active');
+    expect(activeScans).toHaveLength(1);
   });
 });

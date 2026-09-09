@@ -28,6 +28,136 @@ function isBenignLockError(err: any): boolean {
 const CATCHUP_STAGGER_MS = 5 * 60_000;
 let _catchupSlot = 0;
 
+/** An orphan requeue older than this is history, not a miss: re-running a 2-day-old EOD batch
+ *  would compute against a market that has moved on. Past this horizon the reclaim still frees
+ *  the queue and alerts, but does not requeue. */
+export const ORPHAN_REQUEUE_MAX_AGE_MS = 48 * 60 * 60_000;
+
+/** If the job's own schedule fires again within this window, the regular slot IS the make-up:
+ *  requeueing would double-run it on concurrency:1 queues. 90min covers every 15-min market-hours
+ *  job and the hourly ones with room to spare, while daily/weekly jobs (the ones that genuinely
+ *  lose a batch to a restart, like ml-daily-ops on 2026-09-08) sit far outside it and requeue. */
+export const ORPHAN_REQUEUE_SKIP_WINDOW_MS = 90 * 60_000;
+
+/**
+ * Requeue a make-up run for a job whose worker died mid-run (AF-20260909-06).
+ *
+ * reclaimStaleActiveJobs used to be the END of the story: the orphan was moved to failed and
+ * only logged. Worse, that failed state is self-masking -- the failed orphan's finishedOn is
+ * "just now", so addJobWithCatchup's missed-slot detector sees a fresh "last run" and concludes
+ * nothing was missed. That is the exact mechanism which silently lost the 2026-09-08
+ * ml-daily-ops batch (block deals, exit labels, performance_tracker, mf_sector_allocation all
+ * stale for a day while every sibling heartbeat stayed green).
+ *
+ * Guards, in order (each skip is logged):
+ *  1. Upcoming regular slot -- the job's repeatable fires again within
+ *     ORPHAN_REQUEUE_SKIP_WINDOW_MS, so the schedule itself covers the loss.
+ *  2. Make-up already in flight -- an active/waiting/delayed instance of the same jobName with
+ *     the isCatchup or orphanRequeue marker (so two orphans of the same job across rapid
+ *     restarts, or an orphan plus the missed-slot catch-up, don't stack duplicates). Same
+ *     marker-not-bare-name rule as addJobWithCatchup's duplicate guard: the repeatable's own
+ *     next occurrence sits delayed with this jobName forever.
+ *  3. Staleness -- processedOn older than ORPHAN_REQUEUE_MAX_AGE_MS: alert only, no requeue.
+ *
+ * The requeued job carries `isCatchup: true` (so the existing duplicate-catch-up guard
+ * recognizes it on subsequent boots) plus `orphanRequeue: true` (provenance), runs with
+ * attempts: 1 (no retry cascade on top of a make-up), and rides the same global stagger as
+ * missed-slot catch-ups so several orphans don't stampede on boot.
+ *
+ * Returns true when a make-up run was actually queued. Never throws.
+ */
+export async function requeueOrphanedJob(
+  queue: any,
+  orphan: { name: string; id?: string; data?: any; processedOn?: number | null },
+): Promise<boolean> {
+  const name = orphan.name;
+  try {
+    const now = Date.now();
+    const startedAt = typeof orphan.processedOn === 'number' ? orphan.processedOn : undefined;
+
+    // Guard 1: the regular schedule covers it soon. Must be a FUTURE fire: a stale past `next`
+    // (a repeatable about to be replaced, the 2026-09-09 mover cron swap) must not suppress
+    // the requeue -- "fires again at yesterday" covers nothing.
+    try {
+      const repeatables = await queue.getRepeatableJobs();
+      for (const r of repeatables) {
+        if (r.name === name && typeof r.next === 'number' && r.next >= now &&
+            r.next - now < ORPHAN_REQUEUE_SKIP_WINDOW_MS) {
+          console.log(
+            `[QUEUE] ${queue.name}: orphaned ${name} (predates this process) fires again on its ` +
+            `regular schedule at ${new Date(r.next).toISOString()} -- not requeueing a make-up.`);
+          return false;
+        }
+      }
+    } catch { /* a queue that cannot list repeatables falls through to the other guards */ }
+
+    // Guard 2: a make-up for this jobName is already active/waiting/delayed.
+    try {
+      const inFlight = await queue.getJobs(['active', 'waiting', 'delayed'], 0, -1, false);
+      if (inFlight.some(j => j.name === name &&
+          (j.data?.isCatchup === true || j.data?.orphanRequeue === true))) {
+        console.log(
+          `[QUEUE] ${queue.name}: orphaned ${name} already has a make-up run pending -- not ` +
+          `requeueing a duplicate.`);
+        return false;
+      }
+    } catch { /* if we cannot read the queue, leave the decision to the add below */ }
+
+    // Guard 3: too old to be worth recomputing.
+    if (startedAt && now - startedAt > ORPHAN_REQUEUE_MAX_AGE_MS) {
+      console.warn(
+        `[QUEUE] ${queue.name}: orphaned ${name} started ${Math.floor((now - startedAt) / 3_600_000)}h ` +
+        `ago -- past the requeue horizon, alerting only.`);
+      void alertOrphanedJob(queue.name, name, startedAt, false, 'stale beyond requeue horizon');
+      return false;
+    }
+
+    const delay = (_catchupSlot++) * CATCHUP_STAGGER_MS;
+    await queue.add(name, {
+      ...(orphan.data ?? {}),
+      isCatchup: true,
+      orphanRequeue: true,
+      requeuedFrom: orphan.id ?? null,
+    }, {
+      jobId: `${name}-orphan-requeue-${now}`,
+      delay,
+      attempts: 1,
+      removeOnComplete: 10,
+      removeOnFail: 10,
+    });
+    console.warn(
+      `[QUEUE] ${queue.name}: REQUEUED make-up for orphaned job ${name} ` +
+      `(worker died mid-run; fires in ${Math.round(delay / 60_000)}min) -- AF-20260909-06`);
+    void alertOrphanedJob(queue.name, name, startedAt, true,
+      `make-up queued with ${Math.round(delay / 60_000)}min stagger`);
+    return true;
+  } catch (err) {
+    // Never let the make-up machinery fail the reclaim (and therefore the boot) itself.
+    console.warn(`[QUEUE] ${queue.name}: could not requeue orphaned job ${name}:`, err);
+    return false;
+  }
+}
+
+/** Best-effort Telegram alert about a reclaimed orphan. Fire-and-forget: alerting is additive
+ *  and must never break scheduling (sendMarkdownMessage itself is fully guarded, but the dynamic
+ *  import and message construction are not -- hence this wrapper). */
+async function alertOrphanedJob(
+  queueName: string, jobName: string, startedAt: number | undefined, requeued: boolean,
+  detail: string,
+): Promise<void> {
+  try {
+    const ranMin = startedAt ? Math.round((Date.now() - startedAt) / 60_000) : null;
+    const text = [
+      '[ALERT] Orphaned job reclaimed after restart',
+      `job: ${jobName} (queue ${queueName})`,
+      ranMin !== null ? `was active ${ranMin}m before the worker died` : null,
+      requeued ? `action: requeued make-up (${detail})` : `action: none (${detail})`,
+    ].filter(Boolean).join('\n');
+    const { telegramService } = await import('../telegramService');
+    await telegramService.sendMarkdownMessage(text);
+  } catch { /* alerting is additive; scheduling must not depend on it */ }
+}
+
 /**
  * Adds a repeatable BullMQ job, replacing any existing repeatable registration for the same
  * jobId/jobName, and queues an immediate one-off "catch-up" run if the schedule's last expected
@@ -61,7 +191,8 @@ export async function addJobWithCatchup(
     const orphans = await reclaimStaleActiveJobs(queue);
     for (const o of orphans) {
       console.warn(`[QUEUE] ${queue.name}: reclaimed orphaned job ${o.name} (id=${o.id}, was `
-                 + `active ${o.ageMin}m across a restart) -- queue is free again`);
+                 + `active ${o.ageMin}m across a restart) -- queue is free again`
+                 + (o.requeued ? ', make-up requeued' : ', NOT requeued (see reclaim log)'));
     }
   }
 
@@ -324,7 +455,7 @@ export function isStaleActiveJob(job: { processedOn?: number | null }, bootedAt:
  * Returns the jobs it reclaimed, so the caller can log what it found.
  */
 export async function reclaimStaleActiveJobs(queue: any, bootedAt = PROCESS_BOOTED_AT) {
-  const reclaimed: Array<{ name: string; id: string; ageMin: number }> = [];
+  const reclaimed: Array<{ name: string; id: string; ageMin: number; requeued?: boolean }> = [];
   let active: any[] = [];
   try {
     active = await queue.getJobs(['active'], 0, 50);
@@ -339,7 +470,11 @@ export async function reclaimStaleActiveJobs(queue: any, bootedAt = PROCESS_BOOT
         new Error(`orphaned: worker exited mid-run; job predates this process (active ${ageMin}m)`),
         '0', true,
       );
-      reclaimed.push({ name: job.name, id: String(job.id), ageMin });
+      // AF-20260909-06: freeing the queue used to be all this did -- the failed orphan's fresh
+      // finishedOn also masked it from the missed-slot detector, so the work was simply lost.
+      // Requeue a guarded make-up run (see requeueOrphanedJob) and record the outcome.
+      const requeued = await requeueOrphanedJob(queue, job);
+      reclaimed.push({ name: job.name, id: String(job.id), ageMin, requeued });
     } catch { /* another instance may have reclaimed it first */ }
   }
   return reclaimed;
@@ -360,7 +495,8 @@ export async function registerRepeatableJob(
   const orphans = await reclaimStaleActiveJobs(queue);
   for (const o of orphans) {
     console.warn(`[QUEUE] ${cfg.queueName}: reclaimed orphaned job ${o.name} (id=${o.id}, was `
-               + `active ${o.ageMin}m across a restart) -- queue is free again`);
+               + `active ${o.ageMin}m across a restart) -- queue is free again`
+               + (o.requeued ? ', make-up requeued' : ', NOT requeued (see reclaim log)'));
   }
 
   const repeatables = await queue.getRepeatableJobs();
