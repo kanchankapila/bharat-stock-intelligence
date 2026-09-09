@@ -4,6 +4,7 @@ import { join } from 'node:path';
 
 const queuesSrc = readFileSync(join(__dirname, '..', 'queues.ts'), 'utf8');
 const screenerJobsSrc = readFileSync(join(__dirname, '..', 'jobs', 'screeners.jobs.ts'), 'utf8');
+const quantServiceSrc = readFileSync(join(__dirname, '..', 'quantScoringService.ts'), 'utf8');
 
 function fnBody(src: string, fnName: string): string {
   const start = src.indexOf(`async function ${fnName}`);
@@ -63,5 +64,10 @@ describe('quant_scores writer ordering', () => {
     expect(iRun).toBeGreaterThan(-1);
     expect(iMf).toBeGreaterThan(-1);
     expect(iMf).toBeGreaterThan(iRun);
+  });
+
+  it('quant history snapshot keeps the native DATE type after the date migration', () => {
+    expect(quantServiceSrc).toContain('SELECT MAX(date) FROM stock_ohlcv');
+    expect(quantServiceSrc).not.toContain('SELECT MAX(date)::text FROM stock_ohlcv');
   });
 });

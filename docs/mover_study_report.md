@@ -1,71 +1,72 @@
 # Mover Reverse-Engineering Study
 
-Run: `2026-08-30T16:53:09`  |  events analyzed: **251,675** across 82 classes
+Run: `2026-09-06T10:30:25`  |  events analyzed: **334,966** across 83 classes
 
 ## Event counts by class
 
 | source                      |   events |
 |:----------------------------|---------:|
-| calc_gap_down               |    20287 |
-| calc_gap_up                 |    40432 |
-| calc_intraday_breakout      |    11762 |
-| calc_open_eq_high           |    64724 |
-| calc_open_eq_low            |    41245 |
-| calc_volume_shocker         |    21291 |
+| calc_gap_down               |    20467 |
+| calc_gap_up                 |    40846 |
+| calc_intraday_breakout      |    11860 |
+| calc_open_eq_high           |    65416 |
+| calc_open_eq_low            |    41554 |
+| calc_volume_shocker         |    21486 |
 | et_gainers_1d               |        1 |
-| et_screen_hammer            |        1 |
-| et_screen_inverted_hammer   |        1 |
-| et_screen_long_black_candle |        2 |
-| et_screen_long_white_candle |       17 |
-| mc_price_shockers           |      125 |
-| mojo_gainers                |      603 |
-| mojo_losers                 |      788 |
-| nt_top_gainers              |      260 |
-| nteod_gain5                 |       87 |
-| nteod_gap_down              |       89 |
-| nteod_gap_up                |      297 |
-| nteod_gap_up_unfill         |       22 |
-| nteod_high_delivery         |       24 |
-| nteod_loss5                 |       19 |
-| nteod_near_high_close       |       92 |
-| nteod_near_low_close        |      338 |
-| nteod_open_eq_high          |      184 |
-| nteod_open_eq_low           |      202 |
-| ntlive_0930_gain5           |       13 |
-| ntlive_0930_gap_down        |      709 |
-| ntlive_0930_gap_up          |     1902 |
-| ntlive_0930_loss5           |        1 |
-| ntlive_0930_market          |     3016 |
-| ntlive_0930_near_high       |     1193 |
-| ntlive_0930_near_low        |     1671 |
-| ntlive_1030_gain5           |       29 |
-| ntlive_1030_gap_down        |      708 |
-| ntlive_1030_gap_up          |     1903 |
-| ntlive_1030_loss5           |        4 |
-| ntlive_1030_market          |     3016 |
-| ntlive_1030_near_high       |      698 |
-| ntlive_1030_near_low        |     1408 |
-| ntlive_1130_gain5           |       36 |
-| ntlive_1130_gap_down        |      708 |
-| ntlive_1130_gap_up          |     1903 |
-| ntlive_1130_loss5           |        4 |
-| ntlive_1130_market          |     3016 |
-| ntlive_1130_near_high       |      498 |
-| ntlive_1130_near_low        |     1376 |
-| ntlive_1230_gain5           |       47 |
-| ntlive_1230_gap_down        |      708 |
-| ntlive_1230_gap_up          |     1903 |
-| ntlive_1230_loss5           |        6 |
-| ntlive_1230_market          |     3016 |
-| ntlive_1230_near_high       |      455 |
-| ntlive_1230_near_low        |     1304 |
-| ntlive_1330_gain5           |       55 |
-| ntlive_1330_gap_down        |      708 |
-| ntlive_1330_gap_up          |     1903 |
-| ntlive_1330_loss5           |        7 |
-| ntlive_1330_market          |     3016 |
-| ntlive_1330_near_high       |      417 |
-| ntlive_1330_near_low        |     1276 |
+| et_screen_hammer            |        8 |
+| et_screen_inverted_hammer   |        5 |
+| et_screen_long_black_candle |       16 |
+| et_screen_long_white_candle |       52 |
+| mc_price_shockers           |      379 |
+| mojo_gainers                |     1796 |
+| mojo_losers                 |     2246 |
+| nt_top_gainers              |      812 |
+| nteod_gain5                 |      243 |
+| nteod_gap_down              |      363 |
+| nteod_gap_up                |      710 |
+| nteod_gap_up_unfill         |       64 |
+| nteod_high_delivery         |      104 |
+| nteod_loss5                 |       62 |
+| nteod_near_high_close       |      416 |
+| nteod_near_low_close        |      671 |
+| nteod_open_eq_high          |      760 |
+| nteod_open_eq_low           |      524 |
+| nteod_universe              |     2052 |
+| ntlive_0930_gain5           |       34 |
+| ntlive_0930_gap_down        |     2621 |
+| ntlive_0930_gap_up          |     4402 |
+| ntlive_0930_loss5           |       10 |
+| ntlive_0930_market          |     8039 |
+| ntlive_0930_near_high       |     2706 |
+| ntlive_0930_near_low        |     4182 |
+| ntlive_1030_gain5           |       74 |
+| ntlive_1030_gap_down        |     2618 |
+| ntlive_1030_gap_up          |     4405 |
+| ntlive_1030_loss5           |       22 |
+| ntlive_1030_market          |     8039 |
+| ntlive_1030_near_high       |     2035 |
+| ntlive_1030_near_low        |     3061 |
+| ntlive_1130_gain5           |       90 |
+| ntlive_1130_gap_down        |     2118 |
+| ntlive_1130_gap_up          |     4062 |
+| ntlive_1130_loss5           |       22 |
+| ntlive_1130_market          |     7034 |
+| ntlive_1130_near_high       |     1387 |
+| ntlive_1130_near_low        |     2656 |
+| ntlive_1230_gain5           |      125 |
+| ntlive_1230_gap_down        |     2618 |
+| ntlive_1230_gap_up          |     4405 |
+| ntlive_1230_loss5           |       35 |
+| ntlive_1230_market          |     8039 |
+| ntlive_1230_near_high       |     1284 |
+| ntlive_1230_near_low        |     2967 |
+| ntlive_1330_gain5           |      147 |
+| ntlive_1330_gap_down        |     2618 |
+| ntlive_1330_gap_up          |     4405 |
+| ntlive_1330_loss5           |       39 |
+| ntlive_1330_market          |     8039 |
+| ntlive_1330_near_high       |     1252 |
+| ntlive_1330_near_low        |     2770 |
 | ntlive_1509_gain5           |       18 |
 | ntlive_1509_gap_down        |      346 |
 | ntlive_1509_gap_up          |      484 |
@@ -80,54 +81,54 @@ Run: `2026-08-30T16:53:09`  |  events analyzed: **251,675** across 82 classes
 | ntlive_1512_market          |     1005 |
 | ntlive_1512_near_high       |      221 |
 | ntlive_1512_near_low        |      184 |
-| ntlive_eod_gain5            |       47 |
-| ntlive_eod_gap_down         |      525 |
-| ntlive_eod_gap_up           |     1179 |
-| ntlive_eod_loss5            |       10 |
-| ntlive_eod_market           |     2011 |
-| ntlive_eod_near_high        |      206 |
-| ntlive_eod_near_low         |      626 |
+| ntlive_eod_gain5            |      182 |
+| ntlive_eod_gap_down         |     2673 |
+| ntlive_eod_gap_up           |     4326 |
+| ntlive_eod_loss5            |       68 |
+| ntlive_eod_market           |     8038 |
+| ntlive_eod_near_high        |      921 |
+| ntlive_eod_near_low         |     1940 |
 | ntlive_market               |     1005 |
 
 ## Factor rank-IC vs realized mover returns
 
-| t1_date    | factor        |      ic |   n |
-|:-----------|:--------------|--------:|----:|
-| 2025-12-22 | f_mom_21d     |  0.02   | 975 |
-| 2025-12-22 | f_mom_5d      |  0.0055 | 984 |
-| 2025-12-22 | f_rs_vs_nifty | -0.0366 | 986 |
-| 2025-12-23 | f_mom_21d     |  0.0256 | 889 |
-| 2025-12-23 | f_mom_5d      | -0      | 892 |
-| 2025-12-23 | f_rs_vs_nifty | -0.023  | 894 |
-| 2025-12-24 | f_mom_21d     |  0.0605 | 951 |
-| 2025-12-24 | f_mom_5d      |  0.0602 | 952 |
-| 2025-12-24 | f_rs_vs_nifty | -0.0182 | 954 |
-| 2025-12-26 | f_mom_5d      |  0.0601 | 845 |
-| 2025-12-26 | f_mom_21d     |  0.0464 | 844 |
-| 2025-12-26 | f_rs_vs_nifty |  0.023  | 846 |
-| 2025-12-29 | f_mom_21d     |  0.0295 | 967 |
-| 2025-12-29 | f_mom_5d      | -0.0137 | 970 |
-| 2025-12-29 | f_rs_vs_nifty | -0.0219 | 970 |
+| t1_date    | factor        |      ic |    n |
+|:-----------|:--------------|--------:|-----:|
+| 2025-12-29 | f_mom_21d     |  0.0295 |  967 |
+| 2025-12-29 | f_mom_5d      | -0.0137 |  970 |
+| 2025-12-29 | f_rs_vs_nifty | -0.0219 |  970 |
+| 2025-12-30 | f_rs_vs_nifty |  0.1334 | 1079 |
+| 2025-12-30 | f_mom_21d     |  0.0381 | 1075 |
+| 2025-12-30 | f_mom_5d      |  0.0305 | 1078 |
+| 2025-12-31 | f_rs_vs_nifty |  0.0406 | 1009 |
+| 2025-12-31 | f_mom_21d     |  0.0107 | 1003 |
+| 2025-12-31 | f_mom_5d      |  0.0067 | 1009 |
+| 2026-01-01 | f_mom_21d     |  0.0377 | 1010 |
+| 2026-01-01 | f_mom_5d      |  0.0368 | 1012 |
+| 2026-01-01 | f_rs_vs_nifty |  0.0027 | 1012 |
+| 2026-01-02 | f_mom_5d      |  0.1636 | 1018 |
+| 2026-01-02 | f_mom_21d     |  0.1327 | 1014 |
+| 2026-01-02 | f_rs_vs_nifty |  0.063  | 1018 |
 
 ## Cohort lift (P(mover | top-quartile factor) / P(mover | bottom-quartile))
 
 | t1_date    | class                  | factor        |   lift |   p_top |   p_bot |   n_members |
 |:-----------|:-----------------------|:--------------|-------:|--------:|--------:|------------:|
-| 2025-12-22 | calc_intraday_breakout | f_mom_21d     | 45     |  0.0811 |  0.0018 |          76 |
-| 2025-12-22 | calc_intraday_breakout | f_mom_5d      | 11.25  |  0.0806 |  0.0072 |          76 |
-| 2025-12-22 | calc_volume_shocker    | f_mom_5d      |  2.045 |  0.0806 |  0.0394 |         110 |
-| 2025-12-22 | calc_volume_shocker    | f_mom_21d     |  1.957 |  0.0811 |  0.0414 |         110 |
-| 2025-12-22 | calc_intraday_breakout | f_rs_vs_nifty |  1.846 |  0.0429 |  0.0233 |          76 |
-| 2025-12-22 | calc_gap_down          | f_mom_5d      |  1.333 |  0.0287 |  0.0215 |          43 |
-| 2025-12-22 | calc_gap_down          | f_mom_21d     |  1.25  |  0.027  |  0.0216 |          43 |
-| 2025-12-22 | calc_open_eq_high      | f_mom_21d     |  1.132 |  0.1856 |  0.164  |         378 |
-| 2025-12-22 | calc_gap_up            | f_mom_5d      |  0.887 |  0.0842 |  0.095  |         154 |
-| 2025-12-22 | calc_open_eq_high      | f_mom_5d      |  0.87  |  0.1559 |  0.1792 |         378 |
-| 2025-12-22 | calc_open_eq_high      | f_rs_vs_nifty |  0.824 |  0.1592 |  0.1932 |         378 |
-| 2025-12-22 | calc_gap_up            | f_mom_21d     |  0.759 |  0.0739 |  0.0973 |         154 |
-| 2025-12-22 | calc_open_eq_low       | f_mom_21d     |  0.677 |  0.0757 |  0.1117 |         225 |
-| 2025-12-22 | calc_open_eq_low       | f_rs_vs_nifty |  0.53  |  0.0626 |  0.1181 |         225 |
-| 2025-12-22 | calc_open_eq_low       | f_mom_5d      |  0.342 |  0.0466 |  0.1362 |         225 |
+| 2025-12-29 | calc_intraday_breakout | f_mom_5d      | 36     |  0.0644 |  0.0018 |          52 |
+| 2025-12-29 | calc_intraday_breakout | f_mom_21d     | 19.5   |  0.0703 |  0.0036 |          52 |
+| 2025-12-29 | calc_volume_shocker    | f_mom_5d      |  2.267 |  0.1216 |  0.0537 |         151 |
+| 2025-12-29 | calc_volume_shocker    | f_mom_21d     |  1.595 |  0.1063 |  0.0667 |         151 |
+| 2025-12-29 | calc_volume_shocker    | f_rs_vs_nifty |  1.581 |  0.0877 |  0.0555 |         151 |
+| 2025-12-29 | calc_gap_down          | f_mom_21d     |  1.4   |  0.0378 |  0.027  |          50 |
+| 2025-12-29 | calc_intraday_breakout | f_rs_vs_nifty |  1.231 |  0.0286 |  0.0233 |          52 |
+| 2025-12-29 | calc_open_eq_low       | f_mom_21d     |  1.222 |  0.0793 |  0.0649 |         172 |
+| 2025-12-29 | calc_open_eq_high      | f_mom_5d      |  1.222 |  0.2165 |  0.1771 |         418 |
+| 2025-12-29 | calc_gap_up            | f_mom_5d      |  1.071 |  0.0805 |  0.0751 |         127 |
+| 2025-12-29 | calc_open_eq_low       | f_mom_5d      |  1.062 |  0.0608 |  0.0572 |         172 |
+| 2025-12-29 | calc_gap_down          | f_mom_5d      |  1     |  0.0304 |  0.0304 |          50 |
+| 2025-12-29 | calc_open_eq_high      | f_mom_21d     |  1     |  0.1802 |  0.1802 |         418 |
+| 2025-12-29 | calc_gap_up            | f_mom_21d     |  0.9   |  0.0649 |  0.0721 |         127 |
+| 2025-12-29 | calc_open_eq_low       | f_rs_vs_nifty |  0.731 |  0.068  |  0.093  |         172 |
 
 ## Engine hit-rate (movers found in engine top-N on T-1)
 
