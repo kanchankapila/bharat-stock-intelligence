@@ -28,7 +28,7 @@ import numpy as np
 import pandas as pd
 from scipy.stats import spearmanr
 
-from db_compat import connect, read_df
+from db_compat import connect, read_df, now_utc_iso
 
 # WIN threshold: > +1% within horizon = WIN, < -1% = LOSS, else NEUTRAL
 WIN_THRESHOLD  =  1.0
@@ -328,7 +328,7 @@ class PerformanceTracker:
     # ──────────────────────────────────────────────────────────────────────────
 
     def save_strategy_performance(self, rows: list[dict]):
-        now = datetime.datetime.now().isoformat()
+        now = now_utc_iso()
         cur = self.conn.cursor()
         for r in rows:
             r['last_computed'] = now
