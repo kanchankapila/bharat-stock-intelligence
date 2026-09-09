@@ -213,6 +213,25 @@ Currently automated (9 checks): `date.today()` write-anchor, short calendar-day 
   stream nothing read; here the message went to the right stream and was discarded anyway because
   the *other* stream happened to be non-empty. Both produce the same end state — a failure with no
   recoverable reason — so check both directions when a job reports an error you cannot act on.
+- **A Telegram send that treats a 429 as final silently drops the report it was sending.** Telegram's
+  `sendMessage` answers `HTTP 429 {retry_after: N}` with the exact wait it wants; `telegramService.sendMarkdownMessage`
+  used to log the error and report failure, so when the 2026-09-08 08:15 IST morning digest hit
+  `retry after 8`, the digest was simply lost (`job-digest-morning failed: job digest failed to send to Telegram`
+  in `job_run_history`). **Tell:** a daily report that "randomly" fails on a schedule with no code change, and
+  `[TelegramService] Failed to dispatch` bodies containing `error_code: 429` in the app log. Fixed 2026-09-09:
+  bounded retries honoring `retry_after` (+ per-chunk ~1.1s pacing) inside `sendMarkdownMessage`, so every
+  caller (digests, watchdog alerts, recommendations digest, accuracy digest) inherits the fix.
+- **A notification gate that reads a field its pipeline never populates is not a strict gate — it is an
+  always-false dead report.** `technicalSignalsService.sendTelegramSignals` gated on `r.winProbability >= 0.85`,
+  but NOTHING in `runTechnicalSignalScan` ever sets `r.winProbability` (the column `technical_signals.win_probability`
+  it would write is NULL platform-wide, live-verified 2026-09-09) — so the "NSE DAILY SCAN" Telegram digest
+  had never sent a single message, while the code, the scan, and the docs all implied it worked. This is the
+  second instance of the shape (the websocket `confidence >= 85` gate died the same way on 2026-07-12 when the
+  confidence scale was swapped for win_probability). **Tell:** a report channel with zero sends since a known
+  scale/route change; grep for the WRITER of the gated field, not just the reader, before touching the
+  threshold. Fixed 2026-09-09: gate reuses the scan's own actionable threshold (`signalScore >= 5`, 7 in BEAR —
+  the same values that mirror into `recommendation_log`), one digest per date with retry-on-failure, and the
+  send routed through `telegramService` so balancing/chunking/429-retry/DB-configured settings all apply.
 ## Investigating production without breaking it
 
 - **A client-side timeout does NOT cancel the server-side query — it orphans it**, and on a big table that orphan can hold a lock that blocks the whole platform for hours, which then gets misdiagnosed as a storage-engine cost problem. Diagnose lock contention (`pg_stat_activity`, `wait_event_type = 'Lock'`) before theorizing about decompression/storage cost — a query "hanging" on one specific table while others respond normally is lock contention until proven otherwise. Prevent it with a server-side `SET LOCAL statement_timeout`, not a client-side `timeout` wrapper.

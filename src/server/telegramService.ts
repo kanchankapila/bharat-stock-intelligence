@@ -96,9 +96,11 @@ export class TelegramNotificationService {
     }
 
     let allSuccess = true;
-    for (const chunk of chunks) {
+    for (let i = 0; i < chunks.length; i++) {
+      if (i > 0) await sleep(TELEGRAM_CHUNK_PACE_MS);
+      const chunk = chunks[i];
       try {
-        await axios.post(url, {
+        await postWithRateLimitRetry(url, {
           chat_id: chatId,
           text: chunk,
           parse_mode: 'Markdown',
@@ -111,7 +113,7 @@ export class TelegramNotificationService {
         const desc = error.response?.data?.description || '';
         if (desc.includes("can't parse entities") || desc.includes("entity")) {
           try {
-            await axios.post(url, {
+            await postWithRateLimitRetry(url, {
               chat_id: chatId,
               text: chunk,
             });
@@ -169,6 +171,43 @@ _${sanitizeMarkdown(reasoning)}_
 }
 
 export const telegramService = new TelegramNotificationService();
+
+// Telegram rate-limits per chat (~20 msgs/min sustained, ~1/s burst guidance). A 429 response
+// names its own retry_after; before 2026-09-09 a 429 here simply failed the chunk — which is how
+// the 2026-09-08 08:15 IST morning digest died ("Too Many Requests: retry after 8") and the
+// heartbeat recorded a digest nobody received. Bounded, retry_after-honouring retries plus a
+// small inter-chunk pace keep one busy minute from silently dropping a report.
+const TELEGRAM_CHUNK_PACE_MS = 1_100;  // stay under Telegram's ~1 msg/s per-chat guidance
+const MAX_RATE_LIMIT_RETRIES = 2;      // per chunk; each retry honours the fresh retry_after
+const MAX_RETRY_AFTER_MS = 35_000;     // never sleep longer than this on a single attempt
+
+export function sleep(ms: number): Promise<void> {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+/** Milliseconds to wait before retrying a 429, or null when the error is not a rate limit. */
+export function rateLimitWaitMs(error: any): number | null {
+  if (error?.response?.status !== 429) return null;
+  const retryAfter = Number(error?.response?.data?.parameters?.retry_after);
+  if (Number.isFinite(retryAfter) && retryAfter >= 0) {
+    return Math.min(retryAfter * 1000 + 250, MAX_RETRY_AFTER_MS);
+  }
+  return 1_000; // 429 without a retry_after — short default backoff
+}
+
+async function postWithRateLimitRetry(url: string, payload: Record<string, unknown>): Promise<void> {
+  for (let attempt = 0; ; attempt++) {
+    try {
+      await axios.post(url, payload);
+      return;
+    } catch (error: any) {
+      const waitMs = rateLimitWaitMs(error);
+      if (waitMs === null || attempt >= MAX_RATE_LIMIT_RETRIES) throw error;
+      console.warn(`[TelegramService] HTTP 429 rate-limited — retrying in ${Math.round(waitMs / 1000)}s (attempt ${attempt + 1}/${MAX_RATE_LIMIT_RETRIES})`);
+      await sleep(waitMs);
+    }
+  }
+}
 
 /**
  * Neutralises UNTERMINATED Telegram legacy-Markdown entities, leaving balanced ones intact.

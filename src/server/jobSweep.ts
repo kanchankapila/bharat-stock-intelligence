@@ -106,6 +106,11 @@ export function classifyStderr(stderr: string | null | undefined): 'clean' | 'be
     /FutureWarning:/i,
     /DeprecationWarning:/i,
     /InconsistentVersionWarning/i,
+    // [HighFlyer] skip notices are informational data-gap lines — a stat day without
+    // precursor_counts_json is skipped and the run still completes and writes its recall
+    // stats. Live 2026-09-09 that line was the ENTIRE stderr of a successful
+    // high_flyer_retrospective.py run and read as a warn-level "real_error" in the app log.
+    /^\[HighFlyer\] skipped \d+\/\d+ stat day/i,
   ];
   const REAL = [
     /Traceback \(most recent call last\)/i,

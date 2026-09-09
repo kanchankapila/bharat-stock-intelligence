@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { balanceMarkdownEntities } from '../telegramService';
+import { balanceMarkdownEntities, rateLimitWaitMs } from '../telegramService';
 
 /**
  * Telegram's legacy Markdown parser rejects a message containing an UNTERMINATED entity with
@@ -18,6 +18,23 @@ import { balanceMarkdownEntities } from '../telegramService';
  * The fix escapes a delimiter only when its count is ODD, so deliberate formatting (`*bold*`,
  * a balanced `_italic_`) is preserved and only the genuinely broken cases are neutralised.
  */
+describe('rateLimitWaitMs', () => {
+  it('honours Telegram\'s retry_after for a 429', () => {
+    const err = { response: { status: 429, data: { parameters: { retry_after: 8 } } } };
+    expect(rateLimitWaitMs(err)).toBe(8 * 1000 + 250);
+  });
+
+  it('returns null for any non-429 failure so it is not retried as a rate limit', () => {
+    expect(rateLimitWaitMs({ response: { status: 400, data: { description: "can't parse entities" } } })).toBeNull();
+    expect(rateLimitWaitMs(new Error('network down'))).toBeNull();
+  });
+
+  it('caps an absurd retry_after and defaults a 429 that names none', () => {
+    expect(rateLimitWaitMs({ response: { status: 429, data: { parameters: { retry_after: 3600 } } } })).toBe(35_000);
+    expect(rateLimitWaitMs({ response: { status: 429 } })).toBe(1_000);
+  });
+});
+
 describe('balanceMarkdownEntities', () => {
   it('escapes a lone underscore that would open an entity and never close it', () => {
     // The exact live payload that produced the 2026-09-05 400.

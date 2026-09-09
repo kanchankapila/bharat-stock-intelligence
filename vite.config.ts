@@ -98,6 +98,11 @@ export default defineConfig(({mode}) => {
           '**/graphify-out/**',
           '**/backend-python/venv/**',
           '**/.venv/**',
+          // Root-level audit/memory scratch files are rewritten in place by audit sessions;
+          // a lock held during the rewrite surfaced as EBUSY inside chokidar's watcher and an
+          // unhandledRejection in the server log (2026-09-09 00:00:08, .audit-files.txt).
+          // Nothing in the app imports them, so watching them is pure crash-surface.
+          '**/.audit-files.txt',
         ],
       },
     },

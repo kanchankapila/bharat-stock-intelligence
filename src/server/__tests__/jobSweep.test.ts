@@ -125,6 +125,15 @@ describe('classifyStderr', () => {
     expect(classifyStderr('[2026-09-04 21:50:10] INFO: Fetched (200) <GET https://trendlyne.com/x>')).toBe('benign_warning');
   });
 
+  it('classifies the HighFlyer skip notice as benign, not a real error', () => {
+    // Live 2026-09-09 04:05 IST: that single line was the entire stderr of a successful
+    // high_flyer_retrospective.py run (it completed and wrote its recall stats), yet it
+    // fell through to the real_error default and logged at warn level.
+    expect(classifyStderr('[HighFlyer] skipped 1/6 stat day(s) with no precursor_counts_json when computing lifts')).toBe('benign_warning');
+    // A traceback underneath the skip notice must still win — the real-error-anywhere rule.
+    expect(classifyStderr('[HighFlyer] skipped 1/6 stat day(s) with no precursor_counts_json when computing lifts\nTraceback (most recent call last):')).toBe('real_error');
+  });
+
   it('classifies a traceback as a real error', () => {
     expect(classifyStderr('Traceback (most recent call last):\n  File "x.py", line 1')).toBe('real_error');
   });

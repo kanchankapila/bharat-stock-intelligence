@@ -20,6 +20,7 @@ import { dbGet, dbAll, dbRun, dbTransaction } from './dbAsync';
 import { wsSignalService } from './websocketService';
 import { fetchDeliveryMap } from './deliveryFetcher';
 import { getAtrBarriers } from './atrBarriers';
+import { telegramService } from './telegramService';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -1143,19 +1144,30 @@ const BEARISH_SIGNAL_TYPES = new Set<SignalType>([
   'DEATH_CROSS', 'RSI_BEARISH_DIVERGENCE', 'DISTRIBUTION_DAY',
 ]);
 
-async function sendTelegramSignals(results: SignalResult[], date: string): Promise<void> {
-  const token  = process.env.TELEGRAM_BOT_TOKEN;
-  const chatId = process.env.TELEGRAM_CHAT_ID;
-  if (!token || !chatId) return;
+// One digest per scan date. The scan fires every 30 minutes during market hours but this message
+// is the DAILY scan; the date is marked only after a successful send, so a failed dispatch is
+// retried by the next 30-min slot instead of being silently lost. Until 2026-09-09 this gate read
+// r.winProbability — a field the scan never populates (always undefined → 0) — against 0.85 on a
+// 0–1 scale whose live maximum is ~0.41, so the "NSE DAILY SCAN" Telegram digest never sent a
+// single message; a log review (0 sends across the last 5 days of logs, 0 rows with a
+// win_probability on the latest technical_signals date) is what surfaced it.
+let lastScanDigestSentDate: string | null = null;
 
-  const buySignals = results.filter(r =>
-    (r.winProbability ?? 0) >= 0.85 &&
+export async function sendTelegramSignals(results: SignalResult[], date: string): Promise<void> {
+  if (lastScanDigestSentDate === date) return;
+
+  // Same actionable threshold the scan itself uses to mirror rows into recommendation_log
+  // (signalScore >= 5, tightened to 7 in BEAR): the digest reports what the platform actually
+  // recorded as actionable today, not a private second opinion. Bearish-labeled signal types
+  // are excluded from a BUY-picks digest for the same reason they are excluded from the mirror.
+  const actionable = results.filter(r =>
+    r.signalScore >= (r.niftyRegime === 'BEAR' ? 7 : 5) &&
     r.signals.every(s => !BEARISH_SIGNAL_TYPES.has(s.type))
   );
-  if (buySignals.length === 0) return;
+  if (actionable.length === 0) return;
 
   let body = '';
-  for (const r of buySignals.slice(0, 6)) {
+  for (const r of actionable.slice(0, 6)) {
     const e   = r.changePct >= 0 ? '📈' : '📉';
     const sig = r.signals.map(s => `${STRENGTH_EMOJI[s.strength]} ${SIG_SHORT[s.type]}`).join('  ');
     body += `*${r.name ?? r.symbol}* (${r.symbol})\n`;
@@ -1169,16 +1181,12 @@ async function sendTelegramSignals(results: SignalResult[], date: string): Promi
 
   const message = `🇮🇳 *NSE DAILY SCAN — ${date}*\n${'─'.repeat(28)}\n\n${body}⚠️ _Educational only. Not SEBI advice. DYOR._`;
 
-  try {
-    await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ chat_id: chatId, text: message, parse_mode: 'Markdown' }),
-      signal: AbortSignal.timeout(10000),
-    });
-    console.log('[SIGNALS] Telegram notification sent');
-  } catch (e) {
-    console.error('[SIGNALS] Telegram delivery failed:', (e as Error).message);
+  const sent = await telegramService.sendMarkdownMessage(message);
+  if (sent) {
+    lastScanDigestSentDate = date;
+    console.log('[SIGNALS] Telegram daily scan digest sent');
+  } else {
+    console.error('[SIGNALS] Telegram daily scan digest failed to send; the next scan slot will retry');
   }
 }
 

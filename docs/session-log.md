@@ -8205,3 +8205,33 @@ tsc clean; vitest **1224 passed**; pytest **2466 passed / 249 skipped, 0 failed*
   catalog/master pairs now agree. Added regression coverage for directional-only correction and
   ambiguous-neutral preservation; focused suite passes **11/11**. The full Python suite was
   attempted but did not return a complete summary in the runner, so it is not claimed green.
+
+## 2026-09-09 — Telegram daily-report audit: 429 retry, resurrected dead scan digest, noise fixes
+
+- Audited every Telegram report path against live logs + DB: both daily job-health digests (22:50/08:15 IST),
+  the recommendations digest (22:40 IST Mon-Fri), the accuracy digest (inside ml-daily-ops), watchdog/DQ/engine
+  alerts, and the technical-scan digest. Found and fixed four issues (AF-20260909-07..10):
+  - **429 retry (AF-07):** the 09-08 08:15 IST morning digest was lost to Telegram `429 retry after 8` —
+    `sendMarkdownMessage` now honors `retry_after` (bounded 2 retries, 35s cap) and paces multi-chunk sends ~1.1s.
+  - **Dead scan digest (AF-08):** the "NSE DAILY SCAN" Telegram report had never sent — its gate read
+    `r.winProbability >= 0.85`, a field the scan never populates (technical_signals.win_probability is NULL
+    platform-wide on the latest date; 0 sends in 5 days of logs). Now gated on the scan's own actionable
+    threshold (`signalScore >= 5`, 7 in BEAR — the same values that mirror into recommendation_log), one digest
+    per date with retry-on-failure, routed through telegramService (balancing/chunking/429-retry/DB settings).
+  - **stderr misclassification (AF-09):** `[HighFlyer] skipped ... no precursor_counts_json` was the entire
+    stderr of a successful run and logged as `real_error`; added to classifyStderr's BENIGN list.
+  - **Vite EBUSY (AF-10):** `.audit-files.txt` added to vite `watch.ignored` after a 00:00:08
+    `unhandledRejection: EBUSY` from chokidar watching the locked file.
+- Verified live health for the audit itself: `daily_research_reports` READY for all 4 latest trading dates
+  (blurbs present); 73 tracked jobs 73/73 latest-run success at audit time; job_run_history 5 failed / 2,699
+  success over 48h (all 5 already understood: the 429 digest, one Screener.in 403 live-screener-collect run,
+  and the remediated 09-07 ml-daily-ops/outcome-resolver/quant-eod-sync chain); data_quality 164 pass / 5 warn
+  (0 critical) / 0 fail-error; unified+intraday recommendations fresh same-day; telegram settings present+enabled.
+- Transient, documented-not-fixed: one 15s DB-connectivity blip at 02:16:16 (19 monitor timeouts + 1
+  signal-accuracy sweep timeout, all within ~1s, self-healed); 818 NiftyTrader fetch errors on 09-08 that
+  self-cleared by 09-09 (0 today — the known temporary vendor-block pattern, AF-20260828-25's class); 58
+  Trendlyne metrics-API warn lines today under the sustained-block cooldown that aborts early by design.
+- Still open (user action, unchanged): `GEMINI_API_KEY` in `.env` is empty (AF-20260828-24) — AI
+  stock-signal/profile analysis and the chatbot degrade to honest unconfigured responses; 3 restarts today each
+  re-logged the `[ENV]` warning. Re-verified during this audit.
+- Gates: full vitest **1,249 passed / 0 failed** (41 live-skipped) incl. 9 new tests; `tsc --noEmit` clean.
