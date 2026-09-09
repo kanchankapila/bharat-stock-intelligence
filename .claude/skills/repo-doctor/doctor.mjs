@@ -97,6 +97,24 @@ try {
 check('sqlite-isms', 'code', sqliteisms.length ? 'WARN' : 'PASS',
   sqliteisms.length ? `SQLite-only SQL in ${sqliteisms.join(', ')} — confirm pgClient translates or convert` : 'no SQLite-only SQL in server TS');
 
+// AF-20260909-14: classification colour mappings must never be inverted relative to
+// direction. The Grafana "top losers" panel once mapped Strong Sell → dark-green / Strong
+// Buy → dark-red (a correct Sell call showed green); this greps every grafana/*.json for
+// the inverted signature so it cannot silently recur beside a correctly-coloured sibling.
+const grafanaDir = 'grafana';
+const invertedColourMappings = [];
+try {
+  for (const f of fs.readdirSync(path.join(ROOT, grafanaDir))) {
+    if (!f.endsWith('.json')) continue;
+    const g = read(path.join(grafanaDir, f));
+    if (/"Strong Sell"\s*:\s*\{[^}]*"color"\s*:\s*"dark-green"/.test(g) ||
+        /"Strong Buy"\s*:\s*\{[^}]*"color"\s*:\s*"dark-red"/.test(g)) invertedColourMappings.push(f);
+  }
+} catch { /* grafana/ absent */ }
+check('grafana-systemcall-colors', 'code', invertedColourMappings.length ? 'FAIL' : 'PASS',
+  invertedColourMappings.length
+    ? `inverted System-call colour mapping (Sell=green / Buy=red) in ${invertedColourMappings.join(', ')} — flip it back` : 'all grafana classification mappings colour Sell=red, Buy=green');
+
 // ───────────────────────── B. FRONTEND ─────────────────────────
 console.log('\n━━━ B. Frontend ━━━');
 const indexHtml = read('index.html');

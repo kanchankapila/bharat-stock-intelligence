@@ -202,7 +202,7 @@
             "matcher": { "id": "byName", "options": "System call" },
             "properties": [
               { "id": "custom.cellOptions", "value": { "type": "color-background" } },
-              { "id": "mappings", "value": [{ "type": "value", "options": { "Strong Sell": { "color": "dark-green", "index": 0 }, "Sell": { "color": "semi-dark-green", "index": 1 }, "Hold": { "color": "transparent", "index": 2 }, "Buy": { "color": "semi-dark-orange", "index": 3 }, "Strong Buy": { "color": "dark-red", "index": 4 } } }] }
+              { "id": "mappings", "value": [{ "type": "value", "options": { "Strong Sell": { "color": "dark-red", "index": 0 }, "Sell": { "color": "semi-dark-orange", "index": 1 }, "Hold": { "color": "transparent", "index": 2 }, "Buy": { "color": "semi-dark-green", "index": 3 }, "Strong Buy": { "color": "dark-green", "index": 4 } } }] }
             ]
           }
         ]

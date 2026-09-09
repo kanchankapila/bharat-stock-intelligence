@@ -247,6 +247,21 @@ Currently automated (9 checks): `date.today()` write-anchor, short calendar-day 
   verify against the log's latest completed slot and a fresh heartbeat before spending a session on the flag. Related
   measurement trap: `job_heartbeat` stores naive-UTC epochs and pg's JSON rendering appends a bogus `Z` to
   `AT TIME ZONE`-converted values — UTC instants read as IST wall times and vice versa; use raw epoch math (repo-doctor does).
+- **A buy/sell inversion can exist at the DISPLAY layer while the data is correct — check the mapping when a report "looks backwards".**
+  The 2026-09-09 accuracy-digest audit: the ranker was monotone-correct (avg unified_score Strong Buy 85.6 → Strong Sell 14.0),
+  class strings title-case, retrospective class sets pinned by tests — but the Grafana "top losers" panel mapped
+  `Strong Sell → dark-green / Strong Buy → dark-red`, the exact mirror of the correct gainers panel. A user asking "is buy/sell
+  defined opposite?" was right — about the dashboard, not the data. **Tell:** two panes in the same dashboard that colour the same
+  classification differently; a "correct call" rendered green in one view and red in another. Fix the mapping; and reach for the
+  cause the user actually suspected (grep the WRITER, check monotonicity of `classification` vs `unified_score`) before blaming a
+  direction bug that isn't there. Immunized by repo-doctor's `grafana-systemcall-colors` (greps for the inverted
+  `Strong Sell → dark-green` signature in `grafana/*.json`).
+- **A one-sided accuracy report hides the system's real hit rate — report BOTH halves of a directional confusion.** Before 2026-09-09
+  the Signal Accuracy digest only surfaced flyers rated Sell/Strong Sell that rallied (wrong-direction) but not the flyers rated
+  Buy/Strong Buy that made high "as recommended" — so a reader could not distinguish "we are inverted" from "we are right sometimes
+  and only showing the misses". The digest now buckets every mover by prior call (correct/wrong/neutral) and lists the top confirmed
+  as-recommended calls next to the worst wrong calls. **Tell:** an accuracy report whose only named examples are failures cannot
+  separate a directional bug from a low-but-real hit rate.
 ## Investigating production without breaking it
 
 - **A client-side timeout does NOT cancel the server-side query — it orphans it**, and on a big table that orphan can hold a lock that blocks the whole platform for hours, which then gets misdiagnosed as a storage-engine cost problem. Diagnose lock contention (`pg_stat_activity`, `wait_event_type = 'Lock'`) before theorizing about decompression/storage cost — a query "hanging" on one specific table while others respond normally is lock contention until proven otherwise. Prevent it with a server-side `SET LOCAL statement_timeout`, not a client-side `timeout` wrapper.

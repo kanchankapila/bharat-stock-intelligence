@@ -5,6 +5,7 @@ import { describe, it, expect, beforeEach } from 'vitest';
 const { buildAccuracyDigest, formatAccuracyDigest, RECALL_ALERT_FLOOR } = await import(
   '../signalAccuracyDigest'
 );
+import type { AccuracyDigest } from '../signalAccuracyDigest';
 const { dbRun } = await import('../dbAsync');
 
 async function seed(rows: {
@@ -98,14 +99,52 @@ describe('buildAccuracyDigest', () => {
     await seed({ stats: [['2026-08-11', 2000, 4, RECALL({ diver_n: 2 })]] });
     expect((await buildAccuracyDigest())!.recallAny).toBeNull();
   });
+
+  it('buckets today\'s flyers/divers by their prior call into correct/wrong/neutral', async () => {
+    await seed({
+      stats: [['2026-08-11', 2000, 9, RECALL({ any: 0.2, diver_n: 6 })]],
+      retro: [
+        // flyers (positive return) — prior Buy/Strong Buy = correct, Sell/Strong Sell = wrong
+        ['F1', '2026-08-11', 12.0, 0, 'Buy'],
+        ['F2', '2026-08-11', 9.0, 0, 'Strong Buy'],
+        ['F3', '2026-08-11', 7.0, 1, 'Sell'],
+        ['F4', '2026-08-11', 6.0, 1, 'Strong Sell'],
+        ['F5', '2026-08-11', 5.0, 0, 'Hold'],
+        ['F6', '2026-08-11', 4.0, 0, null],
+        // divers (negative return) — prior Sell/Strong Sell = correct, Buy/Strong Buy = wrong
+        ['D1', '2026-08-11', -8.0, 0, 'Sell'],
+        ['D2', '2026-08-11', -7.0, 0, 'Strong Sell'],
+        ['D3', '2026-08-11', -6.0, 1, 'Buy'],
+        ['D4', '2026-08-11', -5.0, 0, 'Hold'],
+        ['D5', '2026-08-11', -4.0, 0, null],
+      ],
+    });
+    const d = await buildAccuracyDigest();
+    expect(d!.flyerCalls).toEqual({ correct: 2, wrong: 2, neutral: 2 });
+    expect(d!.diverCalls).toEqual({ correct: 2, wrong: 1, neutral: 2 });
+    // confirmed = Buy/Strong Buy flyers ordered by return desc
+    expect(d!.confirmedCalls.map(c => c.symbol)).toEqual(['F1', 'F2']);
+    expect(d!.confirmedCalls[0]).toMatchObject({ returnPct: 12.0, priorClassification: 'Buy' });
+  });
 });
 
 describe('formatAccuracyDigest', () => {
-  const base = {
+  const base: {
+    date: string; flyers: number; divers: number; recallAny: number | null;
+    wrongBearish: number; wrongBullish: number;
+    trend: Array<{ date: string; recall: number | null }>;
+    worstCalls: AccuracyDigest['worstCalls'];
+    flyerCalls: AccuracyDigest['flyerCalls'];
+    diverCalls: AccuracyDigest['diverCalls'];
+    confirmedCalls: AccuracyDigest['confirmedCalls'];
+  } = {
     date: '2026-08-11', flyers: 10, divers: 4,
     recallAny: 0.3, wrongBearish: 0, wrongBullish: 0,
     trend: [{ date: '2026-08-11', recall: 0.3 }],
     worstCalls: [],
+    flyerCalls: { correct: 0, wrong: 0, neutral: 0 },
+    diverCalls: { correct: 0, wrong: 0, neutral: 0 },
+    confirmedCalls: [],
   };
 
   it('flags recall below the floor with an alarm marker', () => {
@@ -134,5 +173,41 @@ describe('formatAccuracyDigest', () => {
 
   it('omits the wrong-direction block entirely when there were none', () => {
     expect(formatAccuracyDigest(base)).not.toContain('Wrong-direction');
+  });
+
+  it('renders the flyer/diver direction split with percentages of the movers total', () => {
+    const out = formatAccuracyDigest({
+      ...base,
+      flyers: 128, divers: 80,
+      flyerCalls: { correct: 11, wrong: 16, neutral: 101 },
+      diverCalls: { correct: 22, wrong: 1, neutral: 57 },
+    });
+    // 11/128 → 9%, 16/128 → 12.5 → rounds to 13%, 101/128 → 79%; 22/80 → 28%, 1/80 → 1%.
+    expect(out).toContain('Made high (flyers) 128');
+    expect(out).toContain('as recommended (Buy/Strong Buy) 11 (9%)');
+    expect(out).toContain('we said Sell/Strong Sell 16 (13%)');
+    expect(out).toContain('unrated 101 (79%)');
+    expect(out).toContain('Made low (divers) 80');
+    expect(out).toContain('as recommended (Sell/Strong Sell) 22 (28%)');
+    expect(out).toContain('we said Buy/Strong Buy 1 (1%)');
+  });
+
+  it('omits the split when nothing had a directional prior call', () => {
+    expect(formatAccuracyDigest(base)).not.toContain('Made high');
+    expect(formatAccuracyDigest(base)).not.toContain('Made low');
+  });
+
+  it('lists confirmed as-recommended flyers and sanitizes their dynamic text', () => {
+    const out = formatAccuracyDigest({
+      ...base,
+      confirmedCalls: [
+        { symbol: 'GOACARBON', returnPct: 20.0, priorClassification: 'Strong Buy' },
+        { symbol: 'BAJAJ_AUTO*', returnPct: 12.5, priorClassification: 'Buy' },
+      ],
+    });
+    expect(out).toContain('Confirmed as recommended');
+    expect(out).toContain('GOACARBON +20.0% (we said Strong Buy)');
+    const confirmedLine = out.split('\n').find(l => l.includes('BAJAJ'))!;
+    expect(confirmedLine).not.toMatch(/[_*`[\]]/);
   });
 });

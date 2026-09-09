@@ -42,3 +42,10 @@ Lean, incremental checkpoint of decisions / known bugs / state. Newest first.
   `node .claude/skills/repo-doctor/doctor.mjs` (add `--full` for tsc+vite build). First run:
   33 checks, 26 PASS / 6 documented-benign WARN / 0 FAIL. Rule in its SKILL.md: new bug class
   ⇒ new named check + recurring-bugs row + AF ledger row.
+- **Night addendum (AF-20260909-14, accuracy digest):** data direction audit = CLEAN
+  (`unified_ranker._classify` monotone by `unified_score`; title-case strings; class sets
+  pinned by tests). Real inversion found at the DISPLAY layer — Grafana "top losers" panel
+  mapped Strong Sell→green / Strong Buy→red (fixed). Digest now renders both halves:
+  `Made high (flyers) 128: 11 (9%) as recommended (Buy) · 16 (13%) we said Sell · 101 unrated`
+  (divers mirrored) + a "Confirmed as recommended" top-5. repo-doctor gained
+  `grafana-systemcall-colors`. Live split 09-09: flyers 11/16/101, divers 22/1/57.
