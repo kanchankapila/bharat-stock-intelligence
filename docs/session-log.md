@@ -8255,3 +8255,11 @@ tsc clean; vitest **1224 passed**; pytest **2466 passed / 249 skipped, 0 failed*
 - Tests: `signalAccuracyDigest.test.ts` now **14/14** (+3: bucket build from retro rows, split rendering with exact rounding 16/128=12.5%→13%, confirmed-list markdown sanitization); tsc clean.
 - **repo-doctor** gained `grafana-systemcall-colors` (greps `grafana/*.json` for the inverted `Strong Sell → dark-green` signature — the exact string that caused this).
 - Deployed: `pm2 restart bharat-server --update-env` + live `sendAccuracyDigest()` verification send of the new format (read-only build + one Telegram message). Docs: AF-20260909-14 ledger row, recurring-bugs (2 new classes), session log, memory journal.
+
+## 2026-09-09 (late) — MarketsMojo financials timeout: fixed by matching fetch cadence to data cadence (AF-20260909-15)
+
+- **The user's insight was the fix**: quarterly financials change once per quarter, not weekly — so why re-fetch every 7 days?
+- **Root cause confirmed by measurement**: `marketsmojo_financials_fetcher.py` had `STALENESS_DAYS = 7` (the repo's own comment already said "quarterly-cadence data... weekly crawl is generous" — never acted on). Measured 56.5s/5 fresh symbols = ~11s/symbol → 2000 symbols = **~47 min**, exceeding the 40-min `ml-weekly-retrain` budget. This is what failed the 09-06 run. The shareholding fetcher (9.2s/5 = ~7.5 min for 2000) was under budget — not the blocker.
+- **The fix was NOT a bigger timeout** (that's the band-aid the repo has applied repeatedly): changed `STALENESS_DAYS = 7` → **`90`** so the weekly job skips unchanged-quarter symbols.
+- **Verified live**: full-universe run now skips all 1831 symbols and finishes in **6.7s** (was timinging out at 40 min). `--full` re-upsert still works (HDFCBANK → 1890 cells). After the initial crawl, the weekly job is a near-no-op.
+- Docs: AF-20260909-15 ledger row, session log, memory journal.

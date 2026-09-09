@@ -55,12 +55,14 @@ MAX_PAGES = 8  # confirmed real data through page 5 for HDFCBANK; page 6 already
 # own intra-symbol RATE_LIMIT_SEC pacing -- cross-symbol parallelism is orthogonal to that.
 MAX_WORKERS = 8
 
-# AF-20260816-20: this is quarterly-cadence data (queues.ts's own comment: "the vendor only
-# restates these on results/filing days") fetched by a WEEKLY job -- a symbol checked earlier
-# this week doesn't need re-fetching before next week's run. See marketsmojo_financials_checked
-# (migration 1787090000000) for why this can't be answered from marketsmojo_financials_history
-# alone.
-STALENESS_DAYS = 7
+# AF-20260816-20 / FIX 2026-09-09: quarterly-cadence data (the vendor only restates these on
+# results/filing days) fetched by a WEEKLY job. The data does NOT change within a quarter, so
+# re-fetching weekly was both pointless AND the cause of the ml-weekly-retrain 40-min timeout on
+# an uncached run (2000 symbols x ~11s/symbol = ~47 min). Staleness now matches the data cadence:
+# a symbol checked within the quarter is skipped, so after the initial full crawl the weekly job
+# becomes a near-no-op (sub-second) and only genuinely-new symbols get fetched. Live measurement:
+# 5 fresh symbols = 56.5s on 2026-09-09. See docs/audit-findings.md AF-20260909-15.
+STALENESS_DAYS = 90
 
 
 def _flatten_statement(stmt_key: str, rows: list, period_keys: list) -> list[tuple[str, str, str]]:

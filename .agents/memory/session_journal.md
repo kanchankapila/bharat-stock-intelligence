@@ -49,3 +49,8 @@ Lean, incremental checkpoint of decisions / known bugs / state. Newest first.
   `Made high (flyers) 128: 11 (9%) as recommended (Buy) · 16 (13%) we said Sell · 101 unrated`
   (divers mirrored) + a "Confirmed as recommended" top-5. repo-doctor gained
   `grafana-systemcall-colors`. Live split 09-09: flyers 11/16/101, divers 22/1/57.
+- **Late addendum (AF-20260909-15, MarketsMojo timeout):** the user's insight — quarterly
+  financials don't change weekly — was the fix. `STALENESS_DAYS 7→90` in
+  `marketsmojo_financials_fetcher.py`. Measured 56.5s/5 fresh symbols → ~47 min for 2000
+  (the timeout cause); full-universe run now 6.7s (1831 skipped). `--full` re-upsert intact
+  (HDFCBANK 1890 cells).
