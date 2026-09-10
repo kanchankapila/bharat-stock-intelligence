@@ -37,8 +37,10 @@ Exit code 0 = clear (WARNs allowed), 1 = at least one FAIL.
 
 1. **Code** — regression guards for every AF fix that has a static signature (429 retry,
    VITEST send-guard, per-test telegram mocks, scan-digest gate, benign-stderr classifier,
-   vite watch-ignored), plus heuristics for the two named recurring classes: "notification
-   gate reads a field its pipeline never populates" and "SQLite-only SQL in server TS".
+   vite watch-ignored), plus heuristics for the three named recurring classes: "notification
+   gate reads a field its pipeline never populates", "SQLite-only SQL in server TS", and
+   "a job name logged 'failed' from more than one literal call site" (double-counts every
+   real failure — see `recurring-bugs.md`, AF-20260910-01).
 2. **Frontend** — shell presence; `--full` runs `tsc --noEmit` + `vite build`.
 3. **Database** — heartbeat freshness for the key jobs (epoch math — job_heartbeat stores
    naive-UTC; never `AT TIME ZONE` it), 7d fail-rates, 48h unexplained failures vs the

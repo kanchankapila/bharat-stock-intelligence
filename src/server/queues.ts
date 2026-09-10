@@ -481,11 +481,14 @@ async function processMoverCapture(_job: Job): Promise<{ skipped: boolean }> {
     return { skipped: true };
   }
   // ~2 min: five lightweight JSON list endpoints + one OHLCV pass.
+  // Do NOT recordHeartbeat('failed') here — moverWorker.on('failed', ...) below already logs
+  // every rejection reaching BullMQ, and this .catch's own throw always reaches it, so logging
+  // here too would double-write job_heartbeat/job_run_history for every real failure (same class
+  // as quant-eod-sync's double-log, fixed 2026-09-10 — see dual-failure-log in repo-doctor).
   await runPython('mover_screener_fetcher.py', [], 5 * 60_000)
     .then(() => recordHeartbeat('mover-screener-capture', 'success'))
     .catch(e => {
       console.warn('[QUEUE] mover_screener_fetcher failed:', (e as Error).message);
-      recordHeartbeat('mover-screener-capture', 'failed', (e as Error).message);
       throw e;
     });
   return { skipped: false };
@@ -1671,7 +1674,11 @@ async function processQuantEodSync(job: Job): Promise<{ success: boolean; skippe
     console.log('[QUEUE] quant-eod-sync completed successfully');
     return { success: true };
   } catch (err: any) {
-    updateMonitorState('quant-eod-sync', 'failed', err.message);
+    // Do NOT call updateMonitorState here — the throw below always propagates through
+    // withJobTimeout's Promise.race to the worker's own 'failed' handler (line ~2983), which
+    // logs this exact failure. Logging it here too double-wrote job_heartbeat/job_run_history
+    // for every non-timeout failure (confirmed 2026-09-10: two identical rows 9ms apart for the
+    // 2026-09-07 niftytrader-scores budget failure), inflating the 7-day fail-rate metric.
     console.error('[QUEUE] quant-eod-sync failed:', err.message);
     throw err;
   }

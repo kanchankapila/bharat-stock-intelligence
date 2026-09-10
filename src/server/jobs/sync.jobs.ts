@@ -143,13 +143,20 @@ async function processScreenerPerf(job: Job): Promise<{ success: boolean; skippe
   return { success: verdict.ok, failedSteps: verdict.failedSteps };
 }
 
-async function processCompanyProfilesSync(_job: Job): Promise<{ success: boolean; skipped?: boolean }> {
+async function processCompanyProfilesSync(_job: Job): Promise<{ success: boolean; skipped?: boolean; failedSteps?: string[] }> {
   const { syncAndAnalyzeCompanyProfiles } = await import('../companyProfileSyncService');
   // Was Promise<void>, which discarded the verdict entirely -- so even after
   // syncAndAnalyzeCompanyProfiles stopped hardcoding success:true, the job would still have
   // reported success on a total failure. Both halves are needed for the failure to surface.
   const verdict = await syncAndAnalyzeCompanyProfiles();
-  return { success: verdict.success };
+  // verdict.processed/failed were computed and logged to console but never left the process --
+  // a real success:false run (e.g. 2026-09-09T15:30) landed in job_run_history with error=''.
+  // registerRepeatableJob's completed handler builds its message from failedSteps, so surface
+  // the counts there instead of just the boolean.
+  return {
+    success: verdict.success,
+    failedSteps: verdict.success ? undefined : [`0/${verdict.processed + verdict.failed} profiles synced (${verdict.failed} failed)`],
+  };
 }
 
 async function processTickertapeScorecard(_job: Job): Promise<{ success: boolean; skipped?: boolean }> {

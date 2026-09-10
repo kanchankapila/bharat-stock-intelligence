@@ -115,6 +115,37 @@ check('grafana-systemcall-colors', 'code', invertedColourMappings.length ? 'FAIL
   invertedColourMappings.length
     ? `inverted System-call colour mapping (Sell=green / Buy=red) in ${invertedColourMappings.join(', ')} — flip it back` : 'all grafana classification mappings colour Sell=red, Buy=green');
 
+// AF-20260910-01: a job whose processor's own catch calls updateMonitorState('name','failed',...)
+// AND whose worker.on('failed', ...) handler also calls it will double-log every failure --
+// withJobTimeout is Promise.race([fn(), timeout]), so a processor-thrown error still propagates
+// to BullMQ and fires 'failed' even though the processor's own catch already logged it. Found in
+// quant-eod-sync (fixed 2026-09-10): two identical job_run_history rows 9ms apart for one real
+// failure, inflating its 7-day fail-rate. Detects any job NAME logged 'failed' via
+// updateMonitorState/recordHeartbeat with a LITERAL string at 2+ call sites in the same file set
+// -- registerJob.ts's own shared handler uses a variable (fName/mName), not a literal, so it
+// never trips this; only a hand-rolled second write site does.
+const dualFailureLogs = new Map(); // name -> [line, ...]
+try {
+  for (const f of ['src/server/queues.ts', ...fs.readdirSync(path.join(ROOT, 'src/server/jobs')).filter(x => x.endsWith('.ts')).map(x => `src/server/jobs/${x}`)]) {
+    const src = read(f);
+    if (!src) continue;
+    const lines = src.split('\n');
+    lines.forEach((line, i) => {
+      const m = line.match(/(?:updateMonitorState|recordHeartbeat)\(\s*'([^']+)'\s*,\s*'failed'/);
+      if (m) {
+        const key = m[1];
+        if (!dualFailureLogs.has(key)) dualFailureLogs.set(key, []);
+        dualFailureLogs.get(key).push(`${f}:${i + 1}`);
+      }
+    });
+  }
+} catch { /* jobs dir absent */ }
+const dualLogged = [...dualFailureLogs.entries()].filter(([, sites]) => sites.length > 1);
+check('dual-failure-log', 'code', dualLogged.length ? 'WARN' : 'PASS',
+  dualLogged.length
+    ? `job name logged 'failed' from 2+ literal call sites (double-counts every failure): ${dualLogged.map(([n, s]) => `${n} (${s.join(', ')})`).join('; ')}`
+    : 'no job logs \'failed\' from more than one literal call site');
+
 // ───────────────────────── B. FRONTEND ─────────────────────────
 console.log('\n━━━ B. Frontend ━━━');
 const indexHtml = read('index.html');
@@ -160,7 +191,7 @@ if (client) {
     ['ml-daily-ops', 30], ['ml-weekly-retrain', 24 * 9], ['data-quality-daily', 30],
     ['job-digest', 30], ['job-digest-morning', 30], ['recommendations-digest', 30],
     ['quant-eod-sync', 30], ['outcome-resolver', 30], ['trendlyne-midweek', 24 * 9],
-    ['nt-live-filter-capture', 20], ['technical-signals', 2],
+    ['nt-live-filter-capture', 20], ['technical-scan', 24 * 3],
   ];
   for (const [job, maxAgeH] of freshness) {
     try {
