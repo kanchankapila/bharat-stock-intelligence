@@ -133,6 +133,28 @@ Currently automated (9 checks): `date.today()` write-anchor, short calendar-day 
 - **A step that only runs at the END of a script that routinely gets killed by its timeout never runs at all** — and the wasted runtime and the missing data are the same bug. A `runPython` step logging "killed by timeout" on a recurring basis means check what comes AFTER the kill point in that script and assume it has never executed. Put a slow producer's dependent parse step in its own queue step so it degrades to "parse what landed," not "parse nothing."
 - **A per-call API with no since-parameter turns an upsert into quadratic write amplification**, and the row count hides it (millions of rows written for a handful of genuinely new ones). Read `MAX(date)` per key once and skip what you already hold — the fix is on the write side, not the fetch side.
 - **A `dict.get(key) == value` skip-check on a write-amplification guard can't distinguish "never written" from "already stored as NULL"** — both come back `None`. Use `key in known and known[key] == new_value`, not a bare `.get()` comparison, whenever the column can legitimately hold NULL.
+- **A THROTTLED vendor response and a genuinely-empty one must not collapse to the same value —
+  otherwise "we got rate-limited on every symbol" is indistinguishable from "this universe has no
+  data", and the run reports a clean success over nothing.** Recurred twice, and the second time
+  only because the first fix was recorded in memory instead of here:
+  (1) `insider_transactions_fetcher` (2026-07-31) — `fetch_nse_insider()` returned `[]` both when
+  NSE throttled and when a symbol genuinely had no filings; fixed to `None` vs `[]`.
+  (2) `finstack_cashflow_fetcher` (2026-09-10, AF-20260910-06) — finstack wraps yfinance, and
+  Yahoo answers a throttled caller with `{"error": true, "message": "Too Many Requests. Rate
+  limited."}`, the SAME envelope shape as "no quarterly cash flow for this ticker". Both flattened
+  to `[]` and were tallied as "no vendor coverage"; with 6 parallel workers and no backoff a single
+  throttle burned the whole ~2,000-symbol universe, printed `0 wrote / 2000 had no vendor
+  coverage`, and `main()` returned 0 unconditionally so the step recorded success. The table holds
+  **59 rows / 15 symbols** since 2026-09-01 and how much of that gap is real coverage vs.
+  accumulated throttling is now unknowable for the historical rows.
+  **The fix shape:** classify the throttle explicitly BEFORE parsing (the parser flattening every
+  error envelope to `[]` is fine and should stay pure), count it separately, back off, **abort once
+  throttling is sustained** — continuing burns the rest of the universe for nothing and keeps the
+  throttle warm — and exit non-zero so the step cannot report success. **Tell:** a fetcher whose
+  "no coverage" count is a large round fraction of its universe, or a vendor-coverage claim in a
+  docstring that nobody re-derived after the fetcher started running at scale. Related but
+  distinct: `data-sources.md`'s Trendlyne cumulative-allowance entry (there, no amount of backoff
+  converges — only a bounded slice + resume-from-DB does).
 - **A full-universe fetcher with no resumability turns "retried on catch-up" into "always starts from zero"** — a killed run's real progress is thrown away every retry, compounding any transient slowdown into total failure instead of graceful degradation. Track `MAX(date)`-per-key against wall-clock cost the same way the write-amplification fix does against write volume.
 - **`keep_alive: 0` on a repeated local-LLM/embedding call forces a full reload between EVERY call in the same run**, even with zero external contention. Drop it (default keep-alive) for any script calling the same endpoint in a loop.
 - **A provider-issued id column that silently holds the wrong shape (e.g. a symbol instead of the provider's numeric id) is a permanent, self-concealing 404** for every row with that shape, while also burning retry/backoff budget that masks a real transient outage in the noise floor. `SELECT count(*) FROM t WHERE provider_id !~ '^[0-9]+$'` (or whatever shape the provider actually uses) before trusting a column `data-sources.md` calls opaque/numeric.

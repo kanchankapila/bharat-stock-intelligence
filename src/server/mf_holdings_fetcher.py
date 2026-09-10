@@ -62,6 +62,13 @@ from et_stats_client import HEADERS, load_companyid_map
 import sys
 
 RATE_LIMIT_SEC = 0.3
+
+# Quarterly SEBI filings restate ~4x/year; SHAREHOLDING_DISCLOSURE_LAG_DAYS=30 already models
+# the filing lag. 80 days is comfortably inside a quarter, so a genuinely-new disclosure is still
+# picked up on the next weekly run, while unchanged symbols are skipped instead of recrawled.
+STALENESS_DAYS = 80
+# Flush size for the incremental upsert (see main()).
+FLUSH_EVERY = 100
 SHAREHOLDING_URL = "https://marketservices.indiatimes.com/marketservices/shareholding?companyid={cid}"
 SHAREHOLDING_DISCLOSURE_LAG_DAYS = 30
 
@@ -164,10 +171,32 @@ def upsert_holdings(rows: list[dict], today: str, con) -> None:
     con.commit()
 
 
+def recently_fetched(con, days: int) -> set[str]:
+    """Symbols already written to stock_mf_holdings within `days`.
+
+    Returns an EMPTY SET on any error rather than raising: a failure to read the skip-list must
+    degrade into "fetch everything" (correct, just slower), never into "skip everything"
+    (silently writes nothing while reporting success)."""
+    try:
+        cur = con.cursor()
+        cur.execute(
+            "SELECT DISTINCT symbol FROM stock_mf_holdings "
+            "WHERE date >= ?",
+            ((date.today() - timedelta(days=days)).isoformat(),),
+        )
+        return {r[0] for r in cur.fetchall() if r and r[0]}
+    except Exception as exc:  # noqa: BLE001 - see docstring: degrade toward MORE work, not less
+        print(f"[MF] staleness skip unavailable ({exc}); fetching the full universe",
+              file=sys.stderr)
+        return set()
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--symbol", default=None, help="Single stock NSE symbol")
     ap.add_argument("--limit", type=int, default=None, help="Process first N stocks")
+    ap.add_argument("--no-skip", action="store_true",
+                    help="Ignore the staleness skip and refetch every symbol")
     args = ap.parse_args()
 
     company_map = load_companyid_map()
@@ -183,25 +212,54 @@ def main():
     con = connect()
     ensure_schema(con)
 
+    # AF-20260910-07. Shareholding patterns are QUARTERLY SEBI filings, but this ran a full
+    # ~1,400-symbol recrawl every week: 1,400 x RATE_LIMIT_SEC is ~7min of pure sleep before a
+    # single HTTP response is counted, against a 20-min budget with no headroom. It tipped over
+    # on 2026-09-10 and, because the only upsert ran AFTER the loop, the entire run was lost
+    # (nothing written for that date) -- the "step at the end of a script that gets killed by
+    # its timeout never runs" class. Same fix shape as marketsmojo_financials (AF-20260909-15):
+    # match the fetch cadence to the data cadence, so steady-state runs are a near-no-op.
+    if not args.symbol and not args.no_skip:
+        fresh = recently_fetched(con, STALENESS_DAYS)
+        before = len(stocks)
+        stocks = [(s, c) for s, c in stocks if s not in fresh]
+        print(f"[MF] Skipping {before - len(stocks)}/{before} symbols fetched within "
+              f"{STALENESS_DAYS}d (quarterly data); {len(stocks)} to fetch.")
+        if not stocks:
+            print("[MF] Nothing stale enough to refetch — done.")
+            con.close()
+            return
+
     session = requests.Session()
     session.headers.update(HEADERS)
     today = date.today().isoformat()
 
     results = []
+    pending = []
+    saved = 0
     for i, (sym, company_id) in enumerate(stocks, 1):
         result = fetch_mf_holding(sym, company_id, session)
         if result:
             results.append(result)
+            pending.append(result)
             print(f"[MF] {sym}: {result['mf_holding_pct']:.2f}% (chg {result.get('chg_vs_prev')})")
         else:
             print(f"[MF] {sym}: no data")
+        # Flush incrementally: a timeout-kill must not discard everything fetched so far.
+        if len(pending) >= FLUSH_EVERY:
+            upsert_holdings(pending, today, con)
+            saved += len(pending)
+            pending = []
+            print(f"[MF] Flushed {saved} holdings so far")
         if i % 100 == 0:
             print(f"[MF] Progress: {i}/{len(stocks)}")
         time.sleep(RATE_LIMIT_SEC)
 
-    if results:
-        upsert_holdings(results, today, con)
-        print(f"[MF] Saved {len(results)}/{len(stocks)} holdings to stock_mf_holdings")
+    if pending:
+        upsert_holdings(pending, today, con)
+        saved += len(pending)
+    if saved:
+        print(f"[MF] Saved {saved}/{len(stocks)} holdings to stock_mf_holdings")
     else:
         print("[MF] No data fetched")
 

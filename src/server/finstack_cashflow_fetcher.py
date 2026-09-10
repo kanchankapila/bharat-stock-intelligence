@@ -13,9 +13,16 @@ Source honesty: finstack's cash_flow tool is a thin wrapper over yfinance's
 ticker.quarterly_cashflow (verified in the installed finstack.data.fundamentals source).
 Yahoo carries quarterly cash-flow for only a SUBSET of NSE names — live-probed 2026-09-01:
 INFY returns 4 quarters (reported in USD — stored per-row in `currency`), RELIANCE returns
-finstack's {"error": true} envelope. Missing names are SKIPPED, never fabricated; their
-absence in this table means "vendor has no quarterly cash flow", same honest-unknown rule
-as analyst_estimates_snapshot.py.
+finstack's {"error": true} envelope. Missing names are SKIPPED, never fabricated.
+
+⚠ An absence in this table does NOT automatically mean "vendor has no quarterly cash flow" —
+Yahoo throttles hard, and a throttled call returns the SAME {"error": true} envelope shape as
+genuine no-coverage. Until 2026-09-10 the two were indistinguishable and a fully-throttled run
+exited 0 reporting the whole universe as "no vendor coverage" (AF-20260910-06). Rate-limiting is
+now classified separately, backed off, aborted once sustained, and exits non-zero. Read the run's
+own summary line before drawing any conclusion about vendor coverage from row counts: as of
+2026-09-10 this table holds only 59 rows / 15 symbols, and how much of that is true Yahoo
+coverage vs. accumulated throttling has NOT been established.
 
 Cadence: weekly (same rationale as the marketsmojo trio — vendors restate quarterly figures
 around results days; a weekly pass converges, and 45-day warn windows fit any future DQ check).
@@ -61,6 +68,34 @@ _CF_KEYS = {
     "capital_expenditure": "capex",
     "free_cash_flow": "fcf",
 }
+
+# AF-20260910-06. finstack wraps yfinance, and Yahoo answers a throttled caller with a
+# business-error envelope carrying "Too Many Requests. Rate limited." -- structurally identical
+# to the envelope meaning "Yahoo has no quarterly cash flow for this name". Until 2026-09-10 both
+# collapsed to [] and were counted as "no vendor coverage", so a fully-throttled run over ~2,000
+# symbols reported "0 wrote, 2000 had no vendor coverage" and exited 0. That is the same class as
+# insider_transactions_fetcher's `None`-on-failure vs `[]`-on-genuinely-empty fix (see
+# recurring-bugs.md): a throttled run must never be indistinguishable from an empty universe.
+_RATE_LIMIT_MARKERS = ("too many requests", "rate limit", "429")
+
+# Past this many throttled symbols the vendor is refusing the whole run: continuing burns the
+# remaining universe for nothing AND keeps the throttle warm. Stop and report instead.
+RATE_LIMIT_ABORT_THRESHOLD = 25
+RATE_LIMIT_BACKOFF_SEC = 2.0
+
+
+class RateLimited(Exception):
+    """The vendor throttled us. NOT the same as 'the vendor has no data for this symbol'."""
+
+
+def is_rate_limited_envelope(envelope: object) -> bool:
+    """True only for a business-error envelope whose text says we were throttled. Pure."""
+    if not isinstance(envelope, dict) or not envelope.get("error"):
+        return False
+    blob = " ".join(
+        str(envelope.get(k, "")) for k in ("message", "error", "detail", "reason")
+    ).lower()
+    return any(m in blob for m in _RATE_LIMIT_MARKERS)
 
 
 def ensure_schema(con) -> None:
@@ -156,11 +191,21 @@ def fetch_symbol(mcp: McpStdioClient, symbol: str) -> list[dict]:
         envelope = json.loads(text)
     except json.JSONDecodeError:
         return []
+    # Classify BEFORE parsing: parse_quarterly_cashflow() flattens every error envelope to []
+    # and cannot tell "throttled" from "no coverage" -- that conflation is the bug.
+    if is_rate_limited_envelope(envelope):
+        raise RateLimited(str(envelope.get("message") or envelope.get("error"))[:200])
     return parse_quarterly_cashflow(envelope)
 
 
 def run(symbols: list[str] | None = None, limit: int | None = None,
-        workers: int = 6, server_cmd: list[str] | None = None) -> int:
+        workers: int = 6, server_cmd: list[str] | None = None,
+        stats: dict | None = None) -> int:
+    """Returns the number of symbols written (unchanged contract).
+
+    `stats`, when passed, is populated with the run's honest outcome breakdown
+    (written / empty / rate_limited / aborted) so main() can exit non-zero on a throttled
+    run instead of reporting a clean success over an empty result."""
     t0 = time.time()
     universe = load_universe(symbols, limit)
     if not universe:
@@ -182,14 +227,36 @@ def run(symbols: list[str] | None = None, limit: int | None = None,
     written = 0
     empty = 0
     recycled = 0
+    rate_limited = 0
+    aborted = 0
     recycle_cap = 50  # beyond this, keep the channel: avoid a pathological spawn storm
     lock = threading.Lock()
+    abort = threading.Event()
 
-    def _task(sym: str) -> tuple[str, list[dict]]:
-        nonlocal recycled
+    def _task(sym: str) -> tuple[str, list[dict], str]:
+        nonlocal recycled, rate_limited
+        # Once the vendor is refusing the run, stop issuing calls. Remaining symbols are
+        # reported as skipped-by-abort, never as "no vendor coverage".
+        if abort.is_set():
+            return sym, [], 'aborted'
         client = client_queue.get()
         try:
             rows = fetch_symbol(client, sym)
+        except RateLimited as exc:
+            client_queue.put(client)  # channel is healthy; the VENDOR said no
+            with lock:
+                rate_limited += 1
+                n = rate_limited
+            if n <= 3:
+                print(f"[FCH] {sym}: vendor rate-limited ({exc}) — backing off",
+                      file=sys.stderr)
+            if n >= RATE_LIMIT_ABORT_THRESHOLD and not abort.is_set():
+                abort.set()
+                print(f"[FCH] ABORTING: {n} symbols rate-limited — the vendor is throttling "
+                      f"this run; continuing would burn the rest of the universe for nothing "
+                      f"and keep the throttle warm.", file=sys.stderr)
+            time.sleep(RATE_LIMIT_BACKOFF_SEC)
+            return sym, [], 'rate_limited'
         except McpError as exc:
             # Channel state is unknowable after a timeout/transport error: swap it for a
             # fresh server process and honest-skip this symbol (never fabricate).
@@ -211,27 +278,32 @@ def run(symbols: list[str] | None = None, limit: int | None = None,
                 # stderr: runPython() inspects stderr to flag the run as degraded
                 print(f"[FCH] {sym}: MCP channel error ({exc}); channel replaced, "
                       f"symbol skipped", file=sys.stderr)
-            return sym, []
+            return sym, [], 'mcp_error'
         # healthy channel: hand it back for the next symbol (a `return` inside the try
         # suite would skip an else-clause here — do NOT put the handback in an else)
         client_queue.put(client)
-        return sym, rows
+        return sym, rows, ('ok' if rows else 'empty')
 
     try:
         with ThreadPoolExecutor(max_workers=max(1, workers)) as pool:
             futures = {pool.submit(_task, s): s for s in universe}
             for fut in as_completed(futures):
-                sym, rows = fut.result()
+                sym, rows, outcome = fut.result()
                 with lock:
                     done += 1
-                    if rows:
+                    if outcome == 'ok':
                         upsert_cashflow(sym, rows, con)
                         written += 1
-                    else:
+                    elif outcome == 'empty':
+                        # ONLY a clean vendor answer with no periods counts as "no coverage".
                         empty += 1
+                    elif outcome == 'aborted':
+                        aborted += 1
+                    # 'rate_limited' / 'mcp_error' are already counted in their handlers
                     if done % 100 == 0:
                         print(f"[FCH] {done}/{len(universe)} symbols ({written} with data, "
-                              f"{empty} no coverage, {recycled} channel recycles)")
+                              f"{empty} no coverage, {rate_limited} rate-limited, "
+                              f"{recycled} channel recycles)")
     finally:
         # zero-leak: whatever happens, no MCP server process outlives this run. Close by
         # registry, not by queue — clients in-flight when a task died never re-entered it.
@@ -243,8 +315,18 @@ def run(symbols: list[str] | None = None, limit: int | None = None,
                 pass
 
     print(f"[FCH] done: {written}/{len(universe)} symbols wrote quarterly cash-flow, "
-          f"{empty} had no vendor coverage, {recycled} channel recycles "
-          f"({time.time() - t0:.1f}s).")
+          f"{empty} had no vendor coverage, {rate_limited} rate-limited, {aborted} skipped "
+          f"after abort, {recycled} channel recycles ({time.time() - t0:.1f}s).")
+    if stats is not None:
+        stats.update(universe=len(universe), written=written, empty=empty,
+                     rate_limited=rate_limited, aborted=aborted, recycled=recycled)
+    if rate_limited:
+        # stderr, not stdout: runPython() only inspects stderr to flag a run as degraded
+        # (see recurring-bugs.md's degraded-read-print-to-stdout entry).
+        print(f"[FCH] DEGRADED: {rate_limited} symbol(s) were rate-limited and "
+              f"{aborted} were skipped after abort — their absence from "
+              f"finstack_cashflow_history means THROTTLED, not 'vendor has no data'.",
+              file=sys.stderr)
     return written
 
 
@@ -259,8 +341,12 @@ def main() -> int:
 
     sym_filter = [s.strip() for s in args.symbols.split(",")] if args.symbols else None
     cmd = args.server_cmd.split() if args.server_cmd else None
-    run(symbols=sym_filter, limit=args.limit, workers=args.workers, server_cmd=cmd)
-    return 0
+    stats: dict = {}
+    run(symbols=sym_filter, limit=args.limit, workers=args.workers, server_cmd=cmd,
+        stats=stats)
+    # Exit non-zero when the vendor throttled us. Returning 0 here is what let a run that
+    # wrote NOTHING because Yahoo refused every call be recorded as a clean success.
+    return 1 if stats.get("rate_limited") else 0
 
 
 if __name__ == "__main__":
