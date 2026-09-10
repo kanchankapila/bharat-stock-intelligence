@@ -2,6 +2,7 @@ import os
 import sys
 
 import numpy as np
+import pytest
 import pandas as pd
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
@@ -180,6 +181,17 @@ class TestWriteTrainingMetrics:
     roc_auc on every training run but nothing ever wrote it to dl_model_performance,
     leaving the API's AUC history permanently NULL and check_accuracy_drift without
     a fresh baseline. These pin the write contract against regressions."""
+
+    @pytest.fixture(autouse=True)
+    def _allow_the_write_path_to_run(self, monkeypatch):
+        """write_training_metrics is inert under pytest since 2026-09-10 (AF-20260910-10):
+        an unmocked test run was writing test_dl_engine.py's hardcoded 0.55/0.58 sentinel
+        into production dl_model_performance, and the upsert key excludes model_version, so
+        it REPLACED that date's real row. These tests exist to exercise that write path (all
+        three fake `execute`, so nothing reaches a database), which is what the escape hatch
+        is for. Without it they would still PASS the no-raise case while asserting nothing --
+        a silently hollowed-out test, which is worse than a failing one."""
+        monkeypatch.setenv("DRIFT_ALLOW_TEST_WRITES", "1")
 
     def test_persists_acc_and_auc_under_the_given_date_with_real_version(self, monkeypatch):
         captured = {}

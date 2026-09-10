@@ -41,6 +41,7 @@ import numpy as np
 import pandas as pd
 
 from db_compat import read_df, query_one, execute
+import os
 import sys
 
 # ── PSI thresholds, calibrated from THIS panel's measured null (2026-08-15) ────────────────
@@ -292,6 +293,18 @@ def write_training_metrics(metrics: dict, eval_date=None, model_version: str = "
         if x is None or (isinstance(x, float) and math.isnan(x)):
             return None
         return float(x)
+
+    # A developer's Postgres IS production, and this table's upsert key is
+    # (model_name, eval_date, horizon_days) -- model_version is NOT in it -- so one unmocked
+    # test run REPLACES the day's real monitoring row rather than adding a row beside it.
+    # That is exactly what happened: 10 rows carrying test_dl_engine.py's hardcoded
+    # {"directional_accuracy": 0.55, "roc_auc": 0.58} sentinel under model_version='lstm_v99',
+    # spanning 2026-08-27..2026-09-10, read back by check_accuracy_drift as a real baseline.
+    # Callers mock this too; the guard is here so the NEXT unmocked test cannot re-pollute it.
+    if os.environ.get("PYTEST_CURRENT_TEST") and os.environ.get("DRIFT_ALLOW_TEST_WRITES") != "1":
+        print(f"[DRIFT] skipped metric persistence for {day}: running under pytest "
+              f"(set DRIFT_ALLOW_TEST_WRITES=1 to override)", file=sys.stderr)
+        return
 
     try:
         execute(

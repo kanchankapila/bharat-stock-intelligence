@@ -60,7 +60,7 @@ import pickle
 import argparse
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Dict, List, Tuple
+from typing import Dict, List, Sequence, Tuple
 
 from db_compat import connect, read_df
 from model_promotion import clears_promotion_bar, file_staleness_override_applies
@@ -387,10 +387,90 @@ def clone_model_like(model: "BiLSTMModel") -> "BiLSTMModel":
     return clone
 
 
+# The longest forward label any validation fold trains on. `dir_5d` is what this function
+# grades, but `_train_one_fold` fits the 15d head on the same rows, so a row at date D carries
+# a label that does not resolve until D+15. Purging only 5 dates would leave training labels
+# overlapping the validation window.
+LABEL_HORIZON_DAYS = 15
+WALK_FORWARD_SPLITS = 5
+
+# Stamped onto every metrics dict so _promote_lstm_version can tell a number produced by
+# today's purged date split from the row-sliced ones recorded before 2026-09-10, which are
+# not comparable to it. Same idea as model_promotion.promotion_decision's `label_changed`
+# carve-out: a baseline measured a different way is not evidence, and letting it set the bar
+# freezes the gate by construction rather than on merit.
+VALIDATION_METHOD = "purged_date_walkforward_v1"
+LEGACY_VALIDATION_METHOD = "row_sliced_symbol_major"
+
+
+def _date_folds(dates: Sequence, horizon_days: int = LABEL_HORIZON_DAYS,
+                n_splits: int = WALK_FORWARD_SPLITS) -> List[Tuple[np.ndarray, np.ndarray]]:
+    """Expanding-window folds over whole DATE groups, purged by the label horizon.
+
+    Delegates to `purged_cv`, which ml_ensemble.py, breakout_classifier.py and
+    flyer_classifier.py already use for the same panel shape; dl_engine was the one model
+    still splitting by row position. Taking a date means taking every symbol on that date, so
+    a fold is cross-sectionally complete and strictly earlier than the fold it validates.
+
+    Raises ValueError when the panel holds too few distinct dates to split at all.
+    """
+    from purged_cv import make_purged_group_time_series_split
+
+    splitter = make_purged_group_time_series_split(
+        dates, horizon_days=horizon_days, n_splits=n_splits,
+    )
+    folds = list(splitter.split(np.arange(len(dates))))
+
+    # Assert the invariant rather than trusting the splitter to keep holding it. This class
+    # has now bitten three architecturally unrelated places in this codebase (see
+    # ml-model-bugs.md), always silently and always while looking like a working validation,
+    # and recurring-bugs.md's own header records that written-down prose does not stop it.
+    # One set intersection per fold; it must never fire.
+    date_list = list(dates)
+    for i, (train_idx, test_idx) in enumerate(folds):
+        overlap = {date_list[j] for j in train_idx} & {date_list[j] for j in test_idx}
+        if overlap:
+            raise ValueError(
+                f"_date_folds: fold {i} has {len(overlap)} date(s) in BOTH its train and test "
+                f"slices (e.g. {sorted(overlap)[:3]}) -- that is a cross-sectional split, not a "
+                f"walk-forward, and any AUC it produces is inflated"
+            )
+    return folds
+
+
+def fresh_model_like(model: "BiLSTMModel") -> "BiLSTMModel":
+    """A randomly-initialised model at `model`'s input width -- the honest starting point for
+    a walk-forward fold.
+
+    Cloning the source weights (clone_model_like) starts each fold from a network already fit
+    on the WHOLE universe, test dates included, so the fold is graded on a period its starting
+    weights had memorised. A walk-forward number answers "how does a model trained only on the
+    past do on the future"; that requires starting where a real forward-in-time fit would.
+    """
+    width = model.lstm1.weight_ih_l0.shape[1]
+    return BiLSTMModel(n_features=width).to(DEVICE)
+
+
 def walk_forward_validate(model: BiLSTMModel, X: np.ndarray, y5: np.ndarray,
-                           y15: np.ndarray, yr5: np.ndarray,
-                           fold_size: int = 30) -> Dict:
-    """Expanding window walk-forward. Returns mean metrics across folds.
+                           y15: np.ndarray, yr5: np.ndarray, dates: Sequence,
+                           *, horizon_days: int = LABEL_HORIZON_DAYS,
+                           n_splits: int = WALK_FORWARD_SPLITS,
+                           seed_from_model: bool = False) -> Dict:
+    """Purged, date-grouped expanding-window validation. Returns mean metrics across folds.
+
+    `dates` is REQUIRED and is the whole point. Until 2026-09-10 this function took a
+    `fold_size` row count and sliced `X[:train_end]` / `X[val_end:test_end]` by position --
+    but `train_lstm` builds its panel by concatenating whole per-symbol arrays, so row
+    position carried no time information. Measured against production before the fix (50
+    symbols, 59,702 sequences): from fold 1 onward **100% of test dates also appeared in the
+    training slice**, train and test both spanning 2021-03-31..2026-09-09, with zero symbols
+    shared between them. It was an expanding CROSS-SECTIONAL split -- train on ~40 stocks,
+    test on ~3 others over the same days -- presented as a walk-forward. Daily equity
+    direction is dominated by a market-wide common factor, so that leaks heavily: it is why
+    this engine reported roc_auc 0.6459-0.6578 while every other engine on the platform
+    ceilings at 0.52-0.55 (measurement.md). Every roc_auc recorded in dl_model_config.json
+    before this date carries that inflation; see `_promote_lstm_version`, which no longer
+    lets those numbers act as a baseline.
 
     Also tracks frac_saturated -- the fraction of held-out predictions within
     SATURATION_EPS of 0 or 1 -- across ALL folds' predictions pooled together. Live bug,
@@ -401,31 +481,43 @@ def walk_forward_validate(model: BiLSTMModel, X: np.ndarray, y5: np.ndarray,
     with output then barely changing day-to-day -- a real regression the AUC-only gate missed
     entirely. See _promote_lstm_version's MAX_SATURATION_FRAC check.
     """
-    n = len(X)
-    min_train = 300
-    if n < min_train + fold_size * 2:
-        return {"directional_accuracy": np.nan, "roc_auc": np.nan, "frac_saturated": np.nan}
+    if dates is None or len(dates) != len(X):
+        raise ValueError(
+            f"walk_forward_validate: dates length {0 if dates is None else len(dates)} does "
+            f"not match X length {len(X)} -- every sequence needs the date it was taken on, "
+            f"or the split degenerates to row position"
+        )
+
+    unusable = {"directional_accuracy": np.nan, "roc_auc": np.nan,
+                "n_folds": 0, "frac_saturated": np.nan}
+    try:
+        folds = _date_folds(dates, horizon_days=horizon_days, n_splits=n_splits)
+    except ValueError as e:
+        # Too few distinct dates to purge and still leave a training window. NaN metrics make
+        # _promote_lstm_version refuse ("cannot confirm safe to promote"), which is the right
+        # answer -- but a thin panel must not abort an otherwise-complete training run.
+        print(f"[DL] Walk-forward validation not possible: {e}", file=sys.stderr)
+        return unusable
+    if not folds:
+        print("[DL] Walk-forward validation produced no usable folds", file=sys.stderr)
+        return unusable
 
     accs, aucs, all_probs = [], [], []
-    fold = 0
-    while True:
-        train_end = min_train + fold * fold_size
-        val_end   = train_end + fold_size
-        test_end  = val_end  + fold_size
-        if test_end > n:
-            break
+    for train_idx, test_idx in folds:
+        X_tr, y_tr = X[train_idx], y5[train_idx]
+        X_te, y_te = X[test_idx], y5[test_idx]
 
-        X_tr, y_tr = X[:train_end], y5[:train_end]
-        X_te, y_te = X[val_end:test_end], y5[val_end:test_end]
-
-        # Width from the SOURCE model, not the module default -- see clone_model_like.
-        model_copy = clone_model_like(model)
+        # Fresh weights at the SOURCE model's width by default; `seed_from_model` keeps the
+        # old leaky arm reachable for scripts/measure_dl_walkforward_leak.py, which exists to
+        # size the difference. Either way the width comes from `model`, never from today's
+        # N_FEATURES -- see clone_model_like.
+        model_copy = clone_model_like(model) if seed_from_model else fresh_model_like(model)
         # Fresh scaler per fold: reusing a stale scaler across folds can accumulate scale
         # adjustments and destabilize the loss (observed: late folds failed with NaN even
         # with scaling, likely due to scaler state corruption across prior fold iterations).
         fold_scaler = GradScaler('cuda') if DEVICE.type == "cuda" else None
-        _train_one_fold(model_copy, X_tr, y_tr, yr5[:train_end], epochs=30, y15=y15[:train_end],
-                         scaler=fold_scaler)
+        _train_one_fold(model_copy, X_tr, y_tr, yr5[train_idx], epochs=30,
+                         y15=y15[train_idx], scaler=fold_scaler)
 
         preds = _predict_batch(model_copy, X_te)
         del model_copy
@@ -438,7 +530,6 @@ def walk_forward_validate(model: BiLSTMModel, X: np.ndarray, y5: np.ndarray,
         if len(np.unique(y_te)) > 1:
             aucs.append(roc_auc_score(y_te, prob_up))
         all_probs.extend(prob_up.tolist())
-        fold += 1
 
     SATURATION_EPS = 0.01
     frac_saturated = (
@@ -448,8 +539,9 @@ def walk_forward_validate(model: BiLSTMModel, X: np.ndarray, y5: np.ndarray,
     return {
         "directional_accuracy": float(np.mean(accs)) if accs else np.nan,
         "roc_auc":              float(np.mean(aucs)) if aucs else np.nan,
-        "n_folds":              fold,
+        "n_folds":              len(accs),
         "frac_saturated":       frac_saturated,
+        "validation_method":    VALIDATION_METHOD,
     }
 
 
@@ -618,25 +710,36 @@ def train_lstm(version: int = 1) -> Dict:
 
     print(f"[DL] Total sequences trained: {total_seqs}")
 
-    # Walk-forward validation: load a held-out sample (up to 50 symbols) fresh from DB.
+    # Walk-forward validation panel. The held-out dimension is TIME, not symbols: these 50
+    # names were also in the training universe above, so a symbol split would prove nothing.
+    # walk_forward_validate splits them by date, which is why every sequence's own date has to
+    # travel with it -- discarding the loader's 5th return value is what let the old row-index
+    # slicing look like a walk-forward while being a cross-sectional split.
+    #
+    # n_features=N_FEATURES for the same reason the training loader pins it: without it,
+    # _resolve_input_width falls through to _INFERENCE_INPUT_WIDTH -- a module global that
+    # run_inference sets to the ACTIVE champion's width. python_api.py and
+    # backend-python/main.py both serve train and infer from one process, so an infer-then-train
+    # sequence there would hand 78-wide validation rows to an 85-wide model and the size
+    # mismatch would be swallowed as "validation failed (non-fatal)".
     metrics: Dict = {"directional_accuracy": float("nan"), "roc_auc": float("nan")}
     val_symbols = symbols[:min(50, len(symbols))]
-    val_X, val_y5, val_y15, val_yr5 = [], [], [], []
+    val_X, val_y5, val_y15, val_yr5, val_dates = [], [], [], [], []
 
     def _load_val(sym):
-        Xv, y5v, y15v, yr5v, _ = load_symbol_sequences(sym)
-        return (Xv, y5v, y15v, yr5v) if len(Xv) > 0 else None
+        Xv, y5v, y15v, yr5v, dv = load_symbol_sequences(sym, n_features=N_FEATURES)
+        return (Xv, y5v, y15v, yr5v, dv) if len(Xv) > 0 else None
 
-    for Xv, y5v, y15v, yr5v in load_sequences_bounded(val_symbols, _load_val):
+    for Xv, y5v, y15v, yr5v, dv in load_sequences_bounded(val_symbols, _load_val):
         val_X.append(Xv); val_y5.append(y5v)
-        val_y15.append(y15v); val_yr5.append(yr5v)
+        val_y15.append(y15v); val_yr5.append(yr5v); val_dates.extend(dv)
     if val_X:
         X_val   = np.concatenate(val_X)
         y5_val  = np.concatenate(val_y5)
         y15_val = np.concatenate(val_y15)
         yr5_val = np.concatenate(val_yr5)
         try:
-            metrics = walk_forward_validate(model, X_val, y5_val, y15_val, yr5_val, fold_size=2000)
+            metrics = walk_forward_validate(model, X_val, y5_val, y15_val, yr5_val, val_dates)
             print(f"[DL] Walk-forward metrics: {metrics}")
         except Exception as e:
             # Validation phase is fragile (NaN in metrics, label edge cases); don't let it abort
@@ -926,6 +1029,7 @@ def _promote_lstm_version(new_version: int, metrics: Dict) -> bool:
     cfg = _load_config()
     active_version = cfg.get("lstm_version")
     version_metrics = cfg.get("lstm_metrics", {})
+    baseline = None
     baseline_auc = None
     if active_version is not None:
         baseline = version_metrics.get(str(active_version))
@@ -933,6 +1037,26 @@ def _promote_lstm_version(new_version: int, metrics: Dict) -> bool:
             isinstance(baseline["roc_auc"], float) and np.isnan(baseline["roc_auc"])
         ):
             baseline_auc = float(baseline["roc_auc"])
+
+    # A baseline measured a DIFFERENT way is not evidence, and letting it set the bar freezes
+    # this gate by construction rather than on merit. Every roc_auc recorded here before
+    # 2026-09-10 came from walk_forward_validate's row-sliced, symbol-major split -- ~40 stocks
+    # trained, ~3 others tested, over the SAME dates (measured: 100% of test dates also in the
+    # training slice from fold 1 on), reading 0.6459-0.6578 where every other engine on this
+    # platform ceilings at 0.52-0.55. Nothing honestly validated can beat that, so without this
+    # the DL champion could never be replaced again.
+    #
+    # Keyed on a CHANGE of method, never on the mere absence of a tag: two untagged versions
+    # are compared normally, or "untagged" would silently mean "promote anything".
+    # Same carve-out as model_promotion.promotion_decision's `label_changed` branch.
+    candidate_method = metrics.get("validation_method", LEGACY_VALIDATION_METHOD)
+    baseline_method = (baseline.get("validation_method", LEGACY_VALIDATION_METHOD)
+                       if isinstance(baseline, dict) else None)
+    if baseline_auc is not None and baseline_method != candidate_method:
+        print(f"[DL] Baseline v{active_version} was validated as '{baseline_method}' but "
+              f"v{new_version} as '{candidate_method}' -- the two roc_auc values are not "
+              f"comparable, so the metric bar is skipped for this promotion.")
+        baseline_auc = None
 
     promote = clears_promotion_bar(new_auc, baseline_auc, LSTM_PROMOTION_MARGIN)
 

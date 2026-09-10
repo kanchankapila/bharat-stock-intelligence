@@ -116,6 +116,46 @@ cover classes that stayed in `recurring-bugs.md`.
   `data-sources.md`'s `trendlyne_screener_discovery.py` incident (an identifier column silently
   holding the wrong thing). Fix the fetcher's symbol resolution before reading anything into
   `credit_trend`'s measured edge.
+- **Row-position slicing on a panel built by CONCATENATING PER-SYMBOL ARRAYS is a
+  cross-sectional split wearing a walk-forward's name — train and test cover the same dates,
+  and nothing errors.** Third instance of this family in this file (see the `drop_duplicates()`
+  splitter below and the `.iloc[-N:]` panel-slice above), and the first where the function was
+  *called* a walk-forward. `dl_engine.walk_forward_validate` took a `fold_size` ROW COUNT and
+  sliced `X[:train_end]` / `X[val_end:test_end]`, while its caller `train_lstm` built `X` by
+  `np.concatenate`-ing whole per-symbol arrays (`load_sequences_bounded` yields "in completion
+  order") and **discarded the loader's dates**, so row position carried no time information at
+  all. Measured live 2026-09-10 (50 symbols, 59,702 sequences, its own min_train=300/
+  fold_size=2000): fold 0 22.1% test-date overlap, fold 1 99.9%, **folds 2-27 100.0%**, train
+  and test both spanning 2021-03-31..2026-09-09, **zero shared symbols** — i.e. train on ~40
+  stocks, test on ~3 others on the same days. Daily equity direction is dominated by a
+  market-wide common factor, so this leaks hard.
+  **The tell was sitting in plain sight for weeks and nobody read it as one:** the engine
+  reported `roc_auc` 0.6459-0.6578 while every other engine on this platform ceilings at
+  0.52-0.55 (`measurement.md`) — this file's own "an ML score that grades far better than every
+  comparable engine is at least as suspicious as one that grades far worse", which it records
+  for `movement_predictor`'s AUC 0.894. An implausibly good number IS the diagnostic.
+  **Two cheap checks, either enough:** (1) for any train/test index pair, assert
+  `set(dates[train]) & set(dates[test]) == set()` — one line, and it is now asserted at runtime
+  inside `_date_folds`; (2) ask what the unit of the split is. If a function slices by row and
+  the panel has more than one row per date, the answer is "not time".
+  **Fix shape:** `purged_cv.make_purged_group_time_series_split` already existed for exactly
+  this and its own docstring names the hazard ("a row-count gap can split a trading day in
+  half"); `ml_ensemble.py`, `breakout_classifier.py` and `flyer_classifier.py` used it and
+  `dl_engine.py` did not. **Before writing a splitter, grep for `purged_cv` — the answer to
+  "how do I split a (symbol, date) panel" in this repo is already written.** Purge by the
+  LONGEST label the fold trains on, not the one being graded: `walk_forward_validate` grades
+  `dir_5d` but `_train_one_fold` also fits the 15d head on the same rows, so the gap is 15.
+  **Sibling defect in the same function, fixed the same day:** each fold was seeded from the
+  fully-trained model via `load_state_dict`, i.e. from weights already fit on that fold's own
+  test period. A walk-forward number means "trained only on the past"; folds must start from
+  fresh weights (at the SOURCE model's width, never today's `N_FEATURES`).
+  **And when you fix a validation methodology, fix the BASELINE in the same change** — the
+  stored champion AUC was produced the old way, so an honest candidate can never beat it and
+  the gate freezes by construction rather than on merit (the identical deadlock this file
+  records for `ml_ensemble.py`'s label switch). Tag metrics with the method that produced them
+  and skip the metric bar when the tag changes.
+
+
 - **A splitter that derives its time order from `drop_duplicates()` inherits FIRST-APPEARANCE
   order, not chronological order — so it silently trains on the future the moment a caller hands
   it an unsorted panel.** Found 2026-08-30 reviewing the new `purged_cv.py`. `split()` built

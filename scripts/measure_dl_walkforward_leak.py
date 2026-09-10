@@ -28,11 +28,20 @@ Both arms train the same number of epochs per fold on the same slices, so the ON
 is whether the starting weights had already seen the test period. A large A-B gap in roc_auc is
 the leak; a small one means the seeding does not matter much and the gate's numbers stand.
 
-This does not change any behaviour. measurement.md requires measuring before altering a
-promotion gate, and this is that measurement.
+UPDATE 2026-09-10: both arms USED TO share a second, larger defect that this script could not
+see, because it held that variable constant -- walk_forward_validate split the panel by ROW
+POSITION on a symbol-major array, so every fold trained on ~40 stocks and tested on ~3 others
+over the SAME dates (measured: 100% test-date overlap from fold 1 on). That is fixed: the
+splitter is now date-grouped and purged by the label horizon, and the fresh arm is now the
+DEFAULT (`seed_from_model=False`). This script therefore no longer measures current-vs-honest;
+it sizes how much the seeding alone was worth, on top of the split fix, and Arm A must now ask
+for the old seeding explicitly.
+
+measurement.md requires measuring before altering a promotion gate, and this is that
+measurement.
 
 Usage:
-  python scripts/measure_dl_walkforward_leak.py [--symbols 50] [--folds 2000] [--seeds 2]
+  python scripts/measure_dl_walkforward_leak.py [--symbols 50] [--splits 5] [--seeds 2]
 """
 from __future__ import annotations
 
@@ -49,7 +58,7 @@ import numpy as np  # noqa: E402
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--symbols", type=int, default=50, help="validation symbols (train_lstm uses 50)")
-    ap.add_argument("--folds", type=int, default=2000, help="fold_size passed to walk_forward_validate")
+    ap.add_argument("--splits", type=int, default=5, help="n_splits passed to walk_forward_validate")
     ap.add_argument("--seeds", type=int, default=2, help="repeats of the FRESH arm, to size run-to-run noise")
     args = ap.parse_args()
 
@@ -77,12 +86,13 @@ def main() -> int:
     val_symbols = symbols[:args.symbols]
     print(f"[LEAK] loading {len(val_symbols)} validation symbols")
 
-    Xs, y5s, y15s, yr5s = [], [], [], []
+    Xs, y5s, y15s, yr5s, date_parts = [], [], [], [], []
     for sym in val_symbols:
         try:
-            X, y5, y15, yr5, _ = dl.load_symbol_sequences(sym, n_features=width)
+            X, y5, y15, yr5, dts = dl.load_symbol_sequences(sym, n_features=width)
             if len(X) > 0:
                 Xs.append(X); y5s.append(y5); y15s.append(y15); yr5s.append(yr5)
+                date_parts.extend(dts)
         except Exception as e:
             print(f"  skip {sym}: {e}")
     if not Xs:
@@ -91,7 +101,9 @@ def main() -> int:
 
     X = np.concatenate(Xs); y5 = np.concatenate(y5s)
     y15 = np.concatenate(y15s); yr5 = np.concatenate(yr5s)
-    print(f"[LEAK] {len(X)} sequences, width {X.shape[-1]}")
+    dates = date_parts
+    print(f"[LEAK] {len(X)} sequences, width {X.shape[-1]}, "
+          f"{len(set(dates))} distinct dates")
 
     def seeded_model():
         m = dl.BiLSTMModel(n_features=width).to(dl.DEVICE)
@@ -102,7 +114,8 @@ def main() -> int:
         return dl.BiLSTMModel(n_features=width).to(dl.DEVICE)
 
     print("\n[LEAK] ARM A -- seeded from the trained champion (reproduces current behaviour)")
-    a = dl.walk_forward_validate(seeded_model(), X, y5, y15, yr5, fold_size=args.folds)
+    a = dl.walk_forward_validate(seeded_model(), X, y5, y15, yr5, dates,
+                                 n_splits=args.splits, seed_from_model=True)
     print(f"       roc_auc={a.get('roc_auc')}  dir_acc={a.get('directional_accuracy')} "
           f"folds={a.get('n_folds')} saturated={a.get('frac_saturated')}")
 
@@ -110,7 +123,8 @@ def main() -> int:
     for i in range(args.seeds):
         torch.manual_seed(1234 + i)
         print(f"\n[LEAK] ARM B -- fresh init, repeat {i + 1}/{args.seeds}")
-        b = dl.walk_forward_validate(fresh_model(), X, y5, y15, yr5, fold_size=args.folds)
+        b = dl.walk_forward_validate(fresh_model(), X, y5, y15, yr5, dates,
+                                     n_splits=args.splits, seed_from_model=False)
         print(f"       roc_auc={b.get('roc_auc')}  dir_acc={b.get('directional_accuracy')} "
               f"folds={b.get('n_folds')} saturated={b.get('frac_saturated')}")
         if b.get("roc_auc") is not None and b["roc_auc"] == b["roc_auc"]:

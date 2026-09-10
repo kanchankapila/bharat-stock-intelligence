@@ -198,3 +198,75 @@ class TestStalenessOverride:
         cfg = json.loads(config_path.read_text())
         assert cfg["lstm_version"] == 1
         assert cfg["lstm_metrics"]["1"]["rejection_count"] == 2
+
+
+class TestValidationMethodChange:
+    """A baseline measured a different way is not evidence, and letting it set the bar freezes
+    the gate by construction rather than on merit.
+
+    Every roc_auc recorded in dl_model_config.json before 2026-09-10 came from
+    walk_forward_validate's row-sliced, symbol-major split: it trained on ~40 stocks and tested
+    on ~3 others over the SAME calendar dates (measured: 100% of test dates also present in the
+    training slice from fold 1 on). That read 0.6459-0.6578 where every other engine on this
+    platform ceilings at 0.52-0.55. An honestly-validated candidate cannot beat those numbers,
+    so without this carve-out the DL model could never be replaced again.
+
+    Same shape as model_promotion.promotion_decision's `label_changed` branch, and the same
+    incident ml-model-bugs.md records for ml_ensemble.py's label switch (CV 0.7664 -> 0.5203,
+    "a gate comparing 0.5203 against a 0.7664 baseline rejects every candidate of the new
+    label, permanently, by construction rather than on merit").
+    """
+
+    def _cfg(self, tmp_path, baseline_metrics):
+        path = tmp_path / "dl_model_config.json"
+        path.write_text(json.dumps({"lstm_version": 3, "lstm_metrics": {"3": baseline_metrics}}))
+        return path
+
+    def test_a_legacy_baseline_cannot_block_an_honestly_validated_candidate(self, monkeypatch, tmp_path):
+        monkeypatch.setattr(dle, "MODEL_DIR", tmp_path)
+        monkeypatch.setattr(dle, "CONFIG_PATH", self._cfg(tmp_path, {"roc_auc": 0.58}))
+
+        promoted = dle._promote_lstm_version(
+            4, {"roc_auc": 0.52, "directional_accuracy": 0.51,
+                "validation_method": dle.VALIDATION_METHOD},
+        )
+
+        assert promoted is True, (
+            "an untagged (pre-2026-09-10, inflated) baseline must not gate a candidate measured "
+            "by the purged date split"
+        )
+
+    def test_a_baseline_from_the_same_method_still_blocks_a_worse_candidate(self, monkeypatch, tmp_path):
+        monkeypatch.setattr(dle, "MODEL_DIR", tmp_path)
+        monkeypatch.setattr(dle, "CONFIG_PATH", self._cfg(
+            tmp_path, {"roc_auc": 0.58, "validation_method": dle.VALIDATION_METHOD}))
+
+        promoted = dle._promote_lstm_version(
+            4, {"roc_auc": 0.52, "validation_method": dle.VALIDATION_METHOD},
+        )
+
+        assert promoted is False, "like-for-like comparison must still apply"
+
+    def test_two_untagged_versions_are_compared_normally(self, monkeypatch, tmp_path):
+        """The carve-out keys on a CHANGE of method, not on the absence of a tag. Reading
+        'untagged' as 'incomparable' would promote anything at all on zero evidence -- the
+        guard ml-model-bugs.md demands alongside every override of this kind."""
+        monkeypatch.setattr(dle, "MODEL_DIR", tmp_path)
+        monkeypatch.setattr(dle, "CONFIG_PATH", self._cfg(tmp_path, {"roc_auc": 0.58}))
+
+        promoted = dle._promote_lstm_version(4, {"roc_auc": 0.52})
+
+        assert promoted is False
+
+    def test_the_promoted_candidate_records_how_it_was_measured(self, monkeypatch, tmp_path):
+        """Without the tag on the stored row, the NEXT retrain cannot tell whether the new
+        baseline is comparable to it -- the bookkeeping gap that made this carve-out necessary
+        in the first place."""
+        monkeypatch.setattr(dle, "MODEL_DIR", tmp_path)
+        monkeypatch.setattr(dle, "CONFIG_PATH", self._cfg(tmp_path, {"roc_auc": 0.58}))
+
+        dle._promote_lstm_version(
+            4, {"roc_auc": 0.52, "validation_method": dle.VALIDATION_METHOD})
+
+        cfg = json.loads(dle.CONFIG_PATH.read_text())
+        assert cfg["lstm_metrics"]["4"]["validation_method"] == dle.VALIDATION_METHOD
