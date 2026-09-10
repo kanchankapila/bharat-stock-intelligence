@@ -25,10 +25,20 @@
 [CmdletBinding()]
 param(
   [string]$TaskName = 'bharat-pm2-resurrect',
-  [string]$RepoDir  = (Split-Path -Parent $PSScriptRoot)
+  [string]$RepoDir
 )
 
 $ErrorActionPreference = 'Stop'
+
+# Resolved in the body, not as a param default: under `powershell.exe -File`, $PSScriptRoot is
+# not yet populated while parameter defaults are being bound, so the default form threw
+# "Cannot bind argument to parameter 'Path' because it is an empty string" before this script
+# had ever run. $MyInvocation.MyCommand.Path is the fallback that works when dot-sourced too.
+if (-not $RepoDir) {
+  $here = $PSScriptRoot
+  if (-not $here) { $here = Split-Path -Parent $MyInvocation.MyCommand.Path }
+  $RepoDir = Split-Path -Parent $here
+}
 
 $pm2 = (Get-Command pm2 -ErrorAction SilentlyContinue).Source
 if (-not $pm2) { throw "pm2 not found on PATH. Install it (npm i -g pm2) or run this from a shell where pm2 resolves." }
@@ -68,7 +78,7 @@ $settings = New-ScheduledTaskSettingsSet `
   -ExecutionTimeLimit (New-TimeSpan -Hours 1)
 
 if (Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue) {
-  Write-Host "Existing task found — replacing it."
+  Write-Host "Existing task found -- replacing it."
   Unregister-ScheduledTask -TaskName $TaskName -Confirm:$false
 }
 
