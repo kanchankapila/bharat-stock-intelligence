@@ -44,8 +44,35 @@ EXIT_CANDIDATE_PATH = EXIT_MODEL_PATH + '.candidate'
 EXIT_PROMOTION_MARGIN = 0.1
 
 # Defaults for translating predicted excursions into levels.
-MFE_CAPTURE = 0.6   # bank 60% of the expected favourable run (you don't sell the exact high)
-MAE_BUFFER  = 1.15  # set the stop 15% wider than the expected adverse excursion (noise room)
+# MEASURED 2026-09-10 (AF-20260910-17) -- this constant is a MEDIAN-TARGETING rule, and it is
+# almost exactly calibrated as one. On a time-ordered holdout (40k most recent excursions,
+# embargoed, n_test=4,004) `target = 0.6 * predicted_MFE` is reached by the realized MFE
+# **50.1%** of the time -- 0.1pp off a true median. The capture/hit curve on that holdout:
+#     c=0.4 -> 63.0%   c=0.5 -> 56.3%   c=0.6 -> 50.1%   c=0.7 -> 43.6%   c=1.0 -> 29.7%
+# So do NOT read 0.6 as "we keep 60% of the move": it is "we aim at the level the trade clears
+# about half the time". Changing it moves that hit rate along the curve above, which is a
+# scoring change -- re-measure, don't retune by argument (measurement.md).
+#
+# REPLACING THIS WITH A QUANTILE REGRESSOR WAS TESTED AND LOST (same holdout, same features,
+# GradientBoostingRegressor(loss='quantile')). Every quantile head came out systematically
+# OVER-optimistic -- claimed vs actual hit rate: a=0.20 80%/74.5%, a=0.30 70%/62.9%,
+# a=0.40 60%/52.2%, a=0.50 50%/41.5% (calibration error 5.5-8.5pp). The a=0.50 head, doing this
+# constant's exact job, is 8.5pp worse calibrated than the constant. And at a MATCHED hit rate
+# there is no gain in captured return: c=0.6 gives a 1.37% median target at 50.1%, a=0.40 gives
+# 1.35% at 52.2%. The appeal of "a stated quantile beats an emergent one" is real in principle
+# and false on this data -- the quantile head resolves the lower tail of MFE worse than the
+# point estimate plus a scalar does. Do not re-propose it without a genuinely new angle
+# (different features, a conformal wrapper, or a recalibration layer on top).
+MFE_CAPTURE = 0.6   # aim at the level cleared ~50% of the time (measured; see above)
+# MEASURED 2026-09-10 (AF-20260910-17), same holdout as MFE_CAPTURE above. The number this
+# constant actually picks is the STOP-OUT RATE: `stop = 1.15 * predicted_MAE` is breached by the
+# realized adverse excursion **30.5%** of the time. The buffer/stop-out curve:
+#     b=1.00 -> 37.9%   b=1.15 -> 30.5%   b=1.30 -> 24.6%   b=1.50 -> 17.7%   b=2.00 -> 7.7%
+# Read the pair together: the shipped policy aims at a level cleared ~50% of the time and stops
+# out on ~30% of trades. Neither constant is miscalibrated -- they were UNDOCUMENTED, which is a
+# different defect and the one that was fixed. Widening b trades stop-outs for larger losses when
+# the stop does hit; that is a scoring change, so re-measure rather than retune by argument.
+MAE_BUFFER  = 1.15  # stop breached on ~30% of trades (measured; see above)
 
 
 def suggest_levels(entry: float, pred_mfe_pct: float, pred_mae_pct: float,
