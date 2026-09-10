@@ -60,7 +60,6 @@ import os
 import time
 from tqdm import tqdm
 
-DB_PATH = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..', 'database.sqlite'))
 
 _HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:124.0) Gecko/20100101 Firefox/124.0",
@@ -189,7 +188,7 @@ def init_db(conn):
         conn.commit()
     except Exception:
         conn.rollback()
-    print(f"[OK] stock_ohlcv table ready  [DB: {DB_PATH}]")
+    print("[OK] stock_ohlcv table ready  [DB: Postgres via db_compat.connect()]")
 
 def get_all_nse_symbols(conn):
     try:

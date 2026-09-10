@@ -123,131 +123,18 @@ module.exports = {
 
 
     // ------------------------------------------------------------------
-    // Greenfield shadow-ranker pipeline (one-shot cron jobs, local IST times — see gfCron's own comment)
-    // Chain: bhavcopy → fii-dii → features → ranker (daily, weekdays)
-    //        kayal screeners (weekly, Sunday) | fundamentals (weekly, Saturday)
+    // Greenfield shadow-ranker pipeline - DEREGISTERED 2026-09-10.
     // ------------------------------------------------------------------
-
-    {
-      ...gfCron,
-      name: 'gf-bhavcopy-daily',
-      // 19:30 IST (14:00 UTC) — matches queues.ts's own proven margin ("bhavcopy and MTO
-      // files land ~18:00 IST, so 19:30 left most of the post-close window"). Was 16:00 IST,
-      // ~2h before NSE actually publishes; every weekday run 2026-08-24..08-28 hit a
-      // too-early 404 and got permanently misrecorded as "non-trading day" (isRunAlreadyCompleted
-      // treats status='skipped' as done forever, so nothing ever retried) — found + fixed 2026-08-30.
-      cron_restart: '30 19 * * 1-5',
-      args: 'greenfield/packages/ingestion/src/nse/run-daily-bhavcopy.ts',
-    },
-    {
-      ...gfCron,
-      name: 'gf-fii-dii-daily',
-      // 21:00 IST (15:30 UTC) — shifted with the bhavcopy fix above; was 17:30 IST
-      cron_restart: '0 21 * * 1-5',
-      args: 'greenfield/packages/ingestion/src/stage3/run-daily-fii-dii.ts',
-    },
-    {
-      ...gfCron,
-      name: 'gf-features-daily',
-      // 21:30 IST (16:00 UTC) — after bhavcopy + FII/DII land; was 18:00 IST
-      cron_restart: '30 21 * * 1-5',
-      args: 'greenfield/packages/ingestion/src/stage4/run-compute-features.ts',
-    },
-    {
-      ...gfCron,
-      name: 'gf-stage3-dq-daily',
-      // 21:40 IST (16:10 UTC) — Task 3.7's 5 checks (corporate-actions/fundamentals/fii-dii/
-      // screener-membership freshness+coverage) had evaluateAllStage3Checks/
-      // persistStage3DqResult exported but no runner anywhere — dead code from
-      // an operational standpoint. run-dq-checks.ts mirrors stage4's own runner.
-      // Was 18:10 IST — shifted with the bhavcopy fix above.
-      cron_restart: '40 21 * * 1-5',
-      args: 'greenfield/packages/ingestion/src/stage3/run-dq-checks.ts',
-    },
-    {
-      ...gfCron,
-      name: 'gf-stage4-dq-daily',
-      // 21:50 IST (16:20 UTC) — same gap, one stage over: run-dq-checks.ts existed and
-      // called evaluateAllStage4Checks correctly, just never scheduled.
-      // Was 18:20 IST — shifted with the bhavcopy fix above.
-      cron_restart: '50 21 * * 1-5',
-      args: 'greenfield/packages/ingestion/src/stage4/run-dq-checks.ts',
-    },
-    {
-      ...gfCron,
-      name: 'gf-ranker-daily',
-      // 22:00 IST (16:30 UTC) — after features; shadow period clock ticks here
-      // Was 18:30 IST — shifted with the bhavcopy fix above.
-      cron_restart: '0 22 * * 1-5',
-      args: 'greenfield/packages/ingestion/src/stage5/run-ranker.ts',
-    },
-    {
-      ...gfCron,
-      name: 'gf-divergence-daily',
-      // 22:15 IST (16:45 UTC) — after ranker; compares shadow recs against legacy
-      // unified_recommendations for the same session (descriptive only, per spec).
-      // Needs OLD_DATABASE_URL like the weekly transfer jobs below -- reads legacy.
-      // Was 18:45 IST — shifted with the bhavcopy fix above.
-      cron_restart: '15 22 * * 1-5',
-      args: 'greenfield/packages/ingestion/src/stage5/run-divergence-analysis.ts',
-      env: {
-        ...dotenvVars,
-        DATABASE_URL: dotenvVars.GREENFIELD_DATABASE_URL ?? dotenvVars.DATABASE_URL,
-        OLD_DATABASE_URL: dotenvVars.DATABASE_URL,
-      },
-    },
-    {
-      ...gfCron,
-      name: 'gf-kayal-weekly',
-      // 07:30 IST Saturday (02:00 UTC) — 1,052 screenpks × ~6s each
-      cron_restart: '30 7 * * 6',
-      kill_timeout: 7_200_000,  // 2h
-      args: 'greenfield/packages/ingestion/src/stage3/transfer-screener-membership.ts',
-      env: {
-        ...dotenvVars,
-        DATABASE_URL: dotenvVars.GREENFIELD_DATABASE_URL ?? dotenvVars.DATABASE_URL,
-        // transfer-screener-membership reads legacy screener_appearances for
-        // cross-reference; point it at the legacy bharat_intel DB.
-        OLD_DATABASE_URL: dotenvVars.DATABASE_URL,
-      },
-    },
-    {
-      ...gfCron,
-      name: 'gf-fundamentals-weekly',
-      // 09:30 IST Saturday (04:00 UTC) — ET Stats + MarketsMojo (~180 symbols)
-      cron_restart: '30 9 * * 6',
-      kill_timeout: 3_600_000,  // 1h
-      args: 'greenfield/packages/ingestion/src/stage3/transfer-fundamentals.ts',
-    },
-    // Phase 2 — analyst estimates + insider trades (one-shot Saturday morning).
-    // Both read legacy bharat_intel DB; ran after fundamentals (09:30 IST)
-    // so the connection pool is free.
-    {
-      ...gfCron,
-      name: 'gf-analyst-estimates-weekly',
-      // 11:30 IST Saturday (06:00 UTC)
-      cron_restart: '30 11 * * 6',
-      kill_timeout: 1_800_000,  // 30 min — bulk DB-to-DB copy, no live API calls
-      args: 'greenfield/packages/ingestion/src/stage3/transfer-analyst-estimates.ts',
-      env: {
-        ...dotenvVars,
-        DATABASE_URL: dotenvVars.GREENFIELD_DATABASE_URL ?? dotenvVars.DATABASE_URL,
-        OLD_DATABASE_URL: dotenvVars.DATABASE_URL,
-      },
-    },
-    {
-      ...gfCron,
-      name: 'gf-insider-activity-weekly',
-      // 12:00 IST Saturday (06:30 UTC)
-      cron_restart: '0 12 * * 6',
-      kill_timeout: 1_800_000,  // 30 min
-      args: 'greenfield/packages/ingestion/src/stage3/transfer-insider-activity.ts',
-      env: {
-        ...dotenvVars,
-        DATABASE_URL: dotenvVars.GREENFIELD_DATABASE_URL ?? dotenvVars.DATABASE_URL,
-        OLD_DATABASE_URL: dotenvVars.DATABASE_URL,
-      },
-    },
+    // The 11 gf-* cron_restart apps that used to sit here were removed from pm2, NOT
+    // deleted: greenfield/ still exists in git and nothing about the rebuild was lost.
+    // Why: measured 2026-09-10 - nothing in the live app imports greenfield/ (a grep for
+    // greenfield imports across src/ + server.ts returns zero), its own database on
+    // :5434 refuses connections, and all 11 apps were sitting at 'stopped'. A stopped
+    // cron_restart app is indistinguishable from a healthily-idle one (see CLAUDE.md),
+    // so registering 11 permanently-stopped apps only made `pm2 list` harder to read
+    // and hid that the pipeline had gone dormant. Deregistering makes the config state
+    // the truth. To revive: restore this block from git history, bring up the :5434 DB,
+    // then `pm2 start ecosystem.config.cjs`.
 
     // ------------------------------------------------------------------
     // Postgres logical backup (one-shot nightly)

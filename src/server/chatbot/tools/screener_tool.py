@@ -6,7 +6,12 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 from db_compat import connect
 
-DB_PATH = os.getenv("DB_PATH", "database.sqlite")
+# Dead SQLite-era parameter, NOT a live file path. Every chatbot tool's `_connect(db_path)`
+# ignores its argument and returns db_compat.connect() (Postgres) -- see tests/chatbot/conftest.py,
+# which documents the same no-op. Retained only because ~30 agent.py call sites and the chatbot
+# test suite still thread the argument; the old "database.sqlite" default made a decommissioned
+# file look load-bearing and nearly caused it to be treated as live (AF-20260910-14).
+DB_PATH = os.getenv("DB_PATH", "<unused:postgres-only>")
 CHROMA_DIR = os.getenv("CHROMA_PERSIST_DIR", "src/server/chatbot/chroma_store")
 
 

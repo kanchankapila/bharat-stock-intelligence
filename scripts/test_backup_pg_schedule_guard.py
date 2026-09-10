@@ -44,8 +44,12 @@ class TestBackupScheduleGuard:
 
     def test_rejects_a_fire_outside_the_5_minute_tolerance(self):
         # 2026-09-02T17:00:00Z = 22:30 IST -- 45 min before target, well outside the
-        # tight tolerance (this job's nearest neighbour, gf-divergence-daily, is only
-        # 60 min away at 22:15 IST, so the tolerance must stay well under that gap).
+        # tight tolerance. This bound was sized against pg-backup-nightly's then-nearest
+        # neighbour, gf-divergence-daily at 22:15 IST (60 min away). That job was
+        # deregistered with the rest of the gf-* pipeline on 2026-09-10, so there is now
+        # NO neighbouring cron job at all and the guard is strictly safer than when it was
+        # written -- the 60-minute figure is kept as a deliberate conservative bound, not
+        # because a 60-minute neighbour still exists.
         assert _check("2026-09-02T17:00:00") is False
 
     def test_handles_the_midnight_wraparound_correctly(self):
@@ -56,5 +60,8 @@ class TestBackupScheduleGuard:
     def test_tolerance_constant_is_narrow_relative_to_the_nearest_neighbouring_job(self):
         # Regression for the code-review finding on the TS side: a tolerance wide enough
         # to overlap with a neighbouring job's own window would let one off-schedule pm2
-        # restart pass the guard for both jobs at once. Nearest neighbour is 60 min away.
+        # restart pass the guard for both jobs at once. The 60 is the historical
+        # gf-divergence-daily gap (that job was deregistered 2026-09-10); it stays as a
+        # fixed conservative ceiling so re-adding any neighbouring cron job cannot
+        # silently widen what this test permits.
         assert backup_pg._SCHEDULE_TOLERANCE_MINUTES * 2 < 60

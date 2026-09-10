@@ -28,7 +28,6 @@ from typing import Optional
 
 from db_compat import connect, use_postgres, ConnWrapper
 
-DB_PATH = os.path.join(os.getcwd(), 'database.sqlite')
 
 PARAM_GRID = {
     'min_score':     [3, 4, 5, 6, 7],
@@ -450,8 +449,6 @@ def run_grid_search(
 
 
 def run(window_days: int = 365, dry_run: bool = False):
-    if not use_postgres() and not os.path.exists(DB_PATH):
-        raise FileNotFoundError(f"Database not found: {DB_PATH}. Run from project root.")
     conn = connect()
     try:
         run_grid_search(conn, window_days=window_days, dry_run=dry_run)

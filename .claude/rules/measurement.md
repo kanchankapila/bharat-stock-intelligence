@@ -23,9 +23,33 @@ only relocated, so a fact missing here is one line away in history, not lost).
 Quick live SQL checks, not a full harness re-run — see "Standing architecture facts" and "Open /
 pending" below for what each of these means and what's still needed.
 
-- **`unified_score` is still no-edge** and `REGIME_WEIGHTS['screener']` is still 0.0 in every
-  regime (`unified_ranker.py`, read live) — the third shrink from 2026-08-30 is holding, nobody
-  has silently reverted it.
+- **⚠ SUPERSEDED 2026-09-10 — `unified_score` is NO LONGER reading no-edge. Do not quote the
+  "5d rank IC ≈ 0.0001" figure as current; it was measured under the PRE-2026-08-30 weights.**
+  Measured live 2026-09-10 (`factor_edge.py --table unified_recommendations --scores
+  unified_score --date-col computed_at --entry open`, i.e. the panel spec's honest open-entry
+  convention, not the close-entry upper bound the automated sweep persists):
+
+      unified_score  ALL   5d   rank_IC +0.050  hit_AUC 0.521  n=35735  17 dates  LOW-DATA
+      unified_score  ALL  10d   rank_IC +0.058  hit_AUC 0.527  n=25608  12 dates  LOW-DATA
+      unified_score  ALL  21d   rank_IC +0.073  hit_AUC 0.540  n=2196    1 date   LOW-DATA
+
+  Close-entry the same day read +0.0525 @5d — consistent with this file's own "h=5 barely moves"
+  finding, so the 5d number is not a close-entry artifact. This is broadly in line with the
+  6-engine reconstruction (+0.081 @5d) that `unified_ranker.py:127` cites as the motivation for
+  zeroing `screener`, i.e. **the shrinks appear to have worked**, which is exactly what that
+  comment said could not be verified retroactively.
+  **Three things this is NOT yet, and none may be skipped before calling the ranker "working":**
+  (1) 17 dates is under `MIN_DATES_RELIABLE=20` — the verdict is LOW-DATA, not USABLE;
+  (2) **the panel is MIXED-WEIGHT** — `unified_recommendations` spans 2026-08-10..09-10 but the
+  cs/smart_money zeroing landed 2026-08-31, so only **8** of those dates were generated under
+  today's weights. A clean post-change panel needs ~12 more trading sessions (**≈2026-09-26/29**),
+  not the ~2 sessions the mixed panel needs to cross 20;
+  (3) **no cost-aware `factor_backtest.py` pass has ever been run on `unified_score`.** An IC of
+  0.05 is not money — `win_probability` had a real IC too and still failed at 83.4% turnover and
+  12.61%/yr cost drag (t=1.54). That backtest, on the clean post-2026-08-31 panel, is the number
+  that actually decides whether the ranker is tradeable.
+  `REGIME_WEIGHTS['screener']` is still 0.0 in every regime (`unified_ranker.py`, read live), as
+  are `cs` and `smart_money` — the shrinks are holding, nobody has silently reverted them.
 - **The active ensemble's CV is still 0.5305**, trained 2026-08-29 — no retrain has landed since
   (check `model_registry` before quoting a different number).
 - **`factor_edge_history`'s last full persisted sweep is 2026-08-30 — 5 days old as of today.**
