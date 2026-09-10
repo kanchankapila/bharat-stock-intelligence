@@ -1400,6 +1400,26 @@ async function processMlWeeklyRetrain(_job: Job): Promise<{ success: boolean; sk
   // for the PATH python (see finstack_cashflow_fetcher.py's docstring).
   await runPython('finstack_cashflow_fetcher.py', [], 40 * 60_000)
     .catch(e => T.fail('finstack_cashflow_fetcher', e));
+
+  // SEBI PIT insider filings -> insider_transactions. Moved off the nightly chain 2026-08-13
+  // (14m47 of the critical path to re-scrape a 90-day window that changes weekly at most), and
+  // the comment recording that move said it had gone "to the weekly retrain" -- but it was
+  // never actually added here. Live-verified 2026-09-10: NO invocation existed in queues.ts or
+  // jobs/*.jobs.ts, no `job_heartbeat` row and no `job_run_history` entry for it, and the table
+  // had frozen at transaction_date 2026-05-02 (~131 days stale, up from the 75.3d recorded when
+  // it was first flagged). It had run nowhere for 28 days. (AF-20260910-16.)
+  //
+  // Why nothing caught it: `insider-trades-recency` is deliberately warn-only because SEBI PIT
+  // filings are genuinely event-driven and sparse (data-sources.md's "sparse by nature" case).
+  // A warn-only freshness check cannot tell "sparse" from "the writer is gone", so that
+  // exemption is exactly the cover a dead fetcher needs -- which is why the durable guard here
+  // is queuesMovedStepsAreScheduled.test.ts, not a tighter threshold on the freshness check.
+  //
+  // `.catch` (not T.run) deliberately: this feeds insider_features.py's 90d rolling ratio, which
+  // degrades gracefully to the last landed window. The weekly retrain is already budget-strained
+  // (AF-20260910-13), so a slow filing feed must not fail the parent job that also trains models.
+  await runPython('insider_transactions_fetcher.py', [], 40 * 60_000)
+    .catch(e => T.fail('insider_transactions_fetcher', e));
   // Trendlyne EPS/DivYield series + DVM scores — 2 calls/stock (PE/PB dropped: MC's daily
   // fetch already covers them, fed into the same history tables — see mc_pricefeed_fetcher.py).
   // Scoped to scripts/stocklist.json (~2005 stocks), not the full tlid universe: 2005 stocks

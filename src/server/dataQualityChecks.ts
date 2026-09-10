@@ -2048,37 +2048,98 @@ export const DATA_QUALITY_CHECKS: DataQualityCheck[] = [
 
   {
     id: 'technical-signals-feature-coverage',
-    label: 'technical_signals feature columns that are 100% NULL on the last completed day',
+    label: 'technical_signals feature columns that stopped being written',
     category: 'ml',
     critical: false,
-    sql: `WITH latest AS (
-            SELECT * FROM technical_signals
-            -- date is a native DATE (2026-08-25 migration): compare it to CURRENT_DATE
-            -- directly. Casting either side to text here produces exactly
-            -- "operator does not exist: text < date".
-            WHERE date < CURRENT_DATE
-              AND date = (SELECT MAX(date) FROM technical_signals WHERE date < CURRENT_DATE)
-          ), kv AS (
-            SELECT key, COUNT(*) FILTER (WHERE value <> 'null'::jsonb) AS non_null
-            FROM latest t, LATERAL jsonb_each(to_jsonb(t))
-            GROUP BY key
+    // SELF-BASELINING against the table's own recent past (rewritten 2026-09-10, AF-20260816-11).
+    //
+    // This used to count columns that were 100% NULL on ONE anchor date and grade that scalar
+    // against a hardcoded baseline of 53 (warn>55 / fail>65). Measured live before rewriting:
+    // that quantity's own HEALTHY range is 5..50 across 12 consecutive dates -- a spread of 45
+    // against a 10-wide warn band -- because different writers land on different weekdays
+    // (`delivery_pct`/`iv_hv_ratio` populate on one date, the whole `mc_*` block on another).
+    // Every one of those 12 dates read `pass`, so the check could no longer fire at all: a
+    // regression killing 20 columns on a good day (5 -> 25) stayed invisible. That is
+    // `recurring-bugs.md`'s "a monitor that fires on EVERY run carries no information",
+    // inverted -- and the inverted form is worse, because silence reads as health.
+    //
+    // A windowed scalar was measured and REJECTED as the fix: the 10-date dead count replayed
+    // over 25 past anchors runs 4,4,4,7,8,8,7,28,...,76. It is non-stationary, because the
+    // table gains and retires writers over time, so ANY fixed threshold on it rots exactly the
+    // way the 53 did. There is no correct constant here, which is why this asks a different
+    // question instead of retuning the old one.
+    //
+    // The question that IS stable: did a column that WAS being written STOP? A column counts as
+    // newly dead only if it has at least one non-null value in the reference window and zero
+    // across the whole recent window. Measured null over 18 anchors: 0, 1, 2 (p50 = 1), and both
+    // non-zero cases were real, documented writer stops -- `pead_score` (nightly schedule retired
+    // 2026-08-20, see measurement.md) and `flyer_probability`. A deliberate retirement ages out
+    // of the reference window by itself, so its warn is transient by construction rather than a
+    // permanent siren someone learns to ignore.
+    sql: `WITH d AS (
+            SELECT date, row_number() OVER (ORDER BY date DESC) AS rn
+              FROM (
+                SELECT DISTINCT date FROM technical_signals
+                 WHERE date < CURRENT_DATE
+                 ORDER BY date DESC
+                 LIMIT 20
+              ) x
+          ),
+          recent_d AS (SELECT date FROM d WHERE rn <= 10),
+          ref_d    AS (SELECT date FROM d WHERE rn >  10),
+          rec AS (SELECT * FROM technical_signals WHERE date IN (SELECT date FROM recent_d)),
+          rf  AS (SELECT * FROM technical_signals WHERE date IN (SELECT date FROM ref_d)),
+          rk AS (
+            SELECT key, COUNT(*) FILTER (WHERE value <> 'null'::jsonb) AS nn
+              FROM rec t, LATERAL jsonb_each(to_jsonb(t)) GROUP BY key
+          ),
+          fk AS (
+            SELECT key, COUNT(*) FILTER (WHERE value <> 'null'::jsonb) AS nn
+              FROM rf t, LATERAL jsonb_each(to_jsonb(t)) GROUP BY key
+          ),
+          nd AS (
+            SELECT rk.key FROM rk JOIN fk USING (key) WHERE rk.nn = 0 AND fk.nn > 0
           )
-          SELECT (SELECT COUNT(*) FROM latest) AS grid_rows,
-                 COUNT(*) AS total_cols,
-                 COUNT(*) FILTER (WHERE non_null = 0) AS dead_cols
-          FROM kv`,
+          SELECT (SELECT COUNT(*) FROM nd)                           AS newly_dead_count,
+                 (SELECT string_agg(key, ', ' ORDER BY key) FROM nd) AS newly_dead_cols,
+                 (SELECT COUNT(*) FROM recent_d)                     AS recent_dates,
+                 (SELECT COUNT(*) FROM ref_d)                        AS ref_dates`,
     evaluate: (row) => {
-      const gridRows = Number(row?.grid_rows ?? 0);
-      const total = Number(row?.total_cols ?? 0);
-      const dead = Number(row?.dead_cols ?? 0);
-      if (gridRows === 0 || total === 0) {
-        return { status: 'fail', detail: 'No technical_signals rows on the last completed trading day — the grid-ensurer did not run.' };
+      const recentDates = Number(row?.recent_dates ?? 0);
+      const refDates    = Number(row?.ref_dates ?? 0);
+      const count       = Number(row?.newly_dead_count ?? 0);
+      const cols        = String(row?.newly_dead_cols ?? '');
+      // A young table has no past to baseline against. Reporting a regression it cannot have
+      // measured is the false positive the old fixed baseline produced; stay quiet instead.
+      if (recentDates < 10 || refDates < 5) {
+        return {
+          status: 'pass',
+          detail: `Not enough history to baseline against (${recentDates} recent / ${refDates} ` +
+                  `reference dates; need 10/5). No writer regression is measurable yet.`,
+        };
       }
-      const pct = ((dead / total) * 100).toFixed(1);
-      const detail = `${dead}/${total} feature columns (${pct}%) are 100% NULL across all ${gridRows} rows of the last completed day (baseline 53 on 2026-08-13).`;
-      if (dead > 65) return { status: 'fail', detail: `${detail} That is well above the baseline — a feature writer has stopped landing on the grid.` };
-      if (dead > 55) return { status: 'warn', detail: `${detail} Up from the baseline — check which writer regressed.` };
-      return { status: 'pass', detail };
+      if (count === 0) {
+        return {
+          status: 'pass',
+          detail: `No feature column stopped being written: everything populated in the prior ` +
+                  `${refDates} dates is still landing within the last ${recentDates}.`,
+        };
+      }
+      const detail = `${count} feature column(s) written during the prior ${refDates} dates are ` +
+                     `now 100% NULL across all of the last ${recentDates}: ${cols}.`;
+      // Measured null is 0-2, so 3+ simultaneous stops is outside anything healthy history did.
+      if (count >= 3) {
+        return {
+          status: 'fail',
+          detail: `${detail} The measured null for this check is 0-2, so three at once indicates ` +
+                  `a systemic writer regression rather than one deliberate retirement.`,
+        };
+      }
+      return {
+        status: 'warn',
+        detail: `${detail} Confirm each is a deliberate retirement -- if it is, it ages out of ` +
+                `the reference window on its own and this clears without action.`,
+      };
     },
   },
 

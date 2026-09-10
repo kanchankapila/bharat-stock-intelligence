@@ -110,12 +110,28 @@ cover classes that stayed in `recurring-bugs.md`.
   Live-verified after the fix against production (negative control, not a vacuous all-zero pass):
   AFCONS `cr_downgrades=1`, GABRIEL `cr_upgrades=1`, NAVINFLUOR `cr_upgrades=1` at the score-time
   anchor, where all three read 0 before.
-  **Separate defect found the same way, still OPEN:** `credit_rating_events` has **279 of 323 rows
-  (86%) with a blank/NULL `symbol`**, leaving only 26 distinct real symbols -- so these three
-  features are near-dead in production regardless of the skew fix. Same shape as
-  `data-sources.md`'s `trendlyne_screener_discovery.py` incident (an identifier column silently
-  holding the wrong thing). Fix the fetcher's symbol resolution before reading anything into
-  `credit_trend`'s measured edge.
+  **Separate defect found the same way, PARTIALLY FIXED 2026-09-10 (AF-20260910-15):** the
+  blank-`symbol` rate on `credit_rating_events` was 279/323 (86%) when this was written and
+  403/862 (47%) when re-measured. Root cause of one slice of it: the ISIN issuer-prefix
+  fallback keyed on `isin[:8]`, but an Indian ISIN is `INE` + a **4-char issuer code**
+  (chars 4-7) + a **2-char instrument code** (chars 8-9), so 8 characters swept in the first
+  DIGIT of the instrument code. A rated bond only matched its issuer's equity ISIN when both
+  codes shared that digit -- the 07/08 debenture families against equity '01' all start '0'
+  and worked, so the bug was invisible; the 14/16 families start '1' and could never match.
+  Widened to the real 7-char issuer: measured live, **+18 rows recovered, ZERO symbol changes,
+  and NO change in ambiguity** (2330 unambiguous / 18 ambiguous at both widths), so this was
+  strictly a recovery. Live after: blank 403 -> 385, distinct real symbols 98 -> 100.
+  **Still only 100 distinct symbols, and that is now mostly CORRECT, not a bug** -- of the 385
+  remaining blanks, 46 carry a non-INE sentinel ISIN and 38 hit issuer prefixes that map to
+  more than one listed symbol (deliberately dropped, never guessed, per `data-sources.md`);
+  the rest are genuinely unlisted issuers, trusts and InvITs. **`credit_trend`/`credit_upgraded`/
+  `credit_x_score` remain thin and still should not be read as a measured edge**, but the cause
+  is now the universe (credit ratings are issued mostly against unlisted debt), not a resolver
+  defect. Same shape as `data-sources.md`'s `trendlyne_screener_discovery.py` incident (an
+  identifier column silently holding the wrong thing), with the same lesson: the bug hid because
+  the majority case happened to work. **Tell:** a fixed-width slice of a structured identifier
+  that does not line up with the identifier's own documented field boundaries -- the docstring
+  here stated the 4+2 layout correctly one line above the code that took 8 characters.
 - **Row-position slicing on a panel built by CONCATENATING PER-SYMBOL ARRAYS is a
   cross-sectional split wearing a walk-forward's name — train and test cover the same dates,
   and nothing errors.** Third instance of this family in this file (see the `drop_duplicates()`

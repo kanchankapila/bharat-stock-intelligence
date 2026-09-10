@@ -193,6 +193,35 @@ Currently automated (9 checks): `date.today()` write-anchor, short calendar-day 
   defect is choosing a budget with no headroom, then never revisiting it when the work grows.
 ## Monitoring blind spots
 
+- **A comment saying a step "moved to" another job is a CLAIM, not a schedule — and when the move
+  never lands, the step runs nowhere and leaves no heartbeat to notice.** 2026-09-10
+  (AF-20260910-16): `insider_transactions_fetcher.py` was taken off the nightly chain on
+  2026-08-13 for costing 14m47 of the critical path, and `queues.ts` recorded
+  `insider_transactions_fetcher.py moved to the weekly retrain (processMlWeeklyRetrain)`. It was
+  never added there. Measured 28 days later: **zero** invocations anywhere in `.ts`/`.cjs`, **no
+  `job_heartbeat` row and no `job_run_history` entry at all**, and `insider_transactions` frozen
+  at 2026-05-02 (~131 days stale, roughly double the 75.3d recorded when it was first flagged).
+  **The absence of a heartbeat row is the tell, and it is easy to misread**: every other dead-job
+  class here shows a heartbeat that is stale or `failed`; a job that was never registered has no
+  row at all, so a query for stale/failed jobs returns it in neither. Ask "which scripts have no
+  heartbeat row?", not only "which heartbeats are stale?".
+  **The masking condition is worth its own line:** the matching data-quality check
+  (`insider-trades-recency`) is deliberately **warn-only** because SEBI PIT filings are genuinely
+  event-driven and sparse — `data-sources.md`'s documented "sparse by nature" exemption. A
+  warn-only freshness check structurally cannot distinguish "sparse" from "the writer is gone",
+  so every sparse-by-nature datasource is a place this class can hide indefinitely. The fix is
+  not a tighter threshold (that would re-introduce the false positives the exemption exists to
+  prevent) — it is asserting the schedule exists.
+  **Immunized** by `src/server/__tests__/queuesMovedStepsAreScheduled.test.ts`, which parses
+  `queues.ts`'s own "moved to/off" comments and asserts each named script has a real `runPython`
+  call. Two build-time lessons from it: the scheduler surface is **not** just `queues.ts`
+  (registrations are decomposed into `jobs/*.jobs.ts` — scanning only `queues.ts` produced two
+  false positives), and a `RegExp` assembled inside a **template literal** loses its backslashes
+  (`\(` becomes `(`), so it silently matches nothing and reports every case as a failure, which
+  looks exactly like a real finding. Prefer substring matching, and always include a non-vacuity
+  assertion that the scan found something.
+
+
 - **Removing a monitor does not remove its last verdict — a snapshot table keyed on the monitor's
   own id keeps that verdict readable forever, and every consumer reads it as current.**
   `data_quality_results` holds one upserted row per `check_id` and never deletes;

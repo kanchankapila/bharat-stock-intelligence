@@ -144,7 +144,7 @@ def build_bse_to_nse_map(conn) -> dict[str, dict]:
     Returns TWO layers, exact first then issuer-prefix:
 
       mapping[<full 12-char ISIN>]        -> exact equity match
-      mapping['P:' + <first 8 chars>]     -> same ISSUER, different instrument
+      mapping['P:' + <first 7 chars>]     -> same ISSUER, different instrument
 
     Why the second layer (added 2026-08-30, measured): 279 of 323 live
     credit_rating_events rows had a blank symbol, and ALL 279 carried an ISIN, so the
@@ -155,8 +155,16 @@ def build_bse_to_nse_map(conn) -> dict[str, dict]:
     the issuer's equity ISIN even when the issuer is a large NSE-listed name -- measured
     on the blank rows: instrument codes 80 (47), 70 (35), 71 (20), 82 (17), 81 (11),
     73 (11), versus code 10 (equity) on 38 of the 44 rows that DID resolve.
-    The first 8 characters are the issuer, shared across all its instruments, so matching
-    on that recovers 104 of the 279 (37%) to real listed symbols -- IIFL (20 events),
+    The first SEVEN characters are the issuer (INE + the 4-char issuer code); characters
+    8-9 are the instrument code. This keyed on `isin[:8]` until 2026-09-10, which included
+    the first DIGIT of the instrument code and so only matched when the rated instrument and
+    the equity happened to share it: the 07/08 debenture families against equity '01' all
+    start '0' and worked, while the 14/16 families ('1') could never match anything.
+    Corrected to the real 7-char issuer; measured live on 862 rows at the time, that
+    recovered 18 further rows with ZERO symbol changes and NO change in ambiguity (2330
+    unambiguous / 18 ambiguous at both widths) -- e.g. INE476A16H01 -> CANBK 'Canara Bank',
+    INE756I14EZ4 -> HDBFS 'HDB Financial Services', INE530B14FG5 -> IIFL 'IIFL Finance'.
+    Matching on the issuer recovered 104 of the original 279 (37%) to real listed symbols -- IIFL (20 events),
     HDBFS (15), NLCINDIA (6), LTF (4), SBIN (4), BANKINDIA (3), UCOBANK (3), ...
     Verified by replaying all 279 blank rows through this function: every spot-checked
     symbol matches its own headline company (INE084A08169 -> BANKINDIA "Bank Of India",
@@ -197,8 +205,8 @@ def build_bse_to_nse_map(conn) -> dict[str, dict]:
             for _, row in df.iterrows():
                 isin = str(row.get("isin", "")).strip()
                 sym  = str(row.get("symbol", "") or "").strip()
-                if len(isin) >= 8 and sym:
-                    prefix_syms.setdefault(isin[:8], set()).add(sym)
+                if len(isin) >= 7 and sym:
+                    prefix_syms.setdefault(isin[:7], set()).add(sym)
             ambiguous = 0
             for pfx, syms in prefix_syms.items():
                 if len(syms) == 1:
@@ -212,6 +220,23 @@ def build_bse_to_nse_map(conn) -> dict[str, dict]:
         print(f"[CreditRating] nse_stocks isin fallback warning: {e}", file=sys.stderr)
 
     return mapping
+
+
+def resolve_symbol_via_isin(isin: str, bse_nse_map: dict[str, dict]) -> str:
+    """Resolve an NSE symbol from an ISIN: exact equity match, then issuer prefix.
+
+    Shared by parse_announcements (write path) and the historical backfill, so a fix to the
+    prefix width can never apply to one and not the other -- the class recurring-bugs.md
+    records as "a test that reimplements the logic under test". Returns "" when unresolvable,
+    which is the correct answer for an unlisted issuer or an ambiguous prefix.
+    """
+    isin = (isin or "").strip()
+    resolved = bse_nse_map.get(isin)
+    if not resolved and len(isin) >= 7 and isin.upper().startswith("INE"):
+        # Same issuer, different instrument (a rated bond/NCD of a listed company).
+        # Guarded on the INE prefix so a sentinel ISIN can't collide into a real one.
+        resolved = bse_nse_map.get("P:" + isin[:7])
+    return resolved.get("symbol", "") if resolved else ""
 
 
 # ---------------------------------------------------------------------------
@@ -244,12 +269,7 @@ def parse_announcements(rows: list[dict], bse_nse_map: dict[str, dict]) -> list[
         # (verified live: '', 'NA', 'NOT LISTED', 'NOTLISTED', 'NOT APPLICABLE') —
         # a single exact-match check misses most of them.
         if not symbol or symbol.upper().replace(" ", "") in ("NA", "NOTLISTED", "NOTAPPLICABLE"):
-            resolved = bse_nse_map.get(isin)
-            if not resolved and len(isin) >= 8 and isin.upper().startswith("INE"):
-                # Same issuer, different instrument (a rated bond/NCD of a listed company).
-                # Guarded on the INE prefix so a sentinel ISIN can't collide into a real one.
-                resolved = bse_nse_map.get("P:" + isin[:8])
-            symbol = resolved.get("symbol", "") if resolved else ""
+            symbol = resolve_symbol_via_isin(isin, bse_nse_map)
 
         headline = f"{row.get('CompanyName', '')} — {agency} {row.get('CreditRating', '')} ({row.get('RatingAction', '')})".strip()
 

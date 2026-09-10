@@ -929,3 +929,66 @@ describe('dq-uninformative-checks', () => {
     expect(r.detail).toContain('none stuck on a single verdict either direction');
   });
 });
+
+describe('technical-signals-feature-coverage — self-baselining (AF-20260816-11)', () => {
+  const byId = (id: string) => DATA_QUALITY_CHECKS.find((c) => c.id === id)!;
+  const now = new Date('2026-09-10T12:00:00Z');
+
+  // The check used to count columns that were 100% NULL on ONE anchor date and grade that
+  // scalar against a baseline of 53 (warn>55 / fail>65). Measured live 2026-09-10, that
+  // quantity's own healthy range is 5..50 across 12 consecutive dates — a spread of 45
+  // against a 10-wide warn band — because different writers land on different weekdays.
+  // Every date read `pass`, so a regression that killed 20 columns on a good day (5 -> 25)
+  // was invisible: `recurring-bugs.md`'s "a monitor that can never fire carries no
+  // information", which is harder to notice than a noisy one because silence reads healthy.
+  //
+  // Widening to a windowed scalar was measured too and REJECTED: the K=10 dead count over 25
+  // past anchors ran 4,4,4,7,8,8,7,28,...,76 — non-stationary, because the table gains and
+  // retires writers over time, so any fixed threshold rots exactly like the 53 did.
+  //
+  // The shipped design is a SET DIFFERENCE against the table's own recent past: a column is
+  // "newly dead" only if it was written at least once in the reference window and has zero
+  // non-null values across the whole recent window. Measured null over 18 anchors: 0,1,2
+  // (p50=1), and the non-zero cases are real, documented writer stops (`pead_score`, whose
+  // nightly schedule was retired 2026-08-20, and `flyer_probability`). A retirement ages out
+  // of the reference window on its own, so the warn is transient by construction.
+
+  it('passes when no column stopped being written', () => {
+    const r = byId('technical-signals-feature-coverage').evaluate(
+      { newly_dead_count: 0, newly_dead_cols: null, recent_dates: 10, ref_dates: 10 }, now);
+    expect(r.status).toBe('pass');
+  });
+
+  it('warns and NAMES the column when one writer stops', () => {
+    const r = byId('technical-signals-feature-coverage').evaluate(
+      { newly_dead_count: 1, newly_dead_cols: 'pead_score', recent_dates: 10, ref_dates: 10 }, now);
+    expect(r.status).toBe('warn');
+    expect(r.detail).toContain('pead_score');
+  });
+
+  it('fails when several writers stop at once', () => {
+    // >=3 is outside the measured null (max 2) and means a systemic regression, not one
+    // deliberate retirement.
+    const r = byId('technical-signals-feature-coverage').evaluate(
+      { newly_dead_count: 3, newly_dead_cols: 'a, b, c', recent_dates: 10, ref_dates: 10 }, now);
+    expect(r.status).toBe('fail');
+  });
+
+  it('does not fire before enough history exists to baseline against', () => {
+    // A young table has no reference window; firing there would be the false-positive the
+    // old fixed baseline produced. Must not report a regression it cannot have measured.
+    const r = byId('technical-signals-feature-coverage').evaluate(
+      { newly_dead_count: 7, newly_dead_cols: 'a, b', recent_dates: 3, ref_dates: 0 }, now);
+    expect(r.status).toBe('pass');
+    expect(r.detail).toMatch(/history/i);
+  });
+
+  it('no longer grades against the retired fixed baseline of 53', () => {
+    // Negative control for the actual defect: 50 columns dead on a single date was a NORMAL
+    // reading (measured 2026-08-26), and the old check called it pass purely because 50 < 55.
+    // The new check must not consult a scalar dead-count baseline at all.
+    const check = byId('technical-signals-feature-coverage');
+    expect(check.sql).not.toMatch(/baseline 53/);
+    expect(JSON.stringify(check.sql)).toMatch(/newly_dead/);
+  });
+});

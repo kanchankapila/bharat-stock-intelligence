@@ -52,11 +52,17 @@ pending" below for what each of these means and what's still needed.
   are `cs` and `smart_money` — the shrinks are holding, nobody has silently reverted them.
 - **The active ensemble's CV is still 0.5305**, trained 2026-08-29 — no retrain has landed since
   (check `model_registry` before quoting a different number).
-- **`factor_edge_history`'s last full persisted sweep is 2026-08-30 — 5 days old as of today.**
-  Nobody has re-run the whole-platform harness since; individual columns below were spot-checked
-  by direct SQL instead. If you're about to make a scoring change, this is the harness to re-run
-  first, not a reason to distrust the numbers below (spot-checks match what a full sweep would
-  read for date COUNTS; they don't replace a fresh IC/AUC computation).
+- **⚠ CORRECTED 2026-09-10 — a full persisted sweep DID land 2026-09-10 11:02, so the
+  "last sweep is 2026-08-30" line below is no longer true.** `factor_edge_history` now carries
+  fresh `run_at = 2026-09-10T11:02:31` rows; check that table's own `max(run_at)` before
+  repeating any "the harness hasn't been re-run" claim from this file. **Note the entry
+  convention when you read it**: the automated sweep persists CLOSE-entry rows under
+  `table_name = '<table>'`, while open-entry rows land under `'<table>__open_entry'` — the two
+  are not comparable and this file's panel spec prefers open entry. Every close-entry IC is an
+  upper bound.
+  (Superseded text, kept for the record: "last full persisted sweep is 2026-08-30 — 5 days old
+  as of today. Nobody has re-run the whole-platform harness since; individual columns below were
+  spot-checked by direct SQL instead." That was accurate on 2026-09-04 and is not now.)
 - **Three populations cleared their date floor since they were last written up — all three are
   now gradeable and none has been graded yet. This is this file's most actionable finding today:**
   - `smart_money_score`: **21 non-zero dates** (was 14 on 2026-08-29, needed ~15-20). Past this
