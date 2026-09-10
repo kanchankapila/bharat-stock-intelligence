@@ -1661,11 +1661,25 @@ async function processQuantEodSync(job: Job): Promise<{ success: boolean; skippe
     const today = new Date().toISOString().split('T')[0];
     await quantPhase([
       // 30min budget was hit by the real scheduled run on 2026-08-07 (14% historical fail
-      // rate, 8/56 runs). Bumped defensively -- could not independently re-time this one
-      // (getAllStocks() x per-symbol NiftyTrader fetch needs the live auth token, which a
-      // standalone script outside the running server doesn't pick up the same way), so this
-      // is headroom based on the observed failure rate, not a re-measured confirmation like
-      // the other timeout fixes made this session.
+      // rate, 8/56 runs). Bumped defensively at the time -- the comment used to say it "could
+      // not independently re-time this one" because a standalone script doesn't pick up the
+      // live auth token the same way.
+      //
+      // RE-MEASURED 2026-09-10, and the numbers were available all along: quantStep's own
+      // `finally` already logs "[QUANT EOD] <label> took X.Xmin" -- to pm2 STDOUT
+      // (logs/pm2-out.log), not the structured app log, which is why nobody found them.
+      // Measured `niftytrader-scores`: 2026-09-08 23.8min, 2026-09-09 25.4min, against the
+      // 2026-09-07 failure which ran to exactly 45.0min (i.e. it hit the cap, it did not
+      // merely exceed a tight one). Typical is ~24-25min, so 45 is ~1.8x the norm and is
+      // ADEQUATE -- deliberately NOT bumped again, since the evidence says the 09-07 run was
+      // an outlier (vendor-side), not a systematically-too-small budget. Sibling for scale:
+      // `trendlyne-technicals` (45min budget) measures 5.1-5.4min typical with observed
+      // spikes to 18.1, 29.0 and 32.9min -- same vendor-variance shape, same verdict.
+      //
+      // If you are here because this failed again: read the durations out of pm2-out.log
+      // FIRST (`grep "QUANT EOD.*took" logs/pm2-out.log`) and only raise the budget if the
+      // successful runs have actually moved. Raising it on a single failure is how the
+      // no-headroom class gets re-created.
       quantStep('niftytrader-scores', 45, () => syncNiftyTraderScores()),
       quantStep('trendlyne-scores', 30, () => syncTrendlyneScores()),
       quantStep('delivery-map', 10, () => fetchDeliveryMap(today)),

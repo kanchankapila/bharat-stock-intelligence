@@ -342,6 +342,86 @@ Currently automated (9 checks): `date.today()` write-anchor, short calendar-day 
   and only showing the misses". The digest now buckets every mover by prior call (correct/wrong/neutral) and lists the top confirmed
   as-recommended calls next to the worst wrong calls. **Tell:** an accuracy report whose only named examples are failures cannot
   separate a directional bug from a low-but-real hit rate.
+## Repairs, fallbacks and skip-lists that don't do what they say
+
+- **A repair path can share the exact failure mode it repairs — and then the repair IS the crash
+  site.** The idiom for discarding a possibly-dead connection is `conn.close(); conn = connect()`.
+  But `ConnWrapper.close()` delegates to SQLAlchemy's `Connection.close()`, which issues a
+  **ROLLBACK** before returning the DBAPI connection to the pool, and on a dead socket that
+  rollback raises the very `psycopg2.OperationalError: server closed the connection unexpectedly`
+  the reconnect was written to prevent. Bit twice, six weeks apart: `strategy_optimizer.py`
+  (2026-08-29, discarding a full grid search + 888 computed overrides) and `backtest_optimizer.py`
+  (2026-09-10, AF-20260910-24). **The tell is where the output stops**: captured stdout ended on
+  the grid loop's own last print and stderr was a `do_rollback` traceback — i.e. the first
+  post-loop statement, which was the reconnect itself.
+  **The compounding failure is organisational, not technical:** the guard was written into
+  `strategy_optimizer.py` and never propagated to its sibling, which had been fixed for the
+  ORIGINAL bug *two days earlier*. One class, two files, one fixed. That is why it now lives in
+  shared **`db_compat.reconnect()`** — a guard re-typed per call site is a guard that will be
+  missing from the next call site. **Use `db_compat.reconnect(conn)` anywhere a connection sat
+  idle while a DIFFERENT handle did minutes of work; never hand-roll close-then-connect.**
+  Related, same file: a cleanup `conn.close()` inside a `finally` raises on a dead handle and a
+  raise from `finally` **REPLACES the propagating exception** — so the real failure is swallowed
+  and reported as a connection error at teardown. Wrap cleanup closes.
+
+- **A skip-list built from rows successfully WRITTEN can never contain the things that never
+  write — so those are re-fetched on every run, forever.** `mf_holdings_fetcher`'s staleness skip
+  read the symbols present in its output table; a symbol the vendor has no data for is never
+  written, so it never enters the list. Measured 2026-09-10: of the fetcher's own 1,969-symbol
+  universe, 1,403 had ever been written and **566 (29%) were re-crawled every single run** at
+  ~1s each — ~9-17min of pure waste against a 20-min budget, which is what finally tipped it into
+  `Timed out after 1200000ms` and failed `ml-weekly-retrain` (AF-20260910-28).
+  **The fix is a negative cache, and the naive version is a trap this file already names**
+  ("a THROTTLED vendor response and a genuinely-empty one must not collapse to the same value"):
+  the fetcher returned a bare `None` for HTTP!=200 (incl. 429), a clean 200 carrying no data, AND
+  any exception. Caching that indiscriminately turns a transient rate-limit into **silent
+  permanent data loss**. Classify first (`ok` / `empty` / `error`), cache ONLY `empty`, give it a
+  TTL matched to the data's real cadence (90d here, quarterly disclosures), count errors
+  separately and abort on sustained ones.
+  **Tell:** a fetcher whose runtime grows monotonically while its output row count does not, or
+  whose "no data" count is a large stable fraction of its universe. **Measure against the JOB'S
+  OWN universe, not the master list** — the first count here was 1,037 against `nse_stocks`
+  (2,366), but 397 of those have no vendor id and are never attempted; the real figure was 566.
+
+- **A `try/catch` placed around the statement that CANNOT fail, while the privileged statement
+  sits outside it, is a fallback that never fires — and its docstring will confidently promise
+  the degradation it never performs.** `scripts/install-pm2-autostart.ps1` wrapped
+  `New-ScheduledTaskTrigger -AtStartup` (constructing a trigger object, which succeeds
+  unelevated) and left `Register-ScheduledTask` — the call that actually needs elevation —
+  outside the catch. So the boot trigger was always included, every unelevated install died with
+  a raw `CimException`, and the NOTES claimed "the logon trigger alone works unelevated"
+  (AF-20260910-26). **Tell:** read which statement the guard actually encloses, then ask which
+  statement exercises the privilege/IO/network. They are frequently not the same one. And when
+  you fix it, **re-run and check the fallback path actually executes** — here it then revealed
+  that this box refuses task registration unelevated for ANY trigger set, so the promise was
+  doubly false.
+
+- **A dotted-string monkeypatch target silently stops intercepting when the package is
+  importable under two module identities — and the test then performs the real side effect
+  against production while still looking like an ordinary assertion failure.** This repo is on
+  `sys.path` twice (src/server, and the repo root), so `db_compat` and `src.server.db_compat` are
+  DIFFERENT module objects with different attributes. When a guard moved from
+  `strategy_optimizer` into shared `db_compat`, the existing
+  `monkeypatch.setattr('src.server.db_compat.connect', ...)` matched nothing, the real
+  `connect()` ran, and the test **opened a live production connection** (AF-20260910-25).
+  **Tell:** the failure repr names a REAL object where a sentinel was expected —
+  `assert <db_compat.ConnWrapper object at 0x...> is <object object at 0x...>`; the module prefix
+  in that repr tells you which identity actually loaded. **Fix:** import the module and patch the
+  OBJECT (`monkeypatch.setattr(_db_compat, 'connect', ...)`), which is immune to aliasing. Same
+  family as this file's "a test that can reach a side effect WILL perform it against production",
+  reached through module aliasing rather than a missing mock.
+
+- **"We could not measure this" is usually "we did not look in the right stream."** `queues.ts`
+  carried a comment saying a step's budget was "headroom based on the observed failure rate, not
+  a re-measured confirmation" because a standalone script can't pick up the live auth token — yet
+  `quantStep`'s own `finally` had been logging `[QUANT EOD] <label> took X.Xmin` all along, to
+  **pm2 stdout** (`logs/pm2-out.log`), not the structured app log everyone greps. The numbers
+  were there: niftytrader-scores 23.8min / 25.4min against a 45min budget, with the one failure
+  having run to exactly 45.0min (it hit the cap; it did not merely exceed a tight one) — so the
+  right action was **no change**, not a defensive bump. **Before declaring a runtime
+  unmeasurable, grep the process-manager's stdout log as well as the application log**, and
+  before raising any budget, check whether the SUCCESSFUL runs have actually moved.
+
 ## Investigating production without breaking it
 
 - **A client-side timeout does NOT cancel the server-side query — it orphans it**, and on a big table that orphan can hold a lock that blocks the whole platform for hours, which then gets misdiagnosed as a storage-engine cost problem. Diagnose lock contention (`pg_stat_activity`, `wait_event_type = 'Lock'`) before theorizing about decompression/storage cost — a query "hanging" on one specific table while others respond normally is lock contention until proven otherwise. Prevent it with a server-side `SET LOCAL statement_timeout`, not a client-side `timeout` wrapper.

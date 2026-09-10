@@ -46,6 +46,17 @@ def _load(con, table, symbol_col, date_col, scores):
         columns=["symbol", "date"] + scores,
     )
     df["date"] = pd.to_datetime(df["date"])
+    # A tz-AWARE date column (confluence_signals/technical_signals store computed_at as
+    # `timestamp with time zone`; unified_recommendations stores it as TEXT) yields
+    # datetime64[..., UTC], which cannot merge against the tz-naive DATE column coming from
+    # stock_ohlcv -- pandas raises outright, so every such table was simply ungradeable.
+    # Convert to IST before taking the calendar day: this platform's jobs run into the
+    # evening and past midnight IST, and a post-18:30-IST timestamp is the SAME trading day
+    # in IST but rolls to the NEXT day in UTC. Stripping the zone instead would silently
+    # mis-date exactly those rows.
+    if isinstance(df["date"].dtype, pd.DatetimeTZDtype):
+        df["date"] = df["date"].dt.tz_convert("Asia/Kolkata").dt.tz_localize(None)
+    df["date"] = df["date"].dt.normalize()
     for s in scores:
         df[s] = pd.to_numeric(df[s], errors="coerce")
     return df

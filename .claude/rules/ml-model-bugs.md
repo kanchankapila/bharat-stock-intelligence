@@ -83,6 +83,57 @@ cover classes that stayed in `recurring-bugs.md`.
 
 ## Models, labels & promotion gates
 
+- **A transform that selects its columns by DTYPE (`select_dtypes`, "all numeric", `df.columns`)
+  rather than by an explicit NAME LIST will silently include the LABEL columns — and a scaled
+  label is not a label.** Found 2026-09-10 (AF-20260910-18). `feature_engineering._apply_scaler`
+  did `feat.select_dtypes(include=[np.number]).columns.tolist()` and `_fit_scaler` ran PER SYMBOL
+  inside the write loop, so `feature_store`'s stored target was
+  `(raw − that symbol's median) / that symbol's IQR`. Three separate things broke, and each hid
+  the others:
+  1. **The label stopped being a return.** `dl_engine.py`'s `y5 = (target_ret_5d > 0)` therefore
+     meant *"beat its own historical median"*, not *"rose"*.
+  2. **The FEATURES stopped being comparable across symbols.** A per-symbol affine transform
+     preserves within-symbol ordering and REORDERS the cross-section — so every cross-sectional
+     reader (`ml_ensemble.py`'s wide queries, `factor_backtest.py`) was ranking incommensurable
+     units, and every factor reading sourced from the table graded the self-normalized column
+     rather than the factor (AF-20260910-20).
+  3. **`fillna(0)` in the same two functions** turned "no data" into a literal `0` — a column
+     absent for a symbol gives IQR 0, so `RobustScaler` centers at 0 and stores exactly 0. Live:
+     `roe` 77.8% zeros, `piotroski_f` 83.8%. Fill rates read 88–100% because `count()` counts
+     zeros. This is the sentinel-instead-of-NULL class in `recurring-bugs.md`, reached from the
+     preprocessing side.
+
+  **Tells, cheapest first — any one beats reading the pipeline:**
+  - **Check a column against its own construction bounds.** `rsi_14` is 0–100 by definition and
+    was stored across **−4.09M to +6.23M**. A bounded quantity outside its bounds is proof.
+  - **Check a return against the −1 floor.** `close[a]/close[b] − 1` cannot go below −1;
+    **230,572 rows did.** One `WHERE col < -1` and the diagnosis is finished.
+  - **A "normalized" store whose values are not centered near 0, or a raw store whose values
+    are** — print `min/median/max` per column before trusting either.
+
+  **Do not conclude "the labels are noisy" from a low corr against a recomputed truth.** Two
+  things will fool you at that step, and both did here on the first pass: the recomputed
+  "truth" is usually built with a DIFFERENT entry convention (this code deliberately uses
+  `pct_change(5).shift(-6)` = a T+1 entry; a naive `close[t+5]/close[t]` overlaps it by only 4
+  of 5 days AND cannot be traded), and a per-symbol affine transform depresses POOLED
+  correlation while leaving WITHIN-symbol correlation at ~1.0. **Correlate within symbol and
+  across symbols separately — the gap between the two IS the signature.** Here: within-symbol
+  0.995, pooled 0.994 against the right convention, but 0.735 against the wrong one.
+
+  **Fix shape:** name the label columns explicitly and exclude them; push normalization to the
+  consumer that actually needs it (an LSTM legitimately wants per-symbol scaling, a
+  cross-sectional ranker never does); and coerce non-finite values to NULL at the DB boundary,
+  never to 0.0. **A scaler fit inside a per-item write loop is refit on whatever window that run
+  used**, so the same row holds different values across rebuilds — within-symbol corr came back
+  0.995, not 1.000, which is itself the tell that the transform is not reproducible.
+
+  **Immunized** by `src/server/tests/test_feature_store_targets_unscaled.py`. Note what made this
+  survivable for so long: the existing suite stubbed `_apply_scaler` to the identity, so **every
+  test of that write path ran against a pipeline with the bug switched off.** A stub that
+  neutralizes the code under test is worse than no test — it reports green over the exact line
+  that is wrong.
+
+
 - **A second script that hand-rolls its own training-data SQL instead of importing the canonical feature-engineering function's OWN query silently drifts to a fraction of the real feature set, and the decline shows up as "the model is getting worse," not as an obvious bug.** `cs_ranker.py` and `exit_policy.py` both `import build_features` from `ml_ensemble.py` (correctly sharing the feature-*transform* code) but each wrote its own SELECT for the training *query* feeding it — `build_features()`'s `num(col, default)` silently defaults any column the caller's SQL didn't fetch to a constant, so neither script errored, both just trained on hollowed-out data. Measured 2026-08-30: `cs_ranker.py` used 29 of `build_features()`'s 304 raw inputs, `exit_policy.py` used 23 — and both had multiple consecutive promotion-gate REJECTIONs with declining metrics (`cs_ranker` rho trending 0.161→0.161→0.133→0.158→0.081→0.088 over 6 rejections; `exit_policy` MFE holdout MAE 4.76→4.91→5.00 across 2), which read as "the model doesn't work" rather than "the query is starving it." Fixed by extracting `ml_ensemble.py`'s own maintained ~275-column query into shared `full_feature_train_sql()`/`full_feature_score_sql()` functions (parameterized on anchor table/date column) and rewiring both scripts to use them, `load_training_data()` itself left untouched. **The fix did not uniformly help — this is the finding, not a footnote**: re-trained live 2026-08-30, `cs_ranker` improved (rho 0.0875→0.1403, still short of baseline 0.1758) but `exit_policy` got WORSE (MFE MAE 4.998→5.66, moving further from baseline 4.7642) — the extra features added noise for that specific regression target rather than signal. **Tell:** any second/third script importing a shared feature-*engineering* function should also import (or call) that module's own training-data *query*, not reimplement a narrower one by hand; a `num()`/`.get(col, default)`-style silent-default pattern anywhere in the shared function means a caller's incomplete SELECT fails silently, so diff the caller's SELECT columns against every `num('col', ...)`/`row.get('col')` call in the shared function before trusting either script's metrics. **Corollary: "give the model more features" is not a one-way lever** — verify the effect per model, not per fix, exactly as `measurement.md`'s discipline already demands for any other scoring change. **Third instance, found same day by directly checking every other `build_features` importer after this entry was written**: `online_learner.py`'s `load_recent_outcomes()` — feeding the DAILY SGD/PassiveAggressive online-learning update (`ml-daily-ops`'s `online-learner` step, not weekly), not the score-time path — had the same ~30-column hand-rolled SELECT, and its own docstring wrongly claimed it matched `ml_ensemble.load_training_data`'s columns. **A worse shape than the first two**: this file's sibling `load_pending_signals()` already correctly delegated to the canonical wide query, so the online model trained on a narrow constant-padded vector but scored on the real wide one — a genuine train/serve feature-distribution skew, not just a narrower fit. Fixed the same way. Grepping every `build_features` importer found no further instances after this fix, but nothing prevents a newly-written script from reintroducing the pattern — the tell above is the durable check, not "count now equals zero."
 
 - **Extracting a shared train query and a shared score query as SEPARATE functions does not make

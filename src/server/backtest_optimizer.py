@@ -26,7 +26,7 @@ from workflow_orchestrator import WorkflowDAG, TaskNode
 import os, sys, datetime, argparse, itertools
 from typing import Optional
 
-from db_compat import connect, use_postgres, ConnWrapper
+from db_compat import connect, reconnect, use_postgres, ConnWrapper
 
 
 PARAM_GRID = {
@@ -336,8 +336,16 @@ def run_grid_search(
     # (the crash happens AFTER the holdout run's own row is saved via `bt`, but before this
     # function's own DELETE can clean it up). Reconnecting once here, before the gap's first
     # post-loop use, covers all three DELETE call sites below plus the two reads after them.
-    conn.close()
-    conn = connect()
+    #
+    # 2026-09-10: this reconnect CRASHED, because the obvious idiom
+    # (`conn.close(); conn = connect()`) has the same failure mode as the bug it fixes --
+    # SQLAlchemy's close() issues a ROLLBACK before returning the connection to the pool, and
+    # on a dead socket that rollback raises the identical "server closed the connection
+    # unexpectedly". Live-observed: stdout ended on this loop's own print, stderr was
+    # `do_rollback`. The identical follow-up had already been applied to the sibling file
+    # strategy_optimizer.py on 2026-08-29 and never propagated here -- which is why the guard
+    # now lives in the shared `db_compat.reconnect()` rather than being re-typed per caller.
+    conn = reconnect(conn)
 
     if not results:
         print("[BtOptimizer] No results on the train window -- cannot optimise.")
@@ -379,6 +387,11 @@ def run_grid_search(
         print(f"[BtOptimizer] [DRY] Cleaning up intermediate trial rows from backtesting_runs "
               f"(run_name LIKE 'opt_%') -- scratch rows from this grid search, not persisted "
               f"config changes.")
+    # Second idle gap, same shape as the one after the grid loop: `conn` has been untouched
+    # across the whole holdout `bt.run()` above, which runs through `bt`'s OWN connection.
+    # The DELETE below is its first use afterwards, so it is exactly where a server-side
+    # close surfaces. Cheap to pre-empt; a dead connection here discards the holdout result.
+    conn = reconnect(conn)
     conn.execute("DELETE FROM backtesting_runs WHERE run_name LIKE 'opt_%'")
     conn.commit()
 
@@ -420,6 +433,12 @@ def run_grid_search(
         fold_results = _score_folds(fold_bt, best['config'], champion_cfg, folds)
     finally:
         fold_bt.close()
+    # Third idle gap: _score_folds() above re-runs every fold for BOTH the challenger and the
+    # champion through `fold_bt`'s own connection -- the longest stretch in the function -- and
+    # `conn` is untouched throughout. This DELETE is its first use afterwards, and the writes
+    # that decide promotion (_write_optimal_params) come after it, so a death here throws away
+    # the entire promotion decision.
+    conn = reconnect(conn)
     conn.execute("DELETE FROM backtesting_runs WHERE run_name LIKE 'fold_%'")
     conn.commit()
 
@@ -453,7 +472,15 @@ def run(window_days: int = 365, dry_run: bool = False):
     try:
         run_grid_search(conn, window_days=window_days, dry_run=dry_run)
     finally:
-        conn.close()
+        # A cleanup close() on an already-dead connection raises (SQLAlchemy rolls back
+        # first), and a raise from a `finally` REPLACES whatever exception was propagating --
+        # so the real failure would be swallowed and reported as a connection error at
+        # teardown. run_grid_search rebinds its own local `conn`, so this handle may also be
+        # a superseded one by now; either way we are only releasing it.
+        try:
+            conn.close()
+        except Exception as e:  # noqa: BLE001 -- must never mask the real exception
+            print(f"[BtOptimizer] cleanup close() failed (ignored): {e}", file=sys.stderr)
 
 
 if __name__ == '__main__':

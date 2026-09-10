@@ -7,8 +7,8 @@ import polars as pl
 from workflow_orchestrator import WorkflowDAG, TaskNode
 
 import sys
+import math
 import json
-import pickle
 import multiprocessing
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from datetime import datetime, timedelta
@@ -42,14 +42,12 @@ def _worker_init() -> None:
 
 import numpy as np
 import pandas as pd
-from sklearn.preprocessing import RobustScaler
 import ta
 
 from db_compat import connect, read_df, use_postgres, ConnWrapper
 from as_of import read_as_of_history, logical_write_floor
 from sqlalchemy.exc import OperationalError, PendingRollbackError, InterfaceError
 
-SCALER_PATH = Path(__file__).parent / "ml_models" / "feature_scaler_v1.pkl"
 
 # INSERT OR REPLACE → portable ON CONFLICT for feature_store (PK: symbol, date, timeframe).
 _FEATURE_STORE_CONFLICT = (
@@ -118,10 +116,55 @@ def recover_from_failed_statement(con, symbol: str, exc: Exception) -> bool:
         return False
 
 
-class FeatureEngineer:
-    def __init__(self):
-        self.scaler: Optional[RobustScaler] = None
+def _finite_only(d: dict) -> dict:
+    """Map non-finite floats to None so they reach SQL as NULL, never as a sentinel.
 
+    feature_store persists raw values as of 2026-09-10, so a construction-warmup NaN
+    (rsi_14's first 13 rows) or an inf from a near-zero denominator now arrives at the DB
+    boundary instead of being swallowed by the old `fillna(0)` inside _apply_scaler.
+    Writing 0.0 would fabricate a real-looking reading invisible to every NULL/coverage
+    check -- that is exactly how roe/trailing_pe/piotroski_f came to read 74-84% "populated"
+    while holding literal zeros. Writing NaN is worse still on Postgres, where NaN = NaN is
+    TRUE, NaN sorts HIGHEST under ORDER BY, and the IEEE `x != x` test matches nothing
+    (.claude/rules/recurring-bugs.md). NULL is the only honest value for "not computable".
+    """
+    return {
+        k: (None if isinstance(v, (float, np.floating)) and not math.isfinite(v) else v)
+        for k, v in d.items()
+    }
+
+
+def purge_orphan_feature_rows(con) -> int:
+    """Delete feature_store rows with no clean stock_ohlcv bar. Returns the row count removed.
+
+    `run_full_pipeline` upserts on (symbol, date, timeframe) and can only write dates that exist
+    as clean bars, so a row for any OTHER date survives every rebuild untouched -- forever
+    uncorrectable and silently wrong. This is `recurring-bugs.md`'s standing rule ("a table
+    written as today's full recomputation needs a purge of rows the run did not produce, not
+    just an upsert"), which had already bitten `unified_recommendations`,
+    `intraday_outcome_resolver` and `stock_event_triggers`.
+
+    Measured live 2026-09-10 after the raw rebuild (AF-20260910-18): 2,207 orphans, of which
+    **2,130 sat on 2026-08-09 -- a SUNDAY**, a day NSE never traded and for which no bar can
+    ever exist. Those were not backfillable missing data; they were rows that should never have
+    been written. The rest were computed from bars since quarantined as `is_suspect=1`, which
+    measurement.md's panel spec mandates excluding anyway.
+    """
+    cur = con.cursor()
+    cur.execute(
+        "DELETE FROM feature_store f "
+        "WHERE NOT EXISTS (SELECT 1 FROM stock_ohlcv o "
+        "                  WHERE o.symbol = f.symbol AND o.date = f.date "
+        "                    AND COALESCE(o.is_suspect, 0) = 0)"
+    )
+    removed = cur.rowcount if cur.rowcount and cur.rowcount > 0 else 0
+    con.commit()
+    if removed:
+        print(f"[FE] Purged {removed} orphan feature_store rows (no clean OHLCV bar)")
+    return removed
+
+
+class FeatureEngineer:
     def _con(self) -> ConnWrapper:
         con = connect()
         if not use_postgres():
@@ -619,26 +662,6 @@ class FeatureEngineer:
             )
         return feat
 
-    # ── Normalization ────────────────────────────────────────────────────────
-
-    def _fit_scaler(self, feat: pd.DataFrame, train_frac: float = 0.8) -> RobustScaler:
-        """Fit RobustScaler on first train_frac of dates only (no leakage)."""
-        numeric_cols = feat.select_dtypes(include=[np.number]).columns.tolist()
-        cutoff = max(1, int(len(feat) * train_frac))
-        train_slice = feat.iloc[:cutoff][numeric_cols].fillna(0)
-        scaler = RobustScaler()
-        scaler.fit(train_slice)
-        return scaler
-
-    def _apply_scaler(self, feat: pd.DataFrame, scaler: RobustScaler) -> pd.DataFrame:
-        numeric_cols = feat.select_dtypes(include=[np.number]).columns.tolist()
-        # log1p volume ratios before scaling
-        for col in ["volume_ratio_5d", "volume_ratio_20d"]:
-            if col in feat:
-                feat[col] = np.log1p(feat[col].clip(lower=0))
-        feat[numeric_cols] = scaler.transform(feat[numeric_cols].fillna(0))
-        return feat
-
     # ── Per-symbol pipeline ──────────────────────────────────────────────────
 
     def process_symbol(self, symbol: str, lookback_days: int = 504,
@@ -684,12 +707,16 @@ class FeatureEngineer:
             feat = self._merge_flow_features(feat, symbol)
             feat = self._merge_market_context(feat)
 
-            # Fit scaler on training window, apply to all
-            scaler = self._fit_scaler(feat)
-            SCALER_PATH.parent.mkdir(parents=True, exist_ok=True)
-            with open(SCALER_PATH, "wb") as f:
-                pickle.dump(scaler, f)
-            feat = self._apply_scaler(feat, scaler)
+            # feature_store persists RAW values -- no scaling here. Until 2026-09-10 a
+            # RobustScaler was fit PER SYMBOL and applied to every numeric column, targets
+            # included, so the stored label was (raw - symbol median)/symbol IQR rather than
+            # a return (230,572 live rows held target_ret_5d < -1, impossible for a close
+            # ratio) and rsi_14 -- 0-100 by construction -- spanned +/-6.2 million. Worse for
+            # the cross-sectional readers (ml_ensemble's wide queries, factor_backtest): a
+            # per-symbol affine transform reorders the cross-section, so they were ranking
+            # incommensurable units. Normalization is now the consumer's job; dl_engine, the
+            # one reader that legitimately wants per-symbol scaling for its LSTM, fits its
+            # own over FEATURES ONLY (see dl_engine._scale_features_per_symbol).
 
             # Collect all rows then write in one executemany call
             SQL = """INSERT INTO feature_store
@@ -743,7 +770,7 @@ class FeatureEngineer:
             for date, row in feat.iterrows():
                 if only_date and date.strftime("%Y-%m-%d") < only_date:
                     continue
-                d = row.to_dict()
+                d = _finite_only(row.to_dict())
                 rows_to_insert.append({
                     "sym": symbol, "dt": date.strftime("%Y-%m-%d"),
                     "ret_1d": d.get("ret_1d"), "ret_5d": d.get("ret_5d"),
@@ -865,7 +892,7 @@ class FeatureEngineer:
         for date, row in feat.iterrows():
             if only_date and date.strftime("%Y-%m-%d") < only_date:
                 continue
-            d = row.to_dict()
+            d = _finite_only(row.to_dict())
             rows_to_insert.append({
                 "sym": symbol, "dt": date.strftime("%Y-%m-%d"),
                 "ret_1d": d.get("ret_1d"), "ret_5d": d.get("ret_5d"),
@@ -977,7 +1004,6 @@ class FeatureEngineer:
             it = iter(args_list)
             i = 0
             written = 0
-            last_scaler = None
             # initializer=_worker_init: each spawned worker redirects its own stdio to
             # DEVNULL so it doesn't hold Node's inherited pipe endpoints open after kill.
             with ProcessPoolExecutor(max_workers=num_workers, initializer=_worker_init) as executor:
@@ -992,9 +1018,6 @@ class FeatureEngineer:
                         try:
                             _, feat = future.result()
                             if feat is not None:
-                                scaler = self._fit_scaler(feat)
-                                feat = self._apply_scaler(feat, scaler)
-                                last_scaler = scaler
                                 try:
                                     n = self._write_symbol_features(symbol, feat, only_date, con)
                                 except (OperationalError, PendingRollbackError, InterfaceError) as conn_err:
@@ -1037,12 +1060,13 @@ class FeatureEngineer:
                         if i % 200 == 0:
                             con.commit()
 
-            if last_scaler is not None:
-                SCALER_PATH.parent.mkdir(parents=True, exist_ok=True)
-                with open(SCALER_PATH, "wb") as f:
-                    pickle.dump(last_scaler, f)
-
             con.commit()
+            # Purge AFTER all writes: a row this run could not produce is one no future run can
+            # correct either (its date has no clean bar), so it would otherwise persist forever.
+            # Deliberately not run in --date/single-symbol mode, where "rows this run did not
+            # produce" is almost everything.
+            if not symbols and not date_filter:
+                purge_orphan_feature_rows(con)
             print(f"[FE] Pipeline complete — {written} total rows written")
             if written == 0:
                 # Every symbol either had <60 rows post-fetch, threw inside

@@ -30,7 +30,7 @@ warnings.filterwarnings('ignore')
 import numpy as np
 import pandas as pd
 
-from db_compat import connect
+from db_compat import connect, reconnect
 
 # Default weights — mirrors scoring_engine.py defaults
 DEFAULT_CATEGORY_WEIGHTS = {
@@ -487,20 +487,18 @@ class StrategyOptimizer:
         # the three write methods below to no-ops, so there is nothing real to reconnect there.
         # In production __init__ always sets self.conn, so the guard is a no-op and this always runs.
         if hasattr(self, 'conn'):
-            # 2026-08-29: close() itself can throw here -- it's the SAME stale connection this
-            # comment already identified as potentially dead, and SQLAlchemy's close() tries a
-            # rollback first, which fails with the identical "server closed the connection
-            # unexpectedly" error the reconnect exists to work around. Live-observed: this
-            # crashed the run AFTER a full grid search + 888 computed overrides, discarding all
-            # of it, because the crash sits BEFORE save_to_history/apply_to_scoring_engine below.
-            # We are discarding this connection regardless of whether close() succeeds, so a
-            # failure here is not a reason to abort -- only a failure to open the NEW one is.
-            try:
-                self.conn.close()
-            except Exception as e:
-                print(f"[Optimizer] Stale connection close() failed (expected if the server "
-                      f"already dropped it): {e}", file=sys.stderr)
-            self.conn = connect()
+            # 2026-08-29: close() itself can throw here -- it's the SAME stale connection
+            # this comment already identified as potentially dead, and SQLAlchemy's close()
+            # tries a rollback first, which fails with the identical "server closed the
+            # connection unexpectedly" error the reconnect exists to work around.
+            # Live-observed: this crashed the run AFTER a full grid search + 888 computed
+            # overrides, discarding all of it, because the crash sits BEFORE
+            # save_to_history/apply_to_scoring_engine below.
+            # 2026-09-10: the guard moved into `db_compat.reconnect()`. It had been written
+            # here and NOT propagated to the sibling backtest_optimizer.py, which then failed
+            # the same way six weeks later -- one class, two files, one fixed. Sharing the
+            # helper is what stops a third instance.
+            self.conn = reconnect(self.conn)
 
         self.save_to_history(result, overrides)
         self.apply_to_scoring_engine(result)

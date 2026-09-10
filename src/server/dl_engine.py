@@ -70,6 +70,7 @@ import numpy as np
 import pandas as pd
 
 from sklearn.metrics import roc_auc_score, accuracy_score
+from sklearn.preprocessing import RobustScaler
 
 MODEL_DIR = Path(__file__).parent / "ml_models"
 CONFIG_PATH = MODEL_DIR / "dl_model_config.json"
@@ -259,6 +260,37 @@ def _onehot_vol_regime(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
+def _scale_features_per_symbol(df: pd.DataFrame, cols: List[str],
+                               train_frac: float = 0.8) -> pd.DataFrame:
+    """RobustScale ONE symbol's feature columns, fit on its earliest train_frac of rows.
+
+    feature_store persisted per-symbol RobustScaler output until 2026-09-10; it now holds raw
+    values, so the normalization an LSTM needs moved here. Per-symbol is the right kind of
+    normalization at this layer -- each sequence is one symbol's own history, so centering on
+    that symbol's median is meaningful (unlike in ml_ensemble/factor_backtest, which compare
+    symbols against each other and were silently handed incommensurable units).
+
+    Fit on the earliest rows only so no future statistic leaks backward into the scaling, and
+    touch FEATURES ONLY. Scaling the target is precisely what made `target_ret_5d > 0` mean
+    "beat this symbol's own median 5-day return" rather than "rose".
+    """
+    present = [c for c in cols if c in df.columns]
+    if not present or len(df) < 10:
+        return df
+    # log1p the heavy-tailed volume ratios first (feature_engineering._apply_scaler used to)
+    for col in ("volume_ratio_5d", "volume_ratio_20d"):
+        if col in df.columns:
+            df[col] = np.log1p(df[col].clip(lower=0))
+    block = (df[present].astype(np.float64)
+             .replace([np.inf, -np.inf], np.nan)
+             .fillna(0.0))
+    cutoff = max(1, int(len(block) * train_frac))
+    scaler = RobustScaler()
+    scaler.fit(block.iloc[:cutoff])
+    df[present] = scaler.transform(block)
+    return df
+
+
 from dl_sequence_loader import load_sequences_bounded
 
 
@@ -295,6 +327,8 @@ def load_symbol_sequences(
     # derives target_dir from, so recomputing here is always consistent with {0,1}.
     df = df.dropna(subset=["target_ret_5d", "target_ret_15d"])
     df = df.fillna(0)
+    # feature_store now stores RAW values, so normalize here -- features only, never targets.
+    df = _scale_features_per_symbol(df, numeric_cols)
 
     # A ratio-style feature (e.g. dist_sma200_pct, pe, vwap_dist_pct) computed off a near-zero
     # denominator or an implausible bad bar (this codebase has documented cases of >100,000%

@@ -217,7 +217,24 @@ class TestPromotionGate:
 
         opt.conn = _DeadConn()
         fresh_conn = object()
-        monkeypatch.setattr('src.server.strategy_optimizer.connect', lambda: fresh_conn)
+        # 2026-09-10: the reconnect moved into the shared `db_compat.reconnect()` (the same
+        # guard had been written here and NOT propagated to backtest_optimizer.py, which then
+        # failed the identical way six weeks later), so the seam moved with it -- the call to
+        # intercept is now db_compat's OWN module-global `connect`, not the name
+        # strategy_optimizer imported.
+        #
+        # Patch the module OBJECT, not a dotted string. This package is importable under two
+        # distinct module identities -- `db_compat` (src/server is on sys.path) and
+        # `src.server.db_compat` (repo root is too) -- which are different objects with
+        # different attributes. `strategy_optimizer` resolves the top-level one, so patching
+        # the dotted `src.server.db_compat.connect` silently intercepts NOTHING: the real
+        # connect() runs and the test opens a live PRODUCTION connection while still looking
+        # like an ordinary assertion failure. Verified by the failure repr naming
+        # `db_compat.ConnWrapper`. Importing the object removes the ambiguity.
+        #
+        # The behaviour under test is unchanged: a failing close() must not cost the result.
+        import db_compat as _db_compat
+        monkeypatch.setattr(_db_compat, 'connect', lambda *a, **k: fresh_conn)
 
         opt.run(dry_run=False, apply=True)  # must not raise
 

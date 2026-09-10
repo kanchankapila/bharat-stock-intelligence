@@ -216,20 +216,41 @@ class TestFeatureClipping:
         )
 
     def test_load_symbol_sequences_leaves_ordinary_values_untouched(self):
-        """Negative control: clipping must not distort values already well within bound."""
+        """Negative control: clipping must not distort values already well within bound.
+
+        Since 2026-09-10 load_symbol_sequences ALSO RobustScales features per symbol --
+        feature_store moved to raw storage, so the normalization the LSTM needs lives here
+        now (see _scale_features_per_symbol). "Untouched by clipping" therefore means "equal
+        to the scaler's own output", not "equal to the raw input". A constant override cannot
+        express that (a constant column scales to 0 whatever the code does), so this uses a
+        varying, ordinary RSI series and reproduces the expected transform independently.
+        """
         import src.server.dl_engine as mod
 
         n = mod.SEQUENCE_LEN + 5
-        overrides = {"rsi_14": [42.5] * n}
-        fake_df = self._fake_df(n, overrides)
+        rsi = np.linspace(30.0, 70.0, n)  # ordinary values, far inside FEATURE_CLIP_BOUND
+        fake_df = self._fake_df(n, {"rsi_14": list(rsi)})
 
         with patch.object(mod, "read_df", return_value=fake_df):
             X, *_ = mod.load_symbol_sequences("FAKESYM")
 
         feat_cols = mod.FEATURE_COLS[:mod.N_FEATURES]
         rsi_idx = feat_cols.index("rsi_14")
-        assert np.allclose(X[:, :, rsi_idx], 42.5), (
-            "an ordinary in-range value must pass through clipping unchanged"
+
+        # Mirror _scale_features_per_symbol: fit on the earliest 80% of rows only.
+        cutoff = max(1, int(n * 0.8))
+        train = rsi[:cutoff]
+        iqr = np.percentile(train, 75) - np.percentile(train, 25)
+        expected_full = (rsi - np.median(train)) / iqr
+        # sequence j spans rows [j, j+seq_len); its last timestep is row j+seq_len-1
+        expected_last = expected_full[mod.SEQUENCE_LEN - 1: n - 1]
+
+        got_last = X[:, -1, rsi_idx]
+        assert got_last.shape == expected_last.shape, (
+            f"expected {expected_last.shape} sequences, got {got_last.shape}")
+        assert np.allclose(got_last, expected_last, atol=1e-5), (
+            "an ordinary in-range value must reach the model as the scaler's output, "
+            f"undistorted by clipping -- got {got_last[:3]} vs {expected_last[:3]}"
         )
 
     def test_load_inference_sequence_uses_the_same_bound_as_training(self):

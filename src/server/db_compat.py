@@ -385,6 +385,40 @@ def connect() -> ConnWrapper:
     return ConnWrapper(get_engine().connect())
 
 
+def reconnect(conn):
+    """Discard a possibly-dead connection and return a fresh one.
+
+    Use this wherever a connection has sat IDLE across a long stretch of work done through a
+    DIFFERENT handle (a grid search, a fold loop, a multi-minute backtest). Such a connection
+    gets closed server-side and `pool_pre_ping` cannot catch it -- pre_ping validates at pool
+    CHECKOUT, and this one was checked out once and never returned.
+
+    The reason this is a shared helper rather than a two-line idiom at each call site: the
+    obvious idiom (`conn.close(); conn = connect()`) has THE SAME failure mode as the problem
+    it fixes. `ConnWrapper.close()` delegates to SQLAlchemy's `Connection.close()`, which
+    issues a ROLLBACK before returning the DBAPI connection to the pool, and on a dead socket
+    that rollback raises the very "server closed the connection unexpectedly" the reconnect
+    exists to work around. That bit twice, in two files, six weeks apart:
+    `strategy_optimizer.py` (2026-08-29, after a full grid search + 888 computed overrides)
+    and `backtest_optimizer.py` (2026-09-10, at the first post-loop statement -- which WAS the
+    reconnect). The first was fixed in place; the second had been fixed for the ORIGINAL bug
+    two days earlier and never received the follow-up.
+
+    We are discarding this connection either way, so a failing `close()` is not a reason to
+    abort -- it is expected when the server already dropped it. Failing to open the NEW
+    connection IS a reason to abort, so that is deliberately not caught: swallowing it would
+    hand the caller a dead handle and move the crash somewhere less diagnosable.
+    """
+    try:
+        conn.close()
+    except Exception as e:  # noqa: BLE001 -- see docstring: discarding it regardless
+        # stderr specifically: the subprocess wrappers that run these jobs only inspect
+        # stderr, so a stdout notice here would be invisible (see recurring-bugs.md).
+        print(f"[db_compat] Stale connection close() failed (expected if the server already "
+              f"dropped it): {e}", file=_sys.stderr)
+    return connect()
+
+
 # â”€â”€â”€ Convenience helpers (open + use + close internally) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 def now_utc_iso() -> str:

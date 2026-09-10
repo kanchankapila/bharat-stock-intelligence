@@ -13,10 +13,6 @@ import pandas as pd
 import numpy as np
 import pytest
 
-# process_symbol writes the fitted scaler to SCALER_PATH; point it at a throwaway temp file
-# so the real ml_models/feature_scaler_v1.pkl is never truncated by these mock-driven tests.
-_TMP_SCALER = Path(tempfile.gettempdir()) / "test_feature_scaler_v1.pkl"
-
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", ".."))
 from pg_test_support import pg_memory_conn  # noqa: E402
 from src.server.feature_engineering import FeatureEngineer
@@ -148,14 +144,8 @@ class TestBatchWrites:
         # none of which exist in this fixture's sandbox. Stubbed like every other merge.
         fe._merge_flow_features = lambda feat, sym: feat
         fe._merge_market_context = lambda feat: feat
-        fe._fit_scaler = lambda feat, **kw: MagicMock(
-            transform=lambda X: X.values
-        )
-        fe._apply_scaler = lambda feat, scaler: feat
 
-        with patch("src.server.feature_engineering.SCALER_PATH", _TMP_SCALER), \
-             patch("pickle.dump"):  # avoid writing scaler to disk
-            result = fe.process_symbol("TEST", con=mock_con)
+        result = fe.process_symbol("TEST", con=mock_con)
 
         # con.executemany() must have been called (not con.cursor().executemany())
         assert mock_con.executemany.called, "con.executemany() should have been called at least once"
@@ -225,14 +215,8 @@ class TestBatchWrites:
         # none of which exist in this fixture's sandbox. Stubbed like every other merge.
         fe._merge_flow_features = lambda feat, sym: feat
         fe._merge_market_context = lambda feat: feat
-        fe._fit_scaler = lambda feat, **kw: MagicMock(
-            transform=lambda X: X.values
-        )
-        fe._apply_scaler = lambda feat, scaler: feat
 
-        with patch("src.server.feature_engineering.SCALER_PATH", _TMP_SCALER), \
-             patch("pickle.dump"):
-            result = fe.process_symbol("TATA", con=con)
+        result = fe.process_symbol("TATA", con=con)
 
         assert result == n_rows, f"Expected {n_rows} rows written, got {result}"
 
@@ -319,11 +303,7 @@ class TestZeroRowsGuard:
                 return fut
 
         with patch("src.server.feature_engineering.ProcessPoolExecutor", _FakeExecutor), \
-             patch("src.server.feature_engineering.as_completed", lambda fs: list(fs)), \
-             patch("src.server.feature_engineering.SCALER_PATH", _TMP_SCALER), \
-             patch("pickle.dump"):
-            fe._fit_scaler = lambda feat, **kw: MagicMock(transform=lambda X: X.values)
-            fe._apply_scaler = lambda feat, scaler: feat
+             patch("src.server.feature_engineering.as_completed", lambda fs: list(fs)):
             # Gap #4 exogenous merges need technical_signals etc.; stub so the write path
             # under test stays hermetic.
             fe._merge_flow_features = lambda feat, sym: feat
@@ -386,11 +366,7 @@ class TestRollbackAfterWriteFailure:
                 return fut
 
         with patch("src.server.feature_engineering.ProcessPoolExecutor", _FakeExecutor), \
-             patch("src.server.feature_engineering.as_completed", lambda fs: list(fs)), \
-             patch("src.server.feature_engineering.SCALER_PATH", _TMP_SCALER), \
-             patch("pickle.dump"):
-            fe._fit_scaler = lambda feat, **kw: MagicMock(transform=lambda X: X.values)
-            fe._apply_scaler = lambda feat, scaler: feat
+             patch("src.server.feature_engineering.as_completed", lambda fs: list(fs)):
             fe._merge_flow_features = lambda feat, sym: feat
             fe._merge_market_context = lambda feat: feat
             # BAD's write fails (caught + logged inside run_full_pipeline); GOOD's write must
@@ -457,11 +433,7 @@ class TestReconnectOnIdleConnectionDeath:
                 return fut
 
         with patch("src.server.feature_engineering.ProcessPoolExecutor", _FakeExecutor), \
-             patch("src.server.feature_engineering.as_completed", lambda fs: list(fs)), \
-             patch("src.server.feature_engineering.SCALER_PATH", _TMP_SCALER), \
-             patch("pickle.dump"):
-            fe._fit_scaler = lambda feat, **kw: MagicMock(transform=lambda X: X.values)
-            fe._apply_scaler = lambda feat, scaler: feat
+             patch("src.server.feature_engineering.as_completed", lambda fs: list(fs)):
             fe._merge_flow_features = lambda feat, sym: feat
             fe._merge_market_context = lambda feat: feat
             # Must not raise "wrote 0 feature rows" -- the retry on the reconnected

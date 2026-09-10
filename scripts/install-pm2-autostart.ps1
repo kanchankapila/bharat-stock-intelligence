@@ -16,8 +16,14 @@
   Idempotent: re-running replaces the existing task.
 
 .NOTES
-  Run from an elevated PowerShell if you want the boot trigger; the logon trigger alone works
-  unelevated. Verify afterwards with:
+  RUN THIS FROM AN ELEVATED POWERSHELL. Measured on this box 2026-09-10: Task Scheduler
+  refuses `Register-ScheduledTask` unelevated for ANY trigger set, not just the boot trigger,
+  so the logon-only fallback below is denied too. The fallback is still worth having (it
+  degrades with a clear message instead of a raw CimException, and works where only the boot
+  trigger is privileged), but it cannot rescue an unelevated run here. The pre-2026-09-10
+  version promised "the logon trigger alone works unelevated" and guarded the wrong statement
+  -- the try/catch wrapped the trigger CONSTRUCTION, which never throws. Verify afterwards
+  with:
       Get-ScheduledTask -TaskName 'bharat-pm2-resurrect'
   Remove with:
       Unregister-ScheduledTask -TaskName 'bharat-pm2-resurrect' -Confirm:$false
@@ -60,14 +66,15 @@ Write-Host "Command  : $command"
 
 $action = New-ScheduledTaskAction -Execute 'cmd.exe' -Argument "/c $command"
 
-$triggers = @()
-$triggers += New-ScheduledTaskTrigger -AtLogOn
-try {
-  # Boot trigger needs elevation; skip it gracefully rather than failing the whole install.
-  $triggers += New-ScheduledTaskTrigger -AtStartup
-} catch {
-  Write-Warning "Could not add the at-startup trigger (needs elevation). Logon trigger only."
-}
+$logonTrigger = New-ScheduledTaskTrigger -AtLogOn
+# 2026-09-10: the boot trigger's elevation fallback NEVER fired. It used to wrap
+# `New-ScheduledTaskTrigger -AtStartup` in a try/catch -- but constructing that trigger object
+# succeeds unelevated; it is `Register-ScheduledTask` (further down, OUTSIDE the catch) that
+# throws "Access is denied." So the script always included the boot trigger and always failed
+# unelevated with a raw CimException, while its own NOTES promised "the logon trigger alone
+# works unelevated". Measured on this box: unelevated install failed outright.
+# The retry now sits where the privilege is actually exercised.
+$triggers = @($logonTrigger, (New-ScheduledTaskTrigger -AtStartup))
 
 $settings = New-ScheduledTaskSettingsSet `
   -AllowStartIfOnBatteries `
@@ -82,10 +89,27 @@ if (Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue) {
   Unregister-ScheduledTask -TaskName $TaskName -Confirm:$false
 }
 
-Register-ScheduledTask -TaskName $TaskName -Action $action -Trigger $triggers -Settings $settings `
-  -Description 'Bring the Bharat Stock Intelligence pm2 stack back up after a reboot or resume (AF-20260910-05).' | Out-Null
+$desc = 'Bring the Bharat Stock Intelligence pm2 stack back up after a reboot or resume (AF-20260910-05).'
+$registered = $false
+try {
+  Register-ScheduledTask -TaskName $TaskName -Action $action -Trigger $triggers `
+    -Settings $settings -Description $desc -ErrorAction Stop | Out-Null
+  $registered = $true
+  $triggerNote = 'logon + startup'
+} catch {
+  # Only the STARTUP trigger needs elevation. Falling back to logon-only still covers the
+  # dominant case on a laptop that sleeps, and a partial install beats no install -- the
+  # alternative was leaving the platform with no autostart at all until someone found an
+  # admin shell.
+  Write-Warning "Could not register with the at-startup trigger (needs elevation): $($_.Exception.Message)"
+  Write-Warning "Retrying with the logon trigger only."
+  Register-ScheduledTask -TaskName $TaskName -Action $action -Trigger $logonTrigger `
+    -Settings $settings -Description $desc -ErrorAction Stop | Out-Null
+  $registered = $true
+  $triggerNote = 'logon ONLY -- re-run this script from an ELEVATED PowerShell to add the boot trigger'
+}
 
 Write-Host ""
-Write-Host "Registered '$TaskName'." -ForegroundColor Green
+Write-Host "Registered '$TaskName' ($triggerNote)." -ForegroundColor Green
 Write-Host "IMPORTANT: run 'pm2 save' whenever you change which apps are running, so the dump this task restores stays current."
 Write-Host "Test it now without rebooting:  Start-ScheduledTask -TaskName '$TaskName'"
