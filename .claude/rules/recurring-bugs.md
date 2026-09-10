@@ -214,6 +214,34 @@ Currently automated (9 checks): `date.today()` write-anchor, short calendar-day 
   stream nothing read; here the message went to the right stream and was discarded anyway because
   the *other* stream happened to be non-empty. Both produce the same end state — a failure with no
   recoverable reason — so check both directions when a job reports an error you cannot act on.
+- **A process the OS killed writes NOTHING to either stream, so a runner that builds its failure
+  message from stdout/stderr falls through to a bare magic number that reads exactly like a script
+  crash.** 2026-09-10: `[PY] exit_policy.py encountered an error ... exit code 1073807364` and
+  `ml_ensemble.py ... exit code 3221225794`, with `fullStderr` containing nothing but that same
+  sentence. Neither script had a bug — `0x40010004` is DBG_TERMINATE_PROCESS and `0xC0000142` is
+  STATUS_DLL_INIT_FAILED, i.e. Windows tearing down the process tree during a planned Windows
+  Update restart (System event 1074, TrustedInstaller, confirmed against `LastBootUpTime`).
+  **Decode the exit code before believing the script failed.** The ones seen on this box:
+  `1073807364`/`0x40010004` terminated by the OS, `3221225794`/`0xC0000142` DLL init failed (host
+  shutting down, or out of memory/desktop heap), `3221225786`/`0xC000013A` console closed/Ctrl+C,
+  `3221225477`/`0xC0000005` genuine native crash, `137` OOM-killer. `pythonRunner.describeExitCode()`
+  / `isHostTeardownExit()` now do this automatically, so the log says `HOST/OS TERMINATION: ...`.
+  **Tell:** a failure whose captured stderr *is* the "Command failed with exit code N" sentence —
+  that means both streams were empty, which a failing Python script essentially never produces
+  (it leaves a traceback). Cross-check the host's `LastBootUpTime` and System event log 1074/6008
+  before opening the script. Same family as the `stderr || stdout` and degraded-`print()`-to-stdout
+  entries above: a failure recorded with no recoverable reason.
+- **The whole platform silently stops when the host sleeps or reboots, and every heartbeat check
+  still reads "healthy" — because a job that never ran writes no failure row.** Same 2026-09-10
+  incident: pm2 has no Windows service and no scheduled task (`pm2 startup` does not support
+  Windows), so after the update restart the platform stayed down **4.4h** until a human started it,
+  and this was the *fourth-largest* such window in 14 days — nine gaps over 2h, ~40h total, against
+  a measured healthy inter-job gap of p50 0.23min / p95 5.2min / p99 14.5min. Not one existing
+  check noticed, because they all ask "did this job fail?" and never "did anything run at all?".
+  **Tell:** query the gap, not the failures — `lag(ran_at) OVER (ORDER BY ran_at)` across ALL of
+  `job_run_history`; any window with zero runs of any kind is downtime, not idleness. Immunized by
+  repo-doctor's `platform-outage-gaps` (WARN >90min, ~6x measured p99). Fix the cause with
+  `scripts/install-pm2-autostart.ps1`, and re-run `pm2 save` whenever the running app set changes.
 - **A Telegram send that treats a 429 as final silently drops the report it was sending.** Telegram's
   `sendMessage` answers `HTTP 429 {retry_after: N}` with the exact wait it wants; `telegramService.sendMarkdownMessage`
   used to log the error and report failure, so when the 2026-09-08 08:15 IST morning digest hit

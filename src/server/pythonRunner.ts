@@ -14,6 +14,47 @@ const MODULE_DIR = path.dirname(fileURLToPath(import.meta.url));
 const SCRIPT_ROOT = path.resolve(MODULE_DIR, '..', '..');
 const REPO_ROOT = SCRIPT_ROOT.replace(/[\\/]\.claude[\\/]worktrees[\\/][^\\/]+$/, '');
 
+/**
+ * Human-readable causes for abnormal process exit codes.
+ *
+ * A process killed by the OS writes NOTHING to stdout or stderr, so the `reason` built below
+ * fell through to a bare `Command failed with exit code 3221225794` -- a magic number that reads
+ * exactly like a Python crash and sends the next reader hunting a bug in the script. Live case
+ * 2026-09-10: a planned Windows Update restart (TrustedInstaller, confirmed via System event log
+ * 1074 at 02:06 IST) tore down the in-flight ml-weekly-retrain children, and the only record was
+ * `exit_policy.py encountered an error ... exit code 1073807364` /
+ * `ml_ensemble.py ... exit code 3221225794`, with `fullStderr` holding nothing but that same
+ * sentence. Same family as this file's own `err || out` fix: a failure with no recoverable reason.
+ *
+ * Windows returns NTSTATUS values as unsigned exit codes; the shutdown-related ones matter most
+ * here because they mean "the host killed this", not "the script failed".
+ */
+const ABNORMAL_EXIT_CODES: Record<number, string> = {
+  1073807364: 'DBG_TERMINATE_PROCESS (0x40010004) — the OS terminated the process, typically console/session teardown during a host shutdown or restart',
+  3221225786: 'STATUS_CONTROL_C_EXIT (0xC000013A) — the console was closed or Ctrl+C was delivered',
+  3221225794: 'STATUS_DLL_INIT_FAILED (0xC0000142) — the process could not initialize its DLLs, typically a host shutdown already in progress, or exhausted memory/desktop heap',
+  3221225781: 'STATUS_DLL_NOT_FOUND (0xC0000135) — a required DLL is missing (environment/dependency problem, not a script bug)',
+  3221225477: 'STATUS_ACCESS_VIOLATION (0xC0000005) — native crash inside a compiled extension',
+  3221225725: 'STATUS_STACK_OVERFLOW (0xC00000FD) — native stack overflow',
+  3221226356: 'STATUS_HEAP_CORRUPTION (0xC0000374) — heap corruption detected',
+  3221266689: 'STATUS_STACK_BUFFER_OVERRUN (0xC0000409) — fail-fast / stack buffer overrun',
+  137: 'SIGKILL (128+9) — killed by the OS, typically the out-of-memory killer',
+  143: 'SIGTERM (128+15) — terminated by a signal',
+};
+
+/** Codes meaning "the host/OS killed this process" — the script itself did not fail. */
+const HOST_TEARDOWN_EXIT_CODES = new Set([1073807364, 3221225786, 3221225794]);
+
+/** '' for ordinary codes (1, 2, ...) so the common failure path's message is unchanged. */
+export function describeExitCode(code: number | null | undefined): string {
+  if (code === null || code === undefined) return '';
+  return ABNORMAL_EXIT_CODES[code] ?? '';
+}
+
+export function isHostTeardownExit(code: number | null | undefined): boolean {
+  return code !== null && code !== undefined && HOST_TEARDOWN_EXIT_CODES.has(code);
+}
+
 // Limit concurrent Python subprocesses to avoid starving the Node event loop
 let _runningPython = 0;
 const _pythonQueue: Array<() => void> = [];
@@ -268,7 +309,12 @@ export async function runPython(
             // deliberate sys.exit(1) guard prints its reason, and a failing run can use either.
             const errTail = err ? err.slice(-500) : '';
             const outTail = out ? out.slice(-500) : '';
+            // Decode first: an OS-killed process has NO output at all, so without this the
+            // message is a bare magic number (see ABNORMAL_EXIT_CODES). Empty for ordinary
+            // codes like 1/2, which leaves the normal failure message byte-identical.
+            const decoded = describeExitCode(code);
             const reason = [
+              decoded && `${isHostTeardownExit(code) ? 'HOST/OS TERMINATION' : 'ABNORMAL EXIT'}: ${decoded}`,
               errTail && `stderr: ${errTail}`,
               outTail && `stdout: ${outTail}`,
             ].filter(Boolean).join('\n') || `Command failed with exit code ${code}`;

@@ -203,6 +203,35 @@ if (client) {
     } catch (e) { check(`hb-${job}`, 'db', 'WARN', `query failed: ${e.message}`); }
   }
 
+  // AF-20260910-05: the whole platform stops when the host sleeps or reboots, and NOTHING
+  // detects it -- every heartbeat/fail-rate check above reads "healthy" because a job that never
+  // ran writes no failure. There is no pm2 Windows service and no scheduled task, so pm2 does
+  // not come back until a human starts it (2026-09-10: a Windows Update restart at 02:06 IST
+  // left the platform down 4.4h; the trailing 14 days held NINE gaps over 2h, ~40h total).
+  //
+  // Threshold calibrated against the real distribution rather than guessed, per this repo's rule
+  // that a check firing on correct data stops being read: measured over 14d / 15,927 intervals,
+  // p50 = 0.23min, p95 = 5.2min, p99 = 14.5min. 90min is ~6x p99 -- it cannot fire on healthy
+  // operation, and it caught all nine real outages when backtested.
+  try {
+    const OUTAGE_MIN = 90;
+    const gaps = await q(`
+      WITH ordered AS (
+        SELECT ran_at, lag(ran_at) OVER (ORDER BY ran_at) AS prev
+        FROM job_run_history WHERE ran_at > now() - interval '7 days'
+      )
+      SELECT round((EXTRACT(EPOCH FROM (ran_at - prev))/60.0)::numeric) AS gap_min, prev, ran_at
+      FROM ordered
+      WHERE prev IS NOT NULL AND EXTRACT(EPOCH FROM (ran_at - prev))/60.0 > ${OUTAGE_MIN}
+      ORDER BY gap_min DESC LIMIT 5`);
+    check('platform-outage-gaps', 'db', gaps.length ? 'WARN' : 'PASS',
+      gaps.length
+        ? `${gaps.length} window(s) >${OUTAGE_MIN}min with NO job of any kind running (7d) — the platform was down, not idle: `
+          + gaps.map(g => `${Math.round(g.gap_min)}min (${new Date(g.prev).toISOString().slice(5, 16)}Z→${new Date(g.ran_at).toISOString().slice(5, 16)}Z)`).join('; ')
+          + ` — check host sleep/reboot + whether pm2 auto-starts (scripts/install-pm2-autostart.ps1)`
+        : `no job-run gap >${OUTAGE_MIN}min in 7d (platform ran continuously)`);
+  } catch (e) { check('platform-outage-gaps', 'db', 'WARN', e.message); }
+
   // 7d fail-rate flags (same shape the digest uses)
   try {
     const fr = await q(`SELECT job_name, COUNT(*) AS total, COUNT(*) FILTER (WHERE status <> 'success') AS fails
