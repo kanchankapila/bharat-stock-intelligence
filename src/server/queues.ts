@@ -1466,7 +1466,15 @@ async function processMlWeeklyRetrain(_job: Job): Promise<{ success: boolean; sk
   // query's row count roughly flat instead of growing every week); this bump to 60min is a
   // margin against transient contention on top of that, not a second "wait for it to keep
   // growing" deferral.
-  await T.run('exit-policy-train', () => runPython('exit_policy.py', ['--train'], 60 * 60_000));
+  // 2026-09-10: timed out at 60min again (AF-20260910-13). Per the instruction above, the
+  // script was re-timed STANDALONE before touching this number rather than bumped a fourth
+  // time: 06:04:45Z -> 06:49:54Z = 45m09s, exit 0, on 150k excursions (holdout n=12,790), with
+  // the full platform live around it. So this is contention, not capacity -- MAX_TRAINING_ROWS
+  // is holding the row count flat as intended. 90min = ~2x the measured standalone run, which
+  // covers the >1.33x contention factor the chain actually exhibits instead of the 33% margin
+  // that kept failing. Still safe per the note above: nothing wraps this processor in a
+  // chain-level budget and the worker's 6h lockDuration dwarfs it.
+  await T.run('exit-policy-train', () => runPython('exit_policy.py', ['--train'], 90 * 60_000));
   // --tune runs Optuna hyperparameter search (this is what took the model from AUC 0.70 to
   // 0.757 in the first place) — without it, every scheduled retrain silently falls back to
   // untuned defaults, which measured ~0.20 AUC worse on held-out test in one observed run.
