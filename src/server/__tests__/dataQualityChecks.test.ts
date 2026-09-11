@@ -12,8 +12,9 @@ vi.mock('../dbAsync', () => ({
 
 import {
   DATA_QUALITY_CHECKS, daysStale, tradingDaysStale, safeRatio, runDataQualityChecks,
-  getLatestDataQualityResults,
+  getLatestDataQualityResults, DQ_CHECK_CONCURRENCY,
 } from '../dataQualityChecks';
+import { dbGet } from '../dbAsync';
 
 describe('daysStale', () => {
   const now = new Date('2026-07-19T12:00:00Z');
@@ -611,6 +612,38 @@ describe('runDataQualityChecks (orchestration)', () => {
     expect(purge!.params.length).toBe(DATA_QUALITY_CHECKS.length);
     expect(purge!.params).toContain(DATA_QUALITY_CHECKS[0].id);
     expect(purge!.params).not.toContain('deploy-drift');
+  });
+
+  // 169 checks ran strictly one at a time: 45.7s warm / 93.2s cold per sweep (measured
+  // 2026-09-11), every 15 minutes. Each check is an independent pool query, so a small fixed
+  // number may run at once -- bounded so a sweep never takes a large share of the 22-connection
+  // pool the request path also uses.
+  it('runs checks concurrently, bounded by DQ_CHECK_CONCURRENCY, in registry order', async () => {
+    let inFlight = 0;
+    let peak = 0;
+    vi.mocked(dbGet).mockImplementation(async () => {
+      inFlight++;
+      peak = Math.max(peak, inFlight);
+      await new Promise(r => setTimeout(r, 2));
+      inFlight--;
+      return mockRow.current;
+    });
+    try {
+      const results = await runDataQualityChecks(new Date('2026-07-19T12:00:00Z'));
+      expect(peak).toBeGreaterThan(1);
+      expect(peak).toBeLessThanOrEqual(DQ_CHECK_CONCURRENCY);
+      expect(results.map(r => r.id)).toEqual(DATA_QUALITY_CHECKS.map(c => c.id));
+    } finally {
+      vi.mocked(dbGet).mockImplementation(async () => mockRow.current);
+    }
+  });
+
+  it('persists every check before purging orphans', async () => {
+    dbRunCalls.length = 0;
+    await runDataQualityChecks(new Date('2026-07-19T12:00:00Z'));
+    const purgeAt = dbRunCalls.findIndex(c => /DELETE FROM data_quality_results/i.test(c.sql));
+    const snapshots = dbRunCalls.slice(0, purgeAt).filter(c => /INSERT INTO data_quality_results/i.test(c.sql));
+    expect(snapshots.length).toBe(DATA_QUALITY_CHECKS.length);
   });
 });
 

@@ -131,12 +131,11 @@ describe('JOB_REGISTRY.graceMinutes consistency', () => {
     'quant-scoring': "jobName: 'quant-score-daily'",
     'signal-outcomes': "'signal-outcomes-daily'",
     'trendlyne-intraday': "'trendlyne-intraday-scan'",
-    // These 6 use the Worker-constructor variable name, not the positional job-name marker
+    // These use the Worker-constructor variable name, not the positional job-name marker
     // used elsewhere: their lockDuration sits far enough past the registration (long comment
     // blocks / a separately-constructed Worker) that it fell outside MAX_LOOKAHEAD from the
     // positional marker -- found while building this test, verified each is a unique string.
     'intraday-fetcher': 'intradayFetcherWorker = new Worker',
-    'gdelt-sentiment': 'gdeltSentimentWorker = new Worker',
     // news-sentiment moved into this group 2026-08-04 -- adding the GNews (3 cycles) + MC
     // stock-news jobs between the 'news-sentiment-refresh' marker and the Worker's
     // lockDuration pushed the distance to 5378 chars, over MAX_LOOKAHEAD (4000).

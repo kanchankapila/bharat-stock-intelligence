@@ -177,9 +177,22 @@ function assertTranslatable(sql: string): void {
 
 // translateSql() is a pure function of its input, called on every query on the hot request
 // path for SQL that is static per call site (only bound parameters vary) — cache the result
-// instead of re-running the full regex pipeline every time. Unbounded in practice: distinct
-// call-site SQL strings in this codebase number in the hundreds, not per-request.
+// instead of re-running the full regex pipeline every time.
+//
+// Bounded, because not every statement is static: bulkUpsert builds a new string for every chunk
+// row count and IN-lists vary with their length, so each run's tail chunk used to be a new entry
+// that was never evicted. Measured 2026-09-11: ~2.7MB retained heap per 30-column bulk entry (100
+// distinct tails pinned 264MB of bharat-server), against 9.5ms to translate a full 2,000-row
+// upsert uncached. Call-site SQL is far below the size cut-off; generated SQL above it is never
+// reused often enough to be worth its memory.
+const TRANSLATE_CACHE_MAX_SQL_CHARS = 16_384;
+export const TRANSLATE_CACHE_MAX_ENTRIES = 2_000;
 const translateCache = new Map<string, string>();
+
+/** Exposed for tests. */
+export function translateCacheSize(): number {
+  return translateCache.size;
+}
 
 /** Full translation: function/syntax mapping, then placeholder conversion. Memoized. */
 export function translateSql(sql: string): string {
@@ -187,7 +200,13 @@ export function translateSql(sql: string): string {
   if (cached !== undefined) return cached;
   assertTranslatable(sql);
   const out = convertPlaceholders(mapSqliteFunctions(sql));
-  translateCache.set(sql, out);
+  if (sql.length <= TRANSLATE_CACHE_MAX_SQL_CHARS) {
+    // Map iterates in insertion order, so this evicts the oldest entry.
+    if (translateCache.size >= TRANSLATE_CACHE_MAX_ENTRIES) {
+      translateCache.delete(translateCache.keys().next().value as string);
+    }
+    translateCache.set(sql, out);
+  }
   return out;
 }
 

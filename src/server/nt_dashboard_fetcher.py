@@ -245,13 +245,13 @@ def backfill_technical_signals(ts_floor: str, f: dict, con) -> None:
             nt_oi_direction      = CASE WHEN date >= ? THEN COALESCE(?, nt_oi_direction)      ELSE nt_oi_direction END,
             nt_pcr               = CASE WHEN date >= ? THEN COALESCE(?, nt_pcr)               ELSE nt_pcr END,
             nt_option_volume_log = CASE WHEN date >= ? THEN COALESCE(?, nt_option_volume_log) ELSE nt_option_volume_log END
-        WHERE symbol = ?
+        WHERE symbol = ? AND date >= ?
     """), (
         ts_floor, f.get("max_pain_dist_pct"),
         ts_floor, f.get("oi_direction"),
         ts_floor, f.get("pcr"),
         ts_floor, vol_log,
-        f["symbol"],
+        f["symbol"], ts_floor,   # bounded: older rows only took ELSE-keep yet were all rewritten
     ))
     con.commit()
 

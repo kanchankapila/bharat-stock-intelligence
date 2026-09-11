@@ -64,6 +64,15 @@ ENSEMBLE_PATH = os.path.join(MODELS_DIR, 'ensemble.pkl')
 PROMOTION_MARGIN = 0.005
 # Where this ensemble's own output lands, and therefore which factor_edge_history reading tells
 # us whether the CURRENTLY ACTIVE model has any realized forward edge worth defending.
+# 2026-09-11: flipped to the __open_entry grades (panel-spec convention: enter at d+1's
+# open — the first price actually purchasable). The close-entry rows credit the untradeable
+# overnight gap and read optimistic (measured 2026-08-22, measurement-history.md: h=1 IC
+# more than halves under open entry). unified_ranker.load_engine_edge_verdicts already
+# reads open-entry; this constant was the last gate consumer still grading on the biased
+# convention. Missing open rows for a column => live_edge_verdict returns None =>
+# "ungraded" branch => CV alone cannot promote. That is the designed conservative path,
+# NOT a regression: grade the column with `python factor_edge.py --table technical_signals
+# --scores <cols> --entry open --persist` to make it answerable.
 LIVE_EDGE_TABLE  = 'technical_signals'
 LIVE_EDGE_COLUMN = 'win_probability'
 CANDIDATE_PATH = ENSEMBLE_PATH + '.candidate'
@@ -1080,6 +1089,29 @@ def _table_columns(conn: ConnWrapper, table: str) -> list:
     return [r[1] for r in rows]
 
 
+def own_news_fallback_join(anchor: str, date_col: str) -> str:
+    """LEFT JOIN LATERAL exposing `own_news.news_30d`: the mean sentiment of the platform's own
+    tagged news (news_symbol_link -- all 21 captured sources, pre-market-hour articles included)
+    for the symbol over the 30 days BEFORE the row's date.
+
+    news_sentiment_score's primary value is the same plain mean over a 2-day window
+    (technicalSignalsService.loadRecentNewsSentiment), so this is that feature with a longer
+    memory, used ONLY where the primary is NULL. It replaces GDELT (retired 2026-09-11): GDELT
+    throttled this host and filled 0 NULL rows over the last 10 trading dates, while own news
+    covered ~80% of them. Strictly `< date`: scoring runs on the evening of the row's date, so
+    nothing later is available at serve time -- the train and score queries must see the same.
+    Every training AND scoring query uses this one definition; see test_own_news_fallback.py.
+    """
+    return f"""
+            LEFT JOIN LATERAL (
+                SELECT AVG(nsl.sentiment_score) AS news_30d
+                FROM news_symbol_link nsl
+                WHERE nsl.symbol = {anchor}.symbol
+                  AND nsl.published_at >= ({anchor}.{date_col} - interval '30 days')
+                  AND nsl.published_at < {anchor}.{date_col}
+            ) own_news ON TRUE"""
+
+
 def full_feature_train_sql(anchor: str = 'so', date_col: str = 'signal_date') -> tuple:
     """Returns (select_columns_sql, joins_sql) for the full technical/fundamental/analyst/
     proprietary-scores/macro/sector feature set this platform has accumulated on
@@ -1102,7 +1134,7 @@ def full_feature_train_sql(anchor: str = 'so', date_col: str = 'signal_date') ->
                    ts.rsi, ts.adx, ts.nifty_regime, ts.cmp, ts.sma200, ts.volume_ratio,
                    ts.fii_3d_net,
                    ts.above_sma200,
-                   COALESCE(ts.news_sentiment_score, gdelt.tone_scaled) AS news_sentiment_score,
+                   COALESCE(ts.news_sentiment_score, own_news.news_30d) AS news_sentiment_score,
                    ts.pcr_oi, ts.pcr_vol,
                    ts.fii_10d_net, ts.dii_3d_net,
                    ts.delivery_pct,
@@ -1249,13 +1281,7 @@ def full_feature_train_sql(anchor: str = 'so', date_col: str = 'signal_date') ->
             ) mp ON TRUE
             {as_of_join_sql('fundamentals_history', 'fh', A, 'symbol', D)}
             {as_of_join_sql('analyst_estimates_history', 'aeh', A, 'symbol', D)}
-            LEFT JOIN LATERAL (
-                SELECT AVG(g.avg_tone) / 10.0 AS tone_scaled
-                FROM gdelt_sentiment g
-                WHERE g.symbol = {A}.symbol
-                  AND g.date <= {A}.{D}
-                  AND g.date >= ({A}.{D} - interval '30 days')
-            ) gdelt ON TRUE
+            {own_news_fallback_join(A, D)}
             LEFT JOIN proprietary_scores_history psh_az
                    ON psh_az.symbol = {A}.symbol
                   AND psh_az.source = 'moneycontrol'
@@ -1367,7 +1393,7 @@ def full_feature_score_sql() -> tuple:
                    ts.rsi, ts.adx, ts.nifty_regime, ts.cmp, ts.sma200, ts.volume_ratio,
                    ts.fii_3d_net,
                    ts.above_sma200,
-                   ts.news_sentiment_score,
+                   COALESCE(ts.news_sentiment_score, own_news.news_30d) AS news_sentiment_score,
                    ts.pcr_oi, ts.pcr_vol,
                    ts.fii_10d_net, ts.dii_3d_net,
                    ts.delivery_pct,
@@ -1591,7 +1617,7 @@ def full_feature_score_sql() -> tuple:
                 ORDER BY sfs2.date DESC
                 LIMIT 1
             ) sfs ON true
-    """
+    """ + own_news_fallback_join('ts', 'date')
     return select_cols, joins
 
 
@@ -1639,7 +1665,7 @@ def load_training_data(label: str = 'triple_barrier') -> pd.DataFrame:
                    ts.rsi, ts.adx, ts.nifty_regime, ts.cmp, ts.sma200, ts.volume_ratio,
                    ts.fii_3d_net,
                    ts.above_sma200,
-                   COALESCE(ts.news_sentiment_score, gdelt.tone_scaled) AS news_sentiment_score,
+                   COALESCE(ts.news_sentiment_score, own_news.news_30d) AS news_sentiment_score,
                    ts.pcr_oi, ts.pcr_vol,
                    ts.fii_10d_net, ts.dii_3d_net,
                    ts.delivery_pct,
@@ -1803,18 +1829,7 @@ def load_training_data(label: str = 'triple_barrier') -> pd.DataFrame:
             ) mp ON TRUE
             {as_of_join_sql('fundamentals_history', 'fh', 'so', 'symbol', 'signal_date')}
             {as_of_join_sql('analyst_estimates_history', 'aeh', 'so', 'symbol', 'signal_date')}
-            -- GDELT tone (-100..+100, typically -10..+10) scaled to the same -1..1 range as
-            -- technical_signals.news_sentiment_score, used ONLY as a fallback (COALESCE above)
-            -- for rows that predate live finbert/RSS coverage -- gdelt_sentiment has history
-            -- back to 2015, closing the gap where those older training rows silently got a
-            -- fabricated 0 (== "confirmed neutral") instead of missing/unknown.
-            LEFT JOIN LATERAL (
-                SELECT AVG(g.avg_tone) / 10.0 AS tone_scaled
-                FROM gdelt_sentiment g
-                WHERE g.symbol = so.symbol
-                  AND g.date <= so.signal_date
-                  AND g.date >= (so.signal_date - interval '30 days')
-            ) gdelt ON TRUE
+            {own_news_fallback_join('so', 'signal_date')}
             LEFT JOIN proprietary_scores_history psh_az
                    ON psh_az.symbol = so.symbol
                   AND psh_az.source = 'moneycontrol'
@@ -2232,7 +2247,7 @@ def load_pending_signals() -> pd.DataFrame:
                    ts.rsi, ts.adx, ts.nifty_regime, ts.cmp, ts.sma200, ts.volume_ratio,
                    ts.fii_3d_net,
                    ts.above_sma200,
-                   ts.news_sentiment_score,
+                   COALESCE(ts.news_sentiment_score, own_news.news_30d) AS news_sentiment_score,
                    ts.pcr_oi, ts.pcr_vol,
                    ts.fii_10d_net, ts.dii_3d_net,
                    ts.delivery_pct,
@@ -2449,6 +2464,7 @@ def load_pending_signals() -> pd.DataFrame:
                 ORDER BY sfs2.date DESC
                 LIMIT 1
             ) sfs ON true
+            {own_news_fallback_join('ts', 'date')}
             WHERE ts.win_probability IS NULL
             -- Was `AND ts.signals_json IS NOT NULL` -- excluded every row the full-universe
             -- grid-ensurer (backfill_technical_features.py --full-today) writes, since those

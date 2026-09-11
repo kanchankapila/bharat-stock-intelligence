@@ -433,6 +433,23 @@ class TestNiftyTraderScreens:
         assert got[0]["n"] == len(msf.NT_EOD_SCREENS) * 2
 
 
+
+# 2026-09-11: NiftyTrader's Screener API rejects curl_cffi's Chrome-impersonated request (HTTP 403)
+# but answers a plain requests session with the same headers (HTTP 200, no auth needed). The EOD
+# screens had written 0 rows since 2026-09-07 while each run logged success.
+@pytest.mark.parametrize("wanted, fn_name", [
+    ({"nteod_gap_up"}, "fetch_nt_screens"),
+    ({"ntlive_eod"}, "fetch_nt_live_screener"),
+])
+def test_niftytrader_screener_calls_use_a_plain_requests_session(monkeypatch, wanted, fn_name):
+    seen = []
+    monkeypatch.setattr(msf, fn_name, lambda session, *a, **k: seen.append(session) or [])
+    monkeypatch.setattr(msf, "_nt_bearer_token", lambda: "token")
+    msf.fetch_live("2026-09-11", wanted=wanted)
+    assert len(seen) == 1
+    assert type(seen[0]) is msf.requests.Session
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
 

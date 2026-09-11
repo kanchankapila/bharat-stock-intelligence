@@ -520,6 +520,63 @@ def executemany(sql, seq_of_params):
         ).rowcount
 
 
+def executemany_batched(conn, sql, seq_of_params, page_size=1000) -> None:
+    """executemany() on `conn`'s own transaction, sending page_size statements per round trip.
+
+    ConnWrapper.executemany goes through SQLAlchemy's default psycopg2 mode: one network round
+    trip per row. Measured 2026-09-11 on this DB: a 14,000-row upsert 10.9s -> 1.7s and a
+    14,000-row UPDATE 11.3s -> 1.7s batched. Same SQL, same per-row semantics.
+
+    Returns nothing, deliberately: psycopg2's execute_batch leaves rowcount holding only the
+    LAST statement's count (1 instead of 14,000 in that measurement). That is also why this is
+    opt-in rather than an engine-wide executemany_mode -- analyst_revision.py's `n == 0`
+    matched-nothing guard and several logged counts read executemany's rowcount. Use this only
+    where the caller does not need the affected-row count. A failing statement raises the raw
+    psycopg2 error (it runs on the DBAPI cursor), not a sqlalchemy.exc wrapper.
+    """
+    from psycopg2.extras import execute_batch
+
+    params = [build_params(p) for p in seq_of_params]
+    if not params:
+        return
+    sa_conn = getattr(conn, "_conn", conn)
+    # SQLAlchemy only commits a transaction it knows it began: writing through the raw cursor
+    # on an idle connection would turn the caller's commit() into a silent no-op.
+    if not sa_conn.in_transaction():
+        sa_conn.begin()
+    # Compiling against the psycopg2 dialect renders the :pN binds as %(pN)s and escapes any
+    # literal % -- no hand-rolled placeholder rewriting.
+    stmt = str(text(translate(sql)).compile(dialect=sa_conn.dialect))
+    with _usable_after_failure(sa_conn):
+        with sa_conn.connection.dbapi_connection.cursor() as cur:
+            execute_batch(cur, stmt, params, page_size=page_size)
+
+
+def iter_rows(conn, sql, params=(), batch_size=50_000):
+    """Stream a large read on `conn` as plain tuples, batch_size rows at a time.
+
+    conn.execute(...).fetchall() materialises every row as a dict-subclass Row. Measured
+    2026-09-11 on ohlcv_quality's 2.7M-row stock_ohlcv read: 2,280MB peak Python heap that way
+    vs 380MB streamed as tuples, and ~2.5x faster. Uses a server-side cursor on the caller's own
+    connection and transaction, so it sees the caller's uncommitted writes. Do not commit on
+    that connection while iterating: the cursor is WITHOUT HOLD and dies with the transaction.
+    """
+    sa_conn = getattr(conn, "_conn", conn)
+    # Statement-level options: Connection.execution_options() mutates the connection in place in
+    # SQLAlchemy 2.0, which would turn every later statement on it into a server-side cursor
+    # (`DECLARE ... CURSOR FOR INSERT` -- a syntax error).
+    stmt = text(translate(sql)).execution_options(stream_results=True, yield_per=batch_size)
+    # The guard spans the iteration: with a server-side cursor a statement can fail at FETCH
+    # time (row N), and an aborted transaction left behind poisons every later statement.
+    with _usable_after_failure(sa_conn):
+        result = sa_conn.execute(stmt, build_params(params))
+        try:
+            for row in result:
+                yield tuple(row)
+        finally:
+            result.close()
+
+
 def read_df(sql, params=()):
     """pandas.read_sql wrapper using the active engine + translator."""
     with get_engine().connect() as conn:

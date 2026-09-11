@@ -51,7 +51,10 @@ class TestMfHoldingsFetcherLiveDataSource:
 
         session = requests.Session()
         session.headers.update(mhf.HEADERS)
-        result = mhf.fetch_mf_holding(REAL_SYMBOL, company_id, session)
+        # Returns (verdict, payload) since 2026-09-10 (d2e0be0b): a bare Optional collapsed a
+        # throttle into "no data". This gated test was never updated, so it rotted until run.
+        verdict, result = mhf.fetch_mf_holding(REAL_SYMBOL, company_id, session)
+        assert verdict == mhf.VERDICT_OK, f"fetch_mf_holding verdict={verdict!r} for {REAL_SYMBOL}"
         assert result is not None, (
             f"fetch_mf_holding returned None for {REAL_SYMBOL} — either the endpoint changed "
             f"shape again or companyId={company_id} is stale"
@@ -66,8 +69,9 @@ class TestMfHoldingsFetcherLiveDataSource:
         company_id = company_map.get(REAL_SYMBOL)
         session = requests.Session()
         session.headers.update(mhf.HEADERS)
-        result = mhf.fetch_mf_holding(REAL_SYMBOL, company_id, session)
-        assert result is not None, f"fetch_mf_holding returned None for {REAL_SYMBOL}"
+        verdict, result = mhf.fetch_mf_holding(REAL_SYMBOL, company_id, session)
+        assert verdict == mhf.VERDICT_OK and result is not None, \
+            f"fetch_mf_holding verdict={verdict!r} for {REAL_SYMBOL}"
 
         conn = _make_test_conn()
         today = date.today().isoformat()

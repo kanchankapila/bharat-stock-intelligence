@@ -7,6 +7,7 @@ import { dbAll, dbRun } from "./dbAsync";
 import { bulkUpsert, rowGroups } from "./dbBulk";
 import { isMarketOpen } from "./marketStatusService";
 import { persistIntradayBreadth } from "./intradayBreadth";
+import { yahooQuoteUrl } from "./yahooQuoteUrl";
 
 // ─── Symbol & name resolution ─────────────────────────────────────────────────
 
@@ -129,7 +130,6 @@ async function fetchBatchYahooFinance(
   symbols: string[],
 ): Promise<Map<string, MarketData>> {
   const session = await ensureYahooFinanceSession();
-  const crumbParam = session ? `&crumb=${session.crumb}` : '';
   const requestHeaders: Record<string, string> = {
     "User-Agent":
       "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
@@ -139,12 +139,13 @@ async function fetchBatchYahooFinance(
     requestHeaders["Cookie"] = session.cookie;
   }
 
-  const yfSymbols = symbols.map((s) => `${s}.NS`).join(",");
-  const url =
-    `https://query2.finance.yahoo.com/v7/finance/quote?symbols=${yfSymbols}${crumbParam}` +
-    `&fields=regularMarketPrice,regularMarketChange,regularMarketChangePercent,` +
-    `regularMarketVolume,regularMarketDayHigh,regularMarketDayLow,` +
-    `regularMarketOpen,regularMarketPreviousClose,fiftyTwoWeekHigh,fiftyTwoWeekLow`;
+  const url = yahooQuoteUrl(symbols, {
+    crumb: session?.crumb,
+    fields:
+      'regularMarketPrice,regularMarketChange,regularMarketChangePercent,' +
+      'regularMarketVolume,regularMarketDayHigh,regularMarketDayLow,' +
+      'regularMarketOpen,regularMarketPreviousClose,fiftyTwoWeekHigh,fiftyTwoWeekLow',
+  });
 
   const response = await fetchWithTimeout(url, {
     headers: requestHeaders,

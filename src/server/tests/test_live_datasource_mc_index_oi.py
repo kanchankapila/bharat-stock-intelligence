@@ -63,7 +63,15 @@ class TestMcIndexOiLiveDataSource:
         near_expiry = mio._near_term_expiries(expiries, n=1)[0]
 
         import datetime
-        today = datetime.date.today().isoformat()
+        import urllib.parse
+        # Request the session MC actually serves. During market hours its freshest OI block is
+        # T-1, and _fetch_and_store() deliberately writes NOTHING for a stale block whose
+        # session is already stored (the 2026-08-25 backdating fix) -- so asking for today's
+        # date made this test fail intraday while the fetcher behaved exactly as designed.
+        raw = mio._get(mio.OI_URL.format(sc_id=urllib.parse.quote(REAL_SC_ID, safe=";"),
+                                         expiry=near_expiry))
+        served = sorted(((raw.get("data") or {}).get("results") or {}).keys())
+        today = served[-1] if served else datetime.date.today().isoformat()
         fetched_at = datetime.datetime.utcnow().isoformat()
 
         cap = _CaptureDB()

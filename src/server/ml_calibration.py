@@ -20,7 +20,7 @@ from workflow_orchestrator import WorkflowDAG, TaskNode
 import datetime as _dt
 import math
 
-from db_compat import connect, ConnWrapper
+from db_compat import connect, ConnWrapper, executemany_batched
 
 
 def count_episodes(days, gap_days: int = 5) -> int:
@@ -109,24 +109,36 @@ def recalibrate_win_probabilities(conn: ConnWrapper, min_samples: int = 200,
                              'used': 'regime' if qualifies else 'global'}
 
     sigs = conn.execute(
-        "SELECT symbol, date, nifty_regime, win_probability FROM technical_signals "
+        "SELECT symbol, date, nifty_regime, win_probability, calibrated_win_probability "
+        "FROM technical_signals "
         "WHERE win_probability IS NOT NULL AND win_probability <> 0.5"   # skip unscored 0.5 defaults
     ).fetchall()
     updated = 0
+    changes = []
     for s in sigs:
         p = float(s['win_probability'])
         if math.isnan(p):
             continue
         ir = regime_cal.get(s['nifty_regime'], global_ir)
-        conn.execute(
-            "UPDATE technical_signals SET calibrated_win_probability = ? WHERE symbol = ? AND date = ?",
-            (calibrate(ir, p), s['symbol'], s['date']),
-        )
+        new = calibrate(ir, p)
         updated += 1
+        # This re-fits nightly over every scored row in history, and an UPDATE to an identical
+        # value still writes a new tuple: measured 2026-09-11, 115,284 rewrites of which 36,485
+        # (31.6%) changed value. Send only the changes, batched (one round trip per row was
+        # 168s of the step against 83s batched, before this filter).
+        old = s['calibrated_win_probability']
+        if old is None or not math.isclose(float(old), new, rel_tol=0, abs_tol=1e-12):
+            changes.append((new, s['symbol'], s['date']))
+    executemany_batched(
+        conn,
+        "UPDATE technical_signals SET calibrated_win_probability = ? WHERE symbol = ? AND date = ?",
+        changes,
+    )
     conn.commit()
     for reg, m in regimes_meta.items():
         print(f"[Calibration] regime={reg} n={m['n']} days={m['distinct_days']} ep={m['episodes']} -> {m['used']}")
-    print(f"[Calibration] fit on {len(rows)} WIN/LOSS signals; recalibrated {updated} rows.")
+    print(f"[Calibration] fit on {len(rows)} WIN/LOSS signals; recalibrated {updated} rows "
+          f"({len(changes)} changed value and were written).")
     return {'fit': True, 'n': len(rows), 'updated': updated, 'regimes': regimes_meta}
 
 

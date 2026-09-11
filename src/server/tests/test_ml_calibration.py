@@ -101,6 +101,42 @@ def test_recalibrate_writes_compressed_probabilities():
     assert cal_hi < 0.8
 
 
+def test_recalibrate_rewrites_only_rows_whose_value_changes():
+    # The job re-fits nightly and used to rewrite EVERY scored row in history: measured
+    # 2026-09-11, 115,284 rewrites of which only 36,485 (31.6%) changed value. An UPDATE to an
+    # identical value still writes a new tuple, which xmin exposes.
+    conn = make_db()
+    # Production's column is double precision; float4 REAL would never compare equal.
+    conn.execute("ALTER TABLE technical_signals ALTER COLUMN calibrated_win_probability TYPE DOUBLE PRECISION")
+    conn.execute("ALTER TABLE technical_signals ALTER COLUMN win_probability TYPE DOUBLE PRECISION")
+    for p, wins in [(0.2, 20), (0.8, 60)]:
+        for i in range(100):
+            sym, day = f"S{p}_{i}", f"2026-01-{(i % 28) + 1:02d}"
+            conn.execute("INSERT INTO technical_signals (symbol,date,win_probability) VALUES (?,?,?)", (sym, day, p))
+            conn.execute("INSERT INTO signal_outcomes (symbol,signal_date,horizon_days,outcome) VALUES (?,?,5,?)",
+                         (sym, day, 'WIN' if i < wins else 'LOSS'))
+    # Scored but not yet resolved: calibrated by the fit without being part of it.
+    conn.execute("INSERT INTO technical_signals (symbol,date,win_probability) VALUES ('NEW','2026-02-02',0.2)")
+    conn.commit()
+    recalibrate_win_probabilities(conn, min_samples=50)
+
+    def versions():
+        return {(r[0], r[1]): r[2] for r in conn.execute(
+            "SELECT symbol, date::text, xmin::text FROM technical_signals").fetchall()}
+
+    before = versions()
+    recalibrate_win_probabilities(conn, min_samples=50)
+    assert versions() == before  # same data, same fit: nothing rewritten
+
+    conn.execute("UPDATE technical_signals SET win_probability = 0.8 WHERE symbol = 'NEW'")
+    conn.commit()
+    before = versions()
+    res = recalibrate_win_probabilities(conn, min_samples=50)
+    after = versions()
+    assert {k for k in before if before[k] != after[k]} == {('NEW', '2026-02-02')}
+    assert res['updated'] == 201
+
+
 def test_recalibrate_skips_when_insufficient_data():
     conn = make_db()
     conn.execute("INSERT INTO technical_signals (symbol,date,win_probability) VALUES ('A','2026-01-01',0.7)")

@@ -8406,3 +8406,86 @@ tsc clean; vitest **1224 passed**; pytest **2466 passed / 249 skipped, 0 failed*
   Drop it once 2.30.0 has run cleanly for a few days: `docker volume rm bharat_pgdata_pre_ts2_30_0_20260911`
   (the vhdx will not shrink on its own, but Docker reuses the freed space).
 - Checks: tsc 0, vitest 1,266 passed, pytest 2,614 passed (all against the upgraded server).
+
+## 2026-09-11 (performance sweep) — memory ceilings that actually work, write amplification, parallel DQ (AF-20260911-10..13)
+
+User request: review the whole codebase for performance, controllable memory leaks, infra resource
+use and parallelism, then fix what is found. Driven through the superpowers workflow
+(systematic-debugging → parallel read-only sweep agents → TDD per fix → code review). Every fix
+below has a live before/after; timings on production data were taken in ROLLED-BACK transactions.
+Coordinated with peer session -50 (TimescaleDB 2.30 upgrade, dl_sequence_loader max_in_flight,
+registerJob Guard 0 — none of its files touched here).
+
+### Shipped (each test-first, negative-controlled)
+
+| Area | Before | After | How measured |
+|---|---|---|---|
+| runPython children memory | unbounded; dl_trainer hit 38-52.7GB commit, killed the WSL2 VM 3x | Job Object ceiling on the whole process tree, default 20GB observe-first (review: no heavy job's peak measured yet), `peakMemMb` logged on every path | real interpreters: 1000MB alloc under 400MB ceiling → MemoryError at 407MB |
+| Python services memory | pm2 watched 1MB launchers; real 2.0-2.6GB each, no ceiling | same Job Object ceiling via `ecosystem.config.cjs` `pyService` | pm2 jlist vs Win32_Process private bytes |
+| `translateSql` memo cache | unbounded, ~2.7MB retained per bulk-upsert entry | not cached >16KB SQL, FIFO cap 2,000 | heap delta over 100 distinct tails: +264MB |
+| nightly job digest | schedule deleted on every boot since 09-02 (same-queue registration) | own queue | Redis: only the morning repeatable existed |
+| `ml_calibration` write | 168.1s, 115,284 row-at-a-time UPDATEs | 41.4s whole step; only the 36,485 changed rows, batched | rolled-back live timing |
+| DQ watchdog sweep (every 15 min) | 45.7s warm / 93.2s cold, sequential; `date::text` filters scanned all 42 `stock_ohlcv` chunks | 17.7s, 4-way bounded concurrency; SQL 3.38s → 0.67s, identical results on all 10 changed checks | live run of `runDataQualityChecks` |
+| `ohlcv_quality` (2-3×/day) | 45.7s, 2,974MB peak, bars fetched twice as Row objects | 8.5s, 1,007MB; identical flags (11/91/386) | Job Object peak record |
+| 9 CASE-WHEN fetchers | 115,629 tuples / 216MB WAL per run each | 2,535 tuples / 6MB | pg_current_wal_insert_lsn delta, rolled back |
+| `feature_engineering` global series | 10 identical market-wide reads per symbol (~24k/run) | once per process | 25 symbols: identical frames, 19.9s → 10.1s |
+| `outcome_resolver` caches | grew for the life of ml-api/alphaquant | reset per resolve pass | test |
+
+New shared helpers: `db_compat.executemany_batched` (opt-in; returns no rowcount), `db_compat.iter_rows`
+(streamed tuples). Static guards: `repeatableQueuesUnique.test.ts`, `dataQualityChecksSargable.test.ts`,
+`test_case_update_date_bounded.py`.
+
+### Deliberately NOT done, and why
+- **Engine-wide `executemany_mode='values_plus_batch'`** (6.5× on a 14k-row benchmark): rowcount becomes
+  the last statement's only, and `analyst_revision.py`'s `n == 0` matched-nothing guard plus 8 logged counts
+  read it. Opt-in helper instead; adopt it per call site where the count is unused.
+- **`mf_holdings` / `mf_stock_holdings` whole-history `ELSE NULL` updates**: bounding them would change what
+  they write (the NULLing of older rows), which is a data decision, not a performance one.
+- **bharat-server launch mode** (pm2 watches the tsx wrapper): V8's default 4,288MB heap limit already caps
+  the real node process, so re-plumbing the production launch has no measured gain.
+- **Thread caps (OMP/MKL) on the Python services**: 16 logical cores, no measured contention — a cap would be
+  a guess. **pm2-out.log rotation** (107MB): not urgent.
+- **Chatbot `MemorySaver`** and **`/api/export-picks` outside runPython**: zero requests in the logs since
+  2026-08-27 → no measured cost; recorded as AF-20260911-12/-13.
+- DB-side query stats: `pg_stat_statements` and cumulative table stats were wiped by the 09-11 crash/upgrade,
+  so this pass found hot SQL from job history, logs and code instead. Re-check `pg_stat_statements` after a
+  full nightly cycle.
+
+### Same session, part 2 — market-hours live_datasource run, GDELT → own news, review fixes
+
+**Live datasource run (user request, 14:16 IST, market open).** Python: 240 passed / 5 failed of 249
+selected; TS `live` project: 36 passed / 2 failed. Every failure root-caused:
+- **NiftyTrader screeners (AF-20260911-10, production outage):** curl_cffi Chrome impersonation now 403s;
+  plain session 200. EOD screens dark since 09-07, live screener (15k rows/day) since 09-08. Fixed.
+- **Yahoo live quotes (AF-20260911-11, production bug):** unencoded `&` tickers truncated batches — 287
+  symbols incl. RELIANCE never quoted. Fixed; 2,144 → 2,413 quotes per refresh.
+- **MF holdings live test:** stale since `d2e0be0b` changed `fetch_mf_holding` to return (verdict, payload);
+  production `main()` already unpacks it. Test updated.
+- **MC index OI live test:** intraday timing — MC serves T-1 OI during market hours and the fetcher
+  deliberately skips a stale block (2026-08-25 backdating fix). Test now requests the session MC serves.
+- **GDELT:** HTTP 429 on 2 of 3 requests at compliant 8s spacing (IP-level throttle).
+
+**GDELT retired, own news integrated (user direction: "if GDELT not bringing add-on replace it … integrate
+pre market and other news sources").** Measured before acting: the daily job ran ~42 min and wrote 2-14 of
+150 companies while logging success; over the last 10 trading dates GDELT filled **0** rows (every symbol it
+covered already had a primary score). Own news (`news_symbol_link`, 21 sources incl. ~1,100 pre-open
+articles/week) had tagged articles in the prior 30 days for ~80% of NULL-news rows. Changes:
+- Job unscheduled (repeatable removed from Redis on boot), worker/processor, jobRegistry entry, DQ
+  freshness check and cron-mirror test entries removed; heartbeat row added to `decommissionedJobs`;
+  GDELT live test gated behind `RUN_RETIRED_SOURCE_TESTS=1`. `gdeltService.ts` + manual script kept.
+- `ml_ensemble.own_news_fallback_join()` — one definition used by **all four** feature queries (both
+  training AND both scoring). Before this, only training had a fallback: pre-existing train/serve skew.
+  Window `[date − 30d, date)` — strictly before the row's date, which is what scoring (evening of the date)
+  can see. Measured on the ACTIVE model, 2026-09-10 universe: 368/2,195 rows (16.8%) filled, mean |ΔP|
+  ≈ 0.0000 (max 0.0062), Spearman 0.9999, 0 rows cross the 0.52 threshold — no live-score shock; the value
+  arrives at the next retrain, graded by the promotion gate. All four queries executed on production.
+- Market-level PRE_MARKET report sentiment NOT added to the model: a new feature → EVIDENCE lane (AF-20260911-13d).
+
+**Code review (superpowers:requesting-code-review) — verdict "with fixes", all addressed:** memory ceiling
+made observe-first at 20GB and `peakMemMb` logged on every path (AF-20260911-12 to tighten); descendants
+no longer inherit the guard env; MEMORY CEILING wording only when the peak reached it (Windows counts a
+refused commit in the job peak — 3,011MB recorded for a refused 3,000MB block); `iter_rows` guard spans
+fetch-time errors (the first version of that test passed vacuously because `ORDER BY` evaluated every row
+at the first fetch — dropped the ORDER BY to reach the failing row mid-stream); `executemany_batched`
+accepts any `_conn` wrapper; the static CASE guard now requires ELSE == SET target (nested CASE handled);
+the repeatable-queue guard fails on an unparseable queue name.

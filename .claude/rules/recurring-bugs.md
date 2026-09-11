@@ -456,6 +456,45 @@ Currently automated (9 checks): `date.today()` write-anchor, short calendar-day 
 - **A test parser that reads another file by hardcoded PATH and swallows the read error (`except OSError: continue`) degrades silently**, and the failure surfaces somewhere unrelated with a message that reads like a different bug entirely. Assert the file exists; don't silently continue on a missing input.
 - **A schema DDL file that qualifies some statements to a schema but not others (e.g. indexes but not `CREATE TABLE`) creates tables where you point it and then indexes production's copy** when applied anywhere but the default schema. Schema-qualify everything or assert nothing outside the target schema was touched.
 
+## Write amplification & memory on the hot paths (2026-09-11 performance sweep)
+
+- **`CASE WHEN date >= floor THEN new ELSE col END ... WHERE symbol = ?` rewrites the symbol's
+  WHOLE history to change one row.** For every older row the SET is `col = col`, but Postgres
+  still writes a new tuple. Measured on `mc_pricefeed_fetcher`'s statement over the live
+  universe: 115,629 tuples / 216MB WAL per run unbounded vs 2,535 / 6MB with `AND date >= floor`
+  in the WHERE — identical data, and nine fetchers had this shape (~2GB WAL/night on a 362MB
+  table). Bound the WHERE with the SAME floor (the lower one if a statement uses two). An
+  `ELSE NULL` statement is NOT this class — bounding it changes what it writes. 🤖-adjacent:
+  `src/server/tests/test_case_update_date_bounded.py` scans every such statement.
+- **An `ELSE col` recompute over all history writes rows whose value didn't change.**
+  `ml_calibration.py` re-fit and rewrote all 115,284 scored rows nightly; only 31.6% changed.
+  Compare against the stored value and send the changes (`xmin` is the test observable: any
+  UPDATE, even to an identical value, gives the row a new one).
+- **One network round trip per row is the default for `executemany` through db_compat** —
+  SQLAlchemy's psycopg2 dialect falls through to `cursor.executemany` for `text()`. Batched
+  (`db_compat.executemany_batched`) a 14k-row upsert went 10.9s → 1.7s. It is opt-in, NOT an
+  engine-wide `executemany_mode='values_plus_batch'`, because batching makes `rowcount` report only
+  the LAST statement (1 instead of 14,000) and `analyst_revision.py`'s `n == 0` "matched nothing"
+  guard reads it. Use the helper only where the caller ignores the count.
+- **`conn.execute(...).fetchall()` on a multi-million-row read builds a dict-subclass `Row` per
+  row.** 2.7M `stock_ohlcv` rows: 2,280MB peak Python heap vs 380MB streamed as tuples via
+  `db_compat.iter_rows`. When you add streaming, set `stream_results` on the STATEMENT:
+  `Connection.execution_options()` mutates a SQLAlchemy 2.0 connection in place, turning every
+  later statement into a server-side cursor (`DECLARE ... CURSOR FOR INSERT` → syntax error).
+- **A memo cache keyed on generated SQL is a leak.** `translateSql`'s cache assumed static
+  call-site SQL, but `bulkUpsert` builds a new string per chunk row count: ~2.7MB retained per
+  30-column entry, never evicted. Size-capped and entry-capped since; the same audit applies to
+  any cache keyed on a string that embeds a variable-length list.
+- **`date::text >= date('now', ...)` on a native DATE column defeats the index and, on a
+  hypertable, chunk exclusion.** `stock_ohlcv`'s freshness check: 1,220ms / 42 chunks scanned vs
+  207ms / 40 excluded, every 15 minutes. Compare DATE to DATE (`col >= current_date - N`) after
+  verifying the column type. 🤖-adjacent for dataQualityChecks.ts via
+  `dataQualityChecksSargable.test.ts`.
+- **Two `registerRepeatableJob()` calls on one queue delete each other's schedule on every boot**
+  — it clears EVERY repeatable on its queue before adding its own. The nightly job digest had not
+  fired on its cron since a morning digest was added to its queue (2026-09-02); it only ran as a
+  boot-time catch-up. 🤖-adjacent: `repeatableQueuesUnique.test.ts`.
+
 ## Connection budgets
 
 - **A connection-pool `max` sized for the production server is wrong inside a test process, and
@@ -546,6 +585,20 @@ Currently automated (9 checks): `date.today()` write-anchor, short calendar-day 
 - **Declared ≠ installed.** A dependency in `package.json`/`requirements.txt` but not actually installed silently breaks a live job for days.
 - **Written ≠ applied.** A migration verified against a throwaway cluster is not applied to production. Confirm `npm run migrate:up` ran against the real `POSTGRES_URL`.
 - **Committed ≠ deployed.** `.ts` is not hot-reloaded; `pm2 restart bharat-server` is required. Check `pm_uptime` against the fix commit's timestamp.
+- **pm2 on Windows watches the PID it LAUNCHED, and here that is never the real process — so
+  `max_memory_restart` and `node_args` silently apply to a wrapper.** `venv\Scripts\python.exe` is
+  a redirector that spawns the real interpreter; `tsx`'s CLI spawns a child node. Measured
+  2026-09-11: pm2 reported 1MB per Python service while the real interpreters held 2.0-2.6GB
+  private, and 18MB for bharat-server whose real node held 0.7GB without the
+  `--max-old-space-size` flag (the default V8 limit, 4,288MB here, is the cap that actually
+  applies). And `runPython` children are invisible to pm2 entirely — which is how dl_trainer
+  reached 38-52.7GB commit and killed the WSL2 VM three times. **Tell:** `pm2 list` memory in the
+  single-digit MB for a process that imports torch. **The ceiling that works is kernel-enforced on
+  the real process:** `src/server/pyboot/sitecustomize.py` (Windows Job Object, whole process
+  tree) — on every runPython child via `pythonRunner.ts` (`PY_CHILD_MEM_LIMIT_MB`, default
+  20480, observe-first until measured peaks justify tightening) and on the four Python services
+  via `ecosystem.config.cjs`'s `pyService` env. Every
+  runPython run now logs `peakMemMb`; set ceilings from those, not from estimates.
 - **Registered ≠ running, for a pm2 `cron_restart` job specifically.** `pm2 start` launches it immediately once regardless of schedule; if that first launch fails (dependency not up yet), it settles into `stopped`/`pid 0` and waits for its NEXT cron slot with zero retries — up to 7 days of silent dormancy for a weekly job, indistinguishable in `pm2 list` from healthy idling. Check `pm2 describe <name>` / `pm2 logs` for the actual last failure before concluding "no scheduler exists." After fixing the underlying cause, a `cron_restart` job does not self-heal — `pm2 restart <name>` manually.
 - **A standalone script that imports the DB facade without loading `.env` can silently talk to the wrong backend and print convincing wrong numbers.** Print the resolved connection target and assert a row count against a number you already know from a trusted client before believing an ad hoc script's output. (Structurally closed here 2026-08-15 — `usePostgres()`/`use_postgres()` now default to Postgres unconditionally with no env-var override for any real process, so this specific failure mode is history; the general lesson — verify the connection before trusting the result — still applies to any future default-selection logic.)
 - **A server that binds its port LAST will restart forever on `EADDRINUSE` without pm2 ever detecting instability**, if the crash happens after `min_uptime` has already elapsed (e.g. after initializing other services first). Attach an explicit error handler to the listener so a bind failure surfaces immediately instead of escalating through generic exception handling with the real cause buried in noise.

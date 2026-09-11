@@ -507,7 +507,7 @@ def backfill_technical_signals(symbol: str, today: str, feat: dict, con) -> None
             ret_3m_tl          = CASE WHEN date >= ? THEN COALESCE(?, ret_3m_tl)          ELSE ret_3m_tl END,
             ret_6m_tl          = CASE WHEN date >= ? THEN COALESCE(?, ret_6m_tl)          ELSE ret_6m_tl END,
             ret_1y_tl          = CASE WHEN date >= ? THEN COALESCE(?, ret_1y_tl)          ELSE ret_1y_tl END
-        WHERE symbol = ?
+        WHERE symbol = ? AND date >= ?
     """, (
         today, feat.get("ma_bull_frac"),
         today, feat.get("osc_bull_frac"),
@@ -521,7 +521,7 @@ def backfill_technical_signals(symbol: str, today: str, feat: dict, con) -> None
         today, feat.get("ret_3m"),
         today, feat.get("ret_6m"),
         today, feat.get("ret_1y"),
-        symbol,
+        symbol, today,   # bounded: older rows only took ELSE-keep yet were all rewritten
     ))
     con.commit()
 

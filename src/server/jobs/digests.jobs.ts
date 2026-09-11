@@ -16,6 +16,7 @@ import { telegramService } from '../telegramService';
 import { registerRepeatableJob } from './registerJob';
 
 export const QUEUE_JOB_DIGEST = 'job-digest';
+export const QUEUE_JOB_DIGEST_MORNING = 'job-digest-morning';
 export const QUEUE_RECOMMENDATIONS_DIGEST = 'recommendations-digest';
 
 async function processJobDigest(): Promise<void> {
@@ -58,13 +59,15 @@ export async function registerDigestJobs(connection: any) {
 
   // Second daily send (added 2026-09-02, user request: digest morning AND night). 02:45 UTC =
   // 08:15 IST, pre-open — reports what changed overnight (post-close jobs, catch-ups) before
-  // the trading day starts. Same queue/processor as the night send; its OWN monitorName so
+  // the trading day starts. Same processor as the night send; its OWN monitorName so
   // job_heartbeat tracks each schedule separately (one heartbeat row cannot serve two crons
-  // without lateness detection reading the wrong boundary). A separate repeatable jobId so
-  // BullMQ keeps both schedules independently.
+  // without lateness detection reading the wrong boundary). Its OWN queue too: it shared the
+  // night send's queue until 2026-09-11, and registerRepeatableJob clears every repeatable on its
+  // queue before adding its own -- so this registration deleted the night schedule on every
+  // boot, and the 22:50 digest only ever ran as a boot-time catch-up.
   const jobDigestMorning = await registerRepeatableJob({
     connection,
-    queueName: QUEUE_JOB_DIGEST,
+    queueName: QUEUE_JOB_DIGEST_MORNING,
     jobName: 'job-digest-morning',
     repeat: { pattern: '45 2 * * *' }, // 08:15 IST (02:45 UTC)
     jobId: 'job-digest-morning-repeatable',

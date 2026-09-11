@@ -15,6 +15,7 @@
 import { dbGet, dbAll, dbTransaction, type DbTx } from './dbAsync';
 import { nseStocksData } from '../data/nseStocks';
 import { getAllStocks } from './stockMapping';
+import { yahooQuoteUrl } from './yahooQuoteUrl';
 
 // ─── Constants ───────────────────────────────────────────────────────────────
 
@@ -249,7 +250,6 @@ async function fetchPhase1Batch(
   symbols: string[],
   auth: YFAuth,
 ): Promise<void> {
-  const yfSymbols = symbols.map(s => `${s}.NS`).join(',');
   const fields = [
     'trailingPE', 'forwardPE', 'priceToBook', 'bookValue',
     'epsTrailingTwelveMonths', 'epsForward',
@@ -259,7 +259,8 @@ async function fetchPhase1Batch(
     'averageDailyVolume3Month', 'dividendYield', 'averageAnalystRating',
   ].join(',');
 
-  const url = `https://query2.finance.yahoo.com/v7/finance/quote?symbols=${yfSymbols}&fields=${fields}&crumb=${encodeURIComponent(auth.crumb)}`;
+  // Encoded: a raw '&' in M&M / J&KBANK / S&SPOWER cut every later symbol out of the batch.
+  const url = yahooQuoteUrl(symbols, { fields, crumb: auth.crumb });
   const res = await fetch(url, {
     headers: { ...YF_HEADERS, Cookie: auth.cookie },
     signal: AbortSignal.timeout(15000),

@@ -164,6 +164,29 @@ def purge_orphan_feature_rows(con) -> int:
     return removed
 
 
+_GLOBAL_SERIES_CACHE: dict = {}
+
+
+def clear_global_series_cache() -> None:
+    _GLOBAL_SERIES_CACHE.clear()
+
+
+def _read_global(sql: str, params=()) -> pd.DataFrame:
+    """A market-wide series (identical for every symbol), read once per process per run.
+
+    The merges below re-read the same 10 series for each of ~2,426 symbols: 98ms of the 8
+    cheapest alone per symbol (2026-09-11), ~24k identical queries per run. Pool workers are
+    spawned per run and run_full_pipeline() clears this, so it never outlives the run's data.
+    Callers mutate the frame, so each gets a copy.
+    """
+    key = (sql, tuple(params))
+    df = _GLOBAL_SERIES_CACHE.get(key)
+    if df is None:
+        df = read_df(sql, params)
+        _GLOBAL_SERIES_CACHE[key] = df
+    return df.copy()
+
+
 class FeatureEngineer:
     def _con(self) -> ConnWrapper:
         con = connect()
@@ -297,7 +320,7 @@ class FeatureEngineer:
 
     def _merge_fii(self, feat: pd.DataFrame) -> pd.DataFrame:
         """FII/DII flows — lagged 1 day (published next morning)."""
-        fii = read_df("SELECT date, fii_net, dii_net FROM fii_dii_flow ORDER BY date")
+        fii = _read_global("SELECT date, fii_net, dii_net FROM fii_dii_flow ORDER BY date")
         fii["date"] = pd.to_datetime(fii["date"])
         fii = fii.set_index("date")
         fii = fii[fii.index.notnull()]
@@ -377,7 +400,7 @@ class FeatureEngineer:
             "CRUDE": "crude_ret_5d", "GOLD": "gold_ret_5d", "SP500": "sp500_ret_5d",
         }
         for sym, col in macro_syms.items():
-            df = read_df(
+            df = _read_global(
                 "SELECT date, ret_5d FROM macro_asset_prices WHERE symbol=? ORDER BY date",
                 (sym,),
             )
@@ -388,7 +411,7 @@ class FeatureEngineer:
                 feat[col] = df["ret_5d"].reindex(feat.index, method="ffill", limit=self.FFILL_LIMIT_DAYS)
 
         # Nifty metrics
-        nifty = read_df("SELECT date, close FROM stock_ohlcv WHERE symbol='NIFTY50' ORDER BY date")
+        nifty = _read_global("SELECT date, close FROM stock_ohlcv WHERE symbol='NIFTY50' ORDER BY date")
         nifty["date"] = pd.to_datetime(nifty["date"])
         nifty = nifty.set_index("date")
         nifty = nifty[nifty.index.notnull()]
@@ -397,7 +420,7 @@ class FeatureEngineer:
             feat["nifty_ret_21d"] = nifty["close"].pct_change(21).reindex(feat.index, method="ffill", limit=self.FFILL_LIMIT_DAYS)
 
         # India VIX from macro_asset_prices (true implied-vol index; was a weak NSEBANK proxy)
-        vix_df = read_df("SELECT date, close FROM macro_asset_prices WHERE symbol='INDIAVIX' ORDER BY date")
+        vix_df = _read_global("SELECT date, close FROM macro_asset_prices WHERE symbol='INDIAVIX' ORDER BY date")
         vix_df["date"] = pd.to_datetime(vix_df["date"])
         vix_df = vix_df.set_index("date")
         vix_df = vix_df[vix_df.index.notnull()]
@@ -639,7 +662,7 @@ class FeatureEngineer:
         meaningful across a weekend/holiday gap, so they use the same bounded reindex-ffill
         as the macro merges (FFILL_LIMIT_DAYS caps how stale a carried value may get).
         """
-        pe = read_df(
+        pe = _read_global(
             "SELECT date, pe FROM index_valuation WHERE index_name='NIFTY50' ORDER BY date"
         )
         if not pe.empty:
@@ -650,7 +673,7 @@ class FeatureEngineer:
                 feat.index, method="ffill", limit=self.FFILL_LIMIT_DAYS
             )
 
-        breadth = read_df(
+        breadth = _read_global(
             "SELECT date, adv_decline_ratio FROM market_breadth ORDER BY date"
         )
         if not breadth.empty:
@@ -965,6 +988,7 @@ class FeatureEngineer:
         Workers are read-only (no SQLite writes, no scaler saves). All writes happen
         in the main process sequentially after each worker returns its feature DataFrame.
         """
+        clear_global_series_cache()
         con = self._con()
         try:
             if symbols is None:

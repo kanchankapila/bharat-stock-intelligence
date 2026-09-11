@@ -100,6 +100,45 @@ def test_flag_bad_prints_marks_spikes_only():
     assert suspect == [('SPIKE', 700.0)]
 
 
+def _mixed_universe(conn):
+    _bars(conn, 'SPIKE', [100, 100, 700, 100, 100])     # one-bar error
+    _bars(conn, 'JUMP', [100, 100, 100, 5000, 5000])    # extreme persistent shift
+    _bars(conn, 'CLEAN', [100, 101, 102, 103, 104])
+    conn.execute("INSERT INTO stock_ohlcv (symbol,date,open,high,low,close,volume) "
+                 "VALUES ('BROKEN','2024-02-01',10,9,11,10,1)")   # high < low
+    conn.commit()
+
+
+def _suspects(conn):
+    return sorted(tuple(r) for r in conn.execute(
+        "SELECT symbol, date FROM stock_ohlcv WHERE is_suspect=1").fetchall())
+
+
+def test_flag_all_reads_the_bars_once_and_flags_like_the_separate_passes(monkeypatch):
+    # Both neighbour-based passes used to fetch all of stock_ohlcv (2.7M rows) as Row objects:
+    # 45.7s and a 2,974MB peak per run, measured 2026-09-11.
+    import ohlcv_quality
+    from ohlcv_quality import flag_all, flag_extreme_level_shifts, flag_malformed_bars
+
+    separate = make_db()
+    _mixed_universe(separate)
+    flag_bad_prints(separate)
+    flag_extreme_level_shifts(separate)
+    flag_malformed_bars(separate)
+
+    combined = make_db()
+    _mixed_universe(combined)
+    reads = []
+    real_iter_rows = ohlcv_quality.iter_rows
+    monkeypatch.setattr(ohlcv_quality, 'iter_rows',
+                        lambda conn, sql, *a, **k: (reads.append(sql), real_iter_rows(conn, sql, *a, **k))[1])
+    flag_all(combined)
+
+    assert len([s for s in reads if 'FROM stock_ohlcv' in s]) == 1
+    assert _suspects(combined) == _suspects(separate)
+    assert {s for s, _ in _suspects(combined)} == {'SPIKE', 'JUMP', 'BROKEN'}
+
+
 def test_flag_bad_prints_respects_corporate_action_allowlist():
     conn = make_db()
     _bars(conn, 'CORP', [100, 100, 700, 700, 700])     # a real step up at a split ex-date

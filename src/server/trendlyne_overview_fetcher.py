@@ -602,7 +602,7 @@ def backfill_technical_signals(symbol: str, today: str, profile: dict, con) -> N
             np_growth_yoy_q     = CASE WHEN date >= ? THEN COALESCE(?, np_growth_yoy_q)     ELSE np_growth_yoy_q END,
             days_since_dividend = CASE WHEN date >= ? THEN COALESCE(?, days_since_dividend) ELSE days_since_dividend END,
             last_dividend_amt   = CASE WHEN date >= ? THEN COALESCE(?, last_dividend_amt)   ELSE last_dividend_amt END
-        WHERE symbol = ?
+        WHERE symbol = ? AND date >= ?
     """, (
         today, _safe(profile.get("analyst_upside_pct")),
         today, int(profile.get("analyst_count") or 0) if profile.get("analyst_count") is not None else None,
@@ -620,7 +620,9 @@ def backfill_technical_signals(symbol: str, today: str, profile: dict, con) -> N
         today, _safe(profile.get("rev_growth_yoy_q")), today, _safe(profile.get("np_growth_yoy_q")),
         today, int(profile.get("days_since_dividend") or 0) if profile.get("days_since_dividend") is not None else None,
         today, _safe(profile.get("last_dividend_amt")),
-        symbol,
+        # Bounded at the LOWER of the two floors (both ISO strings, so min() is chronological):
+        # older rows only took ELSE-keep in every column yet were all rewritten.
+        symbol, min(str(today)[:10], str(sh_floor)[:10]),
     ))
     con.commit()
 

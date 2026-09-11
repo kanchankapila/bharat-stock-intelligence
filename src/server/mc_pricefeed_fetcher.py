@@ -465,7 +465,7 @@ def backfill_technical_signals(symbol: str, ts_floor: str, f: dict, con) -> None
             mc_consensus_eps     = CASE WHEN date >= ? THEN COALESCE(?, mc_consensus_eps)     ELSE mc_consensus_eps END,
             mc_eps_vs_cons       = CASE WHEN date >= ? THEN COALESCE(?, mc_eps_vs_cons)       ELSE mc_eps_vs_cons END,
             mc_pe_fwd_discount   = CASE WHEN date >= ? THEN COALESCE(?, mc_pe_fwd_discount)   ELSE mc_pe_fwd_discount END
-        WHERE symbol = ?
+        WHERE symbol = ? AND date >= ?
     """, (
         ts_floor, f.get("cagr_3y"), ts_floor, f.get("cagr_5y"), ts_floor, f.get("cagr_10y"),
         ts_floor, f.get("ind_pe"), ts_floor, f.get("pe_vs_ind"),
@@ -474,7 +474,9 @@ def backfill_technical_signals(symbol: str, ts_floor: str, f: dict, con) -> None
         ts_floor, del_acc, ts_floor, f.get("circuit_dist_pct"), ts_floor, fno_elig,
         ts_floor, f.get("price_cash"), ts_floor, f.get("consensus_eps"),
         ts_floor, f.get("eps_vs_cons"), ts_floor, f.get("pe_fwd_discount"),
-        symbol,
+        # Rows before the floor only ever took the ELSE (keep) branch, but WHERE symbol = ? alone
+        # still rewrote all of them: 115,629 tuples / 216MB WAL per run vs 2,535 / 6MB bounded.
+        symbol, ts_floor,
     ))
     con.commit()
 

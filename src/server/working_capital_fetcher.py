@@ -235,14 +235,14 @@ def update_technical_signals(symbol: str, features: dict, con, today: str | None
             ccc_trend            = CASE WHEN date >= ? THEN COALESCE(?, ccc_trend)            ELSE ccc_trend END,
             wc_deteriorating     = CASE WHEN date >= ? THEN COALESCE(?, wc_deteriorating)     ELSE wc_deteriorating END,
             wc_improving         = CASE WHEN date >= ? THEN COALESCE(?, wc_improving)         ELSE wc_improving END
-        WHERE symbol = ?
+        WHERE symbol = ? AND date >= ?
     """, (
         floor, features.get("receivables_days_ttm"),
         floor, features.get("ccc_ttm"),
         floor, features.get("ccc_trend"),
         floor, features.get("wc_deteriorating"),
         floor, features.get("wc_improving"),
-        symbol,
+        symbol, floor,   # bounded: older rows only took ELSE-keep yet were all rewritten
     ))
     con.commit()
 

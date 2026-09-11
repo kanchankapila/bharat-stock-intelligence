@@ -46,6 +46,24 @@ const common = {
   time: true,
 };
 
+// Long-running Python services: the same kernel-enforced memory ceiling runPython children get
+// (src/server/pyboot/sitecustomize.py puts the interpreter in a Windows Job Object). pm2's own
+// max_memory_restart cannot do this here: it watches the PID it launched, and
+// venv\Scripts\python.exe is a redirector that spawns the real interpreter -- measured
+// 2026-09-11, pm2 reported 1MB per service while the interpreters held 2.0-2.6GB private.
+// ml-api can retrain the ensemble in-process, the same shape as the dl_trainer runaway.
+const pyService = {
+  ...common,
+  env: {
+    ...common.env,
+    PYTHONPATH: [path.resolve(__dirname, 'src', 'server', 'pyboot'), dotenvVars.PYTHONPATH]
+      .filter(Boolean).join(path.delimiter),
+    // Observe-first, same as runPython children (pythonRunner.ts): bites only on a runaway until
+    // measured peaks justify tightening it (AF-20260911-12).
+    BHARAT_PY_MEM_LIMIT_MB: '20480',
+  },
+};
+
 // Shared config for greenfield one-shot cron jobs (shadow-ranker pipeline).
 // cron_restart schedules the run; autorestart:false lets the script exit normally
 // without pm2 restarting it immediately.
@@ -94,7 +112,7 @@ module.exports = {
       max_memory_restart: '3500M',
     },
     {
-      ...common,
+      ...pyService,
       name: 'alphaquant-api',          // FastAPI on :8002 — the service that went silently down
       script: 'main.py',
       cwd: path.resolve(__dirname, 'backend-python'),
@@ -103,19 +121,19 @@ module.exports = {
         : path.resolve(__dirname, 'backend-python', 'venv', 'bin', 'python'),
     },
     {
-      ...common,
+      ...pyService,
       name: 'ml-api',
       script: path.resolve(__dirname, 'src', 'server', 'python_api.py'),
       interpreter: VENV_PY,
     },
     {
-      ...common,
+      ...pyService,
       name: 'chatbot',                 // FastAPI on :8001
       script: path.resolve(__dirname, 'src', 'server', 'chatbot', 'app.py'),
       interpreter: VENV_PY,
     },
     {
-      ...common,
+      ...pyService,
       name: 'engine-worker',           // FastAPI on :8005 — Ingestion Governor, MCP server & Engine Worker
       script: path.resolve(__dirname, 'src', 'server', 'worker_service.py'),
       interpreter: VENV_PY,

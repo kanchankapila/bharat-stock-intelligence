@@ -300,11 +300,11 @@ def backfill_technical_signals(symbol: str, ts_floor: str, signals: dict, con) -
             mc_cp_bear_count     = CASE WHEN date >= ? THEN COALESCE(?, mc_cp_bear_count)     ELSE mc_cp_bear_count     END,
             mc_cp_net_score      = CASE WHEN date >= ? THEN COALESCE(?, mc_cp_net_score)      ELSE mc_cp_net_score      END,
             mc_cp_avg_target_pct = CASE WHEN date >= ? THEN COALESCE(?, mc_cp_avg_target_pct) ELSE mc_cp_avg_target_pct END
-        WHERE symbol = ?
+        WHERE symbol = ? AND date >= ?
     """, (
         ts_floor, signals.get("bull_count"), ts_floor, signals.get("bear_count"),
         ts_floor, signals.get("net_score"), ts_floor, signals.get("avg_target_pct"),
-        symbol,
+        symbol, ts_floor,   # bounded: older rows only took ELSE-keep yet were all rewritten
     ))
     con.commit()
 

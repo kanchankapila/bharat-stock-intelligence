@@ -723,6 +723,11 @@ def fetch_live(trade_date: str, wanted: set | None = None, hhmm: str = "eod") ->
     Returns tuples laid out as (source, symbol, rank, pct, metric, payload, trade_date).
     """
     session = cffi_requests.Session(impersonate="chrome")
+    # NiftyTrader's Screener API rejects the Chrome-impersonated TLS request (HTTP 403) but
+    # answers a plain session with the same headers and no auth (measured 2026-09-11: 403 vs 200
+    # with 34 rows). Its EOD screens had written 0 rows since 2026-09-07 while every run logged
+    # success -- the opposite of the Trendlyne WAF, which is why impersonation is per-source.
+    nt_session = requests.Session()
     out = []
     et_wanted = {"et_gainers_1d", "et_losers_1d", "et_gainers_1w", "et_losers_1w"}
     if not wanted or wanted & et_wanted:
@@ -736,10 +741,10 @@ def fetch_live(trade_date: str, wanted: set | None = None, hhmm: str = "eod") ->
     for fn, tag in ((fetch_mojo, "mojo"), (fetch_niftytrader, "nt"),
                     (lambda s: fetch_mc_shockers(s, symbol_map=_mc_symbol_map()),
                      "mc_price_shockers"),
-                    (lambda s: fetch_nt_screens(s, wanted), "nteod"),
+                    (lambda s: fetch_nt_screens(nt_session, wanted), "nteod"),
                     (lambda s: fetch_et_screens(s, wanted, trade_date), "et_screen"),
                     (lambda s: fetch_nt_live_screener(
-                        s, _nt_bearer_token() if not wanted or any(
+                        nt_session, _nt_bearer_token() if not wanted or any(
                             w.startswith("ntlive") for w in wanted) else None, hhmm),
                      "ntlive")):
         if wanted and not any(s.startswith(tag) or tag.startswith(s) for s in wanted):

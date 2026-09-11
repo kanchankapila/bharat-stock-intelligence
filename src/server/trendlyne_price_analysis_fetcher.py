@@ -349,14 +349,14 @@ def backfill_technical_signals(symbol: str, today_str: str, f: dict, con) -> Non
             tl_seasonal_month_5y = CASE WHEN date >= ? THEN COALESCE(?, tl_seasonal_month_5y) ELSE tl_seasonal_month_5y END,
             tl_dist_3m_high_pct  = CASE WHEN date >= ? THEN COALESCE(?, tl_dist_3m_high_pct)  ELSE tl_dist_3m_high_pct END,
             tl_dist_3m_low_pct   = CASE WHEN date >= ? THEN COALESCE(?, tl_dist_3m_low_pct)   ELSE tl_dist_3m_low_pct END
-        WHERE symbol = ?
+        WHERE symbol = ? AND date >= ?
     """, (
         today_str, f.get("alpha_nifty_1m"), today_str, f.get("alpha_nifty_3m"),
         today_str, f.get("alpha_nifty_6m"),
         today_str, f.get("alpha_ind_1m"), today_str, f.get("alpha_ind_3m"),
         today_str, f.get("tl_seasonal_month_5y"),
         today_str, f.get("dist_3m_high_pct"), today_str, f.get("dist_3m_low_pct"),
-        symbol,
+        symbol, today_str,   # bounded: older rows only took ELSE-keep yet were all rewritten
     ))
     con.commit()
 

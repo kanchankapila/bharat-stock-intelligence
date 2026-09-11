@@ -370,7 +370,7 @@ def _backfill_technical_signals(symbol: str, today: str, features: dict, con) ->
             dvm_durability   = CASE WHEN date >= ? THEN COALESCE(?, dvm_durability)   ELSE dvm_durability END,
             dvm_valuation    = CASE WHEN date >= ? THEN COALESCE(?, dvm_valuation)    ELSE dvm_valuation END,
             dvm_momentum     = CASE WHEN date >= ? THEN COALESCE(?, dvm_momentum)     ELSE dvm_momentum END
-        WHERE symbol = ?
+        WHERE symbol = ? AND date >= ?
     """, (
         today, features.get("eps_ttm"),          today, features.get("eps_growth_yoy"),
         today, features.get("eps_growth_qoq"),   today, features.get("eps_acceleration"),
@@ -379,7 +379,7 @@ def _backfill_technical_signals(symbol: str, today: str, features: dict, con) ->
         today, features.get("div_yield_ttm"),
         today, features.get("dvm_d"),            today, features.get("dvm_v"),
         today, features.get("dvm_m"),
-        symbol,
+        symbol, today,   # bounded: older rows only took ELSE-keep yet were all rewritten
     ))
     con.commit()
 

@@ -65,6 +65,12 @@ def _session():
     return cffi_requests.Session(impersonate="chrome")
 
 
+def _nt_session():
+    # What fetch_live() hands the NiftyTrader screens: the Screener API 403s the impersonated TLS.
+    import requests
+    return requests.Session()
+
+
 def _write_and_read_back(rows, source_prefix):
     """Persist real rows through the fetcher's own persist(), read one back, and
     assert it's ML-usable -- catches both parsing bugs and storage/type-coercion bugs."""
@@ -120,14 +126,14 @@ class TestNiftyTraderEodScreenerLive:
     already cover that every catalog entry maps through the same code correctly."""
 
     def test_real_fetch_returns_real_tickers(self):
-        rows = msf.fetch_nt_screens(_session(), {"nteod_gap_up"})
+        rows = msf.fetch_nt_screens(_nt_session(), {"nteod_gap_up"})
         assert_non_empty_response(rows, "fetch_nt_screens(nteod_gap_up)")
         for source, symbol, rank, pct, metric, payload in rows[:20]:
             assert source == "nteod_gap_up"
             assert_looks_like_ticker(symbol, "nteod_gap_up.symbol")
 
     def test_real_rows_store_ml_usable(self):
-        rows = msf.fetch_nt_screens(_session(), {"nteod_gap_up"})
+        rows = msf.fetch_nt_screens(_nt_session(), {"nteod_gap_up"})
         assert_non_empty_response(rows, "fetch_nt_screens(nteod_gap_up)")
         tagged = [r + ("2026-08-27",) for r in rows]
         _write_and_read_back(tagged, "nteod_gap_up")

@@ -398,7 +398,13 @@ def prepare_outcome_caches(conn, rows) -> None:
     """Prefetch every (symbol, as_of) trailing-window the resolve loops need,
     ONCE per call, turning per-row get_atr/get_volatility_threshold queries
     into dict lookups. `rows` is any iterable of mappings carrying 'symbol'
-    plus an as-of date under 'signal_date' or 'prediction_date'. Idempotent."""
+    plus an as-of date under 'signal_date' or 'prediction_date'. Idempotent.
+
+    Resets the caches first: ml-api and alphaquant-api import this module and live for weeks,
+    so without the reset every daily pass's windows stayed resident for the process lifetime."""
+    _ATR_CACHE.clear()
+    _CLOSES_CACHE.clear()
+    _VOLTHRESH_CACHE.clear()
     pairs = set()
     for r in rows or []:
         if not isinstance(r, dict):

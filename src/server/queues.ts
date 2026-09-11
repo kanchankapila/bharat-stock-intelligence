@@ -187,7 +187,6 @@ let mlWeeklyRetrainWorker: Worker | null = null;
 export let intradayFetcherQueue: Queue | null = null;
 let intradayFetcherWorker: Worker | null = null;
 export let gdeltSentimentQueue: Queue | null = null;
-let gdeltSentimentWorker: Worker | null = null;
 export let researchPremarketQueue: Queue | null = null;
 export let researchPostcloseQueue: Queue | null = null;
 let researchPremarketWorker: Worker | null = null;
@@ -494,40 +493,6 @@ async function processMoverCapture(_job: Job): Promise<{ skipped: boolean }> {
   return { skipped: false };
 }
 
-// Found 2026-08-13 (data-coverage-audit): gdeltService.ts's runGdeltBackfill() existed with a
-// working parser/fetcher and a real table (gdelt_sentiment) but was never called from any
-// queue/job/route — fully disconnected code, table permanently at 0 rows. Wired in here rather
-// than deleted: GDELT is the only source on this platform with historical per-company tone
-// back to 2015 (RSS/Google News don't backfill), so it's worth keeping live.
-//
-// No isMarketOpen() gate -- GDELT indexes global news continuously, weekends and holidays
-// included, unlike NSE-trading-day-gated fetchers above. Trailing 3-day window (not just
-// "yesterday") so a missed run self-heals via the ON CONFLICT upsert in runGdeltBackfill,
-// same reasoning as every other backfill-shaped job in this file. limit=150 matches the
-// function's own default (~roughly this platform's liquid-universe size) -- GDELT's ~1
-// req/5.2s rate limit makes 150 companies a ~13-minute run; do not raise this without also
-// widening the cron gap, or a slow run risks overlapping the next scheduled tick.
-async function processGdeltSentiment(_job: Job): Promise<{ skipped: boolean }> {
-  const { runGdeltBackfill } = await import('./gdeltService');
-  const end = new Date();
-  const start = new Date(end.getTime() - 3 * 24 * 60 * 60 * 1000);
-  const result = await runGdeltBackfill(start, end, 150);
-  console.log(`[QUEUE] gdelt-sentiment: ${result.rows} rows across ${result.companies} companies`);
-  // 2026-09-02: gdelt_sentiment had ZERO rows since 2026-08-24 while this job reported
-  // 'success' daily — live test showed api.gdeltproject.org dropping this machine's IP
-  // entirely (www.gdeltproject.org answers 301 in 0.5s; the API host times out on IPv4 and
-  // IPv6), and fetchGdeltTone converts every failed request into [] so a fully-blocked run
-  // and a healthy one are indistinguishable at this layer. "N companies attempted, 0 rows
-  // written" is a failed run, not a quiet day — fail the job so the freshness check and the
-  // digest tell the truth. A genuinely news-less GDELT day is not a thing at n=150 companies.
-  if (result.companies > 0 && result.rows === 0) {
-    throw new Error(
-      `gdelt-sentiment wrote 0 rows for ${result.companies} companies — ` +
-      `every response parsed empty (API unreachable/throttled/blocked for this IP)`,
-    );
-  }
-  return { skipped: false };
-}
 
 /**
  * Overall execution budget for a heavy processor.
@@ -2612,35 +2577,19 @@ export async function initQueues(): Promise<boolean> {
       recordHeartbeat('mover-study-weekly', 'failed', err?.message, bullJobDurationMs(job));
     });
 
-    // ── GDELT sentiment (daily, 19:00 UTC = 12:30 AM IST, every day incl. weekends -- news
-    // accumulates on non-trading days too, unlike the NSE-specific fetchers above). Deliberately
-    // NOT 17:00-18:00 UTC -- that whole window is the evening-batch cluster (score-all 17:00,
-    // quant-score-daily 17:30, ml-daily-ops-adjacent jobs through 18:45); 19:00 sits clear of it
-    // with the full ~13 min runtime (150 companies x ~5.2s GDELT rate limit) as headroom before
-    // the next scheduled job at 20:30 -- see processGdeltSentiment's own comment before touching
-    // this, and jobPipelineOrdering.test.ts's minute-collision check before picking a new slot.
+    // ── GDELT sentiment — RETIRED 2026-09-11 (user decision: "if GDELT is not bringing add-on,
+    // replace it with other news URLs"). api.gdeltproject.org throttles this host's IP (HTTP 429
+    // "one every 5 seconds" on 2 of 3 requests spaced 8s apart), so the ~42-minute daily run
+    // wrote tone for only 2-14 of 150 companies while reporting success; and over the last 10
+    // trading dates it filled 0 technical_signals rows -- ml_ensemble reads it only as a
+    // COALESCE fallback for a NULL news_sentiment_score, and every symbol it covered already had
+    // one from the 21-source news pipeline (9,833 articles in 7 days). The schedule is removed
+    // from Redis on boot so the old repeatable cannot fire into a queue with no worker.
+    // gdeltService.ts + scripts/gdelt_backfill.ts remain for manual runs from another IP.
     gdeltSentimentQueue = new Queue(QUEUE_GDELT_SENTIMENT, { connection });
-    const gdeltRep = await gdeltSentimentQueue.getRepeatableJobs();
-    for (const r of gdeltRep) await gdeltSentimentQueue.removeRepeatableByKey(r.key);
-    await gdeltSentimentQueue.add('gdelt-sentiment', {}, {
-      repeat: { pattern: '0 19 * * *', tz: 'Etc/UTC' },
-      jobId: 'gdelt-sentiment',
-      removeOnComplete: 5,
-      removeOnFail: 3,
-    });
-    gdeltSentimentWorker = new Worker(
-      QUEUE_GDELT_SENTIMENT,
-      processGdeltSentiment,
-      { connection, concurrency: 1, lockDuration: 20 * 60 * 1000, lockRenewTime: 3 * 60 * 1000 },
-    );
-    gdeltSentimentWorker.on('completed', (job) => {
-      console.log('[QUEUE] gdelt-sentiment completed');
-      recordHeartbeat('gdelt-sentiment', 'success', undefined, bullJobDurationMs(job));
-    });
-    gdeltSentimentWorker.on('failed', (job, err) => {
-      console.error('[QUEUE] gdelt-sentiment failed:', err.message);
-      recordHeartbeat('gdelt-sentiment', 'failed', err?.message, bullJobDurationMs(job));
-    });
+    for (const r of await gdeltSentimentQueue.getRepeatableJobs()) {
+      await gdeltSentimentQueue.removeRepeatableByKey(r.key);
+    }
 
     // ── Live Screener paced collector (every 15 min, '*/15 3-10 * * 1-5' = 03:00-10:45 UTC =
     //    08:30-16:15 IST weekdays). NOTE the stated window is the CRON window, not the market

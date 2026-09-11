@@ -198,54 +198,33 @@ def backfill_technical_signals(con) -> int:
     # TestBackfillPreservesPriorDaysBless for the regression test (a mocked cursor can't catch
     # this class -- it needs a real UPDATE evaluated against real rows across two runs).
     today = logical_write_floor(cur, fallback=datetime.now().strftime("%Y-%m-%d"))
-    if use_postgres():
-        cur.execute(
-            """
-            UPDATE technical_signals
-            SET
-                is_nifty50     = CASE WHEN technical_signals.date >= ? THEN ns.is_nifty50     ELSE technical_signals.is_nifty50     END,
-                is_nifty100    = CASE WHEN technical_signals.date >= ? THEN ns.is_nifty100    ELSE technical_signals.is_nifty100    END,
-                is_nifty200    = CASE WHEN technical_signals.date >= ? THEN ns.is_nifty200    ELSE technical_signals.is_nifty200    END,
-                is_midcap150   = CASE WHEN technical_signals.date >= ? THEN ns.is_midcap150   ELSE technical_signals.is_midcap150   END,
-                is_smallcap250 = CASE WHEN technical_signals.date >= ? THEN ns.is_smallcap250 ELSE technical_signals.is_smallcap250 END,
-                nifty_tier     = CASE WHEN technical_signals.date >= ? THEN
-                    CASE
-                        WHEN ns.is_nifty50     = 1 THEN 50
-                        WHEN ns.is_nifty100    = 1 THEN 100
-                        WHEN ns.is_nifty200    = 1 THEN 200
-                        WHEN ns.is_midcap150   = 1 THEN 150
-                        WHEN ns.is_smallcap250 = 1 THEN 250
-                        ELSE 0
-                    END
-                ELSE technical_signals.nifty_tier END
-            FROM nse_stocks ns
-            WHERE technical_signals.symbol = ns.symbol
-            """,
-            (today, today, today, today, today, today),
-        )
-    else:
-        cur.execute(
-            """
-            UPDATE technical_signals
-            SET
-                is_nifty50     = CASE WHEN date >= ? THEN (SELECT is_nifty50     FROM nse_stocks WHERE symbol = technical_signals.symbol) ELSE is_nifty50     END,
-                is_nifty100    = CASE WHEN date >= ? THEN (SELECT is_nifty100    FROM nse_stocks WHERE symbol = technical_signals.symbol) ELSE is_nifty100    END,
-                is_nifty200    = CASE WHEN date >= ? THEN (SELECT is_nifty200    FROM nse_stocks WHERE symbol = technical_signals.symbol) ELSE is_nifty200    END,
-                is_midcap150   = CASE WHEN date >= ? THEN (SELECT is_midcap150   FROM nse_stocks WHERE symbol = technical_signals.symbol) ELSE is_midcap150   END,
-                is_smallcap250 = CASE WHEN date >= ? THEN (SELECT is_smallcap250 FROM nse_stocks WHERE symbol = technical_signals.symbol) ELSE is_smallcap250 END,
-                nifty_tier     = CASE WHEN date >= ? THEN
-                    CASE
-                        WHEN (SELECT is_nifty50     FROM nse_stocks WHERE symbol = technical_signals.symbol) = 1 THEN 50
-                        WHEN (SELECT is_nifty100    FROM nse_stocks WHERE symbol = technical_signals.symbol) = 1 THEN 100
-                        WHEN (SELECT is_nifty200    FROM nse_stocks WHERE symbol = technical_signals.symbol) = 1 THEN 200
-                        WHEN (SELECT is_midcap150   FROM nse_stocks WHERE symbol = technical_signals.symbol) = 1 THEN 150
-                        WHEN (SELECT is_smallcap250 FROM nse_stocks WHERE symbol = technical_signals.symbol) = 1 THEN 250
-                        ELSE 0
-                    END
-                ELSE nifty_tier END
-            """,
-            (today, today, today, today, today, today),
-        )
+    # The WHERE date bound only drops rows that took ELSE-keep in every column; unbounded, this
+    # rewrote the whole table (~115k tuples) every weekday to bless one date's ~2.3k rows. The
+    # SQLite branch that used to follow was dead since use_postgres() became unconditional.
+    cur.execute(
+        """
+        UPDATE technical_signals
+        SET
+            is_nifty50     = CASE WHEN technical_signals.date >= ? THEN ns.is_nifty50     ELSE technical_signals.is_nifty50     END,
+            is_nifty100    = CASE WHEN technical_signals.date >= ? THEN ns.is_nifty100    ELSE technical_signals.is_nifty100    END,
+            is_nifty200    = CASE WHEN technical_signals.date >= ? THEN ns.is_nifty200    ELSE technical_signals.is_nifty200    END,
+            is_midcap150   = CASE WHEN technical_signals.date >= ? THEN ns.is_midcap150   ELSE technical_signals.is_midcap150   END,
+            is_smallcap250 = CASE WHEN technical_signals.date >= ? THEN ns.is_smallcap250 ELSE technical_signals.is_smallcap250 END,
+            nifty_tier     = CASE WHEN technical_signals.date >= ? THEN
+                CASE
+                    WHEN ns.is_nifty50     = 1 THEN 50
+                    WHEN ns.is_nifty100    = 1 THEN 100
+                    WHEN ns.is_nifty200    = 1 THEN 200
+                    WHEN ns.is_midcap150   = 1 THEN 150
+                    WHEN ns.is_smallcap250 = 1 THEN 250
+                    ELSE 0
+                END
+            ELSE technical_signals.nifty_tier END
+        FROM nse_stocks ns
+        WHERE technical_signals.symbol = ns.symbol AND technical_signals.date >= ?
+        """,
+        (today, today, today, today, today, today, today),
+    )
 
     updated = cur.rowcount
     con.commit()

@@ -18,6 +18,7 @@
  * digest in jobWatchdog.ts rather than introducing a second alerting path.
  */
 import { dbGet, dbAll, dbRun, dbExec } from './dbAsync';
+import { mapWithConcurrency } from './lib/async';
 
 export type DataQualityStatus = 'pass' | 'warn' | 'fail' | 'error';
 
@@ -679,15 +680,8 @@ const TABLE_FRESHNESS_CHECKS: TableFreshnessConfig[] = [
   // daily-cadence default, or this would false-warn every week between syncs.
   { id: 'historical-fundamentals-freshness', label: 'historical_fundamentals (dated fundamentals time series)',
     category: 'fundamentals', critical: false, table: 'historical_fundamentals', dateColumn: 'date', warnDays: 10, failDays: 16 },
-  // gdelt_sentiment: found EMPTY (0 rows) earlier this same audit -- gdeltService.ts's
-  // runGdeltBackfill() existed but was never called from anywhere. Wired into queues.ts
-  // (QUEUE_GDELT_SENTIMENT, daily 19:00 UTC) the same day, so this check is now meaningful
-  // rather than permanently red. tradingDayAware:false (GDELT indexes news on weekends too);
-  // warnDays/failDays generous relative to the 24h cadence to absorb one GDELT rate-limit
-  // throttle/retry without false-alarming the next morning.
-  { id: 'gdelt-sentiment-freshness', label: 'gdelt_sentiment (per-company news tone, GDELT DOC API)',
-    category: 'reference', critical: false, table: 'gdelt_sentiment', dateColumn: 'computed_at',
-    tradingDayAware: false, warnDays: 4, failDays: 7 },
+  // gdelt_sentiment's freshness check was removed with its job (retired 2026-09-11, see queues.ts):
+  // a check on a deliberately unscheduled table can only ever go red.
   // mover_snapshots (mover_screener_fetcher.py, added 2026-08-25) shipped with a
   // live_datasource test but no freshness check -- exactly the mandate gap this file's own
   // header warns about, found during a 2026-08-27 CLAUDE.md-vs-codebase review. Written by
@@ -722,11 +716,11 @@ export const DATA_QUALITY_CHECKS: DataQualityCheck[] = [
     label: 'OHLCV freshness & universe coverage',
     category: 'ohlcv',
     critical: true,
-    // stock_ohlcv.date is a native Postgres DATE column (unlike most other date columns in
-    // this file, which are TEXT) — cast it to ::text so it compares against date('now',...)'s
-    // text output (see sqlTranslate.ts); ::text is stripped on the SQLite path by stripPgCasts.
+    // stock_ohlcv.date is a native DATE: compare it as one. Casting it to text to match the
+    // translated date('now', ...) defeated chunk exclusion -- 1,220ms / 42 chunks vs 207ms / 2 chunks,
+    // measured 2026-09-11, every 15 minutes (see dataQualityChecksSargable.test.ts).
     sql: `SELECT MAX(date) AS last_date, COUNT(DISTINCT symbol) AS symbols
-          FROM stock_ohlcv WHERE date::text >= date('now','-10 days')`,
+          FROM stock_ohlcv WHERE date >= current_date - 10`,
     evaluate: (row, now) => {
       const stale = tradingDaysStale(row?.last_date, now);
       const symbols = Number(row?.symbols) || 0;
@@ -743,9 +737,9 @@ export const DATA_QUALITY_CHECKS: DataQualityCheck[] = [
     category: 'ohlcv',
     critical: true,
     sql: `SELECT
-            (SELECT COUNT(*) FROM stock_ohlcv WHERE date::text >= date('now','-5 days')
+            (SELECT COUNT(*) FROM stock_ohlcv WHERE date >= current_date - 5
                AND (close <= 0 OR high < low OR is_suspect = 1)) AS bad,
-            (SELECT COUNT(*) FROM stock_ohlcv WHERE date::text >= date('now','-5 days')) AS total`,
+            (SELECT COUNT(*) FROM stock_ohlcv WHERE date >= current_date - 5) AS total`,
     evaluate: (row) => {
       const ratio = safeRatio(row?.bad, row?.total);
       const total = Number(row?.total) || 0;
@@ -806,10 +800,9 @@ export const DATA_QUALITY_CHECKS: DataQualityCheck[] = [
     label: 'technical_signals value-range invariants (RSI 0-100, win-prob 0-1)',
     category: 'signals',
     critical: true,
-    // date is a native DATE (2026-08-25 migration); date('now','-3 days') translates to ::text,
-    // so compare like-for-like with date::text (see sqlTranslate.ts's header).
+    // date is a native DATE (2026-08-25 migration): compare it as a date so the index applies.
     sql: `SELECT COUNT(*) AS bad FROM technical_signals
-          WHERE date::text >= date('now','-3 days') AND (
+          WHERE date >= current_date - 3 AND (
             (rsi IS NOT NULL AND (rsi < 0 OR rsi > 100)) OR
             (win_probability IS NOT NULL AND (win_probability < 0 OR win_probability > 1)) OR
             (calibrated_win_probability IS NOT NULL AND (calibrated_win_probability < 0 OR calibrated_win_probability > 1))
@@ -826,7 +819,7 @@ export const DATA_QUALITY_CHECKS: DataQualityCheck[] = [
     category: 'signals',
     critical: false,
     sql: `SELECT COUNT(DISTINCT signal_score) AS distinct_scores, COUNT(*) AS total
-          FROM technical_signals WHERE date::text >= date('now','-3 days')`,
+          FROM technical_signals WHERE date >= current_date - 3`,
     evaluate: (row) => {
       const total = Number(row?.total) || 0;
       const distinct = Number(row?.distinct_scores) || 0;
@@ -1095,7 +1088,7 @@ export const DATA_QUALITY_CHECKS: DataQualityCheck[] = [
     critical: false,
     // feature_store.date is also a native Postgres DATE column — see the stock_ohlcv note above.
     sql: `SELECT MAX(date) AS last_date, COUNT(DISTINCT symbol) AS symbols
-          FROM feature_store WHERE date::text >= date('now','-10 days')`,
+          FROM feature_store WHERE date >= current_date - 10`,
     evaluate: (row, now) => {
       const stale = daysStale(row?.last_date, now);
       if (stale == null) return { status: 'fail', detail: 'No feature_store rows in the last 10 days' };
@@ -1331,7 +1324,7 @@ export const DATA_QUALITY_CHECKS: DataQualityCheck[] = [
     category: 'fundamentals',
     critical: false,
     sql: `SELECT MAX(as_of_date) AS last_snapshot, COUNT(DISTINCT symbol) AS symbols
-          FROM fundamentals_history WHERE as_of_date::text >= date('now','-10 days')`,
+          FROM fundamentals_history WHERE as_of_date >= current_date - 10`,
     evaluate: (row, now) => {
       const stale = daysStale(row?.last_snapshot, now);
       if (stale == null) return { status: 'warn', detail: 'No fundamentals_history snapshot in the last 10 days' };
@@ -1345,7 +1338,7 @@ export const DATA_QUALITY_CHECKS: DataQualityCheck[] = [
     category: 'fundamentals',
     critical: false,
     sql: `SELECT MAX(as_of_date) AS last_snapshot, COUNT(DISTINCT symbol) AS symbols
-          FROM analyst_estimates_history WHERE as_of_date::text >= date('now','-14 days')`,
+          FROM analyst_estimates_history WHERE as_of_date >= current_date - 14`,
     evaluate: (row, now) => {
       const stale = daysStale(row?.last_snapshot, now);
       if (stale == null) return { status: 'warn', detail: 'No analyst_estimates_history snapshot in the last 14 days' };
@@ -1361,7 +1354,7 @@ export const DATA_QUALITY_CHECKS: DataQualityCheck[] = [
     category: 'options',
     critical: true,
     sql: `SELECT COUNT(*) AS total, COUNT(atm_iv) AS has_iv, MAX(date) AS last_date
-          FROM stock_options_oi WHERE date::text >= date('now','-5 days')`,
+          FROM stock_options_oi WHERE date >= current_date - 5`,
     evaluate: (row, now) => {
       const stale = daysStale(row?.last_date, now);
       const total = Number(row?.total) || 0;
@@ -1377,7 +1370,7 @@ export const DATA_QUALITY_CHECKS: DataQualityCheck[] = [
     category: 'options',
     critical: false,
     sql: `SELECT COUNT(*) AS bad FROM stock_options_oi
-          WHERE date::text >= date('now','-5 days') AND pcr IS NOT NULL AND (pcr < 0 OR pcr > 50)`,
+          WHERE date >= current_date - 5 AND pcr IS NOT NULL AND (pcr < 0 OR pcr > 50)`,
     evaluate: (row) => {
       const bad = Number(row?.bad) || 0;
       if (bad > 0) return { status: 'warn', detail: `${bad} rows have a PCR outside [0, 50] (last 5d) — check for a divide-by-zero` };
@@ -1543,7 +1536,7 @@ export const DATA_QUALITY_CHECKS: DataQualityCheck[] = [
     category: 'macro',
     critical: false,
     sql: `SELECT MAX(date) AS last_date, COUNT(DISTINCT indicator_name) AS indicators
-          FROM macro_indicators WHERE date::text >= date('now','-10 days')`,
+          FROM macro_indicators WHERE date >= current_date - 10`,
     evaluate: (row, now) => {
       const stale = daysStale(row?.last_date, now);
       if (stale == null) return { status: 'warn', detail: 'No macro_indicators rows in the last 10 days' };
@@ -2683,13 +2676,17 @@ async function persistResult(check: DataQualityCheck, result: { status: DataQual
   }
 }
 
+/** Checks in flight at once. They were strictly sequential: 169 checks took 45.7s warm / 93.2s
+ *  cold per sweep (2026-09-11), every 15 minutes. Each is an independent pool query, so a few can
+ *  overlap; small enough that a sweep never takes a large share of the 22-connection pool. */
+export const DQ_CHECK_CONCURRENCY = 4;
+
 /** Runs every registered check and persists the latest result per check_id. Each check is
  *  isolated — a query error becomes an 'error' status for that one check, not a thrown
  *  exception that skips the rest. */
 export async function runDataQualityChecks(now: Date = new Date()): Promise<DataQualityResult[]> {
   await ensureTable();
-  const results: DataQualityResult[] = [];
-  for (const check of DATA_QUALITY_CHECKS) {
+  const results = await mapWithConcurrency(DATA_QUALITY_CHECKS, DQ_CHECK_CONCURRENCY, async (check) => {
     let outcome: { status: DataQualityStatus; detail: string };
     try {
       const row = await dbGet<Record<string, any>>(check.sql, check.params ?? []);
@@ -2697,9 +2694,9 @@ export async function runDataQualityChecks(now: Date = new Date()): Promise<Data
     } catch (err) {
       outcome = { status: 'error', detail: (err as Error).message.slice(0, 300) };
     }
-    results.push({ id: check.id, label: check.label, category: check.category, critical: check.critical, ...outcome });
     await persistResult(check, outcome);
-  }
+    return { id: check.id, label: check.label, category: check.category, critical: check.critical, ...outcome };
+  });
   await purgeOrphanResults(results.map(r => r.id));
   return results;
 }

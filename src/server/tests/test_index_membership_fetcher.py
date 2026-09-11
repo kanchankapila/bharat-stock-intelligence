@@ -64,15 +64,19 @@ class TestBackfillTechnicalSignalsPlaceholders:
             "Postgres branch must use `?` placeholders (db_compat's translate() layer "
             "converts them per-dialect) — raw `%s` bypasses translation and crashes psycopg2"
         )
-        assert sql.count("?") == 6
+        # 6 CASE guards + the WHERE date bound (2026-09-11: without it the statement rewrote the
+        # whole table every run to bless one date).
+        assert sql.count("?") == 7
 
-    def test_sqlite_branch_still_uses_question_mark_placeholders(self, monkeypatch):
-        monkeypatch.setattr(imf, "use_postgres", lambda: False)
-        conn = _FakeConn(max_date="2026-07-24")
-        imf.backfill_technical_signals(conn)
-        sql = conn.cur.executed_sql[-1]
-        assert "%s" not in sql
-        assert sql.count("?") == 6
+    def test_statement_no_longer_branches_on_dialect(self, monkeypatch):
+        # The SQLite branch was dead once use_postgres() became unconditional; it was removed.
+        sqls = []
+        for pg in (True, False):
+            monkeypatch.setattr(imf, "use_postgres", lambda pg=pg: pg)
+            conn = _FakeConn(max_date="2026-07-24")
+            imf.backfill_technical_signals(conn)
+            sqls.append(conn.cur.executed_sql[-1])
+        assert sqls[0] == sqls[1]
 
 
 class TestDateAnchorUsesLastTradingSession:

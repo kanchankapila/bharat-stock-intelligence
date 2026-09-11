@@ -207,6 +207,21 @@ def test_prepare_outcome_caches_idempotent():
     assert orc._ATR_CACHE == first_atr
 
 
+def test_prepare_outcome_caches_holds_only_the_current_pass():
+    # These module-level caches live inside the long-running ml-api and alphaquant-api
+    # processes (both import outcome_resolver), where every daily resolve pass added its
+    # (symbol, date) windows and nothing ever evicted them.
+    import outcome_resolver as orc
+    conn = make_db()
+    seed_walk(conn, 'OLDPASS')
+    seed_walk(conn, 'NEWPASS')
+    conn.commit()
+    warm(conn, ['OLDPASS'])
+    orc.get_volatility_threshold(conn, 'OLDPASS', SIGNAL_DATE, 5)
+    warm(conn, ['NEWPASS'])
+    for cache in (orc._ATR_CACHE, orc._CLOSES_CACHE, orc._VOLTHRESH_CACHE):
+        assert not any('OLDPASS' in str(k) for k in cache)
+    assert any('NEWPASS' in str(k) for k in orc._ATR_CACHE)
 
 
 def test_vol_threshold_short_history_fallback_formula():

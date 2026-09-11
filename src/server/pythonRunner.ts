@@ -1,4 +1,6 @@
 import { execFile, spawn } from 'child_process';
+import fs from 'fs';
+import os from 'os';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { classifyStderr } from './jobSweep';
@@ -178,11 +180,50 @@ export const PYTHON = process.env.PYTHON_PATH
 
 export const PY_DIR = path.resolve(SCRIPT_ROOT, 'src', 'server');
 
+// ─── Per-job memory ceiling ───────────────────────────────────────────────────
+// Children get pyboot/ on PYTHONPATH; its sitecustomize.py puts the whole process tree in a
+// Windows Job Object capped at PY_CHILD_MEM_LIMIT_MB of committed memory. pm2's
+// max_memory_restart watches bharat-server only, never these children -- dl_trainer.py reached
+// 38-52.7GB of commit on this 24GB host (2026-09-06..09-11) and killed the WSL2 VM, and the
+// database with it, three times. OBSERVE-FIRST: no heavy job's legitimate peak had been measured
+// when this landed (dl_trainer's post-fix peak is only estimated at ~8-10GB), so the default is
+// set to bite only on a genuine runaway -- 20GB stops the 38-52.7GB case with host commit to spare
+// -- while every run logs peakMemMb. Tighten it from those logged peaks (AF-20260911-12), not from
+// estimates: a ceiling below a job's real peak turns a working job into a guaranteed MemoryError.
+// It is per job tree, not per host: 5 slots can still sum past RAM.
+// 0 disables it. Read per call so a .env change applies after a restart without a code change.
+const PYBOOT_DIR = path.resolve(PY_DIR, 'pyboot');
+const DEFAULT_CHILD_MEM_LIMIT_MB = 20_480;
+let _peakFileSeq = 0;
+
+function childMemLimitMb(): number {
+  const raw = process.env.PY_CHILD_MEM_LIMIT_MB;
+  if (raw === undefined || raw.trim() === '') return DEFAULT_CHILD_MEM_LIMIT_MB;
+  const n = Number(raw);
+  return Number.isFinite(n) && n >= 0 ? Math.floor(n) : DEFAULT_CHILD_MEM_LIMIT_MB;
+}
+
+/** Read (and delete) the child's peak-commit record; undefined if it never wrote one. */
+function takePeakMemMb(file: string): number | undefined {
+  try {
+    const peak = JSON.parse(fs.readFileSync(file, 'utf8')).peak_mb;
+    return typeof peak === 'number' ? peak : undefined;
+  } catch {
+    return undefined;
+  } finally {
+    try { fs.rmSync(file, { force: true }); } catch { /* best-effort */ }
+  }
+}
+
+const OOM_STDERR = /MemoryError|Unable to allocate|not enough memory/;
+
 import log from './logger';
 
 export interface PythonResult {
   stdout: string;
   stderr: string;
+  /** Peak committed memory of the job's whole process tree, when the ceiling was active. */
+  peakMemMb?: number;
 }
 
 const MAX_BUFFER = 4 * 1024 * 1024;
@@ -224,7 +265,10 @@ export async function runPython(
 
   let stdout = '';
   let stderr = '';
+  let peakMemMb: number | undefined;
   let didThrow = false;
+  const memLimitMb = childMemLimitMb();
+  const peakFile = path.join(os.tmpdir(), `bsi-py-peak-${process.pid}-${++_peakFileSeq}.json`);
   try {
     const result = await new Promise<PythonResult>((resolve, reject) => {
       const child = spawn(
@@ -232,9 +276,16 @@ export async function runPython(
         [path.join(PY_DIR, script), ...args],
         {
           windowsHide: true,
-          // Force UTF-8 I/O so Python scripts printing non-ASCII (→ ≥ ₹ etc.)
-          // don't crash on Windows CP1252 console encoding
-          env: { ...process.env, PYTHONIOENCODING: 'utf-8', PYTHONUNBUFFERED: '1' },
+          env: {
+            ...process.env,
+            // Force UTF-8 I/O so Python scripts printing non-ASCII (→ ≥ ₹ etc.)
+            // don't crash on Windows CP1252 console encoding
+            PYTHONIOENCODING: 'utf-8',
+            PYTHONUNBUFFERED: '1',
+            PYTHONPATH: [PYBOOT_DIR, process.env.PYTHONPATH].filter(Boolean).join(path.delimiter),
+            BHARAT_PY_MEM_LIMIT_MB: String(memLimitMb),
+            BHARAT_PY_PEAK_FILE: peakFile,
+          },
         },
       );
 
@@ -279,6 +330,7 @@ export async function runPython(
       });
 
       child.on('close', (code) => {
+        peakMemMb = takePeakMemMb(peakFile);
         settle(() => {
           if (timedOut) {
             reject(Object.assign(new Error(
@@ -291,7 +343,7 @@ export async function runPython(
               { stdout: out, stderr: err },
             ));
           } else if (code === 0) {
-            resolve({ stdout: out, stderr: err });
+            resolve({ stdout: out, stderr: err, peakMemMb });
           } else {
             // A script can sys.exit(1) after printing its failure reason to stdout
             // (e.g. mc_broker_reco_fetcher.py's "0 recos fetched" guard, dl_trainer.py's
@@ -313,7 +365,19 @@ export async function runPython(
             // message is a bare magic number (see ABNORMAL_EXIT_CODES). Empty for ordinary
             // codes like 1/2, which leaves the normal failure message byte-identical.
             const decoded = describeExitCode(code);
+            // A single oversized allocation fails well below the peak, so the stderr signature
+            // counts as well as a peak near the ceiling.
+            // Assert the ceiling only when the peak reached it: a single absurd allocation (a
+            // shape bug asking for terabytes) also raises MemoryError at a low peak, and blaming
+            // the ceiling there would send the reader off to raise it.
+            const atCeiling = memLimitMb > 0 && peakMemMb !== undefined && peakMemMb >= 0.9 * memLimitMb;
+            const oom = OOM_STDERR.test(err);
             const reason = [
+              atCeiling && `MEMORY CEILING: the job's process tree peaked at ${peakMemMb}MB against its ` +
+                `${memLimitMb}MB per-job ceiling (PY_CHILD_MEM_LIMIT_MB) and was refused further ` +
+                `memory -- a runaway this job contained instead of the host.`,
+              !atCeiling && oom && `MemoryError (peak ${peakMemMb ?? '?'}MB of a ${memLimitMb || 'no'}MB ` +
+                `ceiling) -- well below the ceiling, so look at the allocation, not the limit.`,
               decoded && `${isHostTeardownExit(code) ? 'HOST/OS TERMINATION' : 'ABNORMAL EXIT'}: ${decoded}`,
               errTail && `stderr: ${errTail}`,
               outTail && `stdout: ${outTail}`,
@@ -363,18 +427,25 @@ export async function runPython(
     throw error;
   } finally {
     release();
+    // The kill paths settle without 'close', so the record may still be on disk.
+    if (peakMemMb === undefined) peakMemMb = takePeakMemMb(peakFile);
     if (stdout) {
       log.info(`[PY] ${script} execution completed`, {
         script,
         args,
+        peakMemMb,
         outputSnippet: stdout.slice(0, 300),
       });
+    }
+    if (!stdout && !stderr && peakMemMb !== undefined) {
+      log.info(`[PY] ${script} completed`, { script, args, peakMemMb });
     }
     if (stderr) {
       if (didThrow) {
         log.error(`[PY] ${script} encountered an error`, {
           script,
           args,
+          peakMemMb,
           stderrSnippet: stderr.slice(0, 300),
           fullStderr: stderr,
         });
@@ -390,11 +461,11 @@ export async function runPython(
         // underneath benign chatter still classifies as a real error).
         const cls = classifyStderr(stderr);
         const line = `[PY] ${script} finished successfully (stderr: ${cls})`;
-        const meta = { script, args, stderrClass: cls, stderrSnippet: stderr.slice(0, 300), fullStderr: stderr };
+        const meta = { script, args, peakMemMb, stderrClass: cls, stderrSnippet: stderr.slice(0, 300), fullStderr: stderr };
         if (cls === 'real_error') log.warn(line, meta);
         else log.info(line, meta);
       }
     }
   }
-  return { stdout, stderr };
+  return { stdout, stderr, peakMemMb };
 }

@@ -19,7 +19,7 @@ import argparse
 import datetime
 from datetime import timedelta, timezone
 
-from db_compat import connect, ConnWrapper
+from db_compat import connect, ConnWrapper, iter_rows
 from hypertable_safe_write import safe_keyed_update
 import sys
 
@@ -172,35 +172,37 @@ def _within(d1_iso: str, d2_iso: str, days: int) -> bool:
     return abs((a - b).days) <= days
 
 
+def _load_action_map(conn: ConnWrapper) -> dict:
+    action_map = {}
+    for sym, ex_date in iter_rows(conn, "SELECT symbol, ex_date FROM corporate_actions"):
+        action_map.setdefault(sym, []).append(str(ex_date)[:10])
+    return action_map
+
+
+def _load_bars_map(conn: ConnWrapper) -> dict:
+    """symbol -> [(iso_date, close), ...] in date order, for the whole of stock_ohlcv.
+
+    Streamed as tuples: fetchall() built a Row object per bar -- 2.7M of them, 2,280MB peak
+    (2026-09-11) -- and both neighbour passes did it separately. flag_all loads this once.
+    """
+    print("[OHLCVQuality] Fetching all OHLCV rows for analysis...")
+    bars_map = {}
+    for sym, d, c in iter_rows(conn, "SELECT symbol, date, close FROM stock_ohlcv ORDER BY symbol, date"):
+        bars_map.setdefault(sym, []).append((str(d)[:10], float(c or 0)))
+    return bars_map
+
+
 def flag_bad_prints(conn: ConnWrapper, threshold: float = BAD_PRINT_THRESHOLD,
-                    action_window_days: int = ACTION_WINDOW_DAYS) -> dict:
+                    action_window_days: int = ACTION_WINDOW_DAYS,
+                    bars_map: dict = None, action_map: dict = None) -> dict:
     """Mark stock_ohlcv.is_suspect for single-bar bad prints. Idempotent (resets first)."""
     conn.execute("UPDATE stock_ohlcv SET is_suspect=0 WHERE is_suspect=1")
     conn.commit()
 
-    # Bulk fetch corporate actions
-    actions_rows = conn.execute("SELECT symbol, ex_date FROM corporate_actions").fetchall()
-    action_map = {}
-    for r in actions_rows:
-        sym = r[0] if isinstance(r, (list, tuple)) else r['symbol']
-        dt  = str(r[1] if isinstance(r, (list, tuple)) else r['ex_date'])[:10]
-        if sym not in action_map:
-            action_map[sym] = []
-        action_map[sym].append(dt)
-
-    # Bulk fetch stock_ohlcv ordered by symbol and date
-    print("[OHLCVQuality] Fetching all OHLCV rows for analysis...")
-    bars_rows = conn.execute("SELECT symbol, date, close FROM stock_ohlcv ORDER BY symbol, date").fetchall()
-    
-    # Group bars by symbol in memory
-    bars_map = {}
-    for r in bars_rows:
-        sym = r[0] if isinstance(r, (list, tuple)) else r['symbol']
-        dt  = str(r[1] if isinstance(r, (list, tuple)) else r['date'])[:10]
-        c   = float(r[2] if isinstance(r, (list, tuple)) else r['close'] or 0)
-        if sym not in bars_map:
-            bars_map[sym] = []
-        bars_map[sym].append((dt, c))
+    if action_map is None:
+        action_map = _load_action_map(conn)
+    if bars_map is None:
+        bars_map = _load_bars_map(conn)
 
     suspects_to_update = []
     for sym, bars in bars_map.items():
@@ -240,25 +242,16 @@ def flag_bad_prints(conn: ConnWrapper, threshold: float = BAD_PRINT_THRESHOLD,
 
 
 def flag_extreme_level_shifts(conn: ConnWrapper, threshold: float = EXTREME_SHIFT_THRESHOLD,
-                              action_window_days: int = ACTION_WINDOW_DAYS) -> dict:
+                              action_window_days: int = ACTION_WINDOW_DAYS,
+                              bars_map: dict = None, action_map: dict = None) -> dict:
     """Mark stock_ohlcv.is_suspect for single-day moves too large to ever be a real trade,
     whether or not the price reverts afterward (unlike flag_bad_prints, which requires
     reversion on both sides). Does NOT reset is_suspect first -- runs after flag_bad_prints
     in run() and adds to what it already flagged, rather than overwriting it."""
-    actions_rows = conn.execute("SELECT symbol, ex_date FROM corporate_actions").fetchall()
-    action_map = {}
-    for r in actions_rows:
-        sym = r[0] if isinstance(r, (list, tuple)) else r['symbol']
-        dt  = str(r[1] if isinstance(r, (list, tuple)) else r['ex_date'])[:10]
-        action_map.setdefault(sym, []).append(dt)
-
-    bars_rows = conn.execute("SELECT symbol, date, close FROM stock_ohlcv ORDER BY symbol, date").fetchall()
-    bars_map = {}
-    for r in bars_rows:
-        sym = r[0] if isinstance(r, (list, tuple)) else r['symbol']
-        dt  = str(r[1] if isinstance(r, (list, tuple)) else r['date'])[:10]
-        c   = float(r[2] if isinstance(r, (list, tuple)) else r['close'] or 0)
-        bars_map.setdefault(sym, []).append((dt, c))
+    if action_map is None:
+        action_map = _load_action_map(conn)
+    if bars_map is None:
+        bars_map = _load_bars_map(conn)
 
     suspects_to_update = []
     for sym, bars in bars_map.items():
@@ -314,15 +307,23 @@ def flag_malformed_bars(conn: ConnWrapper) -> dict:
     return {'flagged': len(rows)}
 
 
+def flag_all(conn: ConnWrapper) -> None:
+    """All three passes over one load of the bars (the two neighbour passes read the same data)."""
+    action_map = _load_action_map(conn)
+    bars_map = _load_bars_map(conn)
+    flag_bad_prints(conn, bars_map=bars_map, action_map=action_map)          # owns the reset
+    flag_extreme_level_shifts(conn, bars_map=bars_map, action_map=action_map)
+    del bars_map
+    flag_malformed_bars(conn)
+
+
 def run(ingest: bool = True, force_ingest: bool = False):
     conn = connect()
     try:
         if ingest:
             symbols = [r[0] for r in conn.execute("SELECT DISTINCT symbol FROM stock_ohlcv").fetchall()]
             ingest_corporate_actions(conn, symbols, force=force_ingest)
-        flag_bad_prints(conn)          # owns the reset
-        flag_extreme_level_shifts(conn)
-        flag_malformed_bars(conn)
+        flag_all(conn)
     finally:
         conn.close()
 
