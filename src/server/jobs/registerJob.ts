@@ -50,6 +50,7 @@ export const ORPHAN_REQUEUE_SKIP_WINDOW_MS = 90 * 60_000;
  * stale for a day while every sibling heartbeat stayed green).
  *
  * Guards, in order (each skip is logged):
+ *  0. The orphan was itself a make-up (orphanRequeue) -- alert only, never a second make-up.
  *  1. Upcoming regular slot -- the job's repeatable fires again within
  *     ORPHAN_REQUEUE_SKIP_WINDOW_MS, so the schedule itself covers the loss.
  *  2. Make-up already in flight -- an active/waiting/delayed instance of the same jobName with
@@ -74,6 +75,20 @@ export async function requeueOrphanedJob(
   try {
     const now = Date.now();
     const startedAt = typeof orphan.processedOn === 'number' ? orphan.processedOn : undefined;
+
+    // Guard 0: the orphan was itself a make-up. A job whose make-up also dies mid-run is a
+    // signal, not a miss -- dl-retrain-weekly exhausted host memory and killed the WSL2 VM
+    // (taking the DB with it), and each boot requeued it straight into the next kill
+    // (2026-09-10 23:48, 09-11 00:42 and 06:34 IST). One make-up per missed run; the regular
+    // schedule is the next attempt.
+    if (orphan.data?.orphanRequeue === true) {
+      console.warn(
+        `[QUEUE] ${queue.name}: orphaned ${name} was itself a make-up run that also died ` +
+        `mid-run -- not requeueing again (investigate before its next scheduled slot).`);
+      void alertOrphanedJob(queue.name, name, startedAt, false,
+        'the make-up run also died mid-run; not requeued again');
+      return false;
+    }
 
     // Guard 1: the regular schedule covers it soon. Must be a FUTURE fire: a stale past `next`
     // (a repeatable about to be replaced, the 2026-09-09 mover cron swap) must not suppress

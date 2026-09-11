@@ -175,7 +175,14 @@ def backup() -> None:
 
 
 def _verify_dump(path: Path) -> tuple[bool, str]:
-    """True when pg_restore can read the dump's table of contents."""
+    """True when the dump's table of contents AND every data block read back.
+
+    The TOC check alone cannot see truncation: a -Fc dump streamed to stdout writes its TOC
+    first, so 2026-09-10's dump, cut off at 1.55GB of ~4.3GB when the WSL2 VM died mid-dump,
+    listed 496 TABLE DATA entries and read as valid. `pg_restore -f /dev/null` reads every
+    block and failed it with "could not read from input file: end of file" (~5 min on a
+    complete 4.2GB dump).
+    """
     cmd = _docker_base(interactive=True) + ["pg_restore", "--list"]
     with open(path, "rb") as fh:
         r = subprocess.run(cmd, stdin=fh, capture_output=True, text=True)
@@ -183,6 +190,11 @@ def _verify_dump(path: Path) -> tuple[bool, str]:
         return False, r.stderr
     if "TABLE DATA" not in r.stdout:
         return False, "TOC readable but contains no TABLE DATA entries — dump is effectively empty"
+    cmd = _docker_base(interactive=True) + ["pg_restore", "-f", "/dev/null"]
+    with open(path, "rb") as fh:
+        r = subprocess.run(cmd, stdin=fh, capture_output=True, text=True)
+    if r.returncode != 0:
+        return False, f"data blocks unreadable (truncated?): {r.stderr[-1000:]}"
     return True, ""
 
 

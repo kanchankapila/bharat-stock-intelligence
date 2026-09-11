@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import sys
 import time
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
 from typing import Callable, Iterable, Iterator, Optional, TypeVar
 
 T = TypeVar("T")
@@ -35,6 +35,7 @@ def load_sequences_bounded(
     loader: Callable[[str], Optional[T]],
     max_workers: int = DEFAULT_MAX_WORKERS,
     deadline: Optional[float] = None,
+    max_in_flight: Optional[int] = None,
 ) -> Iterator[T]:
     """Yield each symbol's loaded sequences, in completion order, skipping failures.
 
@@ -45,6 +46,13 @@ def load_sequences_bounded(
     loaded" is strictly better than being killed with nothing to show -- which is exactly what
     happened on 2026-09-05.
 
+    At most `max_in_flight` symbols (default 2 x max_workers) are loading or loaded-but-unread
+    at any moment; the next is submitted only as one is yielded. The consumer trains a chunk on
+    the GPU for minutes while this generator is suspended, and a pool holding every symbol's
+    future keeps loading the whole universe into memory during that pause -- 38-52.7GB in one
+    process on a 24GB host (2026-09-06..09-11), enough to kill the WSL2 VM and the database
+    with it.
+
     A symbol that raises is skipped rather than aborting the pass: one bad symbol must not cost
     the other 2,299. A loader returning None (or anything falsy) is treated as "no usable
     history" and dropped here, so callers do not filter twice.
@@ -52,6 +60,7 @@ def load_sequences_bounded(
     symbols = list(symbols)
     if not symbols:
         return
+    window = max(1, max_in_flight if max_in_flight is not None else 2 * max_workers)
 
     skipped = 0
 
@@ -66,26 +75,41 @@ def load_sequences_bounded(
             return _SKIPPED
         return loader(sym)
 
-    with ThreadPoolExecutor(max_workers=max_workers) as pool:
-        futures = {pool.submit(_guarded, sym): sym for sym in symbols}
+    pool = ThreadPoolExecutor(max_workers=max_workers)
+    try:
+        remaining = iter(symbols)
+        pending = {}
 
-        for fut in as_completed(futures):
-            sym = futures[fut]
-            try:
-                result = fut.result()
-            except Exception as e:
-                print(f"[DL] Skip {sym}: {e}", file=sys.stderr)
-                continue
-            if result is _SKIPPED:
-                skipped += 1
-                continue
-            if result is None:
-                continue
-            # numpy arrays are ambiguous in a boolean context, so length is checked explicitly
-            # rather than relying on truthiness -- `if result:` raises ValueError on an ndarray.
-            if hasattr(result, "__len__") and len(result) == 0:
-                continue
-            yield result
+        def _top_up():
+            while len(pending) < window:
+                sym = next(remaining, None)
+                if sym is None:
+                    return
+                pending[pool.submit(_guarded, sym)] = sym
+
+        _top_up()
+        while pending:
+            done, _ = wait(pending, return_when=FIRST_COMPLETED)
+            for fut in done:
+                sym = pending.pop(fut)
+                try:
+                    result = fut.result()
+                except Exception as e:
+                    print(f"[DL] Skip {sym}: {e}", file=sys.stderr)
+                    continue
+                if result is _SKIPPED:
+                    skipped += 1
+                    continue
+                if result is None:
+                    continue
+                # numpy arrays are ambiguous in a boolean context, so length is checked explicitly
+                # rather than relying on truthiness -- `if result:` raises ValueError on an ndarray.
+                if hasattr(result, "__len__") and len(result) == 0:
+                    continue
+                yield result
+            _top_up()
+    finally:
+        pool.shutdown(wait=True, cancel_futures=True)
 
     if skipped:
         print(

@@ -76,6 +76,39 @@ def test_no_deadline_means_load_everything():
     assert len(out) == 2
 
 
+def test_prefetch_is_bounded_while_the_consumer_is_busy():
+    """The loader must not race ahead of a slow consumer.
+
+    train_lstm() consumes this generator in 100-symbol chunks and trains each chunk on the GPU
+    for 30 epochs -- minutes during which the generator is suspended. The first version
+    submitted every symbol to the pool up front, so the pool kept loading the whole ~2,300-symbol
+    universe during that pause and every result (~27MB of float32 windows) sat in memory unread.
+    Measured 2026-09-06..09-11: one dl_trainer.py process at 38-52.7GB of commit on a 24GB host,
+    which exhausted the Windows commit limit, killed the WSL2 VM, and took TimescaleDB and Redis
+    down uncleanly each time -- the "chunking to bound peak RAM" never bounded anything.
+    """
+    import threading
+    lock = threading.Lock()
+    started = 0
+
+    def loader(sym):
+        nonlocal started
+        with lock:
+            started += 1
+        return sym
+
+    symbols = [f"S{i}" for i in range(200)]
+    consumed = 0
+    for _ in load_sequences_bounded(symbols, loader, max_workers=4):
+        consumed += 1
+        if consumed == 1:
+            time.sleep(0.5)  # the consumer is busy training; the pool must wait for it
+            with lock:
+                ahead = started - consumed
+            assert ahead <= 8, f"loader ran {ahead} symbols ahead of a stalled consumer"
+    assert consumed == 200, "bounding the prefetch must not drop symbols"
+
+
 def test_parallelism_actually_overlaps_io():
     """Negative control on the whole point of the change: if this ran serially the elapsed time
     would be ~8x the per-item sleep, not ~2x."""

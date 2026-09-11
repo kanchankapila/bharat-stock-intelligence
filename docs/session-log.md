@@ -8371,3 +8371,38 @@ tsc clean; vitest **1224 passed**; pytest **2466 passed / 249 skipped, 0 failed*
 - **The fix was NOT a bigger timeout** (that's the band-aid the repo has applied repeatedly): changed `STALENESS_DAYS = 7` → **`90`** so the weekly job skips unchanged-quarter symbols.
 - **Verified live**: full-universe run now skips all 1831 symbols and finishes in **6.7s** (was timinging out at 40 min). `--full` re-upsert still works (HDFCBANK → 1890 cells). After the initial crawl, the weekly job is a near-no-op.
 - Docs: AF-20260909-15 ledger row, session log, memory journal.
+
+## 2026-09-11 — TimescaleDB 2.17.2 → 2.30.0; root-caused the DB "hangs and restarts" (AF-20260911-01..04)
+
+- **Upgrade, in place on the existing volume, no data movement.** Same PG major (16.6 → 16.15),
+  both images Alpine/musl (collation provider `c`, so text-index order cannot change). The
+  2.30.0 image ships every older `timescaledb-*.so` plus a direct `timescaledb--2.17.2--2.30.0.sql`.
+  Sequence: verified `pg_dump` (4,215MB, TOC read back) → `CHECKPOINT` + `docker stop -t 300`
+  (clean: `database system is shut down`) → byte-exact volume snapshot
+  `bharat_pgdata_pre_ts2_30_0_20260911` (11,280 files / 46,812,394,767 bytes, identical) → image
+  swap → `ALTER EXTENSION timescaledb UPDATE` as the first statement of a fresh `psql -X` session
+  in **all 8 databases** (template1 included) → one more restart. Verified: 6 hypertables / 5
+  compressed unchanged, `stock_ohlcv` 2,681,610 rows (identical to the pre-upgrade count), 2023 read back
+  from compressed chunks, all 10 background jobs `Success`, every TimescaleDB function the code
+  calls present with compatible signatures. CI's `latest-pg16` now matches production.
+- **Why the DB kept "restarting": it wasn't the DB.** All 6 unclean restarts since 09-04 lacked a
+  shutdown record. Three matched host events (a sleep, a Windows Update reboot, a user reboot).
+  The rest matched Windows Resource-Exhaustion events naming ONE `python.exe` at 38-52.7GB of
+  commit (23GB RAM, ~70GB commit limit). That process was `dl_trainer.py`: its "bounded" loader
+  (`b4c1523a`, 09-06) had every symbol submitted to the pool, so it prefetched the whole universe
+  while the GPU trained a chunk. Commit exhaustion killed the WSL2 VM (Docker backend log:
+  `wsl.exe ... exit status 1`, engine restarted), and Postgres and Redis died with it. The
+  orphan-requeue then relaunched it 3 times (23:48, 00:42, 06:34 IST), holding the host in
+  thrash until the 08:04 reboot. Fixed both (`max_in_flight` window; Guard 0: never requeue a
+  make-up). Live proof: old loader +3,345MB / new +235MB on 150 real symbols during a 60s stall.
+  The guard fired on the first boot.
+- **Why it "hangs":** the same thrash, plus checkpoint fsyncs of up to 286s on an NVMe (p99 103s)
+  during bulk writes. Left OPEN as AF-20260911-04: the likely lever is a Defender exclusion for
+  `D:\DockerData`, which needs admin and is the owner's call.
+- **Collateral:** the 09-10 nightly dump was truncated by the VM death and still passed
+  `_verify_dump` (a streamed `-Fc` dump puts its TOC first). The check now also reads every data
+  block; the file was renamed `*.dump.TRUNCATED`.
+- **Disk:** the snapshot grew `D:\DockerData\disk\docker_data.vhdx` by ~47GB (D: 118 → 63GB free).
+  Drop it once 2.30.0 has run cleanly for a few days: `docker volume rm bharat_pgdata_pre_ts2_30_0_20260911`
+  (the vhdx will not shrink on its own, but Docker reuses the freed space).
+- Checks: tsc 0, vitest 1,266 passed, pytest 2,614 passed (all against the upgraded server).

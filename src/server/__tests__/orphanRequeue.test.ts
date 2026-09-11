@@ -142,6 +142,21 @@ describe('requeueOrphanedJob (AF-20260909-06)', () => {
     expect(queue.add).toHaveBeenCalledTimes(1);
   });
 
+  it('does NOT requeue an orphan that was itself a make-up (one make-up per missed run)', async () => {
+    // 2026-09-10/11: dl-retrain-weekly exhausted host memory and killed the WSL2 VM (and the DB
+    // with it); every boot requeued it and it killed the VM again -- 23:48, 00:42 and 06:34 IST.
+    // A make-up that also dies mid-run is a signal, not a miss; re-running it is how one
+    // host-killing job becomes a crash loop.
+    const queue = fakeQueue({
+      repeatables: [{ name: 'ml-daily-ops', next: Date.now() + 22 * HOUR }],
+    });
+    const makeup = { ...makeOrphanJob('10', Date.now() - HOUR),
+      data: { foo: 'bar', isCatchup: true, orphanRequeue: true, requeuedFrom: '9' } };
+    const ok = await requeueOrphanedJob(queue, makeup);
+    expect(ok).toBe(false);
+    expect(queue.add).not.toHaveBeenCalled();
+  });
+
   it('never throws even when the queue add fails', async () => {
     const queue = fakeQueue();
     queue.add.mockRejectedValue(new Error('redis down'));

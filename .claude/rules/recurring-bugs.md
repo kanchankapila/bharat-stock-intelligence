@@ -422,6 +422,29 @@ Currently automated (9 checks): `date.today()` write-anchor, short calendar-day 
   unmeasurable, grep the process-manager's stdout log as well as the application log**, and
   before raising any budget, check whether the SUCCESSFUL runs have actually moved.
 
+- **A generator fed by an executor that has EVERY task submitted is not bounded by how slowly
+  its consumer reads — the pool keeps working while the generator is suspended, and every
+  finished result sits in memory unread.** `dl_sequence_loader.load_sequences_bounded` did
+  `{pool.submit(f, s) for s in symbols}` then `as_completed(...)`; `train_lstm` read it in
+  100-symbol chunks and trained each for minutes, so during every pause the pool loaded the rest
+  of the ~2,300-symbol universe. The caller's own docstring said "streaming in chunks to bound
+  RAM". Measured: one process at 38-52.7GB of commit on a 23GB host, which exhausted Windows
+  commit, killed the WSL2 VM, and took TimescaleDB and Redis down uncleanly 6 times
+  (AF-20260911-01). **Tell:** `submit` in a comprehension or loop over the full input, feeding a
+  consumer that does slow work per item. Fix: a sliding window — keep at most N futures pending
+  (`wait(pending, FIRST_COMPLETED)`), submit the next only as one is yielded. **A unit test with an
+  instant loader and an instant consumer passes either way.** Stall the consumer and count how
+  far the loader ran ahead (it was 199 of 200).
+- **An automatic retry with no limit on the retry-of-a-retry turns a job that crashes the host
+  into a crash loop.** The orphan-requeue (AF-20260909-06) relaunched the memory-exhausting DL
+  retrain on each boot after it had just killed the VM: 3 make-ups in 7 hours (AF-20260911-02).
+  Its "already in flight" guard cannot see this, because the dead make-up is no longer in flight.
+  Mark retries (`orphanRequeue: true`) and refuse to retry anything already carrying the mark.
+- **A verification that reads a file's HEADER cannot detect a missing TAIL.** `pg_restore --list`
+  read a dump truncated at 1.55GB of ~4.3GB and listed 496 tables, because a streamed `-Fc`
+  dump writes its TOC first (AF-20260911-03). Verify by reading the whole artifact
+  (`pg_restore -f /dev/null`), and prove the check on a real truncated file, not a fresh one.
+
 ## Investigating production without breaking it
 
 - **A client-side timeout does NOT cancel the server-side query — it orphans it**, and on a big table that orphan can hold a lock that blocks the whole platform for hours, which then gets misdiagnosed as a storage-engine cost problem. Diagnose lock contention (`pg_stat_activity`, `wait_event_type = 'Lock'`) before theorizing about decompression/storage cost — a query "hanging" on one specific table while others respond normally is lock contention until proven otherwise. Prevent it with a server-side `SET LOCAL statement_timeout`, not a client-side `timeout` wrapper.

@@ -13,7 +13,7 @@ description: Close the deploy/reliability gaps on this single-box pm2 stack — 
 - Restart policy: `autorestart:true`, `max_restarts:10`, `restart_delay:3000`, `min_uptime:10s`,
   `kill_timeout:10s`. Logs merged into `logs/pm2-{out,err}.log`.
 - **There is no `Dockerfile` and no Kubernetes.** `docker-compose.yml` runs Redis 7 (AOF,
-  `requirepass`, 512mb `noeviction`) and `timescaledb:2.17.2-pg16` only — infra deps, not the app.
+  `requirepass`, 512mb `noeviction`) and `timescaledb:2.30.0-pg16` only (upgraded from 2.17.2 on 2026-09-11) — infra deps, not the app.
 - CI is one workflow (`.github/workflows/ci.yml`), 3 jobs (`build-test`, `python-tests`,
   `smoke-test`), both test jobs with a `timescaledb` service, using `PGTEST_*` and never
   `POSTGRES_*` — deliberately, so a stray production URL can't redirect a schema-creating run.
