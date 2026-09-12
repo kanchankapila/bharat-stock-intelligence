@@ -749,6 +749,52 @@ export const DATA_QUALITY_CHECKS: DataQualityCheck[] = [
       return { status: 'pass', detail: `${(ratio * 100).toFixed(2)}% malformed (${row?.bad}/${total})` };
     },
   },
+  {
+    id: 'ohlcv-fabricated-session',
+    label: 'stock_ohlcv holds no unflagged bars from a day the exchange never opened',
+    category: 'ohlcv',
+    // Critical: this silently corrupts the measurement substrate rather than breaking a page.
+    critical: true,
+    // AF-20260911-15. 4 dates (2026-01-15, 2026-05-01, 2026-05-28, 2026-06-26) held 7,515 bars
+    // where EVERY symbol was open==high==low==close with volume 0 -- market holidays on which a
+    // live-quote refresh persisted each stock's last close as a whole session. Two harms:
+    //   * measurement.md's panel spec excludes `is_suspect = 1`, so unflagged fake bars entered
+    //     every forward-return panel as a real session returning exactly 0%;
+    //   * market_holidays is derived from weekdays ABSENT from stock_ohlcv, so a fabricated bar
+    //     permanently hid the holiday that produced it (the calendar was missing all 4).
+    //
+    // Nothing caught this for eight months: every freshness/coverage check reads "rows exist for
+    // that date" and these days HAVE rows. The tell is the shape of the rows, not their absence.
+    //
+    // The write-side guard (liveStockData.ts's CLOSED_MARKET_SHARE_FLOOR) and the repair
+    // (data_integrity_repair.py --closed-sessions) both use the same 95% floor -- keep all three
+    // in step. This check exists because the upstream calendar guard (isTradingHolidayToday)
+    // returns false on ANY fetch error, i.e. fails OPEN: one network blip on a holiday
+    // reinstates the bug, and only the data's shape reveals it.
+    sql: `SELECT
+            (SELECT COUNT(*) FROM (
+               SELECT date FROM stock_ohlcv
+               WHERE date >= current_date - 90
+               GROUP BY date
+               HAVING COUNT(*) > 50
+                  AND COUNT(*) FILTER (WHERE COALESCE(volume,0) = 0
+                        AND open = high AND high = low AND low = close)::float
+                      / COUNT(*) >= 0.95
+                  AND COUNT(*) FILTER (WHERE COALESCE(is_suspect,0) = 1) < COUNT(*)
+             ) q) AS bad_days`,
+    evaluate: (row) => {
+      const bad = Number(row?.bad_days) || 0;
+      if (bad > 0) {
+        return {
+          status: 'fail',
+          detail: `${bad} session(s) in the last 90d are universe-wide flat/zero-volume and NOT ` +
+            `flagged is_suspect — the exchange was shut and the bars are fabricated. ` +
+            `Run: python data_integrity_repair.py --closed-sessions --holidays (AF-20260911-15)`,
+        };
+      }
+      return { status: 'pass', detail: 'no unflagged closed-session bars in the last 90d' };
+    },
+  },
 
   // ── Technical signals / ML ────────────────────────────────────────────
   {

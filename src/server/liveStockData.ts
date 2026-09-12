@@ -618,6 +618,33 @@ function parseVolumeToNumber(v: string | number): number {
   return Math.round(parseFloat(v) || 0);
 }
 
+/**
+ * Share of a batch that looks like a closed market: a flat bar (open==high==low==close) with
+ * zero volume, which is what a live-quote feed returns for every symbol when NSE never opened.
+ *
+ * A SHARE, not a per-row filter: a genuinely illiquid scrip prints this same bar on a real
+ * trading day, and dropping those individually would delete real data. Only a universe-wide
+ * collapse means "the exchange was shut" (all 4 observed incidents were 100%).
+ */
+export function closedMarketShare(rows: (string | number)[][]): number {
+  if (!rows.length) return 0;
+  const closed = rows.filter(r => {
+    const [, , open, high, low, close, volume] = r as (string | number)[];
+    return Number(volume) === 0
+      && Number(open) === Number(high)
+      && Number(high) === Number(low)
+      && Number(low) === Number(close);
+  }).length;
+  return closed / rows.length;
+}
+
+/**
+ * AF-20260911-15. Above this share the batch is a market-closed artifact and is refused.
+ * 0.95 sits far below the 100% seen on every real incident and far above any plausible
+ * illiquid share on a live session.
+ */
+export const CLOSED_MARKET_SHARE_FLOOR = 0.95;
+
 export async function persistTodayOHLCVData(stocks: MarketData[]): Promise<{ inserted: number; failed: number }> {
   const today = new Date().toISOString().split('T')[0];
 
@@ -648,6 +675,22 @@ export async function persistTodayOHLCVData(stocks: MarketData[]): Promise<{ ins
       s.price,
       parseVolumeToNumber(s.volume),
     ]);
+
+  // AF-20260911-15. Refuse a universe-wide flat/zero-volume snapshot: NSE never opened, and
+  // persisting it mints a fake session that (a) enters every forward-return panel as a real 0%
+  // day because is_suspect is left 0, and (b) permanently hides the holiday from
+  // market_holidays, which is derived from "weekdays absent from stock_ohlcv". The calendar
+  // guard upstream (isTradingHolidayToday) fails OPEN on any fetch error, so this shape check
+  // is the backstop that does not depend on a calendar at all.
+  const closedShare = closedMarketShare(rows);
+  if (closedShare >= CLOSED_MARKET_SHARE_FLOOR) {
+    console.warn(
+      `[OHLCV] REFUSED to persist ${rows.length} bars for ${today}: ` +
+      `${(closedShare * 100).toFixed(1)}% are flat with zero volume, i.e. the market was closed. ` +
+      `No rows written (AF-20260911-15).`,
+    );
+    return { inserted: 0, failed: 0 };
+  }
 
   const buildSql = (rowCount: number) => `
     INSERT INTO stock_ohlcv (symbol, date, open, high, low, close, volume)

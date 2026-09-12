@@ -8,6 +8,7 @@ Each repair is idempotent and can be run independently:
   --bad-bars        flag physically-impossible stock_ohlcv bars (is_suspect)
   --adjustment      backfill the untagged adjustment_basis column
   --insider-dates   convert insider_trades.date from "22 May, 2026" to ISO
+  --closed-sessions flag stock_ohlcv bars from days the exchange never opened
   --holidays        populate market_holidays from observed trading gaps
   --news-link       build an indexed news_symbol_link table from symbols_json
   --labels          add label_definition/producer to signal_outcomes + flag implausible returns
@@ -207,8 +208,15 @@ def repair_holidays(conn: ConnWrapper, dry: bool) -> None:
         )
     """)
     conn.commit()
+    # A date counts as traded only if it has at least one bar NOT flagged as a fabricated
+    # closed session. Without this exclusion the derivation is circular: a holiday on which
+    # a live-quote refresh wrote flat zero-volume bars looks "traded" and can never be
+    # recognised as a holiday again (AF-20260911-15).
     traded = {str(r[0])[:10] for r in
-              conn.execute("SELECT DISTINCT date FROM stock_ohlcv").fetchall()}
+              conn.execute(
+                  "SELECT DISTINCT date FROM stock_ohlcv "
+                  "WHERE suspect_reason IS DISTINCT FROM ?",
+                  (CLOSED_SESSION_REASON,)).fetchall()}
     if not traded:
         _log("  no OHLCV dates; skipping")
         return
@@ -610,10 +618,84 @@ def repair_delivery_trades(conn: ConnWrapper, dry: bool) -> None:
     _log(f"delivery-trades: nulled {total} rows.")
 
 
+# ── 12. fabricated closed-session bars ───────────────────────────────────────
+
+# Above this share of a day's universe being flat AND zero-volume, the exchange never opened.
+# Matches liveStockData.ts's CLOSED_MARKET_SHARE_FLOOR -- keep the two in step.
+CLOSED_MARKET_SHARE_FLOOR = 0.95
+CLOSED_SESSION_REASON = 'closed session: universe-wide flat zero-volume bar'
+
+
+def _find_closed_sessions(conn) -> list:
+    """Dates whose whole universe is a flat (o==h==l==c) zero-volume bar -- a market holiday on
+    which a live-quote refresh persisted every stock's last close as if it were a session."""
+    rows = conn.execute("""
+        SELECT date::text AS d, count(*) AS n,
+               count(*) FILTER (WHERE COALESCE(volume,0)=0
+                                 AND open=high AND high=low AND low=close) AS flat
+        FROM stock_ohlcv
+        GROUP BY date
+        HAVING count(*) > 50
+        ORDER BY date
+    """).fetchall()
+    return [(str(r[0])[:10], int(r[1])) for r in rows
+            if int(r[1]) and int(r[2]) / int(r[1]) >= CLOSED_MARKET_SHARE_FLOOR]
+
+
+def repair_closed_sessions(conn: ConnWrapper, dry: bool) -> None:
+    """Flag bars belonging to a session the exchange never opened (AF-20260911-15).
+
+    Found 2026-09-11: 4 such dates (2026-01-15, 2026-05-01, 2026-05-28, 2026-06-26) held 7,515
+    bars, essentially none flagged. Two distinct harms, which is why flagging matters rather
+    than being cosmetic:
+      * measurement.md's panel spec excludes `is_suspect = 1`, so unflagged fake bars entered
+        every forward-return panel as a real session returning exactly 0%;
+      * repair_holidays() derives market_holidays from weekdays ABSENT from stock_ohlcv, so a
+        fabricated bar permanently hides the holiday that produced it.
+
+    Flags rather than deletes: is_suspect is the column that exists for exactly this, every
+    measurement path already filters on it, and the flag is reversible where a DELETE is not.
+    """
+    _log("closed sessions: scanning for universe-wide flat zero-volume days ...")
+    conn.execute("ALTER TABLE stock_ohlcv ADD COLUMN IF NOT EXISTS is_suspect SMALLINT DEFAULT 0")
+    conn.execute("ALTER TABLE stock_ohlcv ADD COLUMN IF NOT EXISTS suspect_reason TEXT")
+    conn.commit()
+
+    sessions = _find_closed_sessions(conn)
+    if not sessions:
+        _log("  none found")
+        return
+    for d, n in sessions:
+        _log(f"  {d}: {n} bars")
+
+    dates = [d for d, _ in sessions]
+    placeholders = ','.join('?' for _ in dates)
+    # Idempotent: only rows not already carrying this reason are rewritten, so a second run
+    # decompresses nothing.
+    pairs = conn.execute(
+        f"SELECT symbol, date::text FROM stock_ohlcv "
+        f"WHERE date::text IN ({placeholders}) "
+        f"AND (COALESCE(is_suspect,0)=0 OR suspect_reason IS DISTINCT FROM ?)",
+        (*dates, CLOSED_SESSION_REASON)).fetchall()
+    _log(f"  bars needing the flag: {len(pairs)}")
+    if not pairs or dry:
+        return
+
+    done = safe_keyed_update(
+        conn,
+        "UPDATE stock_ohlcv SET is_suspect=1, suspect_reason=? WHERE symbol=? AND date::text=?",
+        [(CLOSED_SESSION_REASON, str(s), str(d)[:10]) for s, d in pairs],
+        batch_size=200)
+    _log(f"  flagged {done} bars across {len(dates)} session(s)")
+
+
 TASKS = {
     'bad_bars': repair_bad_bars,
     'adjustment': repair_adjustment_basis,
     'insider_dates': repair_insider_dates,
+    # Must precede 'holidays': that repair derives the calendar from dates ABSENT from
+    # stock_ohlcv, so the fabricated sessions have to be flagged first to be excluded.
+    'closed_sessions': repair_closed_sessions,
     'holidays': repair_holidays,
     'news_link': repair_news_link,
     'labels': repair_labels,

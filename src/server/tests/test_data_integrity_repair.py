@@ -252,3 +252,73 @@ class TestForwardFillSemantics:
         vals = out['roce'].tolist()
         assert vals[:3] == [5.0, 5.0, 5.0]
         assert all(pd.isna(v) for v in vals[3:]), "fill must not run past its age cap"
+
+
+# ── fabricated closed-session bars (AF-20260911-15) ──────────────────────────
+# Live DB held 4 dates -- 2026-01-15, 2026-05-01, 2026-05-28, 2026-06-26 -- where EVERY symbol
+# carried open==high==low==close with volume 0 (7,515 bars, essentially none flagged
+# is_suspect). They are market holidays on which a live-quote refresh persisted each stock's
+# last close as a whole session. Unflagged they entered every forward-return panel as a real
+# 0% day, and they permanently hid the holiday from market_holidays, which is derived from
+# weekdays ABSENT from stock_ohlcv.
+
+class TestFindClosedSessions:
+    def _conn(self):
+        conn = pg_memory_conn()
+        conn.execute("""
+            CREATE TABLE stock_ohlcv (
+                symbol TEXT NOT NULL, date DATE NOT NULL,
+                open DOUBLE PRECISION, high DOUBLE PRECISION,
+                low DOUBLE PRECISION, close DOUBLE PRECISION,
+                volume BIGINT, is_suspect SMALLINT DEFAULT 0, suspect_reason TEXT,
+                PRIMARY KEY (symbol, date)
+            )
+        """)
+        conn.commit()
+        return conn
+
+    @staticmethod
+    def _insert(conn, date, n, *, flat, volume):
+        for i in range(n):
+            px = 100.0 + i
+            hi, lo, cl = (px, px, px) if flat else (px * 1.02, px * 0.98, px * 1.01)
+            conn.execute(
+                "INSERT INTO stock_ohlcv (symbol, date, open, high, low, close, volume) "
+                "VALUES (?,?,?,?,?,?,?)", (f"S{i}", date, px, hi, lo, cl, volume))
+        conn.commit()
+
+    def test_detects_a_universe_wide_flat_zero_volume_day(self):
+        conn = self._conn()
+        self._insert(conn, '2026-05-01', 120, flat=True, volume=0)
+        found = dict(dir_mod._find_closed_sessions(conn))
+        assert '2026-05-01' in found
+        assert found['2026-05-01'] == 120
+
+    def test_does_not_flag_a_real_session_holding_some_illiquid_flat_bars(self):
+        """Negative control. A genuinely illiquid scrip prints a flat zero-volume bar on a real
+        trading day; flagging per-row would delete real data, so only a universe-wide collapse
+        counts. 10 of 110 flat here -- far under the 95% floor."""
+        conn = self._conn()
+        self._insert(conn, '2026-05-04', 100, flat=False, volume=50_000)
+        for i in range(10):
+            conn.execute(
+                "INSERT INTO stock_ohlcv (symbol, date, open, high, low, close, volume) "
+                "VALUES (?,?,?,?,?,?,?)", (f"ILQ{i}", '2026-05-04', 9.0, 9.0, 9.0, 9.0, 0))
+        conn.commit()
+        assert dir_mod._find_closed_sessions(conn) == []
+
+    def test_flat_bars_with_real_volume_are_a_real_session(self):
+        conn = self._conn()
+        self._insert(conn, '2026-05-05', 120, flat=True, volume=25_000)
+        assert dir_mod._find_closed_sessions(conn) == []
+
+    def test_moving_prices_with_zero_volume_are_a_real_session(self):
+        conn = self._conn()
+        self._insert(conn, '2026-05-06', 120, flat=False, volume=0)
+        assert dir_mod._find_closed_sessions(conn) == []
+
+    def test_ignores_days_too_small_to_be_a_universe(self):
+        """A handful of rows is a partial fetch, not evidence the exchange was shut."""
+        conn = self._conn()
+        self._insert(conn, '2026-05-07', 20, flat=True, volume=0)
+        assert dir_mod._find_closed_sessions(conn) == []
