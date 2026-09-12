@@ -106,7 +106,7 @@ def main():
         print(f"Error: stocklist.json not found at {STOCKLIST_PATH}")
         sys.exit(1)
 
-    with open(STOCKLIST_PATH, "r", encoding="utf-8") as f:
+    with open(STOCKLIST_PATH, "r", encoding="utf-8-sig") as f:
         stocks = json.load(f)
 
     if args.symbol:

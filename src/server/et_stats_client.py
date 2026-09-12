@@ -98,7 +98,7 @@ def load_companyid_map() -> dict[str, str]:
     if _symbol_to_companyid is not None:
         return _symbol_to_companyid
 
-    with open(_STOCKLIST_PATH, encoding="utf-8") as f:
+    with open(_STOCKLIST_PATH, encoding="utf-8-sig") as f:
         rows = json.load(f)
 
     _symbol_to_companyid = {

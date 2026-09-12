@@ -391,7 +391,7 @@ def _load_stocks(symbol_filter: str | None, skip_done_for_date: str | None = Non
     provider-mapping table (2005 stocks) — instead of the much larger (7000+)
     trendlyne_screener_stocks fallback universe, which is why this fetcher used to
     blow past its timeout ceiling."""
-    with open(STOCKLIST_PATH, encoding="utf-8") as f:
+    with open(STOCKLIST_PATH, encoding="utf-8-sig") as f:
         entries = json.load(f)
     rows = [(e["symbol"], str(e["tlid"])) for e in entries if e.get("symbol") and e.get("tlid")]
     if symbol_filter:

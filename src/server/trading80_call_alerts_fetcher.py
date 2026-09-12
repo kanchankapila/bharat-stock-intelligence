@@ -76,7 +76,7 @@ def load_sid_to_symbol_map() -> dict[str, str]:
     global _sid_to_symbol
     if _sid_to_symbol is not None:
         return _sid_to_symbol
-    with open(_STOCKLIST_PATH, encoding="utf-8") as f:
+    with open(_STOCKLIST_PATH, encoding="utf-8-sig") as f:
         rows = json.load(f)
     _sid_to_symbol = {
         str(row["stockid"]): row["symbol"].upper()
