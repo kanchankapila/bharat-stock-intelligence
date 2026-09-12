@@ -51,6 +51,9 @@ class DeliveryTrendFetcherBaseFetcher(BaseFetcher[DeliveryTrendFetcherSchema]):
 
 
 import argparse
+import json
+import math
+import os
 import time
 from datetime import date, timedelta
 
@@ -77,6 +80,22 @@ HEADERS = {
 NSE_BULK_URL       = "https://www.nseindia.com/api/bulk-deals"
 NSE_BULK_HIST_URL  = "https://www.nseindia.com/api/historical/bulk-deals?from={date}&to={date}&stock="
 NSE_BLOCK_URL      = "https://www.nseindia.com/api/block-deal"
+# MoneyControl fallback for the BULK half. Both NSE bulk routes are gone as of 2026-09-12:
+# /api/bulk-deals answers 404 with a "Resource not found" page and
+# /api/historical/bulk-deals answers 503 -- verified with a warm nseindia cookie jar and
+# Chrome TLS impersonation, so this is a retired route, not a bot block (AF-20260912-11).
+# /api/block-deal still returns 200, so only bulk needed replacing. This endpoint carries
+# `deal_type` ("bulk"/"block"), its own per-row `deal_date`, and reports NSE+BSE.
+MC_DEALS_URL = ("https://api.moneycontrol.com/mcapi/v1/deals/list"
+                "?start=0&limit={limit}&orderBy=deal_date&sortBy=DESC&deviceType=W")
+MC_DEALS_HEADERS = {
+    "User-Agent": ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+                   "(KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36"),
+    "Accept": "application/json",
+    "Referer": "https://www.moneycontrol.com/",
+}
+STOCKLIST_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                              "..", "..", "scripts", "stocklist.json")
 
 RATE_LIMIT_SEC = 1.0
 
@@ -187,6 +206,27 @@ def _nse_session() -> requests.Session:
     return s
 
 
+def _fetch_json_plain(url: str, headers: dict) -> list[dict]:
+    """GET + parse for a NON-NSE host, on its own short-lived session.
+
+    Deliberately not reusing `_nse_session()`: that session carries nseindia cookies and an
+    nseindia Referer, and handing another vendor someone else's cookie jar is both pointless
+    and a good way to get fingerprinted. Returns [] on any failure and says so on stderr --
+    the caller decides whether an empty result is tolerable."""
+    try:
+        with requests.Session() as sess:
+            sess.headers.update(headers)
+            r = retry_get(sess, url, timeout=15)
+            data = r.json()
+        if isinstance(data, list):
+            return data
+        rows = data.get("data") or []
+        return rows if isinstance(rows, list) else []
+    except Exception as exc:
+        print(f"[DeliveryTrend] Fetch error {url} after retries: {exc}", file=sys.stderr)
+        return []
+
+
 def _fetch_json(session: requests.Session, url: str, params: dict | None = None) -> list[dict]:
     try:
         r = retry_get(session, url, params=params, timeout=12)
@@ -197,6 +237,99 @@ def _fetch_json(session: requests.Session, url: str, params: dict | None = None)
     except Exception as e:
         print(f"[DeliveryTrend] Fetch error {url} after retries: {e}", file=sys.stderr)
         return []
+
+
+_mc_sc_id_to_symbol: dict[str, str] | None = None
+
+
+def load_mc_sc_id_map() -> dict[str, str]:
+    """MoneyControl `sc_id` (uppercase) -> NSE symbol, from scripts/stocklist.json.
+
+    MC's deals payload carries NO NSE symbol -- only its own opaque `sc_id` ("PJ" for PC
+    Jeweller, "TEL" for Tata Motors). `data-sources.md` is explicit that a provider id must be
+    resolved through the mapping table and never constructed by convention, so an unmappable
+    sc_id is DROPPED rather than guessed at (a wrong symbol here would attribute a real
+    institutional deal to the wrong company). `mcsymbol` is ~98% populated."""
+    global _mc_sc_id_to_symbol
+    if _mc_sc_id_to_symbol is not None:
+        return _mc_sc_id_to_symbol
+    try:
+        with open(STOCKLIST_PATH, encoding="utf-8-sig") as fh:
+            entries = json.load(fh)
+    except OSError as exc:
+        print(f"[DeliveryTrend] cannot read stocklist for sc_id resolution: {exc}",
+              file=sys.stderr)
+        _mc_sc_id_to_symbol = {}
+        return _mc_sc_id_to_symbol
+    # `mcsymbol` is NOT unique in stocklist.json -- measured 2026-09-12, 39 of 1,940 codes
+    # map to more than one NSE symbol, and they include real names: API -> {ASIANPAINT,
+    # AGROPHOS}, LC03 -> {LUPIN, LAXMICOT}, CI29 -> {COALINDIA, COMPINFO}, TEL -> {TMPV,
+    # TOUCHWOOD}. A plain dict comprehension would silently keep whichever entry came LAST in
+    # the file, so a bulk deal in Asian Paints could be booked against Agrophos. An ambiguous
+    # code is therefore DROPPED, never resolved by position -- the same "deliberately dropped,
+    # never guessed" rule the ISIN issuer-prefix resolver follows (ml-model-bugs.md).
+    by_code: dict[str, set[str]] = {}
+    for e in entries:
+        code = (e.get("mcsymbol") or "").strip().upper()
+        sym = (e.get("symbol") or "").strip().upper()
+        if code and sym:
+            by_code.setdefault(code, set()).add(sym)
+    _mc_sc_id_to_symbol = {c: next(iter(v)) for c, v in by_code.items() if len(v) == 1}
+    ambiguous = len(by_code) - len(_mc_sc_id_to_symbol)
+    if ambiguous:
+        # stderr: runPython() inspects stderr to flag a run as degraded.
+        print(f"[DeliveryTrend] {ambiguous} MoneyControl sc_id(s) map to more than one NSE "
+              f"symbol and are skipped rather than guessed", file=sys.stderr)
+    return _mc_sc_id_to_symbol
+
+
+def _parse_mc_deal(raw: dict) -> dict | None:
+    """Normalise one MoneyControl deals/list row into the bulk_block_deals row shape.
+
+    Pure. Returns None for a row we cannot attribute to an NSE symbol, for a non-NSE
+    exchange, or for unusable numbers -- never a fabricated or partial row."""
+    if not isinstance(raw, dict):
+        return None
+    if (raw.get("exchange") or "").strip().upper() != "NSE":
+        return None  # BSE rows would collide on the same natural key with different numbers
+    symbol = load_mc_sc_id_map().get((raw.get("sc_id") or "").strip().upper())
+    if not symbol:
+        return None
+    deal_type = (raw.get("deal_type") or "").strip().lower()
+    if deal_type not in ("bulk", "block"):
+        return None
+    # Per-row date, NOT date.today(): these rows are explicitly ordered DESC by deal_date and
+    # a post-midnight run would otherwise stamp yesterday's deals with today's date -- the
+    # date.today()-as-write-anchor class in recurring-bugs.md.
+    deal_date = (raw.get("deal_date") or "").strip()[:10]
+    if len(deal_date) != 10:
+        return None
+    client = (raw.get("boughtBy") or "").strip()
+    if not client:
+        return None
+    action = (raw.get("action") or "").strip().upper()
+    buy_sell = "BUY" if action.startswith("B") else "SELL"
+    try:
+        qty = float(str(raw.get("quantity") or 0).replace(",", ""))
+        price = float(str(raw.get("tradedPrice") or 0).replace(",", ""))
+        value_cr = float(str(raw.get("dealValue") or 0).replace(",", ""))
+    except (ValueError, TypeError):
+        return None
+    if not math.isfinite(qty) or not math.isfinite(price) or not math.isfinite(value_cr):
+        return None
+    if value_cr == 0 and qty > 0 and price > 0:
+        value_cr = round(qty * price / 1e7, 4)
+    return {
+        "symbol": symbol,
+        "deal_date": deal_date,
+        "deal_type": deal_type,
+        "client_name": client,
+        "buy_sell": buy_sell,
+        "quantity": qty,
+        "price": price,
+        "value_cr": round(value_cr, 4),
+        "source": "moneycontrol",
+    }
 
 
 def _parse_bulk(raw: dict, deal_type: str) -> dict | None:
@@ -249,15 +382,16 @@ def upsert_deals(rows: list[dict], con) -> int:
     for r in rows:
         cur.execute("""
                 INSERT INTO bulk_block_deals
-                    (symbol, deal_date, deal_type, client_name, buy_sell, quantity, price, value_cr)
-                VALUES (:symbol, :deal_date, :deal_type, :client_name, :buy_sell, :quantity, :price, :value_cr)
-                ON CONFLICT (symbol, deal_date, client_name, deal_type) DO UPDATE SET
+                    (source, symbol, deal_date, deal_type, client_name, buy_sell, quantity, price, value_cr)
+                VALUES (:source, :symbol, :deal_date, :deal_type, :client_name, :buy_sell, :quantity, :price, :value_cr)
+                ON CONFLICT (source, symbol, deal_date, client_name, deal_type) DO UPDATE SET
                     buy_sell   = EXCLUDED.buy_sell,
                     quantity   = EXCLUDED.quantity,
                     price      = EXCLUDED.price,
                     value_cr   = EXCLUDED.value_cr,
                     fetched_at = CURRENT_TIMESTAMP
             """, {
+                "source": r.get("source", "nse"),
                 "symbol": r["symbol"], "deal_date": r["deal_date"],
                 "deal_type": r["deal_type"], "client_name": r["client_name"],
                 "buy_sell": r["buy_sell"], "quantity": r["quantity"],
@@ -321,6 +455,22 @@ def run_deals(con) -> tuple[int, int]:
         bulk_raw = _fetch_json(session, NSE_BULK_HIST_URL.format(date=nse_date))
     time.sleep(RATE_LIMIT_SEC)
 
+    # Both NSE bulk routes are retired as of 2026-09-12 (404 and 503, verified with a warm
+    # cookie jar and Chrome TLS impersonation), so without this fallback the BULK half of this
+    # table simply stopped being written while the job still reported success. MC rows carry
+    # their own source tag and go in under the composite PK, so they coexist with NSE's block
+    # rows instead of overwriting them (AF-20260912-11).
+    mc_bulk_rows: list[dict] = []
+    if not bulk_raw:
+        mc_raw = _fetch_json_plain(MC_DEALS_URL.format(limit=200), MC_DEALS_HEADERS)
+        mc_bulk_rows = [r for r in (_parse_mc_deal(x) for x in mc_raw) if r]
+        print(f"[DeliveryTrend] NSE bulk routes empty; MoneyControl fallback parsed "
+              f"{len(mc_bulk_rows)} NSE deal(s) from {len(mc_raw)} row(s)")
+        if not mc_bulk_rows:
+            # Not a silent degrade: both providers failing for the bulk half is a real error.
+            print("[DeliveryTrend] no bulk deals from NSE OR MoneyControl -- the bulk half of "
+                  "bulk_block_deals got NOTHING this run", file=sys.stderr)
+
     print(f"[DeliveryTrend] Fetching block deals from NSE ({today})…")
     block_raw = _fetch_json(session, NSE_BLOCK_URL)
 
@@ -333,6 +483,7 @@ def run_deals(con) -> tuple[int, int]:
         parsed = _parse_bulk(raw, "block")
         if parsed:
             rows.append(parsed)
+    rows.extend(mc_bulk_rows)
 
     saved = upsert_deals(rows, con)
     updated = backfill_deal_flags(con)

@@ -99,7 +99,15 @@ export function classifyStderr(stderr: string | null | undefined): 'clean' | 'be
 
   const BENIGN = [
     /You seem to be using the pipelines sequentially on GPU/i,
-    /^\[?\d{4}-\d{2}-\d{2}[ T][\d:,.]+\]?\s*INFO:/im,
+    // A standard log record at a non-error level. Deliberately tolerant of the three
+    // formats this repo actually emits, because requiring exactly one of them is what made
+    // ordinary progress output read as a crash (AF-20260912-02):
+    //   `[2026-09-04 21:50:10] INFO: ...`      scrapy (bracketed stamp, colon)
+    //   `2026-09-10 11:04:08,573 INFO panel:`  python logging default -- NO colon after level
+    //   `2026-09-10 07:10:42 [finstack] INFO:` logger-name field between stamp and level
+    // The level itself is the discriminator, so ERROR/CRITICAL deliberately do NOT match here
+    // and fall through to the REAL patterns below.
+    /^\[?\d{4}-\d{2}-\d{2}[ T][\d:,.]+\]?\s*(?:\[\w[\w .:_-]{0,38}\]\s*)?(?:INFO|DEBUG|WARNING|WARN|NOTICE)\b/im,
     /expandable_segments not supported/i,
     /PYTORCH_CUDA_ALLOC_CONF is deprecated/i,
     /UserWarning:/i,
@@ -111,6 +119,14 @@ export function classifyStderr(stderr: string | null | undefined): 'clean' | 'be
     // stats. Live 2026-09-09 that line was the ENTIRE stderr of a successful
     // high_flyer_retrospective.py run and read as a warn-level "real_error" in the app log.
     /^\[HighFlyer\] skipped \d+\/\d+ stat day/i,
+    // Same shape as the [HighFlyer] entry above: a script's own progress//"this is not a
+    // failure" notice, deliberately on stderr, with no timestamp to match the log-record
+    // pattern. Both were measured as real_error over 2026-09-10..12 while the runs succeeded.
+    // Kept deliberately NARROW -- a blanket "bracketed prefix = benign" rule would mask the
+    // genuine `[DeliveryTrend] Fetch error ...` / `[FCH] ... rate-limited` lines that must
+    // keep firing.
+    /^\[UnifiedRanker\] (?:universe filter|RL gate excluded)/im,
+    /^\[StockOptionChain\] \d+\/\d+ symbol\(s\) have no chain in ANY surviving source/im,
   ];
   const REAL = [
     /Traceback \(most recent call last\)/i,

@@ -88,6 +88,50 @@ export async function setup() {
   );
 
   await client.query(`CREATE SCHEMA "${schema}"`);
+  // Stamp the schema with its own birth time, then reap anything older than REAP_AFTER_MS.
+  // teardown() drops this run's schema, but a run KILLED before teardown (a timeout, a Ctrl+C,
+  // the vitest process being SIGKILLed) leaks all ~227 tables into production with nothing to
+  // clean them up -- there was no reaper at all. Found 2026-09-12 with TWO such schemas live
+  // (vitest_69c8e188da7c, vitest_9d49f8362944), and they are not inert: an unqualified
+  // `information_schema.columns` read then returns each real table's columns once PER leaked
+  // copy, which is the documented failure in recurring-bugs.md ("a leaked throwaway test
+  // schema as a second copy of a real table"). It bit this very session -- a PK inspection of
+  // bulk_block_deals came back with every column listed twice (AF-20260912-12).
+  //
+  // Reaping by AGE, not by "any schema that isn't mine": concurrent vitest runs are legitimate
+  // (the unit and live projects each build their own), and dropping a sibling's schema
+  // mid-run would fail that run with a hundred "relation does not exist" errors.
+  await client.query(
+    `CREATE TABLE "${schema}".__vitest_meta (created_at timestamptz NOT NULL DEFAULT now())`,
+  );
+  await client.query(`INSERT INTO "${schema}".__vitest_meta DEFAULT VALUES`);
+  try {
+    const REAP_AFTER_MS = 6 * 60 * 60 * 1000;
+    const { rows: stale } = await client.query<{ nspname: string }>(
+      `SELECT n.nspname FROM pg_namespace n
+        WHERE n.nspname LIKE 'vitest\_%' AND n.nspname <> $1`,
+      [schema],
+    );
+    for (const { nspname } of stale) {
+      // An older leak predating the marker table has no created_at; treat a missing marker as
+      // stale, since every live run from now on writes one.
+      const { rows: age } = await client.query<{ ms: number | null }>(
+        `SELECT EXTRACT(EPOCH FROM (now() - max(created_at))) * 1000 AS ms
+           FROM information_schema.tables t
+           LEFT JOIN "${nspname}".__vitest_meta m ON true
+          WHERE t.table_schema = $1 AND t.table_name = '__vitest_meta'`,
+        [nspname],
+      ).catch(() => ({ rows: [{ ms: null }] }));
+      const ms = age[0]?.ms;
+      if (ms === null || ms === undefined || Number(ms) > REAP_AFTER_MS) {
+        await client.query(`DROP SCHEMA IF EXISTS "${nspname}" CASCADE`);
+        console.warn(`[vitest] reaped leaked throwaway schema ${nspname}`);
+      }
+    }
+  } catch (err) {
+    // Never fail the suite over cleanup of someone else's mess.
+    console.warn(`[vitest] stale-schema reap skipped: ${(err as Error).message}`);
+  }
   // public stays on the path so extensions (pg_trgm, timescaledb) and their types resolve; the
   // throwaway schema is FIRST, so every unqualified CREATE/INSERT/SELECT lands inside it.
   await client.query(`SET search_path TO "${schema}", public`);

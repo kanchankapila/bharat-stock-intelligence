@@ -144,7 +144,7 @@ def _et_company_map() -> dict | None:
     path = os.path.join(os.path.dirname(os.path.abspath(__file__)),
                         "..", "..", "scripts", "stocklist.json")
     try:
-        with open(path, encoding="utf-8") as f:
+        with open(path, encoding="utf-8-sig") as f:
             rows = json.load(f)
         return {str(r["companyid"]): r["symbol"].upper() for r in rows
                 if r.get("companyid") and r.get("symbol")}
@@ -371,7 +371,7 @@ def _mojo_sid_map() -> dict | None:
     path = os.path.join(os.path.dirname(os.path.abspath(__file__)),
                         "..", "..", "scripts", "stocklist.json")
     try:
-        with open(path, encoding="utf-8") as f:
+        with open(path, encoding="utf-8-sig") as f:
             rows = json.load(f)
         return {str(r["stockid"]): r["symbol"].upper() for r in rows
                 if r.get("stockid") and r.get("symbol")}
@@ -444,15 +444,24 @@ def fetch_mojo(session) -> list:
 
 def fetch_niftytrader(session) -> list:
     rows = []
+    # The token is OPTIONAL here, and believing otherwise cost this source its rows whenever
+    # the token lapsed. Isolated live 2026-09-12 against the real route, one header at a time
+    # (AF-20260912-09):
+    #     token + sec-fetch  -> 200 (25,227 bytes)
+    #     sec-fetch, NO token-> 200 (25,227 bytes)   <- identical payload
+    #     token, no sec-fetch-> 403 Unauthorized
+    #     neither            -> 403 Unauthorized
+    # The `sec-fetch-*` trio is the discriminator; the Bearer token changes nothing. The old
+    # `if not bearer: return []` therefore skipped a fully-accessible endpoint and wrote zero
+    # rows -- a silent data loss with no error, exactly the shape the sibling comment above
+    # warned about while drawing the opposite conclusion. Send the token when we happen to
+    # hold one (harmless), never require it.
     bearer = _nt_bearer_token()
-    if not bearer:
-        print("[nt_top_gainers] no stored NT token; skipping (this endpoint requires one)")
-        return []
     try:
         resp = session.get(NT_GAINERS_URL,
                            headers={"User-Agent": MC_HEADERS["User-Agent"],
                                     "Accept": "application/json",
-                                    "Authorization": f"Bearer {bearer}",
+                                    **({"Authorization": f"Bearer {bearer}"} if bearer else {}),
                                     "platform_type": "1",
                                     "Origin": "https://www.niftytrader.in",
                                     "Referer": "https://www.niftytrader.in/",

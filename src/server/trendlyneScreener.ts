@@ -740,7 +740,18 @@ export async function fetchTrendlyneScreenerData(
       return result;
     }
 
-    console.warn(`⚠️ Unexpected API response format`);
+    // A degraded read that returns zero rows for a named screener. The message used to
+    // carry NO context at all -- no screener, no status, no payload shape -- so the three
+    // occurrences in the 2026-09-10..12 pm2 window could not be attributed to a screener or
+    // a cause (AF-20260912-05). Log what is needed to act: which screener, and how the
+    // response actually differed from the `head.status === '0' && body` contract above.
+    console.warn(
+      `⚠️ Trendlyne screener "${screenerName}" (screenpk ${screenpk}, page ${pageNumber}): ` +
+      `unexpected response shape - head.status=${JSON.stringify(json?.head?.status)}, ` +
+      `head.statusDesc=${JSON.stringify(json?.head?.statusDesc)}, ` +
+      `body=${json?.body ? `present(keys: ${Object.keys(json.body).slice(0, 8).join(',')})` : 'MISSING'}. ` +
+      `Returning 0 rows.`
+    );
     return {
       success: false,
       data: [],

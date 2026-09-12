@@ -161,9 +161,18 @@ class PerformanceTracker:
             sort_order = pd.to_datetime(dates, errors='coerce').sort_values().index
             ordered_returns = returns.loc[sort_order]
         clipped = ordered_returns.clip(-95, 95)
-        cum_ret = (1 + clipped / 100).cumprod()
-        peak    = cum_ret.cummax()
-        dd      = ((cum_ret - peak) / peak * 100)
+        # Computed in LOG space, which is algebraically identical for a drawdown RATIO and
+        # cannot overflow. The direct `(1 + r/100).cumprod()` did overflow, every run and for
+        # the whole population, not occasionally: measured live 2026-09-12 the h=15 group is
+        # 93,278 rows with a mean clipped return of +2.216%, and 1.02216^93278 is inf. Because
+        # the non-finite guard below then wrote NULL, max_drawdown was never produced at all
+        # for any large group -- a silently dead metric, not a degraded one (AF-20260912-04).
+        # log(cum) = cumsum(log1p(r)); log(peak) = cummax(log(cum)) since log is monotonic; so
+        # dd = exp(logcum - logpeak) - 1, whose exponent is <= 0 by construction. The clip to
+        # [-95, 95] keeps 1 + r/100 in [0.05, 1.95], so log1p never sees a non-positive input.
+        log_cum  = np.log1p(clipped / 100).cumsum()
+        log_peak = log_cum.cummax()
+        dd       = (np.exp(log_cum - log_peak) - 1) * 100
         max_dd  = float(dd.min()) if len(dd) > 0 else 0.0
         if not math.isfinite(max_dd):
             print(f"[PerfTracker] max_drawdown non-finite for a {n}-row group -- writing NULL, not a fabricated number.")

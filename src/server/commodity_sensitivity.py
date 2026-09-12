@@ -151,7 +151,15 @@ def compute_corr_for_symbol(
         if len(aligned) < min_overlap:
             result[asset] = None
         else:
-            corr = aligned["stock"].corr(aligned["macro"])
+            # A constant series (a suspended/illiquid name that did not move across the
+            # whole window) has zero stddev, so pandas' pearson path divides by zero inside
+            # np.corrcoef and returns NaN. That NaN is HANDLED on the next line -- it is
+            # written as NULL, which is the honest answer. Silence only this warning, only
+            # here: letting it reach stderr made every run of this script read as a
+            # real_error in the app log while it was behaving exactly as designed
+            # (AF-20260912-03). Scoped with errstate so an overflow anywhere else still shows.
+            with np.errstate(invalid="ignore", divide="ignore"):
+                corr = aligned["stock"].corr(aligned["macro"])
             result[asset] = None if np.isnan(corr) else round(float(corr), 6)
     return result
 

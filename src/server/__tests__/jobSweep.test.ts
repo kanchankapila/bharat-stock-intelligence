@@ -138,6 +138,49 @@ describe('classifyStderr', () => {
     expect(classifyStderr('Traceback (most recent call last):\n  File "x.py", line 1')).toBe('real_error');
   });
 
+  // AF-20260912-02. The BENIGN log-record pattern required `INFO:` WITH A COLON directly
+  // after the timestamp, but Python's default logging format ("%(asctime)s %(levelname)s
+  // %(message)s") emits `INFO panel: 27608 rows` with no colon after the level, and any
+  // logger configured with a name field emits `[finstack] INFO:`. Neither matched, so both
+  // fell through to the `real_error` default. Measured over logs/pm2-out.log 2026-09-10..12:
+  // 8 scripts were reported as real_error whose entire stderr was ordinary INFO progress
+  // output. Every string below is verbatim from that log.
+  it('classifies python default-format INFO records as benign (no colon after the level)', () => {
+    const twoLines = [
+      '2026-09-10 11:04:08,573 INFO panel: 27608 rows, 6 dates',
+      '2026-09-10 11:04:16,398 INFO wrote 6932 composite rows (4 dates)',
+    ].join(String.fromCharCode(10));
+    expect(classifyStderr(twoLines)).toBe('benign_warning');
+    expect(classifyStderr('2026-09-10 20:06:43,564 INFO progress 100/2340, 9 rows so far')).toBe('benign_warning');
+  });
+
+  it('classifies a log record carrying a logger-name field as benign', () => {
+    expect(classifyStderr('2026-09-10 07:10:42 [finstack] INFO: Starting FinStack MCP server v0.10.0')).toBe('benign_warning');
+  });
+
+  it('classifies a WARNING-level record as benign, not a real error', () => {
+    expect(classifyStderr("2026-09-11 20:43:48,933 WARNING NIFTY50 expiry=2026-09-15: MC's freshest OI block is 2026-09-10 (< requested 2026-09-11); skipping rather than backdating")).toBe('benign_warning');
+  });
+
+  it('still flags a real error sitting under ordinary INFO records', () => {
+    const mixedLog = [
+      '2026-09-10 11:04:08,573 INFO panel: 27608 rows',
+      'Traceback (most recent call last):',
+    ].join(String.fromCharCode(10));
+    expect(classifyStderr(mixedLog)).toBe('real_error');
+    // A vendor HTTP failure reported inside a log record is a real error, not progress.
+    expect(classifyStderr('2026-09-10 20:06:43,564 ERROR fetch failed: HTTP Error 503')).toBe('real_error');
+  });
+
+  it("classifies a script's own not-a-failure notice as benign, but keeps its real errors real", () => {
+    expect(classifyStderr('[UnifiedRanker] universe filter: kept 2362, dropped 2396 non-tradeable/unpriced symbols')).toBe('benign_warning');
+    expect(classifyStderr('[UnifiedRanker] RL gate excluded HAPPSTMNDS: avg_return=-0.96% over 33 resolved outcomes (90d), t=-2.40')).toBe('benign_warning');
+    expect(classifyStderr('[StockOptionChain] 2/214 symbol(s) have no chain in ANY surviving source and are NOT counted as fetch failures.')).toBe('benign_warning');
+    // The narrowness is the point: a sibling line from the SAME scripts that reports an
+    // actual fetch failure must still classify as a real error.
+    expect(classifyStderr('[DeliveryTrend] Fetch error https://www.nseindia.com/api/bulk-deals after retries: 503 Server Error')).toBe('real_error');
+  });
+
   it('reports a real error even when benign warnings appear FIRST on the same stream', () => {
     const mixed = [
       'UserWarning: expandable_segments not supported on this platform',

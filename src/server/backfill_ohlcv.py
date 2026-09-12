@@ -284,9 +284,17 @@ YAHOO_SYMBOL_MAP: dict[str, str] = {
     "SRTRANSFIN":   "SHRIRAMFIN",
     "CHOLAFINSV":   "CHOLAFIN",
     "LTFH":         "LTF",
-    "LTIM":         "LTI",
+    # Verified live 2026-09-12 against a working control (RELIANCE.NS returns rows in the
+    # same call): LTIM.NS, LTI.NS and LTIMINDTREE.NS are ALL absent from Yahoo, so this
+    # mapping pointed a live Nifty-50 ticker at an equally-dead one. Kept as a no-op comment
+    # rather than a wrong redirect -- LTIM needs a non-Yahoo price source (AF-20260912-08).
+    # "LTIM":       "LTI",   <- removed: target is dead too
     "BAJAJINSUR":   "BAJAJFINSV",
-    "TATAMOTORS":   "TATAMTRDVR",
+    # Tata Motors' PV business kept ISIN INE155A01022 and renamed to TMPV; the old DVR line
+    # TATAMTRDVR is delisted and TATAMOTORS.NS itself returns nothing. TMPV.NS resolves (5
+    # rows, last close 301.10, live 2026-09-12). The universe master now carries TMPV, so this
+    # entry is only a safety net for any caller still passing the retired symbol.
+    "TATAMOTORS":   "TMPV",
     "OBEROI":       "OBEROIRLTY",
     "LARSEN":       "LT",
     "NESTLE":       "NESTLEIND",

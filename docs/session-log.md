@@ -4,6 +4,33 @@ Historical record, split out of CLAUDE.md on 2026-08-11 (it was 64% of that file
 
 **Not loaded automatically.** Read a specific entry when you need the history behind a decision. Durable lessons extracted from here live in `.claude/rules/`; if you find one that isn't there, add it.
 
+## 2026-09-12 -- pm2 warn/error sweep: 8 defects fixed, 2 vendor gaps closed from in-tree alternates, 1 wrong-company data corruption purged
+
+- **Scope**: user asked to stop ignoring pm2 `warn`s, fix every warn/error across **today + the previous two days**, and treat **"data not successfully written" as an error regardless of log level**. Collected first (user's instruction) into a 14-item inventory built from `logs/pm2-out.log` (111,301 lines in the 09-10..09-12 window), then resolved one by one. **Closed 8, plus 2 more the user asked me to dig into; 2 remain open, both genuinely needing the user.** Rows `AF-20260912-01..-12`.
+- **The worst one was not a missing-data bug but a WRONG-DATA bug.** `finstack_cashflow_fetcher.py` sent the BARE NSE symbol to an MCP server that wraps `yfinance`, whose id for an NSE listing is `<symbol>.NS`. A bare Indian ticker resolves to whichever US company owns that ticker: measured live, `IEX` -> **IDEX Corporation**, `HAL` -> **Halliburton**, `CUB` -> **Lionheart Holdings**. 13 of the 17 stored symbols held a foreign company's cash-flow statements; 724 bare-symbol 404s in the window. The tell had been sitting in the table for 11 days: `currency = USD`. All 67 rows purged (a wrong company's numbers cannot be repaired into the right one's); no ML/scoring reader exists, only a freshness check. Live after: `INFY` INR (NSE listing) where it was USD (the ADR), and `HAL`/`IEX`/`CUB` honestly report no coverage. (AF-20260912-01)
+- **14 of 57 `real_error` events in the window were FALSE ALARMS.** `classifyStderr`'s benign pattern required `INFO:` **with a colon** right after the timestamp; Python's own default format emits `INFO panel: ...` and a named logger emits `[finstack] INFO:`. Neither matched -> both fell through to the `real_error` default, across 7 scripts whose runs had succeeded. Widened with a deliberate counter-case asserting `[DeliveryTrend] Fetch error ... 503` still reads real, so the fix cannot become a mute button. (AF-20260912-02)
+- **`max_drawdown_pct` was a plausible wrong number, not a NULL.** `(1 + r/100).cumprod()` over the h=15 group (93,278 rows, mean clipped return +2.216%) overflows to `inf`; past that point `(cum-peak)/peak` is NaN and **`Series.min()` skips NaN**, so the metric returned a finite, correctly-signed drawdown from only the pre-overflow rows and the non-finite guard never fired. All 41 groups >5,000 signals were pinned at exactly `-100.0`. Recomputed in log space (cannot overflow). **The first version of the test asserted `is not None` and PASSED against the bug** -- it now asserts no overflow warning is raised. (AF-20260912-04)
+- **Two "dead vendors" were already covered by endpoints in this repo** -- found only because the user pushed back and said to check for alternates before asking. NSE `/api/bulk-deals` is genuinely retired (404 with a `Resource not found` page, warm cookies + Chrome TLS impersonation), but **NSE's own `/api/block-deal` still returns 200** and MoneyControl `deals/list` carries `deal_type: bulk`. The bulk half of `bulk_block_deals` had been frozen at **2026-07-01, ~2.5 months**, while the job exited 0 every night. Repointed with a migration putting the provider in the PK **before** the second writer landed. MC's payload has no NSE symbol, only its opaque `sc_id`, and **`mcsymbol` is not unique -- 39 of 1,940 codes map to >1 symbol** (`API` -> {ASIANPAINT, AGROPHOS}), so ambiguous codes are dropped rather than resolved by file position. Live: `moneycontrol/bulk` 39 rows at 2026-09-11 coexisting with `nse/block` 84 at 2026-09-12. (AF-20260912-11)
+- **`TATAMOTORS` was a retired symbol in the universe master** -- which is why one of the largest NSE names had **zero `stock_ohlcv` rows ever**. Tata Motors' PV business kept ISIN `INE155A01022` and renamed to **TMPV**, which already had 1,417 rows and appears in 101 tables; only the provider-mapping master was stale. User approved retiring it; **renamed rather than deleted** (deleting drops 7 provider mappings), and every provider id was verified individually -- MC `sc_id TEL`, Trendlyne `tlid 1362`, Tickertape `TAMO`, MarketsMojo `949886` all carry over, only `tlname` changed. Live: `_try_download('TMPV')` returns **252 rows, last close 301.10**, where the symbol was unfetchable before. `companyid` could NOT be re-verified (ET host-wide 503) and is retained on the strength of the other five. (AF-20260912-10)
+- **Adding a token LOWERED access.** `fetch_niftytrader()` bailed out with `return []` when no Bearer token was stored, per a comment asserting the route 401s without one. Isolated one header at a time: `sec-fetch-*` **without** a token -> 200 (identical bytes); token **without** `sec-fetch-*` -> 403. The `sec-fetch-*` trio was the discriminator and the token irrelevant, so the guard turned any future token lapse into silent zero rows. Live with the token forced to `None`: **86 rows** where the old code returned 0. (AF-20260912-09)
+- **Two leaked `vitest_%` schemas with 227 tables each were live in production, with no reaper at all** -- and they bit this session: a PK inspection of `bulk_block_deals` returned every column twice, exactly the `information_schema` hazard `recurring-bugs.md` documents. Added a `__vitest_meta(created_at)` stamp + an age-based reaper (age, not "anything not mine" -- concurrent runs are legitimate). Verified by planting a fake leak and watching it get reaped. (AF-20260912-12)
+- **Also fixed**: `commodity_sensitivity.py` reported `real_error` every run for an already-handled zero-variance NaN (AF-20260912-03); `trendlyneScreener.ts` logged a context-free `Unexpected API response format` while returning zero rows (AF-20260912-05); a parameter removed from xgboost 3.2.0's API was still being passed, 31 warnings in the window (AF-20260912-06). Schema snapshot brought back to **clean, 229/229** -- also reflecting two tables an earlier session had left drifting (`finstack_cashflow_checked`, `mf_holdings_no_coverage`); targeted edits, **not** a full `schema:regen`, because `db/schema.postgres.sql` carried another session's uncommitted work.
+- **Still open, both needing the user, with the per-route evidence recorded**: ET markets is host-wide **503 `Service Unavailable - DNS failure`** on every route and under chrome/chrome124/safari17_0 impersonation, so not a fingerprint block -- needs a browser capture; NiftyTrader `live-market-filter-data` is **401 anonymous / 403 with the valid stored JWT**, i.e. the account lacks the prime entitlement, so no client-side change reaches it (AF-20260912-07). `LTIM` (Nifty 50) and `GUJGASLTD` have no Yahoo coverage at all and need a different price source (AF-20260912-08). `GEMINI_API_KEY` is empty; the user said they will add it.
+- **Gates**: `tsc --noEmit` clean; `vitest --project unit` **1,301 passed / 135 files**; `npm run schema:drift` **clean**; pytest **82 passed** across every touched file (the earlier full run's single failure was a test stub matching the old bare symbol -- a correct failure that confirmed the `.NS` fix was live; the stub now asserts the real contract). Every fix negative-controlled: revert, watch the test fail, restore.
+- **Files**: `finstack_cashflow_fetcher.py`, `jobSweep.ts`, `performance_tracker.py`, `commodity_sensitivity.py`, `trendlyneScreener.ts`, `confluence_ml_engine.py`, `mover_screener_fetcher.py`, `delivery_trend_fetcher.py`, `backfill_ohlcv.py`, `vitest.globalSetup.ts`, `scripts/stocklist.json`, `src/data/stocklist.ts`, `db/schema.postgres.sql`, `migrations/20260912120000_bulk-block-deals-source-in-pk.sql`, 5 new/updated test files, `CLAUDE.md`, `.claude/rules/recurring-bugs.md`, `docs/audit-findings.md`.
+
+## 2026-09-11 -- reverse-engineer missing data: DQ warns traced back to source URLs, both fixed by backfilling existing fetchers
+
+- **Scope**: user asked to reverse-engineer and fix missing-data issues by tracing back to source URLs; if a source is dead, try an alternate from `urls.txt`/datasources before asking. Started from the live `data_quality_results` (08:35 UTC run) + DB freshness sweep, not from memory. No code change ended up being required -- both concrete gaps were **data available at a live source URL that the scheduled chain had simply not yet pulled**.
+- **`index_option_oi` stale (DQ warn "2.3d old") -- FIXED.** Missing 2026-09-10 session entirely (last real rows 09-09). Traced to `mc_index_oi_fetcher.py` (runs inside ml-daily-ops). MC's `oi-change-chart` serves **T-1 through much of day T** (documented in the fetcher's staleness guard), so 09-10's ml-daily-ops run correctly wrote the 09-09 block (newly published) and could not write 09-10 yet. Verified the `priceapi.moneycontrol.com` expiry + OI URLs live (09-10 block present in `results`), then ran `mc_index_oi_fetcher.py` -> **102 rows dated 2026-09-10** (NIFTY50+NIFTYBANK), `MAX(date)=2026-09-10`; also refreshed `index_max_pain`. Tonight's ml-daily-ops writes 09-11.
+- **`institutional_deal_signals` stale (DQ warn "5.3d old", `deal_date` frozen at 09-04) -- FIXED.** Not an upstream freeze: probed `mcapi/v1/deals/insight` live across `dealsType`/`range`/`limit` -- `topInvestor` 1W **has** deals through 2026-09-10. The table was behind because the fetcher only runs inside ml-daily-ops (19:30 IST) and NSE bulk/block disclosures are T+1, so 09-10's run legitimately had nothing newer than 09-04 in the feed yet. Ran `institutional_deals_fetcher.py` -> stored 09-10-dated deals, `MAX(deal_date)=2026-09-10`. Cross-check: raw `block_deals` has 09-07/08/09 rows, confirming real deals existed while the ranked feed lagged.
+- **Verified non-issues (deliberately NOT "fixed")**:
+  - `confluence_signals` FAIL ("0.6d old" at 08:17 UTC): `isConfluenceComputeWindow()` is gated to IST 17-23 + 06-07; today's pre-open window was lost to the 09-11 08:04 host reboot / AF-20260911-01 RAM storm, and 09:00-17:00 IST is by-design outside the window. Self-heals at tonight's 17:00 IST tick.
+  - `finstack_cashflow_fetcher` failure in ml-weekly-retrain: root cause was **OpenBLAS memory-allocation failure at 09:00 IST during the DL-trainer RAM exhaustion** (AF-20260911-01, already fixed and closed with evidence), not the FinStack source. Table has rows from 09-11 03:42 UTC.
+  - `pead_score` 100% NULL warn: deliberate writer retirement 2026-08-20 (zero downstream readers, measurement.md). `dataQualityChecks.ts`'s "newly dead" logic is designed to warm transiently on deliberate retirements and age out -- do not "fix" by adding to a dead list.
+  - `bulk_deals` stale since 2026-05-19: table fed by a feature merged 05-19 and reverted 05-21; the labels says the DQ check was repointed to `block_deals` (live). Dead table, not a defect.
+  - Live-screener 502s at 12:31 IST: transient NiftyTrader blip; runs before/after were 45/45 SUCCESS.
+- **Files touched: none.** Both fixes were operational (`mc_index_oi_fetcher.py`, `institutional_deals_fetcher.py` run once each with the project venv). Probe script used for verification lived in gitignored `scratch/` and was deleted.
 ## 2026-09-10 (final) -- production-hardening pass: every failing job root-caused, fixed, run, and verified in the DATABASE
 
 - **Asked to treat this as production-grade code**: fix every reported gap/staleness/data-fetching failure, test each, run each failing job, and ask before moving on. Mid-pass the user added: *"for jobs which says fixed now also check data in database to confirm fixes"* -- so every "fixed" claim below carries production-row evidence, not just a green suite. Ran under `superpowers:systematic-debugging` + `test-driven-development`; inventory came from `repo-doctor` (36 checks: 27 PASS / 8 WARN / **0 FAIL**).
@@ -8406,6 +8433,66 @@ tsc clean; vitest **1224 passed**; pytest **2466 passed / 249 skipped, 0 failed*
   Drop it once 2.30.0 has run cleanly for a few days: `docker volume rm bharat_pgdata_pre_ts2_30_0_20260911`
   (the vhdx will not shrink on its own, but Docker reuses the freed space).
 - Checks: tsc 0, vitest 1,266 passed, pytest 2,614 passed (all against the upgraded server).
+
+## 2026-09-11 (later) — accuracy ladder, first rungs shipped: dead-dep purge + finbert-tone ensemble
+
+User asked what from the ranked free-model plan was actually worth implementing, then said
+**"implement what you think can really help increasing accuracy."** Shipped the pieces that
+carry accuracy-per-effort through the promotion gate without new compute risk; blocked items
+documented with reasons (AF-20260911-08), not silently deferred.
+
+### What shipped (all verified, uncommitted)
+
+1. **Dead-dep purge, root `requirements.txt`** (AF-20260911-05): removed `pytorch-forecasting`,
+   `pytorch-lightning`, `shap`, `ipython`. The grep that kept timing out in earlier sessions was
+   finally landed by writing results to a scratch file (the shell-integration capture swallows
+   large Select-String output — 3rd time's the trick): **0 matches** across every `.py` in
+   src/backend-python/scripts/tests/db. CI installs only `backend-python/requirements.txt`
+   (ci.yml:122), so the root file now carries a header saying it's the aligned quick-start, not
+   the file of record.
+2. **`technical_signals.fcf_yield` dropped** (AF-20260911-06): 0 rows ever, 0 readers (all readers
+   alias `fcf_yield_approx AS fcf_yield`). Migration `20260911090000_technical-signals-drop-fcf-yield.sql`
+   **applied live** (`npm run migrate:up` — DB was up on :5433). pgClient.ts ensure-line and
+   schema.postgres.sql line removed. `tl_financial_quality.fcf_yield` deliberately NOT dropped —
+   may hold real data; separate inventory before touching.
+3. **finbert-tone second sentiment engine** (AF-20260911-07): `finbert_scorer.py` dual-model per
+   batch — ProsusAI/finbert + `yiyanghkust/finbert-tone` (label order verified identical:
+   positive=0/negative=1/neutral=2 in both HF configs). Six additive `news_sentiment_items`
+   columns incl. **`sentiment_conflict = |Δsigned| / 2 ∈ [0,1]`** via
+   `migrations/20260911100000_news-sentiment-items-tone-cols.sql` (**applied live**) + pgClient
+   ensure block + schema. Fusion is a pure `fuse_tone()` (no torch) → 5 fast unit tests; the
+   module still passes the offline-import guard test. `hf_pull_model.py` added: one-off cache
+   warmer, because `HF_HUB_OFFLINE=1` at runtime makes an uncached model PERMANENTLY unfetchable —
+   run `python hf_pull_model.py yiyanghkust/finbert-tone` once to activate the second engine
+   (until then the job fail-softs to ProsusAI-only with NULL tone columns, by design).
+
+### Gates
+
+- `pytest test_finbert_tone_ensemble.py` 5/5; `test_finbert_offline_load.py` 2/2 (one real float-
+  equality bug caught by the tests themselves — 0.8500000000000001 — fixed with `pytest.approx`).
+- `npx tsc --noEmit` exit 0 (pgClient.ts edits type-check).
+- Both migrations live-applied; node-pg-migrate logged both `pgmigrations` rows.
+
+### What did NOT ship, and the honest why
+
+- **Gemini announcement features**: `GEMINI_API_KEY` still empty (2026-09-09 audit). Code written
+  against an API with no key cannot be live-verified on this box — shipping it would be exactly
+  the "untested fix" pattern. Blocked on the user supplying the key.
+- **TabPFN v2 challenger**: Prior Labs license likely restricts commercial use — unverified, and
+  an unverified-license dependency is a removal-later liability. Wire after the license check.
+- **TSFM (TTM-r2/Bolt-tiny) range-vol batch**: this same box's dl_trainer just demonstrated the
+  commit-exhaustion class these nightly batches inherit (see entry above, 52.7GB kill). Only
+  behind the new in-flight/memory guards.
+- **Deep RL / agentic frameworks**: rejected per the ranked plan — `rl_agent.py` Q-learning +
+  `reward_engine.py` + existing MCP tools already cover that ground.
+
+### Standing measurement caveat (repeated because it still governs)
+
+Every feature added today is an EVIDENCE-lane input, not a verdict: `sentiment_conflict` becomes
+a *feature* in `ml_ensemble.py` only after ~1 week of rows accrue, graded through the purged
+walk-forward + promotion gate against the `edge_state_of_the_record` ceiling (+20–26%/yr). Adding
+columns is free; trusting them is not.
+
 
 ## 2026-09-11 (performance sweep) — memory ceilings that actually work, write amplification, parallel DQ (AF-20260911-10..13)
 

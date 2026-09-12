@@ -37,11 +37,24 @@ the row itself:
   reach a reliable size) that cannot be compressed by working harder right now. The row must name
   the unblock condition and an approximate date, not just "not enough data."
 - **Needs a user decision** — a tradeoff only the user can make (e.g. which of two designs, or
-  whether to accept a known bounded risk). Ask, don't leave it silently open.
+  whether to accept a known bounded risk). Ask, don't leave it silently open. **"Needs a user
+  decision" is not a lane you may enter until you have exhausted what you can determine
+  yourself.** For a vendor/endpoint that stopped returning data that means: probe it route by
+  route, isolate the MINIMUM headers/credentials it needs (adding a token can LOWER access —
+  see `recurring-bugs.md`), **and grep the repo for an alternate source and probe that too**
+  before asking. Reinforced by the user 2026-09-12 after a sweep reported three "dead vendors":
+  two were already covered by endpoints sitting in this repo (MoneyControl `deals/list` for NSE
+  bulk deals, MarketsMojo movers for ET gainers), and NSE's own `/api/block-deal` was still
+  returning 200 — only one route had actually retired. Ask with the per-route breakdown and the
+  alternates already ruled in or out, never with "this vendor is dead."
 - **Depends on an earlier fix landing first** — genuinely sequential, and the blocking row is
   named.
 
-Every other finding gets fixed and closed before moving on. Re-surface any open row you touch in
+Every other finding gets fixed and closed before moving on. **This applies to findings surfaced
+by a log/warning sweep exactly as it does to an audit**: a pm2 `warn`/`error` that means data was
+not written is a defect to fix in the same pass, not an inventory item — and per the user
+(2026-09-12), "data not successfully written" counts as an error regardless of the log level it
+was emitted at, including a step that exited 0. Re-surface any open row you touch in
 a session: re-verify it live, and either close it or update its "surviving N runs" count with a
 reason it's still legitimately blocked — an open row that just sits, unre-checked, across
 sessions is itself a finding (the ledger's own header already says this; it applies to every

@@ -196,7 +196,13 @@ def build_model():
         return xgb.XGBClassifier(
             n_estimators=200, max_depth=5, learning_rate=0.05,
             subsample=0.8, colsample_bytree=0.8,
-            use_label_encoder=False, eval_metric='logloss',
+            # `use_label_encoder` was removed as a named parameter in xgboost 2.x (verified
+            # against the installed 3.2.0: it is not in XGBClassifier.__init__'s signature),
+            # so passing it landed in **kwargs and printed a "Parameters: { use_label_encoder }
+            # are not used" WARNING from learner.cc on every fit -- 31 of them in the
+            # 2026-09-10..12 pm2 window. False has been the default behaviour since 1.6, so
+            # dropping it changes nothing except the noise (AF-20260912-06).
+            eval_metric='logloss',
             random_state=42, n_jobs=-1
         )
     if HAS_LGB:

@@ -944,12 +944,12 @@ const stockData: StockMapping[] = [
     "scripcode": 517174
   },
   {
-    "name": "Tata Motors",
+    "name": "Tata Motors Passenger Vehicles",
     "mcsymbol": "TEL",
     "tlid": "1362",
-    "tlname": "tata-motors-ltd",
+    "tlname": "tata-motors-passenger-vehicles-ltd",
     "isin": "INE155A01022",
-    "symbol": "TATAMOTORS",
+    "symbol": "TMPV",
     "stockid": "949886",
     "companyid": "12934",
     "tickertape_sid": "TAMO"

@@ -191,6 +191,73 @@ Currently automated (9 checks): `date.today()` write-anchor, short calendar-day 
   — the helper's own callers are the blast radius, not just the file you edited.** Sibling of
   this file's "measured 119s against a 120_000 budget — a 1-second margin" cases: the recurring
   defect is choosing a budget with no headroom, then never revisiting it when the work grows.
+## Provider identifiers, reverse maps and "the vendor is dead" (2026-09-12 pm2 warn/error sweep)
+
+- **A wrapper around a vendor SDK does not inherit this repo's identifier discipline — check
+  what identifier the wrapped library actually needs.** `finstack_cashflow_fetcher.py` called an
+  MCP tool with the bare NSE symbol; finstack wraps `yfinance`, whose id for an NSE listing is
+  `<symbol>.NS`. A bare Indian ticker does not merely miss on Yahoo — **it resolves to whichever
+  US-listed company owns that ticker**. Measured 2026-09-12: `IEX` -> IDEX Corporation,
+  `HAL` -> Halliburton, `CUB` -> Lionheart Holdings. 13 of 17 stored symbols held a foreign
+  company's cash-flow statements, and ~2,000 others 404'd (AF-20260912-01). **Tell, and it was
+  visible in the table for 11 days: a `currency` column reading USD for names that report in
+  INR.** Whenever a fetcher goes through a wrapper/MCP server/SDK rather than a URL you can
+  read, print the exact argument it sends and check it against `data-sources.md`'s provider-ID
+  table. Also: **a docstring calling something "source honesty" is not evidence** — this one
+  recorded `INFY returns 4 quarters (reported in USD)` as a documented quirk when it was the
+  NYSE ADR.
+
+- **A reverse map built from a provider-id column is ambiguous unless you prove the column is
+  unique, and a dict comprehension silently resolves the ambiguity by file position.**
+  `mcsymbol` in `stocklist.json` looks like a unique MoneyControl code and is not: **39 of 1,940
+  codes map to more than one NSE symbol** — `API` -> {ASIANPAINT, AGROPHOS}, `LC03` -> {LUPIN,
+  LAXMICOT}, `CI29` -> {COALINDIA, COMPINFO}, `TEL` -> {TMPV, TOUCHWOOD}. `{e['mcsymbol']:
+  e['symbol'] for e in entries}` keeps whichever entry came LAST, so a real institutional deal in
+  Asian Paints would be booked against Agrophos with no error anywhere. **Build the map as
+  `code -> set(symbols)` and keep only the singletons**, dropping ambiguous codes the way the
+  ISIN issuer-prefix resolver does (`ml-model-bugs.md`) — never guessing is the rule, and
+  "whichever one the file listed last" is a guess. **Tell:** any `{x[k]: x[v] for x in ...}` over
+  a provider-id field; assert `len(by_code) == len(map)` or print the difference.
+
+- **A retired symbol left in the universe master reads as "this stock has no data" rather than
+  "we are asking for the wrong ticker".** `TATAMOTORS` had **zero `stock_ohlcv` rows ever** while
+  `TMPV` — the renamed PV entity that kept ISIN `INE155A01022` — had 1,417. `nseStocks.ts`
+  already knew TMPV and 101 tables already held TMPV rows; only the provider-mapping master was
+  stale (AF-20260912-10). **RENAME the entry, never delete it** — deleting drops the row's 7
+  provider mappings with it. And **verify each provider id individually rather than assuming
+  they all moved**: here MoneyControl `sc_id`, Trendlyne `tlid`, Tickertape `sid` and MarketsMojo
+  `stockid` all carried over unchanged and only `tlname` changed. **Tell:** a symbol in
+  `stocklist.json` with zero rows in `stock_ohlcv`; cross-check against `nseStocks.ts` and
+  against the ISIN before believing the stock is untraded.
+
+- **Adding a token to a request can LOWER your access, so isolate headers one at a time before
+  concluding a route needs auth.** `fetch_niftytrader()` opened with `if not bearer: return []`
+  on the strength of an in-code comment asserting the route "401s unconditionally now, even with
+  a valid token". Measured route-by-route: **`sec-fetch-*` + token -> 200; `sec-fetch-*` with NO
+  token -> 200 (identical bytes); token WITHOUT `sec-fetch-*` -> 403; neither -> 403.** The
+  `sec-fetch-site/mode/dest` trio was the discriminator and the token was irrelevant, so the
+  guard converted any future token lapse into silent zero rows from a fully-open endpoint
+  (AF-20260912-09). This is `data-sources.md`'s "determine the MINIMUM the new call needs",
+  applied to a route already believed understood — **re-derive it rather than trusting the
+  comment, including a comment written by a previous careful session.**
+
+- **Before asking the user for a vendor capture, grep the repo for an alternate source and probe
+  it — the answer is often already integrated.** Prompted by the user on 2026-09-12, a sweep of
+  in-codebase URLs resolved two of three "dead vendor" gaps with no ask at all: NSE bulk-deals
+  was covered by MoneyControl `deals/list` (200, carries `deal_type: bulk`) **and NSE's own
+  `/api/block-deal` still returned 200 — only the bulk route retired**; movers were covered by
+  `frapi.marketsmojo.com/market_Gainersloser/getData` (200, already wired as `MOJO_MOVERS_URL`)
+  plus MC `price-shockers` and NT's EOD screener. Only ET was genuinely unreachable
+  (host-wide 503 `DNS failure`, unchanged under chrome/chrome124/safari17_0 impersonation, so not
+  a fingerprint block). **Sequence: grep for sibling endpoints -> probe each -> THEN ask, with
+  the per-route breakdown.** Asking first is cheap but reporting "3 vendors are dead" when 2 are
+  already covered in-tree is misleading.
+
+- **A vendor payload can be byte-identical for two different query params — check before relying
+  on the split.** MarketsMojo's movers endpoint returned the same 181,942 bytes for
+  `type=gainer` and `type=loser`, both keyed `"losers"`. The param looks ignored and the body
+  appears to carry both sides.
+
 ## Monitoring blind spots
 
 - **A comment saying a step "moved to" another job is a CLAIM, not a schedule — and when the move
@@ -342,6 +409,52 @@ Currently automated (9 checks): `date.today()` write-anchor, short calendar-day 
   and only showing the misses". The digest now buckets every mover by prior call (correct/wrong/neutral) and lists the top confirmed
   as-recommended calls next to the worst wrong calls. **Tell:** an accuracy report whose only named examples are failures cannot
   separate a directional bug from a low-but-real hit rate.
+## Noise floors, and metrics that overflow into a plausible wrong number
+
+- **A log-level classifier that recognises exactly ONE logging format reports ordinary progress
+  output as a crash, and a loud noise floor is what trains everyone to skip the warnings that
+  matter.** `classifyStderr`'s benign pattern required `INFO:` **with a colon** directly after
+  the timestamp. Python's own default format (`%(asctime)s %(levelname)s %(message)s`) emits
+  `INFO panel: 27608 rows` with no colon, and any logger with a name field emits
+  `[finstack] INFO:`. Neither matched, so both fell through to the `real_error` default:
+  measured over a 3-day pm2 window, **14 of 57 `real_error` events were false alarms** across 7
+  scripts whose runs had succeeded (AF-20260912-02). **Tell:** grep a classifier's own output for
+  scripts whose ENTIRE stderr is progress lines. **When widening such a pattern, add a
+  counter-case in the same commit** asserting a genuine failure from the same script still
+  classifies as real (`[DeliveryTrend] Fetch error ... 503`) — otherwise the widening quietly
+  becomes a mute button. Keep ERROR/CRITICAL out of the benign set so they still fall through.
+
+- **A warning that names no subject is unactionable, and "returns empty on a degraded read" makes
+  it invisible.** `trendlyneScreener.ts` logged the bare string `Unexpected API response format`
+  and returned `{ success: false, data: [] }` — no screener, no id, no status, no payload shape,
+  so three occurrences could not be attributed to a screener or a cause (AF-20260912-05). A
+  degraded-read message must name the subject and say how the response differed from the
+  contract the code checked.
+
+- **A `cumprod` over a long panel overflows to `inf`, and `Series.min()`/`.max()` SKIP NaN — so
+  the metric returns a plausible, finite, correctly-signed number computed from only the rows
+  before the overflow.** `performance_tracker`'s `max_drawdown_pct` compounded the h=15 group
+  (**93,278 rows, mean clipped return +2.216%**) via `(1 + r/100).cumprod()`; past the overflow
+  `(cum - peak)/peak` is `inf/inf = NaN`, `.min()` skipped it, and the existing non-finite guard
+  therefore never fired. All 41 groups over 5,000 signals were pinned at exactly `-100.0`
+  (AF-20260912-04). **Compute any drawdown/cumulative ratio in LOG space** —
+  `exp(cumsum(log1p(r)) - cummax(cumsum(log1p(r)))) - 1` is algebraically identical with an
+  exponent `<= 0` by construction, so it cannot overflow. **Tell:** a metric that is suspiciously
+  round or identical across many groups (`-100.0` for all of them). **And do not write
+  `assert x is not None` as the test** — that is what passed against this bug on the first
+  attempt; assert that **no overflow warning is raised**, since NaN-skipping means the value
+  looks fine either way.
+
+- **A throwaway test schema leaks into production whenever the runner is killed before its own
+  teardown, and an unqualified `information_schema` read then sees it as a second copy of every
+  real table.** Two `vitest_%` schemas with 227 tables each were live, with **no reaper of any
+  kind** — and they bit the same session that found them: a PK inspection of `bulk_block_deals`
+  came back with every column listed twice (AF-20260912-12). Stamp each throwaway schema with
+  its own `created_at` and reap siblings **by AGE** (not "anything that is not mine" —
+  concurrent runs are legitimate and dropping a sibling mid-run fails it with a hundred
+  `relation does not exist` errors). The pytest side (`src/server/conftest.py`) has the same
+  shape and still has no reaper.
+
 ## Repairs, fallbacks and skip-lists that don't do what they say
 
 - **A repair path can share the exact failure mode it repairs — and then the repair IS the crash
