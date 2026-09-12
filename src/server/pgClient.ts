@@ -482,7 +482,10 @@ export async function pgEnsureColumns(): Promise<void> {
     `ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS eps_beat_streak       BIGINT`,
     `ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS eps_miss_after_streak BIGINT DEFAULT 0`,
     `ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS rev_surprise_q1       DOUBLE PRECISION`,
-    `ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS fcf_yield             DOUBLE PRECISION`,
+    // fcf_yield ensure REMOVED 2026-09-11: column had 0 rows ever (measurement.md
+    // 2026-09-10); superseded by fcf_yield_approx (migration 066). Dropped on live DB by
+    // migrations/20260911090000_technical-signals-drop-fcf-yield.sql — readers alias
+    // fcf_yield_approx AS fcf_yield, so no reader changes were needed.
     `ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS interest_coverage     DOUBLE PRECISION`,
     `ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS fcf_positive          BIGINT DEFAULT 0`,
     `ALTER TABLE technical_signals ADD COLUMN IF NOT EXISTS debt_coverage_risk    BIGINT DEFAULT 0`,
@@ -536,6 +539,15 @@ export async function pgEnsureColumns(): Promise<void> {
     `ALTER TABLE tl_financial_quality ADD COLUMN IF NOT EXISTS cfi_ttm            DOUBLE PRECISION`,
     `ALTER TABLE tl_financial_quality ADD COLUMN IF NOT EXISTS fcf_ttm_approx     DOUBLE PRECISION`,
     `ALTER TABLE tl_financial_quality ADD COLUMN IF NOT EXISTS fcf_yield_approx   DOUBLE PRECISION`,
+    // finbert-tone ensemble columns (migration 20260911100000) — second sentiment engine
+    // in finbert_scorer.py; sentiment_conflict = |prosusai_signed - tone_signed| / 2.
+    // Fail-soft: NULL until the tone model cache is warmed (hf_pull_model.py).
+    `ALTER TABLE news_sentiment_items ADD COLUMN IF NOT EXISTS tone_pos           DOUBLE PRECISION`,
+    `ALTER TABLE news_sentiment_items ADD COLUMN IF NOT EXISTS tone_neg           DOUBLE PRECISION`,
+    `ALTER TABLE news_sentiment_items ADD COLUMN IF NOT EXISTS tone_neu           DOUBLE PRECISION`,
+    `ALTER TABLE news_sentiment_items ADD COLUMN IF NOT EXISTS tone_label         TEXT`,
+    `ALTER TABLE news_sentiment_items ADD COLUMN IF NOT EXISTS tone_score         DOUBLE PRECISION`,
+    `ALTER TABLE news_sentiment_items ADD COLUMN IF NOT EXISTS sentiment_conflict DOUBLE PRECISION`,
     // New quant_scores risk and multi-factor columns (migration 053)
     `ALTER TABLE quant_scores ADD COLUMN IF NOT EXISTS beta_1y            DOUBLE PRECISION`,
     `ALTER TABLE quant_scores ADD COLUMN IF NOT EXISTS beta_6m            DOUBLE PRECISION`,

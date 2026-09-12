@@ -613,6 +613,8 @@ CREATE TABLE IF NOT EXISTS "factor_edge_history" (
   "hit_auc" REAL,
   "n" INTEGER,
   "dates" INTEGER,
+  "eff_dates" REAL,
+  "symbols" INTEGER,
   "verdict" TEXT,
   PRIMARY KEY ("run_at", "table_name", "score_col", "regime", "horizon_days")
 );
