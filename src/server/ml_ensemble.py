@@ -73,7 +73,7 @@ PROMOTION_MARGIN = 0.005
 # "ungraded" branch => CV alone cannot promote. That is the designed conservative path,
 # NOT a regression: grade the column with `python factor_edge.py --table technical_signals
 # --scores <cols> --entry open --persist` to make it answerable.
-LIVE_EDGE_TABLE  = 'technical_signals'
+LIVE_EDGE_TABLE  = 'technical_signals__open_entry'
 LIVE_EDGE_COLUMN = 'win_probability'
 CANDIDATE_PATH = ENSEMBLE_PATH + '.candidate'
 
