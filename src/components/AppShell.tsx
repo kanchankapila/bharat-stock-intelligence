@@ -287,8 +287,8 @@ const SidebarInner = React.memo(function SidebarInner({ collapsed, setCollapsed,
           onClick={() => handleNav('dashboard')}
           className="flex items-center gap-2 min-w-0"
         >
-          <div className="w-7 h-7 bg-indigo-600 rounded-md flex items-center justify-center shadow-[0_0_10px_rgba(79,70,229,0.25)] shrink-0">
-            <TrendingUp className="w-3.5 h-3.5 text-white" />
+          <div className="w-7 h-7 bg-gradient-to-b from-amber-400 to-amber-600 rounded-md flex items-center justify-center shadow-[0_2px_8px_rgba(217,119,6,0.35)] shrink-0">
+            <TrendingUp className="w-3.5 h-3.5 text-slate-950" />
           </div>
           <AnimatePresence initial={false}>
             {!collapsed && (
@@ -299,7 +299,7 @@ const SidebarInner = React.memo(function SidebarInner({ collapsed, setCollapsed,
                 exit={{ opacity: 0, width: 0 }}
                 transition={{ duration: 0.18 }}
                 className="text-sm font-black text-slate-200 tracking-wider overflow-hidden whitespace-nowrap"
-                style={{ fontFamily: "'Rajdhani', sans-serif" }}
+                style={{ fontFamily: 'var(--font-display)' }}
               >
                 BHARAT<span className="text-amber-400">STOCK</span>
               </motion.span>
@@ -371,7 +371,7 @@ const SidebarInner = React.memo(function SidebarInner({ collapsed, setCollapsed,
               value={searchQuery}
               onChange={e => { setSearchQuery(e.target.value); setShowSearch(true); }}
               onFocus={() => setShowSearch(true)}
-              className="w-full bg-white/45 border border-slate-850/80 rounded-lg py-1.5 pl-7 pr-3 text-[11px] text-slate-200 placeholder:text-slate-400 focus:outline-none focus:border-indigo-500/30 focus:ring-1 focus:ring-indigo-500/20 transition-all shadow-[inset_0_1px_2px_rgba(0,0,0,0.02)]"
+              className="w-full bg-slate-950/60 border border-white/[0.08] rounded-lg py-1.5 pl-7 pr-3 text-[11px] text-slate-200 placeholder:text-slate-500 focus:outline-none focus:border-indigo-500/30 focus:ring-1 focus:ring-indigo-500/20 transition-all shadow-[inset_0_1px_2px_rgba(0,0,0,0.3)]"
             />
             {showSearch && searchResults.length > 0 && (
               <>
@@ -596,7 +596,7 @@ export const AppShell: React.FC<AppShellProps> = ({
       <motion.aside
         animate={{ width: collapsed ? 60 : 232 }}
         transition={{ duration: 0.2, ease: 'easeInOut' }}
-        className="hidden md:flex flex-col h-full glass border-r border-slate-800/50 shrink-0 overflow-hidden z-20 shadow-sm"
+        className="hidden md:flex flex-col h-full glass border-r border-white/[0.06] shrink-0 overflow-hidden z-20 shadow-sm"
       >
         <SidebarInner {...sidebarProps} />
       </motion.aside>
@@ -631,7 +631,7 @@ export const AppShell: React.FC<AppShellProps> = ({
       {/* ── Content area ── */}
       <div className="flex-1 flex flex-col min-w-0 h-full overflow-hidden">
         {/* Top bar */}
-        <header className="h-11 border-b border-slate-800/30 bg-slate-950/20 backdrop-blur-md flex items-center px-4 gap-3 shrink-0 z-10">
+        <header className="h-11 border-b border-white/[0.06] bg-[#0a0c11]/70 backdrop-blur-md flex items-center px-4 gap-3 shrink-0 z-10">
           {/* Mobile hamburger */}
           <button
             onClick={() => setMobileOpen(true)}
@@ -643,7 +643,7 @@ export const AppShell: React.FC<AppShellProps> = ({
           {/* Page breadcrumb */}
           <div className="flex items-center gap-1.5 min-w-0">
             <span className="text-[9px] font-black uppercase tracking-[0.2em] text-slate-400 hidden sm:block"
-              style={{ fontFamily: "'Rajdhani', sans-serif" }}>
+              style={{ fontFamily: 'var(--font-display)' }}>
               BHARAT STOCK
             </span>
             {activeLabel && (
@@ -651,7 +651,7 @@ export const AppShell: React.FC<AppShellProps> = ({
                 <span className="text-slate-300 hidden sm:block">/</span>
                 {ActiveIcon && <ActiveIcon className="w-3 h-3 text-amber-400 shrink-0" />}
                 <span className="text-[11px] font-black text-amber-400 font-display uppercase tracking-wide truncate"
-                  style={{ fontFamily: "'Rajdhani', sans-serif" }}>
+                  style={{ fontFamily: 'var(--font-display)' }}>
                   {activeLabel}
                 </span>
               </>

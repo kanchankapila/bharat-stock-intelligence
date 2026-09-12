@@ -96,23 +96,17 @@
   --v5-sparkline-bg-to: var(--v6-bg-band);
 
   min-height: 100vh;
-  background:
-    radial-gradient(at 0% 0%, rgba(99, 102, 241, 0.15) 0px, transparent 50%),
-    radial-gradient(at 50% 0%, rgba(167, 139, 250, 0.1) 0px, transparent 50%),
-    radial-gradient(at 100% 0%, rgba(59, 130, 246, 0.15) 0px, transparent 50%),
-    #050508;
-  background-attachment: fixed;
+  background: linear-gradient(180deg, #0b0d13 0%, #08090d 45%, #07080b 100%);
   color: var(--v6-ink);
-  font-family: 'Inter', ui-sans-serif, system-ui, sans-serif;
-  font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+  font-family: 'IBM Plex Sans', ui-sans-serif, system-ui, sans-serif;
 }
 
-/* Matches v1 AppShell's actual brand type (its wordmark and header breadcrumb both set this
-   inline: `fontFamily: "'Rajdhani', sans-serif"`, uppercase, heavily tracked) -- v6 previously
-   used plain Inter here, which is why it didn't read as the same product as v1 despite the color
-   tokens claiming to match it. Rajdhani is already loaded (index.html, shared with v2/v3). */
+/* Matches v1 AppShell's brand type (wordmark + header breadcrumb now set var(--font-display)
+   inline). Redesign 2026-09-10: unified on Archivo across all shells — Rajdhani (and the
+   Inter body face / fixed-attachment purple wash above) retired with it. The static
+   background paints once instead of repainting the viewport on every scroll frame. */
 .v6-title {
-  font-family: 'Rajdhani', ui-sans-serif, system-ui, sans-serif;
+  font-family: 'Archivo', ui-sans-serif, system-ui, sans-serif;
   font-weight: 700;
   letter-spacing: 0.03em;
   text-transform: uppercase;

@@ -2,8 +2,8 @@ import React from 'react';
 import { Cpu, CheckCircle2, ChevronRight, Zap } from 'lucide-react';
 import { trpc } from '../lib/trpc';
 
-const FONT_DISPLAY = "'Rajdhani', sans-serif";
-const FONT_MONO = "'Space Mono', monospace";
+const FONT_DISPLAY = "'Archivo', sans-serif";
+const FONT_MONO = "'IBM Plex Mono', monospace";
 const amber = '#f97316';
 const emerald = '#22c55e';
 

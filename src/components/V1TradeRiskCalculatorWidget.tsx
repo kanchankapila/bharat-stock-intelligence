@@ -1,8 +1,8 @@
 import React, { useState } from 'react';
 import { Calculator, ShieldAlert, Target, Percent } from 'lucide-react';
 
-const FONT_DISPLAY = "'Rajdhani', sans-serif";
-const FONT_MONO = "'Space Mono', monospace";
+const FONT_DISPLAY = "'Archivo', sans-serif";
+const FONT_MONO = "'IBM Plex Mono', monospace";
 const amber = '#f97316';
 const emerald = '#22c55e';
 const rose = '#ef4444';

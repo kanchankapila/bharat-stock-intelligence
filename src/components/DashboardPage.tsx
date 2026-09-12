@@ -33,8 +33,8 @@ import { V1FnOMicrostructureWidget } from './V1FnOMicrostructureWidget';
 import { V1TradeRiskCalculatorWidget } from './V1TradeRiskCalculatorWidget';
 
 // ─── Fonts injected once ──────────────────────────────────────────────────────
-const FONT_FAMILY_DISPLAY = "'Rajdhani', sans-serif";
-const FONT_FAMILY_MONO = "'Space Mono', monospace";
+const FONT_FAMILY_DISPLAY = "'Archivo', sans-serif";
+const FONT_FAMILY_MONO = "'IBM Plex Mono', monospace";
 
 // ─── Design tokens ────────────────────────────────────────────────────────────
 const amber = '#f97316';   // saffron accent

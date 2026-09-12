@@ -31,7 +31,7 @@ export const RolloverPositioningPanel: React.FC<{ onSelectStock?: (symbol: strin
   return (
     <div className="flex flex-col h-[580px] glass border border-slate-800/50 rounded-2xl p-5 text-slate-200">
       <div className="flex-shrink-0 mb-5">
-        <h2 className="text-xl font-bold font-['Rajdhani'] flex items-center gap-2">
+        <h2 className="text-xl font-bold font-display flex items-center gap-2">
           <Repeat className="w-5 h-5 text-sky-400" />
           F&amp;O Rollover Positioning
         </h2>

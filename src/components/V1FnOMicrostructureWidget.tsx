@@ -2,8 +2,8 @@ import React from 'react';
 import { Activity, Magnet, Repeat, AlertCircle } from 'lucide-react';
 import { trpc } from '../lib/trpc';
 
-const FONT_DISPLAY = "'Rajdhani', sans-serif";
-const FONT_MONO = "'Space Mono', monospace";
+const FONT_DISPLAY = "'Archivo', sans-serif";
+const FONT_MONO = "'IBM Plex Mono', monospace";
 const amber = '#f97316';
 const emerald = '#22c55e';
 const rose = '#ef4444';

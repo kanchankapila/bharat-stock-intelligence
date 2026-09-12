@@ -118,12 +118,10 @@ interface Toast {
   confidence: number;
 }
 
-const FALLBACK_INDICES = [
-  { name: 'Nifty 50', value: 22453.20, change: 0.84, isUp: true },
-  { name: 'Sensex', value: 73845.54, change: 0.72, isUp: true },
-  { name: 'Bank Nifty', value: 47285.30, change: 1.24, isUp: true },
-];
-
+// Data honesty (2026-09-10): the old FALLBACK_INDICES here fabricated plausible-looking
+// prices (NIFTY 22453.20 etc.) whenever the live index query returned nothing — a user
+// staring at the header strip had no way to tell invented numbers from real ones. An empty
+// strip (AppShell already guards on displayIndices.length > 0) is the honest state.
 export default function App() {
   const navigate = useNavigate();
   const location = useLocation();
@@ -199,7 +197,7 @@ export default function App() {
     const keyIndices = allIndices.filter((idx: any) =>
       ['NIFTY 50', 'SENSEX', 'NIFTY BANK'].includes(idx.name)
     );
-    if (keyIndices.length === 0) return FALLBACK_INDICES;
+    if (keyIndices.length === 0) return []; // no fabricated fallback — an empty strip is honest, invented prices are not
     return keyIndices.map((idx: any) => ({
       name: idx.name,
       value: parseFloat(String(idx.value ?? '0').replace(/,/g, '')),
