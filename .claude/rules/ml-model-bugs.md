@@ -23,6 +23,46 @@ cover classes that stayed in `recurring-bugs.md`.
 
 ## Evidence, harnesses & measurement tooling
 
+- **A rank IC averaged over DAILY dates at horizon h has ~dates/h independent observations, not
+  `dates` — so a reliability gate applied to the raw date count passes panels that miss it by an
+  order of magnitude.** Consecutive daily dates graded at h=21 share 20 of their 21 forward days,
+  so their per-date ICs are autocorrelated and the standard error of the mean IC is understated
+  by roughly sqrt(h). Found 2026-09-12 (AF-20260912-15): `factor_edge.py` applied
+  `MIN_DATES_RELIABLE = 20` to the raw count, and **every `USABLE` verdict it had ever produced
+  was an artifact of that.** Measured live across all 895 current readings: 24 read `USABLE`,
+  **exactly 1 survives the corrected count**, and that one is `movement_probability` — which this
+  same file already documents as a train/serve-skew artifact (AUC 0.894). Only **46 of 895**
+  readings carry 20+ independent periods.
+  **The tell is a horizon discontinuity, and it is diagnostic, not noise:** `mf_big_fund_flow`
+  read AUC **0.4682 at h=10** (44 dates) and **0.6203 at h=21** (33 dates). A factor does not
+  invert and then triple its edge across horizons; the h=21 panel simply had 1.6 effective points
+  to the h=10 panel's 4.4. Whenever a column looks dead at a short horizon and strong at a long
+  one **on fewer dates**, compute dates/h before believing the long one.
+  **Scope, and this matters — the correction does NOT apply to every harness here.**
+  `factor_edge.py` samples DAILY and overlaps, so it is affected. `factor_backtest.py` forms a
+  portfolio and holds it to the next rebalance, so its periods are DISJOINT and its `n periods`
+  is already an independent count — its cost/turnover rows need no adjustment. Before applying
+  this correction to any number, ask whether the observations overlap; applying it to
+  non-overlapping periods would discard real evidence.
+  **A second, independent precondition the same guard was missing: cross-sectional WIDTH.**
+  `pledge_chg_qoq` read rank_IC +0.19 / AUC 0.605 on a universe of **26 symbols**, and six
+  banking-ratio columns read `USABLE` on 41 — `--min-per-date` defaults to 10, so a 26-name panel
+  clears it, while `factor_backtest.py` forms top-50 portfolios that universe cannot fill. A rank
+  correlation across 26 names is not a cross-sectional factor reading.
+  **How the fix was kept from becoming a mute button, which is the reusable part:** the first
+  draft of this guard keyed on within-symbol variance (a constant-per-symbol column also
+  overstates independence). Measured before shipping, it flagged **159 of ~165 columns** — this
+  file's own "a monitor that fires on EVERY run carries no information", in guard form. It was
+  discarded for the two narrow, measurable preconditions above, which flag 7 and 24 respectively
+  and leave a well-powered panel reading `USABLE`. **Measure what a proposed guard would flag
+  before writing it**, exactly as you would measure a threshold before trusting it.
+  Fixed by `MIN_SYMBOLS_XS = 50` (new `DEGENERATE-XS` verdict) and `_effective_dates()`, with
+  `eff_dates`/`symbols` persisted so a reader sees how far from reliable a reading is instead of
+  a flat label. Historical rows keep NULL and are deliberately NOT backfilled — a retroactive
+  `eff_dates` would fabricate a precondition that was never applied to that row's verdict.
+  Immunized by `src/server/tests/test_factor_edge_degenerate_panels.py` (negative-controlled,
+  including a non-vacuity case that a wide, long panel still reads `USABLE`).
+
 - 🤖 **An unmeasured signal/scoring change gets merged with a green test suite, and is only caught later by a dedicated salvage/audit session.** `verify-gate.mjs` blocks completion on tests-passed, but tests-passed proves the code runs, not that its output is any good — a diff to `unified_ranker.py` with a clean `pytest` run satisfies the gate whether or not anyone re-ran the backtest. Recurred at least 3 times: a prior session's PEAD boost / delivery-in-ranker / screener-sentiment / news-date-shift changes all had to be reviewed and rejected post-hoc (`bd40156`); two separate `factor_backtest.py` benchmark bugs (exit-pricing, `--rebalance 1`) sat undetected long enough to make dead factors look alive until a manual review caught them (`32f9676`, `12be159` — full diagnosis in `docs/measurement-history.md`). Fixed 2026-08-12: `verify-gate.mjs` now also requires backtest evidence (a `factor_backtest.py` run, or a same-session edit to `measurement.md`/`measurement-history.md`) whenever the diff touches `unified_ranker.py`, `scoring_engine.py`, `factor_backtest.py`, `multi_factor_scorer.py`, `institutional_quant_engine.py`, or `quantScoringService.ts`.
 
 - **A bug in the measurement tooling itself is worse than no measurement, because it looks like evidence.** Both `factor_backtest.py` bugs above were in the code that's supposed to *catch* signal-logic bugs, not in signal logic itself — one inflated a dead factor to look significant, the other deflated the whole universe by ~35pp/yr at daily rebalance. Treat a change to any backtest/measurement script with at least as much suspicion as a change to the thing it measures: reproduce at least one already-known result before trusting a harness change's new ones.

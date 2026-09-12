@@ -4,6 +4,66 @@ Historical record, split out of CLAUDE.md on 2026-08-11 (it was 64% of that file
 
 **Not loaded automatically.** Read a specific entry when you need the history behind a decision. Durable lessons extracted from here live in `.claude/rules/`; if you find one that isn't there, add it.
 
+## 2026-09-12 -- factor_edge was grading degenerate panels: every USABLE verdict it ever produced was an artifact
+
+- **Scope**: user asked to refresh all jobs/trainings and then decide a plan from the latest
+  numbers. The refresh found almost nothing to run (Saturday; all core tables current through Fri
+  09-11; `ensemble` retrained 09-11) -- but auditing the numbers themselves found the harness
+  producing them was wrong.
+- **The finding: of 24 `USABLE` verdicts across 895 readings in `factor_edge_history`, exactly ONE
+  survives correction, and that one is `movement_probability` -- already documented as a
+  train/serve-skew artifact (AUC 0.894).** Only 46 of 895 readings carry 20+ independent periods.
+  Two preconditions were never checked. (1) `MIN_DATES_RELIABLE=20` was applied to the RAW date
+  count, but a rank IC averaged over daily dates at horizon h has ~dates/h independent
+  observations -- `mf_big_fund_flow` cleared a 20-observation bar on 33/21 = **1.6**.
+  (2) No cross-sectional width check at all: `pledge_chg_qoq` read rank_IC +0.19 / AUC 0.605 on
+  **26 symbols**, six banking-ratio columns on 41. `--min-per-date` defaults to 10, so a 26-name
+  panel sails through.
+- **The horizon discontinuity was the diagnostic and it was sitting in the data.**
+  `mf_big_fund_flow` read AUC **0.4682 at h=10** and **0.6203 at h=21** on FEWER dates. A factor
+  does not invert then triple its edge across horizons -- the h=21 panel just had 1.6 effective
+  points. This is now a documented tell in `ml-model-bugs.md`.
+- **This resolves a standing puzzle in `measurement.md`**: that a promising LOW-DATA reading here
+  "has, so far, never survived reaching full power." None of them ever reached power.
+- **What the correction does NOT touch, and conflating them would discard real evidence**:
+  `factor_backtest.py` holds to the next rebalance so its periods are DISJOINT -- every
+  cost/turnover row stands, including the capitulation triple (t=+3.48) and `momentum_12_1`
+  (t=1.45). And the `feature_store` mean-reversion finding runs on 1,376-1,415 dates (~275
+  independent at 5d), so it is now the best-powered result in the file.
+- **The first draft of the guard was rejected by its own measurement.** Keying on within-symbol
+  variance also detects overstated independence, but measured before shipping it flagged
+  **159 of ~165 columns** -- `recurring-bugs.md`'s "a gate firing on ~100% of its population
+  carries zero information", in guard form. Replaced with the two narrow preconditions, which
+  flag 7 and 24 and leave a well-powered panel reading `USABLE`.
+- **Harness change validated by reproducing a known result first** (`ml-model-bugs.md` mandate):
+  `win_probability` open-entry 5d came back IC 0.055 / AUC 0.505 / 65 dates against the recorded
+  0.056 / 0.506 / 64 -- the drift is one new trading date (09-11), not the change.
+- **`nse-sync` discarded 15 minutes of MoneyControl traffic for want of ten seconds.**
+  `backfill_sector_mc.py` ran `--enumerate --write --report-unmapped` as ONE step under a single
+  900s budget while the enumerate alone measures ~895s, so the kill landed on the write -- the
+  only phase touching the DB. On the 09-12 07:45 failure the cache was COMPLETE (2,340 symbols)
+  at 07:44:56 and the process died at 07:45:00; the write, timed live, takes **10 seconds**. Split
+  into two independently-caught steps. Lost data recovered in-session (sector for 2,088 stocks,
+  industry for 2,200).
+- **A latent lock bug surfaced while fixing it**: `nse-sync-weekly`'s `lockDuration` was 20 min
+  and its comment budgeted "backfill_sectors.py (120s)", but that step went to 600s on 09-05 and
+  `index_membership` to 180s, neither revisiting the lock -- a 20-min lock over ~35 min of
+  budgets. Raised to 60 min, sized over the SUM. The wiring test now asserts against the sum, not
+  just the largest step, which is what would have caught the 09-05 drift.
+- **A "future-dated" finding that was NOT a bug**: 1,943 `unified_recommendations` rows stamped
+  `2026-09-14` are `as_of.logical_session_date()` working as designed -- a Friday-post-close run
+  labels itself for Monday's session. Stamping real calendar dates previously produced 9,096
+  unreachable rows. Recorded as AF-20260912-18 specifically so nobody "fixes" it back.
+- **Also fixed (working tree only, NOT committed)**: `pythonRunner.ts` had an unterminated regex
+  literal breaking `tsc` repo-wide. Fixed the one character to unblock verification, but the file
+  carries another session's 131-line in-flight work, so it was deliberately left uncommitted.
+- **Gates**: `tsc --noEmit` clean; `pytest` 2702 passed / 249 skipped; `vitest` 1305 passed /
+  41 skipped. Both new test assertions negative-controlled (the lock-sum check fails with
+  "expected 1500000 to be greater than 2100000" when reverted).
+- **Files**: `factor_edge.py`, `jobs/sync.jobs.ts`, `test_factor_edge_degenerate_panels.py` (new),
+  `nseSyncSectorBackfillWiring.test.ts`, migration `20260912140000`, `audit-findings.md`
+  (AF-20260912-15..18), `measurement.md`, `ml-model-bugs.md`. Commit `12bc1b70`.
+
 ## 2026-09-12 -- pm2 warn/error sweep: 8 defects fixed, 2 vendor gaps closed from in-tree alternates, 1 wrong-company data corruption purged
 
 - **Scope**: user asked to stop ignoring pm2 `warn`s, fix every warn/error across **today + the previous two days**, and treat **"data not successfully written" as an error regardless of log level**. Collected first (user's instruction) into a 14-item inventory built from `logs/pm2-out.log` (111,301 lines in the 09-10..09-12 window), then resolved one by one. **Closed 8, plus 2 more the user asked me to dig into; 2 remain open, both genuinely needing the user.** Rows `AF-20260912-01..-12`.

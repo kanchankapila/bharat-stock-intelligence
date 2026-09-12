@@ -2,6 +2,54 @@
 
 Read before quoting, comparing, or acting on any accuracy, win-rate, IC, or backtest number.
 
+> ## ⚠ CORRECTION 2026-09-12 — read this before quoting ANY `factor_edge.py` reading below
+>
+> **`factor_edge.py` counted overlapping forward windows as independent observations, so the
+> `dates` figure attached to every rank-IC/AUC reading in this file OVERSTATES its power by
+> roughly the horizon.** A rank IC averaged over daily dates at horizon h carries ~`dates/h`
+> independent observations. `MIN_DATES_RELIABLE = 20` was applied to the raw count, so readings
+> cleared a reliability bar they missed by up to an order of magnitude (AF-20260912-15).
+>
+> Measured live across all 895 readings in `factor_edge_history`: **24 read `USABLE`, exactly 1
+> survives the corrected count — and that one is `movement_probability`, already known to be a
+> train/serve-skew artifact.** Only **46 of 895** readings carry 20+ independent periods.
+>
+> **Divide before you quote.** Recomputing `dates/h` for this file's own headline claims, from
+> numbers already stated below:
+>
+> | claim as written below | dates | h | independent | status |
+> |---|---|---|---|---|
+> | `unified_score` +0.050 | 18 | 5 | **3.6** | not reliable |
+> | `unified_score` +0.066 | 2 | 21 | **0.1** | anecdote |
+> | `confluence_score` +0.168 / 0.583 | 2 | 21 | **0.1** | anecdote |
+> | `win_probability` +0.056 / 0.506 | 64 | 5 | **12.8** | not reliable |
+> | `ml_breakout_probability` +0.082 / 0.553 "clears USABLE" | 44 | 7 | **6.3** | **retracted** |
+> | `breakout_probability` +0.153 / 0.583 | 19 | 10 | **1.9** | **retracted** |
+> | `screener_momentum_score` +0.172 | 42 | 21 | **2.0** | not reliable |
+> | `ccc_trend` -0.042 | 44 | 21 | **2.1** | not reliable |
+> | `ext_t80_tech_score` +0.185 / 0.574 | 17 | 21 | **0.8** | anecdote |
+>
+> **Two things this correction does NOT touch, and conflating them would discard real evidence:**
+>
+> 1. **`factor_backtest.py` rows are unaffected.** It holds a portfolio to the next rebalance, so
+>    its periods are DISJOINT — its `n periods` is already an independent count. Every
+>    cost/turnover row in "Already tested" stands as written, including the capitulation triple
+>    (t=+3.48, p=0.0005) and `momentum_12_1` (t=1.45).
+> 2. **The `feature_store` mean-reversion finding stands, and is now the best-powered result
+>    here.** Those readings run on **1,376–1,415 dates**, i.e. ~275 independent observations at
+>    5d and ~66 at 21d. Both clear the bar comfortably. The platform's dominant 5d mean-reversion
+>    result is untouched.
+>
+> **The net effect is not "everything is worse" — it is that the SHORT-PANEL readings this file
+> has been treating as emerging leads were never evidence at all.** This also resolves a puzzle
+> stated further down: that a promising LOW-DATA reading here "has, so far, never survived
+> reaching full power." None of them ever reached power. The negative results, which rest on long
+> panels and on `factor_backtest.py`, are unaffected and remain the reliable part of the record.
+>
+> `factor_edge.py` now emits `DEGENERATE-XS` (cross-section under 50 symbols — `pledge_*` read
+> AUC 0.605 on **26**) and applies `MIN_DATES_RELIABLE` to `eff_dates`. New rows carry `eff_dates`
+> and `symbols`; rows written before 2026-09-12 have NULL in both and are not comparable.
+
 **Last full re-verification pass: 2026-09-10.** Every claim in the Snapshot, Standing
 architecture facts, and Open/pending sections was re-measured against live production on that
 date; 21 claims were refreshed and **11 were found materially stale or wrong** (the active
