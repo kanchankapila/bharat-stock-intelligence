@@ -258,6 +258,70 @@ Currently automated (9 checks): `date.today()` write-anchor, short calendar-day 
   `type=gainer` and `type=loser`, both keyed `"losers"`. The param looks ignored and the body
   appears to carry both sides.
 
+## Limits in the wrong unit, and orderings that are only a comment (2026-09-12)
+
+- **A COUNT limit does not bound MEMORY, and a PER-PROCESS ceiling does not bound the HOST — two
+  jobs can each be legal and jointly kill the box.** `MAX_PYTHON_CONCURRENT = 5` caps how many
+  Python subprocesses run; `PY_CHILD_MEM_LIMIT_MB = 20480` caps each process TREE. Neither is a
+  host budget. Measured 2026-09-12 (AF-20260912-13): `strategy_optimizer.py` at 16,870MB peak
+  commit ran alongside `dl_trainer.py` at 13,820MB on a 23.5GB host — both comfortably under the
+  20GB per-tree ceiling, together 30.4GB. Commit hit **94.3% of 82GB**, available memory **339MB**,
+  **102,856 pages/sec**. This is the same host-commit exhaustion that killed the WSL2 VM six times
+  on 09-06..11 (AF-20260911-01), except the cause was CONCURRENCY, not one runaway process — so
+  every per-process guard added after that incident was structurally incapable of catching it.
+  **Tell:** any limit whose unit differs from the resource you are worried about. Ask "5 of WHAT,
+  and 5 times HOW BIG?" — if the answer to the second question is unbounded, the cap bounds
+  nothing that matters. Fixed with an exclusive slot for scripts over `PY_HEAVY_THRESHOLD_MB`,
+  seeded from measured `peakMemMb`, not estimates.
+  **A full byte budget is the obvious fix and it is a trap**: with strict FIFO a 16GB job at the
+  head blocks every small job behind it; with first-fit the big job starves instead. Either way
+  the loser hits `SLOT_WAIT_TIMEOUT_MS` (3 min) and FAILS — you trade a memory bug for a mass
+  job-failure bug. Serialise only the heavy population against itself and leave everything else
+  on the untouched count semaphore.
+
+- **A comment asserting a safety property is not the property, and a WRONG one actively prevents
+  the fix — because the next reader stops looking.** `queues.ts` said "pythonRunner caps global
+  Python concurrency at 5, so this can't oversubscribe the box" while `pythonRunner.ts` said, of
+  the same mechanism, "It is per job tree, not per host: 5 slots can still sum past RAM." Both
+  comments were in the repo for weeks; the second is correct. **Tell:** two files describing the
+  same guard in incompatible terms — grep the guard's own definition before trusting either, and
+  when you find the wrong one, FIX THE COMMENT in the same pass, or the next session re-derives
+  the same false conclusion. Same family as this file's stale-`dataQualityChecks.ts`-comment
+  entry, where a comment claiming warn 60 / fail 80 sent a session chasing a discrepancy that
+  did not exist.
+
+- **A cron offset is not a dependency. `B` scheduled 60 minutes after `A` does not run "after A"
+  unless A is guaranteed to finish in under 60 minutes — and a job chain's own step budgets tell
+  you immediately whether that is possible.** `dl-retrain-weekly` was `0 6 * * 6` carrying the
+  comment "after ml retrain"; `ml-weekly-retrain` fires at `0 5 * * 6` and its last three runs
+  measured **87.4 / 110.7 / 192.7 min**, with ~853 min of summed runPython budget. The DL job
+  therefore started mid-chain **every single week**, and the comment made it look intentional.
+  **Tell:** any "after X" / "once X has finished" comment on a `repeat: { pattern: ... }`. Check
+  it against `job_run_history`'s measured `duration_ms` for X, not against the intent. **Prefer
+  day-separation over a cross-job guard** when a whole day is free — there is no guard to get
+  wrong, and the two heaviest jobs here simply cannot coexist any more. If they must share a day,
+  the ordering has to be a real completion trigger, never an offset.
+
+- **A train job that fetches cannot be scheduled around its own resource profile.** `ml-weekly-retrain`'s first 15 steps were fetchers and labellers (~513 min of budget) ahead of
+  ~340 min of training, so the job was I/O-bound for hours and then abruptly 17GB-RAM-bound, and
+  nothing downstream could reason about when the expensive part started. Split fetch from train:
+  the train half reads the DB only. Label prep (`outcome_resolver`, `exit_labeler`) belongs with
+  the FETCH half even though it writes no vendor data — `exit_policy.py --train` depends on it,
+  so landing labels a day earlier strengthens the ordering instead of racing it.
+
+- **Market data cannot change while the market is closed — a weekend re-fetch is re-reading
+  Friday.** `stock_ohlcv` holds **zero Saturday/Sunday bars** (verified live 2026-09-12). Any
+  price/volume/OI-derived job on a weekend slot is doing at best a rare-correction sweep at
+  full-universe cost. Separately and more expensively, **fetch cadence must match the DATA's own
+  cadence, not the job's convenience**: measured the same day, `finstack_cashflow_history` held 6
+  distinct periods with a newest `period_end` of **2026-06-30** while being re-fetched weekly
+  across ~2,000 symbols — ~13 full-universe crawls per one quarter of new data. **Tell:** compare
+  `count(DISTINCT <period column>)` against `count(DISTINCT fetched_at::date)`. If fetch days far
+  exceed data periods, the schedule is wrong, not the fetcher. Gate on
+  `max(period_end) < expected_current_period` and skip entirely otherwise (the
+  `finstack_cashflow_checked` marker pattern — and note the skip marker must be its OWN table,
+  never the history table, or names with no vendor coverage are re-crawled forever).
+
 ## Monitoring blind spots
 
 - **A comment saying a step "moved to" another job is a CLAIM, not a schedule — and when the move

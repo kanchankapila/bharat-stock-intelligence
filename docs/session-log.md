@@ -4,6 +4,59 @@ Historical record, split out of CLAUDE.md on 2026-08-11 (it was 64% of that file
 
 **Not loaded automatically.** Read a specific entry when you need the history behind a decision. Durable lessons extracted from here live in `.claude/rules/`; if you find one that isn't there, add it.
 
+## 2026-09-12 -- host commit exhaustion was job CONCURRENCY, not a runaway process (AF-20260912-13)
+
+- **Scope**: user asked to review memory consumption and whether jobs could be distributed better.
+  Mid-session they added two constraints that both turned out to be measurably right: *train jobs
+  should only train, fetch beforehand*, and *data already fetched Friday cannot change over a
+  weekend, so weekend re-fetches are waste*.
+- **The box was in active distress while being measured**, which is why this was not a paper
+  exercise: committed 76.5 -> 78.7GB of an 82GB limit (94.3%), available 339MB, 102,856 pages/sec.
+  `strategy_optimizer.py` 16,870MB peak commit + `dl_trainer.py` 13,820MB on a 23.5GB host.
+- **Why no existing guard caught it**: `MAX_PYTHON_CONCURRENT` is a COUNT (5); `PY_CHILD_MEM_LIMIT_MB`
+  is PER PROCESS TREE (20GB). Both jobs were individually legal and jointly 30.4GB. Every guard
+  added after the 09-11 VM kills is per-process and structurally cannot see this shape.
+  `queues.ts` additionally asserted the opposite of `pythonRunner.ts` about the same cap.
+- **Immediate relief, measured**: killed two stale full-suite `pytest` trees (74 and 41 min old,
+  ~17% CPU -- page-thrashing, not computing). Commit 78.7 -> 35.2GB, available 339MB -> 7.2GB,
+  pages/sec 102,856 -> 117. The 26.1GB freed exceeded the 9.8GB they held, because ending the
+  thrash let other processes release reserved commit. Both trainers then completed normally
+  (`dl-trainer` success at 16:05, a 4h run).
+- **Fixes** (see AF-20260912-13 for the full record): exclusive heavy slot in `pythonRunner.ts`
+  keyed on measured `peakMemMb`; `ml-weekly-data` split out of `ml-weekly-retrain` to Friday
+  18:00 UTC (110 lines, steps 1-15); `dl-retrain-weekly` Saturday -> Sunday; `ohlcv-gap-fill-weekly`
+  Saturday -> Thursday; the false `queues.ts` comment corrected.
+- **A host-wide byte budget was designed and rejected**, and the reasoning is the reusable part:
+  strict FIFO starves small jobs behind a 16GB head, first-fit starves the big job, and either
+  way the loser hits the 3-min slot-wait timeout and FAILS. Serialising only the heavy population
+  against itself leaves small jobs bit-identical to before.
+- **Weekend hypothesis confirmed, with a correction and a bigger finding**: `stock_ohlcv` holds
+  zero Sat/Sun bars. But `extra_endpoints_fetcher.py` appearing in both chains is NOT duplication
+  (`--scope daily` vs `--scope weekly` select disjoint sets). The larger waste is cadence
+  mismatch: `finstack_cashflow_history` had 6 distinct periods, newest `period_end` 2026-06-30,
+  re-fetched weekly across ~2,000 symbols. `fundamentals_history` genuinely changes each fetch
+  (58 periods / 56 fetch days) and was deliberately left alone.
+- **Reviewed another session's in-flight finstack work** (AF-20260912-14) rather than duplicating
+  it: correct on the two things that are easy to get wrong (skip keyed on a marker table, not the
+  history table; DB writes on the main thread after the pool closes). Three non-blocking notes
+  raised: the ET fallback has no staleness gate of its own, `checked_skipped` reports the pending
+  count instead of the skipped count on the early-return path, and the change will not reduce peak
+  RAM much because the 4.15GB is dominated by 6 concurrent MCP children (a function of `workers`,
+  not batch size).
+- **pytest cadence, asked and answered**: `verify-gate.mjs:29` matches ANY pytest invocation except
+  `--collect-only` -- the full three-directory suite was never an enforced gate. Full suite = 2,946
+  tests, 4.2-5.7GB, 38.4s just to collect; targeted = 34 tests, 30.8s, ~0.5GB. Three sessions each
+  running the full suite per edit is what put 15.5GB on the box. Recommendation: targeted while
+  iterating, full suite at the commit boundary (which is what CI runs anyway).
+- **Verification**: `npx tsc --noEmit` clean; `npx vitest run` 1,315 passed / 0 failed. New
+  `pythonHeavySlot.test.ts` negative-controlled (admit-unconditionally fails the exclusion case).
+  The repo's cron-mirror guards caught `ml-weekly-data` missing from two pinned lists, and a real
+  drift alongside: `monitorScripts.ts` still pointed the moved `trendlyne_fundamentals_fetcher.py`
+  at `ml-weekly-retrain`.
+- **NOT DEPLOYED**: `.ts` is not hot-reloaded and `ml-weekly-retrain` was mid-flight at step 22;
+  a restart would have orphaned it into a make-up that re-runs the 16.9GB optimizer. Nothing
+  affected fires before Thursday. `pm2 restart bharat-server` still required.
+
 ## 2026-09-12 -- factor_edge was grading degenerate panels: every USABLE verdict it ever produced was an artifact
 
 - **Scope**: user asked to refresh all jobs/trainings and then decide a plan from the latest
