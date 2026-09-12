@@ -26,6 +26,18 @@ import sys
 BAD_PRINT_THRESHOLD = 0.35   # > 35% day-over-day vs BOTH neighbours = suspect spike
 ACTION_WINDOW_DAYS = 3       # don't flag within ±3d of a known ex-date
 
+# data_integrity_repair.py --closed-sessions (AF-20260911-15) flags universe-wide flat
+# zero-volume sessions with this exact reason string. flag_bad_prints's blanket reset must
+# NOT clear another flagger's flags -- AF-20260912-19: the weekly corporate-actions ingest
+# ran flag_all() on 2026-09-12 19:41 IST, the reset wiped the repair's 2,322 closed-session
+# flags on 2026-06-26 (suspect_reason survived; only is_suspect was cleared), and
+# data-quality-daily failed the same night on ohlcv-fabricated-session. A closed session is
+# a fact about the exchange, not a per-bar print, so none of this module's three detectors
+# can ever re-derive it -- preserving the flag here is the only thing that keeps it flagged.
+# Duplicated (not imported) because both files are standalone scripts -- keep in step, the
+# same convention as CLOSED_MARKET_SHARE_FLOOR's three copies.
+CLOSED_SESSION_REASON = 'closed session: universe-wide flat zero-volume bar'
+
 # ingest_corporate_actions() is one of the report's two 150-minute steps (scheduler-review,
 # 2026-09-04) -- a per-symbol yfinance .splits/.dividends call across the whole universe every
 # run. Splits/dividends are declared a handful of times a year per stock, so re-checking a
@@ -195,8 +207,18 @@ def _load_bars_map(conn: ConnWrapper) -> dict:
 def flag_bad_prints(conn: ConnWrapper, threshold: float = BAD_PRINT_THRESHOLD,
                     action_window_days: int = ACTION_WINDOW_DAYS,
                     bars_map: dict = None, action_map: dict = None) -> dict:
-    """Mark stock_ohlcv.is_suspect for single-bar bad prints. Idempotent (resets first)."""
-    conn.execute("UPDATE stock_ohlcv SET is_suspect=0 WHERE is_suspect=1")
+    """Mark stock_ohlcv.is_suspect for single-bar bad prints. Idempotent (resets first).
+
+    The reset is scoped to THIS module's flags: bars flagged by data_integrity_repair.py
+    --closed-sessions carry CLOSED_SESSION_REASON and survive it (AF-20260912-19 -- the
+    unscoped reset wiped 2,322 repaired flags on 2026-06-26). Rows this module flagged have
+    suspect_reason NULL, so `suspect_reason IS NULL OR <> CLOSED_SESSION_REASON` resets
+    exactly ours; on Postgres `NULL <> x` is NULL (row not updated), which is correct here.
+    """
+    conn.execute(
+        "UPDATE stock_ohlcv SET is_suspect=0 WHERE is_suspect=1 "
+        "AND (suspect_reason IS NULL OR suspect_reason <> ?)",
+        (CLOSED_SESSION_REASON,))
     conn.commit()
 
     if action_map is None:

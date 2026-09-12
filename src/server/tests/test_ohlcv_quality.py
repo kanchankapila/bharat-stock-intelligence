@@ -70,7 +70,7 @@ def make_db():
     conn.executescript("""
         CREATE TABLE stock_ohlcv (
             symbol TEXT, date TEXT, open REAL, high REAL, low REAL, close REAL, volume INTEGER,
-            is_suspect INTEGER DEFAULT 0, PRIMARY KEY (symbol, date)
+            is_suspect INTEGER DEFAULT 0, suspect_reason TEXT, PRIMARY KEY (symbol, date)
         );
         CREATE TABLE corporate_actions (
             symbol TEXT, ex_date TEXT, action_type TEXT, ratio REAL, amount REAL,
@@ -98,6 +98,41 @@ def test_flag_bad_prints_marks_spikes_only():
 
     suspect = conn.execute("SELECT symbol, close FROM stock_ohlcv WHERE is_suspect=1").fetchall()
     assert suspect == [('SPIKE', 700.0)]
+
+
+# ── AF-20260912-19: the reset must not clear another flagger's flags ─────────────
+
+def test_reset_preserves_closed_session_flags_from_data_integrity_repair():
+    # data_integrity_repair.py --closed-sessions (AF-20260911-15) flags fabricated
+    # market-holiday sessions with suspect_reason = CLOSED_SESSION_REASON. flag_bad_prints
+    # resets is_suspect at the top of every run; live on 2026-09-12 the unscoped reset wiped
+    # 2,322 of those flags and data-quality-daily failed that night. None of this module's
+    # detectors can re-derive a closed session (a flat bar deviates from neither neighbour),
+    # so the reset must leave another flagger's rows alone.
+    from ohlcv_quality import CLOSED_SESSION_REASON
+
+    conn = make_db()
+    conn.execute(
+        "INSERT INTO stock_ohlcv (symbol,date,open,high,low,close,volume,is_suspect,suspect_reason) "
+        "VALUES ('HOLIDAY','2026-06-26',100,100,100,100,0,1,?)", (CLOSED_SESSION_REASON,))
+    # Our own flag (suspect_reason NULL): must be reset, then re-derived if it is a spike.
+    conn.execute(
+        "INSERT INTO stock_ohlcv (symbol,date,open,high,low,close,volume,is_suspect,suspect_reason) "
+        "VALUES ('STALE','2024-01-02',100,300,100,100,10,1,NULL)")
+    # A third-party flag that is NOT a closed session: still ours to reset (reason mismatch).
+    conn.execute(
+        "INSERT INTO stock_ohlcv (symbol,date,open,high,low,close,volume,is_suspect,suspect_reason) "
+        "VALUES ('OTHER','2024-01-02',100,300,100,100,10,1,'some other tool')")
+    conn.commit()
+
+    flag_bad_prints(conn)
+
+    rows = dict((r[0], (r[1], r[2])) for r in conn.execute(
+        "SELECT symbol, is_suspect, suspect_reason FROM stock_ohlcv "
+        "WHERE symbol IN ('HOLIDAY','STALE','OTHER')").fetchall())
+    assert rows['HOLIDAY'] == (1, CLOSED_SESSION_REASON)   # preserved, reason intact
+    assert rows['STALE'][0] == 0                            # ours: reset (1 bar, not re-flagged)
+    assert rows['OTHER'][0] == 0                            # not a closed session: reset
 
 
 def _mixed_universe(conn):
