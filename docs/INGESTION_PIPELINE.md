@@ -43,11 +43,13 @@ its launch command is known — same client.
 |---|---|
 | Data | Quarterly CFO/CFI/CFF/capex/FCF per stock (finstack `cash_flow` tool → yfinance `quarterly_cashflow`) |
 | Table | `finstack_cashflow_history` — PK `(symbol, period_end)`; columns `ocf, cfi, cff, capex, fcf, currency`; idempotent weekly convergence |
-| Schedule | Weekly step in `processMlWeeklyRetrain` (`queues.ts`), 40-min budget, after the marketsmojo trio |
-| Manual run | `backend-python\venv\Scripts\python.exe src/server/finstack_cashflow_fetcher.py` (flags: `--symbols A,B`, `--limit N`, `--workers 6`, `--server-cmd`) |
-| Measured | Full universe 2,005 symbols ≈ 8 min at 6 workers; INFY/TCS/WIPRO 4 quarters each in the validation run |
-| Coverage truth | **Partial by vendor**: Yahoo carries quarterly CF for a subset of NSE (INFY yes — and in **USD**, stored per-row in `currency`; RELIANCE no). Error envelope → skip, never fabricate |
-| Currency caveat | INFY is USD-reported; never mix currencies without grouping by `currency` |
+| Schedule | Weekly step in `processMlWeeklyData` (`queues.ts`; moved out of the retrain job 2026-09-12, AF-20260912-13), 40-min budget, after the marketsmojo trio |
+| Incremental mode (AF-20260912-14) | 90-day `finstack_cashflow_checked` marker skip (marker, not history — no-coverage names write no rows) + 250-symbol date-rotated batch + pool-wide `ThrottleGovernor` (30s→120s cooldown, 15-min budget). Steady state after convergence is a near-no-op like the marketsmojo trio; the backfill converges over ~8 runs |
+| ET annual fallback | The run's batch is also filled into `et_cashflow_history` via `financial_ratios_fetcher`'s own parse/upsert (annual CFO/CFI/CFF, `--no-et-fallback` to disable). Separate table — annual and quarterly never mix. Exit 0 when either source wrote; exit 1 only throttled-and-wrote-nothing |
+| Manual run | `backend-python\venv\Scripts\python.exe src/server/finstack_cashflow_fetcher.py` (flags: `--symbols A,B`, `--limit N`, `--workers 6`, `--server-cmd`, `--max-fetch N` (0 = uncapped backfill), `--et-fallback/--no-et-fallback`) |
+| Measured | Full-universe crawl ≈ 8 min at 6 workers (pre-incremental; no longer the mode). Live probe 2026-09-12: `--symbols INFY,TCS,RELIANCE` → 2/3 Yahoo quarterly + 18 annual ET rows in 16.6s, exit 0 |
+| Coverage truth | **Partial by vendor**: Yahoo carries quarterly CF for a subset of NSE (INFY/TCS/WIPRO yes, RELIANCE no; post-AF-20260912-01 queries are `<symbol>.NS` so INFY is the INR NSE listing). Error envelope → skip, never fabricate. The ET fallback covers the annual half of Yahoo's gaps |
+| Currency caveat | Never mix currencies without grouping by `currency` |
 
 Verification:
 
@@ -98,6 +100,13 @@ CFO/CFI/CFF CashFlow payload and discarded it; commit `192e6b2` now upserts it i
 `et_cashflow_history (symbol, year_ending)`. **No separate job/backfill is needed** — it
 accumulates automatically on the fetcher's own monthly cadence (annual-refresh data).
 Quarterly granularity from ET remains unavailable; that gap is covered by FinStack (§2).
+
+2026-09-12 (AF-20260912-14): the piggyback had reached only 12 rows / 2 symbols despite the
+monthly schedule, because `et_stats_client.load_companyid_map()` opened `scripts/stocklist.json`
+with plain `utf-8` while the file carries a UTF-8 BOM — every reader of that file crashed on
+open. Fixed (`utf-8-sig` in all 8 readers), and the FinStack weekly step (§2) now ALSO upserts
+its run's batch into this table through the same `financial_ratios_fetcher` functions, so
+annual coverage converges weekly instead of depending on one monthly piggyback.
 
 ## 5. Hybrid analyst-estimates engine — `analyst_estimates_snapshot.py`
 
