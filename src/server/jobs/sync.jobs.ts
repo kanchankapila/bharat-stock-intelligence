@@ -126,7 +126,13 @@ async function processScreenerPerf(job: Job): Promise<{ success: boolean; skippe
   // 8b. Retrain the ML win-probability classifier on the same freshly-resolved outcomes.
   // Gated behind a held-out-AUC promotion check inside the script itself, so a worse
   // retrain never silently replaces a better live model.
-  await T.run('live-screener-ml-train', () => runPython('live_screener_ml_ranker.py', ['--train'], 10 * 60_000));
+  // AF-20260911-16. Budget raised 10 -> 30min from MEASURED runtimes, not a guess: the training
+  // set grows daily and the last five runs read 3.0, 3.3, 7.9, 5.1 and 10.0min, the last of
+  // which is the 10min cap itself (2026-09-10, "Timed out after 600000ms"). p95 was 9.6min --
+  // i.e. the budget had no headroom left at all, which recurring-bugs.md records as the
+  // repeated defect: a budget sized against the work as it was when the budget was set, then
+  // never revisited as the work grew. A timeout here throws away work already done.
+  await T.run('live-screener-ml-train', () => runPython('live_screener_ml_ranker.py', ['--train'], 30 * 60_000));
 
   // 9. Auto-backtest top combinations so frontend cockpit always has fresh performance data
   await runPython('backtest_live_screener.py', ['--auto-backtest-top', '5'], 10 * 60_000)
@@ -220,8 +226,21 @@ async function processNSESync(_job: Job): Promise<{ success: boolean; stockCount
     // incremental mode in the script) -- acceptable at this job's weekly cadence, since sector
     // classification changes rarely and a full weekly refresh also self-heals any transient
     // per-symbol MC miss from the prior run.
-    await runPython('backfill_sector_mc.py', ['--enumerate', '--write', '--report-unmapped'], 900_000)
-      .catch(err => T.fail('backfill_sector_mc', err));
+    // Split into two steps 2026-09-12 (AF-20260912-16). Both phases used to share one 900s
+    // budget, and the enumerate alone measures ~895s -- so when it ran long the kill landed on
+    // the WRITE, which is the phase that actually lands data. Measured on the 09-12 07:45
+    // failure: the cache file was complete (2,340 symbols, 2,174 with a sector) at 07:44:56 and
+    // the process died at 07:45:00, four seconds later, having written nothing to the DB. The
+    // whole 15 minutes of MoneyControl traffic was discarded for want of ten seconds.
+    // enumerate_sectors() flushes mc_sector_cache.json every 200 symbols and again at the end,
+    // and --write reads only that cache, so the write step now lands whatever the enumerate
+    // managed even when the enumerate times out -- "parse what landed", not "parse nothing"
+    // (recurring-bugs.md). Budgets are measured, not guessed: enumerate 1200s (~34% over the
+    // 895s observed), write 120s (12x the 10s measured live on the full 2,340-symbol cache).
+    await runPython('backfill_sector_mc.py', ['--enumerate'], 1_200_000)
+      .catch(err => T.fail('backfill_sector_mc_enumerate', err));
+    await runPython('backfill_sector_mc.py', ['--write', '--report-unmapped'], 120_000)
+      .catch(err => T.fail('backfill_sector_mc_write', err));
     // Backfill canonical nse_stocks.sector from already-resolved confluence data, then
     // propagate to historical signal tables. Keeps sector segmentation healthy over time.
     // Budget 120s -> 600s (2026-09-05). Killed at 120s inside nse-sync on 2026-09-05 (that
@@ -366,10 +385,18 @@ export async function registerSyncJobs(connection: any) {
     monitorName: 'nse-sync',
     concurrency: 1,
     // Was 180000 (3 min, NSE API calls only) -- bumped 2026-08-05 to cover the new
-    // backfill_sector_mc.py step (measured ~9-10 min live enumerate against the full
-    // mcsymbol-bearing universe) plus backfill_sectors.py (120s) and
-    // index_membership_fetcher.py (60s), with real margin above the sum.
-    lockDuration: 20 * 60_000,
+    // backfill_sector_mc.py step, then 20 -> 60 min on 2026-09-12 (AF-20260912-16).
+    // The 20-min value had silently stopped covering the sum: its own comment budgeted
+    // "backfill_sectors.py (120s) and index_membership_fetcher.py (60s)", but backfill_sectors
+    // was raised to 600s on 2026-09-05 and index_membership to 180s, and neither bump revisited
+    // this lock. Current step budgets sum to ~35 min (sector_mc enumerate 20 + write 2 +
+    // backfill_sectors 10 + index_membership 3) against a 20-min lock, so BullMQ would consider
+    // the worker dead partway through and reclaim a job that was running fine -- the exact
+    // failure processScreenerPerf's lockDuration comment above records. 60 min is real margin
+    // over the sum, not over the largest single step.
+    // Raising ANY runPython budget in processNSESync means re-checking this number
+    // (recurring-bugs.md: a budget is calibrated against what the step did when it was set).
+    lockDuration: 60 * 60_000,
     lockRenewTime: 5 * 60_000,
     // Preserves the original handler's extra `(${stockCount} stocks)` detail in the completed
     // log line (the standard helper logs a plain '... completed' line above it).

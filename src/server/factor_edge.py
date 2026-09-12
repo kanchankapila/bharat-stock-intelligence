@@ -37,6 +37,10 @@ from sklearn.metrics import roc_auc_score
 from db_compat import connect
 
 MIN_DATES_RELIABLE = 20
+# factor_backtest.py -- this repo's own arbiter -- forms top-50 portfolios. A factor whose
+# universe cannot fill one is not measurable as a cross-sectional signal here, however clean
+# its rank IC looks. Measured 2026-09-12: pledge_chg_qoq read AUC 0.605 on 26 symbols.
+MIN_SYMBOLS_XS = 50
 
 
 def _load(con, table, symbol_col, date_col, scores):
@@ -118,11 +122,25 @@ def _metrics(d, score, N, min_per_date, min_n):
     mic = float(ics.mean()) if len(ics) else float("nan")
     y = (d[f"xs_{N}"] > 0).astype(int)
     auc = float(roc_auc_score(y, d[score])) if y.nunique() > 1 else float("nan")
-    return mic, auc, len(d), int(d["date"].nunique())
+    return mic, auc, len(d), int(d["date"].nunique()), int(d["symbol"].nunique())
 
 
-def _verdict(mic, auc, dates):
-    if dates < MIN_DATES_RELIABLE:
+def _effective_dates(dates, horizon):
+    """Independent observations behind a rank-IC average over OVERLAPPING forward windows.
+
+    Consecutive daily dates graded at horizon h share h-1 days of their return window, so the
+    per-date ICs are autocorrelated and `dates` overstates independence by ~h. T/h is the
+    standard correction. Measured 2026-09-12: every USABLE verdict this harness had ever
+    emitted came from applying MIN_DATES_RELIABLE to the RAW count -- mf_big_fund_flow cleared
+    a 20-observation bar on 1.6 of them.
+    """
+    return dates / max(horizon, 1)
+
+
+def _verdict(mic, auc, dates, symbols, horizon):
+    if symbols < MIN_SYMBOLS_XS:
+        return "DEGENERATE-XS"
+    if _effective_dates(dates, horizon) < MIN_DATES_RELIABLE:
         return "LOW-DATA"
     if np.isnan(mic) or np.isnan(auc):
         return "n/a"
@@ -143,6 +161,8 @@ def _ensure_history(con):
             hit_auc       REAL,
             n             INTEGER,
             dates         INTEGER,
+            eff_dates     REAL,
+            symbols       INTEGER,
             verdict       TEXT,
             PRIMARY KEY (run_at, table_name, score_col, regime, horizon_days)
         )
@@ -183,28 +203,32 @@ def run(table, scores, symbol_col, date_col, horizons, by_regime, min_per_date, 
         m = m.merge(reg, on="date", how="left")
         groups = [("ALL", m)] + [(r, g) for r, g in m.groupby("regime")]
 
-    print(f"\n{'score':22} {'regime':9} {'horiz':5} {'rank_IC':>8} {'hit_AUC':>8} {'n':>7} {'dates':>6}  verdict")
-    print("-" * 82)
+    print()
+    print(f"{'score':22} {'regime':9} {'horiz':5} {'rank_IC':>8} {'hit_AUC':>8} {'n':>7} {'dates':>6} {'eff':>7} {'syms':>5}  verdict")
+    print("-" * 96)
     for score in scores:
         for reg_name, g in groups:
             for N in horizons:
                 res = _metrics(g, score, N, min_per_date, min_n)
                 if res is None:
                     continue
-                mic, auc, n, dates = res
-                vd = _verdict(mic, auc, dates)
-                print(f"{score:22} {reg_name:9} {N:4}d {mic:8.3f} {auc:8.3f} {n:7} {dates:6}  {vd}")
+                mic, auc, n, dates, symbols = res
+                vd = _verdict(mic, auc, dates, symbols, N)
+                eff = _effective_dates(dates, N)
+                print(f"{score:22} {reg_name:9} {N:4}d {mic:8.3f} {auc:8.3f} {n:7} {dates:6} "
+                      f"{eff:7.1f} {symbols:5}  {vd}")
                 if persist:
                     # NaN -> NULL (never store NaN in a REAL — it poisons downstream reads, same
                     # lesson as win_probability). run_at makes each row unique, so DO NOTHING is safe.
                     con.execute(
                         "INSERT INTO factor_edge_history "
-                        "(run_at,table_name,score_col,regime,horizon_days,rank_ic,hit_auc,n,dates,verdict) "
-                        "VALUES (?,?,?,?,?,?,?,?,?,?) ON CONFLICT DO NOTHING",
+                        "(run_at,table_name,score_col,regime,horizon_days,rank_ic,hit_auc,n,dates,"
+                        "eff_dates,symbols,verdict) "
+                        "VALUES (?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT DO NOTHING",
                         (run_at, history_table, score, reg_name, N,
                          None if mic != mic else round(mic, 4),
                          None if auc != auc else round(auc, 4),
-                         n, dates, vd),
+                         n, dates, round(eff, 2), symbols, vd),
                     )
 
     if persist:
