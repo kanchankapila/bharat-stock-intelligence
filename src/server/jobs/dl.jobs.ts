@@ -238,7 +238,18 @@ export async function registerDlJobs(connection: any) {
     connection,
     queueName: QUEUE_DL_RETRAIN_WEEKLY,
     jobName: 'dl-retrain-weekly',
-    repeat: { pattern: '0 6 * * 6' }, // Saturday 11:30 IST (06:00 UTC) — early on the closed day, after ml retrain
+    // SUNDAY 10:30 IST (05:00 UTC). Moved off Saturday 06:00 UTC 2026-09-12 (AF-20260912-13).
+    // The old slot's comment claimed it ran 'after ml retrain'; it did not. A +60min cron
+    // offset is not a dependency, and ml-weekly-retrain's last three runs measured 87.4 /
+    // 110.7 / 192.7 min, so this job started mid-chain every week. Measured consequence on
+    // 2026-09-12: dl_trainer.py (13.50GB peak commit) ran concurrently with the ml chain's
+    // strategy_optimizer.py (16.87GB) on a 23.5GB host -- 94.3% of the 82GB commit limit,
+    // 339MB available, 102,856 pages/sec. Both were individually under the 20GB per-tree
+    // PY_CHILD_MEM_LIMIT_MB ceiling, which is exactly why neither ceiling fired.
+    // Sunday was entirely unscheduled, so this buys a full day of separation with no
+    // cross-job guard to get wrong -- the two heaviest trainers on the platform simply
+    // cannot coexist any more. Keep it that way: do NOT add a Saturday job here.
+    repeat: { pattern: '0 5 * * 0' },
     jobId: 'dl-retrain-weekly',
     removeOnComplete: 2,
     removeOnFail: 3,

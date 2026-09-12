@@ -172,6 +172,7 @@ describe('JOB_REGISTRY.graceMinutes consistency', () => {
     'chatbot-reingest': "jobName: 'chatbot-reingest-daily'",
     'ml-daily-ops': 'mlDailyOpsWorker = new Worker',
     'trendlyne-daily-fetch': 'trendlyneDailyFetchWorker = new Worker',
+    'ml-weekly-data': 'mlWeeklyDataWorker = new Worker',
     'ml-weekly-retrain': 'mlWeeklyRetrainWorker = new Worker',
     'trendlyne-ratios-monthly': "jobName: 'trendlyne-ratios-monthly-check'",
     'dl-feature-refresh': "jobName: 'dl-feature-daily'",

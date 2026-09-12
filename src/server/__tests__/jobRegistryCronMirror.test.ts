@@ -182,6 +182,9 @@ describe('JOB_REGISTRY cronPattern/everyMs mirror consistency', () => {
     { jobName: 'quant-eod-sync', marker: "'sync-quant-eod'", label: 'quantEodSyncQueue' },
     { jobName: 'trendlyne-daily-fetch', marker: "'trendlyne-daily-fetch'", label: 'trendlyneDailyFetchQueue' },
     { jobName: 'ml-daily-ops', marker: "'ml-daily-ops'", label: 'mlDailyOpsQueue' },
+    // Split out of ml-weekly-retrain 2026-09-12 (AF-20260912-13): the fetch + labelling half
+    // now runs Friday 18:00 UTC so it cannot share the Saturday window with the trainers.
+    { jobName: 'ml-weekly-data', marker: "'ml-weekly-data'", label: 'mlWeeklyDataQueue' },
     { jobName: 'ml-weekly-retrain', marker: "'ml-weekly-retrain'", label: 'mlWeeklyRetrainQueue' },
     { jobName: 'data-quality-daily', marker: "'data-quality-daily-run'", label: 'dataQualityDailyQueue' },
 

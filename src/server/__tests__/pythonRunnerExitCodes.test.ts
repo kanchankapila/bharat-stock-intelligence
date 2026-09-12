@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { describeExitCode, isHostTeardownExit } from '../pythonRunner';
+import { describeExitCode, isHostTeardownExit, buildFailureReason } from '../pythonRunner';
 
 /**
  * AF-20260910-05. A Windows Update restart (2026-09-10 02:06 IST) killed the in-flight
@@ -44,5 +44,68 @@ describe('describeExitCode', () => {
     expect(describeExitCode(undefined)).toBe('');
     expect(isHostTeardownExit(1)).toBe(false);
     expect(isHostTeardownExit(null)).toBe(false);
+  });
+
+  /**
+   * AF-20260911-14. Node on Windows can surface an NTSTATUS exit as a SIGNED 32-bit int
+   * (-1073741819) where the table above is keyed on the unsigned form (3221225477). An
+   * unmatched code decodes to '' and is then dropped from the message entirely by the
+   * `.filter(Boolean)` in buildFailureReason — so a native crash reads as a plain failure
+   * with no code at all. Same family as this repo's `err || out` defect: a failure with no
+   * recoverable reason.
+   */
+  it('decodes the SIGNED 32-bit form of an NTSTATUS code identically to the unsigned form', () => {
+    expect(describeExitCode(-1073741819)).toContain('ACCESS_VIOLATION');   // 0xC0000005
+    expect(describeExitCode(-1073741502)).toContain('DLL_INIT_FAILED');    // 0xC0000142
+    expect(isHostTeardownExit(-1073741502)).toBe(true);
+    expect(isHostTeardownExit(-1073741819)).toBe(false);                   // a real crash
+  });
+});
+
+describe('buildFailureReason', () => {
+  /**
+   * AF-20260911-14. ml-ensemble-train was recorded 'failed' on 2026-09-10 and 2026-09-11 with
+   * an "error" consisting ONLY of a stdout tail ending '[Ensemble] Done.' — the script had
+   * trained, registered model_id=327 and scored 326 signals. Because the code was unlisted,
+   * `decoded` was '' and the raw number never reached the message, so the crash could not be
+   * identified at all. The code must survive whenever it is not an ordinary one.
+   */
+  it('always reports an abnormal exit code, even when stdout carries the tail', () => {
+    const r = buildFailureReason({ code: 3221225477, stdout: '[Ensemble] Done.' });
+    expect(r).toContain('3221225477');
+    expect(r).toContain('stdout: [Ensemble] Done.');
+  });
+
+  it('reports an UNLISTED abnormal code as a raw number rather than dropping it', () => {
+    const r = buildFailureReason({ code: 3221226505, stdout: 'work finished' });
+    expect(r).toMatch(/exit code 3221226505/);
+  });
+
+  it('normalizes a signed code in the message so it is greppable as the unsigned NTSTATUS', () => {
+    const r = buildFailureReason({ code: -1073741819, stdout: 'done' });
+    expect(r).toContain('3221225477');
+    expect(r).toContain('ACCESS_VIOLATION');
+  });
+
+  // Negative control: the dominant path is a deliberate sys.exit(1) that already printed a
+  // reason. Adding an exit-code line there would change every ordinary failure message and
+  // break the log-signature grouping that repo-doctor and jobSweep rely on.
+  it('leaves an ordinary exit-1 failure message byte-identical', () => {
+    expect(buildFailureReason({ code: 1, stderr: 'Traceback...', stdout: 'x' }))
+      .toBe('stderr: Traceback...\nstdout: x');
+    expect(buildFailureReason({ code: 2, stdout: 'guard tripped' }))
+      .toBe('stdout: guard tripped');
+  });
+
+  it('still falls back to the bare sentence when both streams are empty', () => {
+    expect(buildFailureReason({ code: 1 })).toBe('Command failed with exit code 1');
+  });
+
+  it('keeps the memory-ceiling diagnosis ahead of the stream tails', () => {
+    const r = buildFailureReason({
+      code: 1, stdout: 'boom', peakMemMb: 19500, memLimitMb: 20480,
+    });
+    expect(r).toMatch(/^MEMORY CEILING/);
+    expect(r).toContain('19500MB');
   });
 });

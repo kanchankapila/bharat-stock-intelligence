@@ -94,6 +94,7 @@ export const QUEUE_SIGNAL_OUTCOMES      = 'signal-outcomes';
 export const QUEUE_NEWS_SENTIMENT       = 'news-sentiment';
 export const QUEUE_TRENDLYNE_INTRADAY   = 'trendlyne-intraday';
 export const QUEUE_ML_DAILY_OPS        = 'ml-daily-ops';
+export const QUEUE_ML_WEEKLY_DATA      = 'ml-weekly-data';
 export const QUEUE_ML_WEEKLY_RETRAIN   = 'ml-weekly-retrain';
 export const QUEUE_INTRADAY_FETCHER    = 'intraday-fetcher';
 // Ground-truth mover screener capture (see mover_screener_fetcher.py): persists the day's
@@ -182,6 +183,8 @@ export let outcomeResolverQueue: Queue | null = null;
 let outcomeResolverWorker: Worker | null = null;
 export let mlDailyOpsQueue: Queue | null = null;
 let mlDailyOpsWorker: Worker | null = null;
+export let mlWeeklyDataQueue: Queue | null = null;
+let mlWeeklyDataWorker: Worker | null = null;
 export let mlWeeklyRetrainQueue: Queue | null = null;
 let mlWeeklyRetrainWorker: Worker | null = null;
 export let intradayFetcherQueue: Queue | null = null;
@@ -701,7 +704,14 @@ async function processMlDailyOps(job: Job): Promise<{ success: boolean; skipped?
   // news_sentiment_items), no shared rows, no advisory locks, and distinct resources
   // (MoneyControl network vs DB-compute vs GPU/FinBERT). The 5-min MC scrape now runs
   // concurrently with the technical engine + news sentiment instead of after them. pythonRunner
-  // caps global Python concurrency at 5, so this can't oversubscribe the box.
+  // caps global Python concurrency at 5.
+  //
+  // ⚠ That count cap does NOT bound MEMORY, and this comment used to claim it did ('so this
+  // can't oversubscribe the box') -- corrected 2026-09-12, AF-20260912-13. Five slots can sum
+  // past host RAM: on 2026-09-12 strategy_optimizer.py (16,870MB) and dl_trainer.py (13,820MB)
+  // ran concurrently on a 23.5GB host and drove commit to 94.3% of 82GB with 339MB available.
+  // Memory is bounded by the exclusive heavy slot in pythonRunner.ts (PY_HEAVY_THRESHOLD_MB),
+  // not by this number. Do not reason about host memory from MAX_PYTHON_CONCURRENT.
   //
   // institutional_quant_engine.py used to run here, writing quant_scores via a full
   // DELETE+re-INSERT — but quantScoringService.ts's own upsert runs 3.5h later (11 PM IST,
@@ -1321,13 +1331,33 @@ async function processTrendlyneChecklistCycle(_job: Job): Promise<{ skipped: boo
   }
 }
 
-// ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ DL Python runner ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬
-
-async function processMlWeeklyRetrain(_job: Job): Promise<{ success: boolean; skipped?: boolean; failedSteps?: string[] }> {
-  // Dashboard sub-tasks (ml-ensemble-train, strategy-optimizer) run under T.run so their monitor
-  // state reflects the REAL outcome via T.finish() — not the blanket 'success' the completed
-  // handler used to stamp. Untracked steps stay best-effort with console.warn.
-  const T = new StepTracker('ml-weekly-retrain');
+// ── ML weekly DATA prep (fetch + labelling) ───────────────────────────────────
+/**
+ * Split out of processMlWeeklyRetrain 2026-09-12 (AF-20260912-13). Two reasons, both measured:
+ *
+ * 1. MEMORY. The Saturday window ran ml-weekly-retrain's fetch prologue, its training half and
+ *    dl-retrain-weekly concurrently. Live peaks that day: strategy_optimizer.py 16.87GB +
+ *    dl_trainer.py 13.50GB on a 23.5GB box -- commit hit 94.3% of 82GB with 339MB available and
+ *    102,856 pages/sec. MAX_PYTHON_CONCURRENT is a COUNT (5) and PY_CHILD_MEM_LIMIT_MB is
+ *    PER-TREE (20GB), so both jobs were individually legal and jointly fatal; pythonRunner.ts's
+ *    own comment already says 'It is per job tree, not per host: 5 slots can still sum past RAM.'
+ *
+ * 2. A TRAIN JOB MUST NOT FETCH. Training reads the DB; fetching is a separate weekday concern.
+ *    Market data cannot change over a weekend at all -- stock_ohlcv holds ZERO Sat/Sun bars --
+ *    and the fundamentals this block pulls are quarterly/monthly, not weekly (measured
+ *    2026-09-12: finstack_cashflow_history's newest period_end is 2026-06-30 across 6 distinct
+ *    periods; marketsmojo_shareholding_history's periods are quarter-ends).
+ *
+ * The fetch budgets here sum to ~513 min, which is also why dl-retrain-weekly's '+60min' cron
+ * offset and its 'after ml retrain' comment were never true: ml-weekly-retrain's last three
+ * runs measured 87.4 / 110.7 / 192.7 min, so the DL job always started mid-fetch.
+ *
+ * outcome_resolver + exit_labeler come along deliberately: they are label PREP, not training,
+ * and exit_policy.py --train depends on exit_labeler having run. Landing labels on Friday
+ * strengthens that ordering instead of racing it inside one chain.
+ */
+async function processMlWeeklyData(_job: Job): Promise<{ success: boolean; skipped?: boolean; failedSteps?: string[] }> {
+  const T = new StepTracker('ml-weekly-data');
   // Keep index_provider_map in sync with live provider index lists.
   await runPython('sync_mc_index_map.py', [], 60_000)
     .catch(e => T.fail('sync_mc_index_map', e));
@@ -1360,9 +1390,18 @@ async function processMlWeeklyRetrain(_job: Job): Promise<{ success: boolean; sk
   // `python -m finstack.server` (whose cash_flow tool wraps yfinance quarterly_cashflow).
   // Coverage is a SUBSET of NSE names (live-verified: INFY/TCS/WIPRO yes, RELIANCE no) —
   // missing symbols are skipped via the tool's error envelope, never fabricated. Weekly for
-  // the same restates-on-results-days reason as the trio above; 2,005 symbols × ~1.5s / 6
-  // workers ≈ 8 min, 40 min matches the sibling budgets. Host needs finstack pip-installed
-  // for the PATH python (see finstack_cashflow_fetcher.py's docstring).
+  // the same restates-on-results-days reason as the trio above; host needs finstack
+  // pip-installed for the PATH python (see finstack_cashflow_fetcher.py's docstring).
+  //
+  // AF-20260912-14 (after this step's abort failed the verdict 3 weeks running — 09-10
+  // "25 symbols rate-limited", 09-11, 09-12): the fetcher now crawls INCREMENTALLY —
+  // a 90d checked-marker skip (finstack_cashflow_checked), a 250-symbol date-rotated batch,
+  // a pool-wide throttle governor, and an ET annual fallback into et_cashflow_history for
+  // the batch (financial_ratios_fetcher's own harvest, reused — separate table, no source
+  // mixing). Its exit rule: 0 when any row was written anywhere (Yahoo or ET; DEGRADED
+  // stderr still fires for the digest), 1 only for a throttled-and-wrote-nothing outage.
+  // Steady state after convergence is a near-no-op like the marketsmojo trio; the residual
+  // quarterly backfill converges over ~8 runs and no longer depends on this job's wall time.
   await runPython('finstack_cashflow_fetcher.py', [], 40 * 60_000)
     .catch(e => T.fail('finstack_cashflow_fetcher', e));
 
@@ -1429,6 +1468,22 @@ async function processMlWeeklyRetrain(_job: Job): Promise<{ success: boolean; sk
   // Sunday — so it needs real headroom; 10min was SIGTERM-killing it most weeks (2026-07-19).
   await runPython('exit_labeler.py', [], 30 * 60_000)
     .catch(e => T.fail('exit_labeler', e));
+  const verdict = T.finish();
+  await alertFailedSteps('ml-weekly-data', verdict);
+  return { success: verdict.ok, failedSteps: verdict.failedSteps };
+}
+
+
+// ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ DL Python runner ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬
+
+async function processMlWeeklyRetrain(_job: Job): Promise<{ success: boolean; skipped?: boolean; failedSteps?: string[] }> {
+  // Dashboard sub-tasks (ml-ensemble-train, strategy-optimizer) run under T.run so their monitor
+  // state reflects the REAL outcome via T.finish() — not the blanket 'success' the completed
+  // handler used to stamp. Untracked steps stay best-effort with console.warn.
+  const T = new StepTracker('ml-weekly-retrain');
+  // Fetch + labelling moved to processMlWeeklyData (ml-weekly-data, Friday) 2026-09-12,
+  // AF-20260912-13 -- see that function's docstring for the measured reason. This job is now
+  // TRAIN-ONLY and reads the database; it must not regain a fetcher.
   // Retrain the exit policy models. Growing-dataset timeout history: 10min killed it
   // deterministically once signal_excursions reached ~145k rows (bumped to 20min on
   // 2026-07-26, measured 703s uncontended at that size); by the 2026-08-23 run the table had
@@ -2356,6 +2411,37 @@ export async function initQueues(): Promise<boolean> {
       recordHeartbeat('ml-daily-ops', 'failed', err?.message, bullJobDurationMs(job));
     });
 
+    // -- ML weekly DATA prep: fetch + labelling, FRIDAY 23:30 IST (18:00 UTC) --
+    // Deliberately a WEEKDAY slot, and deliberately not adjacent to the Saturday training
+    // window (AF-20260912-13). 18:00 UTC clears ml-daily-ops' worst case: that job is
+    // '20 13 * * 1-5' with a 3.5h withJobTimeout, so it cannot run past 16:50 UTC.
+    // Everything this job fetches is quarterly/monthly disclosure data or a symbol master;
+    // none of it can change between Friday night and Saturday morning, which is precisely
+    // why it no longer belongs in the Saturday chain.
+    mlWeeklyDataQueue = new Queue(QUEUE_ML_WEEKLY_DATA, { connection });
+    await addJobWithCatchup(mlWeeklyDataQueue, 'ml-weekly-data', {}, {
+      repeat: { pattern: '0 18 * * 5' },
+      jobId: 'ml-weekly-data',
+      removeOnComplete: 2, removeOnFail: 3,
+    });
+    mlWeeklyDataWorker = new Worker(QUEUE_ML_WEEKLY_DATA, processMlWeeklyData, {
+      connection,
+      concurrency: 1,
+      // Matches the fetch budgets this job inherited (~513 min of runPython ceilings) with
+      // headroom, and mirrors ml-weekly-retrain's renew/stall settings.
+      lockDuration: 10 * 60 * 60 * 1000,
+      lockRenewTime: 30 * 60 * 1000,
+      stalledInterval: 15 * 60 * 1000,
+      maxStalledCount: 3,
+    });
+    mlWeeklyDataWorker.on('completed', () => {
+      // Per-step + overall monitor states are written by StepTracker.finish() in the processor.
+      console.log('[QUEUE] ml-weekly-data done');
+    });
+    mlWeeklyDataWorker.on('failed', (_, err) => {
+      console.error('[QUEUE] ml-weekly-data failed:', err.message);
+      updateMonitorState('ml-weekly-data', 'failed', err?.message);
+    });
     // -- ML weekly retrain + optimize (Sunday 10:30 IST = 05:00 UTC, see the repeat pattern below) --
     mlWeeklyRetrainQueue = new Queue(QUEUE_ML_WEEKLY_RETRAIN, { connection });
     // addJobWithCatchup does its own remove-then-add internally (and needs the pre-removal
@@ -2874,8 +2960,17 @@ export async function initQueues(): Promise<boolean> {
     // Daily gap-fill: weekdays 4:15 PM IST = 10:45 UTC (after market close, lookback 3 days)
     const ohlcvRep = await ohlcvBackfillQueue.getRepeatableJobs();
     for (const r of ohlcvRep) await ohlcvBackfillQueue.removeRepeatableByKey(r.key);
+    // THURSDAY 23:30 IST (18:00 UTC). Moved off Saturday 00:00 UTC 2026-09-12
+    // (AF-20260912-13): NSE does not trade at the weekend, and stock_ohlcv holds ZERO
+    // Saturday/Sunday bars (verified live), so a Saturday run cannot observe a single bar
+    // that Friday's ohlcv-gap-fill-daily had not already seen. The only thing this 30-day
+    // full-universe sweep can legitimately catch is a vendor RESTATING an older bar, which
+    // is not weekend-sensitive and does not need to sit in the Saturday training window.
+    // A weekday slot also keeps it clear of ml-daily-ops (13:20 UTC + 3.5h worst case) and
+    // of ml-weekly-data (Friday 18:00 UTC). The 30-day lookback makes the exact weekday
+    // irrelevant to coverage -- only the latency of repairing a restated bar changes.
     await addJobWithCatchup(ohlcvBackfillQueue, 'ohlcv-gap-fill-weekly', { mode: 'gap-fill', lookback: 30 }, {
-      repeat: { pattern: '0 0 * * 6' },
+      repeat: { pattern: '0 18 * * 4' },
       jobId: 'ohlcv-gap-fill-weekly',
       removeOnComplete: 2, removeOnFail: 3,
     });

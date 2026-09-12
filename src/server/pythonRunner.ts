@@ -47,21 +47,203 @@ const ABNORMAL_EXIT_CODES: Record<number, string> = {
 /** Codes meaning "the host/OS killed this process" — the script itself did not fail. */
 const HOST_TEARDOWN_EXIT_CODES = new Set([1073807364, 3221225786, 3221225794]);
 
+/**
+ * NTSTATUS exits reach Node as either the unsigned value the table above is keyed on
+ * (3221225477) or its signed 32-bit twin (-1073741819), depending on how the code crosses the
+ * child-process boundary. Normalizing first means one table serves both; without it a signed
+ * code decodes to '' and is then dropped from the message entirely (AF-20260911-14).
+ */
+export function normalizeExitCode(code: number | null | undefined): number | null {
+  if (code === null || code === undefined || !Number.isFinite(code)) return null;
+  return code < 0 ? code >>> 0 : code;
+}
+
 /** '' for ordinary codes (1, 2, ...) so the common failure path's message is unchanged. */
 export function describeExitCode(code: number | null | undefined): string {
-  if (code === null || code === undefined) return '';
-  return ABNORMAL_EXIT_CODES[code] ?? '';
+  const c = normalizeExitCode(code);
+  if (c === null) return '';
+  return ABNORMAL_EXIT_CODES[c] ?? '';
 }
 
 export function isHostTeardownExit(code: number | null | undefined): boolean {
-  return code !== null && code !== undefined && HOST_TEARDOWN_EXIT_CODES.has(code);
+  const c = normalizeExitCode(code);
+  return c !== null && HOST_TEARDOWN_EXIT_CODES.has(c);
+}
+
+/**
+ * An exit code worth printing verbatim. 0/1/2 are the ordinary "the script decided to fail"
+ * codes whose message shape must not change (repo-doctor and jobSweep group log signatures on
+ * it); anything else is a magic number a reader cannot recover from the text otherwise.
+ */
+function isAbnormalExitCode(c: number | null): c is number {
+  return c !== null && c > 2;
+}
+
+/**
+ * Builds the failure message for a non-zero exit. Extracted from the 'close' handler so the
+ * ordering and the never-drop-the-code guarantee are directly testable.
+ *
+ * AF-20260911-14: ml-ensemble-train was recorded 'failed' twice with an "error" that was only a
+ * stdout tail ending '[Ensemble] Done.' — it had trained, registered model_id=327 and scored 326
+ * signals, then exited non-zero at interpreter teardown. The code was unlisted, so `decoded` was
+ * '' and `.filter(Boolean)` removed the number along with it, leaving nothing to diagnose from.
+ */
+export function buildFailureReason(opts: {
+  code: number | null | undefined;
+  stderr?: string | null;
+  stdout?: string | null;
+  peakMemMb?: number;
+  memLimitMb?: number;
+}): string {
+  const { stderr, stdout, peakMemMb } = opts;
+  const memLimitMb = opts.memLimitMb ?? 0;
+  const code = normalizeExitCode(opts.code);
+  const err = stderr ?? '';
+  const out = stdout ?? '';
+  const errTail = err ? err.slice(-500) : '';
+  const outTail = out ? out.slice(-500) : '';
+  const decoded = describeExitCode(code);
+  // A single oversized allocation fails well below the peak, so the stderr signature counts as
+  // well as a peak near the ceiling. Assert the ceiling only when the peak reached it: a shape
+  // bug asking for terabytes also raises MemoryError at a low peak, and blaming the ceiling
+  // there would send the reader off to raise the limit.
+  const atCeiling = memLimitMb > 0 && peakMemMb !== undefined && peakMemMb >= 0.9 * memLimitMb;
+  const oom = OOM_STDERR.test(err);
+  return [
+    atCeiling && `MEMORY CEILING: the job's process tree peaked at ${peakMemMb}MB against its ` +
+      `${memLimitMb}MB per-job ceiling (PY_CHILD_MEM_LIMIT_MB) and was refused further ` +
+      `memory -- a runaway this job contained instead of the host.`,
+    !atCeiling && oom && `MemoryError (peak ${peakMemMb ?? '?'}MB of a ${memLimitMb || 'no'}MB ` +
+      `ceiling) -- well below the ceiling, so look at the allocation, not the limit.`,
+    decoded && `${isHostTeardownExit(code) ? 'HOST/OS TERMINATION' : 'ABNORMAL EXIT'}: ${decoded}`,
+    // Never let the raw number vanish. `decoded` covers only codes someone has already met;
+    // an unlisted one is exactly the case that needs the number most.
+    isAbnormalExitCode(code) && !decoded && `ABNORMAL EXIT: exit code ${code} ` +
+      `(0x${code.toString(16).toUpperCase()}) — not a code this runner has seen before; the ` +
+      `script's own output (if any) follows.`,
+    isAbnormalExitCode(code) && decoded && `exit code ${code}`,
+    errTail && `stderr: ${errTail}`,
+    outTail && `stdout: ${outTail}`,
+  ].filter(Boolean).join('\n') || `Command failed with exit code ${opts.code}`;
 }
 
 // Limit concurrent Python subprocesses to avoid starving the Node event loop
 let _runningPython = 0;
 const _pythonQueue: Array<() => void> = [];
 const MAX_PYTHON_CONCURRENT = 5;
-// If a slot leaks (observed 2026-07-21: a killed subprocess whose inherited stdio handle
+
+// ─── Host-wide memory budget (AF-20260912-13) ─────────────────────────────────────
+// MAX_PYTHON_CONCURRENT is a COUNT. PY_CHILD_MEM_LIMIT_MB (below) is PER PROCESS TREE. Neither
+// is a host budget, and the gap between them took the box down on 2026-09-12: strategy_optimizer.py
+// peaked at 16,870MB while dl_trainer.py held 13,500MB -- each individually legal against the
+// 20GB per-tree ceiling, jointly 30.4GB on a 23.5GB host. Commit reached 94.3% of 82GB with
+// 339MB available and 102,856 pages/sec. queues.ts asserted the opposite in a comment ('caps
+// global Python concurrency at 5, so this can't oversubscribe the box'); that assertion was the bug.
+//
+// So admission is now weighted: a job is admitted only while the sum of the EXPECTED peaks of
+// everything already running, plus its own, fits HOST_PY_BUDGET_MB.
+//
+// Two escape hatches, both deliberate:
+//  - A job whose own weight exceeds the whole budget MUST still run, or the queue deadlocks and
+//    every Python-backed job on the platform stops. It is admitted when nothing else is running,
+//    i.e. it gets the box to itself. That is the correct handling for a 16GB trainer anyway.
+//  - An unknown script gets DEFAULT_SCRIPT_PEAK_MB rather than 0, so a newly added script cannot
+//    silently weigh nothing. 600MB is the measured median of the 23 scripts under 900MB.
+//
+// Weights are MEASURED, not estimated -- every value below is the max observed `peakMemMb` in
+// logs/app-2026-09-*.log, which pythonRunner logs on every run (AF-20260911-12). Re-derive with:
+//   grep -ho 'peakMemMb\":[0-9]*' logs/app-*.log   (paired with the \"script\" field)
+// A weight that is too LOW re-opens this bug; too HIGH only costs serialisation. Round up.
+const DEFAULT_SCRIPT_PEAK_MB = 600;
+const SCRIPT_PEAK_MB: Record<string, number> = {
+  // strategy_optimizer.py has no logged peakMemMb yet (no completed run in the retained window);
+  // 16870 is the live Win32_Process PeakPageFileUsage read taken during the 2026-09-12 incident.
+  'strategy_optimizer.py': 16870,
+  'dl_trainer.py': 13820,
+  'ml_ensemble.py': 7088,
+  'finstack_cashflow_fetcher.py': 4148,
+  'ohlcv_adjust.py': 4005,
+  'finbert_news_sentiment.py': 3563,
+  'factor_edge.py': 2413,
+  'extra_endpoints_fetcher.py': 2398,
+  'mover_screener_fetcher.py': 1452,
+  'confluence_ml_engine.py': 1340,
+  'performance_tracker.py': 1304,
+  'backtester.py': 1169,
+};
+
+/** Expected peak MB for a script path/name. Exported for the guard test. */
+export function scriptWeightMb(script: string): number {
+  const base = script.replace(/\\/g, '/').split('/').pop() ?? script;
+  return SCRIPT_PEAK_MB[base] ?? DEFAULT_SCRIPT_PEAK_MB;
+}
+
+// A full host-wide byte budget was considered and REJECTED as the admission rule: with strict
+// FIFO a 16GB trainer at the head blocks every small job behind it, and with first-fit the
+// trainer starves instead -- either way the loser hits SLOT_WAIT_TIMEOUT_MS (3 min) and FAILS.
+// Trading one memory bug for a mass job-failure bug is not a fix.
+//
+// What actually caused the incident is narrower and needs a narrower rule: TWO HEAVY jobs ran
+// at once. So heavy jobs are serialised against EACH OTHER and nothing else changes. Small jobs
+// never touch this lock, so their behaviour is bit-identical to before -- no starvation, no new
+// timeout surface, and no deadlock (the lock has exactly one holder).
+//
+// 8192MB splits the measured population cleanly: strategy_optimizer 16,870 and dl_trainer 13,820
+// are heavy; the next largest script on the platform is ml_ensemble at 7,088, and two of those
+// plus the services still fit. 0 disables the heavy lock. Read per call so a .env change applies
+// after a restart without a code change.
+function heavyThresholdMb(): number {
+  const raw = process.env.PY_HEAVY_THRESHOLD_MB;
+  if (raw === undefined || raw === '') return 8192;
+  const n = Number(raw);
+  return Number.isFinite(n) && n >= 0 ? n : 8192;
+}
+
+/** True when a script is heavy enough to require the exclusive heavy slot. */
+export function isHeavyScript(script: string): boolean {
+  const t = heavyThresholdMb();
+  return t > 0 && scriptWeightMb(script) >= t;
+}
+
+// The exclusive heavy slot. A heavy job waits here for however long the incumbent heavy job
+// takes -- dl_trainer ran 4h on 2026-09-12 -- so this wait is deliberately NOT bounded by
+// SLOT_WAIT_TIMEOUT_MS, which exists to surface a leaked COUNT slot in 3 min. Bounding it at
+// 3 min would fail every heavy job that correctly waited its turn.
+let _heavyRunning: string | null = null;
+const _heavyQueue: Array<() => void> = [];
+
+export function acquireHeavySlot(script: string): Promise<void> {
+  return new Promise((resolve) => {
+    if (_heavyRunning === null) {
+      _heavyRunning = script;
+      resolve();
+      return;
+    }
+    console.warn(
+      `[PY-HEAVY] ${script} (~${scriptWeightMb(script)}MB expected peak) is waiting: ` +
+      `${_heavyRunning} holds the exclusive heavy slot. Serialising them is deliberate -- ` +
+      `running both concurrently is what exhausted host commit on 2026-09-12 (AF-20260912-13).`,
+    );
+    _heavyQueue.push(() => { _heavyRunning = script; resolve(); });
+  });
+}
+
+export function releaseHeavySlot(): void {
+  _heavyRunning = null;
+  const next = _heavyQueue.shift();
+  if (next) next();
+}
+
+/** Exposed for tests/diagnostics. */
+export function getHeavySlotState(): { running: string | null; queued: number; thresholdMb: number } {
+  return { running: _heavyRunning, queued: _heavyQueue.length, thresholdMb: heavyThresholdMb() };
+}
+
+/** Force-reset the heavy slot (tests only). */
+export function resetHeavySlot(): void {
+  _heavyRunning = null;
+  _heavyQueue.length = 0;
+}// If a slot leaks (observed 2026-07-21: a killed subprocess whose inherited stdio handle
 // never closed, so execFile's promisified callback never fired even though the OS process
 // was already gone) an unbounded wait here silently deadlocks every Python-backed job app-wide
 // -- ml-daily-ops and everything behind it queued for 4h+ with zero log output until the outer
@@ -127,7 +309,7 @@ export function resetPythonSlots(): void {
 
 
 /** Exposed for tests only -- production callers go through runPython(). */
-export function acquirePythonSlot(): Promise<void> {
+export function acquirePythonSlot(_script = ''): Promise<void> {
   return new Promise((resolve, reject) => {
     if (_runningPython < MAX_PYTHON_CONCURRENT) {
       _runningPython++;
@@ -153,7 +335,7 @@ export function acquirePythonSlot(): Promise<void> {
 }
 
 /** Exposed for tests only -- production callers go through runPython(). */
-export function releasePythonSlot(): void {
+export function releasePythonSlot(_script = ''): void {
   // Always decrement for the finishing holder first. If a waiter is queued,
   // handing them the slot re-increments via entry() -- net zero (transfer).
   // Previously this branch skipped the decrement on handoff, so every transfer
@@ -255,12 +437,25 @@ export async function runPython(
   args: string[] = [],
   timeoutMs = 5 * 60_000,
 ): Promise<PythonResult> {
-  await acquirePythonSlot();
+  // Heavy jobs take the exclusive heavy slot BEFORE the count slot, and in that order on
+  // purpose: holding a count slot while waiting for the heavy slot would occupy 1 of only 5
+  // count slots for the entire wait (hours), throttling every unrelated fetcher behind it.
+  const heavy = isHeavyScript(script);
+  if (heavy) await acquireHeavySlot(script);
+  try {
+    await acquirePythonSlot(script);
+  } catch (e) {
+    // The count slot timed out. Give the heavy slot back or it leaks forever and every
+    // later heavy job waits on a holder that is not running.
+    if (heavy) releaseHeavySlot();
+    throw e;
+  }
   let released = false;
   const release = () => {
     if (released) return;
     released = true;
-    releasePythonSlot();
+    releasePythonSlot(script);
+    if (heavy) releaseHeavySlot();
   };
 
   let stdout = '';
@@ -359,29 +554,7 @@ export async function runPython(
             // no error text at all, in the job history OR the heartbeat. Concatenate both streams
             // instead of choosing one: stderr is where a traceback lands, stdout is where a
             // deliberate sys.exit(1) guard prints its reason, and a failing run can use either.
-            const errTail = err ? err.slice(-500) : '';
-            const outTail = out ? out.slice(-500) : '';
-            // Decode first: an OS-killed process has NO output at all, so without this the
-            // message is a bare magic number (see ABNORMAL_EXIT_CODES). Empty for ordinary
-            // codes like 1/2, which leaves the normal failure message byte-identical.
-            const decoded = describeExitCode(code);
-            // A single oversized allocation fails well below the peak, so the stderr signature
-            // counts as well as a peak near the ceiling.
-            // Assert the ceiling only when the peak reached it: a single absurd allocation (a
-            // shape bug asking for terabytes) also raises MemoryError at a low peak, and blaming
-            // the ceiling there would send the reader off to raise it.
-            const atCeiling = memLimitMb > 0 && peakMemMb !== undefined && peakMemMb >= 0.9 * memLimitMb;
-            const oom = OOM_STDERR.test(err);
-            const reason = [
-              atCeiling && `MEMORY CEILING: the job's process tree peaked at ${peakMemMb}MB against its ` +
-                `${memLimitMb}MB per-job ceiling (PY_CHILD_MEM_LIMIT_MB) and was refused further ` +
-                `memory -- a runaway this job contained instead of the host.`,
-              !atCeiling && oom && `MemoryError (peak ${peakMemMb ?? '?'}MB of a ${memLimitMb || 'no'}MB ` +
-                `ceiling) -- well below the ceiling, so look at the allocation, not the limit.`,
-              decoded && `${isHostTeardownExit(code) ? 'HOST/OS TERMINATION' : 'ABNORMAL EXIT'}: ${decoded}`,
-              errTail && `stderr: ${errTail}`,
-              outTail && `stdout: ${outTail}`,
-            ].filter(Boolean).join('\n') || `Command failed with exit code ${code}`;
+            const reason = buildFailureReason({ code, stderr: err, stdout: out, peakMemMb, memLimitMb });
             reject(Object.assign(new Error(reason), { stdout: out, stderr: err, code }));
           }
         });

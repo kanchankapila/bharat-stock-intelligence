@@ -359,9 +359,13 @@ export const MONITOR_SCRIPTS = [
     category: 'Data',
     critical: false,
     description: 'EPS_TTM + DivYield series and DVM scores (PE/PB now fed by mc_pricefeed_fetcher.py)',
-    schedule: 'Weekly Saturday',
+    // Moved with the fetch prologue out of ml-weekly-retrain into ml-weekly-data
+    // (Friday 18:00 UTC) on 2026-09-12, AF-20260912-13. Both fields updated together:
+    // a queueName/schedule mirror left pointing at the old job is this repo's documented
+    // cron-mirror-drift class -- it produces phantom 'late'/'stale' alerts forever.
+    schedule: 'Weekly Friday',
     pyScript: 'trendlyne_fundamentals_fetcher.py',
-    queueName: 'ml-weekly-retrain',
+    queueName: 'ml-weekly-data',
     // 200h assumed a flat 168h (Sunday-to-Sunday) worst case, but the written `date` value is
     // logical_write_floor()-anchored to the last completed trading session (Friday), not the
     // Sunday run itself -- so the OLD value sits 2 extra days stale before each week's run

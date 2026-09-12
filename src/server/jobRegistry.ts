@@ -157,6 +157,15 @@ export const JOB_REGISTRY: JobScheduleEntry[] = [
   // flagged 'late' on any run past 3 hours, well inside what the job's own declared budget
   // (which includes a 90min ml_ensemble.py --train --tune --score step alone) allows.
   // Found 2026-08-03 while building the graceMinutes mirror-consistency test.
+  // ml-weekly-data carries the fetch + labelling prologue split out of ml-weekly-retrain on
+  // 2026-09-12 (AF-20260912-13). Friday 18:00 UTC. graceMinutes 600 covers the ~513 min of
+  // runPython budget it inherited plus margin -- deliberately generous: this job is allowed
+  // to be slow on a Friday night, it just must not still be running on Saturday.
+  { jobName: 'ml-weekly-data', label: 'ML Weekly Data Prep', cronPattern: '0 18 * * 5', graceMinutes: 600, critical: false },
+  // graceMinutes still 390 after the 2026-09-12 split. It is now TRAIN-ONLY and should finish
+  // well inside that, but the value was not tightened: the train-only runtime has not been
+  // measured yet, and guessing a tighter bound risks a phantom 'late' alert. Re-measure from
+  // job_run_history after a few Saturdays, then tighten.
   { jobName: 'ml-weekly-retrain', label: 'ML Weekly Retrain', cronPattern: '0 5 * * 6', graceMinutes: 390, critical: false },
   // Queue id kept as '-monthly' deliberately: renaming a BullMQ queue would orphan its
   // repeatable-job key and monitor state. As of 2026-07-31 the ratios step is WEEKLY (every
