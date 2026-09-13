@@ -372,6 +372,9 @@ class TestCheckpointWidthAgnosticLoading:
         for c in dl_engine.FEATURE_COLS:
             if c != "vol_regime":
                 data[c] = [0.0] * n
+        # the inference query selects the targets too, to reproduce training's scaler fit
+        data["target_ret_5d"] = [0.01] * n
+        data["target_ret_15d"] = [0.01] * n
         fake_df = dl_engine.pd.DataFrame(data)
 
         monkeypatch.setattr(dl_engine, "read_df", lambda *a, **k: fake_df)

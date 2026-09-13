@@ -60,7 +60,7 @@ import pickle
 import argparse
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Dict, List, Sequence, Tuple
+from typing import Dict, List, Optional, Sequence, Tuple
 
 from db_compat import connect, read_df
 from model_promotion import clears_promotion_bar, file_staleness_override_applies
@@ -261,7 +261,8 @@ def _onehot_vol_regime(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def _scale_features_per_symbol(df: pd.DataFrame, cols: List[str],
-                               train_frac: float = 0.8) -> pd.DataFrame:
+                               train_frac: float = 0.8,
+                               fit_mask: Optional[np.ndarray] = None) -> pd.DataFrame:
     """RobustScale ONE symbol's feature columns, fit on its earliest train_frac of rows.
 
     feature_store persisted per-symbol RobustScaler output until 2026-09-10; it now holds raw
@@ -275,7 +276,11 @@ def _scale_features_per_symbol(df: pd.DataFrame, cols: List[str],
     "beat this symbol's own median 5-day return" rather than "rose".
     """
     present = [c for c in cols if c in df.columns]
-    if not present or len(df) < 10:
+    # fit_mask selects which rows define "the earliest train_frac" (default: all rows).
+    # Inference passes the target-bearing rows so its scaler is fit on exactly the rows
+    # training fit on, while still transforming the newest rows that have no target yet.
+    fit_idx = np.arange(len(df)) if fit_mask is None else np.flatnonzero(np.asarray(fit_mask))
+    if not present or len(fit_idx) < 10:
         return df
     # log1p the heavy-tailed volume ratios first (feature_engineering._apply_scaler used to)
     for col in ("volume_ratio_5d", "volume_ratio_20d"):
@@ -284,9 +289,9 @@ def _scale_features_per_symbol(df: pd.DataFrame, cols: List[str],
     block = (df[present].astype(np.float64)
              .replace([np.inf, -np.inf], np.nan)
              .fillna(0.0))
-    cutoff = max(1, int(len(block) * train_frac))
+    cutoff = max(1, int(len(fit_idx) * train_frac))
     scaler = RobustScaler()
-    scaler.fit(block.iloc[:cutoff])
+    scaler.fit(block.iloc[fit_idx[:cutoff]])
     df[present] = scaler.transform(block)
     return df
 
@@ -370,7 +375,11 @@ def load_inference_sequence(
     Defaults to the ACTIVE CHECKPOINT's input width (not today's N_FEATURES): loaders
     always build the full widened frame, then slice, so a legacy-width champion reads
     FEATURE_COLS[:78] -- byte-identical to its training-time columns because the widening
-    appended, never inserted."""
+    appended, never inserted.
+
+    Reads the symbol's FULL history, not just the last seq_len rows: the per-symbol scaler
+    training applies is fit on the earliest 80% of target-bearing rows, and serving has to
+    reproduce that fit or the model sees raw prices it never trained on (AF-20260913-01)."""
     feat_cols = FEATURE_COLS[:_resolve_input_width(n_features)]
     numeric_cols = [c for c in feat_cols if c not in _VOL_ONEHOT]
     cols_sql = ", ".join(
@@ -379,15 +388,20 @@ def load_inference_sequence(
         for c in numeric_cols
     )
     df = read_df(
-        f"""SELECT date, {cols_sql}, vol_regime
+        f"""SELECT date, {cols_sql}, vol_regime,
+               target_ret_5d, target_ret_15d
             FROM feature_store WHERE symbol=? AND timeframe='D'
-            ORDER BY date DESC LIMIT {int(seq_len)}""",
+            ORDER BY date""",
         (symbol,),
     )
     if len(df) < seq_len:
         return None, None
-    df = df.sort_values("date")
-    df = _onehot_vol_regime(df).fillna(0)
+    df = df.sort_values("date").reset_index(drop=True)
+    has_target = (df["target_ret_5d"].notna() & df["target_ret_15d"].notna()).values
+    df = _onehot_vol_regime(df)
+    df[numeric_cols] = df[numeric_cols].fillna(0)
+    df = _scale_features_per_symbol(df, numeric_cols, fit_mask=has_target)
+    df = df.iloc[-seq_len:]
     # Same non-finite + extreme-outlier guard as load_symbol_sequences (training) -- must match
     # exactly, or inference sees a different feature distribution than training did (train/serve
     # skew). A live inf/extreme feature here would otherwise produce an inf/NaN prediction,
