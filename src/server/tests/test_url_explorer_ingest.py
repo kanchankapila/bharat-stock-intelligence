@@ -171,7 +171,7 @@ def test_make_fetch_fn_retries_transport_then_succeeds(_db):
             return 503, "", "text/html"
         return 200, "{\"a\": 1}", "application/json"
     fetch = fp.make_fetch_fn(retries=2, once=flaky_once)
-    status, body, _ = fetch("https://x/y")
+    status, body, _ = fetch({"url": "https://x/y"})
     assert status == 200 and len(calls) == 2
 
 def test_make_fetch_fn_does_not_retry_definitive_404(_db):
@@ -181,7 +181,7 @@ def test_make_fetch_fn_does_not_retry_definitive_404(_db):
         calls.append(url)
         return 404, "", "text/html"
     fetch = fp.make_fetch_fn(retries=2, once=once)
-    status, _, _ = fetch("https://x/y")
+    status, _, _ = fetch({"url": "https://x/y"})
     assert status == 404 and len(calls) == 1
 
 def test_unwrap_payload(_db):
@@ -196,12 +196,12 @@ def test_execute_pass_caps_failing_host(_db):
     store, _ = _db
     import url_explorer.fetch_pass as fp
     plan = [{"endpoint_id": x, "template": f"https://dead/s{x}/?x",
-             "sample": f"https://dead/s{x}/?x"} for x in range(3)]
-    def fail_fetch(url):
+             "attempts": [{"url": f"https://dead/s{x}/?x"}]} for x in range(3)]
+    def fail_fetch(attempt):
         return 404, "", "text/html"
     summary = fp.execute_pass(plan, fail_fetch, {}, set(), delay_base=0,
                               host_fail_cap=2, progress_every=1000)
-    assert summary["fail"] == 2
+    assert summary["attempts_fail"] == 2
     assert summary["skipped_host_cap"] == 1
     assert summary["capped_hosts"] == ["dead"]
 
@@ -216,7 +216,8 @@ def test_execute_pass_populates_fetch_fields_correlations(_db):
                               method="GET", params=[], urls=[tpl])
         eids.append(store.upsert_endpoint(ep))
 
-    def fake_fetch(url):
+    def fake_fetch(attempt):
+        url = attempt["url"]
         if url.startswith("https://b-scan/"):
             return 503, "", "text/html"
         body = json.dumps({"rows": [{"sym": f"S{i}", "val": float(i) * 1.5}
@@ -224,11 +225,13 @@ def test_execute_pass_populates_fetch_fields_correlations(_db):
         return 200, body, "application/json"
 
     returns = {"trailing_ret_5d": {f"S{i}": i / 500 for i in range(25)}}
-    plan = [{"endpoint_id": eid, "template": tpl, "sample": tpl}
+    plan = [{"endpoint_id": eid, "template": tpl,
+             "attempts": [{"url": tpl}]}
             for eid, tpl in zip(eids, ("https://a-scan/scan/?sym&val",
                                        "https://b-scan/scan/?sym&val"))]
     summary = fp.execute_pass(plan, fake_fetch, returns, universe, delay_base=0)
-    assert summary["ok"] == 1 and summary["fail"] == 1
+    assert summary["attempts_ok"] == 1 and summary["attempts_fail"] == 1
+    assert summary["endpoints_ok"] == 1 and summary["endpoints_fail"] == 1
     assert summary["fields"] > 0 and summary["correlations"] >= 1
 
     import db_compat

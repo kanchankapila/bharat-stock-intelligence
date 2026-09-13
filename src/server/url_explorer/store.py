@@ -58,6 +58,24 @@ _DDL = [
     "ALTER TABLE url_endpoints ADD COLUMN IF NOT EXISTS refs_json TEXT",
     "ALTER TABLE url_endpoints ADD COLUMN IF NOT EXISTS updated_at TEXT",
     "ALTER TABLE url_endpoints ADD COLUMN IF NOT EXISTS verified_json TEXT",
+    # Per-screener instance database (2026-09-13, url_explorer.screeners): the layer
+    # between endpoint families and concrete captures — one row per (provider, scan_id)
+    # with its captured payload and taxonomy. ue_* columns are urls-explorer's own
+    # measured results, external evidence like verified_json.
+    """CREATE TABLE IF NOT EXISTS screener_instances (
+        provider TEXT NOT NULL,
+        scan_id TEXT NOT NULL,
+        name TEXT,
+        category TEXT,
+        sentiment TEXT,
+        timeframe TEXT,
+        endpoint TEXT,
+        query_condition TEXT,
+        description TEXT,
+        ue_status TEXT,
+        ue_stocks_count INTEGER,
+        updated_at TEXT,
+        PRIMARY KEY (provider, scan_id))""",
 ]
 
 
@@ -104,6 +122,25 @@ def update_endpoint_meta(endpoint_id: int, *, provider, category, description,
          json.dumps(feature_targets), json.dumps(sources), json.dumps(refs),
          json.dumps(verified) if verified is not None else None,
          datetime.now(timezone.utc).isoformat(), endpoint_id),
+    )
+
+
+def upsert_screener_instance(inst: dict) -> None:
+    execute(
+        """INSERT INTO screener_instances (provider, scan_id, name, category, sentiment,
+             timeframe, endpoint, query_condition, description, ue_status,
+             ue_stocks_count, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+           ON CONFLICT (provider, scan_id) DO UPDATE SET
+             name = excluded.name, category = excluded.category,
+             sentiment = excluded.sentiment, timeframe = excluded.timeframe,
+             endpoint = excluded.endpoint, query_condition = excluded.query_condition,
+             description = excluded.description, ue_status = excluded.ue_status,
+             ue_stocks_count = excluded.ue_stocks_count, updated_at = excluded.updated_at""",
+        (inst["provider"], inst["scan_id"], inst.get("name"), inst.get("category"),
+         inst.get("sentiment"), inst.get("timeframe"), inst.get("endpoint"),
+         inst.get("query_condition"), inst.get("description"), inst.get("ue_status"),
+         inst.get("ue_stocks_count"), datetime.now(timezone.utc).isoformat()),
     )
 
 

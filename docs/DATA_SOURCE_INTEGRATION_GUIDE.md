@@ -800,15 +800,31 @@ and the polite sample-fetch pass `url_explorer.fetch_pass` (browser headers per
 `urls-explorer/extract_urls.py`, per-host delays, per-host failure caps, transport-only breaker,
 resumable via the no-fetch-history selection).
 
-Fetch coverage after the 2026-09-13 pass (490 measured attempts): **51 endpoints verified alive
-by our own fetch** (www.moneycontrol widget family 32, MarketsMojo 7, trendlyne 3, api.moneycontrol 2,
-etapi 2, mfapps/stockedge/niftytrader/analyze.tickertape/etpwaapi singles), **~380 measured
-404/403** — dominated by `ai_endpoint_memory.json`'s synthetic cross-provider path mashups
-(e.g. `nseindia.com/api/NextApi/*`, `bselivefeeds.../price-forecast`), now provably phantom —
-**~363 skipped** on capped hosts (need per-site session context or value rendering),
-7 id-rendered-only, 3 POST families. `url_field_correlations` remains near-empty: the alive
-new endpoints are per-stock snapshots, so cross-sectional IC needs the market-scope screens
-(kayal/MC-scanner families — POST/pagination support is the next build).
+### 9.3 Per-screener instance database + POST measurement (2026-09-13)
+
+`src/server/url_explorer/screeners.py` parses `screener_replicate_helper.md` (urls-explorer's
+master screener catalog, 813KB) into the Postgres `screener_instances` table: **1,624 instances**
+(Trendlyne 986 GET kayal, ETnow 529 POST, MoneyControl 109 GET proscanner) keyed
+`(provider, scan_id)` with name/category/sentiment/timeframe/captured payload/description, plus
+`ue_status`/`ue_stocks_count` — urls-explorer's own measured results (1,623/1,624 SUCCESS),
+external evidence like `verified_json`. `python -m url_explorer.screeners --apply` ingests.
+
+`fetch_pass` sends real POSTs for POST endpoint families using the captured payloads (ETnow
+recipe: `Content-Type: application/json` + ET Referer/Origin, `pagesize` widened to 250 per the
+urls-explorer bulk recipe), sampling up to `--post-samples` distinct instances per family and
+profiling the family row across all sampled responses. Measured: both ETnow POST families
+40/40 attempts OK, 118 field profiles.
+
+Fetch coverage after the 2026-09-13 passes (~1,100 measured attempts across runs): **~100
+endpoints verified alive by our own fetch** (www.moneycontrol widget family 32, MarketsMojo 7,
+the two ETnow POST screener families 40/40 attempts, trendlyne/api.moneycontrol/etapi singles),
+**~450 measured 404/403** — dominated by `ai_endpoint_memory.json`'s synthetic cross-provider
+path mashups (e.g. `nseindia.com/api/NextApi/*`, `bselivefeeds.../price-forecast`), now provably
+phantom — and **198 templates still never fetched** (skipped when hosts tripped the transport
+breaker after sustained throttling; a cooled-down re-run of `fetch_pass` resumes exactly those).
+`url_field_correlations` remains near-empty: the alive new endpoints are per-stock snapshots, so
+cross-sectional IC needs the market-scope screens (kayal/MC-scanner families — POST/pagination
+support is the next build).
 
 #### Concrete screener-request count
 

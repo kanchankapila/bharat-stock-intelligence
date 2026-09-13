@@ -90,17 +90,35 @@ def _fetch_once(url: str):
 
 
 def make_fetch_fn(retries: int = 2, once=_fetch_once):
-    """Retries transport failures and 429/5xx with a short backoff; a definitive
-    4xx answer is returned immediately (it is a measurement, not a failure to retry)."""
-    def fetch(url: str):
+    """attempt = {"url", "method" ("GET"/"POST"), "payload" (dict, POST),
+    "headers" (extra)}. Retries transport failures and 429/5xx with short backoff;
+    a definitive 4xx answer is returned immediately (it is a measurement, not a
+    failure to retry)."""
+    def fetch(attempt: dict):
+        url = attempt["url"]
+        method = (attempt.get("method") or "GET").upper()
         last = (0, "", "")
-        for attempt in range(retries + 1):
-            status, body, ctype = once(url)
+        for i in range(retries + 1):
+            try:
+                if method == "POST":
+                    from curl_cffi import requests as cffi
+                    h = {**_BROWSER_HEADERS, **_domain_headers(url),
+                         **(attempt.get("headers") or {})}
+                    h.setdefault("Content-Type", "application/json")
+                    r = cffi.post(url, json=attempt.get("payload") or {},
+                                  headers=h, impersonate="chrome120",
+                                  timeout=20, allow_redirects=True)
+                    status, body, ctype = (r.status_code, r.text,
+                                           r.headers.get("content-type", ""))
+                else:
+                    status, body, ctype = once(url)
+            except Exception as e:
+                status, body, ctype = 0, "", str(e)
             if 200 <= status < 300 or (400 <= status < 500 and status != 429):
                 return status, body, ctype
             last = (status, body, ctype)
-            if attempt < retries:
-                time.sleep(0.8 * (attempt + 1))
+            if i < retries:
+                time.sleep(0.8 * (i + 1))
         return last
     return fetch
 
@@ -139,7 +157,67 @@ def build_template_members(universe) -> dict[str, list[str]]:
     return members
 
 
-def select_targets(refetch_failed: bool = False) -> tuple[list[tuple[int, str]], int]:
+def select_post_targets(refetch_failed: bool = False) -> list[tuple[int, str]]:
+    from db_compat import query_all
+    fail_cond = "AND f.ok = 1" if refetch_failed else ""
+    rows = query_all(
+        "SELECT e.id, e.template, e.verified_json FROM url_endpoints e"
+        " WHERE e.method = 'POST'"
+        " AND NOT EXISTS (SELECT 1 FROM url_fetches f"
+        f" WHERE f.endpoint_id = e.id {fail_cond})")
+    out: list[tuple[int, str]] = []
+    for r in rows:
+        v = None
+        if r["verified_json"]:
+            try:
+                v = json.loads(r["verified_json"])
+            except ValueError:
+                v = None
+        if v and v.get("ok", 0) == 0:
+            continue  # zero-200 evidence — access-controlled-or-retired
+        out.append((int(r["id"]), r["template"]))
+    return out
+
+
+def load_post_instances() -> dict[str, list[dict]]:
+    from db_compat import query_all
+    try:
+        rows = query_all(
+            "SELECT provider, scan_id, name, endpoint, query_condition"
+            " FROM screener_instances")
+    except Exception:
+        return {}
+    out: dict[str, list[dict]] = {}
+    for r in rows:
+        out.setdefault(r["endpoint"], []).append(dict(r))
+    return out
+
+
+def _decode_query_condition(qc: str):
+    """ETnow query_condition is double-JSON-encoded (a JSON string containing JSON)."""
+    try:
+        payload = json.loads(qc)
+    except (TypeError, ValueError):
+        return None
+    if isinstance(payload, str):
+        try:
+            payload = json.loads(payload)
+        except (TypeError, ValueError):
+            return None
+    return payload if isinstance(payload, dict) else None
+
+
+def _provider_post_headers(endpoint: str) -> dict[str, str]:
+    headers = {"Content-Type": "application/json",
+               "Referer": f"https://{urlsplit(endpoint).netloc}/",
+               "Origin": f"https://{urlsplit(endpoint).netloc}"}
+    if "indiatimes" in endpoint:
+        headers["Referer"] = "https://economictimes.indiatimes.com/"
+        headers["Origin"] = "https://economictimes.indiatimes.com"
+    return headers
+
+
+def select_targets(refetch_failed: bool = False) -> tuple[list[tuple[int, str, int]], int]:
     from db_compat import query_all
     fail_cond = "AND f.ok = 1" if refetch_failed else ""
     rows = query_all(
@@ -166,7 +244,8 @@ def select_targets(refetch_failed: bool = False) -> tuple[list[tuple[int, str]],
 
 
 def build_plan(universe, catalog_path: str | None = None,
-               refetch_failed: bool = False) -> tuple[list[dict], dict]:
+               refetch_failed: bool = False,
+               post_samples: int = 20) -> tuple[list[dict], dict]:
     members = build_template_members(universe)
     verified = {}
     if catalog_path:
@@ -196,16 +275,39 @@ def build_plan(universe, catalog_path: str | None = None,
         if not _usable(sample) or "." not in urlsplit(sample).netloc:
             valueless += 1
             continue
-        plan.append({"endpoint_id": eid, "template": template, "sample": sample,
-                     "tier": tier})
+        plan.append({"endpoint_id": eid, "template": template,
+                     "attempts": [{"url": sample}], "tier": tier})
+    post_rows = select_post_targets(refetch_failed)
+    post_instances = load_post_instances()
+    post_no_instances = 0
+    for eid, template in post_rows:
+        instances = post_instances.get(template) or []
+        attempts = []
+        for inst in instances[:post_samples]:
+            payload = _decode_query_condition(inst.get("query_condition") or "")
+            if payload is None:
+                continue
+            if "pagesize" in payload:
+                # urls-explorer's bulk-extraction recipe: widen the page, same filter
+                payload["pagesize"] = 250
+            attempts.append({"url": inst["endpoint"], "method": "POST",
+                             "payload": payload,
+                             "headers": _provider_post_headers(inst["endpoint"])})
+        if not attempts:
+            post_no_instances += 1
+            continue
+        plan.append({"endpoint_id": eid, "template": template,
+                     "attempts": attempts, "tier": 1})
+
     stats = {"targets": len(plan), "excluded_zero_200": excluded_dead,
              "skipped_needs_id": needs_id, "skipped_junk_host": junk_host,
-             "skipped_valueless": valueless}
+             "skipped_valueless": valueless, "post_families": len(post_rows),
+             "post_no_instances": post_no_instances}
     # Host-interleave so the global breaker can't sit on one host's dead cluster,
     # evidence-alive tiers first within each host.
     by_host: dict[str, list[dict]] = {}
     for item in sorted(plan, key=lambda x: x["tier"]):
-        by_host.setdefault(urlsplit(item["sample"]).netloc.lower(), []).append(item)
+        by_host.setdefault(urlsplit(item["attempts"][0]["url"]).netloc.lower(), []).append(item)
     interleaved: list[dict] = []
     while any(by_host.values()):
         for q in by_host.values():
@@ -246,65 +348,84 @@ def execute_pass(plan, fetch_fn, returns_by_target, universe,
                  delay_base: float = BASE_DELAY, progress_every: int = 25,
                  host_fail_cap: int = 10, transport_breaker: int = 15) -> dict:
     run_at = datetime.now(timezone.utc).isoformat()
-    n_ok = n_fail = n_fields = n_corr = skipped_capped = 0
+    endpoints_ok = endpoints_fail = attempts_ok = attempts_fail = 0
+    n_fields = n_corr = skipped_capped = 0
     host_consec: dict[str, int] = {}
     capped_hosts: set[str] = set()
     transport_consec = 0
     host_fails: dict[str, int] = {}
     for i, item in enumerate(plan, 1):
-        url = item["sample"]
-        eid = item["endpoint_id"]
-        host = urlsplit(url).netloc.lower()
-        if host in capped_hosts:
-            skipped_capped += 1
+        first_host = urlsplit(item["attempts"][0]["url"]).netloc.lower()
+        if first_host in capped_hosts:
+            skipped_capped += len(item["attempts"])
             continue
-        time.sleep(_host_delay(url, delay_base) * (0.7 + 0.6 * random.random()))
-        t0 = time.time()
-        try:
-            status, body, ctype = fetch_fn(url)
-            ok = 200 <= status < 300 and body is not None
-            err = None if ok else f"http {status}"
-        except Exception as e:  # noqa: BLE001 — a fetch failure is recorded data, not a crash
-            status, body, ctype, ok, err = 0, None, "", False, str(e)
-        latency = int((time.time() - t0) * 1000)
+        eid = item["endpoint_id"]
+        results = []
+        any_ok = False
+        last_err = None
+        for att in item["attempts"]:
+            url = att["url"]
+            time.sleep(_host_delay(url, delay_base) * (0.7 + 0.6 * random.random()))
+            t0 = time.time()
+            try:
+                status, body, ctype = fetch_fn(att)
+                ok = 200 <= status < 300 and body is not None
+                err = None if ok else f"http {status}"
+            except Exception as e:  # noqa: BLE001 — a fetch failure is recorded data, not a crash
+                status, body, ctype, ok, err = 0, "", "", False, str(e)
+            latency = int((time.time() - t0) * 1000)
 
-        store.insert_fetch(eid, url, "{}", status, latency, ok, len(body or ""), body, err)
-        prof_body = unwrap_payload(body) if body else body
-        res = FetchResult(None, url, status, latency, ok, prof_body, ctype, err)
-        profiles = profile_endpoint([res], universe, store.last_run_field_paths(eid))
+            params_json = json.dumps(att["payload"]) if att.get("payload") else "{}"
+            store.insert_fetch(eid, url, params_json, status, latency, ok,
+                               len(body or ""), body, err)
+            results.append(FetchResult(None, url, status, latency, ok,
+                                       unwrap_payload(body) if body else body,
+                                       ctype, err))
+            host = urlsplit(url).netloc.lower()
+            if ok:
+                any_ok = True
+                attempts_ok += 1
+                host_consec[host] = 0
+                transport_consec = 0
+            else:
+                attempts_fail += 1
+                last_err = err
+                host_fails[host] = host_fails.get(host, 0) + 1
+                host_consec[host] = host_consec.get(host, 0) + 1
+                if host_consec[host] >= host_fail_cap:
+                    capped_hosts.add(host)
+                # 404/403 on a synthetic endpoint is a measurement, not a network problem.
+                # Only transport-level failures (unreachable, throttling) trip the breaker.
+                if status == 0 or status in (429, 503):
+                    transport_consec += 1
+        prev = store.last_run_field_paths(eid)
+        profiles = profile_endpoint(results, universe, prev)
         for p in profiles:
             store.insert_field(eid, run_at, p)
         cors = []
-        if ok and returns_by_target:
-            cors = correlate_endpoint([res], profiles, returns_by_target, universe)
+        if any_ok and returns_by_target:
+            cors = correlate_endpoint(results, profiles, returns_by_target, universe)
             for c in cors:
                 store.insert_correlation(eid, run_at, c)
-        store.record_health(eid, ok, err)
         n_fields += len(profiles)
         n_corr += len(cors)
-        if ok:
-            n_ok += 1
-            host_consec[host] = 0
-            transport_consec = 0
+        if any_ok:
+            endpoints_ok += 1
         else:
-            n_fail += 1
-            host_fails[host] = host_fails.get(host, 0) + 1
-            host_consec[host] = host_consec.get(host, 0) + 1
-            if host_consec[host] >= host_fail_cap:
-                capped_hosts.add(host)
-            # 404/403 on a synthetic endpoint is a measurement, not a network problem.
-            # Only transport-level failures (unreachable, throttling) trip the breaker.
-            if status == 0 or status in (429, 503):
-                transport_consec += 1
-            if transport_consec >= transport_breaker:
-                print(f"[FETCH-PASS] transport breaker: {transport_consec} consecutive"
-                      f" unreachable/throttled responses — stopping; re-run resumes",
-                      flush=True)
-                break
+            endpoints_fail += 1
+        store.record_health(eid, any_ok, last_err)
         if i % progress_every == 0:
-            print(f"[FETCH-PASS] {i}/{len(plan)} ok={n_ok} fail={n_fail}"
-                  f" fields={n_fields} corr={n_corr}", flush=True)
-    return {"fetched": n_ok + n_fail, "ok": n_ok, "fail": n_fail,
+            print(f"[FETCH-PASS] {i}/{len(plan)} eps_ok={endpoints_ok}"
+                  f" eps_fail={endpoints_fail} att_ok={attempts_ok}"
+                  f" att_fail={attempts_fail} fields={n_fields} corr={n_corr}",
+                  flush=True)
+        if transport_consec >= transport_breaker:
+            print(f"[FETCH-PASS] transport breaker: {transport_consec} consecutive"
+                  f" unreachable/throttled responses — stopping; re-run resumes",
+                  flush=True)
+            break
+    return {"endpoints_ok": endpoints_ok, "endpoints_fail": endpoints_fail,
+            "attempts_ok": attempts_ok, "attempts_fail": attempts_fail,
             "fields": n_fields, "correlations": n_corr, "host_fails": host_fails,
             "skipped_host_cap": skipped_capped, "capped_hosts": sorted(capped_hosts)}
 
@@ -318,11 +439,17 @@ def main(argv=None) -> int:
                     help="datasource_catalog.md path; prefers 200-verified sample URLs")
     ap.add_argument("--refetch-failed", action="store_true",
                     help="also retry templates whose only fetches failed")
+    ap.add_argument("--post-samples", type=int, default=20,
+                    help="POST instances sampled per screener family")
+    ap.add_argument("--host-fail-cap", type=int, default=10,
+                    help="consecutive same-host failures before skipping that host")
     ap.add_argument("--out", default=None)
     args = ap.parse_args(argv)
 
     universe = load_universe()
-    plan, stats = build_plan(universe, args.catalog, args.refetch_failed)
+    plan, stats = build_plan(universe, args.catalog, args.refetch_failed,
+                             post_samples=args.post_samples)
+    host_fail_cap = args.host_fail_cap
     if args.limit:
         plan = plan[:args.limit]
     print(f"[FETCH-PASS] plan: {len(plan)} targets (excluded zero-200:"
@@ -342,10 +469,12 @@ def main(argv=None) -> int:
     print("[FETCH-PASS] return targets:"
           f" {[(t, len(r)) for t, r in returns_by_target.items()]}", flush=True)
 
-    summary = execute_pass(plan, make_fetch_fn(), returns_by_target, universe)
-    print(f"[FETCH-PASS] done: {summary['fetched']} fetched, {summary['ok']} ok,"
-          f" {summary['fail']} failed, {summary['fields']} fields,"
-          f" {summary['correlations']} correlations", flush=True)
+    summary = execute_pass(plan, make_fetch_fn(), returns_by_target, universe,
+                           host_fail_cap=host_fail_cap)
+    print(f"[FETCH-PASS] done: endpoints ok={summary['endpoints_ok']}"
+          f" fail={summary['endpoints_fail']}; attempts ok={summary['attempts_ok']}"
+          f" fail={summary['attempts_fail']}; fields={summary['fields']}"
+          f" correlations={summary['correlations']}", flush=True)
     if summary["capped_hosts"]:
         print(f"[FETCH-PASS] hosts capped after repeated failures"
               f" ({summary['skipped_host_cap']} targets skipped):"
@@ -359,8 +488,8 @@ def main(argv=None) -> int:
     out.parent.mkdir(parents=True, exist_ok=True)
     lines = [f"# Fetch pass — {datetime.now(timezone.utc).date().isoformat()}",
              "",
-             f"- templates fetched: {summary['fetched']} (ok {summary['ok']} /"
-             f" fail {summary['fail']})",
+             f"- endpoints ok: {summary['endpoints_ok']} / fail: {summary['endpoints_fail']}"
+             f" (attempts ok {summary['attempts_ok']} / fail {summary['attempts_fail']})",
              f"- field profiles written: {summary['fields']}",
              f"- correlations written: {summary['correlations']}",
              "", "## Failures by host", ""]
