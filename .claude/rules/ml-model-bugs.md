@@ -123,6 +123,34 @@ cover classes that stayed in `recurring-bugs.md`.
 
 ## Models, labels & promotion gates
 
+- **Moving a transform out of a table and into the TRAINING loader creates train/serve skew
+  unless the INFERENCE loader gets the identical step in the same change.** 2026-09-10 made
+  `feature_store` raw and moved per-symbol `RobustScaler` into `dl_engine.load_symbol_sequences`;
+  `load_inference_sequence` kept reading the last 60 raw rows. Measured live 2026-09-13 on
+  RELIANCE: `sma200` 0.949 trained vs **1,386 served**, `obv` -2.48 vs -10,000 (the clip bound)
+  -- every `dl_score` for three days (AF-20260913-01). **Tell:** print `median(abs(X))` and
+  `max(abs(X))` for one symbol through BOTH loaders; a scaled matrix sits near 1, a raw one in the
+  hundreds. **Fix shape:** the serve path must reproduce the fit, not approximate it -- a per-symbol
+  scaler fit on "the earliest 80% of target-bearing rows" needs the full history at inference and a
+  `fit_mask` selecting those rows. **Assert parity against the real training loader** on shared
+  dates (max abs diff was 0.0 after the fix), never against a re-implementation.
+  **Two consequences that were NOT obvious and each changed a decision:**
+  (1) **fixing the input exposes the model** -- with correct inputs the promoted v5 saturated 40%
+  of predictions (23% even on its own last training window), while the v3 it replaced stayed at
+  2.8%; the gate's `MAX_SATURATION_FRAC=0.5` on validation let a 0.32 through (AF-20260913-05).
+  (2) **a per-symbol scaler fit on early history makes ANY rewrite of a feature's history a
+  serve-time shift** -- replacing 7 sparse columns with deep-history sources moved served
+  `prob_up_5d` to rank-corr 0.59 after ONE daily refresh. Pair such a change with a retrain;
+  jobs run from the working tree, so "merged" is "deployed" (AF-20260913-02).
+
+- **A skew fix applied to a SHARED helper does not fix the caller that keeps its own inline
+  query.** The 2026-08-30 `cr_upgrades`/`cr_downgrades` fix (entry below) went into
+  `full_feature_score_sql()`, which only `cs_ranker.py` calls; `ml_ensemble.load_pending_signals()`
+  -- the ensemble's actual scorer -- has its own inline SQL and stayed skewed for two weeks
+  (AF-20260913-04). **Verify a skew fix on the path that writes the production column**, and make
+  the check structural: `test_ml_ensemble_train_score_columns.py` reads both loaders' column sets
+  from Postgres (`LIMIT 0` on an empty production schema) instead of parsing SQL text.
+
 - **A transform that selects its columns by DTYPE (`select_dtypes`, "all numeric", `df.columns`)
   rather than by an explicit NAME LIST will silently include the LABEL columns — and a scaled
   label is not a label.** Found 2026-09-10 (AF-20260910-18). `feature_engineering._apply_scaler`

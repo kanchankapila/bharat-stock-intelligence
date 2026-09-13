@@ -1732,7 +1732,7 @@ async function processQuantEodSync(job: Job): Promise<{ success: boolean; skippe
     // See docs session notes 2026-08-04 for the full evidence trail (each call traced to its
     // function body, not just its job name).
 
-    updateMonitorState('quant-eod-sync', 'success');
+    updateMonitorState('quant-eod-sync', 'success', undefined, job.processedOn ? Date.now() - job.processedOn : undefined);
     console.log('[QUEUE] quant-eod-sync completed successfully');
     return { success: true };
   } catch (err: any) {
@@ -1969,11 +1969,11 @@ export async function initQueues(): Promise<boolean> {
     technicalSignalsWorker.on('completed', (_job, result?: { skipped?: boolean }) => {
       console.log('[QUEUE] technical-signals completed');
       if (result?.skipped) return;
-      updateMonitorState('technical-scan', 'success');
+      updateMonitorState('technical-scan', 'success', undefined, bullJobDurationMs(_job));
     });
     technicalSignalsWorker.on('failed', (_job, err) => {
       console.error('[QUEUE] technical-signals failed:', err.message);
-      updateMonitorState('technical-scan', 'failed', err.message);
+      updateMonitorState('technical-scan', 'failed', err.message, bullJobDurationMs(_job));
     });
     technicalSignalsWorker.on('error', (err) => {
       if ((err as any).code === -2 || err.message?.includes('Missing lock')) return;
@@ -2810,16 +2810,17 @@ export async function initQueues(): Promise<boolean> {
         // cache during market hours. Result: 54 snapshot rows total, with multi-day gaps, and
         // intraday_regime.py's (correct) staleness guard therefore dropped breadth from the
         // regime fusion most cycles. On this chain it runs every 15 min like its consumer.
+        const breadthStart = Date.now();
         try {
           const { getOrRefreshAllStocks } = await import('./liveStockData');
           const { persistIntradayBreadth } = await import('./intradayBreadth');
           const quotes = await getOrRefreshAllStocks();
           const breadth = await persistIntradayBreadth(quotes);
-          recordHeartbeat('intraday-breadth-capture', 'success');
+          recordHeartbeat('intraday-breadth-capture', 'success', undefined, Date.now() - breadthStart);
           if (breadth) console.log(`[QUEUE] intraday breadth captured (score ${breadth.breadthScore})`);
         } catch (e) {
           console.warn('[QUEUE] intraday breadth capture failed:', (e as Error).message);
-          recordHeartbeat('intraday-breadth-capture', 'failed', (e as Error).message);
+          recordHeartbeat('intraday-breadth-capture', 'failed', (e as Error).message, Date.now() - breadthStart);
         }
         const T = new StepTracker('market-regime-refresh');
         // 1) fetch live macro (VIX/USDINR/basis) → macro_asset_prices
@@ -2871,9 +2872,10 @@ export async function initQueues(): Promise<boolean> {
       removeOnComplete: 3, removeOnFail: 3,
     });
     new Worker(QUEUE_CLOSED_DAY,
-      async () => {
+      async (job) => {
+        const elapsed = () => (job.processedOn ? Date.now() - job.processedOn : undefined);
         if (!(await isTradingHolidayToday())) {
-          recordHeartbeat('closed-day-early-batch', 'success'); // normal session / weekend — nothing to early-run
+          recordHeartbeat('closed-day-early-batch', 'success', undefined, elapsed()); // normal session / weekend — nothing to early-run
           return;
         }
         console.log('[QUEUE] Trading holiday — running daily pipeline early (outcome-resolver → ml-daily-ops → unified-ranker)');
@@ -2883,10 +2885,10 @@ export async function initQueues(): Promise<boolean> {
           await mlDailyOpsQueue?.add('closed-day-early', {}, opt);
           // unified-ranker after a delay so fresh scores / ml-ops land first
           await unifiedRankerQueue?.add('closed-day-early', {}, { ...opt, delay: 20 * 60_000 });
-          recordHeartbeat('closed-day-early-batch', 'success');
+          recordHeartbeat('closed-day-early-batch', 'success', undefined, elapsed());
         } catch (e) {
           console.warn('[QUEUE] closed-day-early-batch failed:', (e as Error).message);
-          recordHeartbeat('closed-day-early-batch', 'failed', (e as Error).message);
+          recordHeartbeat('closed-day-early-batch', 'failed', (e as Error).message, elapsed());
         }
       },
       { connection, concurrency: 1, lockDuration: 5 * 60_000 });
@@ -2942,11 +2944,11 @@ export async function initQueues(): Promise<boolean> {
       });
     ohlcvBackfillWorker.on('completed', (job) => {
       console.log(`[QUEUE] ohlcv-backfill (${job.data?.mode}) done`);
-      updateMonitorState('ohlcv-backfill', 'success');
+      updateMonitorState('ohlcv-backfill', 'success', undefined, bullJobDurationMs(job));
     });
-    ohlcvBackfillWorker.on('failed', (_, err) => {
+    ohlcvBackfillWorker.on('failed', (job, err) => {
       console.error('[QUEUE] ohlcv-backfill failed:', err.message);
-      updateMonitorState('ohlcv-backfill', 'failed', err.message);
+      updateMonitorState('ohlcv-backfill', 'failed', err.message, bullJobDurationMs(job));
     });
 
     // Weekly gap-fill: Saturday 5:30 AM IST = Saturday 00:00 UTC.
@@ -3070,10 +3072,10 @@ export async function initQueues(): Promise<boolean> {
       }
     );
     quantEodSyncWorker.on('completed', () => console.log('[QUEUE] quant-eod-sync done'));
-    quantEodSyncWorker.on('failed', (_, e) => {
+    quantEodSyncWorker.on('failed', (job, e) => {
       // The processor's own catch can't see a timeout — it rejects outside the processor —
       // so mark the state here too, otherwise a timed-out run leaves the last success showing.
-      updateMonitorState('quant-eod-sync', 'failed', e.message);
+      updateMonitorState('quant-eod-sync', 'failed', e.message, bullJobDurationMs(job));
       console.error('[QUEUE] quant-eod-sync failed:', e.message);
     });
 

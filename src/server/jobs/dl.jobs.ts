@@ -198,7 +198,7 @@ export async function registerDlJobs(connection: any) {
     lockDuration: 30 * 60 * 1000,
     lockRenewTime: 5 * 60 * 1000,
     // Real monitor id is 'dl-engine-infer', not 'dl-inference' -- see module docstring.
-    monitorFn: (_name, status, detail) => updateMonitorState('dl-engine-infer', status, detail),
+    monitorFn: (_name, status, detail, durationMs) => updateMonitorState('dl-engine-infer', status, detail, durationMs),
   });
 
   // Chain trigger: dispatch dl-inference the moment dl-feature-refresh actually finishes with
@@ -231,7 +231,7 @@ export async function registerDlJobs(connection: any) {
     concurrency: 1,
     lockDuration: 5 * 60 * 1000,
     // Real monitor id is 'regime-detector', not 'dl-regime-update' -- see module docstring.
-    monitorFn: (_name, status, detail) => updateMonitorState('regime-detector', status, detail),
+    monitorFn: (_name, status, detail, durationMs) => updateMonitorState('regime-detector', status, detail, durationMs),
   });
 
   const retrainWeekly = await registerRepeatableJob({
@@ -261,7 +261,7 @@ export async function registerDlJobs(connection: any) {
     stalledInterval: 15 * 60 * 1000,
     maxStalledCount: 3,
     // Real monitor id is 'dl-trainer', not 'dl-retrain-weekly' -- see module docstring.
-    monitorFn: (_name, status, detail) => updateMonitorState('dl-trainer', status, detail),
+    monitorFn: (_name, status, detail, durationMs) => updateMonitorState('dl-trainer', status, detail, durationMs),
   });
 
   return { macroFetch, featureRefresh, inference, regimeUpdate, retrainWeekly };

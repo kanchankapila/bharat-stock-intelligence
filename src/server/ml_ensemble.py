@@ -2364,6 +2364,18 @@ def load_pending_signals() -> pd.DataFrame:
                    psh_oo.score_value AS ohlson_o,
                    psh_gn.score_value AS graham_number,
                    psh_ds.score_value AS dupont_score,
+                   -- AF-20260913-04: the 2026-08-30 fix added these to full_feature_score_sql(),
+                   -- which only cs_ranker calls; this is the ensemble's own score query.
+                   (SELECT COUNT(*) FROM credit_rating_events cre
+                     WHERE cre.symbol = ts.symbol
+                       AND UPPER(cre.action) LIKE '%UPGRADE%'
+                       AND cre.announcement_date::date >= (ts.date::date - interval '365 days')
+                       AND cre.announcement_date::date <= ts.date::date) AS cr_upgrades,
+                   (SELECT COUNT(*) FROM credit_rating_events cre
+                     WHERE cre.symbol = ts.symbol
+                       AND UPPER(cre.action) LIKE '%DOWNGRADE%'
+                       AND cre.announcement_date::date >= (ts.date::date - interval '365 days')
+                       AND cre.announcement_date::date <= ts.date::date) AS cr_downgrades,
                    sfs.sector_pcr, sfs.total_call_oi AS sector_call_oi, sfs.total_put_oi AS sector_put_oi
             FROM technical_signals ts
             -- mc_pricefeed_daily carries the SAME MoneyControl fields as the ts.mc_*

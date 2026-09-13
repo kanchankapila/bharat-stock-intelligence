@@ -324,6 +324,27 @@ Currently automated (9 checks): `date.today()` write-anchor, short calendar-day 
 
 ## Monitoring blind spots
 
+- **An inline wrapper that declares fewer parameters than its caller passes silently drops the
+  extras.** `registerJob` calls `monitorFn(name, status, detail, durationMs)`; three wrappers in
+  `dl.jobs.ts` were written `(_name, status, detail) => updateMonitorState(...)`, so
+  `job_run_history.duration_ms` was NULL on every run of `dl-engine-infer`/`dl-trainer`/
+  `regime-detector` -- 8 jobs in total once direct call sites were counted (AF-20260913-06). It
+  made a trainer run look like ~0 minutes and blocked measuring a widened inference read against
+  its budget. **Tell:** `SELECT job_name FROM job_run_history GROUP BY 1 HAVING count(duration_ms)=0`.
+  Immunized by `monitorFnForwardsDuration.test.ts`. Note `bullJobDurationMs(job)` needs
+  `finishedOn`, so it returns undefined INSIDE a running processor -- measure from `processedOn`.
+
+- **A vendor time series' newest point is the in-progress one, and storing it under the run's
+  calendar date writes rounded values on non-trading days.** MoneyControl's index fundamentals
+  graph ends at "today": every `nifty_pe_fetcher` run stored it -- NIFTY50 pb **2.0** against ~2.9,
+  under Saturday/Sunday dates (504 weekend rows, 94 indices). The same feed returns isolated
+  glitches (pe 1.1 among 21.8; pe == pb = 26.0). **Guard at the write boundary, and measure the
+  guard before trusting it**: the rule set flagged 0 of 5,889 points on 23 years of clean history
+  (incl. 2008/2020) and 0.3% of stored values -- and the measurement caught a first draft that
+  would have deleted BSETELECOM's genuinely negative P/B (AF-20260913-08). Related: MC's
+  `duration` enum is `1M,3M,6M,1Y,5Y,Max`, case-sensitive, and longer windows are COARSER (5Y
+  weekly, Max monthly) -- read the 422 message, it lists the enum.
+
 - **A comment saying a step "moved to" another job is a CLAIM, not a schedule — and when the move
   never lands, the step runs nowhere and leaves no heartbeat to notice.** 2026-09-10
   (AF-20260910-16): `insider_transactions_fetcher.py` was taken off the nightly chain on

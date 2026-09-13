@@ -140,9 +140,53 @@ def _parse_mc_graph(resp_json: dict) -> list[tuple[str, float]]:
     return result
 
 
+def _mc_duration(days: int) -> str:
+    """MC's graph accepts exactly [1M, 3M, 6M, 1Y, 5Y, Max] (its own 422 lists them; '3Y' was
+    sent here for 366-1095 days and always failed). Resolution drops with length: 1Y is daily,
+    5Y weekly (from ~5 years back), Max monthly (from 2015)."""
+    for limit, code in ((30, "1M"), (90, "3M"), (180, "6M"), (365, "1Y"), (1825, "5Y")):
+        if days <= limit:
+            return code
+    return "Max"
+
+
+# A point more than this far from the median of its neighbouring sessions is a vendor glitch, not
+# a market move: an index P/E moves a few percent a day even in a crash.
+_MAX_NEIGHBOUR_DEVIATION = 0.25
+_NEIGHBOURS = 5
+
+
+def _drop_implausible(combined: dict[str, dict]) -> dict[str, dict]:
+    """Remove impossible pe/pb points MC's graph returns and this table stored verbatim
+    (AF-20260913-08): pe == pb (NIFTY50 2025-12-29 read 26.0/26.0 against pb ~3.55), isolated
+    spikes (2025-09-08 pe=1.1 among ~21.7), and weekend dates -- the graph's in-progress point
+    for the run's own calendar day, stored rounded (NIFTY50 pb=2.0 against ~2.9 on every one).
+    Negative values are NOT dropped: BSETELECOM's pb is genuinely negative. Other fields kept."""
+    out = {d: dict(v) for d, v in combined.items()
+           if datetime.date.fromisoformat(d[:10]).weekday() < 5}
+    for v in out.values():
+        pe, pb = v.get("pe"), v.get("pb")
+        if pe is not None and pb is not None and pe == pb:
+            v.pop("pe"); v.pop("pb")
+    dates = sorted(out)
+    for k in ("pe", "pb"):
+        valid = [(d, out[d][k]) for d in dates if out[d].get(k) is not None]
+        bad = []
+        for i, (d, val) in enumerate(valid):
+            nb = [x for _, x in valid[max(0, i - _NEIGHBOURS):i] + valid[i + 1:i + 1 + _NEIGHBOURS]]
+            if len(nb) < 3:
+                continue
+            med = sorted(nb)[len(nb) // 2]
+            if med > 0 and abs(val / med - 1) > _MAX_NEIGHBOUR_DEVIATION:
+                bad.append(d)
+        for d in bad:
+            out[d].pop(k, None)
+    return out
+
+
 def fetch_mc_pe_pb(ind_id: int, days: int = 365) -> dict[str, dict]:
     """Fetch PE and PB history from MoneyControl. Returns {date: {pe, pb}}."""
-    duration = "1Y" if days <= 365 else ("3Y" if days <= 1095 else "5Y")
+    duration = _mc_duration(days)
     combined: dict[str, dict] = {}
 
     for metric, key in [("pe", "pe"), ("pb", "pb")]:
@@ -259,6 +303,7 @@ def run(days: int = 30, full: bool = False):
             else:
                 print(f"[PE] {index_name}: MC {len(combined)} dates")
 
+        combined = _drop_implausible(combined)
         if not combined:
             continue
 

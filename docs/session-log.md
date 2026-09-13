@@ -57,6 +57,50 @@ Historical record, split out of CLAUDE.md on 2026-08-11 (it was 64% of that file
   a restart would have orphaned it into a make-up that re-runs the 16.9GB optimizer. Nothing
   affected fires before Thursday. `pm2 restart bharat-server` still required.
 
+## 2026-09-13 -- DL inference read raw prices; the fix exposed a saturated model; deep-history inputs held for a coordinated retrain
+
+- **Scope**: user asked to find and fix more cases like the 23 near-empty DL inputs, check the
+  alternate URL list, test NiftyTrader with correct expiries, and try longer duration parameters.
+- **P0, shipped (`86d3da6f`, pushed, `ml-api` restarted): DL train/serve scaling skew.** The
+  09-10 rebuild moved per-symbol scaling into the training loader only; inference fed raw values
+  (RELIANCE `sma200` 1,386 served vs 0.949 trained). Inference now reproduces the exact fit
+  (earliest 80% of target-bearing rows, via `fit_mask`); parity 0.0 on 43 shared dates, 4 symbols.
+  Full `--mode infer` timed at 314s. Also found: production served **v3** through 09-11, not v4.
+- **The fix exposed the model (AF-20260913-05, needs a user decision before Mon 21:30 IST).**
+  Same inputs, 250 symbols: v5 (active) 40% of predictions <0.01 or >0.99 served and 23% on its
+  own training window; clipping inputs barely helps (38%) -- the model, not the inputs. v3 2.8%.
+  v5 passed the gate at validation `frac_saturated` 0.32 < 0.5. The planned revert of v5 was NOT
+  done: v5-vs-v4 is seed noise, so a revert is equally unevidenced -- stated to the user.
+- **Deep-history inputs built, tested, and deliberately held on `feat/deep-history-features`**
+  (AF-20260913-02/-03). Sources chosen by agreement with the values they replace: consolidated TTM
+  P/E 0.967, P/B 0.869, dalalos EPS/revenue YoY 0.917/0.899, NSE delivery 0.992; 97-100%
+  populated every year 2021-2026. **Trendlyne `pe_ttm` rejected -- it is standalone-based**
+  (ADANIPORTS 153 vs 29). Held because jobs run from the working tree and `dl-feature-refresh`
+  rewrites 504 days daily: measured served-prediction rank-corr 0.59 (v5) after one refresh.
+- **`insider_buy_pct_90d` counted ~2% of trades** (exact-set match missed NSE's
+  `'ACQUISITION -  MARKET PURCHASE'`), scored no activity as 0 = max selling (4,277 of 6,139
+  recent values), and `insider_trades` holds ~8.5 copies per trade. Fixed on the same branch.
+- **Ensemble score path still skewed on credit columns** (AF-20260913-04, fixed): the 08-30 fix
+  landed in a helper the ensemble's scorer never calls. 19 of 2,193 live rows now get real values.
+  Duplicate columns (identical expressions) and 5 never-selected constants measured and accepted.
+  The fabricated-defaults problem is structural -- `num()` fills before the null guard runs, so
+  163 mostly-null inputs survive -- logged EVIDENCE with a measurement plan (AF-20260913-07).
+- **8 jobs never recorded `duration_ms`** (AF-20260913-06, fixed, guard test added).
+- **Longer-duration probes (user request)**: MC index graph enum is `1M,3M,6M,1Y,5Y,Max`
+  (case-sensitive; longer = coarser); `nifty_pe_fetcher` sent an invalid `3Y`. The probes surfaced
+  vendor glitches stored verbatim in `index_valuation` (pe 1.1, pe==pb 26.0, rounded weekend
+  points) -- guarded, measured (0 of 5,889 flagged on 23 years of clean history), stored data
+  repaired (AF-20260913-08). NDTV 5Y graph duplicates `stock_ohlcv`; no endpoint gives historical
+  OI (AF-20260913-09).
+- **Mistakes made and recorded as checks** (`feedback_repeat_mistakes_ledger` memory, at the
+  user's request): an invented pytest flag read as a run; a test deriving its expectation from the
+  constant it guards (passed with the lag at 0 -- caught by mutating the constant); an NDTV probe
+  with plain `requests` where the repo uses curl_cffi; a weekend inference run writing Sunday rows
+  (deleted); a "failure" caused by editing a file mid-pytest (`inspect.getsource` line drift).
+- **Gates**: see the commit for final counts. Negative controls: parity test (2/3 red pre-fix),
+  column-set test (red naming exactly the two columns), duration-wrapper guard, nifty guards
+  (each rule mutated), deep-history lag (red at 0 and 30).
+
 ## 2026-09-12 -- factor_edge was grading degenerate panels: every USABLE verdict it ever produced was an artifact
 
 - **Scope**: user asked to refresh all jobs/trainings and then decide a plan from the latest
