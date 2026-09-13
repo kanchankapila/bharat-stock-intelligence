@@ -82,6 +82,63 @@ class TestComputeInsiderFeatures:
         assert list(result.columns) == ['symbol', 'insider_buy_pct_90d']
 
 
+class TestRealVendorTransactionStrings:
+    """AF-20260913-03: BUY_TYPES matched by exact set membership, and NSE's real strings are
+    'ACQUISITION -  MARKET PURCHASE' / 'DISPOSAL -  MARKET SALE' (18.7k rows each), so only the
+    1,545 Tickertape BUY/SELL rows ever counted. Everything else -- ESOP, pledge, gift -- fell
+    through to buy=0, and 0 on this scale means 'maximum insider selling'."""
+
+    def _run(self, monkeypatch, *rows):
+        data = _trades(*rows)
+        monkeypatch.setattr('src.server.insider_features.read_df', lambda sql, params=(): data)
+        res = compute_insider_features('2026-06-22')
+        return dict(zip(res['symbol'], res['insider_buy_pct_90d']))
+
+    def test_nse_market_purchase_counts_as_buy(self, monkeypatch):
+        out = self._run(monkeypatch,
+                        {'symbol': 'A', 'typeOfTransaction': 'Acquisition -  Market Purchase', 'quantity': 900},
+                        {'symbol': 'A', 'typeOfTransaction': 'Disposal -  Market Sale', 'quantity': 100})
+        assert out['A'] == pytest.approx(0.9)
+
+    def test_non_market_activity_is_neutral_not_max_selling(self, monkeypatch):
+        out = self._run(monkeypatch,
+                        {'symbol': 'B', 'typeOfTransaction': 'Acquisition -  ESOP', 'quantity': 5000},
+                        {'symbol': 'B', 'typeOfTransaction': 'Pledge -  Creation of Pledge', 'quantity': 5000})
+        assert out['B'] == pytest.approx(0.5)
+
+    def test_duplicated_vendor_rows_count_once(self, monkeypatch):
+        trade = {'symbol': 'C', 'acquirerName': 'x', 'typeOfTransaction': 'Market Purchase',
+                 'quantity': 100, 'date_iso': '2026-06-01'}
+        sell = {'symbol': 'C', 'acquirerName': 'y', 'typeOfTransaction': 'Market Sale',
+                'quantity': 100, 'date_iso': '2026-06-02'}
+        out = self._run(monkeypatch, trade, dict(trade), dict(trade), sell)
+        assert out['C'] == pytest.approx(0.5)
+
+
+class TestInsiderHistory:
+    """feature_store needs a point-in-time series per date, not just today's value."""
+
+    def test_series_uses_disclosure_lag_window_and_neutral_default(self):
+        from src.server.insider_features import insider_buy_pct_series, DISCLOSURE_LAG_DAYS
+        trades = _trades(
+            {'acquirerName': 'p', 'typeOfTransaction': 'Market Purchase', 'quantity': 300, 'date_iso': '2026-01-05'},
+        )
+        dates = pd.to_datetime(['2026-01-06', '2026-01-05'] + [
+            str((pd.Timestamp('2026-01-05') + pd.Timedelta(days=DISCLOSURE_LAG_DAYS)).date()),
+            '2026-03-01', '2026-06-01'])
+        s = insider_buy_pct_series(trades, dates)
+        assert s.iloc[0] == 0.5 and s.iloc[1] == 0.5, "a trade must not be visible before it is disclosed"
+        assert s.iloc[2] == pytest.approx(1.0)
+        assert s.iloc[3] == pytest.approx(1.0)
+        assert s.iloc[4] == 0.5, "window is 90 days"
+
+    def test_empty_trades_give_neutral(self):
+        from src.server.insider_features import insider_buy_pct_series
+        dates = pd.to_datetime(['2026-01-05', '2026-01-06'])
+        s = insider_buy_pct_series(pd.DataFrame(), dates)
+        assert list(s) == [0.5, 0.5]
+
+
 class TestRunUsesLogicalTradingDate:
     """2026-08-01: run() targeted date.today() for its `UPDATE ... WHERE date = ?`, which
     silently wrote 0 rows whenever ml-daily-ops's step chain crossed midnight IST -- confirmed

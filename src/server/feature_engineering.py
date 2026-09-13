@@ -46,6 +46,50 @@ import ta
 
 from db_compat import connect, read_df, use_postgres, ConnWrapper
 from as_of import read_as_of_history, logical_write_floor
+from insider_features import insider_buy_pct_series
+
+# Quarterly results are usable only once published: SEBI allows 45 days after a quarter and 60
+# after Q4, and the deep tables are stamped at period END -- so a value becomes visible 60 days
+# later, never on the quarter's own date.
+DEEP_QUARTERLY_LAG_DAYS = 60
+# A quarterly value older than this (from its availability date) reads as missing, not current.
+DEEP_QUARTERLY_STALE_DAYS = 200
+
+
+def _asof_columns(index: pd.DatetimeIndex, df: pd.DataFrame, date_col: str, cols: list,
+                  lag_days: int = 0, tolerance_days: Optional[int] = None) -> pd.DataFrame:
+    """For each date in `index`, the latest row of `df` whose date_col + lag_days <= that date."""
+    out = pd.DataFrame(np.nan, index=index, columns=cols)
+    if df is None or df.empty:
+        return out
+    right = df[[date_col] + cols].copy()
+    right["_avail"] = pd.to_datetime(right[date_col], errors="coerce").astype("datetime64[ns]") \
+        + pd.Timedelta(days=lag_days)
+    right = right.dropna(subset=["_avail"]).sort_values("_avail")
+    for c in cols:
+        right[c] = pd.to_numeric(right[c], errors="coerce")
+    left = pd.DataFrame({"_d": pd.DatetimeIndex(index).astype("datetime64[ns]"),
+                         "_pos": np.arange(len(index))}).sort_values("_d")
+    m = pd.merge_asof(left, right[["_avail"] + cols], left_on="_d", right_on="_avail",
+                      direction="backward",
+                      tolerance=pd.Timedelta(days=tolerance_days) if tolerance_days else None)
+    out[cols] = m.sort_values("_pos")[cols].to_numpy()
+    return out
+
+
+def _quarterly_yoy(q: pd.DataFrame, value_col: str) -> pd.DataFrame:
+    """Growth vs the same quarter a year earlier (period_end 350-380 days back), abs denominator."""
+    q = q[["period_end", value_col]].copy()
+    q["period_end"] = pd.to_datetime(q["period_end"]).astype("datetime64[ns]")
+    q[value_col] = pd.to_numeric(q[value_col], errors="coerce")
+    q = q.dropna().sort_values("period_end")
+    prev = q.rename(columns={"period_end": "prev_end", value_col: "prev_val"})
+    q["_target"] = q["period_end"] - pd.Timedelta(days=365)
+    m = pd.merge_asof(q.sort_values("_target"), prev, left_on="_target", right_on="prev_end",
+                      direction="nearest", tolerance=pd.Timedelta(days=15))
+    ok = m["prev_val"].notna() & (m["prev_val"] != 0)
+    m["growth"] = np.where(ok, (m[value_col] - m["prev_val"]) / m["prev_val"].abs(), np.nan)
+    return m[["period_end", "growth"]]
 from sqlalchemy.exc import OperationalError, PendingRollbackError, InterfaceError
 
 
@@ -339,16 +383,12 @@ class FeatureEngineer:
         of history) -- stamping today's fundamentals onto months-old dates. fundamentals_history
         accumulates a daily as-of trail (fundamentals_snapshot.py); merge_asof pulls, for each
         date, only the snapshot actually known by then. Dates before history coverage begins
-        get NaN, not a leaked current value. fundamentals_history has no trailing_pe column,
-        so it's derived from the point-in-time earnings_yield instead.
+        get NaN, not a leaked current value.
         """
         hist = read_as_of_history(
             "fundamentals_history", symbol,
             ["return_on_equity", "debt_to_equity", "operating_margins",
-             "piotroski_f_score", "earnings_yield",
-             # Gap #4: valuation/growth fields present in fundamentals_history but never
-             # merged (only the five legacy columns were requested before).
-             "price_to_book", "revenue_growth", "earnings_growth"],
+             "piotroski_f_score"],
         )
         if hist.empty:
             return feat
@@ -368,23 +408,8 @@ class FeatureEngineer:
         feat["debt_to_equity"] = merged["debt_to_equity"]
         feat["op_margins"]     = merged["operating_margins"]
         feat["piotroski_f"]    = merged["piotroski_f_score"]
-        # fundamentals_history.earnings_yield mirrors stock_fundamentals.earnings_yield's
-        # convention: a PERCENTAGE (e.g. 4.46 meaning 4.46%, so trailing_pe = 100/ey), not a
-        # decimal fraction. The old code's "earnings_yield" feature was a decimal 1/pe
-        # (~0.02-0.10); ey/100 reproduces that same scale so historical feature_store rows
-        # stay comparable to rows written under this fix.
-        ey = merged["earnings_yield"]
-        feat["earnings_yield"] = ey / 100.0
-        feat["trailing_pe"] = np.where(ey.notna() & (ey != 0), 100.0 / ey, np.nan)
-        # Gap #4 follow-up (2026-08-24): price_to_book/revenue_growth/earnings_growth were
-        # added to the read list above during the Gap #4 fix but never assigned -- fetched
-        # every run and silently dropped, leaving the feature_store columns permanently
-        # NULL (the same fetched-but-dead shape as the flow columns). revenue_growth /
-        # earnings_growth arrive as decimal fractions (RELIANCE 2026-08-21: 0.297 / -0.224);
-        # price_to_book is a plain ratio (~1.96).
-        feat["price_to_book"] = merged["price_to_book"]
-        feat["rev_growth"]    = merged["revenue_growth"]
-        feat["eps_growth"]    = merged["earnings_growth"]
+        # trailing_pe/earnings_yield/price_to_book/rev_growth/eps_growth moved to
+        # _merge_deep_history (AF-20260913-02): fundamentals_history only starts 2026-06-30.
         return feat
 
     # Max trading days a forward-filled macro/sentiment value may carry before it reads as
@@ -464,8 +489,9 @@ class FeatureEngineer:
     # encode (the same NEVER_FILL doctrine densify_feature_matrix.py applies to the
     # technical_signals side of the same tables).
     FLOW_COLUMNS = (
-        "delivery_pct", "pcr_oi", "pcr_vol", "iv_rank", "iv_skew",
-        "insider_buy_pct_90d", "block_deal_net_qty",
+        # delivery_pct/insider_buy_pct_90d come from _merge_deep_history (AF-20260913-02)
+        "pcr_oi", "pcr_vol", "iv_rank", "iv_skew",
+        "block_deal_net_qty",
         "call_wall_dist_pct", "put_wall_dist_pct", "near_expiry_gamma",
         "sector_ret_5d", "sector_ret_21d",
     )
@@ -654,6 +680,78 @@ class FeatureEngineer:
             feat["iv_skew"] = skew
         return feat
 
+    def _merge_deep_history(self, feat: pd.DataFrame, symbol: str) -> pd.DataFrame:
+        """Valuation/growth/delivery/insider inputs from tables with years of history.
+
+        Their previous sources (fundamentals_history, from 2026-06-30; technical_signals' live
+        flow columns) cover only recent months, so a symbol's DL training history held 0 for
+        these inputs and real values appeared only at the end (AF-20260913-02). ONE source per
+        input for EVERY date -- a symbol the deep table lacks reads NaN throughout rather than
+        switching definition when a shallow source starts.
+
+        Sources were chosen by agreement with the values they replace, measured 2026-09-13:
+          trailing_pe/earnings_yield  close / trendlyne_eps_history.eps_ttm (consolidated TTM;
+                                      Spearman 0.967 vs 100/ey). NOT trendlyne_pe_history.pe_ttm:
+                                      it is standalone-based (ADANIPORTS 153 vs 29 consolidated).
+          price_to_book               trendlyne_pb_history (0.869, median ratio 0.99)
+          eps_growth / rev_growth     dalalos quarterly, same quarter last year (0.917 / 0.899)
+          delivery_pct                nse_universe_history bhavcopy (0.992)
+          insider_buy_pct_90d         insider_trades, open-market only, 7-day disclosure lag
+        """
+        idx = feat.index
+        start = idx.min()
+        s = lambda days: (start - pd.Timedelta(days=days)).strftime("%Y-%m-%d")
+
+        closes = read_df(
+            "SELECT date, close FROM stock_ohlcv WHERE symbol=? AND date>=? "
+            "AND COALESCE(is_suspect,0)=0 ORDER BY date", (symbol, s(0)))
+        close = _asof_columns(idx, closes, "date", ["close"], tolerance_days=1)["close"]
+
+        eps = read_df("SELECT date, eps_ttm FROM trendlyne_eps_history WHERE symbol=? AND date>=? "
+                      "ORDER BY date", (symbol, s(500)))
+        eps_ttm = _asof_columns(idx, eps, "date", ["eps_ttm"], lag_days=DEEP_QUARTERLY_LAG_DAYS,
+                                tolerance_days=DEEP_QUARTERLY_STALE_DAYS)["eps_ttm"]
+        nonzero = eps_ttm.notna() & (eps_ttm != 0) & close.notna() & (close != 0)
+        feat["trailing_pe"] = np.where(nonzero, close / eps_ttm.where(nonzero, 1.0), np.nan)
+        feat["earnings_yield"] = np.where(nonzero, eps_ttm / close.where(nonzero, 1.0), np.nan)
+
+        dal = read_df(
+            "SELECT * FROM dalalos_financial_trends_history WHERE symbol=? "
+            "AND period_type='quarterly' AND period_end>=? ORDER BY period_end", (symbol, s(900)))
+        if not dal.empty and "statement_type" in dal:
+            dal = (dal.assign(_c=(dal["statement_type"] != "consolidate").astype(int))
+                      .sort_values(["period_end", "_c"]).drop_duplicates("period_end"))
+        if dal.empty:
+            feat["rev_growth"] = np.nan
+            feat["eps_growth"] = np.nan
+        else:
+            feat["rev_growth"] = _asof_columns(
+                idx, dal, "period_end", ["yoy_revenue_growth"], lag_days=DEEP_QUARTERLY_LAG_DAYS,
+                tolerance_days=DEEP_QUARTERLY_STALE_DAYS)["yoy_revenue_growth"].to_numpy()
+            feat["eps_growth"] = _asof_columns(
+                idx, _quarterly_yoy(dal, "eps"), "period_end", ["growth"],
+                lag_days=DEEP_QUARTERLY_LAG_DAYS,
+                tolerance_days=DEEP_QUARTERLY_STALE_DAYS)["growth"].to_numpy()
+
+        pb = read_df("SELECT date, pb_ratio FROM trendlyne_pb_history WHERE symbol=? AND date>=? "
+                     "ORDER BY date", (symbol, s(10)))
+        feat["price_to_book"] = _asof_columns(idx, pb, "date", ["pb_ratio"], tolerance_days=5)["pb_ratio"].to_numpy()
+
+        dv = read_df("SELECT date, deliv_pct FROM nse_universe_history WHERE symbol=? AND series='EQ' "
+                     "AND date>=? ORDER BY date", (symbol, s(0)))
+        if dv.empty:
+            feat["delivery_pct"] = np.nan
+        else:
+            dv["date"] = pd.to_datetime(dv["date"]).astype("datetime64[ns]")
+            dv = dv.drop_duplicates("date").set_index("date")["deliv_pct"]
+            feat["delivery_pct"] = pd.to_numeric(dv, errors="coerce").reindex(
+                pd.DatetimeIndex(idx).astype("datetime64[ns]")).to_numpy()
+
+        trades = read_df('SELECT "acquirerName", "typeOfTransaction", quantity, date_iso '
+                         "FROM insider_trades WHERE symbol=? AND date_iso>=?", (symbol, s(120)))
+        feat["insider_buy_pct_90d"] = insider_buy_pct_series(trades, idx).to_numpy()
+        return feat
+
     def _merge_market_context(self, feat: pd.DataFrame) -> pd.DataFrame:
         """Market-level regime context: NIFTY50 P/E (index_valuation) and the
         advance/decline ratio (market_breadth).
@@ -728,6 +826,7 @@ class FeatureEngineer:
             # Gap #4: options-flow/smart-money/sector + market context -- never merged
             # before, so dl_engine trained on zeros for every one of these columns.
             feat = self._merge_flow_features(feat, symbol)
+            feat = self._merge_deep_history(feat, symbol)
             feat = self._merge_market_context(feat)
 
             # feature_store persists RAW values -- no scaling here. Until 2026-09-10 a
@@ -1141,6 +1240,7 @@ def _compute_symbol_unscaled(args: tuple):
         # Gap #4: same exogenous merges as process_symbol -- workers must produce the
         # identical unscaled frame or the two write paths diverge.
         feat = fe._merge_flow_features(feat, symbol)
+        feat = fe._merge_deep_history(feat, symbol)
         feat = fe._merge_market_context(feat)
         return (symbol, feat)
     except Exception as e:
