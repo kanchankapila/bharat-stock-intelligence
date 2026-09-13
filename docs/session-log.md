@@ -66,7 +66,7 @@ Historical record, split out of CLAUDE.md on 2026-08-11 (it was 64% of that file
   (RELIANCE `sma200` 1,386 served vs 0.949 trained). Inference now reproduces the exact fit
   (earliest 80% of target-bearing rows, via `fit_mask`); parity 0.0 on 43 shared dates, 4 symbols.
   Full `--mode infer` timed at 314s. Also found: production served **v3** through 09-11, not v4.
-- **The fix exposed the model (AF-20260913-05, needs a user decision before Mon 21:30 IST).**
+- **The fix exposed the model (AF-20260913-05) -- user decided to PAUSE the `dl` weight (`df7bb3f6`).**
   Same inputs, 250 symbols: v5 (active) 40% of predictions <0.01 or >0.99 served and 23% on its
   own training window; clipping inputs barely helps (38%) -- the model, not the inputs. v3 2.8%.
   v5 passed the gate at validation `frac_saturated` 0.32 < 0.5. The planned revert of v5 was NOT
@@ -97,7 +97,21 @@ Historical record, split out of CLAUDE.md on 2026-08-11 (it was 64% of that file
   constant it guards (passed with the lag at 0 -- caught by mutating the constant); an NDTV probe
   with plain `requests` where the repo uses curl_cffi; a weekend inference run writing Sunday rows
   (deleted); a "failure" caused by editing a file mid-pytest (`inspect.getsource` line drift).
-- **Gates**: see the commit for final counts. Negative controls: parity test (2/3 red pre-fix),
+- **`dl` weight paused to 0.0 in all five regimes** (user chose it over keeping v5 or rolling back
+  to v3). Freed weight split over ml/confluence/technical, breakout pinned, key kept. Measured on
+  the 09-11 panel: rank-corr 0.895 vs the old blend, top-50 overlap 19/50 (simplified re-blend that
+  reproduces stored `unified_score` at corr 0.76 -- indicative). **Population boundary: `unified_score`
+  from 2026-09-14 has no dl contribution.** Restore only from a promoted model's realized
+  `factor_edge_history` reading. v5 keeps writing `dl_score` as a reporting column.
+- **Commits**: `86d3da6f` (DL scaling), `5f559993` (credit skew, durations, index_valuation, AF rows,
+  rules), `df7bb3f6` (dl pause + measurement.md boundary), `ff8e89e5` (AF-05 decision);
+  branch `feat/deep-history-features` `52ad62fb` (NOT for merge alone). Services restarted:
+  `ml-api` (dl_engine), `bharat-server` (queues.ts/dl.jobs.ts).
+- **Gates**: `tsc --noEmit` clean; `vitest` 1317 passed / 41 skipped; `pytest` 2729 passed / 249
+  skipped / 4 failed -- all 4 in `test_url_explorer_ingest.py`, another session's in-flight files
+  edited during the run (10/10 in isolation); `test_unified_ranker*.py` 136 passed after the weight
+  change. An earlier run's single failure was `inspect.getsource` line drift from editing
+  `ml_ensemble.py` mid-run, not a defect. Negative controls: parity test (2/3 red pre-fix),
   column-set test (red naming exactly the two columns), duration-wrapper guard, nifty guards
   (each rule mutated), deep-history lag (red at 0 and 30).
 
