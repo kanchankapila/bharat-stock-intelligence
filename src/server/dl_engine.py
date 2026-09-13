@@ -499,6 +499,30 @@ def fresh_model_like(model: "BiLSTMModel") -> "BiLSTMModel":
     return BiLSTMModel(n_features=width).to(DEVICE)
 
 
+SATURATION_EPS = 0.01
+
+
+def serve_saturation(model, symbols, n_features: int) -> float:
+    """Fraction of `model`'s served prob_up_5d within SATURATION_EPS of 0 or 1, on each symbol's
+    latest inference window built by the production loader.
+
+    walk_forward_validate's frac_saturated describes the FOLD models -- fresh copies trained 30
+    epochs each -- not the model that gets promoted. v5 read 0.32 there and 40% when served
+    (AF-20260913-10), so the gate needs a reading of the final model on the inputs it will see.
+    NaN when no symbol yields a window, so a missing reading can never pass as 0.
+    """
+    probs = []
+    for sym in symbols:
+        X, _ = load_inference_sequence(sym, n_features=n_features)
+        if X is None:
+            continue
+        probs.append(float(_predict_batch(model, X)["dir_5d"][0, 1]))
+    if not probs:
+        return float("nan")
+    p = np.asarray(probs)
+    return float(np.mean((p <= SATURATION_EPS) | (p >= 1 - SATURATION_EPS)))
+
+
 def walk_forward_validate(model: BiLSTMModel, X: np.ndarray, y5: np.ndarray,
                            y15: np.ndarray, yr5: np.ndarray, dates: Sequence,
                            *, horizon_days: int = LABEL_HORIZON_DAYS,
@@ -579,7 +603,6 @@ def walk_forward_validate(model: BiLSTMModel, X: np.ndarray, y5: np.ndarray,
             aucs.append(roc_auc_score(y_te, prob_up))
         all_probs.extend(prob_up.tolist())
 
-    SATURATION_EPS = 0.01
     frac_saturated = (
         float(np.mean([(p <= SATURATION_EPS or p >= 1 - SATURATION_EPS) for p in all_probs]))
         if all_probs else np.nan
@@ -827,6 +850,11 @@ def train_lstm(version: int = 1) -> Dict:
 
     torch.save(model.state_dict(), path)
     print(f"[DL] Model saved to {path}")
+    try:
+        metrics["serve_frac_saturated"] = serve_saturation(model, val_symbols, N_FEATURES)
+        print(f"[DL] Served saturation of the final model: {metrics['serve_frac_saturated']:.3f}")
+    except Exception as e:
+        print(f"[DL] Served-saturation check failed (gate falls back to folds): {e}", file=sys.stderr)
     return metrics
 
 
@@ -1064,12 +1092,19 @@ def _promote_lstm_version(new_version: int, metrics: Dict) -> bool:
     # day, then barely varied day-to-day -- a real regression this gate did not catch. 0.5 is a
     # deliberately generous ceiling (well above the 19% baseline, well below the 70% regression)
     # so a model with a genuinely high-conviction minority of predictions isn't blocked.
-    MAX_SATURATION_FRAC = 0.5
-    frac_saturated = metrics.get("frac_saturated")
-    if frac_saturated is not None and not (isinstance(frac_saturated, float) and np.isnan(frac_saturated)) \
-            and frac_saturated > MAX_SATURATION_FRAC:
+    #
+    # Lowered 0.5 -> 0.25 on 2026-09-13 (AF-20260913-10): v5 was promoted at 0.32 and, once its
+    # inference inputs were correct, pinned 40% of served predictions. 0.25 still passes the 19%
+    # healthy baseline above. The gate also reads serve_frac_saturated -- the FINAL model on its
+    # served windows -- because the fold models it otherwise measures are not the promoted model.
+    MAX_SATURATION_FRAC = 0.25
+    readings = [metrics.get(k) for k in ("frac_saturated", "serve_frac_saturated")]
+    readings = [float(v) for v in readings if v is not None and np.isfinite(float(v))]
+    frac_saturated = max(readings) if readings else None
+    if frac_saturated is not None and frac_saturated > MAX_SATURATION_FRAC:
         print(f"[DL] REFUSED: v{new_version} frac_saturated={frac_saturated:.2f} exceeds "
-              f"{MAX_SATURATION_FRAC} -- {frac_saturated:.0%} of walk-forward predictions are "
+              f"{MAX_SATURATION_FRAC} -- {frac_saturated:.0%} of predictions (worst of the "
+              f"walk-forward folds and the final model served) are "
               f"within 1% of 0 or 1, regardless of roc_auc={new_auc:.4f}. Weights saved to "
               f"lstm_v{new_version}.pt but NOT activated.")
         return False

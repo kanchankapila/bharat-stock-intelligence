@@ -136,8 +136,56 @@ class TestSaturationGate:
         monkeypatch.setattr(dle, "MODEL_DIR", tmp_path)
         monkeypatch.setattr(dle, "CONFIG_PATH", tmp_path / "dl_model_config.json")
 
-        promoted = dle._promote_lstm_version(1, {"roc_auc": 0.65, "frac_saturated": 0.5})
+        # ceiling lowered 0.5 -> 0.25 on 2026-09-13 (AF-20260913-10): v5 passed at 0.32 and served 40%
+        promoted = dle._promote_lstm_version(1, {"roc_auc": 0.65, "frac_saturated": 0.25})
         assert promoted is True, "exactly at the ceiling should not be blocked (only strictly above it)"
+
+    def test_v5_validation_saturation_is_now_refused(self, monkeypatch, tmp_path):
+        monkeypatch.setattr(dle, "MODEL_DIR", tmp_path)
+        monkeypatch.setattr(dle, "CONFIG_PATH", tmp_path / "dl_model_config.json")
+        promoted = dle._promote_lstm_version(1, {"roc_auc": 0.65, "frac_saturated": 0.32})
+        assert promoted is False, "v5's 0.32 validation saturation cleared the old 0.5 bar"
+
+    def test_served_saturation_of_the_final_model_blocks_even_when_folds_look_fine(self, monkeypatch, tmp_path):
+        """The fold models are fresh 30-epoch copies, not the model being promoted. v5's folds
+        read 0.32 while the final model served 40% -- gate on the worse of the two."""
+        monkeypatch.setattr(dle, "MODEL_DIR", tmp_path)
+        monkeypatch.setattr(dle, "CONFIG_PATH", tmp_path / "dl_model_config.json")
+        promoted = dle._promote_lstm_version(
+            1, {"roc_auc": 0.65, "frac_saturated": 0.10, "serve_frac_saturated": 0.40})
+        assert promoted is False
+
+    def test_nan_served_saturation_falls_back_to_the_fold_figure(self, monkeypatch, tmp_path):
+        monkeypatch.setattr(dle, "MODEL_DIR", tmp_path)
+        monkeypatch.setattr(dle, "CONFIG_PATH", tmp_path / "dl_model_config.json")
+        promoted = dle._promote_lstm_version(
+            1, {"roc_auc": 0.65, "frac_saturated": 0.10, "serve_frac_saturated": float("nan")})
+        assert promoted is True
+
+
+class TestServeSaturation:
+    def test_measures_the_given_model_on_served_windows(self, monkeypatch):
+        seen = []
+
+        def fake_seq(sym, n_features=None):
+            seen.append((sym, n_features))
+            return (np.zeros((1, 3, 2), dtype=np.float32), "2026-09-11") if sym != "EMPTY" else (None, None)
+
+        probs = iter([0.995, 0.5, 0.004, 0.6])
+
+        def fake_predict(model, X):
+            p = next(probs)
+            return {"dir_5d": np.array([[1 - p, p]])}
+
+        monkeypatch.setattr(dle, "load_inference_sequence", fake_seq)
+        monkeypatch.setattr(dle, "_predict_batch", fake_predict)
+        frac = dle.serve_saturation(object(), ["A", "B", "EMPTY", "C", "D"], n_features=85)
+        assert frac == 0.5
+        assert all(n == 85 for _, n in seen), "must feed the model its own width"
+
+    def test_no_windows_is_nan_not_zero(self, monkeypatch):
+        monkeypatch.setattr(dle, "load_inference_sequence", lambda s, n_features=None: (None, None))
+        assert np.isnan(dle.serve_saturation(object(), ["A"], n_features=85))
 
 
 class TestStalenessOverride:
