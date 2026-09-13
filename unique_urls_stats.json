@@ -1,0 +1,7 @@
+{
+  "input_lines": 9837,
+  "unique_urls": 3103,
+  "duplicates_removed": 6367,
+  "blank_or_non_url_lines": 367,
+  "verified_unique": true
+}
