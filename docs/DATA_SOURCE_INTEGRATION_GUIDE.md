@@ -795,9 +795,20 @@ python -m url_explorer.ingest --find-alternates "pcr,delivery_pct" --exclude <fa
 
 `docs/url_explorer/consolidation_report_2026-09-13.md` additionally lists the 14 feature targets
 with no alternate provider and the 67 templates with zero HTTP-200 evidence. Consolidation itself
-never hits the network; exploration fetching/profiling/correlation stays with `url_explorer.explore`.
-Current fetch coverage: 251 templates fetched+profiled once on 2026-08-03, 267 covered by external
-evidence only, 567 never fetched.
+never hits the network; exploration fetching/profiling/correlation stays with `url_explorer.explore`
+and the polite sample-fetch pass `url_explorer.fetch_pass` (browser headers per
+`urls-explorer/extract_urls.py`, per-host delays, per-host failure caps, transport-only breaker,
+resumable via the no-fetch-history selection).
+
+Fetch coverage after the 2026-09-13 pass (490 measured attempts): **51 endpoints verified alive
+by our own fetch** (www.moneycontrol widget family 32, MarketsMojo 7, trendlyne 3, api.moneycontrol 2,
+etapi 2, mfapps/stockedge/niftytrader/analyze.tickertape/etpwaapi singles), **~380 measured
+404/403** — dominated by `ai_endpoint_memory.json`'s synthetic cross-provider path mashups
+(e.g. `nseindia.com/api/NextApi/*`, `bselivefeeds.../price-forecast`), now provably phantom —
+**~363 skipped** on capped hosts (need per-site session context or value rendering),
+7 id-rendered-only, 3 POST families. `url_field_correlations` remains near-empty: the alive
+new endpoints are per-stock snapshots, so cross-sectional IC needs the market-scope screens
+(kayal/MC-scanner families — POST/pagination support is the next build).
 
 #### Concrete screener-request count
 

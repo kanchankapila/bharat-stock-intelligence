@@ -1,5 +1,6 @@
 import importlib, json, os, sys, uuid
 import pytest
+from urllib.parse import urlsplit
 SERVER_DIR = os.path.join(os.path.dirname(__file__), "..")
 sys.path.insert(0, SERVER_DIR)
 from url_explorer.normalizer import EndpointTemplate, ParamSpec
@@ -140,6 +141,107 @@ def test_record_health(_db):
     row = db_compat.query_one("SELECT last_status, last_run_at FROM url_endpoints")
     assert row["last_status"].startswith("fail")
     assert row["last_run_at"]
+
+def test_select_targets_exclusions(_db):
+    store, _ = _db
+    import url_explorer.fetch_pass as fp
+    def _ep(tpl, host):
+        return EndpointTemplate(template=tpl, host=host, path_skeleton="/s/",
+                                query_keys=["x"], method="GET", params=[], urls=[tpl])
+    clean = store.upsert_endpoint(_ep("https://clean/s/?x", "clean"))
+    fetched = store.upsert_endpoint(_ep("https://fetched/s/?x", "fetched"))
+    dead = store.upsert_endpoint(_ep("https://dead/s/?x", "dead"))
+    store.insert_fetch(fetched, "u", "{}", 200, 5, True, 10, "{}", None)
+    store.update_endpoint_meta(dead, provider=None, category=None, description=None,
+                               feature_targets=[], sources=[], refs=[],
+                               verified={"n": 2, "ok": 0, "non200": {"403": 2}, "errors": 0})
+    targets, excluded = fp.select_targets()
+    templates = [t for _, t, _ in targets]
+    assert "https://clean/s/?x" in templates
+    assert "https://fetched/s/?x" not in templates
+    assert "https://dead/s/?x" not in templates
+    assert excluded == 1
+
+def test_make_fetch_fn_retries_transport_then_succeeds(_db):
+    import url_explorer.fetch_pass as fp
+    calls = []
+    def flaky_once(url):
+        calls.append(url)
+        if len(calls) == 1:
+            return 503, "", "text/html"
+        return 200, "{\"a\": 1}", "application/json"
+    fetch = fp.make_fetch_fn(retries=2, once=flaky_once)
+    status, body, _ = fetch("https://x/y")
+    assert status == 200 and len(calls) == 2
+
+def test_make_fetch_fn_does_not_retry_definitive_404(_db):
+    import url_explorer.fetch_pass as fp
+    calls = []
+    def once(url):
+        calls.append(url)
+        return 404, "", "text/html"
+    fetch = fp.make_fetch_fn(retries=2, once=once)
+    status, _, _ = fetch("https://x/y")
+    assert status == 404 and len(calls) == 1
+
+def test_unwrap_payload(_db):
+    import url_explorer.fetch_pass as fp
+    assert fp.unwrap_payload("callback({\"a\": 1});") == "{\"a\": 1}"
+    assert fp.unwrap_payload("﻿{\"a\": 1}") == "{\"a\": 1}"
+    html = "<html><script id=\"__NEXT_DATA__\" type=\"application/json\">{\"b\": 2}</script></html>"
+    assert fp.unwrap_payload(html) == "{\"b\": 2}"
+    assert fp.unwrap_payload("{\"c\": 3}") == "{\"c\": 3}"
+
+def test_execute_pass_caps_failing_host(_db):
+    store, _ = _db
+    import url_explorer.fetch_pass as fp
+    plan = [{"endpoint_id": x, "template": f"https://dead/s{x}/?x",
+             "sample": f"https://dead/s{x}/?x"} for x in range(3)]
+    def fail_fetch(url):
+        return 404, "", "text/html"
+    summary = fp.execute_pass(plan, fail_fetch, {}, set(), delay_base=0,
+                              host_fail_cap=2, progress_every=1000)
+    assert summary["fail"] == 2
+    assert summary["skipped_host_cap"] == 1
+    assert summary["capped_hosts"] == ["dead"]
+
+def test_execute_pass_populates_fetch_fields_correlations(_db):
+    store, _ = _db
+    import url_explorer.fetch_pass as fp
+    universe = {f"S{i}" for i in range(40)}
+    eids = []
+    for tpl in ("https://a-scan/scan/?sym&val", "https://b-scan/scan/?sym&val"):
+        ep = EndpointTemplate(template=tpl, host=urlsplit(tpl).netloc,
+                              path_skeleton="/scan/", query_keys=["sym", "val"],
+                              method="GET", params=[], urls=[tpl])
+        eids.append(store.upsert_endpoint(ep))
+
+    def fake_fetch(url):
+        if url.startswith("https://b-scan/"):
+            return 503, "", "text/html"
+        body = json.dumps({"rows": [{"sym": f"S{i}", "val": float(i) * 1.5}
+                                    for i in range(25)]})
+        return 200, body, "application/json"
+
+    returns = {"trailing_ret_5d": {f"S{i}": i / 500 for i in range(25)}}
+    plan = [{"endpoint_id": eid, "template": tpl, "sample": tpl}
+            for eid, tpl in zip(eids, ("https://a-scan/scan/?sym&val",
+                                       "https://b-scan/scan/?sym&val"))]
+    summary = fp.execute_pass(plan, fake_fetch, returns, universe, delay_base=0)
+    assert summary["ok"] == 1 and summary["fail"] == 1
+    assert summary["fields"] > 0 and summary["correlations"] >= 1
+
+    import db_compat
+    assert db_compat.query_scalar("SELECT COUNT(*) FROM url_fetches") == 2
+    corr = db_compat.query_all(
+        "SELECT field_path, target, n FROM url_field_correlations")
+    assert any(c["n"] == 25 for c in corr)
+    ok_row = db_compat.query_one(
+        "SELECT last_status FROM url_endpoints WHERE template LIKE 'https://a-scan/%'")
+    assert ok_row["last_status"] == "ok"
+    fail_row = db_compat.query_one(
+        "SELECT last_status FROM url_endpoints WHERE template LIKE 'https://b-scan/%'")
+    assert fail_row["last_status"].startswith("fail")
 
 def test_split_url_line_repairs_and_splits():
     from url_explorer.ingest import split_url_line
