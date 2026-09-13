@@ -769,11 +769,35 @@ large captured URL corpus. A faithful migration must carry both layers:
 | `updated_urls.json` / `updated_urls_verified.json` | Updated/verified subset | 919 rows each | Supplemental subset, not proof that the other 1,064 raw rows are absent |
 | `et_screeners.json` | ETNow POST request captures | 438 request bodies; one failed source-index capture | Exact `screenerId` + `queryCondition` definitions |
 | `et-marketstats-post-requests.json` | ET Marketstats POST request captures | 91 request bodies | Exact technical/intraday operand payloads; combine with four extras in `etMarketstats.ts` |
+| `unique_urls.txt` / `unique_urls_stats.json` | Deduplicated merged corpus (all captures) | 3,103 unique URLs of 9,837 lines | Input to the consolidated catalog (Section 9.2); loader repairs 15 malformed `https:////` URLs and splits whitespace-concatenated lines |
 
 `url_explorer.normalizer` groups by host, path structure, and query-key set. The original malformed
 corpus produces 250 structural templates, matching the historical field report. Running the same
 normalizer after canonical URL repair produces 248 templates because malformed-host/path variants
 and three duplicate URLs converge. Do not treat that reduction as lost coverage.
+
+### 9.2 Consolidated endpoint catalog (2026-09-13)
+
+`src/server/url_explorer/ingest.py` consolidates every artifact above (plus
+`ai_endpoint_memory.json`) into the Postgres `url_endpoints` table — **830 endpoint templates**,
+deduped by structural key (host + path-segment shape + query-key set). Each row carries provider,
+category, description, `feature_targets_json` (harmonized field names — the key that makes
+alternate-source lookup possible), `sources_json`, `refs_json` (EP-xxxx / registry ids), and
+`verified_json` (external per-URL HTTP evidence, deliberately separate from the `last_run_at` /
+`last_status` columns that only our own fetches write). Dry-run by default; `--apply` writes;
+`--catalog <datasource_catalog.md>` ingests external verification evidence.
+
+Triage lookup when a source stops returning data (run from `src/server`):
+
+```powershell
+python -m url_explorer.ingest --find-alternates "pcr,delivery_pct" --exclude <failing-host>
+```
+
+`docs/url_explorer/consolidation_report_2026-09-13.md` additionally lists the 14 feature targets
+with no alternate provider and the 67 templates with zero HTTP-200 evidence. Consolidation itself
+never hits the network; exploration fetching/profiling/correlation stays with `url_explorer.explore`.
+Current fetch coverage: 251 templates fetched+profiled once on 2026-08-03, 267 covered by external
+evidence only, 567 never fetched.
 
 #### Concrete screener-request count
 

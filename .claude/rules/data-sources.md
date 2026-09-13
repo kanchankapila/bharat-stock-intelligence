@@ -215,3 +215,19 @@ Related failure shape, different cause: a vendor that answers but *rations* — 
 `trendlyne_waf_request_allowance_2026_08_17` in memory and `so_option_chain_fetcher.py`'s
 `resume_order()`. A cumulative request allowance also presents as "this source doesn't work",
 but no amount of asking helps there; rotation does.
+
+### Catalog-assisted alternate lookup (added 2026-09-13)
+
+The "grep the repo for an alternate source and probe that too" step is now a query. The
+consolidated catalog (`url_endpoints`, 830 endpoint templates — see `DATA_SOURCE_INTEGRATION_GUIDE.md`
+§9.2) carries harmonized feature-target names per endpoint; alternates for a failing source's
+DATA rank by target overlap, provider, and last-known health (run from `src/server`):
+
+```powershell
+python -m url_explorer.ingest --find-alternates "pcr,delivery_pct" --exclude <failing-host>
+```
+
+Results are candidates, not verdicts — the route-by-route probing and minimum-header discipline
+above still applies. A row whose `verified_json` shows zero HTTP-200 evidence is
+access-controlled-or-retired, not confirmed dead; one with a healthy `last_status` was live the
+last time `url_explorer` fetched it.
