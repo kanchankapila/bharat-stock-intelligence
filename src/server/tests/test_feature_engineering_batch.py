@@ -143,6 +143,7 @@ class TestBatchWrites:
         # Gap #4 exogenous merges hit technical_signals/nse_stocks/so_stock_oi_summary --
         # none of which exist in this fixture's sandbox. Stubbed like every other merge.
         fe._merge_flow_features = lambda feat, sym: feat
+        fe._merge_deep_history = lambda feat, sym: feat
         fe._merge_market_context = lambda feat: feat
 
         result = fe.process_symbol("TEST", con=mock_con)
@@ -214,6 +215,7 @@ class TestBatchWrites:
         # Gap #4 exogenous merges hit technical_signals/nse_stocks/so_stock_oi_summary --
         # none of which exist in this fixture's sandbox. Stubbed like every other merge.
         fe._merge_flow_features = lambda feat, sym: feat
+        fe._merge_deep_history = lambda feat, sym: feat
         fe._merge_market_context = lambda feat: feat
 
         result = fe.process_symbol("TATA", con=con)
@@ -307,6 +309,7 @@ class TestZeroRowsGuard:
             # Gap #4 exogenous merges need technical_signals etc.; stub so the write path
             # under test stays hermetic.
             fe._merge_flow_features = lambda feat, sym: feat
+            fe._merge_deep_history = lambda feat, sym: feat
             fe._merge_market_context = lambda feat: feat
             # Should not raise.
             fe.run_full_pipeline(symbols=["TATA"])
@@ -368,6 +371,7 @@ class TestRollbackAfterWriteFailure:
         with patch("src.server.feature_engineering.ProcessPoolExecutor", _FakeExecutor), \
              patch("src.server.feature_engineering.as_completed", lambda fs: list(fs)):
             fe._merge_flow_features = lambda feat, sym: feat
+            fe._merge_deep_history = lambda feat, sym: feat
             fe._merge_market_context = lambda feat: feat
             # BAD's write fails (caught + logged inside run_full_pipeline); GOOD's write must
             # still land -- the guard below would otherwise raise "wrote 0 feature rows".
@@ -435,6 +439,7 @@ class TestReconnectOnIdleConnectionDeath:
         with patch("src.server.feature_engineering.ProcessPoolExecutor", _FakeExecutor), \
              patch("src.server.feature_engineering.as_completed", lambda fs: list(fs)):
             fe._merge_flow_features = lambda feat, sym: feat
+            fe._merge_deep_history = lambda feat, sym: feat
             fe._merge_market_context = lambda feat: feat
             # Must not raise "wrote 0 feature rows" -- the retry on the reconnected
             # connection succeeds and the zero-rows guard never fires.
