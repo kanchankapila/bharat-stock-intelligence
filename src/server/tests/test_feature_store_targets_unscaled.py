@@ -58,6 +58,7 @@ def _run(symbol, con):
     fe._merge_macro = lambda feat: feat
     fe._merge_sentiment = lambda feat, sym: feat
     fe._merge_flow_features = lambda feat, sym: feat
+    fe._merge_block_deals = lambda feat, sym: feat
     fe._merge_market_context = lambda feat: feat
     return fe.process_symbol(symbol, con=con)
 

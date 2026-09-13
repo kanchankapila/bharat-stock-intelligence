@@ -107,7 +107,8 @@ _FEATURE_STORE_CONFLICT = (
             "obv_slope", "vwap", "vwap_dist_pct", "trend_1d", "trend_1w", "trend_1m",
             "mtf_alignment_score",
             "pcr_oi", "pcr_vol", "iv_rank", "iv_skew", "delivery_pct",
-            "insider_buy_pct_90d", "block_deal_net_qty",
+            "insider_buy_pct_90d", "block_deal_net_qty", "block_deal_value_cr",
+            "block_deal_net_qty_5d", "block_deal_value_cr_5d",
             "call_wall_dist_pct", "put_wall_dist_pct", "near_expiry_gamma", "max_pain",
             "sector_ret_5d", "sector_ret_21d",
             "nifty_pe", "advance_decline_ratio",
@@ -680,6 +681,77 @@ class FeatureEngineer:
             feat["iv_skew"] = skew
         return feat
 
+    def _merge_block_deals(self, feat: pd.DataFrame, symbol: str) -> pd.DataFrame:
+        """Block-deal smart-money features from block_deals (per-deal table of record).
+
+        Why this exists (2026-09-13): FLOW_COLUMNS.block_deal_net_qty was joined from
+        technical_signals, whose block_deal_* columns are stamped ONLY by
+        block_deal_fetcher.backfill_technical_signals() for that script's run date --
+        any symbol/day where that UPDATE didn't fire (fetcher skipped, or the symbol
+        had no technical_signals row) left feature_store NULL forever. Live
+        2026-09-13: feature_store.block_deal_net_qty had 877/2,674,984 non-null rows
+        (0.03%) while block_deals held 8,657 raw deals across 2,307 symbol/dates.
+
+        This merge reads block_deals DIRECTLY (the table of record) and aggregates
+        per day in SQL. Side derivation: trade_type ('buy'/'sell', the tickertape
+        source's 8,590 rows) wins; the NSE-source rows (67) carry session labels
+        instead, where block_deal_fetcher._parse_deal's rule applies -- "Session 1"
+        is the buy side. A deal with neither marker counts as sell qty (conservative:
+        unsigned volume still lands in value_cr_5d).
+
+        Columns:
+          * block_deal_net_qty   -- HOLE-FILL ONLY into the technical_signals join
+            (never clobbers a value the upstream copy supplied), exact-date as-of,
+            no ffill: a deal three days ago is not today's flow (NEVER_FILL).
+          * block_deal_value_cr  -- NEW; total traded value (cr) that day.
+            ml_ensemble already consumes this name (num('block_deal_value_cr', 0.0)),
+            which always fell back to its default because feature_store never had
+            the column.
+          * block_deal_net_qty_5d / block_deal_value_cr_5d -- trailing 5-session
+            sums over the feat index (min_count=1): aggregation over the event
+            series handles sparsity without fabricating stale daily values.
+        """
+        deals = read_df(
+            """SELECT date,
+                      SUM(CASE WHEN is_buy THEN qty ELSE 0 END)  AS buy_qty,
+                      SUM(CASE WHEN is_buy THEN 0 ELSE qty END)  AS sell_qty,
+                      SUM(CASE WHEN is_buy THEN qty ELSE -qty END) AS net_qty,
+                      SUM(value_cr)                              AS value_cr,
+                      COUNT(*)                                   AS deal_count
+               FROM (SELECT date, qty, value_cr,
+                            CASE WHEN LOWER(COALESCE(trade_type, '')) = 'buy'  THEN TRUE
+                                 WHEN LOWER(COALESCE(trade_type, '')) = 'sell' THEN FALSE
+                                 ELSE session LIKE 'Session 1'
+                            END AS is_buy
+                     FROM block_deals
+                     WHERE symbol = ? AND date >= ?) t
+               GROUP BY date ORDER BY date""",
+            (symbol, feat.index.min().strftime("%Y-%m-%d")),
+        )
+        if deals.empty:
+            for col in ("block_deal_value_cr", "block_deal_net_qty_5d", "block_deal_value_cr_5d"):
+                feat[col] = np.nan
+            return feat
+
+        deals["date"] = pd.to_datetime(deals["date"])
+        deals = deals.set_index("date")
+        deals = deals[deals.index.notnull()].reindex(feat.index)
+        # BIGINT/SUM aggregates come back as Decimal through psycopg2 — feature_store
+        # columns are DOUBLE PRECISION and every downstream consumer expects floats.
+        deals[["net_qty", "value_cr"]] = deals[["net_qty", "value_cr"]].astype(float)
+
+        net = deals["net_qty"]
+        if "block_deal_net_qty" in feat:
+            feat["block_deal_net_qty"] = feat["block_deal_net_qty"].fillna(net)
+        else:
+            feat["block_deal_net_qty"] = net
+        feat["block_deal_value_cr"] = deals["value_cr"]
+        # Trailing 5 SESSION sums (the feat index is the symbol's own trading-day
+        # calendar), min_count=1 so a single deal day surfaces in its window.
+        feat["block_deal_net_qty_5d"] = net.rolling(5, min_periods=1).sum()
+        feat["block_deal_value_cr_5d"] = deals["value_cr"].rolling(5, min_periods=1).sum()
+        return feat
+
     def _merge_deep_history(self, feat: pd.DataFrame, symbol: str) -> pd.DataFrame:
         """Valuation/growth/delivery/insider inputs from tables with years of history.
 
@@ -826,6 +898,7 @@ class FeatureEngineer:
             # Gap #4: options-flow/smart-money/sector + market context -- never merged
             # before, so dl_engine trained on zeros for every one of these columns.
             feat = self._merge_flow_features(feat, symbol)
+            feat = self._merge_block_deals(feat, symbol)
             feat = self._merge_deep_history(feat, symbol)
             feat = self._merge_market_context(feat)
 
@@ -852,7 +925,8 @@ class FeatureEngineer:
                         volume_ratio_20d, volume_ratio_5d, obv, obv_slope, vwap, vwap_dist_pct,
                         trend_1d, trend_1w, trend_1m, mtf_alignment_score,
                         pcr_oi, pcr_vol, iv_rank, iv_skew, delivery_pct,
-                        insider_buy_pct_90d, block_deal_net_qty,
+                        insider_buy_pct_90d, block_deal_net_qty, block_deal_value_cr,
+                        block_deal_net_qty_5d, block_deal_value_cr_5d,
                         call_wall_dist_pct, put_wall_dist_pct, near_expiry_gamma, max_pain,
                         sector_ret_5d, sector_ret_21d,
                         nifty_pe, advance_decline_ratio,
@@ -875,7 +949,8 @@ class FeatureEngineer:
                         :volume_ratio_20d,:volume_ratio_5d,:obv,:obv_slope,:vwap,:vwap_dist_pct,
                         :trend_1d,:trend_1w,:trend_1m,:mtf_alignment_score,
                         :pcr_oi,:pcr_vol,:iv_rank,:iv_skew,:delivery_pct,
-                        :insider_buy_pct_90d,:block_deal_net_qty,
+                        :insider_buy_pct_90d,:block_deal_net_qty,:block_deal_value_cr,
+                        :block_deal_net_qty_5d,:block_deal_value_cr_5d,
                         :call_wall_dist_pct,:put_wall_dist_pct,:near_expiry_gamma,:max_pain,
                         :sector_ret_5d,:sector_ret_21d,
                         :nifty_pe,:advance_decline_ratio,
@@ -939,6 +1014,9 @@ class FeatureEngineer:
                     "delivery_pct": d.get("delivery_pct"),
                     "insider_buy_pct_90d": d.get("insider_buy_pct_90d"),
                     "block_deal_net_qty": d.get("block_deal_net_qty"),
+                    "block_deal_value_cr": d.get("block_deal_value_cr"),
+                    "block_deal_net_qty_5d": d.get("block_deal_net_qty_5d"),
+                    "block_deal_value_cr_5d": d.get("block_deal_value_cr_5d"),
                     "call_wall_dist_pct": d.get("call_wall_dist_pct"),
                     "put_wall_dist_pct": d.get("put_wall_dist_pct"),
                     "near_expiry_gamma": d.get("near_expiry_gamma"),
@@ -974,7 +1052,8 @@ class FeatureEngineer:
                     volume_ratio_20d, volume_ratio_5d, obv, obv_slope, vwap, vwap_dist_pct,
                     trend_1d, trend_1w, trend_1m, mtf_alignment_score,
                     pcr_oi, pcr_vol, iv_rank, iv_skew, delivery_pct,
-                    insider_buy_pct_90d, block_deal_net_qty,
+                    insider_buy_pct_90d, block_deal_net_qty, block_deal_value_cr,
+                    block_deal_net_qty_5d, block_deal_value_cr_5d,
                     call_wall_dist_pct, put_wall_dist_pct, near_expiry_gamma, max_pain,
                     sector_ret_5d, sector_ret_21d,
                     nifty_pe, advance_decline_ratio,
@@ -997,7 +1076,8 @@ class FeatureEngineer:
                     :volume_ratio_20d,:volume_ratio_5d,:obv,:obv_slope,:vwap,:vwap_dist_pct,
                     :trend_1d,:trend_1w,:trend_1m,:mtf_alignment_score,
                     :pcr_oi,:pcr_vol,:iv_rank,:iv_skew,:delivery_pct,
-                    :insider_buy_pct_90d,:block_deal_net_qty,
+                    :insider_buy_pct_90d,:block_deal_net_qty,:block_deal_value_cr,
+                    :block_deal_net_qty_5d,:block_deal_value_cr_5d,
                     :call_wall_dist_pct,:put_wall_dist_pct,:near_expiry_gamma,:max_pain,
                     :sector_ret_5d,:sector_ret_21d,
                     :nifty_pe,:advance_decline_ratio,
@@ -1061,6 +1141,9 @@ class FeatureEngineer:
                 "delivery_pct": d.get("delivery_pct"),
                 "insider_buy_pct_90d": d.get("insider_buy_pct_90d"),
                 "block_deal_net_qty": d.get("block_deal_net_qty"),
+                "block_deal_value_cr": d.get("block_deal_value_cr"),
+                "block_deal_net_qty_5d": d.get("block_deal_net_qty_5d"),
+                "block_deal_value_cr_5d": d.get("block_deal_value_cr_5d"),
                 "call_wall_dist_pct": d.get("call_wall_dist_pct"),
                 "put_wall_dist_pct": d.get("put_wall_dist_pct"),
                 "near_expiry_gamma": d.get("near_expiry_gamma"),

@@ -400,6 +400,11 @@ def repair_feature_store_columns(conn: ConnWrapper, dry: bool) -> None:
         "ALTER TABLE feature_store ADD COLUMN IF NOT EXISTS sector_ret_5d DOUBLE PRECISION",
         "ALTER TABLE feature_store ADD COLUMN IF NOT EXISTS sector_ret_21d DOUBLE PRECISION",
         "ALTER TABLE feature_store ADD COLUMN IF NOT EXISTS price_to_book DOUBLE PRECISION",
+        # 2026-09-13: block-deal smart-money family (_merge_block_deals reads the
+        # block_deals table of record; value_cr is already consumed by ml_ensemble).
+        "ALTER TABLE feature_store ADD COLUMN IF NOT EXISTS block_deal_value_cr DOUBLE PRECISION",
+        "ALTER TABLE feature_store ADD COLUMN IF NOT EXISTS block_deal_net_qty_5d DOUBLE PRECISION",
+        "ALTER TABLE feature_store ADD COLUMN IF NOT EXISTS block_deal_value_cr_5d DOUBLE PRECISION",
     ]
     if not dry:
         for s in stmts:
@@ -416,6 +421,7 @@ def repair_feature_store_columns(conn: ConnWrapper, dry: bool) -> None:
         "iv_skew", "insider_buy_pct_90d", "block_deal_net_qty", "call_wall_dist_pct",
         "put_wall_dist_pct", "near_expiry_gamma", "sector_ret_5d", "sector_ret_21d",
         "price_to_book",
+        "block_deal_value_cr", "block_deal_net_qty_5d", "block_deal_value_cr_5d",
     ]
     missing = [c for c in want if c not in have]
     _log(f"  post-check: {len(want) - len(missing)}/{len(want)} present"

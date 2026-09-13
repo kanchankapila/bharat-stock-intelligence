@@ -60,7 +60,8 @@ CREATE TABLE IF NOT EXISTS feature_store (
     target_dir_1d REAL, target_dir_5d REAL, target_dir_15d REAL,
     ret_12m_ex1m REAL,
     pcr_oi REAL, pcr_vol REAL, iv_rank REAL, iv_skew REAL, delivery_pct REAL,
-    insider_buy_pct_90d REAL, block_deal_net_qty REAL,
+    insider_buy_pct_90d REAL, block_deal_net_qty REAL, block_deal_value_cr REAL,
+    block_deal_net_qty_5d REAL, block_deal_value_cr_5d REAL,
     call_wall_dist_pct REAL, put_wall_dist_pct REAL, near_expiry_gamma REAL, max_pain REAL,
     sector_ret_5d REAL, sector_ret_21d REAL,
     nifty_pe REAL, advance_decline_ratio REAL,
@@ -143,6 +144,7 @@ class TestBatchWrites:
         # Gap #4 exogenous merges hit technical_signals/nse_stocks/so_stock_oi_summary --
         # none of which exist in this fixture's sandbox. Stubbed like every other merge.
         fe._merge_flow_features = lambda feat, sym: feat
+        fe._merge_block_deals = lambda feat, sym: feat
         fe._merge_deep_history = lambda feat, sym: feat
         fe._merge_market_context = lambda feat: feat
 
@@ -215,6 +217,7 @@ class TestBatchWrites:
         # Gap #4 exogenous merges hit technical_signals/nse_stocks/so_stock_oi_summary --
         # none of which exist in this fixture's sandbox. Stubbed like every other merge.
         fe._merge_flow_features = lambda feat, sym: feat
+        fe._merge_block_deals = lambda feat, sym: feat
         fe._merge_deep_history = lambda feat, sym: feat
         fe._merge_market_context = lambda feat: feat
 
@@ -309,6 +312,7 @@ class TestZeroRowsGuard:
             # Gap #4 exogenous merges need technical_signals etc.; stub so the write path
             # under test stays hermetic.
             fe._merge_flow_features = lambda feat, sym: feat
+            fe._merge_block_deals = lambda feat, sym: feat
             fe._merge_deep_history = lambda feat, sym: feat
             fe._merge_market_context = lambda feat: feat
             # Should not raise.
@@ -371,6 +375,7 @@ class TestRollbackAfterWriteFailure:
         with patch("src.server.feature_engineering.ProcessPoolExecutor", _FakeExecutor), \
              patch("src.server.feature_engineering.as_completed", lambda fs: list(fs)):
             fe._merge_flow_features = lambda feat, sym: feat
+            fe._merge_block_deals = lambda feat, sym: feat
             fe._merge_deep_history = lambda feat, sym: feat
             fe._merge_market_context = lambda feat: feat
             # BAD's write fails (caught + logged inside run_full_pipeline); GOOD's write must
@@ -439,6 +444,7 @@ class TestReconnectOnIdleConnectionDeath:
         with patch("src.server.feature_engineering.ProcessPoolExecutor", _FakeExecutor), \
              patch("src.server.feature_engineering.as_completed", lambda fs: list(fs)):
             fe._merge_flow_features = lambda feat, sym: feat
+            fe._merge_block_deals = lambda feat, sym: feat
             fe._merge_deep_history = lambda feat, sym: feat
             fe._merge_market_context = lambda feat: feat
             # Must not raise "wrote 0 feature rows" -- the retry on the reconnected
