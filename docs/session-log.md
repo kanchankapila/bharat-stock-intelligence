@@ -57,6 +57,30 @@ Historical record, split out of CLAUDE.md on 2026-08-11 (it was 64% of that file
   a restart would have orphaned it into a make-up that re-runs the 16.9GB optimizer. Nothing
   affected fires before Thursday. `pm2 restart bharat-server` still required.
 
+## 2026-09-13 (cont.) -- deep-history inputs landed same day: rebuild done, DL retrain running
+
+- **User asked to do it today instead of next week.** Stopped the scheduled `dl-retrain-weekly`
+  that had started 12:55 on the OLD sparse inputs (PID 31828; recorded failed, attempts:1, no
+  requeue -- and it was the first `dl-trainer` row ever to carry `duration_ms`, live proof of
+  AF-20260913-06). Merged `feat/deep-history-features` (`1728f3a2`).
+- **Ordering caught mid-launch:** `feature_engineering` workers read `index_valuation` once and
+  cache it, so the rebuild was stopped a minute in and `nifty_pe_fetcher --full` run first
+  (9 min, 202k rows, NIFTY50 daily back to 2003; the 1.1/26.0 glitch dates now hold real values).
+  Only NIFTY50 feeds DL; `--full` loops every index by design.
+- **Saturation gate fixed before the retrain** (`7854e46d`, AF-20260913-10): it measured the fold
+  models, not the promoted one; now also reads `serve_frac_saturated`; ceiling 0.5 -> 0.25.
+- **The host crashed at 15:22** -- bugcheck `0x19C` WIN32K_POWER_WATCHDOG_TIMEOUT with
+  `ConnectedStandbyInProgress=true` (laptop entered Modern Standby), not memory. Postgres replayed
+  cleanly; pm2 autostart brought all 5 services back. The rebuild had committed 2,397/2,425;
+  the last 28 took 81s. Long jobs now run under a `SetThreadExecutionState` keep-awake wrapper
+  (blocks idle sleep for the job's lifetime only, no power-plan change; a lid close still sleeps).
+- **Rebuild validated:** deep inputs 61-95% populated every year 2021-2026 (were ~0 before 2026),
+  0 non-finite P/E, 0 targets below -1. 7,498 leftover rows on `is_suspect` bars (a from-scratch
+  build never creates them) removed after a CSV backup.
+- **Retrain** enqueued through BullMQ (`manual-postrebuild-1789296541706`, 16:02) so it holds the
+  heavy memory slot and heartbeat. `dl` weight stays 0.0 regardless of the result: a promoted
+  model still needs ~20 effective dates of realized grading before the weight returns.
+
 ## 2026-09-13 -- DL inference read raw prices; the fix exposed a saturated model; deep-history inputs held for a coordinated retrain
 
 - **Scope**: user asked to find and fix more cases like the 23 near-empty DL inputs, check the
