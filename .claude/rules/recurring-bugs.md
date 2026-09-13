@@ -249,7 +249,8 @@ Currently automated (9 checks): `date.today()` write-anchor, short calendar-day 
   `frapi.marketsmojo.com/market_Gainersloser/getData` (200, already wired as `MOJO_MOVERS_URL`)
   plus MC `price-shockers` and NT's EOD screener. Only ET was genuinely unreachable
   (host-wide 503 `DNS failure`, unchanged under chrome/chrome124/safari17_0 impersonation, so not
-  a fingerprint block). **Sequence: grep for sibling endpoints -> probe each -> THEN ask, with
+  a fingerprint block; **re-probed 2026-09-13: `screener.indiatimes.com` screener POST is back —
+  200, 167 records** — so recheck before treating ET as down). **Sequence: grep for sibling endpoints -> probe each -> THEN ask, with
   the per-route breakdown.** Asking first is cheap but reporting "3 vendors are dead" when 2 are
   already covered in-tree is misleading.
 

@@ -231,3 +231,90 @@ Results are candidates, not verdicts — the route-by-route probing and minimum-
 above still applies. A row whose `verified_json` shows zero HTTP-200 evidence is
 access-controlled-or-retired, not confirmed dead; one with a healthy `last_status` was live the
 last time `url_explorer` fetched it.
+
+### Endpoint discovery registry — look here FIRST for alternates and for new data (added 2026-09-13)
+
+**Standing instruction (user, 2026-09-13):** whenever a source stops returning data, or you are
+exploring whether *any* source carries a metric the platform lacks, query the discovery registry
+in the production database **before** grepping the repo, hunting the web, or asking the user.
+It lives in `bharat_intel` (:5433), populated outside this repo (built by `urls-explorer`'s
+`scratch/build_pg_registry.py`) — nothing in `src/` reads or writes it, so this rule is the only
+pointer to it. **How to CALL and PARSE a registry hit is documented in
+[`DATA_FETCHING_GUIDE.md`](../../DATA_FETCHING_GUIDE.md)** (repo root) — per-provider headers,
+handshakes, POST payloads, JSONP/Trendlyne-matrix unwrapping. Use it, but read the conflicts list
+below first: parts of it contradict this file and were measured wrong.
+
+| Object | Rows (live 2026-09-13) | What it is |
+|---|---|---|
+| `market_endpoint_registry` | 3,408 (2,864 GET / 544 POST) | one row per endpoint that answered 200: `provider`, `data_domain`, `category`/`sub_category`, `scope`, `update_frequency`, `use_case` (prose), `target_url`, `url_template`, `required_params[]`, `request_headers`/`request_payload` (jsonb), `auth_type`, `output_fields[]`, `latency_ms`, `response_bytes`, `sample_info`, `validated_at` |
+| `url_candidates_validation_audit` | 4,477 (3,408 ok / 1,069 not) | every candidate probed, incl. failures with `status_code`/`error_msg` — check it before re-probing a URL someone already found dead |
+| `v_working_market_endpoints` / `v_stock_screeners` (2,709) / `v_fno_endpoints` (82) / `v_endpoint_discovery_summary` | views | convenience projections |
+
+GIN indexes exist on `output_fields`, `required_params`, and a `to_tsvector` over
+`use_case || endpoint_name || category`, so these are cheap:
+
+```sql
+-- by intent (most reliable column — see caveats)
+SELECT provider, http_method, target_url, url_template, required_params, auth_type, use_case
+FROM market_endpoint_registry
+WHERE to_tsvector('english', use_case||' '||endpoint_name||' '||category) @@ to_tsquery('english','option & chain');
+-- by taxonomy
+SELECT ... WHERE category = 'Fundamental Financials & Valuation' AND scope = 'SINGLE_STOCK';
+-- by field name (candidate generator only)
+SELECT ... WHERE output_fields @> ARRAY['pcr']::text[];
+-- was it already tried and failed?
+SELECT status_code, error_msg, validated_at FROM url_candidates_validation_audit WHERE url ILIKE '%<host>%';
+```
+
+**Order of lookup:** this registry (broadest, 3,408 endpoints) → `url_endpoints` /
+`--find-alternates` above (830 templates, carries our own fetch health) → repo grep → ask the
+user with the per-route breakdown. Both catalogs are candidate generators; neither is a verdict.
+
+**Caveats measured live 2026-09-13 — do not skip these, each one would mislead you:**
+
+1. **`is_working = true` means "HTTP 200", not "returned data".** All 3,408 rows are `true` /
+   `200`, so the flag discriminates nothing. The 41 NiftyTrader rows all point at the **retired
+   `webapi.niftytrader.in` host** (see the NiftyTrader section above); probed live, the
+   option-chain row returns `200 {"result":0,"resultMessage":"Unauthorized: ..."}` — a 110-byte
+   error envelope recorded as working. 153 rows have `response_bytes < 1000`; treat those as
+   suspects. Always fetch the candidate yourself and inspect the body.
+2. **`output_fields` is a per-provider/category TEMPLATE, not the measured response schema.**
+   Only 144 distinct arrays across 3,408 rows; **2,048 Trendlyne rows share one identical array**
+   (`stockId, name, lastPrice, changePercent, pe_ttm, marketCap, dvm_score`) — including a
+   "Promoter Holding" screener whose own `columns=` param requests FII/promoter/pledge fields and
+   no `pe_ttm`. So `output_fields @> ARRAY['pe_ttm']` returns screeners that may not carry it,
+   and misses endpoints that do. 147 rows have an empty array. Prefer `use_case` full-text or
+   the URL's own `columns=` parameter, then confirm the field in a real response.
+3. **`provider` is not normalized** — `MoneyControl` (324) vs `Moneycontrol` (175), `ETnow` /
+   `EconomicTimes` / `Economic Times` / `ETnow / Economic Times`. Filter with `ILIKE`, never `=`.
+4. **`validated_at` is a single ~15-minute sweep (2026-09-13 11:43–11:57 UTC).** It is a
+   snapshot; a row's health is only as current as that date.
+5. **A registry hit does not bypass the rest of this file.** Resolve the provider id from
+   `stocklist.ts` (never construct it from `url_template`'s example), find the minimum headers
+   route by route (`auth_type` is a hint — 12 Akamai/NSE and 12 SapphireBroking session rows),
+   add the `live_datasource` test and freshness check, and pass the vendor-onboarding freeze
+   above (a named hypothesis) before wiring a new column into any production blend.
+
+#### Using `DATA_FETCHING_GUIDE.md` — where it is right, and where this repo overrides it
+
+**Verified live 2026-09-13 (trust these):** §3.4 SapphireBroking genuinely needs BOTH the
+`sapp_session` cookie from the homepage AND an `Origin`/`Referer` — no cookie → `401 "A valid
+session cookie is required"`, cookie without Origin → `403 "Cross-origin requests are not
+accepted"`. §3.1 Trendlyne `kayal.trendlyne.com/broker-webview/...` base answers 200 with the
+`head`/`body.tableHeaders`/`tableData` matrix it describes. §3.2 ET `screenerByScreenerIdForWeb`
+POST with the documented payload returned 200 / 167 records — **ET is reachable again**, contrary
+to the 2026-09-12 "host-wide 503" note in `recurring-bugs.md`; re-probe before treating ET as down.
+
+**Overridden by this repo — do NOT copy these from the guide:**
+
+| Guide says | Why it is wrong here | Do instead |
+|---|---|---|
+| Header "Status: Verified Live, HTTP 200 … with active response payloads" | 200 ≠ data; see caveat 1 (Unauthorized envelope stored as working) | classify the BODY (ok / empty / error-envelope) on every call |
+| §3.6 NiftyTrader host `webapi.niftytrader.in/webapi/*` | **retired** — probed live: `200 {"result":0,"resultMessage":"Unauthorized…"}` (110 B); new host `www.niftytrader.in/api/niftytrader/*` returned `result:1`, 138 KB | rewrite the host per the NiftyTrader section above |
+| §2.1 "every request must carry" the full browser header set | headers are per-route and a token/header can LOWER access (`recurring-bugs.md`) | start from the guide's set, then isolate the minimum route by route |
+| §2.2 / §7 pool 25–50 per host, 20–25 workers, retry only 5xx | Trendlyne rations a cumulative request allowance; 429 is never retried; throttled and empty collapse to the same `[]` | bounded slice + resume-from-DB for Trendlyne; honor `retry_after`; count throttles separately and abort on sustained ones |
+| §3.2 `parse_et_screener`: `float(r.get(...) or 0.0)` | writes a sentinel `0.0` for missing — the sentinel-instead-of-NULL class | `math.isfinite` check, write NULL |
+| §5 client `_unpack_trendlyne_matrix` keys on `cell["parameter"]` only | the 2026-07-23 corruption was exactly a wrong-key header match; §3.1's own unpacker checks `unique_name` first | reuse the repo's existing Trendlyne parser / `tl_fetch.py`, and assert `assert_looks_like_ticker` on the symbol column |
+| §5 / §6 "drop-in production client" | a second generic HTTP client in `src/` duplicates existing fetcher helpers and bypasses the `live_datasource` / freshness mandates | reference it for header/payload shapes only; build the fetcher with `/onboard-data-source` |
+| §9 Recipe 1 `output_fields @> ARRAY['pe_ttm']` | `output_fields` is a template (caveat 2) | search `use_case` / the URL's `columns=` param, confirm in a real response |
+| §"File Location Reference" `file:///d:/Github/urls-explorer/...` | those links point at a different repo | the guide's copy here is the repo-root file; the CSV/XLSX live only in `urls-explorer` |
