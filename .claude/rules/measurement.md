@@ -116,6 +116,20 @@ inline with `WAS ->` so the drift stays visible instead of being silently overwr
   shrinks.
 
 ### Models
+- **`dl` weight PAUSED to 0.0 in all five regimes, 2026-09-13 (user decision, AF-20260913-05).**
+  Not a verdict that DL cannot work -- a pause while the inputs are rebuilt and the model retrained
+  (AF-20260913-02). Evidence at the time: `dl_score` no edge on `unified_recommendations`
+  (+0.007 rank IC @5d, 2026-09-10, LOW-DATA); live inference had been reading raw prices
+  (AF-20260913-01, fixed); with inputs corrected the active v5 pins **40%** of served `prob_up_5d`
+  below 0.01 / above 0.99 (23% on its own training window), and the calibrated v3 (2.8%) has no
+  honest AUC. Freed weight split over ml/confluence/technical, breakout pinned. **Measured effect on
+  the 2026-09-11 panel (1,971 names, SIDEWAYS): rank-corr old-vs-new blend 0.895, top-50 overlap
+  19/50** -- from a simplified `_blend` re-run that reproduces the stored `unified_score` only at
+  corr 0.76 (vetoes/dispersion drops not replayed), so treat those two numbers as indicative.
+  **Population boundary: `unified_score` rows from 2026-09-14 onward carry no dl contribution --
+  do not pool them with earlier rows when grading the ranker.** Restore only from a promoted
+  model's realized `factor_edge_history` reading, not the old 0.16-0.21 weights.
+
 
 - **The active ensemble is CV 0.5277, trained 2026-09-10** (`model_registry` id=322, version
   `20260910_102154`, n=281,476, test_roc_auc 0.5422).

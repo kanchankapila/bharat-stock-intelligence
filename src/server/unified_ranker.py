@@ -194,14 +194,22 @@ def _normalize_timeframe(raw):
 
 
 REGIME_WEIGHTS = {
-    'BULL':     {'screener': 0.0, 'ml': 0.15, 'cs': 0.0, 'confluence': 0.30, 'technical': 0.24, 'dl': 0.16, 'breakout': 0.15, 'smart_money': 0.0},
-    'BEAR':     {'screener': 0.0, 'ml': 0.189088, 'cs': 0.0, 'confluence': 0.378178, 'technical': 0.191367, 'dl': 0.191367, 'breakout': 0.05, 'smart_money': 0.0},
-    'HIGH_VOL': {'screener': 0.0, 'ml': 0.099999, 'cs': 0.0, 'confluence': 0.20, 'technical': 0.400001, 'dl': 0.20, 'breakout': 0.10, 'smart_money': 0.0},
-    'CRASH':    {'screener': 0.0, 'ml': 0.208537, 'cs': 0.0, 'confluence': 0.324389, 'technical': 0.208537, 'dl': 0.208537, 'breakout': 0.05, 'smart_money': 0.0},
+    'BULL':     {'screener': 0.0, 'ml': 0.184783, 'cs': 0.0, 'confluence': 0.369565, 'technical': 0.295652, 'dl': 0.0, 'breakout': 0.15, 'smart_money': 0.0},
+    'BEAR':     {'screener': 0.0, 'ml': 0.236786, 'cs': 0.0, 'confluence': 0.473574, 'technical': 0.23964, 'dl': 0.0, 'breakout': 0.05, 'smart_money': 0.0},
+    'HIGH_VOL': {'screener': 0.0, 'ml': 0.12857, 'cs': 0.0, 'confluence': 0.257143, 'technical': 0.514287, 'dl': 0.0, 'breakout': 0.10, 'smart_money': 0.0},
+    'CRASH':    {'screener': 0.0, 'ml': 0.267188, 'cs': 0.0, 'confluence': 0.415624, 'technical': 0.267188, 'dl': 0.0, 'breakout': 0.05, 'smart_money': 0.0},
     # SIDEWAYS was silently falling back to BULL; a balanced blend is more appropriate for
-    # a rangebound tape (lean slightly less on momentum/dl than BULL).
-    'SIDEWAYS': {'screener': 0.0, 'ml': 0.165714, 'cs': 0.0, 'confluence': 0.331429, 'technical': 0.207143, 'dl': 0.165714, 'breakout': 0.13, 'smart_money': 0.0},
+    # a rangebound tape (lean slightly less on momentum than BULL).
+    'SIDEWAYS': {'screener': 0.0, 'ml': 0.204705, 'cs': 0.0, 'confluence': 0.409413, 'technical': 0.255882, 'dl': 0.0, 'breakout': 0.13, 'smart_money': 0.0},
 }
+# dl PAUSED to 0.0 2026-09-13 by user decision (AF-20260913-05), pending the rebuild+retrain in
+# AF-20260913-02 -- a pause, not a verdict on the engine. Evidence: dl_score read no edge on
+# unified_recommendations (+0.007 rank IC @5d, measurement.md 2026-09-10), and with inference
+# inputs corrected (AF-20260913-01) the active v5 pins 40% of prob_up_5d below 0.01 / above 0.99
+# (23% even on its own training window) while the calibrated alternative v3 has no honest AUC.
+# Same mechanics as the screener/cs/smart_money zeroings below: key kept, freed weight split
+# proportionally over ml/confluence/technical only, breakout left at its pinned ceiling. Restore
+# by re-deriving from the promoted model's realized factor_edge reading, not the old 0.16-0.21.
 # cs and smart_money zeroed 2026-08-31 (fourth+ fifth engine-weight removals), same procedure
 # and same evidence bar as the screener zeroing below:
 #   - cs (cs_ranker): live model_registry CV AUC 0.176 — materially WORSE than random — and
