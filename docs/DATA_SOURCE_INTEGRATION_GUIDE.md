@@ -793,12 +793,37 @@ Triage lookup when a source stops returning data (run from `src/server`):
 python -m url_explorer.ingest --find-alternates "pcr,delivery_pct" --exclude <failing-host>
 ```
 
-`docs/url_explorer/consolidation_report_2026-09-13.md` additionally lists the 14 feature targets
-with no alternate provider and the 67 templates with zero HTTP-200 evidence. Consolidation itself
+`docs/url_explorer/fetch_coverage_2026-09-13.md` additionally lists the 14 feature targets
+with no alternate provider and the templates with zero HTTP-200 evidence. Consolidation itself
 never hits the network; exploration fetching/profiling/correlation stays with `url_explorer.explore`
-and the polite sample-fetch pass `url_explorer.fetch_pass` (browser headers per
-`urls-explorer/extract_urls.py`, per-host delays, per-host failure caps, transport-only breaker,
-resumable via the no-fetch-history selection).
+and the polite sample-fetch pass `url_explorer.fetch_pass`.
+
+### 9.4 urls-explorer fetch mechanism ported + coverage parity (2026-09-13)
+
+The urls-explorer fetchers (`extract_urls.py`, `fetch_screeners.py`) were studied and their
+mechanism ported wholesale into `fetch_pass.make_fetch_fn`:
+1. **persistent impersonated session** (`curl_cffi.Session(chrome120)`) — cookies accumulate
+   across the pass like their `requests.Session` run;
+2. **patient retries**: 5 attempts on transport/429/5xx with 0.5→3s backoff (their
+   `HTTPAdapter(Retry(5, backoff 0.5, forcelist 500/502/503/504))`);
+3. **403 referer-fallback ladder** — own-domain referer, then portal-specific pages
+   (finology ticker pages, moneycontrol `/`+`/stocksmarketsindia/`, tickertape `/`+`/stocks/`)
+   each with `X-Requested-With: XMLHttpRequest` and `Accept-Encoding: gzip, deflate`;
+4. **URL normalization** — repairs browser-copied `https:///host//path` forms (6 malformed
+   catalog rows deleted — they were duplicates of correctly-formed rows);
+5. **proven-sample preference** — urls-explorer's own success lists
+   (`successful_urls.csv` 528 + `report_success.csv` 407 → 429 unique proven-200 URLs,
+   ingested as catalog members with 200-evidence by `load_ue_successes`) are sampled FIRST
+   for any template they belong to, so the pass reproduces requests that verifiably worked.
+
+**Coverage parity with urls-explorer:** of their 429 proven-success URLs, 242 map onto our
+templates and **240 (99.2%) are healthy here**. The 2 unhealthy are etmarketsapis.indiatimes.com
+requests the host is actively 503-throttling for this IP today (their runs used a different
+day/IP) — a cooled-down re-run resumes exactly those. Overall catalog coverage after the day's
+passes: **272 / 834 endpoints verified alive by our own fetch**, 403 measured-dead (dominated by
+`ai_endpoint_memory.json` synthetic cross-provider mashups that exist in neither urls-explorer's
+success list nor the live sites — proven phantom, not mechanism failures), 159 pending (host
+throttling; resumable). Full per-endpoint tables: `docs/url_explorer/fetch_coverage_2026-09-13.md`.
 
 ### 9.3 Per-screener instance database + POST measurement (2026-09-13)
 

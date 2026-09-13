@@ -23,7 +23,7 @@ import sys
 import time
 from datetime import datetime, timezone
 from pathlib import Path
-from urllib.parse import parse_qsl, urlsplit
+from urllib.parse import parse_qsl, urlsplit, urlunsplit
 
 from . import store
 from .correlator import correlate_endpoint
@@ -82,43 +82,113 @@ def _domain_headers(url: str) -> dict[str, str]:
     return headers
 
 
+_CFFI_SESSION = None
+
+
+def _session():
+    """Persistent impersonated session — cookies accumulate across the whole pass,
+    exactly like urls-explorer's requests.Session run (their +127% JSON success)."""
+    global _CFFI_SESSION
+    if _CFFI_SESSION is None:
+        from curl_cffi import requests as cffi
+        _CFFI_SESSION = cffi.Session(impersonate="chrome120")
+    return _CFFI_SESSION
+
+
+_URL_SCHEME_RE = re.compile(r"^(https?:)/*", re.IGNORECASE)
+
+
+def normalize_url(url: str) -> str:
+    """urls-explorer's normalize_url_and_method repair step: browser-copied
+    https:///host//path forms -> https://host/path (requests/curl reject the rest)."""
+    url = _URL_SCHEME_RE.sub(r"\1//", url.strip())
+    try:
+        parts = urlsplit(url)
+        if parts.scheme and parts.netloc:
+            path = re.sub(r"/{2,}", "/", parts.path)
+            url = urlunsplit((parts.scheme, parts.netloc, path, parts.query, parts.fragment))
+    except ValueError:
+        pass
+    return url
+
+
+def referer_fallbacks(url: str) -> list[str]:
+    """urls-explorer's portal-specific referer ladder for 403-walled endpoints."""
+    domain = urlsplit(url).netloc.lower()
+    referers = [f"https://{domain}/"]
+    if "finology.in" in domain:
+        referers += ["https://ticker.finology.in/",
+                     "https://ticker.finology.in/company/WIPRO",
+                     "https://www.finology.in/"]
+    elif "moneycontrol.com" in domain:
+        referers += ["https://www.moneycontrol.com/",
+                     "https://www.moneycontrol.com/stocksmarketsindia/"]
+    elif "tickertape.in" in domain:
+        referers += ["https://www.tickertape.in/",
+                     "https://www.tickertape.in/stocks/"]
+    return list(dict.fromkeys(referers))
+
+
 def _fetch_once(url: str):
-    from curl_cffi import requests as cffi
-    r = cffi.get(url, headers={**_BROWSER_HEADERS, **_domain_headers(url)},
-                 impersonate="chrome120", timeout=20, allow_redirects=True)
+    r = _session().get(url, headers={**_BROWSER_HEADERS, **_domain_headers(url)},
+                       timeout=20, allow_redirects=True)
     return r.status_code, r.text, r.headers.get("content-type", "")
 
 
-def make_fetch_fn(retries: int = 2, once=_fetch_once):
-    """attempt = {"url", "method" ("GET"/"POST"), "payload" (dict, POST),
-    "headers" (extra)}. Retries transport failures and 429/5xx with short backoff;
-    a definitive 4xx answer is returned immediately (it is a measurement, not a
-    failure to retry)."""
+def make_fetch_fn(retries: int = 4, once=_fetch_once):
+    """urls-explorer's fetch ladder (extract_urls.py), ported:
+    1. normalize_url repairs browser-copied https:///host//path forms
+    2. patient retries on transport/429/5xx with exponential-ish backoff
+       (their HTTPAdapter: Retry(5, backoff 0.5, forcelist 500/502/503/504))
+    3. a definitive 403 gets the portal-specific referer fallback ladder with
+       X-Requested-With before giving up (4xx otherwise = measurement, no retry)
+    GET uses injectable once(); everything rides the shared impersonated session
+    so cookies persist across the pass."""
+    def _send(method: str, url: str, headers: dict, payload=None):
+        s = _session()
+        if method == "POST":
+            r = s.post(url, json=payload if payload is not None else {},
+                       headers=headers, timeout=20, allow_redirects=True)
+        else:
+            r = s.get(url, headers=headers, timeout=20, allow_redirects=True)
+        return (r.status_code, r.text, r.headers.get("content-type", ""))
+
     def fetch(attempt: dict):
-        url = attempt["url"]
+        url = normalize_url(attempt["url"])
         method = (attempt.get("method") or "GET").upper()
+        payload = attempt.get("payload")
         last = (0, "", "")
         for i in range(retries + 1):
             try:
                 if method == "POST":
-                    from curl_cffi import requests as cffi
                     h = {**_BROWSER_HEADERS, **_domain_headers(url),
                          **(attempt.get("headers") or {})}
                     h.setdefault("Content-Type", "application/json")
-                    r = cffi.post(url, json=attempt.get("payload") or {},
-                                  headers=h, impersonate="chrome120",
-                                  timeout=20, allow_redirects=True)
-                    status, body, ctype = (r.status_code, r.text,
-                                           r.headers.get("content-type", ""))
+                    h.setdefault("X-Requested-With", "XMLHttpRequest")
+                    status, body, ctype = _send(method, url, h, payload)
                 else:
                     status, body, ctype = once(url)
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 — transport failure is recorded data
                 status, body, ctype = 0, "", str(e)
             if 200 <= status < 300 or (400 <= status < 500 and status != 429):
+                if status == 403:
+                    for ref in referer_fallbacks(url):
+                        rsp = urlsplit(ref)
+                        h = {**_BROWSER_HEADERS, **_domain_headers(url),
+                             "Referer": ref, "Origin": f"{rsp.scheme}://{rsp.netloc}",
+                             "X-Requested-With": "XMLHttpRequest",
+                             "Accept-Encoding": "gzip, deflate"}
+                        try:
+                            st2, b2, c2 = _send(method, url, h, payload)
+                        except Exception:  # noqa: BLE001
+                            continue
+                        if 200 <= st2 < 300:
+                            return st2, b2, c2
+                        status, body, ctype = st2, b2, c2
                 return status, body, ctype
             last = (status, body, ctype)
             if i < retries:
-                time.sleep(0.8 * (i + 1))
+                time.sleep(min(3.0, 0.5 * (2 ** i)))
         return last
     return fetch
 
@@ -143,6 +213,8 @@ def unwrap_payload(body: str) -> str:
 def build_template_members(universe) -> dict[str, list[str]]:
     records = load_json_records()
     records.extend(load_unique_urls()[0])
+    from .ingest import load_ue_successes, split_url_line
+    records.extend(load_ue_successes())  # urls-explorer's proven-200 requests
     corpus: list[str] = []
     from .ingest import split_url_line
     for r in records:
@@ -251,6 +323,10 @@ def build_plan(universe, catalog_path: str | None = None,
     if catalog_path:
         verified, _ = load_verification_evidence(Path(catalog_path))
     targets, excluded_dead = select_targets(refetch_failed)
+    # urls-explorer's proven-200 URLs: sample these first when a template has one —
+    # they are requests that verifiably worked from this codebase's lineage.
+    from .ingest import load_ue_successes
+    ue_ok = {r.url for r in load_ue_successes()}
     plan: list[dict] = []
     needs_id = junk_host = valueless = 0
     for eid, template, tier in targets:
@@ -270,7 +346,8 @@ def build_plan(universe, catalog_path: str | None = None,
             q = parse_qsl(urlsplit(u).query, keep_blank_values=True)
             return not q or any(v.strip() for _, v in q)
 
-        ranked = sorted(urls, key=lambda u: (verified.get(u) != 200, not _usable(u)))
+        ranked = sorted(urls, key=lambda u: (u not in ue_ok,
+                                             verified.get(u) != 200, not _usable(u)))
         sample = ranked[0]
         if not _usable(sample) or "." not in urlsplit(sample).netloc:
             valueless += 1

@@ -162,6 +162,39 @@ def test_select_targets_exclusions(_db):
     assert "https://dead/s/?x" not in templates
     assert excluded == 1
 
+def test_load_ue_successes_paroles_proven_urls(_db):
+    from url_explorer.ingest import load_ue_successes
+    recs = load_ue_successes()
+    assert len(recs) == 429  # 528 + 407 raw rows, deduped by URL
+    assert all(r.source.startswith("urls-explorer/") for r in recs)
+    assert any("marketservices.indiatimes.com" in r.url for r in recs)
+
+def test_normalize_url_repairs_browser_copied_forms(_db):
+    import url_explorer.fetch_pass as fp
+    assert fp.normalize_url("https:///api.moneycontrol.com/mcapi/v1/x/?scId") == \
+        "https://api.moneycontrol.com/mcapi/v1/x/?scId"
+    assert fp.normalize_url("https:////host//a//b/?x=1") == "https://host/a/b/?x=1"
+    assert fp.normalize_url("  https://ok.example/p/?a  ") == "https://ok.example/p/?a"
+
+def test_make_fetch_fn_403_referer_fallback(_db, monkeypatch):
+    import url_explorer.fetch_pass as fp
+    calls = []
+    class FakeResp:
+        def __init__(self, status):
+            self.status_code = status
+            self.text = "{}"
+            self.headers = {"content-type": "application/json"}
+    class FakeSession:
+        def get(self, url, headers=None, timeout=None, allow_redirects=None):
+            calls.append(headers.get("Referer"))
+            return FakeResp(200 if len(calls) > 1 else 403)
+    monkeypatch.setattr(fp, "_CFFI_SESSION", FakeSession())
+    fetch = fp.make_fetch_fn(retries=1)
+    status, body, _ = fetch({"url": "https://ticker.finology.in/peers.ashx/?fincode"})
+    assert status == 200
+    assert calls[0].endswith("finology.in/")       # own-domain referer first
+    assert any("ticker.finology.in" in c for c in calls[1:])  # then the ladder
+
 def test_make_fetch_fn_retries_transport_then_succeeds(_db):
     import url_explorer.fetch_pass as fp
     calls = []

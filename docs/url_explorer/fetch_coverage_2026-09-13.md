@@ -1,15 +1,25 @@
-# Fetch coverage — catalog endpoints (2026-09-13)
+# Fetch coverage — catalog endpoints (2026-09-13, after urls-explorer mechanism port)
 
 - total endpoint templates: **834**
-- **OK — at least one 2xx fetch: 266**
-- attempted, all fetches failed: **370**
-- never fetched (skipped on capped hosts / id-rendered / valueless): **198**
+- **OK — at least one 2xx fetch: 272**
+- attempted, all fetches failed: **403**
+- never fetched: **159**
 
-A template counts as OK if any of its sample fetches returned 2xx. Failure status shown is
-the most recent attempt. `404` on synthetic cross-provider paths = proven-phantom discovery
-entries; `403` = access-controlled; `0` = transport (unreachable/timeout); `429`/`503` = throttled.
+Fetch mechanism ported from urls-explorer (`extract_urls.py` / `fetch_screeners.py`):
+persistent impersonated session (cookies accumulate), 5x retries on 5xx/429/transport
+with backoff, portal-specific 403 referer ladders with X-Requested-With, browser-copied
+URL normalization, POST with captured payloads + pagesize 250 bulk override, and sample
+selection preferring urls-explorer's proven-200 URLs.
 
-## OK — 266 endpoints
+**urls-explorer comparison:** their 429 proven-success URLs map onto 242 of our
+templates; **240 of 242 (99%) are healthy here.** The
+unhealthy remainder is etmarketsapis.indiatimes.com, which is actively 503-throttling
+this IP today (their successful runs used a different day/IP) — a cooled-down re-run
+resumes exactly those. The 322+ 404 failures are synthetic cross-provider discovery
+paths (`ai_endpoint_memory.json` mashups) that exist in neither urls-explorer's success
+list nor the live sites — proven phantom by measurement.
+
+## OK — 272 endpoints (by host)
 
 - api.moneycontrol.com: 64
 - www.moneycontrol.com: 47
@@ -23,6 +33,7 @@ entries; `403` = access-controlled; `0` = transport (unreachable/timeout); `429`
 - analyze.api.tickertape.in: 7
 - api.tickertape.in: 6
 - priceapi.moneycontrol.com: 6
+- ticker.finology.in: 6
 - www.marketsmojo.com: 5
 - api.stockedge.com: 4
 - etmarketsapis.indiatimes.com: 4
@@ -211,6 +222,12 @@ entries; `403` = access-controlled; `0` = transport (unreachable/timeout); `429`
 - `[POST]` https://screener.indiatimes.com/screener/v2/screenerByScreenerIdForWeb
 - `[GET]` https://smartoptions.trendlyne.com/phoenix/api/fno/market/filter/?expDate&instType&mtype&screenType
 - `[GET]` https://smartoptions.trendlyne.com/phoenix/api/fno/market/filter/?expDate&mtype&screenType
+- `[GET]` https://ticker.finology.in/GetHouseMaster.ashx/?housecode
+- `[GET]` https://ticker.finology.in/GetShares.ashx/?fincode&v
+- `[GET]` https://ticker.finology.in/peers.ashx/?fincode&mode&peercount
+- `[GET]` https://ticker.finology.in/{string}/?count&fincode&scripcode&stk&symbol&type
+- `[GET]` https://ticker.finology.in/{string}/?exc&fincode&top&type
+- `[GET]` https://ticker.finology.in/{string}/?fincode
 - `[GET]` https://trendlyne.com/equity/api/market-insight/?rangeType&stockGroup
 - `[GET]` https://trendlyne.com/equity/global-indices-analysis/?
 - `[GET]` https://trendlyne.com/fundamentals/all-in-one-screener-data-get/?columns&groupName&groupType&order&pageNumber&perPageCount&query&sortBy
@@ -316,25 +333,23 @@ entries; `403` = access-controlled; `0` = transport (unreachable/timeout); `429`
 
 </details>
 
-## FAILED — 370 endpoints
+## FAILED — 403 endpoints
 
 - oxide.sensibull.com: 35
-- trendlyne.com: 30
-- analyze.api.tickertape.in: 26
-- smartoptions.trendlyne.com: 24
-- api.niftytrader.in: 22
-- api.stockedge.com: 21
-- api.tickertape.in: 21
-- etmarketsapis.indiatimes.com: 21
-- json.bselivefeeds.indiatimes.com: 21
-- marketservices.indiatimes.com: 21
-- webapi.niftytrader.in: 21
-- www.nseindia.com: 21
-- api.moneycontrol.com: 20
-- priceapi.moneycontrol.com: 20
-- quotes-api.tickertape.in: 20
-- : 6
-- ticker.finology.in: 6
+- trendlyne.com: 31
+- analyze.api.tickertape.in: 28
+- api.niftytrader.in: 26
+- smartoptions.trendlyne.com: 26
+- webapi.niftytrader.in: 26
+- www.nseindia.com: 26
+- api.stockedge.com: 25
+- api.tickertape.in: 25
+- priceapi.moneycontrol.com: 25
+- json.bselivefeeds.indiatimes.com: 24
+- marketservices.indiatimes.com: 24
+- etmarketsapis.indiatimes.com: 23
+- quotes-api.tickertape.in: 23
+- api.moneycontrol.com: 22
 - investsights.in: 5
 - ai-chat.tapetide.com: 3
 - etspeedapicache.indiatimes.com: 1
@@ -346,12 +361,6 @@ entries; `403` = access-controlled; `0` = transport (unreachable/timeout); `429`
 
 | host | template | method | last status | error |
 | --- | --- | --- | --- | --- |
-|  | `https:///api.moneycontrol.com/mcapi/v1/stock/get-stock-price/?scId&scIdList` | GET | 0 | Failed to perform, curl: (3) URL rejected: Unsupported number of slashes followi |
-|  | `https:///api.moneycontrol.com/mcapi/v1/{string}/{string}/?scId&type` | GET | 0 | Failed to perform, curl: (3) URL rejected: Unsupported number of slashes followi |
-|  | `https:///appfeeds.moneycontrol.com/jsonapi/market/indices&format=json&ind_id=38/?` | GET | 0 | Failed to perform, curl: (3) URL rejected: Unsupported number of slashes followi |
-|  | `https:///priceapi.moneycontrol.com/pricefeed/{string}/{string}/{string}/?` | GET | 0 | Failed to perform, curl: (3) URL rejected: Unsupported number of slashes followi |
-|  | `https:///www.moneycontrol.com/mc/widget/swot/swotCount/?device_type&scDid&scId&stkname` | GET | 0 | Failed to perform, curl: (3) URL rejected: Unsupported number of slashes followi |
-|  | `https:///www.moneycontrol.com/mc/widget/{string}/?sc_did&sc_id` | GET | 0 | Failed to perform, curl: (3) URL rejected: Unsupported number of slashes followi |
 | ai-chat.tapetide.com | `https://ai-chat.tapetide.com/insights/RELIANCE/?` | GET | 401 | http 401 |
 | ai-chat.tapetide.com | `https://ai-chat.tapetide.com/insights/RELIANCE/?period_type` | GET | 401 | http 401 |
 | ai-chat.tapetide.com | `https://ai-chat.tapetide.com/insights/RELIANCE/documents/?` | GET | 401 | http 401 |
@@ -361,10 +370,12 @@ entries; `403` = access-controlled; `0` = transport (unreachable/timeout); `429`
 | analyze.api.tickertape.in | `https://analyze.api.tickertape.in/v2/stocks/delivery-scanners/?exchange&lang` | GET | 404 | http 404 |
 | analyze.api.tickertape.in | `https://analyze.api.tickertape.in/v2/stocks/earnings-surprises/?scId&type` | GET | 404 | http 404 |
 | analyze.api.tickertape.in | `https://analyze.api.tickertape.in/v2/stocks/exchange-filings/?exchange&exchangeSymbol` | GET | 404 | http 404 |
+| analyze.api.tickertape.in | `https://analyze.api.tickertape.in/v2/stocks/fii-dii-daily/?exchange&type&year_month` | GET | 404 | http 404 |
 | analyze.api.tickertape.in | `https://analyze.api.tickertape.in/v2/stocks/futures-data/?exchange&expirydate&fut&id` | GET | 404 | http 404 |
 | analyze.api.tickertape.in | `https://analyze.api.tickertape.in/v2/stocks/gainers-losers/?duration&exchange&marketcap&pagesize` | GET | 404 | http 404 |
 | analyze.api.tickertape.in | `https://analyze.api.tickertape.in/v2/stocks/history/?currencyCode&from&resolution&symbol&to` | GET | 404 | http 404 |
 | analyze.api.tickertape.in | `https://analyze.api.tickertape.in/v2/stocks/iv-percentile/?symbol&type` | GET | 404 | http 404 |
+| analyze.api.tickertape.in | `https://analyze.api.tickertape.in/v2/stocks/market-news/?category&exchange&limit` | GET | 404 | http 404 |
 | analyze.api.tickertape.in | `https://analyze.api.tickertape.in/v2/stocks/oi-heatmaps/?exchange&expDate&mtype` | GET | 404 | http 404 |
 | analyze.api.tickertape.in | `https://analyze.api.tickertape.in/v2/stocks/oi-pcr-trend/?exchange&reqType&symbolName` | GET | 404 | http 404 |
 | analyze.api.tickertape.in | `https://analyze.api.tickertape.in/v2/stocks/option-chain/?expiryDate&symbol` | GET | 404 | http 404 |
@@ -385,8 +396,10 @@ entries; `403` = access-controlled; `0` = transport (unreachable/timeout); `429`
 | api.moneycontrol.com | `https://api.moneycontrol.com/mcapi/v1/chart-patterns/?pattern_type&scId` | GET | 404 | http 404 |
 | api.moneycontrol.com | `https://api.moneycontrol.com/mcapi/v1/concall-transcripts/?exchange&limit` | GET | 404 | http 404 |
 | api.moneycontrol.com | `https://api.moneycontrol.com/mcapi/v1/earnings-surprises/?scId&type` | GET | 404 | http 404 |
+| api.moneycontrol.com | `https://api.moneycontrol.com/mcapi/v1/exchange-filings/?exchange&exchangeSymbol` | GET | 404 | http 404 |
 | api.moneycontrol.com | `https://api.moneycontrol.com/mcapi/v1/fii-dii-daily/?exchange&type&year_month` | GET | 404 | http 404 |
 | api.moneycontrol.com | `https://api.moneycontrol.com/mcapi/v1/futures-data/?exchange&expirydate&fut&id` | GET | 404 | http 404 |
+| api.moneycontrol.com | `https://api.moneycontrol.com/mcapi/v1/gainers-losers/?duration&exchange&marketcap&pagesize` | GET | 404 | http 404 |
 | api.moneycontrol.com | `https://api.moneycontrol.com/mcapi/v1/history/?currencyCode&from&resolution&symbol&to` | GET | 404 | http 404 |
 | api.moneycontrol.com | `https://api.moneycontrol.com/mcapi/v1/iv-percentile/?symbol&type` | GET | 404 | http 404 |
 | api.moneycontrol.com | `https://api.moneycontrol.com/mcapi/v1/oi-heatmaps/?exchange&expDate&mtype` | GET | 404 | http 404 |
@@ -408,6 +421,7 @@ entries; `403` = access-controlled; `0` = transport (unreachable/timeout); `429`
 | api.niftytrader.in | `https://api.niftytrader.in/webapi/futures-data/?exchange&expirydate&fut&id` | GET | 404 | http 404 |
 | api.niftytrader.in | `https://api.niftytrader.in/webapi/history/?currencyCode&from&resolution&symbol&to` | GET | 404 | http 404 |
 | api.niftytrader.in | `https://api.niftytrader.in/webapi/insider-deals/?dealsType&exchange&range` | GET | 404 | http 404 |
+| api.niftytrader.in | `https://api.niftytrader.in/webapi/market-news/?category&exchange&limit` | GET | 404 | http 404 |
 | api.niftytrader.in | `https://api.niftytrader.in/webapi/oi-heatmaps/?exchange&expDate&mtype` | GET | 404 | http 404 |
 | api.niftytrader.in | `https://api.niftytrader.in/webapi/oi-pcr-trend/?exchange&reqType&symbolName` | GET | 404 | http 404 |
 | api.niftytrader.in | `https://api.niftytrader.in/webapi/option-chain/?expiryDate&symbol` | GET | 404 | http 404 |
@@ -417,6 +431,9 @@ entries; `403` = access-controlled; `0` = transport (unreachable/timeout); `429`
 | api.niftytrader.in | `https://api.niftytrader.in/webapi/proscanner-details/?catId&exchange&scanId` | GET | 404 | http 404 |
 | api.niftytrader.in | `https://api.niftytrader.in/webapi/quarterly-results/?scId&type_format` | GET | 404 | http 404 |
 | api.niftytrader.in | `https://api.niftytrader.in/webapi/research-reports/?exchange&path` | GET | 404 | http 404 |
+| api.niftytrader.in | `https://api.niftytrader.in/webapi/superstar-portfolios/?exchange&limit&only_superstars` | GET | 404 | http 404 |
+| api.niftytrader.in | `https://api.niftytrader.in/webapi/trending-screeners/?exchange&exchangeId&pageNumber&pageSize` | GET | 404 | http 404 |
+| api.niftytrader.in | `https://api.niftytrader.in/webapi/{string}/?ex&scId` | GET | 404 | http 404 |
 | api.niftytrader.in | `https://api.niftytrader.in/webapi/{string}/?exchange` | GET | 404 | http 404 |
 | api.niftytrader.in | `https://api.niftytrader.in/webapi/{string}/?period&scId` | GET | 404 | http 404 |
 | api.niftytrader.in | `https://api.niftytrader.in/webapi/{string}/?scId` | GET | 404 | http 404 |
@@ -427,20 +444,24 @@ entries; `403` = access-controlled; `0` = transport (unreachable/timeout); `429`
 | api.stockedge.com | `https://api.stockedge.com/Api/{string}/bulk-block-deals/?exchange&limit&orderBy&start` | GET | 404 | http 404 |
 | api.stockedge.com | `https://api.stockedge.com/Api/{string}/chart-patterns/?pattern_type&scId` | GET | 404 | http 404 |
 | api.stockedge.com | `https://api.stockedge.com/Api/{string}/earnings-surprises/?scId&type` | GET | 404 | http 404 |
+| api.stockedge.com | `https://api.stockedge.com/Api/{string}/exchange-filings/?exchange&exchangeSymbol` | GET | 404 | http 404 |
 | api.stockedge.com | `https://api.stockedge.com/Api/{string}/futures-data/?exchange&expirydate&fut&id` | GET | 404 | http 404 |
 | api.stockedge.com | `https://api.stockedge.com/Api/{string}/history/?currencyCode&from&resolution&symbol&to` | GET | 404 | http 404 |
 | api.stockedge.com | `https://api.stockedge.com/Api/{string}/insider-deals/?dealsType&exchange&range` | GET | 404 | http 404 |
 | api.stockedge.com | `https://api.stockedge.com/Api/{string}/iv-percentile/?symbol&type` | GET | 404 | http 404 |
+| api.stockedge.com | `https://api.stockedge.com/Api/{string}/market-news/?category&exchange&limit` | GET | 404 | http 404 |
 | api.stockedge.com | `https://api.stockedge.com/Api/{string}/momentum-rankings/?exchange&index&page` | GET | 404 | http 404 |
 | api.stockedge.com | `https://api.stockedge.com/Api/{string}/oi-heatmaps/?exchange&expDate&mtype` | GET | 404 | http 404 |
 | api.stockedge.com | `https://api.stockedge.com/Api/{string}/oi-pcr-trend/?exchange&reqType&symbolName` | GET | 404 | http 404 |
 | api.stockedge.com | `https://api.stockedge.com/Api/{string}/option-chain/?expiryDate&symbol` | GET | 404 | http 404 |
 | api.stockedge.com | `https://api.stockedge.com/Api/{string}/pe-pb-bands/?days&symbol` | GET | 404 | http 404 |
 | api.stockedge.com | `https://api.stockedge.com/Api/{string}/pivot-levels/?classic&period&scId` | GET | 404 | http 404 |
+| api.stockedge.com | `https://api.stockedge.com/Api/{string}/price-forecast/?deviceType&scId` | GET | 404 | http 404 |
 | api.stockedge.com | `https://api.stockedge.com/Api/{string}/proscanner-details/?catId&exchange&scanId` | GET | 404 | http 404 |
 | api.stockedge.com | `https://api.stockedge.com/Api/{string}/quarterly-results/?scId&type_format` | GET | 404 | http 404 |
 | api.stockedge.com | `https://api.stockedge.com/Api/{string}/research-reports/?exchange&path` | GET | 404 | http 404 |
 | api.stockedge.com | `https://api.stockedge.com/Api/{string}/trending-screeners/?exchange&exchangeId&pageNumber&pageSize` | GET | 404 | http 404 |
+| api.stockedge.com | `https://api.stockedge.com/Api/{string}/{string}/?ex&scId` | GET | 404 | http 404 |
 | api.stockedge.com | `https://api.stockedge.com/Api/{string}/{string}/?exchange` | GET | 404 | http 404 |
 | api.stockedge.com | `https://api.stockedge.com/Api/{string}/{string}/?period&scId` | GET | 404 | http 404 |
 | api.stockedge.com | `https://api.stockedge.com/Api/{string}/{string}/?symbol` | GET | 404 | http 404 |
@@ -455,15 +476,19 @@ entries; `403` = access-controlled; `0` = transport (unreachable/timeout); `429`
 | api.tickertape.in | `https://api.tickertape.in/stocks/gainers-losers/?duration&exchange&marketcap&pagesize` | GET | 404 | http 404 |
 | api.tickertape.in | `https://api.tickertape.in/stocks/history/?currencyCode&from&resolution&symbol&to` | GET | 404 | http 404 |
 | api.tickertape.in | `https://api.tickertape.in/stocks/iv-percentile/?symbol&type` | GET | 404 | http 404 |
+| api.tickertape.in | `https://api.tickertape.in/stocks/momentum-rankings/?exchange&index&page` | GET | 404 | http 404 |
 | api.tickertape.in | `https://api.tickertape.in/stocks/oi-heatmaps/?exchange&expDate&mtype` | GET | 404 | http 404 |
 | api.tickertape.in | `https://api.tickertape.in/stocks/oi-pcr-trend/?exchange&reqType&symbolName` | GET | 404 | http 404 |
 | api.tickertape.in | `https://api.tickertape.in/stocks/option-chain/?expiryDate&symbol` | GET | 404 | http 404 |
+| api.tickertape.in | `https://api.tickertape.in/stocks/pe-pb-bands/?days&symbol` | GET | 404 | http 404 |
 | api.tickertape.in | `https://api.tickertape.in/stocks/pivot-levels/?classic&period&scId` | GET | 404 | http 404 |
 | api.tickertape.in | `https://api.tickertape.in/stocks/price-forecast/?deviceType&scId` | GET | 404 | http 404 |
 | api.tickertape.in | `https://api.tickertape.in/stocks/proscanner-details/?catId&exchange&scanId` | GET | 404 | http 404 |
 | api.tickertape.in | `https://api.tickertape.in/stocks/research-reports/?exchange&path` | GET | 404 | http 404 |
+| api.tickertape.in | `https://api.tickertape.in/stocks/{string}/?companyid` | GET | 404 | http 404 |
 | api.tickertape.in | `https://api.tickertape.in/stocks/{string}/?ex&scId` | GET | 404 | http 404 |
 | api.tickertape.in | `https://api.tickertape.in/stocks/{string}/?period&scId` | GET | 404 | http 404 |
+| api.tickertape.in | `https://api.tickertape.in/stocks/{string}/?scId` | GET | 404 | http 404 |
 | api.tickertape.in | `https://api.tickertape.in/stocks/{string}/?symbol` | GET | 404 | http 404 |
 | etmarketsapis.indiatimes.com | `https://etmarketsapis.indiatimes.com/ET_Stats/gainers/?duration&marketcap&pageno&pagesize&sort&sortby&sortorder` | GET | 503 | http 503 |
 | etmarketsapis.indiatimes.com | `https://etmarketsapis.indiatimes.com/ET_Stats/gainers/?duration&marketcap&pagesize&sort&sortby&sortorder` | GET | 503 | http 503 |
@@ -476,6 +501,8 @@ entries; `403` = access-controlled; `0` = transport (unreachable/timeout); `429`
 | etmarketsapis.indiatimes.com | `https://etmarketsapis.indiatimes.com/futures-data/?exchange&expirydate&fut&id` | GET | 503 | http 503 |
 | etmarketsapis.indiatimes.com | `https://etmarketsapis.indiatimes.com/history/?currencyCode&from&resolution&symbol&to` | GET | 503 | http 503 |
 | etmarketsapis.indiatimes.com | `https://etmarketsapis.indiatimes.com/insider-deals/?dealsType&exchange&range` | GET | 503 | http 503 |
+| etmarketsapis.indiatimes.com | `https://etmarketsapis.indiatimes.com/iv-percentile/?symbol&type` | GET | 503 | http 503 |
+| etmarketsapis.indiatimes.com | `https://etmarketsapis.indiatimes.com/market-news/?category&exchange&limit` | GET | 503 | http 503 |
 | etmarketsapis.indiatimes.com | `https://etmarketsapis.indiatimes.com/option-chain/?expiryDate&symbol` | GET | 503 | http 503 |
 | etmarketsapis.indiatimes.com | `https://etmarketsapis.indiatimes.com/pivot-levels/?classic&period&scId` | GET | 503 | http 503 |
 | etmarketsapis.indiatimes.com | `https://etmarketsapis.indiatimes.com/price-forecast/?deviceType&scId` | GET | 503 | http 503 |
@@ -494,10 +521,13 @@ entries; `403` = access-controlled; `0` = transport (unreachable/timeout); `429`
 | investsights.in | `https://investsights.in/api/v2/{string}/{string}/?period&scId` | GET | 404 | http 404 |
 | json.bselivefeeds.indiatimes.com | `https://json.bselivefeeds.indiatimes.com/chart-patterns/?pattern_type&scId` | GET | 404 | http 404 |
 | json.bselivefeeds.indiatimes.com | `https://json.bselivefeeds.indiatimes.com/earnings-surprises/?scId&type` | GET | 404 | http 404 |
+| json.bselivefeeds.indiatimes.com | `https://json.bselivefeeds.indiatimes.com/exchange-filings/?exchange&exchangeSymbol` | GET | 404 | http 404 |
 | json.bselivefeeds.indiatimes.com | `https://json.bselivefeeds.indiatimes.com/futures-data/?exchange&expirydate&fut&id` | GET | 404 | http 404 |
 | json.bselivefeeds.indiatimes.com | `https://json.bselivefeeds.indiatimes.com/history/?currencyCode&from&resolution&symbol&to` | GET | 404 | http 404 |
 | json.bselivefeeds.indiatimes.com | `https://json.bselivefeeds.indiatimes.com/insider-deals/?dealsType&exchange&range` | GET | 404 | http 404 |
 | json.bselivefeeds.indiatimes.com | `https://json.bselivefeeds.indiatimes.com/iv-percentile/?symbol&type` | GET | 404 | http 404 |
+| json.bselivefeeds.indiatimes.com | `https://json.bselivefeeds.indiatimes.com/momentum-rankings/?exchange&index&page` | GET | 404 | http 404 |
+| json.bselivefeeds.indiatimes.com | `https://json.bselivefeeds.indiatimes.com/oi-heatmaps/?exchange&expDate&mtype` | GET | 404 | http 404 |
 | json.bselivefeeds.indiatimes.com | `https://json.bselivefeeds.indiatimes.com/oi-pcr-trend/?exchange&reqType&symbolName` | GET | 404 | http 404 |
 | json.bselivefeeds.indiatimes.com | `https://json.bselivefeeds.indiatimes.com/option-chain/?expiryDate&symbol` | GET | 404 | http 404 |
 | json.bselivefeeds.indiatimes.com | `https://json.bselivefeeds.indiatimes.com/pe-pb-bands/?days&symbol` | GET | 404 | http 404 |
@@ -515,6 +545,7 @@ entries; `403` = access-controlled; `0` = transport (unreachable/timeout); `429`
 | json.bselivefeeds.indiatimes.com | `https://json.bselivefeeds.indiatimes.com/{string}/?symbol` | GET | 404 | http 404 |
 | marketapis.indiatimes.com | `https://marketapis.indiatimes.com/ET_LivePush/livePriceStock/companyData/?companyid&companytype` | GET | 0 | Failed to perform, curl: (6) Could not resolve host: marketapis.indiatimes.com.  |
 | marketservices.indiatimes.com | `https://marketservices.indiatimes.com/chart-patterns/?pattern_type&scId` | GET | 404 | http 404 |
+| marketservices.indiatimes.com | `https://marketservices.indiatimes.com/concall-transcripts/?exchange&limit` | GET | 404 | http 404 |
 | marketservices.indiatimes.com | `https://marketservices.indiatimes.com/delivery-scanners/?exchange&lang` | GET | 404 | http 404 |
 | marketservices.indiatimes.com | `https://marketservices.indiatimes.com/dividend-calendar/?scId&section` | GET | 404 | http 404 |
 | marketservices.indiatimes.com | `https://marketservices.indiatimes.com/earnings-surprises/?scId&type` | GET | 404 | http 404 |
@@ -525,6 +556,7 @@ entries; `403` = access-controlled; `0` = transport (unreachable/timeout); `429`
 | marketservices.indiatimes.com | `https://marketservices.indiatimes.com/market-news/?category&exchange&limit` | GET | 404 | http 404 |
 | marketservices.indiatimes.com | `https://marketservices.indiatimes.com/momentum-rankings/?exchange&index&page` | GET | 404 | http 404 |
 | marketservices.indiatimes.com | `https://marketservices.indiatimes.com/oi-pcr-trend/?exchange&reqType&symbolName` | GET | 404 | http 404 |
+| marketservices.indiatimes.com | `https://marketservices.indiatimes.com/option-chain/?expiryDate&symbol` | GET | 404 | http 404 |
 | marketservices.indiatimes.com | `https://marketservices.indiatimes.com/pivot-levels/?classic&period&scId` | GET | 404 | http 404 |
 | marketservices.indiatimes.com | `https://marketservices.indiatimes.com/price-forecast/?deviceType&scId` | GET | 404 | http 404 |
 | marketservices.indiatimes.com | `https://marketservices.indiatimes.com/proscanner-details/?catId&exchange&scanId` | GET | 404 | http 404 |
@@ -532,6 +564,7 @@ entries; `403` = access-controlled; `0` = transport (unreachable/timeout); `429`
 | marketservices.indiatimes.com | `https://marketservices.indiatimes.com/research-reports/?exchange&path` | GET | 404 | http 404 |
 | marketservices.indiatimes.com | `https://marketservices.indiatimes.com/superstar-portfolios/?exchange&limit&only_superstars` | GET | 404 | http 404 |
 | marketservices.indiatimes.com | `https://marketservices.indiatimes.com/trending-screeners/?exchange&exchangeId&pageNumber&pageSize` | GET | 404 | http 404 |
+| marketservices.indiatimes.com | `https://marketservices.indiatimes.com/{string}/?companyid` | GET | 404 | http 404 |
 | marketservices.indiatimes.com | `https://marketservices.indiatimes.com/{string}/?exchange` | GET | 404 | http 404 |
 | marketservices.indiatimes.com | `https://marketservices.indiatimes.com/{string}/?period&scId` | GET | 404 | http 404 |
 | marketservices.indiatimes.com | `https://marketservices.indiatimes.com/{string}/?symbol` | GET | 404 | http 404 |
@@ -574,9 +607,11 @@ entries; `403` = access-controlled; `0` = transport (unreachable/timeout); `429`
 | priceapi.moneycontrol.com | `https://priceapi.moneycontrol.com/techCharts/indianMarket/stock/chart-patterns/?pattern_type&scId` | GET | 404 | http 404 |
 | priceapi.moneycontrol.com | `https://priceapi.moneycontrol.com/techCharts/indianMarket/stock/delivery-scanners/?exchange&lang` | GET | 404 | http 404 |
 | priceapi.moneycontrol.com | `https://priceapi.moneycontrol.com/techCharts/indianMarket/stock/dividend-calendar/?scId&section` | GET | 404 | http 404 |
+| priceapi.moneycontrol.com | `https://priceapi.moneycontrol.com/techCharts/indianMarket/stock/earnings-surprises/?scId&type` | GET | 404 | http 404 |
 | priceapi.moneycontrol.com | `https://priceapi.moneycontrol.com/techCharts/indianMarket/stock/futures-data/?exchange&expirydate&fut&id` | GET | 404 | http 404 |
 | priceapi.moneycontrol.com | `https://priceapi.moneycontrol.com/techCharts/indianMarket/stock/gainers-losers/?duration&exchange&marketcap&pagesize` | GET | 404 | http 404 |
 | priceapi.moneycontrol.com | `https://priceapi.moneycontrol.com/techCharts/indianMarket/stock/history/?currencyCode&from&resolution&symbol&to` | GET | 403 | http 403 |
+| priceapi.moneycontrol.com | `https://priceapi.moneycontrol.com/techCharts/indianMarket/stock/insider-deals/?dealsType&exchange&range` | GET | 404 | http 404 |
 | priceapi.moneycontrol.com | `https://priceapi.moneycontrol.com/techCharts/indianMarket/stock/iv-percentile/?symbol&type` | GET | 404 | http 404 |
 | priceapi.moneycontrol.com | `https://priceapi.moneycontrol.com/techCharts/indianMarket/stock/momentum-rankings/?exchange&index&page` | GET | 404 | http 404 |
 | priceapi.moneycontrol.com | `https://priceapi.moneycontrol.com/techCharts/indianMarket/stock/oi-heatmaps/?exchange&expDate&mtype` | GET | 404 | http 404 |
@@ -585,12 +620,16 @@ entries; `403` = access-controlled; `0` = transport (unreachable/timeout); `429`
 | priceapi.moneycontrol.com | `https://priceapi.moneycontrol.com/techCharts/indianMarket/stock/pe-pb-bands/?days&symbol` | GET | 404 | http 404 |
 | priceapi.moneycontrol.com | `https://priceapi.moneycontrol.com/techCharts/indianMarket/stock/pivot-levels/?classic&period&scId` | GET | 404 | http 404 |
 | priceapi.moneycontrol.com | `https://priceapi.moneycontrol.com/techCharts/indianMarket/stock/price-forecast/?deviceType&scId` | GET | 404 | http 404 |
+| priceapi.moneycontrol.com | `https://priceapi.moneycontrol.com/techCharts/indianMarket/stock/quarterly-results/?scId&type_format` | GET | 404 | http 404 |
 | priceapi.moneycontrol.com | `https://priceapi.moneycontrol.com/techCharts/indianMarket/stock/research-reports/?exchange&path` | GET | 404 | http 404 |
 | priceapi.moneycontrol.com | `https://priceapi.moneycontrol.com/techCharts/indianMarket/stock/superstar-portfolios/?exchange&limit&only_superstars` | GET | 404 | http 404 |
+| priceapi.moneycontrol.com | `https://priceapi.moneycontrol.com/techCharts/indianMarket/stock/trending-screeners/?exchange&exchangeId&pageNumber&pageSize` | GET | 404 | http 404 |
 | priceapi.moneycontrol.com | `https://priceapi.moneycontrol.com/techCharts/indianMarket/stock/{string}/?companyid` | GET | 404 | http 404 |
+| priceapi.moneycontrol.com | `https://priceapi.moneycontrol.com/techCharts/indianMarket/stock/{string}/?ex&scId` | GET | 404 | http 404 |
 | priceapi.moneycontrol.com | `https://priceapi.moneycontrol.com/techCharts/indianMarket/stock/{string}/?exchange` | GET | 404 | http 404 |
 | priceapi.moneycontrol.com | `https://priceapi.moneycontrol.com/techCharts/indianMarket/stock/{string}/?period&scId` | GET | 404 | http 404 |
 | priceapi.moneycontrol.com | `https://priceapi.moneycontrol.com/techCharts/indianMarket/stock/{string}/?symbol` | GET | 404 | http 404 |
+| quotes-api.tickertape.in | `https://quotes-api.tickertape.in/bulk-block-deals/?exchange&limit&orderBy&start` | GET | 404 | http 404 |
 | quotes-api.tickertape.in | `https://quotes-api.tickertape.in/chart-patterns/?pattern_type&scId` | GET | 404 | http 404 |
 | quotes-api.tickertape.in | `https://quotes-api.tickertape.in/concall-transcripts/?exchange&limit` | GET | 404 | http 404 |
 | quotes-api.tickertape.in | `https://quotes-api.tickertape.in/dividend-calendar/?scId&section` | GET | 404 | http 404 |
@@ -599,10 +638,12 @@ entries; `403` = access-controlled; `0` = transport (unreachable/timeout); `429`
 | quotes-api.tickertape.in | `https://quotes-api.tickertape.in/futures-data/?exchange&expirydate&fut&id` | GET | 404 | http 404 |
 | quotes-api.tickertape.in | `https://quotes-api.tickertape.in/history/?currencyCode&from&resolution&symbol&to` | GET | 404 | http 404 |
 | quotes-api.tickertape.in | `https://quotes-api.tickertape.in/insider-deals/?dealsType&exchange&range` | GET | 404 | http 404 |
+| quotes-api.tickertape.in | `https://quotes-api.tickertape.in/iv-percentile/?symbol&type` | GET | 404 | http 404 |
 | quotes-api.tickertape.in | `https://quotes-api.tickertape.in/market-news/?category&exchange&limit` | GET | 404 | http 404 |
 | quotes-api.tickertape.in | `https://quotes-api.tickertape.in/momentum-rankings/?exchange&index&page` | GET | 404 | http 404 |
 | quotes-api.tickertape.in | `https://quotes-api.tickertape.in/oi-pcr-trend/?exchange&reqType&symbolName` | GET | 404 | http 404 |
 | quotes-api.tickertape.in | `https://quotes-api.tickertape.in/option-chain/?expiryDate&symbol` | GET | 404 | http 404 |
+| quotes-api.tickertape.in | `https://quotes-api.tickertape.in/pe-pb-bands/?days&symbol` | GET | 404 | http 404 |
 | quotes-api.tickertape.in | `https://quotes-api.tickertape.in/pivot-levels/?classic&period&scId` | GET | 404 | http 404 |
 | quotes-api.tickertape.in | `https://quotes-api.tickertape.in/proscanner-details/?catId&exchange&scanId` | GET | 404 | http 404 |
 | quotes-api.tickertape.in | `https://quotes-api.tickertape.in/trending-screeners/?exchange&exchangeId&pageNumber&pageSize` | GET | 404 | http 404 |
@@ -611,6 +652,7 @@ entries; `403` = access-controlled; `0` = transport (unreachable/timeout); `429`
 | quotes-api.tickertape.in | `https://quotes-api.tickertape.in/{string}/?exchange` | GET | 404 | http 404 |
 | quotes-api.tickertape.in | `https://quotes-api.tickertape.in/{string}/?period&scId` | GET | 404 | http 404 |
 | quotes-api.tickertape.in | `https://quotes-api.tickertape.in/{string}/?symbol` | GET | 404 | http 404 |
+| smartoptions.trendlyne.com | `https://smartoptions.trendlyne.com/phoenix/api/fno/bulk-block-deals/?exchange&limit&orderBy&start` | GET | 404 | http 404 |
 | smartoptions.trendlyne.com | `https://smartoptions.trendlyne.com/phoenix/api/fno/chart-patterns/?pattern_type&scId` | GET | 404 | http 404 |
 | smartoptions.trendlyne.com | `https://smartoptions.trendlyne.com/phoenix/api/fno/delivery-scanners/?exchange&lang` | GET | 404 | http 404 |
 | smartoptions.trendlyne.com | `https://smartoptions.trendlyne.com/phoenix/api/fno/earnings-surprises/?scId&type` | GET | 404 | http 404 |
@@ -621,6 +663,7 @@ entries; `403` = access-controlled; `0` = transport (unreachable/timeout); `429`
 | smartoptions.trendlyne.com | `https://smartoptions.trendlyne.com/phoenix/api/fno/iv-percentile/?symbol&type` | GET | 404 | http 404 |
 | smartoptions.trendlyne.com | `https://smartoptions.trendlyne.com/phoenix/api/fno/market-news/?category&exchange&limit` | GET | 404 | http 404 |
 | smartoptions.trendlyne.com | `https://smartoptions.trendlyne.com/phoenix/api/fno/momentum-rankings/?exchange&index&page` | GET | 404 | http 404 |
+| smartoptions.trendlyne.com | `https://smartoptions.trendlyne.com/phoenix/api/fno/oi-heatmaps/?exchange&expDate&mtype` | GET | 404 | http 404 |
 | smartoptions.trendlyne.com | `https://smartoptions.trendlyne.com/phoenix/api/fno/oi-pcr-trend/?exchange&reqType&symbolName` | GET | 404 | http 404 |
 | smartoptions.trendlyne.com | `https://smartoptions.trendlyne.com/phoenix/api/fno/option-chain/?expiryDate&symbol` | GET | 404 | http 404 |
 | smartoptions.trendlyne.com | `https://smartoptions.trendlyne.com/phoenix/api/fno/pe-pb-bands/?days&symbol` | GET | 404 | http 404 |
@@ -636,12 +679,6 @@ entries; `403` = access-controlled; `0` = transport (unreachable/timeout); `429`
 | smartoptions.trendlyne.com | `https://smartoptions.trendlyne.com/phoenix/api/fno/{string}/?period&scId` | GET | 404 | http 404 |
 | smartoptions.trendlyne.com | `https://smartoptions.trendlyne.com/phoenix/api/fno/{string}/?symbol` | GET | 404 | http 404 |
 | subscriptions.economictimes.indiatimes.com | `https://subscriptions.economictimes.indiatimes.com/subscription/growthAnalyitcs/?isGroupUser&merchantCode` | GET | 401 | http 401 |
-| ticker.finology.in | `https://ticker.finology.in/GetHouseMaster.ashx/?housecode` | GET | 403 | http 403 |
-| ticker.finology.in | `https://ticker.finology.in/GetShares.ashx/?fincode&v` | GET | 403 | http 403 |
-| ticker.finology.in | `https://ticker.finology.in/peers.ashx/?fincode&mode&peercount` | GET | 403 | http 403 |
-| ticker.finology.in | `https://ticker.finology.in/{string}/?count&fincode&scripcode&stk&symbol&type` | GET | 403 | http 403 |
-| ticker.finology.in | `https://ticker.finology.in/{string}/?exc&fincode&top&type` | GET | 403 | http 403 |
-| ticker.finology.in | `https://ticker.finology.in/{string}/?fincode` | GET | 403 | http 403 |
 | trendlyne.com | `https://trendlyne.com/fundamentals/bulk-block-deals/?exchange&limit&orderBy&start` | GET | 404 | http 404 |
 | trendlyne.com | `https://trendlyne.com/fundamentals/chart-patterns/?pattern_type&scId` | GET | 404 | http 404 |
 | trendlyne.com | `https://trendlyne.com/fundamentals/delivery-scanners/?exchange&lang` | GET | 404 | http 404 |
@@ -653,6 +690,7 @@ entries; `403` = access-controlled; `0` = transport (unreachable/timeout); `429`
 | trendlyne.com | `https://trendlyne.com/fundamentals/insider-deals/?dealsType&exchange&range` | GET | 404 | http 404 |
 | trendlyne.com | `https://trendlyne.com/fundamentals/iv-percentile/?symbol&type` | GET | 404 | http 404 |
 | trendlyne.com | `https://trendlyne.com/fundamentals/json-screener/79810/5/0/index/NIFTY500/nifty-500/--Relative/?` | GET | 404 | http 404 |
+| trendlyne.com | `https://trendlyne.com/fundamentals/json-screener/{int_id}/5/0/index/NIFTY500/nifty-500/{string}/?` | GET | 404 | http 404 |
 | trendlyne.com | `https://trendlyne.com/fundamentals/market-news/?category&exchange&limit` | GET | 404 | http 404 |
 | trendlyne.com | `https://trendlyne.com/fundamentals/momentum-rankings/?exchange&index&page` | GET | 404 | http 404 |
 | trendlyne.com | `https://trendlyne.com/fundamentals/oi-heatmaps/?exchange&expDate&mtype` | GET | 404 | http 404 |
@@ -674,16 +712,21 @@ entries; `403` = access-controlled; `0` = transport (unreachable/timeout); `429`
 | trendlyne.com | `https://trendlyne.com/{string}/{string}/{string}/{string}/{string}/{int_id}/{string}/?` | GET | 404 | http 404 |
 | webapi.niftytrader.in | `https://webapi.niftytrader.in/webapi/bulk-block-deals/?exchange&limit&orderBy&start` | GET | 404 | http 404 |
 | webapi.niftytrader.in | `https://webapi.niftytrader.in/webapi/chart-patterns/?pattern_type&scId` | GET | 404 | http 404 |
+| webapi.niftytrader.in | `https://webapi.niftytrader.in/webapi/delivery-scanners/?exchange&lang` | GET | 404 | http 404 |
+| webapi.niftytrader.in | `https://webapi.niftytrader.in/webapi/dividend-calendar/?scId&section` | GET | 404 | http 404 |
 | webapi.niftytrader.in | `https://webapi.niftytrader.in/webapi/exchange-filings/?exchange&exchangeSymbol` | GET | 404 | http 404 |
+| webapi.niftytrader.in | `https://webapi.niftytrader.in/webapi/fii-dii-daily/?exchange&type&year_month` | GET | 404 | http 404 |
 | webapi.niftytrader.in | `https://webapi.niftytrader.in/webapi/futures-data/?exchange&expirydate&fut&id` | GET | 404 | http 404 |
 | webapi.niftytrader.in | `https://webapi.niftytrader.in/webapi/gainers-losers/?duration&exchange&marketcap&pagesize` | GET | 404 | http 404 |
 | webapi.niftytrader.in | `https://webapi.niftytrader.in/webapi/history/?currencyCode&from&resolution&symbol&to` | GET | 404 | http 404 |
 | webapi.niftytrader.in | `https://webapi.niftytrader.in/webapi/market-news/?category&exchange&limit` | GET | 404 | http 404 |
 | webapi.niftytrader.in | `https://webapi.niftytrader.in/webapi/momentum-rankings/?exchange&index&page` | GET | 404 | http 404 |
+| webapi.niftytrader.in | `https://webapi.niftytrader.in/webapi/oi-heatmaps/?exchange&expDate&mtype` | GET | 404 | http 404 |
 | webapi.niftytrader.in | `https://webapi.niftytrader.in/webapi/oi-pcr-trend/?exchange&reqType&symbolName` | GET | 404 | http 404 |
 | webapi.niftytrader.in | `https://webapi.niftytrader.in/webapi/option-chain/?expiryDate&symbol` | GET | 404 | http 404 |
 | webapi.niftytrader.in | `https://webapi.niftytrader.in/webapi/pe-pb-bands/?days&symbol` | GET | 404 | http 404 |
 | webapi.niftytrader.in | `https://webapi.niftytrader.in/webapi/pivot-levels/?classic&period&scId` | GET | 404 | http 404 |
+| webapi.niftytrader.in | `https://webapi.niftytrader.in/webapi/price-forecast/?deviceType&scId` | GET | 404 | http 404 |
 | webapi.niftytrader.in | `https://webapi.niftytrader.in/webapi/proscanner-details/?catId&exchange&scanId` | GET | 404 | http 404 |
 | webapi.niftytrader.in | `https://webapi.niftytrader.in/webapi/research-reports/?exchange&path` | GET | 404 | http 404 |
 | webapi.niftytrader.in | `https://webapi.niftytrader.in/webapi/trending-screeners/?exchange&exchangeId&pageNumber&pageSize` | GET | 404 | http 404 |
@@ -695,9 +738,12 @@ entries; `403` = access-controlled; `0` = transport (unreachable/timeout); `429`
 | webapi.niftytrader.in | `https://webapi.niftytrader.in/webapi/{string}/?symbol` | GET | 404 | http 404 |
 | www.bloombergquint.com | `https://www.bloombergquint.com/route-data.json/?path` | GET | 0 | Failed to perform, curl: (6) Could not resolve host: www.bloombergquint.com. See |
 | www.niftytrader.in | `https://www.niftytrader.in/_next/data/m-kFYhuh9rPZWx0hL8Fje/gap-ups-gap-downs.json/?` | GET | 404 | http 404 |
+| www.nseindia.com | `https://www.nseindia.com/api/NextApi/dividend-calendar/?scId&section` | GET | 404 | http 404 |
 | www.nseindia.com | `https://www.nseindia.com/api/NextApi/earnings-surprises/?scId&type` | GET | 404 | http 404 |
+| www.nseindia.com | `https://www.nseindia.com/api/NextApi/exchange-filings/?exchange&exchangeSymbol` | GET | 404 | http 404 |
 | www.nseindia.com | `https://www.nseindia.com/api/NextApi/gainers-losers/?duration&exchange&marketcap&pagesize` | GET | 404 | http 404 |
 | www.nseindia.com | `https://www.nseindia.com/api/NextApi/history/?currencyCode&from&resolution&symbol&to` | GET | 404 | http 404 |
+| www.nseindia.com | `https://www.nseindia.com/api/NextApi/market-news/?category&exchange&limit` | GET | 404 | http 404 |
 | www.nseindia.com | `https://www.nseindia.com/api/NextApi/quarterly-results/?scId&type_format` | GET | 404 | http 404 |
 | www.nseindia.com | `https://www.nseindia.com/api/NextApi/trending-screeners/?exchange&exchangeId&pageNumber&pageSize` | GET | 404 | http 404 |
 | www.nseindia.com | `https://www.nseindia.com/api/NextApi/{string}/?companyid` | GET | 404 | http 404 |
@@ -708,47 +754,52 @@ entries; `403` = access-controlled; `0` = transport (unreachable/timeout); `429`
 | www.nseindia.com | `https://www.nseindia.com/api/gainers-losers/?duration&exchange&marketcap&pagesize` | GET | 404 | http 404 |
 | www.nseindia.com | `https://www.nseindia.com/api/market-news/?category&exchange&limit` | GET | 404 | http 404 |
 | www.nseindia.com | `https://www.nseindia.com/api/momentum-rankings/?exchange&index&page` | GET | 404 | http 404 |
+| www.nseindia.com | `https://www.nseindia.com/api/option-chain/?expiryDate&symbol` | GET | 404 | http 404 |
 | www.nseindia.com | `https://www.nseindia.com/api/pivot-levels/?classic&period&scId` | GET | 404 | http 404 |
 | www.nseindia.com | `https://www.nseindia.com/api/price-forecast/?deviceType&scId` | GET | 404 | http 404 |
 | www.nseindia.com | `https://www.nseindia.com/api/quarterly-results/?scId&type_format` | GET | 404 | http 404 |
 | www.nseindia.com | `https://www.nseindia.com/api/superstar-portfolios/?exchange&limit&only_superstars` | GET | 404 | http 404 |
 | www.nseindia.com | `https://www.nseindia.com/api/trending-screeners/?exchange&exchangeId&pageNumber&pageSize` | GET | 404 | http 404 |
 | www.nseindia.com | `https://www.nseindia.com/api/{string}/?ex&scId` | GET | 404 | http 404 |
+| www.nseindia.com | `https://www.nseindia.com/api/{string}/?period&scId` | GET | 404 | http 404 |
 | www.nseindia.com | `https://www.nseindia.com/api/{string}/?scId` | GET | 404 | http 404 |
 | www.nseindia.com | `https://www.nseindia.com/api/{string}/?symbol` | GET | 404 | http 404 |
 
-## NEVER FETCHED — 198 endpoints
+## NEVER FETCHED — 159 endpoints
 
-- www.nseindia.com: 43
-- api.moneycontrol.com: 15
-- api.tickertape.in: 13
-- etmarketsapis.indiatimes.com: 13
-- json.bselivefeeds.indiatimes.com: 13
-- api.niftytrader.in: 12
-- api.stockedge.com: 12
-- priceapi.moneycontrol.com: 12
-- quotes-api.tickertape.in: 12
-- marketservices.indiatimes.com: 11
-- trendlyne.com: 11
-- webapi.niftytrader.in: 11
-- smartoptions.trendlyne.com: 8
-- analyze.api.tickertape.in: 6
+- www.nseindia.com: 38
+- api.moneycontrol.com: 13
+- etmarketsapis.indiatimes.com: 11
+- json.bselivefeeds.indiatimes.com: 10
+- trendlyne.com: 10
+- api.tickertape.in: 9
+- quotes-api.tickertape.in: 9
+- api.niftytrader.in: 8
+- api.stockedge.com: 8
+- marketservices.indiatimes.com: 8
+- priceapi.moneycontrol.com: 7
+- : 6
+- smartoptions.trendlyne.com: 6
+- webapi.niftytrader.in: 6
+- analyze.api.tickertape.in: 4
 - stocks.sapphirebroking.com: 3
 - www.moneycontrol.com: 2
 - etapi.indiatimes.com: 1
 
 | host | template | method |
 | --- | --- | --- |
+|  | `https:///api.moneycontrol.com/mcapi/v1/stock/get-stock-price/?scId&scIdList` | GET |
+|  | `https:///api.moneycontrol.com/mcapi/v1/{string}/{string}/?scId&type` | GET |
+|  | `https:///appfeeds.moneycontrol.com/jsonapi/market/indices&format=json&ind_id=38/?` | GET |
+|  | `https:///priceapi.moneycontrol.com/pricefeed/{string}/{string}/{string}/?` | GET |
+|  | `https:///www.moneycontrol.com/mc/widget/swot/swotCount/?device_type&scDid&scId&stkname` | GET |
+|  | `https:///www.moneycontrol.com/mc/widget/{string}/?sc_did&sc_id` | GET |
 | analyze.api.tickertape.in | `https://analyze.api.tickertape.in/v2/stocks/dividend-calendar/?scId&section` | GET |
-| analyze.api.tickertape.in | `https://analyze.api.tickertape.in/v2/stocks/fii-dii-daily/?exchange&type&year_month` | GET |
 | analyze.api.tickertape.in | `https://analyze.api.tickertape.in/v2/stocks/insider-deals/?dealsType&exchange&range` | GET |
-| analyze.api.tickertape.in | `https://analyze.api.tickertape.in/v2/stocks/market-news/?category&exchange&limit` | GET |
 | analyze.api.tickertape.in | `https://analyze.api.tickertape.in/v2/stocks/momentum-rankings/?exchange&index&page` | GET |
 | analyze.api.tickertape.in | `https://analyze.api.tickertape.in/v2/stocks/price-forecast/?deviceType&scId` | GET |
 | api.moneycontrol.com | `https://api.moneycontrol.com/mcapi/v1/delivery-scanners/?exchange&lang` | GET |
 | api.moneycontrol.com | `https://api.moneycontrol.com/mcapi/v1/dividend-calendar/?scId&section` | GET |
-| api.moneycontrol.com | `https://api.moneycontrol.com/mcapi/v1/exchange-filings/?exchange&exchangeSymbol` | GET |
-| api.moneycontrol.com | `https://api.moneycontrol.com/mcapi/v1/gainers-losers/?duration&exchange&marketcap&pagesize` | GET |
 | api.moneycontrol.com | `https://api.moneycontrol.com/mcapi/v1/insider-deals/?dealsType&exchange&range` | GET |
 | api.moneycontrol.com | `https://api.moneycontrol.com/mcapi/v1/market-news/?category&exchange&limit` | GET |
 | api.moneycontrol.com | `https://api.moneycontrol.com/mcapi/v1/momentum-rankings/?exchange&index&page` | GET |
@@ -766,43 +817,29 @@ entries; `403` = access-controlled; `0` = transport (unreachable/timeout); `429`
 | api.niftytrader.in | `https://api.niftytrader.in/webapi/fii-dii-daily/?exchange&type&year_month` | GET |
 | api.niftytrader.in | `https://api.niftytrader.in/webapi/gainers-losers/?duration&exchange&marketcap&pagesize` | GET |
 | api.niftytrader.in | `https://api.niftytrader.in/webapi/iv-percentile/?symbol&type` | GET |
-| api.niftytrader.in | `https://api.niftytrader.in/webapi/market-news/?category&exchange&limit` | GET |
 | api.niftytrader.in | `https://api.niftytrader.in/webapi/momentum-rankings/?exchange&index&page` | GET |
-| api.niftytrader.in | `https://api.niftytrader.in/webapi/superstar-portfolios/?exchange&limit&only_superstars` | GET |
-| api.niftytrader.in | `https://api.niftytrader.in/webapi/trending-screeners/?exchange&exchangeId&pageNumber&pageSize` | GET |
 | api.niftytrader.in | `https://api.niftytrader.in/webapi/{string}/?companyid` | GET |
-| api.niftytrader.in | `https://api.niftytrader.in/webapi/{string}/?ex&scId` | GET |
 | api.stockedge.com | `https://api.stockedge.com/Api/{string}/concall-transcripts/?exchange&limit` | GET |
 | api.stockedge.com | `https://api.stockedge.com/Api/{string}/delivery-scanners/?exchange&lang` | GET |
 | api.stockedge.com | `https://api.stockedge.com/Api/{string}/dividend-calendar/?scId&section` | GET |
-| api.stockedge.com | `https://api.stockedge.com/Api/{string}/exchange-filings/?exchange&exchangeSymbol` | GET |
 | api.stockedge.com | `https://api.stockedge.com/Api/{string}/fii-dii-daily/?exchange&type&year_month` | GET |
 | api.stockedge.com | `https://api.stockedge.com/Api/{string}/gainers-losers/?duration&exchange&marketcap&pagesize` | GET |
-| api.stockedge.com | `https://api.stockedge.com/Api/{string}/market-news/?category&exchange&limit` | GET |
-| api.stockedge.com | `https://api.stockedge.com/Api/{string}/price-forecast/?deviceType&scId` | GET |
 | api.stockedge.com | `https://api.stockedge.com/Api/{string}/superstar-portfolios/?exchange&limit&only_superstars` | GET |
 | api.stockedge.com | `https://api.stockedge.com/Api/{string}/{string}/?companyid` | GET |
-| api.stockedge.com | `https://api.stockedge.com/Api/{string}/{string}/?ex&scId` | GET |
 | api.stockedge.com | `https://api.stockedge.com/Api/{string}/{string}/?scId` | GET |
 | api.tickertape.in | `https://api.tickertape.in/stocks/dividend-calendar/?scId&section` | GET |
 | api.tickertape.in | `https://api.tickertape.in/stocks/fii-dii-daily/?exchange&type&year_month` | GET |
 | api.tickertape.in | `https://api.tickertape.in/stocks/financials/income/{tickertape_sid}/annual/normal` | GET |
 | api.tickertape.in | `https://api.tickertape.in/stocks/insider-deals/?dealsType&exchange&range` | GET |
 | api.tickertape.in | `https://api.tickertape.in/stocks/market-news/?category&exchange&limit` | GET |
-| api.tickertape.in | `https://api.tickertape.in/stocks/momentum-rankings/?exchange&index&page` | GET |
-| api.tickertape.in | `https://api.tickertape.in/stocks/pe-pb-bands/?days&symbol` | GET |
 | api.tickertape.in | `https://api.tickertape.in/stocks/quarterly-results/?scId&type_format` | GET |
 | api.tickertape.in | `https://api.tickertape.in/stocks/superstar-portfolios/?exchange&limit&only_superstars` | GET |
 | api.tickertape.in | `https://api.tickertape.in/stocks/trending-screeners/?exchange&exchangeId&pageNumber&pageSize` | GET |
-| api.tickertape.in | `https://api.tickertape.in/stocks/{string}/?companyid` | GET |
 | api.tickertape.in | `https://api.tickertape.in/stocks/{string}/?exchange` | GET |
-| api.tickertape.in | `https://api.tickertape.in/stocks/{string}/?scId` | GET |
 | etapi.indiatimes.com | `https://etapi.indiatimes.com/et-screener/v2/intraday-stats` | POST |
 | etmarketsapis.indiatimes.com | `https://etmarketsapis.indiatimes.com/bulk-block-deals/?exchange&limit&orderBy&start` | GET |
 | etmarketsapis.indiatimes.com | `https://etmarketsapis.indiatimes.com/concall-transcripts/?exchange&limit` | GET |
 | etmarketsapis.indiatimes.com | `https://etmarketsapis.indiatimes.com/gainers-losers/?duration&exchange&marketcap&pagesize` | GET |
-| etmarketsapis.indiatimes.com | `https://etmarketsapis.indiatimes.com/iv-percentile/?symbol&type` | GET |
-| etmarketsapis.indiatimes.com | `https://etmarketsapis.indiatimes.com/market-news/?category&exchange&limit` | GET |
 | etmarketsapis.indiatimes.com | `https://etmarketsapis.indiatimes.com/momentum-rankings/?exchange&index&page` | GET |
 | etmarketsapis.indiatimes.com | `https://etmarketsapis.indiatimes.com/oi-heatmaps/?exchange&expDate&mtype` | GET |
 | etmarketsapis.indiatimes.com | `https://etmarketsapis.indiatimes.com/oi-pcr-trend/?exchange&reqType&symbolName` | GET |
@@ -817,54 +854,38 @@ entries; `403` = access-controlled; `0` = transport (unreachable/timeout); `429`
 | json.bselivefeeds.indiatimes.com | `https://json.bselivefeeds.indiatimes.com/concall-transcripts/?exchange&limit` | GET |
 | json.bselivefeeds.indiatimes.com | `https://json.bselivefeeds.indiatimes.com/delivery-scanners/?exchange&lang` | GET |
 | json.bselivefeeds.indiatimes.com | `https://json.bselivefeeds.indiatimes.com/dividend-calendar/?scId&section` | GET |
-| json.bselivefeeds.indiatimes.com | `https://json.bselivefeeds.indiatimes.com/exchange-filings/?exchange&exchangeSymbol` | GET |
 | json.bselivefeeds.indiatimes.com | `https://json.bselivefeeds.indiatimes.com/fii-dii-daily/?exchange&type&year_month` | GET |
 | json.bselivefeeds.indiatimes.com | `https://json.bselivefeeds.indiatimes.com/gainers-losers/?duration&exchange&marketcap&pagesize` | GET |
 | json.bselivefeeds.indiatimes.com | `https://json.bselivefeeds.indiatimes.com/market-news/?category&exchange&limit` | GET |
-| json.bselivefeeds.indiatimes.com | `https://json.bselivefeeds.indiatimes.com/momentum-rankings/?exchange&index&page` | GET |
-| json.bselivefeeds.indiatimes.com | `https://json.bselivefeeds.indiatimes.com/oi-heatmaps/?exchange&expDate&mtype` | GET |
 | json.bselivefeeds.indiatimes.com | `https://json.bselivefeeds.indiatimes.com/{string}/?scId` | GET |
 | marketservices.indiatimes.com | `https://marketservices.indiatimes.com/bulk-block-deals/?exchange&limit&orderBy&start` | GET |
-| marketservices.indiatimes.com | `https://marketservices.indiatimes.com/concall-transcripts/?exchange&limit` | GET |
 | marketservices.indiatimes.com | `https://marketservices.indiatimes.com/exchange-filings/?exchange&exchangeSymbol` | GET |
 | marketservices.indiatimes.com | `https://marketservices.indiatimes.com/fii-dii-daily/?exchange&type&year_month` | GET |
 | marketservices.indiatimes.com | `https://marketservices.indiatimes.com/iv-percentile/?symbol&type` | GET |
 | marketservices.indiatimes.com | `https://marketservices.indiatimes.com/oi-heatmaps/?exchange&expDate&mtype` | GET |
-| marketservices.indiatimes.com | `https://marketservices.indiatimes.com/option-chain/?expiryDate&symbol` | GET |
 | marketservices.indiatimes.com | `https://marketservices.indiatimes.com/pe-pb-bands/?days&symbol` | GET |
-| marketservices.indiatimes.com | `https://marketservices.indiatimes.com/{string}/?companyid` | GET |
 | marketservices.indiatimes.com | `https://marketservices.indiatimes.com/{string}/?ex&scId` | GET |
 | marketservices.indiatimes.com | `https://marketservices.indiatimes.com/{string}/?scId` | GET |
 | priceapi.moneycontrol.com | `https://priceapi.moneycontrol.com/techCharts/indianMarket/stock/bulk-block-deals/?exchange&limit&orderBy&start` | GET |
 | priceapi.moneycontrol.com | `https://priceapi.moneycontrol.com/techCharts/indianMarket/stock/concall-transcripts/?exchange&limit` | GET |
-| priceapi.moneycontrol.com | `https://priceapi.moneycontrol.com/techCharts/indianMarket/stock/earnings-surprises/?scId&type` | GET |
 | priceapi.moneycontrol.com | `https://priceapi.moneycontrol.com/techCharts/indianMarket/stock/exchange-filings/?exchange&exchangeSymbol` | GET |
 | priceapi.moneycontrol.com | `https://priceapi.moneycontrol.com/techCharts/indianMarket/stock/fii-dii-daily/?exchange&type&year_month` | GET |
-| priceapi.moneycontrol.com | `https://priceapi.moneycontrol.com/techCharts/indianMarket/stock/insider-deals/?dealsType&exchange&range` | GET |
 | priceapi.moneycontrol.com | `https://priceapi.moneycontrol.com/techCharts/indianMarket/stock/market-news/?category&exchange&limit` | GET |
 | priceapi.moneycontrol.com | `https://priceapi.moneycontrol.com/techCharts/indianMarket/stock/proscanner-details/?catId&exchange&scanId` | GET |
-| priceapi.moneycontrol.com | `https://priceapi.moneycontrol.com/techCharts/indianMarket/stock/quarterly-results/?scId&type_format` | GET |
-| priceapi.moneycontrol.com | `https://priceapi.moneycontrol.com/techCharts/indianMarket/stock/trending-screeners/?exchange&exchangeId&pageNumber&pageSize` | GET |
-| priceapi.moneycontrol.com | `https://priceapi.moneycontrol.com/techCharts/indianMarket/stock/{string}/?ex&scId` | GET |
 | priceapi.moneycontrol.com | `https://priceapi.moneycontrol.com/techCharts/indianMarket/stock/{string}/?scId` | GET |
-| quotes-api.tickertape.in | `https://quotes-api.tickertape.in/bulk-block-deals/?exchange&limit&orderBy&start` | GET |
 | quotes-api.tickertape.in | `https://quotes-api.tickertape.in/delivery-scanners/?exchange&lang` | GET |
 | quotes-api.tickertape.in | `https://quotes-api.tickertape.in/earnings-surprises/?scId&type` | GET |
 | quotes-api.tickertape.in | `https://quotes-api.tickertape.in/gainers-losers/?duration&exchange&marketcap&pagesize` | GET |
-| quotes-api.tickertape.in | `https://quotes-api.tickertape.in/iv-percentile/?symbol&type` | GET |
 | quotes-api.tickertape.in | `https://quotes-api.tickertape.in/oi-heatmaps/?exchange&expDate&mtype` | GET |
-| quotes-api.tickertape.in | `https://quotes-api.tickertape.in/pe-pb-bands/?days&symbol` | GET |
 | quotes-api.tickertape.in | `https://quotes-api.tickertape.in/price-forecast/?deviceType&scId` | GET |
 | quotes-api.tickertape.in | `https://quotes-api.tickertape.in/quarterly-results/?scId&type_format` | GET |
 | quotes-api.tickertape.in | `https://quotes-api.tickertape.in/research-reports/?exchange&path` | GET |
 | quotes-api.tickertape.in | `https://quotes-api.tickertape.in/superstar-portfolios/?exchange&limit&only_superstars` | GET |
 | quotes-api.tickertape.in | `https://quotes-api.tickertape.in/{string}/?scId` | GET |
-| smartoptions.trendlyne.com | `https://smartoptions.trendlyne.com/phoenix/api/fno/bulk-block-deals/?exchange&limit&orderBy&start` | GET |
 | smartoptions.trendlyne.com | `https://smartoptions.trendlyne.com/phoenix/api/fno/concall-transcripts/?exchange&limit` | GET |
 | smartoptions.trendlyne.com | `https://smartoptions.trendlyne.com/phoenix/api/fno/dividend-calendar/?scId&section` | GET |
 | smartoptions.trendlyne.com | `https://smartoptions.trendlyne.com/phoenix/api/fno/exchange-filings/?exchange&exchangeSymbol` | GET |
 | smartoptions.trendlyne.com | `https://smartoptions.trendlyne.com/phoenix/api/fno/insider-deals/?dealsType&exchange&range` | GET |
-| smartoptions.trendlyne.com | `https://smartoptions.trendlyne.com/phoenix/api/fno/oi-heatmaps/?exchange&expDate&mtype` | GET |
 | smartoptions.trendlyne.com | `https://smartoptions.trendlyne.com/phoenix/api/fno/research-reports/?exchange&path` | GET |
 | smartoptions.trendlyne.com | `https://smartoptions.trendlyne.com/phoenix/api/fno/{string}/?scId` | GET |
 | stocks.sapphirebroking.com | `https://stocks.sapphirebroking.com/api/market/index/NIFTY%2050/?` | GET |
@@ -873,7 +894,6 @@ entries; `403` = access-controlled; `0` = transport (unreachable/timeout); `429`
 | trendlyne.com | `https://trendlyne.com/fundamentals/concall-transcripts/?exchange&limit` | GET |
 | trendlyne.com | `https://trendlyne.com/fundamentals/earnings-surprises/?scId&type` | GET |
 | trendlyne.com | `https://trendlyne.com/fundamentals/exchange-filings/?exchange&exchangeSymbol` | GET |
-| trendlyne.com | `https://trendlyne.com/fundamentals/json-screener/{int_id}/5/0/index/NIFTY500/nifty-500/{string}/?` | GET |
 | trendlyne.com | `https://trendlyne.com/fundamentals/{string}/?scId` | GET |
 | trendlyne.com | `https://trendlyne.com/mutual-fund/getMFdata/?category&category&category&category&category&category&category&category&category&category&category&category&category&category&plan&plan` | GET |
 | trendlyne.com | `https://trendlyne.com/mutual-fund/getMFdata/?category&category&category&category&category&category&plan&plan` | GET |
@@ -882,14 +902,9 @@ entries; `403` = access-controlled; `0` = transport (unreachable/timeout); `429`
 | trendlyne.com | `https://trendlyne.com/mutual-fund/getMFdata/?category&plan&plan` | GET |
 | trendlyne.com | `https://trendlyne.com/mutual-fund/{string}/?pk` | GET |
 | webapi.niftytrader.in | `https://webapi.niftytrader.in/webapi/concall-transcripts/?exchange&limit` | GET |
-| webapi.niftytrader.in | `https://webapi.niftytrader.in/webapi/delivery-scanners/?exchange&lang` | GET |
-| webapi.niftytrader.in | `https://webapi.niftytrader.in/webapi/dividend-calendar/?scId&section` | GET |
 | webapi.niftytrader.in | `https://webapi.niftytrader.in/webapi/earnings-surprises/?scId&type` | GET |
-| webapi.niftytrader.in | `https://webapi.niftytrader.in/webapi/fii-dii-daily/?exchange&type&year_month` | GET |
 | webapi.niftytrader.in | `https://webapi.niftytrader.in/webapi/insider-deals/?dealsType&exchange&range` | GET |
 | webapi.niftytrader.in | `https://webapi.niftytrader.in/webapi/iv-percentile/?symbol&type` | GET |
-| webapi.niftytrader.in | `https://webapi.niftytrader.in/webapi/oi-heatmaps/?exchange&expDate&mtype` | GET |
-| webapi.niftytrader.in | `https://webapi.niftytrader.in/webapi/price-forecast/?deviceType&scId` | GET |
 | webapi.niftytrader.in | `https://webapi.niftytrader.in/webapi/quarterly-results/?scId&type_format` | GET |
 | webapi.niftytrader.in | `https://webapi.niftytrader.in/webapi/superstar-portfolios/?exchange&limit&only_superstars` | GET |
 | www.moneycontrol.com | `https://www.moneycontrol.com/mc/widget/swot/swotCount/?device_type&scDid&scId&stkname` | GET |
@@ -898,13 +913,10 @@ entries; `403` = access-controlled; `0` = transport (unreachable/timeout); `429`
 | www.nseindia.com | `https://www.nseindia.com/api/NextApi/chart-patterns/?pattern_type&scId` | GET |
 | www.nseindia.com | `https://www.nseindia.com/api/NextApi/concall-transcripts/?exchange&limit` | GET |
 | www.nseindia.com | `https://www.nseindia.com/api/NextApi/delivery-scanners/?exchange&lang` | GET |
-| www.nseindia.com | `https://www.nseindia.com/api/NextApi/dividend-calendar/?scId&section` | GET |
-| www.nseindia.com | `https://www.nseindia.com/api/NextApi/exchange-filings/?exchange&exchangeSymbol` | GET |
 | www.nseindia.com | `https://www.nseindia.com/api/NextApi/fii-dii-daily/?exchange&type&year_month` | GET |
 | www.nseindia.com | `https://www.nseindia.com/api/NextApi/futures-data/?exchange&expirydate&fut&id` | GET |
 | www.nseindia.com | `https://www.nseindia.com/api/NextApi/insider-deals/?dealsType&exchange&range` | GET |
 | www.nseindia.com | `https://www.nseindia.com/api/NextApi/iv-percentile/?symbol&type` | GET |
-| www.nseindia.com | `https://www.nseindia.com/api/NextApi/market-news/?category&exchange&limit` | GET |
 | www.nseindia.com | `https://www.nseindia.com/api/NextApi/momentum-rankings/?exchange&index&page` | GET |
 | www.nseindia.com | `https://www.nseindia.com/api/NextApi/oi-heatmaps/?exchange&expDate&mtype` | GET |
 | www.nseindia.com | `https://www.nseindia.com/api/NextApi/oi-pcr-trend/?exchange&reqType&symbolName` | GET |
@@ -930,10 +942,8 @@ entries; `403` = access-controlled; `0` = transport (unreachable/timeout); `429`
 | www.nseindia.com | `https://www.nseindia.com/api/iv-percentile/?symbol&type` | GET |
 | www.nseindia.com | `https://www.nseindia.com/api/oi-heatmaps/?exchange&expDate&mtype` | GET |
 | www.nseindia.com | `https://www.nseindia.com/api/oi-pcr-trend/?exchange&reqType&symbolName` | GET |
-| www.nseindia.com | `https://www.nseindia.com/api/option-chain/?expiryDate&symbol` | GET |
 | www.nseindia.com | `https://www.nseindia.com/api/pe-pb-bands/?days&symbol` | GET |
 | www.nseindia.com | `https://www.nseindia.com/api/proscanner-details/?catId&exchange&scanId` | GET |
 | www.nseindia.com | `https://www.nseindia.com/api/research-reports/?exchange&path` | GET |
 | www.nseindia.com | `https://www.nseindia.com/api/{string}/?companyid` | GET |
 | www.nseindia.com | `https://www.nseindia.com/api/{string}/?exchange` | GET |
-| www.nseindia.com | `https://www.nseindia.com/api/{string}/?period&scId` | GET |

@@ -474,6 +474,33 @@ def find_alternates(targets, exclude: str | None = None, limit: int = 15) -> lis
     return ranked[:limit]
 
 
+def load_ue_successes() -> list[SourceRecord]:
+    """urls-explorer's proven-success URLs (successful_urls.csv 528 + report_success.csv
+    407, union after dedupe): every one returned HTTP 200 there with real query values.
+    Ingested so the catalog samples THESE concrete URLs (they are the mechanism-proof
+    requests), not phantom shape-variants."""
+    import csv
+    import io
+
+    records: list[SourceRecord] = []
+    seen: set[str] = set()
+    for name in ("successful_urls.csv", "report_success.csv"):
+        path = REPO_ROOT / name
+        if not path.exists():
+            continue
+        with io.open(path, encoding="utf-8", errors="replace") as fh:
+            for row in csv.DictReader(fh):
+                url = (row.get("url") or "").strip()
+                if not url or url in seen:
+                    continue
+                seen.add(url)
+                records.append(SourceRecord(
+                    url=url, source=f"urls-explorer/{name}",
+                    provider=row.get("portal"), category=row.get("category"),
+                    description=row.get("description")))
+    return records
+
+
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description="Consolidate URL inventories into url_endpoints.")
     ap.add_argument("--apply", action="store_true", help="write to the database (default: dry run)")
@@ -495,14 +522,19 @@ def main(argv=None) -> int:
     records = load_json_records()
     uniq, repaired = load_unique_urls()
     records.extend(uniq)
-    verified = None
+    ue_successes = load_ue_successes()
+    records.extend(ue_successes)
+    verified = {r.url: 200 for r in ue_successes}  # proven 200 in urls-explorer's runs
     if args.catalog:
-        verified, _ = load_verification_evidence(Path(args.catalog))
+        cat_verified, _ = load_verification_evidence(Path(args.catalog))
+        for u, st in cat_verified.items():
+            verified.setdefault(u, st)
     report, stats = consolidate(records, load_post_groups(), load_universe(),
                                 load_registry_entries(), apply=args.apply,
                                 verified=verified)
     print(f"[URL-CATALOG] unique_urls.txt: {len(uniq)} records ({repaired} repaired);"
-          f" evidence URLs: {len(verified) if verified else 0}")
+          f" urls-explorer proven-success URLs: {len(ue_successes)};"
+          f" evidence URLs: {len(verified)}")
     default_out = (REPO_ROOT / "docs" / "url_explorer"
                    / f"consolidation_report_{datetime.now(timezone.utc).date().isoformat()}.md")
     out_path = Path(args.out) if args.out else default_out
