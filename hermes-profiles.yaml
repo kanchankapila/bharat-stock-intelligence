@@ -1,0 +1,190 @@
+# Hermes Profiles for Bharat Stock Intelligence
+# Place these in ~/.hermes/profiles/<profile_name>/config.yaml
+
+# ─── bharat-ops Profile (Operational, Fast, Low-Cost) ───
+# ~/.hermes/profiles/bharat-ops/config.yaml
+model:
+  default: "gemini-2.5-flash"
+  provider: "openrouter"
+  context_length: 128000
+  temperature: 0.1
+
+agent:
+  max_turns: 20
+  tool_use_enforcement: "smart"
+  verify_on_stop: true
+
+terminal:
+  backend: "local"
+  timeout: 180
+  cwd: "D:/Github/bharat-stock-intelligence"
+
+compression:
+  enabled: true
+  threshold: 0.60
+  target_ratio: 0.25
+
+display:
+  interface: "cli"
+  show_reasoning: false
+  show_cost: true
+
+approvals:
+  mode: "smart"
+  cron_mode: "auto"
+
+toolsets:
+  enabled:
+    - "terminal"
+    - "file"
+    - "code_execution"
+    - "coding"
+    - "cronjob"
+    - "clarify"
+    - "todo"
+    - "web"
+    - "search"
+
+mcp_servers:
+  bharat-intelligence:
+    command: "python"
+    args: ["-m", "mcp.market_intelligence_mcp"]
+    cwd: "D:/Github/bharat-stock-intelligence"
+    env:
+      POSTGRES_URL: "${POSTGRES_URL}"
+      PYTHONPATH: "D:/Github/bharat-stock-intelligence/src/server"
+      PATH: "D:/Github/bharat-stock-intelligence/backend-python/venv/Scripts;${PATH}"
+    timeout: 120
+
+# Cron jobs for ops profile (high-frequency, low-latency)
+cron:
+  jobs:
+    - name: "ingestion-health-check"
+      schedule: "*/5 * * * *"
+      prompt: "Quick health check: call inspect_ingestion_health, alert only on NEW failures or DLQ > 5"
+      skills: ["bharat-fetcher-health"]
+      model: "gemini-2.5-flash"
+
+    - name: "dlq-reprocess"
+      schedule: "0 * * * *"
+      prompt: "Requeue DLQ entries: call requeue_dlq"
+      skills: ["bharat-fetcher-health"]
+      deliver: "telegram"
+
+    - name: "pre-market-briefing"
+      schedule: "0 3 * * 1-5"  # 8:30 AM IST
+      prompt: "Generate pre-market audio briefing using tts_briefing.py pre_market"
+      script: "tts_briefing.py pre_market"
+      deliver: "telegram"
+
+    - name: "post-market-briefing"
+      schedule: "30 10 * * 1-5"  # 4:00 PM IST
+      prompt: "Generate post-market audio briefing using tts_briefing.py post_market"
+      script: "tts_briefing.py post_market"
+      deliver: "telegram"
+
+---
+# ─── bharat-research Profile (Deep Reasoning, High-Quality) ───
+# ~/.hermes/profiles/bharat-research/config.yaml
+model:
+  default: "claude-3-5-sonnet-20241022"
+  provider: "anthropic"
+  context_length: 200000
+  temperature: 0.3
+
+agent:
+  max_turns: 100
+  tool_use_enforcement: "strict"
+  verify_on_stop: true
+
+terminal:
+  backend: "local"
+  timeout: 1800
+  cwd: "D:/Github/bharat-stock-intelligence"
+
+compression:
+  enabled: true
+  threshold: 0.75
+  target_ratio: 0.20
+
+display:
+  interface: "cli"
+  show_reasoning: true
+  show_cost: true
+
+approvals:
+  mode: "smart"
+  cron_mode: "ask"
+
+toolsets:
+  enabled:
+    - "terminal"
+    - "file"
+    - "code_execution"
+    - "coding"
+    - "cronjob"
+    - "clarify"
+    - "todo"
+    - "web"
+    - "search"
+    - "delegation"
+    - "skills"
+    - "memory"
+    - "session_search"
+    - "kanban"
+    - "vision"
+
+mcp_servers:
+  bharat-intelligence:
+    command: "python"
+    args: ["-m", "mcp.market_intelligence_mcp"]
+    cwd: "D:/Github/bharat-stock-intelligence"
+    env:
+      POSTGRES_URL: "${POSTGRES_URL}"
+      PYTHONPATH: "D:/Github/bharat-stock-intelligence/src/server"
+      PATH: "D:/Github/bharat-stock-intelligence/backend-python/venv/Scripts;${PATH}"
+    timeout: 600
+
+cron:
+  jobs:
+    - name: "weekly-factor-discovery"
+      schedule: "0 6 * * 0"  # Sunday 11:30 AM IST
+      prompt: |
+        Run full factor discovery cycle:
+        1. Call run_agent_role with agent_name=data_scientist
+        2. Review new factor candidates on kanban board bharat-quant-research
+        3. For each candidate in candidate-factors column, run validation gates
+        4. Move approved factors to approved-factors column
+      skills: ["bharat-backtest-runner", "bharat-model-promotion"]
+      model: "claude-3-5-sonnet-20241022"
+      deliver: "telegram"
+
+    - name: "monthly-model-audit"
+      schedule: "0 2 1 * *"  # 1st of month 7:30 AM IST
+      prompt: |
+        Run comprehensive model audit:
+        1. Call run_agent_role with agent_name=auditor
+        2. Check model_registry for all promoted models
+        3. Run negative control tests on each
+        4. Verify paper trading performance vs backtest
+        5. Flag any models needing rollback
+      skills: ["bharat-model-promotion", "bharat-backtest-runner"]
+      model: "claude-3-5-sonnet-20241022"
+      deliver: "telegram"
+
+    - name: "quarterly-weight-optimization"
+      schedule: "0 6 1 */3 *"  # Quarterly 11:30 AM IST
+      prompt: |
+        Run REGIME_WEIGHTS optimization:
+        1. Call run_agent_role with agent_name=optimizer
+        2. Run AlphaQuant walk-forward for each regime
+        3. Validate new weights against out-of-sample
+        4. If improved, promote via model_registry
+      skills: ["bharat-model-promotion"]
+      deliver: "telegram"
+
+---
+# ─── Profile Switching Commands ───
+# hermes --profile bharat-ops      # Daily operations
+# hermes --profile bharat-research # Deep research sessions
+# hermes profile switch bharat-ops # Switch active profile
