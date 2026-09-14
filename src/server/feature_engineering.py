@@ -835,10 +835,13 @@ class FeatureEngineer:
     def _merge_earnings_clock(self, feat: pd.DataFrame, symbol: str) -> pd.DataFrame:
         """Earnings event clock + last-surprise features (2026-09-13 step 2).
 
-        days_to_next_earnings / days_since_last_earnings from stock_earnings_dates
-        (scid matches the MC ticker symbols in this dataset). last_eps_surprise_pct
-        / last_beat_score read stock_earnings_beats as-of (latest quarter_date <=
-        the feature date; stale beyond 400 days reads as missing -- a year-old
+        days_to_next_earnings / days_since_last_earnings from stock_earnings_dates,
+        which is keyed by MoneyControl's opaque scid -- resolved to the NSE symbol
+        through nse_stocks.mcsymbol (the canonical provider-ID map; 2,340/2,366
+        populated, 1,944/3,694 of the feed's scids resolve -- the rest are indices
+        and unmapped instruments). last_eps_surprise_pct / last_beat_score read
+        stock_earnings_beats as-of (already symbol-keyed; latest quarter_date <=
+        the feature date, stale beyond 400 days reads as missing -- a year-old
         surprise is not information). earnings_in_5d flags the announcement-risk
         window; never forward-filled (NaN = no known upcoming earnings, not 0).
         """
@@ -849,13 +852,18 @@ class FeatureEngineer:
             feat[c] = np.nan
 
         ed = read_df(
-            """SELECT result_date FROM stock_earnings_dates
-               WHERE scid=? AND result_date IS NOT NULL ORDER BY result_date""",
+            """SELECT e.result_date
+               FROM stock_earnings_dates e
+               JOIN nse_stocks n ON n.mcsymbol = e.scid
+               WHERE n.symbol=? AND e.result_date IS NOT NULL
+               ORDER BY e.result_date""",
             (symbol,),
         )
         if not ed.empty:
             ev = pd.to_datetime(ed["result_date"], errors="coerce").dropna()
-            ev = ev.dt.normalize().sort_values().to_numpy()
+            # A mcsymbol collision in nse_stocks could duplicate dates; the event
+            # clock counts distinct dates.
+            ev = ev.dt.normalize().drop_duplicates().sort_values().to_numpy()
             right = np.searchsorted(ev, days, side="right")
             safe_right = np.minimum(right, len(ev) - 1)
             safe_left = np.maximum(right - 1, 0)

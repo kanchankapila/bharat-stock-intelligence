@@ -1173,10 +1173,12 @@ hole-fill-only into the technical_signals join, plus new `block_deal_value_cr`,
   `broker_recos_90d` = trailing-90-day event count from `trendlyne_analyst_targets`.
   **Trap:** buy/hold/sell columns are ALREADY percentages summing to ~100 (RELIANCE 96/0/4),
   not counts — a count ratio produced 369% nonsense before the fix.
-- `_merge_earnings_clock` — `stock_earnings_dates` (keyed by MC **scid**, not NSE symbol;
-  symbols without a scid mapping stay NaN): `days_to_next_earnings`, `days_since_last_earnings`,
-  `earnings_in_5d` (flag only, never forward-filled). `stock_earnings_beats` as-of (400-day
-  staleness): `last_eps_surprise_pct`, `last_beat_score`.
+- `_merge_earnings_clock` — `stock_earnings_dates` keyed by MoneyControl's opaque **scid**,
+  resolved to the NSE symbol through `nse_stocks.mcsymbol` (2,340/2,366 populated;
+  1,944/3,694 of the feed's scids resolve — the rest are indices/unmapped instruments,
+  which stay NaN): `days_to_next_earnings`, `days_since_last_earnings`, `earnings_in_5d`
+  (flag only, never forward-filled). `stock_earnings_beats` is already symbol-keyed;
+  as-of (400-day staleness): `last_eps_surprise_pct`, `last_beat_score`.
 - `_merge_delivery` — `stock_delivery_data`: `delivery_z_20d` (min 10 obs), `delivery_pct_chg_5d`,
   `delivery_qty_5d`.
 

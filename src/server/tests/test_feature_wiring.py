@@ -158,6 +158,9 @@ _DDL = {
         CREATE TABLE IF NOT EXISTS stock_earnings_dates (
             scid TEXT, result_date DATE, stock_name TEXT, result_type TEXT,
             result_time TEXT, market_cap REAL, exchange TEXT, fetched_at TEXT)""",
+    "nse_stocks": """
+        CREATE TABLE IF NOT EXISTS nse_stocks (
+            symbol TEXT, mcsymbol TEXT)""",
     "stock_earnings_beats": """
         CREATE TABLE IF NOT EXISTS stock_earnings_beats (
             id BIGINT, symbol TEXT, quarter_date DATE, period_type TEXT,
@@ -248,9 +251,18 @@ def _seed_analyst(con):
 def _seed_earnings(con):
     nxt = (pd.Timestamp.today() + pd.Timedelta(days=3)).strftime("%Y-%m-%d")
     prv = (pd.Timestamp.today() - pd.Timedelta(days=20)).strftime("%Y-%m-%d")
+    # The feed is scid-keyed; the merge must resolve TEST -> MC01 through
+    # nse_stocks (mcsymbol != symbol, so a no-op WHERE scid=symbol fails here).
+    # UNMAPPED's yesterday date must never leak into TEST's clock.
+    _ins(con, "nse_stocks", [
+        {"symbol": "TEST", "mcsymbol": "MC01"},
+        {"symbol": "OTHER", "mcsymbol": "MC02"},
+    ], ["symbol", "mcsymbol"])
     _ins(con, "stock_earnings_dates", [
-        {"scid": "TEST", "result_date": nxt},
-        {"scid": "TEST", "result_date": prv},
+        {"scid": "MC01", "result_date": nxt},
+        {"scid": "MC01", "result_date": prv},
+        {"scid": "UNMAPPED", "result_date": (pd.Timestamp.today()
+                                             - pd.Timedelta(days=1)).strftime("%Y-%m-%d")},
     ], ["scid", "result_date"])
     _ins(con, "stock_earnings_beats", [
         {"symbol": "TEST", "quarter_date": prv, "beat_score": 3, "surprise_pct": 7.5},
@@ -312,6 +324,8 @@ class TestEarningsClock:
         assert out.loc[DATES[-1], "days_to_next_earnings"] == 3
         # today-20 is 21 days before DATES[0].
         assert out.loc[DATES[0], "days_since_last_earnings"] == 11
+        # UNMAPPED's yesterday must not leak in (would read 1 here).
+        assert out.loc[DATES[-1], "days_since_last_earnings"] == 20
         assert out.loc[DATES[-1], "last_eps_surprise_pct"] == 7.5
         assert out.loc[DATES[-1], "last_beat_score"] == 3
         assert out["earnings_in_5d"].notna().sum() >= 1
