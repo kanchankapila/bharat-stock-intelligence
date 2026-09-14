@@ -1197,3 +1197,11 @@ param dicts, `_FEATURE_STORE_CONFLICT` SET list) — a lagging conflict list sil
 columns on re-write; `test_feature_wiring.py` regression-guards this. Both writer INSERTs must
 stay balanced (111 cols / 111 values as of step 3). Note `process_symbol` commits only when it
 owns the connection — callers passing `con=` must `con.commit()` themselves.
+And one more pair is kept in lock-step: the **merge-call SEQUENCES** of `process_symbol` and
+`_compute_symbol_unscaled`. The worker is the only compute path `run_full_pipeline` — i.e. the
+nightly `dl-feature-refresh` job — runs; on 2026-09-14 it was found five merges behind
+(`_merge_block_deals`, `_merge_analyst_consensus`, `_merge_earnings_clock`, `_merge_delivery`,
+`_merge_options_backfill` — landed 2026-09-13 on `process_symbol` only), so the nightly
+full-universe upsert NULLed every column those merges own, day after day (AF-20260914-01).
+`test_feature_wiring.py::TestWorkerPathMergeParity` extracts both sequences from source and
+asserts equality — adding a merge to one path fails the suite until it lands in the other.

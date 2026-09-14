@@ -1642,7 +1642,21 @@ def _compute_symbol_unscaled(args: tuple):
         feat = fe._merge_sentiment(feat, symbol)
         # Gap #4: same exogenous merges as process_symbol -- workers must produce the
         # identical unscaled frame or the two write paths diverge.
+        # 2026-09-14 (worker-path parity fix): this list had silently drifted five merges
+        # behind process_symbol's -- _merge_block_deals, _merge_analyst_consensus,
+        # _merge_earnings_clock, _merge_delivery and _merge_options_backfill were never
+        # added here when their step-2/3 versions landed 2026-09-13, so the nightly
+        # full-universe run (the ONLY caller of this worker) upserted NULL over every
+        # column those merges own, day after day (live census 2026-09-14: analyst_* 205,
+        # block_deal_value_cr 1, days_to_next_earnings 1,227 non-null rows each).
+        # The sequences must stay identical; test_feature_wiring.py's
+        # TestWorkerPathMergeParity pins them together.
         feat = fe._merge_flow_features(feat, symbol)
+        feat = fe._merge_block_deals(feat, symbol)
+        feat = fe._merge_analyst_consensus(feat, symbol)
+        feat = fe._merge_earnings_clock(feat, symbol)
+        feat = fe._merge_delivery(feat, symbol)
+        feat = fe._merge_options_backfill(feat, symbol)
         feat = fe._merge_deep_history(feat, symbol)
         feat = fe._merge_market_context(feat)
         return (symbol, feat)

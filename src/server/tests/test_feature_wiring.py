@@ -7,7 +7,9 @@ snapshots go stale after 35 days, surprises after 400, and sparse days stay NaN
 (NEVER_FILL) instead of fabricating neutral values.
 """
 
+import inspect
 import os
+import re
 import sys
 from unittest.mock import patch
 
@@ -372,3 +374,41 @@ class TestOptionsBackfill:
         # (24000) must never leak through.
         assert out.loc[DATES[-1], "nifty_pcr"] == pytest.approx(0.95)
         assert (out["nifty_pcr"].dropna() < 20).all()
+
+
+class TestWorkerPathMergeParity:
+    """run_full_pipeline -- the body of the nightly dl-feature-refresh job -- computes
+    every symbol through the module-level _compute_symbol_unscaled worker, NOT through
+    FeatureEngineer.process_symbol. On 2026-09-14 the worker was found carrying only 8
+    of process_symbol's 13 merges: _merge_block_deals, _merge_analyst_consensus,
+    _merge_earnings_clock, _merge_delivery and _merge_options_backfill were never added
+    to it when their step-2/3 versions landed 2026-09-13, so the nightly full-universe
+    upsert overwrote every column those five merges own with NULL, day after day
+    (live census 2026-09-14: analyst_buy_pct 205/2,674,984 non-null,
+    block_deal_value_cr 1/2,674,984, days_to_next_earnings 1,227/2,674,984).
+    Both call sequences are extracted from the live source and pinned equal so the
+    two write paths cannot drift apart again.
+    """
+
+    def test_worker_calls_the_same_merges_as_process_symbol(self):
+        worker = inspect.getsource(fe_mod._compute_symbol_unscaled)
+        single = inspect.getsource(fe_mod.FeatureEngineer.process_symbol)
+        worker_merges = re.findall(r"(?:self|fe)\._merge_(\w+)\(", worker)
+        single_merges = re.findall(r"(?:self|fe)\._merge_(\w+)\(", single)
+        assert worker_merges, "worker merge sequence not found -- source shape changed"
+        assert single_merges, "process_symbol merge sequence not found -- source shape changed"
+        assert worker_merges == single_merges, (
+            "_compute_symbol_unscaled and process_symbol run different merge sequences; "
+            f"worker={worker_merges} process_symbol={single_merges}"
+        )
+
+    def test_worker_calls_every_merge_this_file_covers(self):
+        # The five step-2/3 merges unit-tested above must each appear in the worker's
+        # own sequence. Guards against a future symmetric drop (removing a merge from
+        # BOTH paths) that the equality assertion cannot see.
+        worker = inspect.getsource(fe_mod._compute_symbol_unscaled)
+        for merge in ("_merge_block_deals", "_merge_analyst_consensus",
+                      "_merge_earnings_clock", "_merge_delivery",
+                      "_merge_options_backfill"):
+            assert f"fe.{merge}(" in worker, f"{merge} missing from _compute_symbol_unscaled"
+
