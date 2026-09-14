@@ -805,6 +805,17 @@ Currently automated (9 checks): `date.today()` write-anchor, short calendar-day 
 - **A manual `UPDATE app_settings` is not a fix** — it reverts on any fresh DB and is invisible to every other environment. Seed it in a migration.
 - **Deleting a thing does not delete the checks and instructions that point at it — and an orphaned check does not go quiet, it starts emitting false signals in the opposite direction.** Grep the removed identifier across `.md`, `.claude/commands/`, `.claude/skills/`, and validator/bootstrap code whenever you remove an env var, column, file, or fallback — a stale check can crash a correct process, or a freshness check pointed at a superseded table can warn on every run forever while the table nothing reads sits there as the actual bug. **Tell for the latter:** a freshness check that has NEVER passed is more likely watching an abandoned table than reporting a real outage — grep who actually reads the table before fixing the fetcher.
 
+## Placeholder credential in an executable alert path = registered-but-never-delivered monitoring (2026-09-14)
+
+A hardcoded placeholder credential (chat id `-100123456789`, token `123456:ABC-DEF...`) inside a
+script that REGISTERS alerting (crons, webhooks, digests) does not fail — it succeeds, writes its
+config, and every future alert silently routes to a nonexistent destination. Worse than no
+monitoring: the dashboard/ledger says alerts are wired. Rule: **executable alert paths source
+real credentials from the repo `.env` and fail loudly (`: "${VAR:?...}"`) at registration time;
+templates/templates-docs may be EMPTY with a "copy from repo .env" pointer, never fake.** Found in
+the Hermes integration batch (AF-20260914-04); the same class as "Registered != running" — a
+successful registration is not evidence of a working delivery path.
+
 ## Testing
 
 - **A warning printed by a test runner is not a verdict — CI and hooks read the EXIT CODE.** A suite that skips everything it can't reach (e.g. no DB) and still exits 0 is advisory-only to any automation consuming it; flip the exit code non-zero when a test was skipped for a reason that shouldn't be silently tolerated (e.g. an unreachable required dependency).

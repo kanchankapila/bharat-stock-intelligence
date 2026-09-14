@@ -200,3 +200,13 @@ Before finishing, make all four consistent with what actually happened (`/sessio
 4. **`docs/audit-findings.md`** — fix and close findings in-session by default (see "Resolve findings, don't just log them" above); anything left open needs a stated reason (EVIDENCE/calendar-blocked/needs-a-decision/depends-on-another-row). New rows get a stable `AF-YYYYMMDD-NN` ID, not a new file and not just a mention in the session log. If you closed a row, update it in place with today's date and evidence; never delete a row.
 
 Run `graphify update .` if files changed significantly. Silence in any of these means a future session rediscovers the same thing from scratch.
+
+## graphify
+
+This project has a knowledge graph at graphify-out/ with god nodes, community structure, and cross-file relationships.
+
+Rules:
+- For codebase questions, first run `graphify query "<question>"` when graphify-out/graph.json exists. Use `graphify path "<A>" "<B>"` for relationships and `graphify explain "<concept>"` for focused concepts. These return a scoped subgraph, usually much smaller than GRAPH_REPORT.md or raw grep output.
+- If graphify-out/wiki/index.md exists, use it for broad navigation instead of raw source browsing.
+- Read graphify-out/GRAPH_REPORT.md only for broad architecture review or when query/path/explain do not surface enough context.
+- After modifying code, run `graphify update .` to keep the graph current (AST-only, no API cost).

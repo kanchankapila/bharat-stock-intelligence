@@ -32,8 +32,14 @@ stopped at N instances when a static check immediately found N+4 more.
   nothing in this repo enumerates non-fetcher scripts automatically.
 - **Database** — every table has a freshness check in `dataQualityChecks.ts`'s
   `TABLE_FRESHNESS_CHECKS` and the live schema matches `db/schema.postgres.sql`
-  (`npm run schema:drift`). Cross-check `information_schema.tables` against the check list; an
-  uncovered table is a blind spot, not evidence of health.
+  (`npm run schema:drift`). The cross-check is now AUTOMATED:
+  `npx vitest run src/server/__tests__/tableFreshnessCoverage.test.ts` fails on any schema
+  table that is neither freshness-checked (directly, or read by the monitoring stack) nor
+  present in that test's reason-tagged `EXCLUDED_TABLES` map — an uncovered table is a blind
+  spot, not evidence of health, and a new table can no longer land without either a check or
+  a documented exclusion. When the gate fails, add a real freshness check (calibrated against
+  live `MAX(date)` data, per `measurement.md`) or an exclusion whose reason genuinely holds —
+  do not add a placeholder exclusion to make the test green.
 - **Score-column fidelity** — fresh is not the same as *usable for measurement*, and this class
   is invisible to every freshness/coverage check by construction. For any column a measurement
   might later be built on, ask two questions:
