@@ -163,6 +163,14 @@ class TestBlockDealMerge:
         fe._merge_macro = lambda feat: feat
         fe._merge_sentiment = lambda feat, sym: feat
         fe._merge_flow_features = lambda feat, sym: feat
+        # Step-2/3 merges query their own source tables (analyst_estimates_history,
+        # stock_earnings_*, stock_delivery_data, so_option_chain, nt_index_pcr_ts)
+        # which this block-deals sandbox does not seed -- stubbed, not seeded, to
+        # keep this test about the block-deal write path only.
+        fe._merge_analyst_consensus = lambda feat, sym: feat
+        fe._merge_earnings_clock = lambda feat, sym: feat
+        fe._merge_delivery = lambda feat, sym: feat
+        fe._merge_options_backfill = lambda feat, sym: feat
         fe._merge_deep_history = lambda feat, sym: feat
         fe._merge_market_context = lambda feat: feat
 

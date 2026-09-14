@@ -109,6 +109,20 @@ _FEATURE_STORE_CONFLICT = (
             "pcr_oi", "pcr_vol", "iv_rank", "iv_skew", "delivery_pct",
             "insider_buy_pct_90d", "block_deal_net_qty", "block_deal_value_cr",
             "block_deal_net_qty_5d", "block_deal_value_cr_5d",
+            "analyst_buy_pct",
+            "analyst_target_mean",
+            "analyst_target_upside_pct",
+            "analyst_n",
+            "broker_recos_90d",
+            "days_to_next_earnings",
+            "days_since_last_earnings",
+            "last_eps_surprise_pct",
+            "last_beat_score",
+            "earnings_in_5d",
+            "delivery_z_20d",
+            "delivery_pct_chg_5d",
+            "delivery_qty_5d",
+            "nifty_pcr",
             "call_wall_dist_pct", "put_wall_dist_pct", "near_expiry_gamma", "max_pain",
             "sector_ret_5d", "sector_ret_21d",
             "nifty_pe", "advance_decline_ratio",
@@ -752,6 +766,214 @@ class FeatureEngineer:
         feat["block_deal_value_cr_5d"] = deals["value_cr"].rolling(5, min_periods=1).sum()
         return feat
 
+    def _merge_analyst_consensus(self, feat: pd.DataFrame, symbol: str) -> pd.DataFrame:
+        """Analyst consensus / target-price features (2026-09-13 step 2).
+
+        Source of record: analyst_estimates_history -- symbol-keyed snapshot history
+        (as_of_date, n_analysts, buy/hold/sell, target_high/mean/low, eps_est_next),
+        joined AS-OF with a 35-day staleness tolerance: a consensus older than ~5
+        weeks reads as missing, not current (NEVER_FILL -- snapshots are
+        point-in-time; carrying one forward fabricates a stale rating).
+
+        broker_recos_90d counts trendlyne_analyst_targets broker entries in the
+        trailing 90 calendar days (event count over a window -- aggregation, not
+        stale carry). All columns NaN where the symbol has no coverage.
+        """
+        idx = feat.index
+        for c in ("analyst_buy_pct", "analyst_target_mean", "analyst_target_upside_pct",
+                  "analyst_n", "broker_recos_90d"):
+            feat[c] = np.nan
+
+        est = read_df(
+            """SELECT as_of_date, n_analysts, buy_count, hold_count, sell_count,
+                      target_mean, eps_est_next
+               FROM analyst_estimates_history
+               WHERE symbol=? ORDER BY as_of_date""",
+            (symbol,),
+        )
+        if not est.empty:
+            # buy/hold/sell are ALREADY percentages summing to ~100 (verified live
+            # 2026-09-13: RELIANCE 96/0/4 with n=26) -- a count ratio produced
+            # nonsense like 369%. Sanity-clamp to [0,100]; anything else is
+            # corruption and reads as missing (NEVER_FILL).
+            raw = pd.to_numeric(est["buy_count"], errors="coerce")
+            est["analyst_buy_pct"] = raw.where((raw >= 0) & (raw <= 100))
+            asof = _asof_columns(
+                idx, est, "as_of_date",
+                ["analyst_buy_pct", "target_mean", "n_analysts", "eps_est_next"],
+                tolerance_days=35,
+            )
+            feat["analyst_buy_pct"] = asof["analyst_buy_pct"].to_numpy()
+            feat["analyst_n"] = asof["n_analysts"].to_numpy()
+            tgt = asof["target_mean"].to_numpy()
+            feat["analyst_target_mean"] = tgt
+            close = read_df(
+                "SELECT date, close FROM stock_ohlcv "
+                "WHERE symbol=? AND COALESCE(is_suspect,0)=0 AND date >= ? ORDER BY date",
+                (symbol, idx.min().strftime("%Y-%m-%d")),
+            )
+            if not close.empty:
+                close["date"] = pd.to_datetime(close["date"])
+                close = close.drop_duplicates("date").set_index("date")["close"].reindex(idx)
+                with np.errstate(divide="ignore", invalid="ignore"):
+                    feat["analyst_target_upside_pct"] = (tgt / close.to_numpy() - 1.0) * 100.0
+
+        recos = read_df(
+            """SELECT reco_date FROM trendlyne_analyst_targets
+               WHERE symbol=? AND reco_date IS NOT NULL ORDER BY reco_date""",
+            (symbol,),
+        )
+        if not recos.empty:
+            ev = pd.to_datetime(recos["reco_date"], errors="coerce").dropna()
+            ev = ev.sort_values().to_numpy()
+            days = pd.DatetimeIndex(idx).astype("datetime64[ns]").to_numpy()
+            right = np.searchsorted(ev, days, side="right")
+            left90 = np.searchsorted(ev, days - np.timedelta64(90, "D"), side="left")
+            feat["broker_recos_90d"] = (right - left90).astype(float)
+        return feat
+
+    def _merge_earnings_clock(self, feat: pd.DataFrame, symbol: str) -> pd.DataFrame:
+        """Earnings event clock + last-surprise features (2026-09-13 step 2).
+
+        days_to_next_earnings / days_since_last_earnings from stock_earnings_dates
+        (scid matches the MC ticker symbols in this dataset). last_eps_surprise_pct
+        / last_beat_score read stock_earnings_beats as-of (latest quarter_date <=
+        the feature date; stale beyond 400 days reads as missing -- a year-old
+        surprise is not information). earnings_in_5d flags the announcement-risk
+        window; never forward-filled (NaN = no known upcoming earnings, not 0).
+        """
+        idx = pd.DatetimeIndex(feat.index)
+        days = idx.astype("datetime64[ns]").to_numpy()
+        for c in ("days_to_next_earnings", "days_since_last_earnings",
+                  "last_eps_surprise_pct", "last_beat_score", "earnings_in_5d"):
+            feat[c] = np.nan
+
+        ed = read_df(
+            """SELECT result_date FROM stock_earnings_dates
+               WHERE scid=? AND result_date IS NOT NULL ORDER BY result_date""",
+            (symbol,),
+        )
+        if not ed.empty:
+            ev = pd.to_datetime(ed["result_date"], errors="coerce").dropna()
+            ev = ev.dt.normalize().sort_values().to_numpy()
+            right = np.searchsorted(ev, days, side="right")
+            safe_right = np.minimum(right, len(ev) - 1)
+            safe_left = np.maximum(right - 1, 0)
+            with np.errstate(invalid="ignore"):
+                d2n = (ev[safe_right] - days).astype("timedelta64[D]").astype(float)
+                dsl = (days - ev[safe_left]).astype("timedelta64[D]").astype(float)
+            feat["days_to_next_earnings"] = np.where(right < len(ev), d2n, np.nan)
+            feat["days_since_last_earnings"] = np.where(right > 0, dsl, np.nan)
+            in5 = (feat["days_to_next_earnings"] >= 0) & \
+                  (feat["days_to_next_earnings"] <= 5)
+            feat["earnings_in_5d"] = np.where(in5, 1.0, np.nan)
+
+        beats = read_df(
+            """SELECT quarter_date, surprise_pct, beat_score FROM stock_earnings_beats
+               WHERE symbol=? AND quarter_date IS NOT NULL ORDER BY quarter_date""",
+            (symbol,),
+        )
+        if not beats.empty:
+            bq = pd.to_datetime(beats["quarter_date"], errors="coerce")
+            beats = beats.loc[bq.notna()].copy()
+            beats["_q"] = bq.loc[bq.notna()].sort_values().to_numpy()
+            beats = beats.sort_values("_q").reset_index(drop=True)
+            q = np.sort(beats["_q"].to_numpy())
+            sp = pd.to_numeric(beats["surprise_pct"], errors="coerce").to_numpy()
+            bs = pd.to_numeric(beats["beat_score"], errors="coerce").to_numpy()
+            right = np.searchsorted(q, days, side="right")
+            have = right > 0
+            sel = np.maximum(right - 1, 0)
+            stale = (days - q[sel]) > np.timedelta64(400, "D")
+            feat["last_eps_surprise_pct"] = np.where(have & ~stale, sp[sel], np.nan)
+            feat["last_beat_score"] = np.where(have & ~stale, bs[sel], np.nan)
+        return feat
+
+    def _merge_delivery(self, feat: pd.DataFrame, symbol: str) -> pd.DataFrame:
+        """Delivery-dynamics features from stock_delivery_data (2026-09-13 step 2).
+
+        delivery_pct itself is already wired (from nse_universe_history,
+        _merge_deep_history). stock_delivery_data is the same metric from the NSE
+        delivery feed with its own daily sync -- here we derive the dynamics the
+        static level misses: a 20-session z-score (unusual delivery = conviction
+        repricing), the 5-session point change, and the 5-session delivered-quantity
+        sum. Exact-date joins; days absent from the feed stay NaN (NEVER_FILL).
+        """
+        dv = read_df(
+            """SELECT date, delivery_pct, delivery_qty FROM stock_delivery_data
+               WHERE symbol=? AND date >= ? ORDER BY date""",
+            (symbol, feat.index.min().strftime("%Y-%m-%d")),
+        )
+        for c in ("delivery_z_20d", "delivery_pct_chg_5d", "delivery_qty_5d"):
+            feat[c] = np.nan
+        if dv.empty:
+            return feat
+        dv["date"] = pd.to_datetime(dv["date"])
+        dv = dv.drop_duplicates("date").set_index("date")
+        dv = dv[dv.index.notnull()]
+        base = pd.to_numeric(dv["delivery_pct"], errors="coerce").reindex(feat.index)
+        qty = pd.to_numeric(dv["delivery_qty"], errors="coerce").reindex(feat.index)
+        mean20 = base.rolling(20, min_periods=10).mean()
+        std20 = base.rolling(20, min_periods=10).std()
+        feat["delivery_z_20d"] = (base - mean20) / std20.replace(0, np.nan)
+        feat["delivery_pct_chg_5d"] = base.diff(5)
+        feat["delivery_qty_5d"] = qty.rolling(5, min_periods=1).sum()
+        return feat
+
+    def _merge_options_backfill(self, feat: pd.DataFrame, symbol: str) -> pd.DataFrame:
+        """Options-backfill: kill the pcr_oi/pcr_vol zero-poison tail (2026-09-13 step 3).
+
+        feature_store.pcr_oi/pcr_vol are 3.8% populated -- the Trendlyne chain
+        fetcher only began feeding technical_signals in Jul 2026. so_option_chain
+        (StockEdge, 8,155 symbol/days back to 2026-06-30) carries per-strike ce/pe
+        OI and volume: aggregate to one daily PCR per symbol (put OI / call OI and
+        the volume analogue) and HOLE-FILL only -- never clobber a technical_signals
+        value. Sanity band 0.05-20: ratio noise outside it is data corruption, not
+        flow. nifty_pcr (index-level market context, NIFTY50 from nt_index_pcr_ts,
+        daily last reading, bounded ffill like nifty_pe) gives every symbol the same
+        derivatives-regime signal; GIFTNIFTY rows are deliberately excluded -- that
+        feed's 'pcr' column carries the index LEVEL (~24,000), not a ratio.
+        """
+        idx = feat.index
+        feat["nifty_pcr"] = np.nan
+        # _merge_flow_features normally creates pcr_oi/pcr_vol; guarantee them so
+        # hole-fill never depends on call order.
+        if "pcr_oi" not in feat:
+            feat["pcr_oi"] = np.nan
+        if "pcr_vol" not in feat:
+            feat["pcr_vol"] = np.nan
+
+        pcr = read_df(
+            """SELECT date,
+                      SUM(pe_oi) / NULLIF(SUM(ce_oi), 0) AS pcr_oi,
+                      SUM(pe_volume) / NULLIF(SUM(ce_volume), 0) AS pcr_vol
+               FROM so_option_chain
+               WHERE symbol=? AND ce_oi > 0
+               GROUP BY date
+               HAVING SUM(pe_oi) > 0
+               ORDER BY date""",
+            (symbol,),
+        )
+        if not pcr.empty:
+            pcr["date"] = pd.to_datetime(pcr["date"])
+            pcr = pcr.drop_duplicates("date").set_index("date").reindex(idx)
+            sane = (pcr["pcr_oi"] >= 0.05) & (pcr["pcr_oi"] <= 20)
+            pcr.loc[~sane, ["pcr_oi", "pcr_vol"]] = np.nan
+            feat["pcr_oi"] = feat["pcr_oi"].fillna(pcr["pcr_oi"])
+            feat["pcr_vol"] = feat["pcr_vol"].fillna(pcr["pcr_vol"])
+
+        npc = read_df(
+            """SELECT ts::date AS d, pcr FROM nt_index_pcr_ts
+               WHERE index_name='NIFTY50' AND pcr BETWEEN 0.05 AND 20
+               ORDER BY ts""",
+        )
+        if not npc.empty:
+            npc = npc.drop_duplicates("d", keep="last")
+            npc["d"] = pd.to_datetime(npc["d"])
+            npc = npc.set_index("d")["pcr"]
+            feat["nifty_pcr"] = npc.reindex(idx, method="ffill", limit=5)
+        return feat
+
     def _merge_deep_history(self, feat: pd.DataFrame, symbol: str) -> pd.DataFrame:
         """Valuation/growth/delivery/insider inputs from tables with years of history.
 
@@ -899,6 +1121,10 @@ class FeatureEngineer:
             # before, so dl_engine trained on zeros for every one of these columns.
             feat = self._merge_flow_features(feat, symbol)
             feat = self._merge_block_deals(feat, symbol)
+            feat = self._merge_analyst_consensus(feat, symbol)
+            feat = self._merge_earnings_clock(feat, symbol)
+            feat = self._merge_delivery(feat, symbol)
+            feat = self._merge_options_backfill(feat, symbol)
             feat = self._merge_deep_history(feat, symbol)
             feat = self._merge_market_context(feat)
 
@@ -927,6 +1153,20 @@ class FeatureEngineer:
                         pcr_oi, pcr_vol, iv_rank, iv_skew, delivery_pct,
                         insider_buy_pct_90d, block_deal_net_qty, block_deal_value_cr,
                         block_deal_net_qty_5d, block_deal_value_cr_5d,
+                        analyst_buy_pct,
+                        analyst_target_mean,
+                        analyst_target_upside_pct,
+                        analyst_n,
+                        broker_recos_90d,
+                        days_to_next_earnings,
+                        days_since_last_earnings,
+                        last_eps_surprise_pct,
+                        last_beat_score,
+                        earnings_in_5d,
+                        delivery_z_20d,
+                        delivery_pct_chg_5d,
+                        delivery_qty_5d,
+                        nifty_pcr,
                         call_wall_dist_pct, put_wall_dist_pct, near_expiry_gamma, max_pain,
                         sector_ret_5d, sector_ret_21d,
                         nifty_pe, advance_decline_ratio,
@@ -951,6 +1191,20 @@ class FeatureEngineer:
                         :pcr_oi,:pcr_vol,:iv_rank,:iv_skew,:delivery_pct,
                         :insider_buy_pct_90d,:block_deal_net_qty,:block_deal_value_cr,
                         :block_deal_net_qty_5d,:block_deal_value_cr_5d,
+                        :analyst_buy_pct,
+                        :analyst_target_mean,
+                        :analyst_target_upside_pct,
+                        :analyst_n,
+                        :broker_recos_90d,
+                        :days_to_next_earnings,
+                        :days_since_last_earnings,
+                        :last_eps_surprise_pct,
+                        :last_beat_score,
+                        :earnings_in_5d,
+                        :delivery_z_20d,
+                        :delivery_pct_chg_5d,
+                        :delivery_qty_5d,
+                        :nifty_pcr,
                         :call_wall_dist_pct,:put_wall_dist_pct,:near_expiry_gamma,:max_pain,
                         :sector_ret_5d,:sector_ret_21d,
                         :nifty_pe,:advance_decline_ratio,
@@ -1017,6 +1271,20 @@ class FeatureEngineer:
                     "block_deal_value_cr": d.get("block_deal_value_cr"),
                     "block_deal_net_qty_5d": d.get("block_deal_net_qty_5d"),
                     "block_deal_value_cr_5d": d.get("block_deal_value_cr_5d"),
+                    "analyst_buy_pct": d.get("analyst_buy_pct"),
+                    "analyst_target_mean": d.get("analyst_target_mean"),
+                    "analyst_target_upside_pct": d.get("analyst_target_upside_pct"),
+                    "analyst_n": d.get("analyst_n"),
+                    "broker_recos_90d": d.get("broker_recos_90d"),
+                    "days_to_next_earnings": d.get("days_to_next_earnings"),
+                    "days_since_last_earnings": d.get("days_since_last_earnings"),
+                    "last_eps_surprise_pct": d.get("last_eps_surprise_pct"),
+                    "last_beat_score": d.get("last_beat_score"),
+                    "earnings_in_5d": d.get("earnings_in_5d"),
+                    "delivery_z_20d": d.get("delivery_z_20d"),
+                    "delivery_pct_chg_5d": d.get("delivery_pct_chg_5d"),
+                    "delivery_qty_5d": d.get("delivery_qty_5d"),
+                    "nifty_pcr": d.get("nifty_pcr"),
                     "call_wall_dist_pct": d.get("call_wall_dist_pct"),
                     "put_wall_dist_pct": d.get("put_wall_dist_pct"),
                     "near_expiry_gamma": d.get("near_expiry_gamma"),
@@ -1054,6 +1322,20 @@ class FeatureEngineer:
                     pcr_oi, pcr_vol, iv_rank, iv_skew, delivery_pct,
                     insider_buy_pct_90d, block_deal_net_qty, block_deal_value_cr,
                     block_deal_net_qty_5d, block_deal_value_cr_5d,
+                    analyst_buy_pct,
+                    analyst_target_mean,
+                    analyst_target_upside_pct,
+                    analyst_n,
+                    broker_recos_90d,
+                    days_to_next_earnings,
+                    days_since_last_earnings,
+                    last_eps_surprise_pct,
+                    last_beat_score,
+                    earnings_in_5d,
+                    delivery_z_20d,
+                    delivery_pct_chg_5d,
+                    delivery_qty_5d,
+                    nifty_pcr,
                     call_wall_dist_pct, put_wall_dist_pct, near_expiry_gamma, max_pain,
                     sector_ret_5d, sector_ret_21d,
                     nifty_pe, advance_decline_ratio,
@@ -1078,6 +1360,20 @@ class FeatureEngineer:
                     :pcr_oi,:pcr_vol,:iv_rank,:iv_skew,:delivery_pct,
                     :insider_buy_pct_90d,:block_deal_net_qty,:block_deal_value_cr,
                     :block_deal_net_qty_5d,:block_deal_value_cr_5d,
+                    :analyst_buy_pct,
+                    :analyst_target_mean,
+                    :analyst_target_upside_pct,
+                    :analyst_n,
+                    :broker_recos_90d,
+                    :days_to_next_earnings,
+                    :days_since_last_earnings,
+                    :last_eps_surprise_pct,
+                    :last_beat_score,
+                    :earnings_in_5d,
+                    :delivery_z_20d,
+                    :delivery_pct_chg_5d,
+                    :delivery_qty_5d,
+                    :nifty_pcr,
                     :call_wall_dist_pct,:put_wall_dist_pct,:near_expiry_gamma,:max_pain,
                     :sector_ret_5d,:sector_ret_21d,
                     :nifty_pe,:advance_decline_ratio,
@@ -1144,6 +1440,20 @@ class FeatureEngineer:
                 "block_deal_value_cr": d.get("block_deal_value_cr"),
                 "block_deal_net_qty_5d": d.get("block_deal_net_qty_5d"),
                 "block_deal_value_cr_5d": d.get("block_deal_value_cr_5d"),
+                "analyst_buy_pct": d.get("analyst_buy_pct"),
+                "analyst_target_mean": d.get("analyst_target_mean"),
+                "analyst_target_upside_pct": d.get("analyst_target_upside_pct"),
+                "analyst_n": d.get("analyst_n"),
+                "broker_recos_90d": d.get("broker_recos_90d"),
+                "days_to_next_earnings": d.get("days_to_next_earnings"),
+                "days_since_last_earnings": d.get("days_since_last_earnings"),
+                "last_eps_surprise_pct": d.get("last_eps_surprise_pct"),
+                "last_beat_score": d.get("last_beat_score"),
+                "earnings_in_5d": d.get("earnings_in_5d"),
+                "delivery_z_20d": d.get("delivery_z_20d"),
+                "delivery_pct_chg_5d": d.get("delivery_pct_chg_5d"),
+                "delivery_qty_5d": d.get("delivery_qty_5d"),
+                "nifty_pcr": d.get("nifty_pcr"),
                 "call_wall_dist_pct": d.get("call_wall_dist_pct"),
                 "put_wall_dist_pct": d.get("put_wall_dist_pct"),
                 "near_expiry_gamma": d.get("near_expiry_gamma"),

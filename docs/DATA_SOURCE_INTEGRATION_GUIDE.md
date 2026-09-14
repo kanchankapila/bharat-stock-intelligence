@@ -1152,3 +1152,46 @@ This guide was reconciled against:
 
 The counts describe repository search coverage, not an assertion that all third-party endpoints
 were reachable on 2026-08-12. Reachability is intentionally delegated to the gated live tests.
+
+## 17. Feature-store wiring of fetched sources (2026-09-13)
+
+Steps 1-3 wired previously fetch-only tables into `feature_store` via new merges in
+`feature_engineering.py`. Doctrine throughout: NEVER_FILL (sparse days stay NaN; hole-fill never
+clobbers upstream values), as-of joins with staleness tolerances, sanity bands on derived ratios.
+
+### 17.1 Block deals (step 1, commit 5210c30d)
+
+`_merge_block_deals` reads `block_deals` (table of record) directly; `block_deal_net_qty` is
+hole-fill-only into the technical_signals join, plus new `block_deal_value_cr`,
+`block_deal_net_qty_5d`, `block_deal_value_cr_5d` (rolling 5, min_periods=1). Side resolution:
+`trade_type` (8,590 rows) with NSE `session`-label fallback (67 rows).
+
+### 17.2 Analyst consensus + earnings clock + delivery dynamics (step 2)
+
+- `_merge_analyst_consensus` — `analyst_estimates_history` as-of (35-day staleness):
+  `analyst_buy_pct`, `analyst_target_mean`, `analyst_target_upside_pct`, `analyst_n`;
+  `broker_recos_90d` = trailing-90-day event count from `trendlyne_analyst_targets`.
+  **Trap:** buy/hold/sell columns are ALREADY percentages summing to ~100 (RELIANCE 96/0/4),
+  not counts — a count ratio produced 369% nonsense before the fix.
+- `_merge_earnings_clock` — `stock_earnings_dates` (keyed by MC **scid**, not NSE symbol;
+  symbols without a scid mapping stay NaN): `days_to_next_earnings`, `days_since_last_earnings`,
+  `earnings_in_5d` (flag only, never forward-filled). `stock_earnings_beats` as-of (400-day
+  staleness): `last_eps_surprise_pct`, `last_beat_score`.
+- `_merge_delivery` — `stock_delivery_data`: `delivery_z_20d` (min 10 obs), `delivery_pct_chg_5d`,
+  `delivery_qty_5d`.
+
+### 17.3 Options PCR backfill (step 3)
+
+`_merge_options_backfill` — `so_option_chain` aggregated to daily `SUM(pe_oi)/SUM(ce_oi)` (and
+volume analogue) hole-fills `pcr_oi`/`pcr_vol` only where technical_signals has no value
+(sanity band 0.05–20). `nifty_pcr` = daily last NIFTY50 reading from `nt_index_pcr_ts`, ffill
+limit 5. **Trap:** GIFTNIFTY rows in that feed carry the index LEVEL (~24,000) in the pcr
+column — excluded by the same band.
+
+### 17.4 Writer invariants
+
+`feature_engineering.py` keeps five column enumerations in sync (2 INSERT col-lists, 2 value/
+param dicts, `_FEATURE_STORE_CONFLICT` SET list) — a lagging conflict list silently NULLs new
+columns on re-write; `test_feature_wiring.py` regression-guards this. Both writer INSERTs must
+stay balanced (111 cols / 111 values as of step 3). Note `process_symbol` commits only when it
+owns the connection — callers passing `con=` must `con.commit()` themselves.

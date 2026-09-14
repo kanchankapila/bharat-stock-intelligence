@@ -62,6 +62,12 @@ CREATE TABLE IF NOT EXISTS feature_store (
     pcr_oi REAL, pcr_vol REAL, iv_rank REAL, iv_skew REAL, delivery_pct REAL,
     insider_buy_pct_90d REAL, block_deal_net_qty REAL, block_deal_value_cr REAL,
     block_deal_net_qty_5d REAL, block_deal_value_cr_5d REAL,
+    analyst_buy_pct REAL, analyst_target_mean REAL, analyst_target_upside_pct REAL,
+    analyst_n REAL, broker_recos_90d REAL,
+    days_to_next_earnings REAL, days_since_last_earnings REAL,
+    last_eps_surprise_pct REAL, last_beat_score REAL, earnings_in_5d REAL,
+    delivery_z_20d REAL, delivery_pct_chg_5d REAL, delivery_qty_5d REAL,
+    nifty_pcr REAL,
     call_wall_dist_pct REAL, put_wall_dist_pct REAL, near_expiry_gamma REAL, max_pain REAL,
     sector_ret_5d REAL, sector_ret_21d REAL,
     nifty_pe REAL, advance_decline_ratio REAL,
@@ -145,6 +151,10 @@ class TestBatchWrites:
         # none of which exist in this fixture's sandbox. Stubbed like every other merge.
         fe._merge_flow_features = lambda feat, sym: feat
         fe._merge_block_deals = lambda feat, sym: feat
+        fe._merge_analyst_consensus = lambda feat, sym: feat
+        fe._merge_earnings_clock = lambda feat, sym: feat
+        fe._merge_delivery = lambda feat, sym: feat
+        fe._merge_options_backfill = lambda feat, sym: feat
         fe._merge_deep_history = lambda feat, sym: feat
         fe._merge_market_context = lambda feat: feat
 
@@ -218,6 +228,10 @@ class TestBatchWrites:
         # none of which exist in this fixture's sandbox. Stubbed like every other merge.
         fe._merge_flow_features = lambda feat, sym: feat
         fe._merge_block_deals = lambda feat, sym: feat
+        fe._merge_analyst_consensus = lambda feat, sym: feat
+        fe._merge_earnings_clock = lambda feat, sym: feat
+        fe._merge_delivery = lambda feat, sym: feat
+        fe._merge_options_backfill = lambda feat, sym: feat
         fe._merge_deep_history = lambda feat, sym: feat
         fe._merge_market_context = lambda feat: feat
 
@@ -313,6 +327,10 @@ class TestZeroRowsGuard:
             # under test stays hermetic.
             fe._merge_flow_features = lambda feat, sym: feat
             fe._merge_block_deals = lambda feat, sym: feat
+            fe._merge_analyst_consensus = lambda feat, sym: feat
+            fe._merge_earnings_clock = lambda feat, sym: feat
+            fe._merge_delivery = lambda feat, sym: feat
+            fe._merge_options_backfill = lambda feat, sym: feat
             fe._merge_deep_history = lambda feat, sym: feat
             fe._merge_market_context = lambda feat: feat
             # Should not raise.
@@ -376,6 +394,10 @@ class TestRollbackAfterWriteFailure:
              patch("src.server.feature_engineering.as_completed", lambda fs: list(fs)):
             fe._merge_flow_features = lambda feat, sym: feat
             fe._merge_block_deals = lambda feat, sym: feat
+            fe._merge_analyst_consensus = lambda feat, sym: feat
+            fe._merge_earnings_clock = lambda feat, sym: feat
+            fe._merge_delivery = lambda feat, sym: feat
+            fe._merge_options_backfill = lambda feat, sym: feat
             fe._merge_deep_history = lambda feat, sym: feat
             fe._merge_market_context = lambda feat: feat
             # BAD's write fails (caught + logged inside run_full_pipeline); GOOD's write must
@@ -445,6 +467,10 @@ class TestReconnectOnIdleConnectionDeath:
              patch("src.server.feature_engineering.as_completed", lambda fs: list(fs)):
             fe._merge_flow_features = lambda feat, sym: feat
             fe._merge_block_deals = lambda feat, sym: feat
+            fe._merge_analyst_consensus = lambda feat, sym: feat
+            fe._merge_earnings_clock = lambda feat, sym: feat
+            fe._merge_delivery = lambda feat, sym: feat
+            fe._merge_options_backfill = lambda feat, sym: feat
             fe._merge_deep_history = lambda feat, sym: feat
             fe._merge_market_context = lambda feat: feat
             # Must not raise "wrote 0 feature rows" -- the retry on the reconnected

@@ -405,6 +405,20 @@ def repair_feature_store_columns(conn: ConnWrapper, dry: bool) -> None:
         "ALTER TABLE feature_store ADD COLUMN IF NOT EXISTS block_deal_value_cr DOUBLE PRECISION",
         "ALTER TABLE feature_store ADD COLUMN IF NOT EXISTS block_deal_net_qty_5d DOUBLE PRECISION",
         "ALTER TABLE feature_store ADD COLUMN IF NOT EXISTS block_deal_value_cr_5d DOUBLE PRECISION",
+        "ALTER TABLE feature_store ADD COLUMN IF NOT EXISTS analyst_buy_pct DOUBLE PRECISION",
+        "ALTER TABLE feature_store ADD COLUMN IF NOT EXISTS analyst_target_mean DOUBLE PRECISION",
+        "ALTER TABLE feature_store ADD COLUMN IF NOT EXISTS analyst_target_upside_pct DOUBLE PRECISION",
+        "ALTER TABLE feature_store ADD COLUMN IF NOT EXISTS analyst_n DOUBLE PRECISION",
+        "ALTER TABLE feature_store ADD COLUMN IF NOT EXISTS broker_recos_90d DOUBLE PRECISION",
+        "ALTER TABLE feature_store ADD COLUMN IF NOT EXISTS days_to_next_earnings DOUBLE PRECISION",
+        "ALTER TABLE feature_store ADD COLUMN IF NOT EXISTS days_since_last_earnings DOUBLE PRECISION",
+        "ALTER TABLE feature_store ADD COLUMN IF NOT EXISTS last_eps_surprise_pct DOUBLE PRECISION",
+        "ALTER TABLE feature_store ADD COLUMN IF NOT EXISTS last_beat_score DOUBLE PRECISION",
+        "ALTER TABLE feature_store ADD COLUMN IF NOT EXISTS earnings_in_5d DOUBLE PRECISION",
+        "ALTER TABLE feature_store ADD COLUMN IF NOT EXISTS delivery_z_20d DOUBLE PRECISION",
+        "ALTER TABLE feature_store ADD COLUMN IF NOT EXISTS delivery_pct_chg_5d DOUBLE PRECISION",
+        "ALTER TABLE feature_store ADD COLUMN IF NOT EXISTS delivery_qty_5d DOUBLE PRECISION",
+        "ALTER TABLE feature_store ADD COLUMN IF NOT EXISTS nifty_pcr DOUBLE PRECISION",
     ]
     if not dry:
         for s in stmts:
@@ -422,6 +436,20 @@ def repair_feature_store_columns(conn: ConnWrapper, dry: bool) -> None:
         "put_wall_dist_pct", "near_expiry_gamma", "sector_ret_5d", "sector_ret_21d",
         "price_to_book",
         "block_deal_value_cr", "block_deal_net_qty_5d", "block_deal_value_cr_5d",
+        "analyst_buy_pct",
+        "analyst_target_mean",
+        "analyst_target_upside_pct",
+        "analyst_n",
+        "broker_recos_90d",
+        "days_to_next_earnings",
+        "days_since_last_earnings",
+        "last_eps_surprise_pct",
+        "last_beat_score",
+        "earnings_in_5d",
+        "delivery_z_20d",
+        "delivery_pct_chg_5d",
+        "delivery_qty_5d",
+        "nifty_pcr",
     ]
     missing = [c for c in want if c not in have]
     _log(f"  post-check: {len(want) - len(missing)}/{len(want)} present"
