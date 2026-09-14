@@ -707,6 +707,32 @@ const TABLE_FRESHNESS_CHECKS: TableFreshnessConfig[] = [
   { id: 'nt-live-screener-freshness', label: 'niftytrader_live_screener_snapshots (per-filter live screener)',
     category: 'flows', critical: false, table: 'niftytrader_live_screener_snapshots',
     dateColumn: 'captured_at', tradingDayAware: true, warnDays: 1, failDays: 2 },
+
+  // 2026-09-14 coverage gap audit (user ask: every datasource table monitored or documented as
+  // excluded): et_cashflow_history is financial_ratios_fetcher.py's second write target via
+  // ET_Stats cash-flow endpoints -- finstack_cashflow_history and tl_financial_quality were both
+  // already checked, this one fell through the 2026-08-03 sweep because the same fetcher shares
+  // those tables. Weekly-ish cadence (ET annual data, smart-cadence skip per
+  // AF-20260909-01), so calibrated to the weekly 10/16 pair like its siblings, and warn-only is
+  // NOT acceptable: it was the probe for AF-20260912-01 (the 13 US-listed companies stored under
+  // NSE tickers) and would have caught it on 2026-09-01 instead of 11 days later.
+  { id: 'et-cashflow-history-recency', label: 'et_cashflow_history (ET Stats cash flow, INR/currency guard)',
+    category: 'fundamentals', critical: true, table: 'et_cashflow_history', dateColumn: 'fetched_at',
+    warnDays: 10, failDays: 16 },
+  // 2026-09-14 coverage gap audit: live_screener_ml_scores (live_screener_ml_ranker.py, model
+  // win-probability over the intraday screener universe, 832k rows) -- the ranker ran since
+  // 2026-08 with a heartbeat but no landing-table freshness check, so a silent
+  // write-only-failure would look identical to a healthy run. computed_at is native TIMESTAMPTZ.
+  // Same */15 market-hours cadence as live-screener-runs-freshness -> same 1/2-day thresholds.
+  { id: 'live-screener-ml-scores-freshness', label: 'live_screener_ml_scores (live screener ML win-probability)',
+    category: 'flows', critical: false, table: 'live_screener_ml_scores', dateColumn: 'computed_at',
+    nativeDateColumn: true, tradingDayAware: true, warnDays: 1, failDays: 2 },
+  // 2026-09-14 coverage gap audit: intraday_breadth_snapshots (intradayBreadth.ts breadth scan,
+  // level-1/level-2 capture every 15 min during market hours, 1,173 rows). Same cadence as its
+  // checked sibling market_breadth (date column native DATE).
+  { id: 'intraday-breadth-snapshots-freshness', label: 'intraday_breadth_snapshots (intraday breadth scan)',
+    category: 'reference', critical: false, table: 'intraday_breadth_snapshots', dateColumn: 'date',
+    nativeDateColumn: true, tradingDayAware: true, warnDays: 1, failDays: 2 },
 ];
 
 export const DATA_QUALITY_CHECKS: DataQualityCheck[] = [

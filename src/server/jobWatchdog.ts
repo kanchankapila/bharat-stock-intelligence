@@ -9,7 +9,7 @@
  */
 import fs from 'fs';
 import path from 'path';
-import { getLateJobs, wasAlreadyAlerted, markAlerted } from './jobHeartbeat';
+import { getLateJobs, wasAlreadyAlerted, markAlerted, getRecentTradingSessions, isDeliberatelyIdleOccurrence } from './jobHeartbeat';
 import { JOB_REGISTRY } from './jobRegistry';
 import { getSystemStatus } from './routers/monitor.router';
 import { telegramService, sanitizeMarkdown } from './telegramService';
@@ -221,6 +221,13 @@ export async function buildDailyDigest(now: Date = new Date()): Promise<string> 
   const scriptStatuses = await getSystemStatus(now);
   const dqResults = await getLatestDataQualityResults();
 
+  // Holiday context (2026-09-14): on a closed-session weekday the whole skip family was
+  // planned to idle, so "nothing changed / all on schedule" reads as alarming silence unless
+  // the reader knows why. Judged with the SAME window getLateJobs() used (cached), so the
+  // banner and the lateness verdicts can never disagree.
+  const sessions = await getRecentTradingSessions(now).catch(() => null);
+  const isTradingHolidayToday = isDeliberatelyIdleOccurrence(now, sessions);
+
   const prevState = await loadDigestState();
   const currState: Record<string, string> = {};
   const attention: string[] = [];
@@ -294,6 +301,15 @@ export async function buildDailyDigest(now: Date = new Date()): Promise<string> 
   await saveDigestState(currState);
 
   const lines = [`📋 *Daily Job Health Digest* — ${now.toISOString().slice(0, 10)}`, ''];
+
+  if (isTradingHolidayToday) {
+    lines.push(
+      '🇮🇳 *Trading holiday* — the exchange never opened, so every weekday job was planned ' +
+      'to skip today (closed-day-early-batch ran the critical pipeline in the morning). ' +
+      'Nothing below counts as late for that reason.',
+      '',
+    );
+  }
 
   if (attention.length) {
     lines.push(`*Needs attention (${attention.length}):*`, ...attention, '');

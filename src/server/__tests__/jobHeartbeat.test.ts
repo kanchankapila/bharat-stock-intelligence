@@ -18,6 +18,7 @@ vi.mock('../jobRegistry', () => ({
       lateDeadlineCronPatterns: ['45 3 * * 1-5', '*/15 4-9 * * 1-5', '0 10 * * 1-5'] },
     { jobName: 'stale-tail-job', label: 'Stale Tail Job', cronPattern: '*/15 3-10 * * 1-5', graceMinutes: 45, critical: false },
   ],
+  HOLIDAY_ACTIVE_JOB_NAMES: new Set<string>(),
 }));
 vi.mock('../monitorScripts', () => ({ MONITOR_SCRIPTS: [] }));
 vi.mock('../dataQualityChecks', async () => {

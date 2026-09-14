@@ -6,7 +6,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 const {
   mockSend, mockGetLateJobs, mockWasAlreadyAlerted, mockMarkAlerted, mockGetSystemStatus,
   mockDbGet, mockDbRun, mockDbAll, mockRunDataQualityChecks, mockGetLatestDataQualityResults,
-  mockReadFileSync,
+  mockReadFileSync, mockIsDeliberatelyIdleOccurrence,
 } = vi.hoisted(() => ({
   mockSend: vi.fn(async (_text: string) => true),
   mockGetLateJobs: vi.fn(),
@@ -21,6 +21,9 @@ const {
   // Default: no log file on disk -- getRecentCatchupCounts treats that as "nothing to report",
   // not an error (see its try/catch). Individual tests override this to supply log content.
   mockReadFileSync: vi.fn((..._args: unknown[]): string => { throw Object.assign(new Error('ENOENT'), { code: 'ENOENT' }); }),
+  // Default: not a trading holiday (mirrors isDeliberatelyIdleOccurrence's fail-open false).
+  // The holiday-banner test flips this to true.
+  mockIsDeliberatelyIdleOccurrence: vi.fn(() => false),
 }));
 
 vi.mock('fs', () => ({ default: { readFileSync: mockReadFileSync }, readFileSync: mockReadFileSync }));
@@ -35,6 +38,10 @@ vi.mock('../jobHeartbeat', () => ({
   getLateJobs: mockGetLateJobs,
   wasAlreadyAlerted: mockWasAlreadyAlerted,
   markAlerted: mockMarkAlerted,
+  // Holiday-window pair (2026-09-14): buildDailyDigest asks both for the banner and
+  // getLateJobs itself consumes the window internally in the real module.
+  getRecentTradingSessions: vi.fn(async () => null),
+  isDeliberatelyIdleOccurrence: mockIsDeliberatelyIdleOccurrence,
 }));
 
 vi.mock('../jobRegistry', () => ({
@@ -242,6 +249,21 @@ describe('buildDailyDigest', () => {
     });
     mockGetLateJobs.mockResolvedValue([]);
     mockGetSystemStatus.mockResolvedValue([]);
+    mockIsDeliberatelyIdleOccurrence.mockReset().mockReturnValue(false);
+  });
+
+  it('shows the trading-holiday banner when the judged day is a closed session', async () => {
+    mockIsDeliberatelyIdleOccurrence.mockReturnValue(true);
+    const digest = await buildDailyDigest(new Date('2026-09-16T17:50:00Z')); // a Wednesday
+    expect(digest).toContain('Trading holiday');
+    // The banner states why nothing counts as late, so a green digest on a holiday reads
+    // as "planned idle", not as alarming silence.
+    expect(digest).toContain('planned');
+  });
+
+  it('shows no holiday banner on a normal session day', async () => {
+    const digest = await buildDailyDigest(new Date('2026-07-02T15:30:00Z'));
+    expect(digest).not.toContain('Trading holiday');
   });
 
   it('lists a late registry job and a stale script under "Needs attention"', async () => {

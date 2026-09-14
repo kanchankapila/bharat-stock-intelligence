@@ -7,7 +7,7 @@ import { runPython } from '../pythonRunner';
 import { fetchIndexAdvanceDecline, fetchIndiaVix, fetchLiveMarketScreener, fetchEODMarketScreener } from '../marketIntelService';
 import * as queueModule from '../queues';
 import { MONITOR_SCRIPTS } from '../monitorScripts';
-import { computeCronLateness } from '../jobHeartbeat';
+import { computeCronLateness, getRecentTradingSessions } from '../jobHeartbeat';
 import { CronExpressionParser } from 'cron-parser';
 import { fetchWithCache } from '../cacheService';
 
@@ -391,9 +391,13 @@ export async function getSystemStatus(now: Date = new Date()) {
     // ~30 scripts in MONITOR_SCRIPTS this whole map is already running concurrently (Promise.all
     // over the map, not a true N+1 loop), so this halves the critical-path depth per script
     // rather than the total round-trip count.
-    const [dbLastRunAt, stats] = await Promise.all([
+    const [dbLastRunAt, stats, sessions] = await Promise.all([
       getLastRunAt(s.id as ScriptId),
       getScriptStats(s.id as ScriptId),
+      // Holiday-aware lateness (2026-09-14): a sessionless weekday inside the window is a
+      // trading holiday the skip family was planned to idle through, not a miss. Cached in
+      // jobHeartbeat.ts, so this adds no extra DB load beyond the first caller per 15 min.
+      getRecentTradingSessions(now),
     ]);
     // Take the LATEST of three independent pieces of evidence that the script ran, rather than
     // `dbLastRunAt ?? storedRanAt`. Preferring the output-table probe is only correct when a
@@ -452,6 +456,7 @@ export async function getSystemStatus(now: Date = new Date()) {
           (s as any).graceMinutes ?? 60,
           toComparableMs(lastRunAt),
           now,
+          sessions,
         ).late;
       } else {
         const ageHours = (now.getTime() - toComparableMs(lastRunAt)) / 3600000;

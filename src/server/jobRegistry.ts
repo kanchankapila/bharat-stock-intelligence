@@ -43,6 +43,18 @@ export interface JobScheduleEntry {
   lateDeadlineCronPatterns?: string[];
 }
 
+/**
+ * Jobs whose weekday cron DELIBERATELY RUNS on NSE trading holidays — the opposite polarity
+ * of the skip family — so the holiday lateness forgiveness in jobHeartbeat.ts
+ * (isDeliberatelyIdleOccurrence) must never apply to them: on a closed day they are NOT idle,
+ * and a genuine failure that day would otherwise be pardoned as planned idle. The one such
+ * job on a weekday-only cron is closed-day-early-batch, which IS the holiday dispatcher (on
+ * normal days it stamps a success and no-ops, so it is never late anyway); 24/7 cadences
+ * (confluence-compute, trendlyne-catchup, the two digests, data-quality-daily) are already
+ * excluded from forgiveness by the weekday-only pattern gate.
+ */
+export const HOLIDAY_ACTIVE_JOB_NAMES: ReadonlySet<string> = new Set(['closed-day-early-batch']);
+
 // ── Market-hours policy (IST 09:15–15:30 = UTC 03:45–10:00, Mon–Fri, minus holidays) ──
 // INTRADAY jobs run ONLY during market hours and no-op on holidays via an isMarketOpen() guard
 // (holiday-aware, see marketStatusService): stock-refresh (live prices), intraday-fetcher,

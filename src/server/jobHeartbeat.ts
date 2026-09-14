@@ -10,9 +10,10 @@
  */
 import { dbAll, dbRun, dbExec } from './dbAsync';
 import { CronExpressionParser } from 'cron-parser';
-import { JOB_REGISTRY } from './jobRegistry';
+import { JOB_REGISTRY, HOLIDAY_ACTIVE_JOB_NAMES } from './jobRegistry';
 import { MONITOR_SCRIPTS } from './monitorScripts';
 import { DATA_QUALITY_CHECKS, tradingDaysStale } from './dataQualityChecks';
+import { isTradingHolidayToday } from './marketStatusService';
 
 // This module is the sole creator of job_heartbeat on both engines (it is not in db.ts
 // nor the generated PG schema). The CREATE runs once, memoized, and every public fn
@@ -191,6 +192,197 @@ export async function getStaleJobs(): Promise<Array<{ job: string; hoursStale: n
   }
 }
 
+// ── Holiday-aware session window (added 2026-09-14) ─────────────────────────────
+// The lateness math below is cron-blind to NSE trading holidays: every weekday-only
+// job in the holiday-skip family returns { skipped: true } on a closed day, and a
+// skip is deliberately NOT stamped as a success (registerJob.ts's completed handler;
+// see HOLIDAY_SKIP_NOTE at the foot of confluence.jobs.ts) — so on those days the
+// heartbeat shows no success since the last real session, and getLateJobs()/
+// computeCronLateness() flagged the whole family "late" in the digest and the 15-min
+// watchdog on exactly the days they were correctly idle. That phantom-delay class is
+// what this window exists to forgive.
+//
+// The exchange's own record is authoritative, so the session calendar comes from the
+// same source as_of.py's trading_days_back() uses: distinct recent stock_ohlcv dates
+// (that table holds ONLY real sessions — special Saturday sessions included), with a
+// 6-day freshness guard: a newest-session older than that means the EOD writes
+// themselves have stalled, which is a real outage the lateness check must KEEP
+// reporting, not a holiday to forgive. Fail-open to the old cron-only behavior
+// whenever the window cannot be built. Cached 15 min — the 15-min watchdog, the
+// twice-daily digests and getSystemStatus() all ask for it.
+export interface TradingSessionWindow {
+  /** IST date (YYYY-MM-DD) of the OLDEST session in the window. */
+  oldest: string;
+  /** IST date (YYYY-MM-DD) of the NEWEST session in the window. */
+  newest: string;
+  /** Every observed session date (IST, YYYY-MM-DD) in the window. */
+  dates: Set<string>;
+  /**
+   * Every IST date in [oldest, today] the exchange provably never opened — the holidays
+   * this module exists to forgive. Precomputed per window because the evidence differs
+   * by band and the verdict at judgment time must stay a cheap sync lookup:
+   *  - [oldest, newest]: weekday dates absent from `dates`. stock_ohlcv only ever holds
+   *    real sessions, and reconcile-stock-ohlcv (nightly ml-daily-ops step) backfills any
+   *    real session its first write missed from bhavcopy — so an unbackfilled gap inside
+   *    the observed window IS a closed day.
+   *  - (newest, today): ambiguous — could be a holiday or a session whose EOD write
+   *    simply hasn't landed yet (ohlcv lands ~16:00 IST). Resolved with technical_signals
+   *    (technical-scan writes it from 08:30 IST on every real session, nothing on a
+   *    holiday — lag-free inside the market day): a weekday in this band with NO
+   *    technical_signals row is a holiday; one WITH rows is a real session whose EOD
+   *    write is pending, and lateness must keep judging it normally.
+   *  - today: answered by the live holiday feed (exact for today, fail-open to false on
+   *    a fetch error), never by absent writes — the 00:00–08:30 IST band must not mask
+   *    a failed post-midnight job just because the session's writes haven't started.
+   */
+  idleDates: Set<string>;
+}
+
+const SESSIONS_CACHE_TTL_MS = 15 * 60_000;
+// 10 sessions ≈ 12+ calendar days; a sessionless weekday INSIDE the window is a
+// holiday, one OLDER than it is simply unobserved (unknown ≠ forgiven).
+const SESSIONS_WINDOW = 10;
+const MAX_SESSIONS_AGE_DAYS = 6;
+
+let _sessionsCache: { window: TradingSessionWindow | null; at: number } | null = null;
+
+/** Test seam: the cache is per-process, so a test that swaps the dbAll fixture must
+ *  start cold (mirrors registerJob.ts's __resetMonitorNames). */
+export function __resetTradingSessionCache(): void {
+  _sessionsCache = null;
+}
+
+function istDateStr(t: number): string {
+  return new Date(t + 5.5 * 3600_000).toISOString().slice(0, 10);
+}
+
+function istIsWeekday(t: number): boolean {
+  const d = new Date(t + 5.5 * 3600_000).getUTCDay(); // 0=Sun, 6=Sat
+  return d >= 1 && d <= 5;
+}
+
+/** Splits the ambiguous gap band (newest, today, both exclusive) into:
+ *  - `scanned`: weekday dates technical-scan DID write (technical_signals rows exist —
+ *    real sessions whose ~16:00-IST ohlcv EOD write is missing or pending);
+ *  - `idle`: weekday dates it never wrote (the exchange never opened — holidays).
+ *  technical-scan writes that table from 08:30 IST on every real session, so inside the
+ *  market day this probe is lag-free — exactly where stock_ohlcv's own EOD write is too
+ *  slow to distinguish a holiday from a pending write. Probe failure fails open: empty
+ *  sets, no verdicts either way (the lateness math keeps the pre-fix behavior). */
+async function probeIdleGapDates(newest: string, todayIst: string): Promise<{ scanned: Set<string>; idle: Set<string> }> {
+  try {
+    const rows = await dbAll(
+      `SELECT DISTINCT date::text AS d FROM technical_signals
+       WHERE date::text > ? AND date::text < ? LIMIT 20`,
+      [newest, todayIst],
+    ) as Array<{ d?: string | null }>;
+    const scanned = new Set(
+      (rows ?? [])
+        .map(r => String(r?.d ?? '').slice(0, 10))
+        .filter(d => /^\d{4}-\d{2}-\d{2}$/.test(d)),
+    );
+    const idle = new Set<string>();
+    for (
+      let d = new Date(`${newest}T00:00:00Z`);
+      d < new Date(`${todayIst}T00:00:00Z`);
+      d.setUTCDate(d.getUTCDate() + 1)
+    ) {
+      const iso = d.toISOString().slice(0, 10);
+      if (istIsWeekday(d.getTime()) && !scanned.has(iso)) idle.add(iso);
+    }
+    return { scanned, idle };
+  } catch {
+    return { scanned: new Set<string>(), idle: new Set<string>() };
+  }
+}
+
+export async function getRecentTradingSessions(now: Date = new Date()): Promise<TradingSessionWindow | null> {
+  if (_sessionsCache && now.getTime() - _sessionsCache.at < SESSIONS_CACHE_TTL_MS) {
+    return _sessionsCache.window;
+  }
+  const window = await (async (): Promise<TradingSessionWindow | null> => {
+    try {
+      const rows = await dbAll(
+        `SELECT DISTINCT date::text AS d FROM stock_ohlcv ORDER BY d DESC LIMIT ${SESSIONS_WINDOW}`,
+      ) as Array<{ d?: string | null }>;
+      const dates = (rows ?? [])
+        .map(r => String(r?.d ?? '').slice(0, 10))
+        .filter(d => /^\d{4}-\d{2}-\d{2}$/.test(d));
+      if (!dates.length) return null;
+      const newestMs = Date.parse(`${dates[0]}T10:00:00+05:30`);
+      if (Number.isFinite(newestMs) && now.getTime() - newestMs > MAX_SESSIONS_AGE_DAYS * 86_400_000) return null;
+      const oldest = dates[dates.length - 1];
+      const newest = dates[0];
+      const todayIst = istDateStr(now.getTime());
+      const dateSet = new Set(dates);
+      // Band 1 — holidays inside the observed window.
+      const idleDates = new Set<string>();
+      let d = new Date(`${oldest}T00:00:00Z`);
+      const end = new Date(`${todayIst}T00:00:00Z`);
+      for (; d <= end; d.setUTCDate(d.getUTCDate() + 1)) {
+        if (istIsWeekday(d.getTime()) && !dateSet.has(d.toISOString().slice(0, 10))) {
+          idleDates.add(d.toISOString().slice(0, 10));
+        }
+      }
+      // Band 2 — the ambiguous gap between the newest session and today: keep only the
+      // dates the technical_signals probe proves the exchange never opened, and REMOVE
+      // the ones it proves were real sessions (band 1 marked them idle purely because
+      // their ohlcv write failed/hasn't landed — a write failure must not read as a
+      // holiday, or every other job's genuine miss that day would be pardoned too).
+      const gap = await probeIdleGapDates(newest, todayIst);
+      for (const iso of gap.idle) idleDates.add(iso);
+      for (const iso of gap.scanned) idleDates.delete(iso);
+      // Band 3 — today: the live feed answers exactly (fail-open to NOT idle on error),
+      // so a real session's early-morning hours are never mistaken for a holiday.
+      const todayIdle = await isTradingHolidayToday().catch(() => false);
+      if (todayIdle) idleDates.add(todayIst); else idleDates.delete(todayIst);
+      return { oldest, newest, dates: dateSet, idleDates };
+    } catch {
+      return null;
+    }
+  })();
+  _sessionsCache = { window, at: now.getTime() };
+  return window;
+}
+
+/** True when every 5-field pattern's day-of-week field restricts it to weekdays
+ *  (every listed day lands in 1-5). Forgiveness must ONLY apply to such patterns:
+ *  a weekend-anchored weekly job ('0 2 * * 6' — nse-sync, fundamentals-sync,
+ *  ml-weekly-retrain) has occurrences on days stock_ohlcv legitimately never holds,
+ *  so forgiving those would pardon a genuinely missed weekly run forever; and a 24/7
+ *  cadence (trendlyne-catchup's every-20-min cron; confluence-compute's every-day
+ *  window patterns) keeps working on holidays, so its failures must keep alerting on
+ *  one too. */
+export function patternsAreWeekdayOnly(cronPatterns: string[]): boolean {
+  return cronPatterns.every(p => {
+    const fields = p.trim().split(/\s+/);
+    const dow = fields[4];
+    if (!dow || dow === '*') return false;
+    return dow.split(',').every(tok => {
+      const range = tok.match(/^(\d+)-(\d+)$/);
+      const days = range
+        ? Array.from({ length: Number(range[2]) - Number(range[1]) + 1 }, (_, i) => Number(range[1]) + i)
+        : [Number(tok)];
+      return days.every(n => Number.isInteger(n) && n >= 1 && n <= 5);
+    });
+  });
+}
+
+/** True when `expectedAt`'s IST calendar date is a weekday the exchange provably never
+ *  opened — i.e. the job's skip that day was the PLANNED holiday behavior, not a miss.
+ *  The provable-idle verdicts are precomputed into `sessions.idleDates` (see the field's
+ *  doc for the per-band evidence); here only the cheap checks remain. Returns false
+ *  whenever anything is uncertain: no session window (fail-open), a weekend date, or an
+ *  occurrence older than the observed window. */
+export function isDeliberatelyIdleOccurrence(expectedAt: Date, sessions: TradingSessionWindow | null): boolean {
+  if (!sessions) return false;
+  const t = expectedAt.getTime();
+  if (!istIsWeekday(t)) return false;
+  const d = istDateStr(t);
+  if (d < sessions.oldest) return false; // older than the window: unobserved, not proven idle
+  return sessions.idleDates.has(d);
+}
+
 /**
  * Cron-aware lateness for an arbitrary set of contributing cron patterns (a script fed by
  * more than one queue, e.g. outcome-resolver-5d is touched by both the 9:30am resolver queue
@@ -201,12 +393,19 @@ export async function getStaleJobs(): Promise<Array<{ job: string; hoursStale: n
  * a flat hours-since-last-success threshold that false-flags "stale" every time it's checked
  * before that day's/week's run has had a chance to fire (see docs on the Monday-morning /
  * pre-evening-batch false positives this was written to fix).
+ *
+ * `sessions` (optional) makes the verdict holiday-aware: when the most recent expected fire
+ * lands on a weekday the exchange never opened — and the patterns themselves are weekday-only,
+ * so 24/7 and weekend-anchored schedules can never be pardoned — the job was deliberately idle
+ * and is NOT late regardless of the heartbeat. Pass getRecentTradingSessions()'s result; null
+ * (window unavailable) keeps the pre-holiday-aware behavior.
  */
 export function computeCronLateness(
   cronPatterns: string[],
   graceMinutes: number,
   lastSuccessMs: number | null,
   now: Date = new Date(),
+  sessions: TradingSessionWindow | null = null,
 ): { late: boolean; expectedAt: Date } {
   let expectedAt: Date | null = null;
   for (const pattern of cronPatterns) {
@@ -215,6 +414,11 @@ export function computeCronLateness(
   }
   const deadline = expectedAt!.getTime() + graceMinutes * 60_000;
   if (now.getTime() < deadline) return { late: false, expectedAt: expectedAt! };
+  if (sessions && patternsAreWeekdayOnly(cronPatterns) && isDeliberatelyIdleOccurrence(expectedAt!, sessions)) {
+    // Trading holiday: the job was planned NOT to run today (its processor skipped and
+    // declined the heartbeat by design). Not late.
+    return { late: false, expectedAt: expectedAt! };
+  }
   return { late: (lastSuccessMs ?? 0) < expectedAt!.getTime(), expectedAt: expectedAt! };
 }
 
@@ -229,6 +433,9 @@ export async function getLateJobs(now: Date = new Date()): Promise<Array<{
 }>> {
   try {
     await ensureTable();
+    // Holiday window (see the header comment above): null = unknown = fail-open, the
+    // pre-holiday-aware cron-only behavior. Cached 15 min across all callers.
+    const sessions = await getRecentTradingSessions(now);
     const rows = await dbAll(
       'SELECT job_name, last_success_at, last_error, last_alert_sent_at FROM job_heartbeat'
     ) as Array<{ job_name: string; last_success_at: number | null; last_error: string | null; last_alert_sent_at: number | null }>;
@@ -243,7 +450,7 @@ export async function getLateJobs(now: Date = new Date()): Promise<Array<{
       if (entry.lateDeadlineCronPatterns) {
         // See jobRegistry.ts's doc comment: computes lateness against the job's real work
         // window, not its cron's generous post-close tail slots.
-        const result = computeCronLateness(entry.lateDeadlineCronPatterns, entry.graceMinutes, lastSuccess, now);
+        const result = computeCronLateness(entry.lateDeadlineCronPatterns, entry.graceMinutes, lastSuccess, now, sessions);
         if (!result.late) continue;
         expectedAt = result.expectedAt;
       } else if (entry.cronPattern) {
@@ -252,6 +459,15 @@ export async function getLateJobs(now: Date = new Date()): Promise<Array<{
         const deadline = expectedAt.getTime() + entry.graceMinutes * 60_000;
         if (now.getTime() < deadline) continue; // not late yet
         if ((lastSuccess ?? 0) >= expectedAt.getTime()) continue; // already succeeded for this occurrence
+        // Trading holiday: the job's cron fired on a weekday the exchange never opened, the
+        // processor skipped and declined the heartbeat BY DESIGN (registerJob.ts never stamps
+        // a skip as a success) — the absent success is the planned behavior, not a miss.
+        // Gated on weekday-only patterns so 24/7 cadences (trendlyne-catchup) and
+        // weekend-anchored weekly jobs (nse-sync '0 2 * * 6') can never be pardoned, and on
+        // HOLIDAY_ACTIVE_JOB_NAMES because closed-day-early-batch runs ON holidays (it is the
+        // holiday dispatcher) — a genuine failure of it on the closed day must still alert.
+        if (sessions && !HOLIDAY_ACTIVE_JOB_NAMES.has(entry.jobName)
+            && patternsAreWeekdayOnly([entry.cronPattern]) && isDeliberatelyIdleOccurrence(expectedAt, sessions)) continue;
       } else if (entry.everyMs) {
         // Anchor on the most recent boundary whose grace has ALREADY expired, not the current
         // one. Anchoring on the current boundary made this branch VACUOUS whenever graceMinutes

@@ -178,22 +178,33 @@ export async function registerConfluenceJobs() {
 }
 
 /**
- * HOLIDAY_SKIP_NOTE — why processConfluenceOutcomes does NOT return { skipped: true }.
+ * HOLIDAY_SKIP_NOTE — the trading-holiday skip / heartbeat / lateness interplay, recorded so
+ * the next reader doesn't re-derive it.
  *
- * registerJob.ts now declines to stamp a heartbeat for any processor returning that marker, so a
- * skip can no longer erase a real failure. processConfluenceCompute uses it because it no-ops for
- * ~9 hours EVERY day: a genuine failure inside its work window was being overwritten by the next
- * out-of-window skip within 30 minutes, on a job marked critical.
+ * registerJob.ts declines to stamp a heartbeat for any processor returning { skipped: true },
+ * so a skip can never erase a real failure. processConfluenceCompute uses the marker because it
+ * no-ops for ~9 hours EVERY day: a genuine failure inside its work window was being overwritten
+ * by the next out-of-window skip within 30 minutes, on a job marked critical.
  *
- * A trading-holiday skip is a different risk profile and must NOT be converted piecemeal.
- * getLateJobs() has no holiday awareness, so declining the heartbeat on the ~10 NSE holidays a
- * year would flag this job — and its identically-shaped siblings processStockScoring,
- * processMcScreenerSync, processEtnowScreenerSync, processEtMarketstatsSync,
- * processTrendlyneScreenerSync, processScreenerPerf, several of them critical — as 'late' on
- * exactly the days they are correctly idle. That is the phantom-alert class recurring-bugs.md
- * records 6 times, so it would trade one recurring bug for another.
+ * A trading-holiday skip was a different risk profile, and the reason processConfluenceOutcomes'
+ * holiday skip originally could NOT use the marker: with getLateJobs() holiday-blind, declining
+ * the heartbeat on the ~10 NSE holidays a year would flag this job — and its identically-shaped
+ * siblings processStockScoring, processMcScreenerSync, processEtnowScreenerSync,
+ * processEtMarketstatsSync, processTrendlyneScreenerSync, processScreenerPerf, several of them
+ * critical — as 'late' on exactly the days they are correctly idle (the phantom-alert class
+ * recurring-bugs.md records 6 times).
  *
- * The correct order is: make getLateJobs() holiday-aware, THEN convert all of these together.
- * Until then they stamp success on a holiday skip, which is a known, bounded inaccuracy — the
- * erasure window is one holiday landing directly after a failed run, not 30 minutes every day.
+ * That blocker is RESOLVED 2026-09-14: jobHeartbeat.ts's getRecentTradingSessions()/
+ * computeCronLateness() now judge the occurrence's IST date against the exchange's own session
+ * record (stock_ohlcv sessions + a technical_signals probe for the ambiguous newest-session-to-
+ * today band + the live holiday feed for today) and forgive weekday-only jobs on proven closed
+ * days — gated so 24/7 cadences and weekend-anchored weekly jobs can never be pardoned
+ * (src/server/__tests__/holidayLatenessForgiveness.test.ts pins every rule). Which is why the
+ * holiday skip above now safely returns { success: true, skipped: true }: the declined heartbeat
+ * leaves a provable-idle day behind, not a false 'late'.
+ *
+ * The one bounded trade-off that remains: a REAL failure landing on the holiday slot itself is
+ * only surfaced from the next real session's occurrence (≤1 day), because a skip still erases
+ * the failure's verdict for that one occurrence — the same erasure-window bound this note has
+ * always recorded, now the only inaccuracy left standing.
  */
