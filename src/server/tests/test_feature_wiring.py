@@ -161,6 +161,10 @@ _DDL = {
     "nse_stocks": """
         CREATE TABLE IF NOT EXISTS nse_stocks (
             symbol TEXT, mcsymbol TEXT)""",
+    "mc_scid_map": """
+        CREATE TABLE IF NOT EXISTS mc_scid_map (
+            scid TEXT PRIMARY KEY, symbol TEXT NOT NULL, stock_name TEXT,
+            source TEXT, resolved_at TEXT DEFAULT CURRENT_TIMESTAMP)""",
     "stock_earnings_beats": """
         CREATE TABLE IF NOT EXISTS stock_earnings_beats (
             id BIGINT, symbol TEXT, quarter_date DATE, period_type TEXT,
@@ -253,14 +257,20 @@ def _seed_earnings(con):
     prv = (pd.Timestamp.today() - pd.Timedelta(days=20)).strftime("%Y-%m-%d")
     # The feed is scid-keyed; the merge must resolve TEST -> MC01 through
     # nse_stocks (mcsymbol != symbol, so a no-op WHERE scid=symbol fails here).
-    # UNMAPPED's yesterday date must never leak into TEST's clock.
+    # MAP04X exists only in mc_scid_map (recently-listed name, no nse_stocks row)
+    # -- exercises the fallback. UNMAPPED's yesterday date must never leak.
     _ins(con, "nse_stocks", [
         {"symbol": "TEST", "mcsymbol": "MC01"},
         {"symbol": "OTHER", "mcsymbol": "MC02"},
     ], ["symbol", "mcsymbol"])
+    _ins(con, "mc_scid_map", [
+        {"scid": "MAP04X", "symbol": "TEST", "source": "autosuggest-name"},
+    ], ["scid", "symbol", "source"])
     _ins(con, "stock_earnings_dates", [
         {"scid": "MC01", "result_date": nxt},
         {"scid": "MC01", "result_date": prv},
+        {"scid": "MAP04X", "result_date": (pd.Timestamp.today()
+                                           - pd.Timedelta(days=2)).strftime("%Y-%m-%d")},
         {"scid": "UNMAPPED", "result_date": (pd.Timestamp.today()
                                              - pd.Timedelta(days=1)).strftime("%Y-%m-%d")},
     ], ["scid", "result_date"])
@@ -324,8 +334,9 @@ class TestEarningsClock:
         assert out.loc[DATES[-1], "days_to_next_earnings"] == 3
         # today-20 is 21 days before DATES[0].
         assert out.loc[DATES[0], "days_since_last_earnings"] == 11
-        # UNMAPPED's yesterday must not leak in (would read 1 here).
-        assert out.loc[DATES[-1], "days_since_last_earnings"] == 20
+        # MAP04X (today-2) resolves ONLY through the mc_scid_map fallback -> 2.
+        # Without the map row this reads 20; a UNMAPPED leak would read 1.
+        assert out.loc[DATES[-1], "days_since_last_earnings"] == 2
         assert out.loc[DATES[-1], "last_eps_surprise_pct"] == 7.5
         assert out.loc[DATES[-1], "last_beat_score"] == 3
         assert out["earnings_in_5d"].notna().sum() >= 1

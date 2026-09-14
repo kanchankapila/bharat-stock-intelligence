@@ -3084,6 +3084,22 @@ CREATE TABLE IF NOT EXISTS "stock_earnings_dates" (
   PRIMARY KEY ("scid", "result_date")
 );
 
+-- ── mc_scid_map ──────────────────────────────────────────────────────
+-- scid -> NSE symbol for stock_earnings_dates rows the nse_stocks.mcsymbol map
+-- cannot place (recently-listed / SME names the universe refresh hasn't ingested).
+-- Backfilled from MC's autosuggestion API by scripts/sync_mc_scid_map.py, which
+-- accepts ONLY entries whose sc_id equals the feed's scid (exact id match -- the
+-- URL slug code can differ, e.g. Shiprocket price page SL26 vs earnings scid SL25).
+-- feature_engineering._merge_earnings_clock consults this as the fallback after
+-- nse_stocks. Re-run weekly; new work appears only when new listings do.
+CREATE TABLE IF NOT EXISTS "mc_scid_map" (
+  "scid" TEXT NOT NULL PRIMARY KEY,
+  "symbol" TEXT NOT NULL,
+  "stock_name" TEXT,
+  "source" TEXT,
+  "resolved_at" TEXT DEFAULT now()
+);
+
 -- ── stock_event_triggers ─────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS "stock_event_triggers" (
   "date" DATE NOT NULL,

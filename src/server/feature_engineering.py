@@ -837,13 +837,14 @@ class FeatureEngineer:
 
         days_to_next_earnings / days_since_last_earnings from stock_earnings_dates,
         which is keyed by MoneyControl's opaque scid -- resolved to the NSE symbol
-        through nse_stocks.mcsymbol (the canonical provider-ID map; 2,340/2,366
-        populated, 1,944/3,694 of the feed's scids resolve -- the rest are indices
-        and unmapped instruments). last_eps_surprise_pct / last_beat_score read
-        stock_earnings_beats as-of (already symbol-keyed; latest quarter_date <=
-        the feature date, stale beyond 400 days reads as missing -- a year-old
-        surprise is not information). earnings_in_5d flags the announcement-risk
-        window; never forward-filled (NaN = no known upcoming earnings, not 0).
+        through nse_stocks.mcsymbol first, then mc_scid_map (the autosuggestion-
+        backfilled map for recently-listed names the universe tables predate;
+        scripts/sync_mc_scid_map.py maintains it). last_eps_surprise_pct
+        / last_beat_score read stock_earnings_beats as-of (already symbol-keyed;
+        latest quarter_date <= the feature date, stale beyond 400 days reads as
+        missing -- a year-old surprise is not information). earnings_in_5d flags
+        the announcement-risk window; never forward-filled (NaN = no known upcoming
+        earnings, not 0).
         """
         idx = pd.DatetimeIndex(feat.index)
         days = idx.astype("datetime64[ns]").to_numpy()
@@ -854,8 +855,9 @@ class FeatureEngineer:
         ed = read_df(
             """SELECT e.result_date
                FROM stock_earnings_dates e
-               JOIN nse_stocks n ON n.mcsymbol = e.scid
-               WHERE n.symbol=? AND e.result_date IS NOT NULL
+               LEFT JOIN nse_stocks n ON n.mcsymbol = e.scid
+               LEFT JOIN mc_scid_map m ON m.scid = e.scid
+               WHERE COALESCE(n.symbol, m.symbol) = ? AND e.result_date IS NOT NULL
                ORDER BY e.result_date""",
             (symbol,),
         )
