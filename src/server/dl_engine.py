@@ -76,12 +76,11 @@ MODEL_DIR = Path(__file__).parent / "ml_models"
 CONFIG_PATH = MODEL_DIR / "dl_model_config.json"
 
 SEQUENCE_LEN = 60
-# 78 legacy channels + 7 added 2026-08-24 (see FEATURE_COLS tail). Positions 0-77 are
-# frozen: the champion checkpoint lstm_v3.pt was trained at this width, and until a wider
-# candidate clears the promotion bar, run_inference() loads and runs it via the
-# width-agnostic loader (_checkpoint_input_width) reading ONLY the first N_FEATURES_LEGACY
-# columns of every batch. Bumping this constant alone must never break daily inference.
-N_FEATURES        = 85
+# 78 legacy channels + 7 added 2026-08-24 + 11 added 2026-09-14 (positions 85-95).
+# Positions 0-84 are frozen: champion checkpoints trained at narrower widths
+# continue to run via _checkpoint_input_width slicing FEATURE_COLS to the model's width.
+# Bumping this constant alone must never break daily inference.
+N_FEATURES        = 96
 N_FEATURES_LEGACY = 78
 
 # Defensive winsorization bound for raw engineered features fed to the LSTM (2026-08-06).
@@ -144,6 +143,25 @@ FEATURE_COLS = [
     "call_wall_dist_pct","put_wall_dist_pct",
     "insider_buy_pct_90d","block_deal_net_qty",
     "near_expiry_gamma",
+    # ── 2026-09-14 widening (+11, positions 85-95) ──────────────────────────────
+    # APPENDED, never inserted: positions 0-84 stay byte-identical.
+    # Step-2/3 merges: analyst consensus (4), earnings clock (4), delivery dynamics (2),
+    # and market-wide options sentiment (1). Sourced PIT from analyst_estimates_history,
+    # stock_earnings_dates, stock_financials_annual, nse_delivery_data, and nifty_option_chain.
+    # Excluded (3): analyst_target_mean (absolute rupee scale; needs normalization),
+    # last_beat_score (redundant with last_eps_surprise_pct), delivery_qty_5d (absolute shares;
+    # delivery_z_20d captures this scale-invariantly).
+    "analyst_buy_pct",
+    "analyst_target_upside_pct",
+    "analyst_n",
+    "broker_recos_90d",
+    "days_to_next_earnings",
+    "days_since_last_earnings",
+    "last_eps_surprise_pct",
+    "earnings_in_5d",
+    "delivery_z_20d",
+    "delivery_pct_chg_5d",
+    "nifty_pcr",
 ]
 
 if torch is not None:
