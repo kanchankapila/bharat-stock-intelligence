@@ -34,21 +34,25 @@ vi.mock('../telegramService', () => ({
     (text || '').replace(/[_*`[\]]/g, ' ').replace(/\s+/g, ' ').trim(),
 }));
 
-vi.mock('../jobHeartbeat', () => ({
-  getLateJobs: mockGetLateJobs,
-  wasAlreadyAlerted: mockWasAlreadyAlerted,
-  markAlerted: mockMarkAlerted,
-  // Holiday-window pair (2026-09-14): buildDailyDigest asks both for the banner and
-  // getLateJobs itself consumes the window internally in the real module.
-  getRecentTradingSessions: vi.fn(async () => null),
-  isDeliberatelyIdleOccurrence: mockIsDeliberatelyIdleOccurrence,
-}));
+vi.mock('../jobHeartbeat', async () => {
+  const actual = await vi.importActual<typeof import('../jobHeartbeat')>('../jobHeartbeat');
+  return {
+    ...actual,
+    getLateJobs: mockGetLateJobs,
+    wasAlreadyAlerted: mockWasAlreadyAlerted,
+    markAlerted: mockMarkAlerted,
+    getRecentTradingSessions: vi.fn(async () => null),
+    isDeliberatelyIdleOccurrence: mockIsDeliberatelyIdleOccurrence,
+  };
+});
 
 vi.mock('../jobRegistry', () => ({
   JOB_REGISTRY: [
     { jobName: 'critical-job', label: 'Critical Job', cronPattern: '0 10 * * 1-5', graceMinutes: 45, critical: true },
     { jobName: 'noncritical-job', label: 'Noncritical Job', cronPattern: '0 11 * * 1-5', graceMinutes: 45, critical: false },
+    { jobName: 'saturday-job', label: 'Saturday Job', cronPattern: '0 2 * * 6', graceMinutes: 120, critical: false },
   ],
+  HOLIDAY_ACTIVE_JOB_NAMES: new Set(['closed-day-early-batch']),
 }));
 
 vi.mock('../routers/monitor.router', () => ({
@@ -393,5 +397,28 @@ describe('buildDailyDigest', () => {
     );
     const digest = await buildDailyDigest(new Date('2026-07-02T15:30:00Z'));
     expect(digest).not.toContain('Job-runtime health');
+  });
+
+  it('does NOT report Saturday jobs as late in a weekday digest', async () => {
+    mockGetLateJobs.mockResolvedValue([
+      { job: 'saturday-job', label: 'Saturday Job', expectedAt: new Date('2026-06-27T02:00:00Z'), hoursLate: 133, lastError: 'failed on sat' },
+    ]);
+    const digest = await buildDailyDigest(new Date('2026-07-02T15:30:00Z')); // Thursday
+    expect(digest).not.toContain('Saturday Job');
+    expect(digest).not.toContain('Needs attention');
+  });
+
+  it('excludes Saturday jobs and skipped weekday jobs from digest on a trading holiday', async () => {
+    mockIsDeliberatelyIdleOccurrence.mockReturnValue(true);
+    mockGetLateJobs.mockResolvedValue([
+      { job: 'saturday-job', label: 'Saturday Job', expectedAt: new Date('2026-09-12T02:00:00Z'), hoursLate: 100, lastError: null },
+      { job: 'critical-job', label: 'Critical Job', expectedAt: new Date('2026-09-16T10:00:00Z'), hoursLate: 2, lastError: null },
+    ]);
+    const digest = await buildDailyDigest(new Date('2026-09-16T17:50:00Z')); // Wednesday holiday
+    expect(digest).toContain('Trading holiday');
+    expect(digest).not.toContain('Saturday Job');
+    expect(digest).not.toContain('Critical Job');
+    expect(digest).not.toContain('Needs attention');
+    expect(digest).not.toContain('Changed since last report');
   });
 });

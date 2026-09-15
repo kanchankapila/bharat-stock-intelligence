@@ -252,7 +252,7 @@ export function __resetTradingSessionCache(): void {
   _sessionsCache = null;
 }
 
-function istDateStr(t: number): string {
+export function istDateStr(t: number): string {
   return new Date(t + 5.5 * 3600_000).toISOString().slice(0, 10);
 }
 
@@ -384,6 +384,121 @@ export function isDeliberatelyIdleOccurrence(expectedAt: Date, sessions: Trading
 }
 
 /**
+ * Checks if a cron pattern has any scheduled occurrence within the specified IST calendar date.
+ * An IST day (e.g. 2026-09-14) spans from UTC (D-1) 18:30:00 to UTC D 18:29:59.999.
+ */
+export function hasOccurrenceOnIstDate(cronPattern: string, istDate: string): boolean {
+  try {
+    const [y, m, d] = istDate.split('-').map(Number);
+    const endOfDayUtc = new Date(Date.UTC(y, m - 1, d, 23, 59, 59, 999) - 5.5 * 3600_000);
+    const prev = CronExpressionParser.parse(cronPattern, { currentDate: endOfDayUtc, tz: 'Etc/UTC' }).prev().toDate();
+    return istDateStr(prev.getTime()) === istDate;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Returns true if a job entry is supposed to run on the specified IST date.
+ * Accounts for day-of-week cron schedules, trading holidays, and weekend exclusions.
+ */
+export function isJobSupposedToRunOnDate(
+  entry: {
+    jobName: string;
+    cronPattern?: string;
+    everyMs?: number;
+    lateDeadlineCronPatterns?: string[];
+  },
+  date: Date,
+  isTradingHoliday: boolean,
+): boolean {
+  if (!entry.cronPattern && !entry.everyMs) return false; // event-driven, no fixed schedule
+  const istDate = istDateStr(date.getTime());
+
+  if (isTradingHoliday) {
+    if (HOLIDAY_ACTIVE_JOB_NAMES?.has?.(entry.jobName)) {
+      return entry.cronPattern ? hasOccurrenceOnIstDate(entry.cronPattern, istDate) : true;
+    }
+    // Weekday-only jobs skip on trading holidays
+    if (entry.cronPattern && patternsAreWeekdayOnly([entry.cronPattern])) {
+      return false;
+    }
+    // Intraday market-hours jobs with weekday deadlines skip on trading holidays
+    if (entry.everyMs && entry.lateDeadlineCronPatterns && patternsAreWeekdayOnly(entry.lateDeadlineCronPatterns)) {
+      return false;
+    }
+    if (entry.cronPattern) {
+      return hasOccurrenceOnIstDate(entry.cronPattern, istDate);
+    }
+    return true; // 24/7 cadence (news-sentiment, confluence-compute, etc.)
+  }
+
+  // Regular (non-holiday) day
+  if (entry.cronPattern) {
+    return hasOccurrenceOnIstDate(entry.cronPattern, istDate);
+  }
+
+  // everyMs jobs
+  const istDayOfWeek = new Date(date.getTime() + 5.5 * 3600_000).getUTCDay();
+  // Intraday market-hours jobs skip on weekends
+  if ((istDayOfWeek === 0 || istDayOfWeek === 6) && entry.lateDeadlineCronPatterns && patternsAreWeekdayOnly(entry.lateDeadlineCronPatterns)) {
+    return false;
+  }
+  return true;
+}
+
+export interface JobTypicalDuration {
+  avgMs: number;
+  p95Ms: number;
+  count: number;
+}
+
+let _durationsCache: { durations: Map<string, JobTypicalDuration>; at: number } | null = null;
+
+export function __resetJobTypicalDurationsCache(): void {
+  _durationsCache = null;
+}
+
+/**
+ * Retrieves typical execution duration (avg and p95 ms) from job_run_history over the
+ * past 14 days of successful runs, cached for 15 minutes.
+ */
+export async function getJobTypicalDurations(now: Date = new Date()): Promise<Map<string, JobTypicalDuration>> {
+  if (_durationsCache && now.getTime() - _durationsCache.at < SESSIONS_CACHE_TTL_MS) {
+    return _durationsCache.durations;
+  }
+  const durations = new Map<string, JobTypicalDuration>();
+  try {
+    const rows = await dbAll<{
+      job_name: string;
+      avg_ms: number | string | null;
+      p95_ms: number | string | null;
+      count: number | string;
+    }>(
+      `SELECT job_name,
+              round(avg(duration_ms)) as avg_ms,
+              round(percentile_cont(0.95) within group (order by duration_ms)) as p95_ms,
+              count(*) as count
+       FROM job_run_history
+       WHERE status = 'success' AND duration_ms IS NOT NULL AND ran_at > now() - interval '14 days'
+       GROUP BY job_name`
+    );
+    for (const r of (rows ?? [])) {
+      if (!r?.job_name) continue;
+      durations.set(r.job_name, {
+        avgMs: Number(r.avg_ms ?? 0),
+        p95Ms: Number(r.p95_ms ?? r.avg_ms ?? 0),
+        count: Number(r.count ?? 0),
+      });
+    }
+  } catch {
+    // Fail-open to empty map (e.g. SQLite tests or table not ready)
+  }
+  _durationsCache = { durations, at: now.getTime() };
+  return durations;
+}
+
+/**
  * Cron-aware lateness for an arbitrary set of contributing cron patterns (a script fed by
  * more than one queue, e.g. outcome-resolver-5d is touched by both the 9:30am resolver queue
  * and the 7:30pm ml-daily-ops batch, uses the MOST RECENT of the two expected fire times).
@@ -436,6 +551,8 @@ export async function getLateJobs(now: Date = new Date()): Promise<Array<{
     // Holiday window (see the header comment above): null = unknown = fail-open, the
     // pre-holiday-aware cron-only behavior. Cached 15 min across all callers.
     const sessions = await getRecentTradingSessions(now);
+    const isTradingHoliday = isDeliberatelyIdleOccurrence(now, sessions);
+    const typicalDurations = await getJobTypicalDurations(now).catch(() => new Map<string, JobTypicalDuration>());
     const rows = await dbAll(
       'SELECT job_name, last_success_at, last_error, last_alert_sent_at FROM job_heartbeat'
     ) as Array<{ job_name: string; last_success_at: number | null; last_error: string | null; last_alert_sent_at: number | null }>;
@@ -443,6 +560,11 @@ export async function getLateJobs(now: Date = new Date()): Promise<Array<{
 
     const late: Array<{ job: string; label: string; expectedAt: Date; hoursLate: number; lastError: string | null }> = [];
     for (const entry of JOB_REGISTRY) {
+      // 1. Only evaluate jobs that are supposed to run on this IST date
+      if (!isJobSupposedToRunOnDate(entry, now, isTradingHoliday)) {
+        continue;
+      }
+
       const row = byName.get(entry.jobName);
       const lastSuccess = row?.last_success_at ?? null;
 
@@ -456,18 +578,6 @@ export async function getLateJobs(now: Date = new Date()): Promise<Array<{
       } else if (entry.cronPattern) {
         const interval = CronExpressionParser.parse(entry.cronPattern, { currentDate: now, tz: 'Etc/UTC' });
         expectedAt = interval.prev().toDate();
-        const deadline = expectedAt.getTime() + entry.graceMinutes * 60_000;
-        if (now.getTime() < deadline) continue; // not late yet
-        if ((lastSuccess ?? 0) >= expectedAt.getTime()) continue; // already succeeded for this occurrence
-        // Trading holiday: the job's cron fired on a weekday the exchange never opened, the
-        // processor skipped and declined the heartbeat BY DESIGN (registerJob.ts never stamps
-        // a skip as a success) — the absent success is the planned behavior, not a miss.
-        // Gated on weekday-only patterns so 24/7 cadences (trendlyne-catchup) and
-        // weekend-anchored weekly jobs (nse-sync '0 2 * * 6') can never be pardoned, and on
-        // HOLIDAY_ACTIVE_JOB_NAMES because closed-day-early-batch runs ON holidays (it is the
-        // holiday dispatcher) — a genuine failure of it on the closed day must still alert.
-        if (sessions && !HOLIDAY_ACTIVE_JOB_NAMES.has(entry.jobName)
-            && patternsAreWeekdayOnly([entry.cronPattern]) && isDeliberatelyIdleOccurrence(expectedAt, sessions)) continue;
       } else if (entry.everyMs) {
         // Anchor on the most recent boundary whose grace has ALREADY expired, not the current
         // one. Anchoring on the current boundary made this branch VACUOUS whenever graceMinutes
@@ -480,16 +590,53 @@ export async function getLateJobs(now: Date = new Date()): Promise<Array<{
           (now.getTime() - entry.graceMinutes * 60_000) / entry.everyMs,
         ) * entry.everyMs;
         expectedAt = new Date(boundary);
-        if ((lastSuccess ?? 0) >= expectedAt.getTime()) continue; // already succeeded for this occurrence
       } else {
         continue; // event-driven, no schedule to be late against
       }
+
+      // If scheduled time hasn't arrived yet today, it cannot be late yet
+      if (expectedAt.getTime() > now.getTime()) continue;
+
+      if ((lastSuccess ?? 0) >= expectedAt.getTime()) continue; // already succeeded for this occurrence
+
+      // Trading holiday: the job's cron fired on a weekday the exchange never opened, the
+      // processor skipped and declined the heartbeat BY DESIGN (registerJob.ts never stamps
+      // a skip as a success) — the absent success is the planned behavior, not a miss.
+      // Gated on weekday-only patterns so 24/7 cadences (trendlyne-catchup) and
+      // weekend-anchored weekly jobs (nse-sync '0 2 * * 6') can never be pardoned, and on
+      // HOLIDAY_ACTIVE_JOB_NAMES because closed-day-early-batch runs ON holidays (it is the
+      // holiday dispatcher) — a genuine failure of it on the closed day must still alert.
+      if (sessions && !HOLIDAY_ACTIVE_JOB_NAMES?.has?.(entry.jobName)
+          && patternsAreWeekdayOnly([entry.cronPattern ?? '']) && isDeliberatelyIdleOccurrence(expectedAt, sessions)) continue;
+
+      // 2. Delay check based on time it usually takes:
+      // If duration history exists, use typical runtime (p95 or avg) plus a jitter buffer (at least 10m).
+      // Fallback to entry.graceMinutes if no duration history exists.
+      const durationInfo = typicalDurations.get(entry.jobName);
+      const hasDurationHistory = durationInfo && durationInfo.count >= 2;
+      const usualDurationMs = hasDurationHistory
+        ? (durationInfo.p95Ms || durationInfo.avgMs)
+        : (entry.graceMinutes * 60_000);
+
+      const deadlineMs = hasDurationHistory
+        ? (expectedAt.getTime() + usualDurationMs + Math.max(10 * 60_000, Math.round(usualDurationMs * 0.5)))
+        : (expectedAt.getTime() + entry.graceMinutes * 60_000);
+
+      // Still within the typical execution window + buffer: not delayed yet
+      if (now.getTime() < deadlineMs) {
+        continue;
+      }
+
+      const delayMs = hasDurationHistory
+        ? Math.max(0, now.getTime() - (expectedAt.getTime() + usualDurationMs))
+        : Math.max(0, now.getTime() - expectedAt.getTime());
+      const hoursLate = Math.round((delayMs / 3_600_000) * 10) / 10;
 
       late.push({
         job: entry.jobName,
         label: entry.label,
         expectedAt,
-        hoursLate: Math.round(((now.getTime() - expectedAt.getTime()) / 3_600_000) * 10) / 10,
+        hoursLate,
         lastError: row?.last_error ?? null,
       });
     }

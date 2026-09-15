@@ -9,7 +9,17 @@
  */
 import fs from 'fs';
 import path from 'path';
-import { getLateJobs, wasAlreadyAlerted, markAlerted, getRecentTradingSessions, isDeliberatelyIdleOccurrence } from './jobHeartbeat';
+import {
+  getLateJobs,
+  wasAlreadyAlerted,
+  markAlerted,
+  getRecentTradingSessions,
+  isDeliberatelyIdleOccurrence,
+  isJobSupposedToRunOnDate,
+  hasOccurrenceOnIstDate,
+  istDateStr,
+  patternsAreWeekdayOnly,
+} from './jobHeartbeat';
 import { JOB_REGISTRY } from './jobRegistry';
 import { getSystemStatus } from './routers/monitor.router';
 import { telegramService, sanitizeMarkdown } from './telegramService';
@@ -228,20 +238,37 @@ export async function buildDailyDigest(now: Date = new Date()): Promise<string> 
   const sessions = await getRecentTradingSessions(now).catch(() => null);
   const isTradingHolidayToday = isDeliberatelyIdleOccurrence(now, sessions);
 
+  // Filter registry jobs to ONLY those supposed to run on this IST date
+  const todaysScheduledJobs = scheduledRegistry.filter(j => isJobSupposedToRunOnDate(j, now, isTradingHolidayToday));
+
+  // Filter MONITOR_SCRIPTS to those scheduled / supposed to run on this IST date
+  const istToday = istDateStr(now.getTime());
+  const todaysScriptStatuses = (scriptStatuses as any[]).filter(s => {
+    const cronPatterns = s.cronPatterns as string[] | undefined;
+    if (!cronPatterns || !cronPatterns.length) return true;
+    if (isTradingHolidayToday && patternsAreWeekdayOnly(cronPatterns)) return false;
+    return cronPatterns.some(p => hasOccurrenceOnIstDate(p, istToday));
+  });
+
   const prevState = await loadDigestState();
-  const currState: Record<string, string> = {};
+  const currState: Record<string, string> = { ...prevState };
   const attention: string[] = [];
   const changed: string[] = [];
   let unchangedHealthy = 0;
 
-  for (const j of scheduledRegistry) {
+  for (const j of todaysScheduledJobs) {
     const key = `registry:${j.jobName}`;
     const lateEntry = lateByName.get(j.jobName);
     const state = lateEntry ? 'late' : 'ontime';
     currState[key] = state;
     const prev = prevState[key];
 
-    if (state === 'late') attention.push(`⚠️ ${j.label} (~${lateEntry!.hoursLate}h late)`);
+    if (state === 'late') {
+      const delayText = lateEntry!.hoursLate >= 1
+        ? `~${lateEntry!.hoursLate}h late`
+        : `~${Math.max(1, Math.round(lateEntry!.hoursLate * 60))}m late`;
+      attention.push(`⚠️ ${j.label} (${delayText})`);
+    }
 
     if (prev === undefined) continue; // first time this key is tracked — nothing to diff yet
     if (prev !== state) {
@@ -251,7 +278,7 @@ export async function buildDailyDigest(now: Date = new Date()): Promise<string> 
     }
   }
 
-  for (const s of scriptStatuses as any[]) {
+  for (const s of todaysScriptStatuses) {
     const key = `script:${s.id}`;
     const state: string = s.runState;
     currState[key] = state;
