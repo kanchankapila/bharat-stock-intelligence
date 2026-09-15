@@ -821,6 +821,51 @@ export const DATA_QUALITY_CHECKS: DataQualityCheck[] = [
       return { status: 'pass', detail: 'no unflagged closed-session bars in the last 90d' };
     },
   },
+  {
+    id: 'ohlcv-exit-carryforward',
+    label: 'stock_ohlcv holds no bars for a symbol after its exchange-record last trade',
+    category: 'ohlcv',
+    critical: false,
+    // AF-20260914-05. Companion to ohlcv-fabricated-session above, per-SYMBOL instead of
+    // per-DATE: 48 delisted/suspended names (JETAIRWAYS, SRTRANSFIN -- delisted 2022-12 --
+    // RELCAPITAL, TATAMETALI, ...) kept receiving one bar per trading day from the live-quote
+    // refresh long after nse_universe_history (the exchange's own bhavcopy record) stopped
+    // printing them. The bars are frozen vendor snapshots with PLAUSIBLE shape (high>low,
+    // volume in the millions) so the closed-market shape check above cannot see them -- but
+    // the exchange record can: a symbol absent from bhavcopy for >7 days is not trading, and
+    // any bar minted after that is fabricated volume/liquidity that enters every ADT/liquidity
+    // feature. 3,199 such bars were purged 2026-09-14 (backup:
+    // backups/ohlcv_post_exit_fabricated_bars_2026-09-14.csv); the write-side guard
+    // (liveStockData.ts getPostExitSymbols) now drops these names at persist time, and this
+    // check is the backstop that does not depend on the guard staying wired. 7-day grace
+    // matches the writer's POST_EXIT_GRACE_DAYS -- keep the two in step. Bounded to the last
+    // 60 days: the purge owns history, this check watches the present, and the bound keeps the
+    // join SARGable for chunk exclusion on the hypertable.
+    sql: `SELECT COUNT(*) AS symbols, COALESCE(SUM(n), 0) AS bars FROM (
+            SELECT o.symbol, COUNT(*) AS n
+            FROM stock_ohlcv o
+            JOIN (SELECT symbol, MAX(date) AS last_trade FROM nse_universe_history GROUP BY symbol) u
+              ON u.symbol = o.symbol
+            WHERE o.date >= current_date - 60
+              AND o.date > u.last_trade + 7
+            GROUP BY o.symbol
+          ) t`,
+    evaluate: (row) => {
+      const symbols = Number(row?.symbols) || 0;
+      const bars = Number(row?.bars) || 0;
+      if (symbols === 0) {
+        return { status: 'pass', detail: 'no bars past any symbol\'s exchange-record last trade (60d window)' };
+      }
+      if (bars > 200 || symbols > 10) {
+        return {
+          status: 'fail',
+          detail: `${symbols} post-exit symbol(s) carry ${bars} fabricated bar(s) written after the exchange ` +
+            `stopped trading them -- purge and check liveStockData.ts's getPostExitSymbols guard (AF-20260914-05)`,
+        };
+      }
+      return { status: 'warn', detail: `${symbols} post-exit symbol(s) carry ${bars} post-exit bar(s)` };
+    },
+  },
 
   // ── Technical signals / ML ────────────────────────────────────────────
   {

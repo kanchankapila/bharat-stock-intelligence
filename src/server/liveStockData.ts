@@ -645,6 +645,47 @@ export function closedMarketShare(rows: (string | number)[][]): number {
  */
 export const CLOSED_MARKET_SHARE_FLOOR = 0.95;
 
+/**
+ * AF-20260914-05. Symbols the EXCHANGE itself no longer trades — their last
+ * nse_universe_history (bhavcopy) row is more than POST_EXIT_GRACE_DAYS old — are dead:
+ * suspended, delisted, or merged away. The quote vendors keep serving a frozen snapshot
+ * for them, so without this guard every refresh mints one fabricated bar per dead name
+ * per trading day (48 symbols / 3,199 fabricated bars found live, incl. SRTRANSFIN —
+ * delisted 2022-12 — still receiving bars in 2026-09). The bars look plausible (high>low,
+ * volume>0) so the closed-market guard below cannot see them.
+ *
+ * Cached 12h: the dead set changes on delisting-announcement cadence, not intraday.
+ */
+export const POST_EXIT_GRACE_DAYS = 7;
+let _postExitCache: { set: Set<string>; loadedAt: number } | null = null;
+const POST_EXIT_CACHE_TTL_MS = 12 * 60 * 60 * 1000;
+
+export async function getPostExitSymbols(): Promise<Set<string>> {
+  if (_postExitCache && Date.now() - _postExitCache.loadedAt < POST_EXIT_CACHE_TTL_MS) {
+    return _postExitCache.set;
+  }
+  try {
+    const rows = await dbAll<{ symbol: string }>(
+      `SELECT symbol FROM (
+         SELECT symbol, MAX(date) AS last_trade FROM nse_universe_history GROUP BY symbol
+       ) u
+       WHERE u.last_trade < current_date - ${POST_EXIT_GRACE_DAYS}`,
+    );
+    const set = new Set(rows.map((r) => r.symbol));
+    _postExitCache = { set, loadedAt: Date.now() };
+    return set;
+  } catch {
+    // Fail OPEN: if the exchange record is unreachable, persisting as before is the
+    // pre-guard behavior; the ohlcv-exit-carryforward DQ check still catches the result.
+    return new Set<string>();
+  }
+}
+
+/** Test seam: clears the 12h cache so each test observes its own mocked exchange record. */
+export function _resetPostExitCacheForTests(): void {
+  _postExitCache = null;
+}
+
 export async function persistTodayOHLCVData(stocks: MarketData[]): Promise<{ inserted: number; failed: number }> {
   const today = new Date().toISOString().split('T')[0];
 
@@ -664,8 +705,24 @@ export async function persistTodayOHLCVData(stocks: MarketData[]): Promise<{ ins
 
   // Dedupe by symbol — bulkUpsert errors if the same ON CONFLICT key appears twice in one batch.
   const seen = new Set<string>();
-  const rows = stocks
-    .filter(s => { if (seen.has(s.symbol)) return false; seen.add(s.symbol); return true; })
+  const deduped = stocks
+    .filter(s => { if (seen.has(s.symbol)) return false; seen.add(s.symbol); return true; });
+
+  // AF-20260914-05. Drop post-exit (delisted/suspended) names BEFORE persisting: their vendor
+  // quotes are frozen snapshots, and writing them mints one fabricated bar per dead name per
+  // trading day with plausible-looking OHLC and volume. Fail-open inside getPostExitSymbols.
+  const postExit = await getPostExitSymbols();
+  const live = postExit.size
+    ? deduped.filter(s => !postExit.has(s.symbol))
+    : deduped;
+  if (live.length < deduped.length) {
+    console.warn(
+      `[OHLCV] Skipped ${deduped.length - live.length} post-exit symbol(s) whose exchange ` +
+      `record shows no trades for >${POST_EXIT_GRACE_DAYS} days — vendor quotes for them are ` +
+      `frozen snapshots, not trading data (AF-20260914-05).`,
+    );
+  }
+  const rows = live
     .map(s => [
       s.symbol,
       today,

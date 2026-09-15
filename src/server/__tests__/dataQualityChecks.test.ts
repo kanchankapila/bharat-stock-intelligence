@@ -137,6 +137,29 @@ describe('individual evaluate() functions', () => {
     expect(r.status).toBe('pass');
   });
 
+  it('ohlcv-exit-carryforward passes when no symbol carries bars past its exchange exit', () => {
+    const r = byId('ohlcv-exit-carryforward').evaluate(undefined, now);
+    expect(r.status).toBe('pass');
+    expect(r.detail).toContain('no bars past');
+  });
+
+  it('ohlcv-exit-carryforward warns on a small post-exit residue', () => {
+    const r = byId('ohlcv-exit-carryforward').evaluate({ symbols: 3, bars: 12 }, now);
+    expect(r.status).toBe('warn');
+    expect(r.detail).toContain('3 post-exit symbol');
+  });
+
+  it('ohlcv-exit-carryforward fails on the AF-20260914-05-shaped accumulation', () => {
+    const r = byId('ohlcv-exit-carryforward').evaluate({ symbols: 48, bars: 3199 }, now);
+    expect(r.status).toBe('fail');
+    expect(r.detail).toContain('fabricated bar');
+  });
+
+  it('ohlcv-exit-carryforward fails on many symbols even when each is small (the guard-fell-open shape)', () => {
+    const r = byId('ohlcv-exit-carryforward').evaluate({ symbols: 12, bars: 24 }, now);
+    expect(r.status).toBe('fail');
+  });
+
   it('ohlcv-freshness-coverage does not false-warn on a Monday morning check for Friday data (regression)', () => {
     const mondayMorning = new Date('2026-08-03T03:10:00Z'); // ~08:40 IST
     const r = byId('ohlcv-freshness-coverage').evaluate({ last_date: '2026-07-31', symbols: 2436 }, mondayMorning);
