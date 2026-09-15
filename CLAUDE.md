@@ -5,7 +5,10 @@ Real-time Indian stock market intelligence platform (NSE/BSE). Express + tRPC ba
 ## Read first
 
 1. **`fable-brain.md`** (project root) — standing reasoning discipline. Applies to every task.
-2. **Memory index** — `C:\Users\amitk\.claude\projects\d--Github-bharat-stock-intelligence\memory\MEMORY.md`. Load the entries relevant to your task before exploring files.
+2. **Memory** — two indexes, both live, and the SessionStart hook reports which it found:
+   - Claude Code's project memory: `C:\Users\amitk\.claude\projects\d--Github-bharat-stock-intelligence\memory\MEMORY.md` (index; detail in 130+ topic files in that directory).
+   - This repo's own: **`.agents/memory/MEMORY.md`** (index) + **`.agents/memory/session_journal.md`** (append a dated section per session).
+   Load the entries relevant to your task before exploring files; a finding recorded in either is not re-investigated from scratch.
 3. **The rule file for what you're touching** (below). Don't read all of them.
 
 ## Rules (load on demand)
@@ -87,7 +90,24 @@ Plus, for anything touching signal/scoring/model logic:
 - **Run it against live production data and query the result back.** `tsc --noEmit` and a green suite do not tell you a fetcher wrote the right rows. See `.claude/rules/measurement.md`.
 - **Committed ≠ deployed.** `.ts` needs `pm2 restart bharat-server`; a migration needs `npm run migrate:up` against the real `POSTGRES_URL`; a package needs `npm install` / the right venv. (`/deploy-and-verify` does this end to end.)
 
-**These are enforced, not advisory.** `.claude/hooks/verify-gate.mjs` is a `Stop` hook: it blocks the session from finishing if the diff touches `.ts`/`.py` and the matching command never ran, and demands backtest evidence for signal-surface files. It reads your actual Bash invocations — writing "I ran pytest" does not satisfy it. `.claude/hooks/{rules-pointer,env-guard}.mjs` run on every Edit/Write.
+**These are enforced, not advisory.** Four hooks run as `node .claude/hooks/<file>.mjs` (that
+invocation shape matters — see the shell note below):
+`.claude/hooks/verify-gate.mjs` is a `Stop` hook: it blocks the session from finishing if the
+diff touches `.ts`/`.py` and the matching command never ran, and demands backtest evidence for
+signal-surface files. It reads your actual Bash invocations — writing "I ran pytest" does not
+satisfy it. `.claude/hooks/{rules-pointer,env-guard}.mjs` run on every Edit/Write.
+`.claude/hooks/graphify-pointer.mjs` runs on Read/Glob and on Bash search commands, and is what
+actually enforces the query-the-graph-first rule in the graphify section below.
+`.claude/hooks/run-session-start.mjs` is the SessionStart entry point (it locates a usable bash
+and runs `session-start.sh`).
+
+⚠ **An enforcement hook that cannot run is indistinguishable from a passing one** — it exits 0
+and prints nothing, so the session proceeds believing it was checked. Both failure modes have
+happened here: the graphify hooks were written as inline `bash`+`python3` one-liners that no
+shell on Windows could parse (measured: exit 127, zero output, from both cmd.exe and WSL bash),
+and `session-start.sh` shipped CRLF so bash rejected it outright (`.gitattributes` now pins
+`*.sh` to `eol=lf`; `git config core.autocrlf` is `true` on this box, which is what rewrote it).
+If you change a hook, run `npx vitest run .claude/hooks` — `settings-hooks.replay.test.mjs` replays every command declared in `.claude/settings.json` through the platform shell with the hook JSON on stdin and asserts both emit **and** silence. The other hook logic is unit-tested in colocated `.claude/hooks/*.test.mjs`. A `*.sh` a hook calls must stay LF-only: `.gitattributes` pins it, and a CRLF script fails with `$'\r': command not found` before a single line of it runs.
 
 Run pytest with `backend-python/venv` (the production interpreter, Python 3.11) unless reproducing a CI-only failure — CI runs 3.12, and that gap has caused a green-locally/red-on-CI tokenizer bug before.
 
@@ -104,6 +124,8 @@ $PY = Get-Content "graphify-out/.graphify_python"
 Check `graphify-out/GRAPH_REPORT.md`'s "Built from commit" hash against `git rev-parse HEAD` before trusting it — it drifted 330 files behind in five days once already, and it is usually behind (it was again at the time of writing). Node/edge/file counts live in that report, deliberately not here.
 
 Updating is **free** (local AST extraction, 0 tokens) — run it, don't ration it. `graph.html` is no longer emitted: 16k+ nodes is over the 5,000-node viz cap, which is expected and exits 0. `query`/`path`/`explain` are the interface.
+
+This is enforced, not advisory: `.claude/hooks/graphify-pointer.mjs` (PreToolUse on `Read|Glob` and on `Bash` search commands) injects the reminder whenever `graphify-out/graph.json` exists, and covers subagents only if you put the instruction in their prompt. It was **dead on Windows** until 2026-09-15 — the rule appeared in `CLAUDE.md` and in every skill while the hook that enforced it emitted nothing; `npx vitest run .claude/hooks/` replays the declared hook commands and asserts they fire, so a change to this wiring cannot regress silently.
 
 ## Services
 

@@ -78,6 +78,28 @@ if [ "${CLAUDE_CODE_REMOTE:-}" != "true" ]; then
     fi
   fi
 
+  # ── token-reduction surfaces (print-only): memory + knowledge-graph freshness ─────────
+  # A session that re-derives repo state from scratch burns its context budget on
+  # re-discovery. Point at the memory journal and the graphify graph BEFORE any tool
+  # call; report graph staleness, never auto-update here (`graphify update .` stays an
+  # explicit post-change step). Everything below must be unable to fail the session.
+  if [ -f .agents/memory/MEMORY.md ] && [ -f .agents/memory/session_journal.md ]; then
+    say "  ✓ memory: read .agents/memory/MEMORY.md (index) + tail of session_journal.md before researching anything"
+  else
+    say "  ! memory index/journal missing (.agents/memory/) — sessions will re-discover state from scratch"
+  fi
+  if [ -f graphify-out/graph.json ]; then
+    graph_commit="$(grep -m1 'Built from commit' graphify-out/GRAPH_REPORT.md 2>/dev/null | grep -oE '[0-9a-f]{8,40}' || true)"
+    head_commit="$(git rev-parse HEAD 2>/dev/null || true)"
+    if [ -n "$graph_commit" ] && [ -n "$head_commit" ] && [ "${head_commit:0:8}" != "${graph_commit:0:8}" ]; then
+      say "  ! graphify graph built from ${graph_commit:0:8}, HEAD is ${head_commit:0:8} — stale; run \`graphify update .\` after changes (queries still fine for stable areas)"
+    else
+      say "  ✓ graphify graph fresh${graph_commit:+ (${graph_commit:0:8})} — query/explain/path before reading source files (PreToolUse hooks will remind you)"
+    fi
+  else
+    say "  ! no graphify-out/graph.json — the query-first rule has nothing to orient against"
+  fi
+
   if [ "$problems" -gt 0 ]; then
     say "[session-start] $problems issue(s) above. Verification commands may not measure what you think."
   else

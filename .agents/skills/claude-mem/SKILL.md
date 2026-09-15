@@ -15,7 +15,7 @@ This skill governs persistent memory tracking, session-to-session continuity, an
 ## Guidelines for Memory & State Management
 
 ### 1. Incremental Checkpointing
-- When a complex task is completed or a significant architectural choice is made, update the `walkthrough.md` or a local session journal in `.agents/memory/` or `CLAUDE.md`.
+- When a complex task is completed or a significant architectural choice is made, append a dated section to the session journal `.agents/memory/session_journal.md` (this repo's single journal; there is no separate walkthrough file).
 - Keep memory artifacts lean: focus on *decisions*, *known bugs*, *port settings*, and *dependencies*.
 
 ### 2. Schema and State Caching
@@ -23,5 +23,5 @@ This skill governs persistent memory tracking, session-to-session continuity, an
 - If a schema has been mapped, cache it in memory rather than running a new DB scan.
 
 ### 3. Read Memory Before Research
-- At the start of a session, check if there are existing memory logs or active plans (e.g., `implementation_plan.md`, `CLAUDE.md`).
-- Do not repeat investigations that have been logged in the "Recent session notes" section of `CLAUDE.md` or in the walkthrough logs.
+- At the start of a session, check `.agents/memory/MEMORY.md` (the index) and the tail of `.agents/memory/session_journal.md` before researching anything.
+- Do not repeat investigations that are already recorded in `.agents/memory/session_journal.md`, `docs/audit-findings.md` (stable `AF-YYYYMMDD-NN` rows — search it before re-investigating a suspected bug), or `docs/session-log.md`.
