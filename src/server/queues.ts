@@ -2911,6 +2911,22 @@ export async function initQueues(): Promise<boolean> {
     dlRetrainEmergencyWorker.on('completed', (job) => {
       console.log('[QUEUE] dl-retrain-emergency done');
       recordHeartbeat('dl-retrain-emergency', 'success', undefined, bullJobDurationMs(job));
+      // 2026-09-15 bookkeeping fix: the flag column stayed 0 on every dl_model_performance row
+      // since drift_detector's 2026-08-15 recalibration because nothing flipped it when the
+      // retrain this queue runs actually completed -- any monitor reading retrain_triggered
+      // concludes "no drift signal was ever answered by a retrain". Stamp each model's most
+      // recent drift-scored row (the one whose EMERGENCY_RETRAIN exit(1) enqueued this job).
+      // Swallow-and-warn: a bookkeeping stamp must never turn a finished retrain into a
+      // reported failure (same convention as write_training_metrics' non-fatal persistence).
+      void dbRun(
+        `UPDATE dl_model_performance SET retrain_triggered = 1
+         WHERE id IN (
+           SELECT MAX(id) FROM dl_model_performance
+           WHERE drift_score IS NOT NULL AND retrain_triggered = 0
+           GROUP BY model_name
+         )`,
+      ).catch((e: Error) =>
+        console.warn('[QUEUE] retrain_triggered stamp failed (non-fatal):', e.message));
     });
     dlRetrainEmergencyWorker.on('failed', (job, err) => {
       console.error('[QUEUE] dl-retrain-emergency failed:', err.message);

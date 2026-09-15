@@ -60,7 +60,15 @@ RAPID_PAGES = 1   # limit=10000 fetches all in one request
 CATEGORY_SCORE = {"BP": 2, "PT": 1, "LR": 0, "WP": -1, "NT": -2}
 
 TODAY = date.today().isoformat()
-TODAY_PLUS_14 = (date.today() + timedelta(days=14)).isoformat()
+# 2026-09-15: forward window widened 14 -> 90 days. MC's get-earnings-data API accepts an
+# arbitrary start/end range, but 14 days only ever captured the current reporting week --
+# which between quarters is dominated by SME/new-listing scids (SL25/Shiprocket, KI25,
+# TII02...) that do not join to the main universe. Measured 2026-09-15: exactly 18 upcoming
+# events existed, every one an SME scid, so feature_store.days_to_next_earnings sat at ~0%
+# (1 row on 09-04, 0 thereafter) and ml_ensemble's pre_earnings_3d/10d flags were dead
+# constants. The next large-cap Q2 board dates sit 3-6 weeks out -- inside 90, outside 14.
+UPCOMING_WINDOW_DAYS = 90
+TODAY_PLUS_90 = (date.today() + timedelta(days=UPCOMING_WINDOW_DAYS)).isoformat()
 
 
 # ── HTTP helper ──────────────────────────────────────────────────────────────────
@@ -177,7 +185,7 @@ def ensure_schema(con) -> None:
 def fetch_earnings_dates(con) -> None:
     url = (
         f"https://api.moneycontrol.com/mcapi/v1/earnings/get-earnings-data"
-        f"?indexId=All&page=1&startDate={TODAY}&endDate={TODAY_PLUS_14}"
+        f"?indexId=All&page=1&startDate={TODAY}&endDate={TODAY_PLUS_90}"
         f"&sector=&limit=10000"
     )
     data = _get(url)
@@ -226,7 +234,7 @@ def fetch_earnings_dates(con) -> None:
 
     # Backfill days_to_next_results into technical_signals via mc_pricefeed_daily join
     _backfill_days_to_results(con)
-    print(f"[EarningsFetcher] Upcoming: {len(rows)} stocks with results in next 14 days -> days_to_next_results updated")
+    print(f"[EarningsFetcher] Upcoming: {len(rows)} stocks with results in next {UPCOMING_WINDOW_DAYS} days -> days_to_next_results updated")
 
 
 def _backfill_days_to_results(con, as_of: str | None = None) -> None:

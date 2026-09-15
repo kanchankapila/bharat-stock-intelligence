@@ -67,8 +67,14 @@ class TestInsiderDateIsoPopulated:
         rows = _captured_insert_rows(fetcher, INSIDER_HTML_UNPARSEABLE_DATE)
         assert rows, "expected at least one insider row parsed"
         r = rows[0]
-        assert r['date'] == '31 Oct, 2025'  # raw fallback, unchanged behavior
-        assert r['dateIso'] == '2025-10-31'  # but date_iso is still a real ISO date
+        # AF-20260915-04: `date` now stores the parsed ISO too. It previously kept the raw
+        # display string ('31 Oct, 2025') on the strptime-fallback path, which string-max-
+        # sorted to garbage in every ad-hoc max(date) query and misled three separate audits
+        # into reading the table as 10.5 months stale. date_iso was always the parseable
+        # truth column; the writer now keeps both columns identical so they can never
+        # diverge again (78,419 historical rows backfilled to match).
+        assert r['date'] == '2025-10-31'
+        assert r['dateIso'] == '2025-10-31'  # and date_iso is still a real ISO date
 
     def test_insert_statement_includes_date_iso_column(self):
         fetcher = _make_fetcher()

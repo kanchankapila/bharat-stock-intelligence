@@ -94,6 +94,29 @@ FACTOR_SQL = {
             FROM historical_fundamentals fs
             WHERE fs.date <= ?
         ) WHERE rn = 1 GROUP BY symbol""",
+    # 2026-09-15 extension (P1-6): pre-open microstructure, F&O positioning, news tone.
+    # Same defensive contract as every family above: a missing table/column degrades to a
+    # loader-caught exception (family skipped), never a fabricated value.
+    "preopen": """
+        SELECT symbol, MAX(iep_gap_pct)      AS f_preopen_gap_pct,
+                      MAX(preopen_imbalance) AS f_preopen_imbalance
+        FROM preopen_stock_snapshot
+        WHERE snapshot_date = ? GROUP BY symbol""",
+    "fno_positioning": """
+        SELECT symbol, MAX(CASE WHEN rn = 1 THEN pcr END)       AS f_so_pcr,
+                      MAX(CASE WHEN rn = 1 THEN fut_oi_chg END) AS f_fut_oi_chg
+        FROM (
+            SELECT symbol, date, pcr, fut_oi_chg,
+                   ROW_NUMBER() OVER (PARTITION BY symbol ORDER BY date DESC) AS rn
+            FROM so_stock_oi_summary
+            WHERE date <= ? AND date > (DATE ? - INTERVAL '5 days')
+        ) t WHERE rn = 1 GROUP BY symbol""",
+    "news": """
+        SELECT symbol, AVG(sentiment_score) AS f_news_sent,
+               COUNT(*)::float              AS f_news_count
+        FROM news_symbol_link
+        WHERE published_at::date <= ? AND published_at::date > (DATE ? - INTERVAL '3 days')
+        GROUP BY symbol""",
 }
 
 # ---------------------------------------------------------------------------
@@ -240,8 +263,11 @@ def cohort_lift_table(ev: pd.DataFrame, fac: pd.DataFrame,
 def engine_hit_rate(events: pd.DataFrame, top_n: int = 20) -> pd.DataFrame:
     """Of the movers on date D, what share did each ranking engine hold in its top-N on T-1?
 
-    Engines audited: unified_signals.technical_score (per-day snapshot) and
-    confluence_signals.confluence_score (latest computed_at strictly before D).
+    Engines audited: unified_signals.technical_score (per-day snapshot),
+    confluence_signals.confluence_score (latest computed_at strictly before D), and
+    intraday_recommendations.intraday_score (latest computed_ts strictly before D --
+    added 2026-09-15, P1-6; the intraday engine refreshes many times a day, so its
+    "T-1 snapshot" is the last full run of the prior session).
     """
     engine = get_engine()
     try:
@@ -254,10 +280,26 @@ def engine_hit_rate(events: pd.DataFrame, top_n: int = 20) -> pd.DataFrame:
                            "FROM confluence_signals", engine)
     except Exception:
         conf = pd.DataFrame()
+    # intraday_recommendations is by far the highest-frequency of the three (dozens of
+    # runs/day over the full universe), so bound the read to the event window instead of
+    # loading the table's whole history: earliest event date minus a 5-day cushion still
+    # gives every event a T-1 snapshot. dmin comes from our own mover_snapshots ISO dates.
+    intr = pd.DataFrame()
+    if len(events):
+        try:
+            dmin = (pd.Timestamp(str(events["trade_date"].min()))
+                    - pd.Timedelta(days=5)).strftime("%Y-%m-%d")
+            intr = pd.read_sql(f"SELECT DATE(computed_ts) AS d, symbol, intraday_score "
+                               f"FROM intraday_recommendations "
+                               f"WHERE intraday_score IS NOT NULL AND DATE(computed_ts) >= '{dmin}'",
+                               engine)
+        except Exception:
+            intr = pd.DataFrame()
     truth = {td: set(g["symbol"]) for td, g in events.groupby("trade_date")}
     rows = []
     for label, df, col in (("technical_rank", sig, "technical_score"),
-                           ("confluence_rank", conf, "confluence_score")):
+                           ("confluence_rank", conf, "confluence_score"),
+                           ("intraday_rank", intr, "intraday_score")):
         if not len(df):
             continue
         df = df.copy()

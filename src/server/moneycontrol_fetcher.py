@@ -559,7 +559,7 @@ class MoneyControlFetcher:
                     "typeOfTransaction": action_str or "Trade",
                     "quantity": qty or 0,
                     "valueInr": val_inr,
-                    "date": date_str,
+                    "date": parsed.isoformat() if parsed else date_str,
                     "dateIso": parsed.isoformat() if parsed else None,
                 })
 
