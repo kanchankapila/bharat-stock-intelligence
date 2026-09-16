@@ -223,6 +223,26 @@ Before finishing, make all four consistent with what actually happened (`/sessio
 
 Run `graphify update .` if files changed significantly. Silence in any of these means a future session rediscovers the same thing from scratch.
 
+## Issue tracker, triage labels and domain docs (matt-pocock config)
+
+Configured 2026-09-15 by `/setup-matt-pocock-skills`. Downstream matt-pocock skills read these
+three settings; edit them here rather than re-running the skill.
+
+- **Issue tracker: GitHub**, via the `gh` CLI — `github.com/kanchankapila/bharat-stock-intelligence`,
+  inferred from `git remote -v` (so `gh issue …` needs no `--repo`). External PRs are **not**
+  treated as feature requests here.
+- **Findings are NOT GitHub issues.** The single tracker for bugs, gaps and follow-ups stays
+  `docs/audit-findings.md` with stable `AF-YYYYMMDD-NN` ids (see above). Don't mirror a finding
+  into GitHub Issues, and don't create a second markdown tracker — the `docs/audit-findings.md`
+  section above is explicit that this repo already retired three of those.
+- **Triage label vocabulary** — the `triage` skill is not installed in this repo, so no label
+  section is bound. These are the roles if it is ever added: `needs-triage`, `needs-info`,
+  `ready-for-agent`, `ready-for-human`, `wontfix`.
+- **Domain docs: single context.** `CONTEXT.md` (project overview + data sources + ops rhythms)
+  and `AGENTS.md` (agent registry + contracts) created 2026-09-15 at repo root. Downstream
+  matt-pocock skills (`trade-desk`, `verify-gate-runner`, `weekend-audit`, `claude-mem`,
+  `headroom`, `codebase`) read these for context injection. ADRs under `docs/adr/` when needed.
+
 ## graphify
 
 This project has a knowledge graph at graphify-out/ with god nodes, community structure, and cross-file relationships.
